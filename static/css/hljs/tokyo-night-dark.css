@@ -1,0 +1,90 @@
+/* highlight.js — Tokyo Night.
+   Hand-written against the palette in styles.css so code blocks and chrome
+   come from one set of colours. Class names follow the highlight.js 11
+   scope list; anything not listed inherits --hl-fg. */
+
+.hljs {
+  color: #a9b1d6;
+  background: transparent;
+}
+
+/* comments + deliberately de-emphasised text */
+.hljs-comment,
+.hljs-quote {
+  color: #565f89;
+  font-style: italic;
+}
+
+/* keywords, control flow, operators */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-formula {
+  color: #bb9af7;
+}
+
+/* strings and anything string-shaped */
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: #9ece6a;
+}
+
+/* numbers, constants, booleans */
+.hljs-number,
+.hljs-variable.constant_,
+.hljs-template-variable,
+.hljs-type,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: #ff9e64;
+}
+
+/* function and method names */
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: #7aa2f7;
+}
+
+/* class names and constructors */
+.hljs-title.class_,
+.hljs-title.class_.inherited__,
+.hljs-built_in {
+  color: #2ac3de;
+}
+
+/* identifiers, parameters, object keys */
+.hljs-variable,
+.hljs-params,
+.hljs-property,
+.hljs-attr,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: #7dcfff;
+}
+
+/* punctuation-ish and tags */
+.hljs-tag,
+.hljs-name,
+.hljs-punctuation {
+  color: #f7768e;
+}
+
+/* preprocessor, annotations, decorators */
+.hljs-meta,
+.hljs-meta .hljs-keyword,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+  color: #e0af68;
+}
+
+.hljs-deletion { color: #f7768e; }
+
+.hljs-emphasis { font-style: italic; }
+.hljs-strong   { font-weight: 600; }
+.hljs-link     { text-decoration: underline; }

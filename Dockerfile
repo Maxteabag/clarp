@@ -11,6 +11,13 @@ RUN mkdir /tmp/npm-new \
     && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && npm --version
 
+FROM node:22.22.2-bookworm-slim AS frontend
+WORKDIR /build
+COPY package.json package-lock.json vite.config.js ./
+COPY web ./web
+COPY static ./static
+RUN npm ci --ignore-scripts --no-audit --no-fund && npm run build
+
 FROM python:3.12-slim-bookworm AS runtime
 
 ARG CLAUDE_CODE_VERSION=2.1.250
@@ -40,7 +47,7 @@ RUN python -m pip install --no-cache-dir -r requirements-docker.txt \
 
 COPY server/server.py ./server.py
 COPY server/lib ./lib
-COPY static ./static
+COPY --from=frontend /build/static ./static
 COPY plugin ./plugin
 COPY skills ./skills
 COPY scripts ./scripts

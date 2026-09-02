@@ -39,6 +39,14 @@ Requirements:
 curl -fsSL https://maxteabag.github.io/clarp-site/install.sh | bash
 ```
 
+Or Docker:
+
+```bash
+docker run -d --name clarp --restart unless-stopped \
+  -p 127.0.0.1:7682:7682 -v clarp-data:/data \
+  ghcr.io/maxteabag/clarp:stable
+```
+
 With a real terminal, `setup.sh` opens the Textual setup interface. Choose the
 agent tools, transcription, voice provider, and phone-network mode there. After
 setup, use **Pair iPhone** to scan a short-lived one-time QR code in the Clarp

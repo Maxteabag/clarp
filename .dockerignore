@@ -8,7 +8,7 @@ ios-native
 node_modules
 tests
 vad-harness
-*.png
+static/app
 **/__pycache__
 **/*.pyc
 **/.DS_Store

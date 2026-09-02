@@ -1,0 +1,57 @@
+{
+  "cell_size": 256,
+  "cols": 5,
+  "rows": 2,
+  "icons": [
+    {
+      "name": "mic",
+      "col": 0,
+      "row": 0
+    },
+    {
+      "name": "stop",
+      "col": 1,
+      "row": 0
+    },
+    {
+      "name": "reload",
+      "col": 2,
+      "row": 0
+    },
+    {
+      "name": "close",
+      "col": 3,
+      "row": 0
+    },
+    {
+      "name": "settings",
+      "col": 4,
+      "row": 0
+    },
+    {
+      "name": "send",
+      "col": 0,
+      "row": 1
+    },
+    {
+      "name": "play",
+      "col": 1,
+      "row": 1
+    },
+    {
+      "name": "history",
+      "col": 2,
+      "row": 1
+    },
+    {
+      "name": "chat",
+      "col": 3,
+      "row": 1
+    },
+    {
+      "name": "mute",
+      "col": 4,
+      "row": 1
+    }
+  ]
+}

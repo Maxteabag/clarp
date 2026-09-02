@@ -90,6 +90,15 @@ for _d in "$CACHE_DIR/audio/hls" "$CACHE_DIR/logs"; do
 done
 chmod 600 "$SHARE"/state.sqlite* 2>/dev/null || true
 
+if [[ ! -f "$REPO_DIR/static/app/bundle.js" ]]; then
+    echo ">> building PWA"
+    command -v npm >/dev/null 2>&1 || {
+        echo "ERROR: npm is required to build the web UI." >&2
+        exit 1
+    }
+    (cd "$REPO_DIR" && npm ci --ignore-scripts --no-audit --no-fund && npm run build)
+fi
+
 echo ">> staging versioned Clarp release"
 STAGE="$(mktemp -d "$RELEASES/.install.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT

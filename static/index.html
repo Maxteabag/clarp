@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Claude">
+<meta name="theme-color" content="#16161e">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon.png">
+<!-- Desktop layout is an OS decision, not a window-size one: a laptop with a
+     narrow window is still a pointer-and-keyboard machine and keeps the
+     permanent composer. Runs before the stylesheet so the first paint is
+     already the right layout — styles.css keys everything off html.desktop,
+     and the app reads the same class. -->
+<script>
+  (function () {
+    var ua = navigator.userAgent || '';
+    var uaData = navigator.userAgentData;
+    var mobile = uaData ? uaData.mobile
+      : /Android|iPhone|iPad|iPod|Mobile|Silk|Kindle|Windows Phone/i.test(ua);
+    // iPadOS asks for the desktop site and claims to be a Mac; a Mac with a
+    // touchscreen doesn't exist, so maxTouchPoints settles it.
+    if (!mobile && /Macintosh/.test(ua) && navigator.maxTouchPoints > 1) mobile = true;
+    if (!mobile) document.documentElement.classList.add('desktop');
+  })();
+</script>
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/static/css/hljs/tokyo-night-dark.css">
+<!-- Markdown rendering + sanitizer + code highlighter. Loaded synchronously
+     so the app can reference `marked`, `DOMPurify` and `hljs` as globals on
+     first paint. All three are vendored under /static/lib so the PWA works
+     offline-LAN — no CDN dependency. Left as plain script tags rather than
+     bundled: they are large, they change only when deliberately revendored,
+     and the service worker already caches them separately from the app. -->
+<script src="/static/lib/marked.min.js"></script>
+<script src="/static/lib/purify.min.js"></script>
+<script src="/static/lib/highlight.min.js"></script>
+<title>Claude</title>
+  <script type="module" crossorigin src="/static/app/bundle.js"></script>
+  <link rel="stylesheet" crossorigin href="/static/app/index.css">
+</head>
+<body>
+  <div id="app"></div>
+</body>
+</html>

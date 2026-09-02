@@ -4,7 +4,6 @@ __pycache__/
 node_modules/
 .vitest/
 .pytest_cache/
-package-lock.json
 
 # Playwright debug artifacts
 .playwright-mcp/
@@ -25,4 +24,4 @@ test-results/
 playwright-report/
 
 # Built PWA bundle — install.sh / Docker run npm run build
-static/
+static/app/

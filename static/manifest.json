@@ -1,0 +1,12 @@
+{
+  "name": "Claude",
+  "short_name": "Claude",
+  "description": "Voice and terminal interface to Claude Code",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#161512",
+  "theme_color": "#161512",
+  "icons": [
+    { "src": "/icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

@@ -1,0 +1,3407 @@
+/* ============================================================
+   Clarp — Tokyo Night
+   ------------------------------------------------------------
+   A terminal, not a chat app. #1a1b26 ground, the Tokyo Night
+   accents, and monospace for every piece of chrome: agent names,
+   labels, buttons, status lines. Prose inside a turn stays in a
+   proportional face — a transcript is paragraphs, and setting
+   paragraphs in mono buys the look at the cost of reading them.
+
+   Colour roles (token -> Tokyo Night name):
+     --ink / --ink-soft / --ink-soft-2   bg, bg_dark, bg_highlight
+     --washi / --dim / --low             fg, fg_dark, comment
+     --accent        red      #f7768e    recording, unread, active stamp
+     --accent-blue   blue     #7aa2f7    interactive, focus, links
+     --moss          green    #9ece6a    live / connected only
+     --current-ring  yellow   #e0af68    ring on the focused agent
+
+   Type:
+     JetBrains Mono  — chrome, labels, code, tool blocks
+     IBM Plex Sans   — turn prose only
+
+   Motion:
+     Default easing — cubic-bezier(.2,.7,.1,1)
+     prefers-reduced-motion collapses everything to opacity-only.
+   ============================================================ */
+
+@font-face {
+  font-family: 'Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/IBMPlexSans-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/static/fonts/IBMPlexSans-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/static/fonts/IBMPlexSans-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JBMono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/JetBrainsMono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JBMono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/static/fonts/JetBrainsMono-600.woff2') format('woff2');
+}
+
+:root {
+  /* Tokyo Night — dark, default. */
+  --ink:           #1a1b26;     /* background */
+  --ink-soft:      #1f2335;     /* lifted panel surface */
+  --ink-soft-2:    #24283b;     /* second-tier surface */
+  --ink-edge:      #2f334d;     /* hairline border / divider */
+  --ink-edge-hi:   #414868;     /* stronger hairline */
+  --washi:         #c0caf5;     /* primary foreground */
+  --washi-dim:     #a9b1d6;     /* secondary text */
+  --washi-low:     #565f89;     /* labels, meta, captions */
+  --vermillion:    #f7768e;     /* the accent — used sparingly */
+  --vermillion-hi: #ff8fa3;     /* hover / brighter pop */
+  --hanko:         #db5b73;     /* deeper red for the active-agent stamp */
+  --moss:          #9ece6a;     /* "live"/connected only */
+  --ochre:         #ff9e64;     /* avatar tint fallback */
+  --current-ring:  #e0af68;     /* ring marking the active agent */
+  --user-wash:     rgba(122, 162, 247, .07); /* bg behind user turns */
+
+  /* Additional Tokyo Night hues, for anything that reads as interactive
+     rather than as an alert. */
+  --accent-blue:   #7aa2f7;
+  --accent-cyan:   #7dcfff;
+  --accent-teal:   #73daca;
+  --accent-purple: #bb9af7;
+
+  /* Typography stacks. Mono is the default for chrome — this is a terminal.
+     --font-body is reserved for prose inside a turn. */
+  --font-display: 'JBMono', ui-monospace, SFMono-Regular, Menlo,
+                  'Noto Sans Symbols 2', 'Noto Sans Symbols', 'DejaVu Sans', 'Segoe UI Symbol', monospace;
+  --font-ui:      'JBMono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-body:    'Plex Sans', -apple-system, BlinkMacSystemFont,
+                  'Segoe UI', system-ui, sans-serif;
+  --font-mono:    'JBMono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Motion */
+  --ease: cubic-bezier(.2, .7, .1, 1);
+  --t-snap: 140ms;
+  --t-soft: 280ms;
+  --t-slow: 460ms;
+
+  /* Shadow — deep and neutral; the ground is already dark, so shadows read
+     as depth rather than as smudge. */
+  --shadow-1: 0 6px 18px rgba(9, 10, 17, .6);
+  --shadow-2: 0 18px 40px rgba(9, 10, 17, .7);
+
+  /* Legacy aliases — keep so any forgotten reference still resolves. */
+  --bg: var(--ink);
+  --fg: var(--washi);
+  --accent: var(--vermillion);
+  --accent-recording: var(--vermillion-hi);
+  --focus-ring: var(--accent-blue);
+  --shadow: var(--shadow-1);
+}
+
+/* Tokyo Night Day. Follows the OS preference, and is forceable either way
+   with data-theme="day" / data-theme="night" on <html>. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="night"]) {
+    --ink:           #e1e2e7;
+    --ink-soft:      #d0d5e3;
+    --ink-soft-2:    #c4c8da;
+    --ink-edge:      #a8aecb;
+    --ink-edge-hi:   #8990b3;
+    --washi:         #3760bf;
+    --washi-dim:     #48546b;
+    --washi-low:     #848cb5;
+    --vermillion:    #f52a65;
+    --vermillion-hi: #d20065;
+    --hanko:         #c64343;
+    --moss:          #587539;
+    --ochre:         #b15c00;
+    --current-ring:  #8c6c3e;
+    --user-wash:     rgba(55, 96, 191, .07);
+    --accent-blue:   #2e7de9;
+    --accent-cyan:   #007197;
+    --accent-teal:   #118c74;
+    --accent-purple: #9854f1;
+  }
+}
+:root[data-theme="day"] {
+  --ink:       #e1e2e7;
+  --ink-soft:    #d0d5e3;
+  --ink-soft-2:  #c4c8da;
+  --ink-edge:    #a8aecb;
+  --ink-edge-hi:   #8990b3;
+  --washi:     #3760bf;
+  --washi-dim:   #48546b;
+  --washi-low:   #848cb5;
+  --vermillion:  #f52a65;
+  --vermillion-hi: #d20065;
+  --hanko:     #c64343;
+  --moss:      #587539;
+  --ochre:     #b15c00;
+  --current-ring:  #8c6c3e;
+  --user-wash:   rgba(55, 96, 191, .07);
+  --accent-blue:   #2e7de9;
+  --accent-cyan:   #007197;
+  --accent-teal:   #118c74;
+  --accent-purple: #9854f1;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+/* Scrollbars. The platform default is a light chunky bar that reads as a
+   hole punched in a dark UI. Firefox takes the two-keyword form; Chromium
+   and Safari need the ::-webkit- pseudo-elements, so both are set. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-edge-hi) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--ink-edge-hi);
+  border-radius: 6px;
+  /* A transparent border, painted over by the track, insets the thumb
+     without needing a narrower scrollbar and its clumsier hit target. */
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: var(--washi-low); }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+html, body {
+  margin: 0; padding: 0;
+  height: 100dvh; width: 100vw;
+  background: var(--ink);
+  color: var(--washi);
+  font: 400 14px/1.5 var(--font-ui);
+  font-feature-settings: 'kern' 1, 'liga' 1, 'tnum' 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+/* A soft wash of accent light off the top edge, so a full-bleed dark ground
+   has some depth to it without patterning the whole viewport. Sits BEHIND
+   interactive content and is entirely decorative. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(120% 55% at 50% -12%, rgba(122, 162, 247, .10), transparent 62%),
+    radial-gradient(90% 45% at 88% 108%, rgba(187, 154, 247, .06), transparent 64%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+#terminal-wrap {
+  position: fixed;
+  inset: 0;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) 0;
+  z-index: 1;
+}
+#term {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--ink);
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* ============================================================
+   Bottom dock
+   Flat ink surface with a hand-drawn sumi brush stroke above the
+   top hairline. No glass, no rounded-pill chrome on each button —
+   the mic is the only filled control, the rest are hairline glyphs.
+   ============================================================ */
+.dock {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  padding: 2px 8px calc(env(safe-area-inset-bottom) + 1px);
+  background: var(--ink-soft);
+  border-top: 1px solid var(--ink-edge);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 10;
+  transition: transform 160ms var(--ease);
+  will-change: transform;
+}
+/* Brush-stroke divider sitting on top of the dock's upper border. */
+.dock::before {
+  content: '';
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent, var(--ink-edge-hi) 18%, var(--ink-edge-hi) 82%, transparent);
+  pointer-events: none;
+}
+.dock-spacer { flex: 1; }
+
+/* ============================================================
+   Agent chip — Mincho display, sumi-bordered avatar, hanko stamp
+   for the currently-active session.
+   ============================================================ */
+.session {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 8px 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--washi);
+  font: 500 17px/1 var(--font-display);
+  letter-spacing: .01em;
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-user-select: none; user-select: none;
+  transition: opacity var(--t-snap) var(--ease);
+}
+.session:active { opacity: .65; }
+.agent-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  overflow: hidden;
+}
+.agent-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-activity-label {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 9px/1 var(--font-body);
+  color: var(--washi-low);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.agent-activity-label.running { color: var(--moss); }
+.agent-activity-label.error { color: var(--vermillion-hi); }
+.agent-activity-label.ok { color: var(--washi-dim); }
+
+.avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  flex: 0 0 44px;
+  background: var(--ochre);
+  color: var(--ink);
+  font: 600 18px/1 var(--font-display);
+  text-transform: uppercase;
+  background-size: cover;
+  background-position: center;
+  overflow: visible;
+  box-shadow: inset 0 0 0 1px var(--ink-edge-hi);
+}
+.avatar-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--ink);
+  font: 600 1em/1 var(--font-display);
+  text-transform: uppercase;
+}
+
+/* Notification badge on the dock avatar — count of agents with new
+   activity awaiting attention. Hidden when zero. */
+.dock-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--vermillion);
+  color: #f6efd9;
+  font: 700 11px/18px var(--font-body);
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--ink-soft);
+  pointer-events: none;
+}
+.dock-badge.hidden { display: none; }
+/* Hanko stamp — appears on the agent chip's avatar to mark "this is
+   the session you're currently inside". Small rotated square seal with
+   the agent initial in white. Only visible because of the `.current`
+   class added by JS (the dock chip is always current, so we apply it
+   unconditionally here via .session .avatar). */
+/* Status dot — Slack/Teams style. Bottom-right of every avatar, color
+   reflects state:
+     red    — this is the agent your terminal is currently inside
+     green  — agent is busy/working
+     amber  — agent has finished and there's something new to see
+     yellow — agent is alive but idle
+     none   — agent is not running
+
+   The dot has a ring matching the dock background so it pops cleanly off
+   any avatar image. */
+.switcher-avatar::after,
+.overview-row .agent-avatar::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: 0 0 0 2px var(--ink-soft);
+  pointer-events: none;
+  transition: background 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dock chip — always the current agent. Marked with a yellow ring
+   around the whole avatar instead of a red status dot. The unread
+   count lives in .dock-badge (top-right) instead. */
+.session .avatar {
+  box-shadow: inset 0 0 0 1px var(--ink-edge-hi),
+              0 0 0 2px var(--current-ring);
+}
+
+/* Switcher: state class lives directly on .switcher-avatar.
+   current → yellow ring around avatar (matches the dock chip).
+   unread → red dot (was amber).                                 */
+.switcher-avatar.current {
+  box-shadow: inset 0 0 0 1px var(--ink-edge-hi), 0 4px 10px rgba(0,0,0,.4),
+              0 0 0 2px var(--current-ring);
+}
+.switcher-avatar.busy::after    { background: var(--moss); }
+.switcher-avatar.active::after  { background: #e6c34a; }
+/* unread state replaces the bottom-right dot with a top-right red
+   notification badge (matches the dock avatar style). */
+.switcher-avatar.unread::after  { display: none; }
+.switcher-avatar.unread::before {
+  content: '1';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--vermillion);
+  color: #f6efd9;
+  font: 700 11px/18px var(--font-body);
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--ink-soft);
+  pointer-events: none;
+}
+/* .inactive (no state class on switcher-avatar) → no dot */
+
+/* Overview rows: state lives on the row's `.active` flag and a sibling
+   `.agent-state.*` badge. Use :has() to flow it to the avatar.
+   active row → yellow ring; unread → top-right red badge.            */
+.overview-row.active .agent-avatar                          { box-shadow: inset 0 0 0 1px var(--ink-edge-hi), 0 0 0 2px var(--current-ring); }
+.overview-row:has(.agent-state.busy)   .agent-avatar::after { background: var(--moss); }
+.overview-row:has(.agent-state.active) .agent-avatar::after { background: #e6c34a; }
+.overview-row:has(.agent-state.unread) .agent-avatar::after { display: none; }
+.overview-row:has(.agent-state.unread) .agent-avatar::before {
+  content: '1';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--vermillion);
+  color: #f6efd9;
+  font: 700 11px/18px var(--font-body);
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--ink-soft);
+  pointer-events: none;
+}
+/* .inactive rows: no dot. */
+
+.agent-label {
+  font: 500 17px/1 var(--font-display);
+  letter-spacing: .01em;
+}
+
+/* ============================================================
+   Connection indicator — a small status dot.
+   grey connecting · green connected · red dead
+   ============================================================ */
+.conn-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  flex: none;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--washi-low);
+  transition: background var(--t-snap) var(--ease);
+}
+.conn-dot.live { background: var(--moss); }
+.conn-dot.dead { background: var(--vermillion); }
+
+/* ============================================================
+   Dock buttons — hairline circles. Pressed state inks vermillion.
+   ============================================================ */
+.history-toggle,
+.chat-btn,
+.mute-audio-btn,
+.stop-btn,
+.ctrlc-btn {
+  position: relative;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-edge);
+  background: transparent;
+  color: var(--washi-dim);
+  font: 500 17px/1 var(--font-body);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    color var(--t-snap) var(--ease),
+    border-color var(--t-snap) var(--ease),
+    transform var(--t-snap) var(--ease),
+    background var(--t-snap) var(--ease);
+}
+.history-toggle:active,
+.chat-btn:active,
+.mute-audio-btn:active,
+.stop-btn:active,
+.ctrlc-btn:active { transform: scale(.94); }
+
+/* Active-state appearance for the painted dock buttons is owned by the
+   painted-sprites section much further down (drop-shadow glow). These
+   legacy rules used `background:` shorthand which clobbered the painted
+   PNG background-image, so we stub them with color-only properties. */
+.history-toggle.active { color: var(--washi); }
+.mute-audio-btn.active { color: var(--washi); }
+.stop-btn.busy:active  { color: #fff; }
+.ctrlc-btn:active      { color: #fff; }
+
+/* ============================================================
+   Mic — same footprint and weight as the other dock controls. Neutral
+   at rest, moss-filled while recording, with a concentric ring ripple.
+   ============================================================ */
+.mic {
+  position: relative;
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  color: var(--washi);
+  box-shadow: inset 0 0 0 1px var(--ink-edge);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform var(--t-snap) var(--ease), background var(--t-snap) var(--ease);
+  -webkit-user-select: none; user-select: none;
+}
+.mic:active { transform: scale(.94); }
+.mic::after {
+  /* Concentric ink ring — appears only when recording. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--moss);
+  opacity: 0;
+  transform: scale(1);
+  pointer-events: none;
+}
+.mic.recording { background: var(--moss); }
+.mic.recording::after {
+  animation: mic-ring 1.6s var(--ease) infinite;
+}
+.mic.capturing::after {
+  animation: mic-ring 0.7s var(--ease) infinite;
+}
+@keyframes mic-ring {
+  0%   { transform: scale(1);    opacity: .75; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
+
+/* ============================================================
+   Status toast — Mincho text underlined by a single vermillion sumi
+   brush stroke instead of a filled pill.
+   ============================================================ */
+.status {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink-soft);
+  color: var(--washi);
+  padding: 10px 18px 14px;
+  font: 500 13px/1.2 var(--font-display);
+  letter-spacing: .02em;
+  border: 1px solid var(--ink-edge);
+  border-radius: 2px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--t-soft) var(--ease), transform var(--t-soft) var(--ease);
+  max-width: 86vw;
+  text-align: center;
+  z-index: 11;
+  box-shadow: var(--shadow-1);
+}
+.status::after {
+  /* Accent underline on the toast */
+  content: '';
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg,
+    transparent, var(--accent-blue) 20%, var(--accent-blue) 80%, transparent);
+}
+.status.show { opacity: 1; transform: translateX(-50%) translateY(2px); }
+
+/* ============================================================
+   Quick-switch agent panel — opens with a scroll-unfurl from the top.
+   ============================================================ */
+.agent-switcher {
+  /* Telegram-style floating popover: rounded, layered shadow, springy in,
+     gentle out. The panel scales from the bottom-left corner (where the
+     chip lives) so it appears to grow out of the tap point. */
+  position: fixed;
+  left: 14px; right: 14px;
+  bottom: calc(env(safe-area-inset-bottom) + 88px);
+  background: var(--ink-soft);
+  border: 0;
+  border-radius: 22px;
+  padding: 18px 14px 16px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  z-index: 30;
+  /* Layered shadow — close + soft + wide, builds up depth */
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, .22),
+    0 12px 28px rgba(0, 0, 0, .38),
+    0 32px 64px rgba(0, 0, 0, .42);
+  transform-origin: 28px calc(100% + 12px);
+  opacity: 0;
+  transform: translateY(8px) scale(0.82);
+  pointer-events: none;
+  will-change: transform, opacity;
+  /* Closing transition: gentle deceleration, no overshoot. */
+  transition:
+    transform 220ms cubic-bezier(0.4, 0.0, 0.2, 1),
+    opacity   180ms cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+.agent-switcher::-webkit-scrollbar { display: none; }
+.agent-switcher:not(.hidden) {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+  /* Opening transition: snappy spring with gentle overshoot. */
+  transition:
+    transform 360ms cubic-bezier(0.18, 1.4, 0.4, 1),
+    opacity   180ms cubic-bezier(0.2, 0.7, 0.1, 1);
+}
+.switcher-item {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 4px 2px;
+  color: var(--washi);
+  /* Items cascade in left-to-right with a soft spring. On close they
+     fade with the container — no per-item exit animation needed. */
+  opacity: 0;
+  transform: translateY(10px) scale(0.78);
+  transform-origin: center bottom;
+  animation: switcher-item-pop 380ms cubic-bezier(0.18, 1.45, 0.4, 1) forwards;
+  transition: transform var(--t-snap) var(--ease);
+}
+.switcher-item:nth-child(1) { animation-delay: 50ms; }
+.switcher-item:nth-child(2) { animation-delay: 90ms; }
+.switcher-item:nth-child(3) { animation-delay: 130ms; }
+.switcher-item:nth-child(4) { animation-delay: 170ms; }
+.switcher-item:nth-child(5) { animation-delay: 210ms; }
+.switcher-item:nth-child(6) { animation-delay: 250ms; }
+.switcher-item:nth-child(7) { animation-delay: 290ms; }
+.switcher-item:nth-child(8) { animation-delay: 330ms; }
+.switcher-item:nth-child(9) { animation-delay: 370ms; }
+.switcher-item:nth-child(10){ animation-delay: 410ms; }
+/* While closed: items hold their pre-open state so re-opening triggers
+   a fresh cascade. */
+.agent-switcher.hidden .switcher-item {
+  animation: none;
+  opacity: 0;
+  transform: translateY(10px) scale(0.78);
+}
+.switcher-item:active { transform: scale(0.92) translateY(1px); }
+@keyframes switcher-item-pop {
+  0%   { opacity: 0; transform: translateY(10px) scale(0.78); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.switcher-avatar {
+  position: relative;
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--ochre);
+  box-shadow: inset 0 0 0 1px var(--ink-edge-hi), 0 4px 10px rgba(0,0,0,.4);
+  color: var(--ink);
+  font-size: 28px;
+}
+/* (Old top-right state dots replaced by the unified bottom-right
+   Slack-style ::after dot defined near .session .avatar::after.) */
+.switcher-name {
+  font: 500 12px/1.1 var(--font-display);
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+.switcher-state {
+  font: 600 9px/1 var(--font-body);
+  color: var(--washi-low);
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.switcher-state.busy    { color: var(--moss); }
+.switcher-state.current { color: var(--current-ring); }
+.switcher-state.unread  { color: var(--vermillion); }
+
+/* ============================================================
+   Speaking indicator — a vermillion stroke floating above the dock
+   with a pulsing status dot inset.
+   ============================================================ */
+.speaking {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 96px);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 22px;
+  background: transparent;
+  color: var(--washi);
+  font: 500 14px/1 var(--font-display);
+  z-index: 13;
+  border: 0;
+}
+.speaking.hidden { display: none; }
+.speaking::before {
+  /* The brush stroke behind the text. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--vermillion);
+  -webkit-mask: url('/static/img/speaking-stroke.svg') center/100% 100% no-repeat;
+          mask: url('/static/img/speaking-stroke.svg') center/100% 100% no-repeat;
+  z-index: -1;
+}
+.speaking-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: #f6efd9;
+  animation: speakingPulse 1.6s var(--ease) infinite;
+}
+.speaking-mute {
+  font-size: 12px;
+  opacity: .8;
+  color: #f6efd9;
+}
+@keyframes speakingPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .55; transform: scale(.92); }
+}
+
+/* ============================================================
+   Chat bar — Plex Sans input on a hairline underline.
+   ============================================================ */
+.chat-bar {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--ink-soft);
+  padding: 12px 16px calc(env(safe-area-inset-bottom) + 16px);
+  border-top: 1px solid var(--ink-edge);
+  z-index: 14;
+}
+.chat-bar.hidden { display: none; }
+.chat-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.chat-input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--washi);
+  font: 400 15px/1.4 var(--font-mono);
+  padding: 12px 4px;
+  border-radius: 0;
+  outline: none;
+  min-height: 48px;
+  box-sizing: border-box;
+  caret-color: var(--accent-blue);
+}
+.chat-input::placeholder { color: var(--washi-low); }
+
+/* The composer reads as a prompt line: a recessed field, a shell caret in
+   front of it, and an accent hairline that lights when it has focus. */
+.chat-row {
+  position: relative;
+  border: 1px solid var(--ink-edge);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 70%, black);
+  padding-left: 10px;
+  transition: border-color var(--t-snap) var(--ease),
+              box-shadow var(--t-snap) var(--ease);
+}
+.chat-row::before {
+  content: '\276f';
+  flex: 0 0 auto;
+  align-self: center;
+  font: 600 14px/1 var(--font-mono);
+  color: var(--accent-blue);
+  opacity: .75;
+}
+.chat-row:focus-within {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-blue) 45%, transparent);
+}
+.chat-row:focus-within::before { opacity: 1; }
+.chat-input::placeholder {
+  color: var(--washi-low);
+  font-style: italic;
+  font-family: var(--font-display);
+  font-weight: 400;
+}
+.chat-input:focus { border-bottom-color: var(--washi); }
+.chat-send {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--ink-edge);
+  color: var(--washi);
+  font-size: 17px;
+}
+.chat-close {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-edge);
+  background: transparent;
+  color: var(--washi-dim);
+  font-size: 15px;
+}
+body.chat-open .dock,
+body.chat-open .status { display: none !important; }
+
+/* ============================================================
+   History panel — full bleed sumi page with paper grain, Mincho
+   header, side-aligned turns separated only by hairlines.
+   ============================================================ */
+.history {
+  position: absolute;
+  inset: 0;
+  background: var(--ink);
+  display: flex;
+  flex-direction: column;
+  z-index: 9;
+}
+.history.hidden { display: none; }
+.history::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent, rgba(192, 202, 245, .16) 22%, rgba(192, 202, 245, .16) 78%, transparent);
+  pointer-events: none;
+}
+.history-head {
+  position: relative;
+  flex: 0 0 auto;
+  padding: calc(env(safe-area-inset-top) + 6px) 10px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+/* Elements that are semantically buttons but must not look like one: the
+   identity block, the agent rows, and the path/session pickers. */
+.history-agent,
+.overview-row .row-main,
+.start-suggestions li > button,
+.start-favorites li > button,
+.start-resume li > button {
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.start-suggestions li > button,
+.start-favorites li > button,
+.start-resume li > button {
+  display: block;
+  width: 100%;
+}
+
+.history-agent {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--washi);
+  overflow: hidden;
+}
+/* Squircle, not a circle, and no coloured ring around it. The old yellow
+   halo was doing the job of "this agent is focused" — but this header only
+   ever shows the focused agent, so the ring was decorating a fact that was
+   never in question. State lives in the dot instead. */
+.history-agent-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--ink-soft-2);
+  color: var(--ink);
+  font-size: 17px;
+  box-shadow: inset 0 0 0 1px rgba(192, 202, 245, .14);
+}
+.history-agent-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+.history-agent-name {
+  display: block;
+  max-width: 48vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 16px/1.1 var(--font-display);
+  letter-spacing: .01em;
+  color: var(--washi);
+}
+.history-agent-status {
+  display: block;
+  max-width: 48vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 9px/1 var(--font-body);
+  color: var(--washi-low);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.history-agent-status.running { color: var(--moss); }
+.history-agent-status.error { color: var(--vermillion-hi); }
+.history-agent-status.ok { color: var(--washi-dim); }
+.history-unread-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--vermillion);
+  color: #f6efd9;
+  font: 700 11px/18px var(--font-body);
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--ink);
+  pointer-events: none;
+}
+.history-unread-badge.hidden { display: none; }
+.history-btn {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-edge);
+  background: transparent;
+  color: var(--washi-dim);
+  font: 500 14px/1 var(--font-body);
+  transition: color var(--t-snap) var(--ease), border-color var(--t-snap) var(--ease);
+}
+.history-btn.active {
+  color: var(--washi);
+  border-color: var(--washi-dim);
+}
+.history-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.history-body.hide-tools .tool { display: none; }
+/* Hiding the tools inside a turn is not enough when the turn is nothing but
+   tools: the wrapper keeps its margin, its padding and the height
+   content-visibility assumes for it, so a run of tool-only turns leaves a
+   column of blank space between two replies. Drop the wrapper too. Activity
+   rows are their own live feed and are not part of this toggle. */
+.history-body.hide-tools .turn:not(.has-body):not(.activity) { display: none; }
+.history-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0 10px calc(env(safe-area-inset-bottom) + 80px);
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  font: 400 16px/1.5 var(--font-body);
+  color: var(--washi);
+  touch-action: pan-y;
+  position: relative;
+}
+.history-jump {
+  position: absolute;
+  right: 14px;
+  bottom: calc(env(safe-area-inset-bottom) + 86px);
+  z-index: 2;
+  border: 1px solid var(--ink-edge-hi);
+  background: var(--ink-soft);
+  color: var(--washi);
+  padding: 7px 12px 8px;
+  border-radius: 8px;
+  font: 600 10px/1 var(--font-body);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  box-shadow: var(--shadow-1);
+}
+.history-jump.hidden { display: none; }
+
+.turn {
+  position: relative;
+  margin: 4px 0;
+  padding: 6px 12px;
+  border-radius: 6px;
+  word-wrap: break-word;
+  max-width: 65ch;
+  /* Skip layout, paint and style for rows outside the viewport. The
+     transcript holds ~100 turns at ~60 nodes each; without this the browser
+     styles all of them on every scroll frame. contain-intrinsic-size gives a
+     skipped row an assumed height so the scrollbar stays honest, and `auto`
+     remembers the real one once a row has been rendered even once. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
+}
+/* No side rules, no chat-bubble borders. Assistant turns are pure text on
+   the page background; the user's own turns get a subtle wash so the eye
+   can find "what I said" without a box around it. */
+.turn.assistant { background: transparent; }
+.turn.user      { background: var(--user-wash); border: 1px solid rgba(122, 162, 247, 0.12); margin-top: 8px; margin-bottom: 8px; }
+/* In flight: painted immediately so typing feels instant, but visibly not yet
+   acknowledged, because a bubble is not proof of delivery. */
+.turn.user.unsent { opacity: 0.62; }
+.turn.user.failed {
+  border-color: rgba(247, 118, 142, 0.55);
+  background: color-mix(in srgb, #f7768e 8%, transparent);
+}
+.turn-delivery {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: #f7768e;
+}
+
+.turn.activity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 8px;
+  padding: 4px 0;
+  color: var(--washi-low);
+  font: 500 12px/1.25 var(--font-body);
+}
+.turn.activity.running {
+  color: var(--washi-dim);
+}
+.activity-log-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 7px;
+  background: var(--washi-low);
+}
+.turn.activity.running .activity-log-dot {
+  background: var(--moss);
+  animation: activity-live-pulse 900ms ease-in-out infinite;
+  box-shadow: 0 0 0 0 rgba(107, 130, 83, .45);
+}
+.turn.activity.running .activity-log-label,
+.turn.activity.running .activity-log-summary { color: var(--washi); }
+.turn.activity.thinking-live .activity-log-summary::after {
+  content: '...';
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  width: 0;
+  animation: thinking-ellipsis 1.2s steps(4, end) infinite;
+}
+.turn.activity.ok .activity-log-dot { background: var(--moss); }
+.turn.activity.error .activity-log-dot { background: var(--vermillion); }
+.activity-log-label {
+  flex: 0 0 auto;
+  max-width: 38%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--washi-dim);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: 10px;
+}
+.activity-log-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes activity-live-pulse {
+  0%, 100% { transform: scale(.85); opacity: .65; box-shadow: 0 0 0 0 rgba(107, 130, 83, .42); }
+  50%      { transform: scale(1.35); opacity: 1; box-shadow: 0 0 0 5px rgba(107, 130, 83, 0); }
+}
+@keyframes thinking-ellipsis {
+  0%   { width: 0; }
+  100% { width: 18px; }
+}
+.turn .meta {
+  display: block;
+  font: 400 italic 12px/1.3 var(--font-display);
+  color: var(--washi-low);
+  margin-bottom: 4px;
+  letter-spacing: .02em;
+}
+.turn .body {
+  /* marked produces real <p>/<br> elements, so we no longer want
+     pre-wrap on the container — that would double-space every line. */
+  word-wrap: break-word;
+  /* The one place that leaves the monospace grid: a turn is paragraphs, and
+     paragraphs set in mono are slower to read for no gain in character. */
+  font: 400 15px/1.6 var(--font-body);
+}
+.turn .body a {
+  color: var(--accent-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+.turn .body a:active { color: var(--vermillion); }
+.turn .body code {
+  font: 400 13px/1.4 var(--font-mono);
+  background: rgba(255, 255, 255, .05);
+  padding: 1px 5px;
+  border-radius: 3px;
+  word-break: break-all;
+}
+.turn .body pre {
+  font: 400 13px/1.45 var(--font-mono);
+  background: rgba(0, 0, 0, .25);
+  margin: 4px 0;
+  padding: 6px 10px;
+  border-radius: 3px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+.turn .body pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+.turn .body .table-wrap {
+  margin: 6px 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.turn .body img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  margin: 6px 0;
+  border-radius: 8px;
+  background: var(--ink-soft);
+  border: 1px solid var(--ink-edge);
+}
+.turn .body .media-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 6px;
+  margin: 6px 0;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--ink-soft);
+  border: 1px solid var(--ink-edge);
+}
+.turn .body .media-gallery img {
+  width: 100%;
+  aspect-ratio: 1;
+  max-height: none;
+  object-fit: cover;
+  margin: 0;
+  border-radius: 6px;
+}
+.turn .body table {
+  width: 100%;
+  border-collapse: collapse;
+  font: 400 14px/1.4 var(--font-body);
+}
+.turn .body th,
+.turn .body td {
+  border: 1px solid var(--ink-edge);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+}
+.turn .body th {
+  background: rgba(255, 255, 255, .05);
+  color: var(--washi);
+  font: 500 13px/1.3 var(--font-display);
+  letter-spacing: .02em;
+}
+.turn .body tbody tr:nth-child(odd) td {
+  background: rgba(255, 255, 255, .02);
+}
+.turn .body h1, .turn .body h2, .turn .body h3,
+.turn .body h4, .turn .body h5, .turn .body h6 {
+  font: 500 17px/1.3 var(--font-display);
+  margin: 10px 0 4px;
+  letter-spacing: .02em;
+  color: var(--washi);
+}
+.turn .body h1 { font-size: 20px; }
+.turn .body h2 { font-size: 18px; }
+.turn .body ul, .turn .body ol {
+  margin: 4px 0;
+  padding-left: 22px;
+}
+.turn .body li { margin: 2px 0; }
+.turn .body li > p { margin: 0; }
+.turn .body blockquote {
+  margin: 6px 0;
+  padding: 2px 10px;
+  border-left: 2px solid var(--ink-edge-hi);
+  color: var(--washi-dim);
+}
+.turn .body hr {
+  border: 0;
+  border-top: 1px solid var(--ink-edge);
+  margin: 10px 0;
+}
+.turn .body p { margin: 4px 0; }
+.turn .body p:first-child { margin-top: 0; }
+.turn .body p:last-child  { margin-bottom: 0; }
+/* hljs theme keeps its own colors; let our box rules win for spacing. */
+.turn .body pre code.hljs { padding: 0; background: transparent; }
+
+details.tool {
+  margin: 4px 0;
+  padding: 0;
+  border-radius: 0;
+  background: var(--ink-soft);
+  border: 1px solid var(--ink-edge);
+  overflow: hidden;
+}
+details.tool > .tool-head {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+}
+details.tool > .tool-head::-webkit-details-marker { display: none; }
+details.tool[open] > .tool-head {
+  border-bottom: 1px solid var(--ink-edge);
+}
+details.tool > :not(.tool-head) { margin: 8px 12px; }
+.tool-summary {
+  font: 400 12px/1.4 var(--font-mono);
+  color: var(--washi-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.tool-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+  background: var(--washi-low);
+}
+.tool-status.running { background: var(--moss); animation: typing-bounce 1.2s infinite ease-in-out; }
+.tool-status.ok { background: var(--moss); }
+.tool-status.error { background: var(--vermillion); }
+.tool-state {
+  font: 600 9px/1 var(--font-body);
+  color: var(--washi-low);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+}
+details.tool.running { border-color: rgba(107, 130, 83, .36); }
+details.tool.ok { border-color: rgba(107, 130, 83, .24); }
+details.tool.error { border-color: rgba(200, 65, 42, .45); }
+.tool-name {
+  display: inline-block;
+  font: 600 10px/1 var(--font-body);
+  color: var(--moss);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.tool-file {
+  font: 600 12px/1.4 var(--font-mono);
+  color: var(--washi);
+  word-break: break-all;
+  margin-bottom: 4px;
+}
+.tool-count, .tool-flag {
+  font: 400 11px/1 var(--font-mono);
+  color: var(--washi-low);
+  margin-left: 6px;
+}
+.tool-desc {
+  font: 400 12px/1.45 var(--font-body);
+  color: var(--washi-dim);
+  margin-bottom: 4px;
+}
+.tool-diff, .tool-cmd {
+  margin: 4px 0;
+  padding: 8px 10px;
+  border-radius: 0;
+  font: 400 12px/1.5 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+  border-left: 2px solid var(--ink-edge);
+}
+.tool-diff.old { color: #d88a7e; border-left-color: var(--vermillion); background: rgba(200, 65, 42, .06); }
+.tool-diff.new { color: #b6c89c; border-left-color: var(--moss);       background: rgba(107, 130, 83, .08); }
+.tool-cmd     { background: rgba(0, 0, 0, .25); color: var(--washi); }
+
+.tool-todos { padding-left: 20px; margin: 6px 0; font: 400 13px/1.55 var(--font-body); }
+.tool-todos .todo-completed { opacity: .5; text-decoration: line-through; }
+.tool-todos .todo-in_progress { color: var(--vermillion); font-weight: 600; }
+
+/* ============================================================
+   Reconnect overlay
+   ============================================================ */
+.reconnect {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  padding: 18px 28px 22px;
+  border-radius: 2px;
+  border: 1px solid var(--vermillion);
+  background: var(--ink-soft);
+  color: var(--washi);
+  font: 500 16px/1.2 var(--font-display);
+  text-align: center;
+  box-shadow: var(--shadow-2);
+  z-index: 8;
+}
+.reconnect::before {
+  content: 'Reconnecting';
+  display: block;
+  font: 600 15px/1.2 var(--font-body);
+  color: var(--vermillion);
+  letter-spacing: .02em;
+  margin-bottom: 6px;
+}
+.reconnect span { font-size: 12px; color: var(--washi-low); letter-spacing: .04em; }
+.reconnect.hidden { display: none; }
+
+/* ============================================================
+   Agent overview — vertical list of all known agents
+   ============================================================ */
+.overview {
+  position: fixed;
+  inset: 0;
+  background: var(--ink);
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  padding: calc(env(safe-area-inset-top) + 28px) 22px env(safe-area-inset-bottom);
+  transition: transform var(--t-soft) var(--ease), opacity var(--t-soft) var(--ease);
+}
+.overview::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent, rgba(192, 202, 245, .16) 22%, rgba(192, 202, 245, .16) 78%, transparent);
+  pointer-events: none;
+}
+.overview.hidden { display: none; }
+.overview-head {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  font: 500 17px/1 var(--font-display);
+  letter-spacing: .02em;
+  color: var(--washi);
+}
+.overview-head::before {
+  content: 'Agents';
+  position: absolute;
+  left: 0; top: -16px;
+  font: 600 10px/1 var(--font-body);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--washi-low);
+}
+.overview-head::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    var(--ink-edge-hi), var(--ink-edge-hi) 62%, transparent);
+}
+.overview-close {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-edge);
+  background: transparent;
+  color: var(--washi-dim);
+  font: 500 15px/1 var(--font-body);
+}
+.overview-actions {
+  display: flex;
+  gap: 10px;
+}
+.overview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  position: relative;
+}
+.overview-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 4px 20px;
+  margin: 0;
+  border-bottom: 0;
+  background: transparent;
+  font: 500 16px/1.2 var(--font-display);
+  color: var(--washi);
+}
+/* Torn-paper bottom edge per row, painted in the hairline ink colour. */
+.overview-row::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 1px;
+  background: var(--ink-edge);
+}
+.overview-row:nth-of-type(3n)   ::after,
+.overview-row:nth-of-type(3n+1) ::after { /* nothing — the bg above covers */ }
+.overview-list .overview-row { border-radius: 10px; }
+.overview-row.active {
+  background: transparent;
+}
+.overview-row .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--ink-edge-hi);
+  margin-right: 10px;
+}
+.overview-row.active .dot { background: var(--moss); }
+.overview-row .row-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+}
+.agent-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  color: var(--ink);
+  font: 600 18px/1 var(--font-display);
+  text-transform: uppercase;
+  background-size: cover;
+  background-position: center;
+  overflow: visible;
+  box-shadow: inset 0 0 0 1px var(--ink-edge-hi);
+}
+.agent-name {
+  font: 500 16px/1.2 var(--font-display);
+  letter-spacing: .01em;
+}
+.agent-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.agent-work {
+  max-width: 42vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 11px/1.25 var(--font-body);
+  color: var(--washi-low);
+  letter-spacing: 0;
+}
+.agent-state {
+  position: relative;
+  font: 600 10px/1 var(--font-body);
+  padding: 5px 12px 6px;
+  background: transparent;
+  color: var(--washi-dim);
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  max-width: 34vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* A pill badge with a faint inner border. */
+  box-shadow: inset 0 0 0 1px var(--ink-edge);
+  border-radius: 999px;
+}
+.agent-state.busy    { background: var(--moss);       color: var(--ink);    box-shadow: inset 0 0 0 1px var(--moss); }
+.agent-state.unread  { background: var(--vermillion); color: #f6efd9;       box-shadow: inset 0 0 0 1px var(--vermillion); }
+.agent-state.current { color: var(--hanko); box-shadow: inset 0 0 0 1px var(--hanko); }
+.agent-state.inactive{ opacity: .5; }
+.overview-row .row-tail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.overview-row .right {
+  font: 400 12px/1.4 var(--font-body);
+  color: var(--washi-low);
+}
+.row-action {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-edge);
+  background: transparent;
+  color: var(--washi-dim);
+  font-size: 12px;
+  transition: color var(--t-snap) var(--ease), border-color var(--t-snap) var(--ease);
+}
+.row-action.start    { color: var(--moss); }
+.row-action.stop     { color: var(--vermillion); }
+.row-action.settings { color: var(--washi-dim); }
+.row-action.relaunch { color: var(--vermillion-hi); }
+.row-action:disabled { opacity: .25; }
+.row-action:active { transform: scale(.94); }
+
+/* ============================================================
+   Voice picker
+   ============================================================ */
+.voice-bio {
+  margin: -2px 0 14px;
+  font: italic 400 13px/1.45 var(--font-body, sans-serif);
+  color: var(--washi-dim, #b9b2a6);
+}
+.voice-list {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--ink-edge);
+}
+.voice-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ink-edge);
+  font: 400 14px/1.4 var(--font-body);
+  color: var(--washi);
+}
+.voice-row:last-child { border-bottom: 0; }
+.voice-row.current { background: rgba(168, 53, 36, .10); }
+.voice-row.current::before {
+  content: '◉';
+  margin-right: 8px;
+  color: var(--hanko);
+}
+.voice-row.taken { opacity: .55; }
+.voice-actions { display: flex; gap: 8px; }
+.voice-preview, .voice-pick {
+  border: 1px solid var(--ink-edge);
+  background: transparent;
+  color: var(--washi-dim);
+  height: 32px; padding: 0 14px;
+  border-radius: 2px;
+  font: 500 11px/1 var(--font-body);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.voice-pick {
+  background: var(--vermillion);
+  color: #f6efd9;
+  border-color: var(--vermillion);
+}
+
+/* ============================================================
+   Start dialog — hanging-scroll card.
+   ============================================================ */
+.start-dialog {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 14;
+  padding: 24px;
+}
+.start-dialog.hidden { display: none; }
+.start-card {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  background: var(--ink-soft);
+  border: 1px solid var(--ink-edge);
+  border-radius: 2px;
+  padding: 28px 22px 22px;
+  color: var(--washi);
+  box-shadow: var(--shadow-2);
+}
+.start-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent, rgba(192, 202, 245, .16) 22%, rgba(192, 202, 245, .16) 78%, transparent);
+  pointer-events: none;
+}
+.start-card > * { position: relative; }
+.start-card h3 {
+  margin: 0 0 18px;
+  font: 500 22px/1 var(--font-display);
+  letter-spacing: .04em;
+}
+.start-card h3#startTitle::before {
+  content: 'Start';
+  display: block;
+  font: 600 10px/1 var(--font-body);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--washi-low);
+  margin-bottom: 6px;
+}
+.start-card h3#voiceTitle::before {
+  content: 'Voice';
+  display: block;
+  font: 600 10px/1 var(--font-body);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--washi-low);
+  margin-bottom: 6px;
+}
+.start-field {
+  display: block;
+  margin-bottom: 16px;
+}
+.start-field.inline-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.start-field.inline-toggle span {
+  margin-bottom: 0;
+}
+.start-field.inline-toggle input {
+  width: 20px;
+  height: 20px;
+}
+.start-field span {
+  display: block;
+  font: 600 10px/1 var(--font-body);
+  color: var(--washi-low);
+  margin-bottom: 6px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.start-field input,
+.start-field select {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--ink-edge-hi);
+  background: transparent;
+  color: var(--washi);
+  padding: 8px 2px;
+  border-radius: 0;
+  font: 400 14px/1.4 var(--font-mono);
+  outline: none;
+  caret-color: var(--vermillion);
+}
+.start-field select {
+  color-scheme: dark;
+}
+.start-field input:focus,
+.start-field select:focus { border-bottom-color: var(--washi); }
+.orchestrator-last {
+  min-height: 54px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--ink-edge);
+  font: 400 12px/1.35 var(--font-body);
+  color: var(--washi-low);
+}
+.orchestrator-ignored {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0 0 14px;
+  border: 1px solid var(--ink-edge);
+  font: 400 12px/1.35 var(--font-body);
+  color: var(--washi-low);
+}
+.orchestrator-ignored-title {
+  padding: 9px 12px 7px;
+  color: var(--washi);
+  border-bottom: 1px solid var(--ink-edge);
+}
+.orchestrator-ignored-row {
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+}
+.orchestrator-ignored-row:last-child { border-bottom: 0; }
+.orchestrator-ignored-text {
+  color: var(--washi);
+  overflow-wrap: anywhere;
+}
+.orchestrator-ignored-meta,
+.orchestrator-ignored-empty {
+  padding-top: 3px;
+  color: var(--washi-dim);
+}
+.orchestrator-ignored-empty {
+  padding: 10px 12px;
+}
+.start-modes,
+.start-backends {
+  display: flex;
+  gap: 16px;
+  margin: 8px 0 14px;
+  flex-wrap: wrap;
+  font: 400 13px/1 var(--font-body);
+}
+.start-backends {
+  margin-bottom: 4px;
+}
+.start-modes label,
+.start-backends label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--washi-dim);
+}
+.start-modes input[type="radio"],
+.start-backends input[type="radio"] {
+  -webkit-appearance: none;
+     -moz-appearance: none;
+          appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 0;
+  border: 1px solid var(--ink-edge-hi);
+  background: transparent;
+  position: relative;
+  margin: 0;
+  cursor: pointer;
+}
+.start-modes input[type="radio"]:checked,
+.start-backends input[type="radio"]:checked {
+  border-color: var(--hanko);
+}
+.start-modes input[type="radio"]:checked::after,
+.start-backends input[type="radio"]:checked::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  background: var(--hanko);
+}
+.start-suggestions {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  background: var(--ink);
+  border: 1px solid var(--ink-edge);
+  border-radius: 0;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.start-suggestions.hidden { display: none; }
+.start-suggestions li {
+  padding: 10px 14px;
+  font: 400 12px/1.4 var(--font-mono);
+  color: var(--washi);
+  border-bottom: 1px solid var(--ink-edge);
+}
+.start-suggestions li:last-child { border-bottom: 0; }
+.start-suggestions li:hover,
+.start-suggestions li:active { background: rgba(168, 53, 36, .12); color: var(--washi); }
+.start-favorites {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.start-favorites.hidden { display: none; }
+.start-favorites li {
+  max-width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--ink-edge);
+  color: var(--washi-dim);
+  font: 400 11px/1.3 var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.start-favorites li:hover,
+.start-favorites li:active {
+  border-color: var(--hanko);
+  color: var(--washi);
+  background: rgba(168, 53, 36, .10);
+}
+.start-resume {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--ink-edge);
+}
+.start-resume.hidden { display: none; }
+.start-resume li {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ink-edge);
+  cursor: pointer;
+}
+.start-resume li:last-child { border-bottom: 0; }
+.start-resume li.selected { background: rgba(168, 53, 36, .10); }
+.start-resume .preview {
+  font: 400 13px/1.4 var(--font-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--washi);
+}
+.start-resume .meta {
+  font: 400 italic 11px/1.3 var(--font-display);
+  color: var(--washi-low);
+  margin-top: 4px;
+}
+.start-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.start-btn {
+  height: 40px;
+  padding: 0 22px;
+  border-radius: 2px;
+  border: 1px solid var(--ink-edge);
+  background: transparent;
+  font: 600 11px/1 var(--font-body);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--washi-dim);
+  cursor: pointer;
+  transition: color var(--t-snap) var(--ease), border-color var(--t-snap) var(--ease);
+}
+.start-btn.ghost:active { color: var(--washi); border-color: var(--washi-dim); }
+.start-btn.primary {
+  background: var(--washi);
+  color: var(--ink);
+  border-color: var(--washi);
+}
+
+/* ============================================================
+   Sumi-e icon layer
+   ------------------------------------------------------------
+   Hand-painted ink-brush PNGs in /static/img/icons/, masked into
+   each button so the icon takes the parent's currentColor. We hide
+   the existing Unicode/SVG glyphs inside the buttons rather than
+   editing the HTML, so all the JS selectors keep working.
+
+   Icons live at 1024x1024 PNG; mask-size: contain handles sizing.
+   ============================================================ */
+
+/* Shared paint */
+.icon-mask::before,
+.history-toggle::before,
+.history-btn::before,
+.chat-btn::before,
+.mute-audio-btn::before,
+.stop-btn::before,
+.ctrlc-btn::before,
+.chat-send::before,
+.chat-close::before,
+.overview-close::before,
+.row-action::before,
+.mic::before {
+  content: '';
+  position: absolute;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+          mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+          mask-position: center;
+  -webkit-mask-size: contain;
+          mask-size: contain;
+  pointer-events: none;
+}
+
+/* Hide the Unicode glyphs / inline SVG inside icon buttons; the mask layer
+   draws the icon. font-size: 0 collapses any unicode text content.
+   position: relative scopes the absolute ::before to the button itself. */
+.history-toggle,
+.chat-btn,
+.mute-audio-btn,
+.stop-btn,
+.ctrlc-btn,
+.chat-send,
+.chat-close,
+.overview-close,
+.row-action,
+.history-btn { font-size: 0; position: relative; }
+/* Icon sizing for the inline-SVG controls. currentColor means one
+   `color` declaration themes the whole icon set. */
+.mic > svg,
+.btn-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+}
+.mic > svg { width: 22px; height: 22px; }
+
+/* Per-icon mask paths + inset (insets create the icon padding inside the
+   circular button — bigger inset = smaller icon). */
+.mic::before              { inset: 14px; -webkit-mask-image: url('/static/img/icons/mic.png');      mask-image: url('/static/img/icons/mic.png'); }
+.history-toggle::before   { inset: 11px; -webkit-mask-image: url('/static/img/icons/history.png');  mask-image: url('/static/img/icons/history.png'); }
+.chat-btn::before         { inset: 11px; -webkit-mask-image: url('/static/img/icons/chat.png');     mask-image: url('/static/img/icons/chat.png'); }
+.mute-audio-btn::before   { inset: 11px; -webkit-mask-image: url('/static/img/icons/mute.png');     mask-image: url('/static/img/icons/mute.png'); }
+.stop-btn::before         { inset: 13px; -webkit-mask-image: url('/static/img/icons/stop.png');     mask-image: url('/static/img/icons/stop.png'); }
+.ctrlc-btn::before        { inset: 12px; -webkit-mask-image: url('/static/img/icons/close.png');    mask-image: url('/static/img/icons/close.png'); }
+.chat-send::before        { inset: 12px; -webkit-mask-image: url('/static/img/icons/send.png');     mask-image: url('/static/img/icons/send.png'); }
+.chat-close::before       { inset: 13px; -webkit-mask-image: url('/static/img/icons/close.png');    mask-image: url('/static/img/icons/close.png'); }
+.overview-close::before   { inset: 9px;  -webkit-mask-image: url('/static/img/icons/close.png');    mask-image: url('/static/img/icons/close.png'); }
+.history-btn::before      { inset: 7px;  -webkit-mask-image: url('/static/img/icons/reload.png');   mask-image: url('/static/img/icons/reload.png'); }
+.row-action::before       { inset: 7px;  -webkit-mask-image: url('/static/img/icons/close.png');    mask-image: url('/static/img/icons/close.png'); }
+.row-action.start::before { -webkit-mask-image: url('/static/img/icons/play.png');     mask-image: url('/static/img/icons/play.png'); }
+.row-action.stop::before  { -webkit-mask-image: url('/static/img/icons/stop.png');     mask-image: url('/static/img/icons/stop.png'); }
+.row-action.settings::before { -webkit-mask-image: url('/static/img/icons/settings.png'); mask-image: url('/static/img/icons/settings.png'); }
+.row-action.relaunch::before { -webkit-mask-image: url('/static/img/icons/reload.png');   mask-image: url('/static/img/icons/reload.png'); }
+
+/* Special cases — buttons that share a generic class but need a distinct icon. */
+#historyToolsToggle::before { -webkit-mask-image: url('/static/img/icons/settings.png'); mask-image: url('/static/img/icons/settings.png'); }
+#overviewReload::before     { -webkit-mask-image: url('/static/img/icons/reload.png');   mask-image: url('/static/img/icons/reload.png'); }
+#overviewOrchestrator::before { -webkit-mask-image: url('/static/img/icons/settings.png'); mask-image: url('/static/img/icons/settings.png'); }
+
+/* The mic glyph tints to the button's own colour. */
+.mic::before { color: inherit; }
+
+/* ============================================================
+   Inked-Hanko shape & motion language
+   ------------------------------------------------------------
+   Every interactive control gets a hand-irregular outline via
+   clip-path: url(#shape-*) (defs are inlined in index.html), plus
+   the ink-bleed press effect powered by static/lib/press.js.
+
+   Categories:
+     PRIMARY    — mic, dialog Start, chat Send: circle
+     SECONDARY  — dock secondary buttons (history, mute, chat, stop):
+                  rounded square
+     TERTIARY   — small action buttons (close, settings, reload, row
+                  actions): circle
+   ============================================================ */
+
+/* Containers must clip overflow so the ink bloom can soak past the
+   button's nominal rect without escaping. They also need position:
+   relative so the bloom's absolute positioning is local. */
+.mic, .session, .start-btn, .chat-send,
+.history-toggle, .chat-btn, .mute-audio-btn, .stop-btn, .ctrlc-btn,
+.history-btn, .overview-close, .chat-close, .row-action,
+.switcher-item, .voice-pick, .voice-preview {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ----- PRIMARY shapes: circle ----- */
+.mic {
+  border-radius: 50%;
+  width: 50px; height: 50px;
+  transition:
+    transform var(--t-snap) var(--ease),
+    filter var(--t-soft) var(--ease),
+    background var(--t-snap) var(--ease);
+}
+.mic:active { transform: scale(.95); }
+.mic.recording::before {
+  /* Ink-dispersing filter applies only to the icon glyph while recording.
+     The blob shape itself stays sharp; the icon dissolves like wet ink. */
+  filter: url(#ink-disperse);
+}
+/* The recording-state ring no longer overlays a circle; the blob mask
+   crops it to the blob's outline, which is the desired effect. */
+
+.chat-send {
+  border-radius: 50%;
+  transition:
+    transform var(--t-snap) var(--ease),
+    background var(--t-snap) var(--ease);
+}
+.chat-send:active { transform: scale(.95); }
+
+.start-btn.primary {
+  border-radius: 10px;
+  transition: transform var(--t-snap) var(--ease), background var(--t-snap) var(--ease);
+}
+.start-btn.primary:active { transform: scale(.97); }
+
+/* ----- SECONDARY shapes: rounded square ----- */
+.history-toggle, .mute-audio-btn, .stop-btn, .chat-btn, .ctrlc-btn {
+  border-radius: 10px;
+  border: 0;
+  background: transparent;
+  /* The hand-painted hairline frame: a faint inner shadow that traces
+     the clipped shape, giving a "stroked" look. */
+  box-shadow: inset 0 0 0 1px var(--ink-edge);
+  transition:
+    transform var(--t-snap) var(--ease),
+    color var(--t-snap) var(--ease),
+    box-shadow var(--t-snap) var(--ease),
+    background var(--t-snap) var(--ease);
+}
+.history-toggle:active,
+.mute-audio-btn:active,
+.stop-btn:active,
+.chat-btn:active,
+.ctrlc-btn:active { transform: scale(.94); }
+
+/* Active state styling is owned by the painted-sprites section further
+   down (glow halo via filter:drop-shadow). The older rules below used
+   background: shorthand which clobbered the painted PNG background-image
+   — left here as no-ops for safety. */
+.history-toggle.active { color: var(--washi); }
+.mute-audio-btn.active { color: var(--washi); }
+.stop-btn.busy:active  { color: #fff; }
+@keyframes stop-wobble {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(.94); }
+}
+
+/* ----- TERTIARY shapes: circle ----- */
+.history-btn, .overview-close, .chat-close, .row-action {
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--ink-edge);
+  transition:
+    transform var(--t-snap) var(--ease),
+    color var(--t-snap) var(--ease),
+    box-shadow var(--t-snap) var(--ease);
+}
+.history-btn:active,
+.overview-close:active,
+.chat-close:active { transform: scale(.92); }
+.row-action:active { transform: scale(.9); }
+.row-action.start { box-shadow: inset 0 0 0 1px var(--moss); }
+.row-action.stop  { box-shadow: inset 0 0 0 1px var(--vermillion); }
+.row-action.relaunch { box-shadow: inset 0 0 0 1px var(--vermillion-hi); }
+.history-btn.active {
+  background: rgba(168, 53, 36, .16);
+  box-shadow: inset 0 0 0 1px var(--hanko);
+  color: var(--washi);
+}
+
+/* ============================================================
+   Ink-bleed press effect (paired with static/lib/press.js)
+   ============================================================ */
+.press-bloom {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(
+    closest-side,
+    rgba(232, 222, 196, .30) 0%,
+    rgba(232, 222, 196, .18) 30%,
+    rgba(232, 222, 196, .07) 55%,
+    rgba(232, 222, 196, 0)  85%
+  );
+  opacity: 0;
+  transform: scale(.18);
+  transition:
+    transform 320ms cubic-bezier(.2, .7, .1, 1),
+    opacity   140ms cubic-bezier(.2, .7, .1, 1);
+  mix-blend-mode: normal;
+  z-index: 2;
+}
+.press-bloom.show {
+  opacity: .8;
+  transform: scale(1);
+}
+.press-bloom.show.fading {
+  opacity: 0;
+  transition: opacity 200ms cubic-bezier(.4, 0, .2, 1);
+}
+/* Primary-action presses get a brighter bloom (the mic is a major event). */
+.mic .press-bloom,
+.chat-send .press-bloom {
+  background: radial-gradient(
+    closest-side,
+    rgba(20, 17, 13, .55) 0%,
+    rgba(20, 17, 13, .35) 30%,
+    rgba(20, 17, 13, .12) 55%,
+    rgba(20, 17, 13, 0)   85%
+  );
+}
+
+/* ============================================================
+   Status dot landing — gentle pop-in when an agent first gets a dot.
+   ============================================================ */
+.switcher-avatar.busy::after,
+.switcher-avatar.unread::after,
+.switcher-avatar.active::after {
+  animation: dot-land 280ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes dot-land {
+  0%   { transform: scale(0.2); opacity: 0; }
+  60%  { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ============================================================
+   Brush divider draw-in (overlay open)
+   Header / footer brush strokes get painted left-to-right when an
+   overlay is first revealed.
+   ============================================================ */
+.overview:not(.hidden) .overview-head::after,
+.agent-switcher:not(.hidden)::before {
+  animation: brush-paint 420ms var(--ease) both;
+}
+@keyframes brush-paint {
+  0%   { clip-path: inset(0 100% 0 0); }
+  100% { clip-path: inset(0 0 0 0); }
+}
+
+/* ============================================================
+   Status toast — brush-stroke underline painted in.
+   ============================================================ */
+.status.show::after { animation: brush-paint 360ms var(--ease) both; }
+
+/* ============================================================
+   Painted UI sprites (gpt-image-1 generated)
+   ------------------------------------------------------------
+   Each button is now a hand-painted hanko PNG, not a CSS clip-path.
+   Overrides the procedural shapes earlier in this file. The mic uses
+   a 4-frame horizontal strip for its recording animation; the dock
+   secondary buttons use single PNGs and brighten/saturate for active
+   states.
+   ============================================================ */
+
+/* Disable the clip-path + mask icon layer for buttons we're replacing
+   with painted PNGs. Re-enabling overflow:visible so the press bloom and
+   recording rings can extend past the button bounds. */
+.mic,
+.history-toggle, .mute-audio-btn, .stop-btn, .chat-btn,
+.chat-send {
+  clip-path: none !important;
+  background: transparent;
+  box-shadow: none !important;
+  border: 0 !important;
+  overflow: visible !important;
+}
+.mute-audio-btn::before, .stop-btn::before,
+.chat-btn::before, .chat-send::before, .mic::before {
+  /* These buttons hold a real inline <svg> now — no mask layer. */
+  display: none !important;
+}
+
+/* ----- Dock secondary buttons — painted hanko stamps ----- */
+.history-toggle, .mute-audio-btn, .stop-btn, .chat-btn {
+  width: 40px;
+  height: 40px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  transition:
+    transform var(--t-snap) var(--ease),
+    filter   var(--t-snap) var(--ease),
+    opacity  var(--t-snap) var(--ease);
+}
+.history-toggle,
+.mute-audio-btn,
+.stop-btn,
+.chat-btn { background-image: none; color: var(--washi); }
+.mic { color: var(--washi); }
+
+/* Rest opacity reflects "is this action currently relevant?" */
+.history-toggle { opacity: .70; }
+.mute-audio-btn { opacity: .70; }
+.stop-btn       { opacity: .45; }
+.chat-btn       { opacity: .90; }
+
+/* Active states — a soft cream halo around the icon. Busy stop gets
+   ochre so "working" reads differently from "toggled on", without
+   reaching for red. */
+.history-toggle.active,
+.mute-audio-btn.active {
+  opacity: 1;
+  filter:
+    drop-shadow(0 0 7px rgba(232, 222, 196, .55))
+    drop-shadow(0 0 14px rgba(232, 222, 196, .28));
+}
+.stop-btn.busy {
+  opacity: 1;
+  filter:
+    drop-shadow(0 0 8px rgba(184, 134, 90, .8))
+    drop-shadow(0 0 16px rgba(184, 134, 90, .45));
+}
+/* History toggle shares the cream active halo defined above. */
+
+/* Press state — the button dips slightly and dims briefly. */
+.history-toggle:active,
+.mute-audio-btn:active,
+.stop-btn:active,
+.chat-btn:active {
+  transform: scale(.92);
+}
+
+/* Busy stop — continuous pulse + glow, makes the agent's working state
+   impossible to miss. */
+.stop-btn.busy {
+  animation: stop-busy-wobble 1.2s var(--ease) infinite;
+}
+@keyframes stop-busy-wobble {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.06); }
+}
+
+/* ----- Mic — same 44px circle as the other dock controls, with the
+   painted sumi mic glyph masked on top (tints to currentColor), and
+   mic-rings.png + a scale throb for the recording animation. */
+.mic {
+  width: 40px;
+  height: 40px;
+  /* Lock the size — the dock is a flex row so without this the mic gets
+     squeezed thinner than tall and reads as an oval. Also strip the
+     browser's default <button> padding which would otherwise eat content. */
+  flex: 0 0 40px;
+  min-width: 40px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  background-image: none;
+  background-size: auto;
+  position: relative;
+  overflow: visible !important;
+  transform: none;
+  box-shadow: inset 0 0 0 1px var(--ink-edge);
+  transition:
+    transform var(--t-snap) var(--ease),
+    background-color var(--t-snap) var(--ease),
+    box-shadow var(--t-snap) var(--ease);
+}
+.mic:active { transform: scale(.93); }
+
+/* The mic glyph itself — cream sumi-brush icon masked onto the disc. */
+.mic::before {
+  content: '' !important;
+  display: block !important;
+  position: absolute;
+  inset: 11px;
+  background-color: currentColor;
+  -webkit-mask: url('/static/img/icons/mic.png') center/contain no-repeat;
+          mask: url('/static/img/icons/mic.png') center/contain no-repeat;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Capturing — slight saturation bump, faint inhale. */
+.mic.capturing {
+  background-color: var(--moss);
+  animation: mic-inhale 1.4s ease-in-out infinite;
+}
+@keyframes mic-inhale {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.05); }
+}
+
+/* Recording — moss-filled disc, slow strong throb, soft halo. */
+.mic.recording {
+  background-color: var(--moss);
+  animation: mic-throb 1.3s ease-in-out infinite;
+  box-shadow:
+    0 2px 10px rgba(107, 130, 83, .45),
+    0 0 20px rgba(107, 130, 83, .28),
+    inset 0 0 0 1px rgba(0, 0, 0, .2);
+}
+@keyframes mic-throb {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.10); }
+}
+
+/* Recording rings — painted ink rings emanate outward from the mic. */
+.mic.recording::after {
+  content: '';
+  position: absolute;
+  inset: -22px;
+  background-image: url('/static/img/ui/mic-rings.png');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(.35);
+  animation: mic-rings-emit 1.3s ease-out infinite;
+  z-index: 1;
+}
+@keyframes mic-rings-emit {
+  0%   { transform: scale(.4);  opacity: .9; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* ----- Send button — same neutral icon treatment as the dock ----- */
+.chat-send {
+  width: 40px;
+  height: 40px;
+  background-image: none;
+  color: var(--washi);
+  transition: transform var(--t-snap) var(--ease), filter var(--t-snap) var(--ease);
+}
+.chat-send:active {
+  transform: scale(.92);
+  filter: brightness(.85);
+}
+
+/* (The painted hanko PNG was replaced with a Slack-style status dot — see
+   the .session .avatar::after / .switcher-avatar::after block higher in
+   this file. Keeping this comment so the painted seal can be put back
+   later by reinstating the rule.) */
+
+/* Dividers are crisp hairlines now — see the ::before/::after rules above.
+   The painted brush PNG that used to override them belonged to the previous
+   design and would blur every edge in this one. */
+
+/* ============================================================
+   Reduced motion
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .agent-switcher {
+    clip-path: none;
+    transition: opacity 1ms;
+  }
+}
+
+/* Cache-bust visibility — lives in the agent-overview header now, so
+   it's out of the way during normal use but still visible when you open
+   the agents panel. */
+.version-badge {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--washi-low);
+  opacity: 0.6;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  user-select: all;
+  align-self: center;
+  margin-right: 4px;
+}
+
+/* ============================================================
+   Persistent mute — long-pressed mute button toggles this. The
+   red diagonal-line overlay makes it unmistakable from the
+   "tap-once-to-stop-current-clip" transient state.
+   ============================================================ */
+.mute-audio-btn.muted {
+  opacity: 1;
+}
+.mute-audio-btn.muted::after {
+  content: '';
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 50%;
+  height: 3px;
+  background: var(--ochre);
+  transform: translateY(-50%) rotate(-30deg);
+  border-radius: 2px;
+  box-shadow: 0 0 6px rgba(184, 134, 90, .65);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Hook-driven status banner above the history pane.
+   Always tells you what the current agent is doing:
+   - thinking:   Teams-style three-dot animation + "Thinking 3s"
+   - tool:       three-dot animation + "Running Bash 4s"
+   - compacting: spinner + "Compacting context 12s"
+   - waiting:    red ! icon + Notification message
+   - done:       brief ✓ summary with duration · tokens · cost  */
+.agent-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 10px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font: 500 13px/1.35 var(--font-body);
+  color: var(--washi);
+  background: var(--ink-soft);
+  border: 1px solid var(--ink-edge-hi);
+}
+.agent-banner.hidden { display: none; }
+.activity-strip {
+  margin: 6px 10px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--washi-dim);
+  font: 500 11px/1.3 var(--font-body);
+}
+.activity-strip.hidden { display: none; }
+.activity-now,
+.activity-item {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.activity-now {
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, .025);
+  border: 1px solid var(--ink-edge);
+}
+.activity-timeline {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.activity-timeline::-webkit-scrollbar { display: none; }
+.activity-item {
+  flex: 0 0 auto;
+  max-width: 220px;
+  color: var(--washi-low);
+}
+.activity-item b,
+.activity-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+}
+.activity-phase {
+  flex: 0 0 auto;
+  color: var(--washi);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.activity-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 7px;
+  background: var(--washi-low);
+}
+.activity-now.running .activity-dot,
+.activity-item.running .activity-dot { background: var(--moss); animation: typing-bounce 1.2s infinite ease-in-out; }
+.activity-now.error .activity-dot,
+.activity-item.error .activity-dot { background: var(--vermillion); }
+.activity-now.ok .activity-dot,
+.activity-item.ok .activity-dot { background: var(--moss); }
+.agent-banner.thinking {
+  background: rgba(107, 130, 83, 0.08);
+  border-color: rgba(107, 130, 83, 0.30);
+}
+.agent-banner.tool {
+  background: rgba(107, 130, 83, 0.12);
+  border-color: rgba(107, 130, 83, 0.40);
+}
+.agent-banner.compacting {
+  background: rgba(184, 134, 90, 0.12);
+  border-color: rgba(184, 134, 90, 0.35);
+}
+.agent-banner.waiting {
+  background: rgba(168, 53, 36, 0.10);
+  border-color: rgba(168, 53, 36, 0.45);
+}
+.agent-banner.interrupted {
+  background: rgba(168, 53, 36, 0.10);
+  border-color: rgba(168, 53, 36, 0.45);
+}
+.agent-banner.done {
+  background: rgba(107, 130, 83, 0.08);
+  border-color: rgba(107, 130, 83, 0.25);
+  opacity: 0.92;
+}
+.banner-spinner {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--ink-edge-hi);
+  border-top-color: var(--washi);
+  animation: agent-banner-spin 800ms linear infinite;
+  flex: 0 0 12px;
+}
+@keyframes agent-banner-spin { to { transform: rotate(360deg); } }
+.banner-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--vermillion);
+  color: #f6efd9;
+  font: 700 12px/18px var(--font-body);
+  flex: 0 0 18px;
+}
+.banner-icon.done {
+  background: var(--moss);
+}
+.banner-msg { flex: 1 1 auto; }
+.banner-meta {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  opacity: 0.7;
+  letter-spacing: 0.02em;
+}
+
+/* Teams-style typing indicator — three dots bouncing in sequence.
+   Fired during THINKING and TOOL state so the user gets immediate
+   "the agent is alive and working" feedback. */
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  padding: 0 2px;
+}
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--washi);
+  opacity: 0.4;
+  animation: typing-bounce 1.2s infinite ease-in-out;
+}
+.typing-dots span:nth-child(1) { animation-delay: 0ms;   }
+.typing-dots span:nth-child(2) { animation-delay: 160ms; }
+.typing-dots span:nth-child(3) { animation-delay: 320ms; }
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0);     opacity: 0.35; }
+  30%           { transform: translateY(-3px);  opacity: 0.95; }
+}
+
+
+/* ============================================================
+   Desktop conversation rail
+   ------------------------------------------------------------
+   Exists only on html.desktop — it is a pointer-and-keyboard affordance.
+   Whether it is *expanded* is a separate question, decided by window width
+   (see the max-width rule at the end of this block) with a manual toggle
+   that only applies while there is room to honour it.
+   ============================================================ */
+html.desktop #terminal-wrap {
+  display: flex;
+  align-items: stretch;
+}
+html.desktop .workspace {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sidebar {
+  flex: 0 0 264px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--ink-soft);
+  border-right: 1px solid var(--ink-edge);
+  z-index: 10;
+  transition: flex-basis var(--t-soft) var(--ease);
+}
+.sidebar.collapsed { flex-basis: 60px; }
+
+.sidebar-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: calc(env(safe-area-inset-top) + 12px) 10px 10px 14px;
+  border-bottom: 1px solid var(--ink-edge);
+}
+.sidebar.collapsed .sidebar-head { justify-content: center; padding-inline: 0; }
+.sidebar-title {
+  font: 600 10px/1 var(--font-ui);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--washi-low);
+  white-space: nowrap;
+}
+.sidebar-toggle {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px; height: 26px;
+  border: 1px solid var(--ink-edge);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--washi-low);
+  cursor: pointer;
+  transition: color var(--t-snap) var(--ease), border-color var(--t-snap) var(--ease);
+}
+.sidebar-toggle:hover:not(:disabled) { color: var(--washi); border-color: var(--ink-edge-hi); }
+.sidebar-toggle:disabled { opacity: .35; cursor: default; }
+
+.sidebar-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidebar.collapsed .sidebar-list { padding: 8px 6px; align-items: center; }
+
+.sidebar .side-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--washi-dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-snap) var(--ease), color var(--t-snap) var(--ease);
+}
+.sidebar.collapsed .side-row { width: auto; padding: 6px; }
+.sidebar .side-row:hover { background: var(--ink-soft-2); color: var(--washi); }
+/* Where the keyboard is in the rail. Distinct from .current, which is the
+   conversation actually open: you walk the list before choosing. */
+.sidebar .side-row.selected {
+  outline: 1px solid var(--accent-blue);
+  outline-offset: -1px;
+  background: color-mix(in srgb, var(--accent-blue) 9%, transparent);
+}
+.sidebar .side-row.current {
+  background: color-mix(in srgb, var(--accent-blue) 16%, transparent);
+  color: var(--washi);
+}
+
+.side-avatar {
+  position: relative;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--ink-soft-2);
+  box-shadow: inset 0 0 0 1px rgba(192, 202, 245, .14);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+  font-size: 18px;
+}
+/* Status dot. Absent = idle; the dot only appears when there is something
+   to say, so a quiet roster stays quiet. */
+.side-dot {
+  position: absolute;
+  right: -3px; bottom: -3px;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: 0 0 0 2px var(--ink-soft);
+}
+.sidebar .side-row.current .side-dot { box-shadow: 0 0 0 2px var(--ink-soft-2); }
+.side-dot.busy   { background: var(--moss); }
+.side-dot.unread { background: var(--vermillion); }
+
+.side-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.side-name {
+  font: 500 13px/1.2 var(--font-ui);
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side-line {
+  font: 400 11px/1.2 var(--font-ui);
+  color: var(--washi-low);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-foot {
+  flex: 0 0 auto;
+  padding: 8px;
+  border-top: 1px solid var(--ink-edge);
+}
+.sidebar-all {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--ink-edge);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--washi-low);
+  font: 500 12px/1 var(--font-ui);
+  cursor: pointer;
+  transition: color var(--t-snap) var(--ease), border-color var(--t-snap) var(--ease);
+}
+.sidebar-all:hover { color: var(--washi); border-color: var(--ink-edge-hi); }
+
+/* The dock is fixed to the viewport, so it has to be told about the rail. */
+html.desktop .dock { left: 264px; }
+html.desktop .sidebar.collapsed ~ .workspace ~ .dock,
+html.desktop:has(.sidebar.collapsed) .dock { left: 60px; }
+
+/* Narrow window on a desktop machine: not enough room for a 264px rail, so
+   it becomes an icon strip whatever the stored preference says. The toggle
+   is disabled here rather than hidden, so the control does not move. */
+@media (max-width: 1080px) {
+  html.desktop .sidebar { flex-basis: 60px; }
+  html.desktop .dock { left: 60px; }
+}
+
+/* ============================================================
+   Desktop layout (html.desktop — set by the OS probe in index.html).
+
+   Keyed to the machine, not the window: a laptop with a narrow window
+   is still a pointer-and-keyboard screen, so it keeps the desktop
+   composer. The composer is permanent and lives *in* the dock row —
+   agent on the left, input filling the middle, controls on the right —
+   rather than in a second bar stacked above it. app.js reparents
+   #chatBar into .dock on the same signal; everything here assumes
+   that placement.
+   ============================================================ */
+/* Desktop stacks: workspace, then the dock, then the shortcut statusline.
+   They are flex items in a column, so each one takes its own height and
+   overlap is impossible. The phone keeps the fixed dock — it has a soft
+   keyboard to dodge — which is why this is scoped to html.desktop.
+
+   --dock-h drops to 0 here because nothing has to reserve space for a floating
+   dock any more; the values that add to it are the gaps they always were. */
+html.desktop { --dock-h: 0px; }
+html.desktop #app {
+  /* Filled by inset rather than a viewport height unit: this is the same way
+     the layout has always filled the window, and WebKitGTK in the desktop
+     shell does not size a flex container from 100dvh the way Chromium does —
+     the column then collapsed to its content and the dock floated mid-page.
+     The stacking itself is the flex column, not the positioning. */
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+html.desktop #terminal-wrap {
+  position: static;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+html.desktop .dock {
+  position: static;
+  flex: none;
+  left: auto;
+  right: auto;
+  bottom: auto;
+}
+
+/* The input takes over the spacer's job of filling the row. */
+html.desktop .dock-spacer { display: none; }
+
+/* Identity already sits in the transcript header on desktop, so the
+   bottom bar drops the avatar, name and activity line. app.js moves
+   the connection dot up into the header and makes it the agent
+   picker, so nothing becomes unreachable. */
+html.desktop .dock .session { display: none; }
+html.desktop .history-agent {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+html.desktop .history-agent .conn-dot { margin-left: 8px; }
+
+/* From fixed overlay to an ordinary flex child of the dock. */
+html.desktop .chat-bar,
+html.desktop .chat-bar.hidden {
+  display: flex;
+  position: static;
+  inset: auto;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  gap: 0;
+  background: transparent;
+  border-top: 0;
+  z-index: auto;
+}
+html.desktop .chat-bar .chat-row {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A shorter field so the single bar stays compact. */
+html.desktop .chat-input {
+  min-height: 40px;
+  padding: 8px 4px;
+  font-size: 15px;
+}
+html.desktop .chat-send { font-size: 15px; }
+
+/* Toggling a permanent composer makes no sense. */
+html.desktop .chat-btn,
+html.desktop .chat-close { display: none; }
+
+/* The phone hides the dock while chatting. Here the composer lives
+   inside the dock, so hiding it would hide the composer too. */
+html.desktop body.chat-open .dock { display: flex !important; }
+
+/* Keep the transcript's last rows clear of the bar. */
+html.desktop #historyBody {
+  padding-bottom: calc(var(--dock-h) + 16px);
+  padding-inline: 18px;
+}
+html.desktop .history-head { padding-inline: 16px 12px; }
+html.desktop .history-jump { bottom: calc(var(--dock-h) + 12px); }
+html.desktop .speaking { bottom: calc(var(--dock-h) + 16px); }
+
+/* ============================================================
+   Agents mission control
+   ------------------------------------------------------------
+   A responsive field-journal dashboard: operational Chats carry dense live
+   context; saved Contacts stay visually quieter and ready to launch.
+   ============================================================ */
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.overview {
+  display: block;
+  padding: 0;
+  overflow: auto;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 12% 2%, color-mix(in srgb, var(--accent-blue) 10%, transparent), transparent 31rem),
+    radial-gradient(circle at 91% 10%, color-mix(in srgb, var(--ochre) 8%, transparent), transparent 25rem),
+    var(--ink);
+  color: var(--washi);
+}
+.overview::before { display: none; }
+.overview-atmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: .24;
+  background-image:
+    linear-gradient(var(--ink-edge) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ink-edge) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: linear-gradient(to bottom, black, transparent 68%);
+}
+.overview-shell {
+  width: min(1460px, 100%);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: calc(env(safe-area-inset-top) + 30px) clamp(18px, 3.4vw, 52px)
+    calc(env(safe-area-inset-bottom) + 40px);
+}
+.overview-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 25px;
+  border-bottom: 1px solid var(--ink-edge-hi);
+}
+.overview-kicker {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--washi-low);
+  font: 600 10px/1 var(--font-ui);
+  letter-spacing: .22em;
+  text-transform: uppercase;
+}
+.overview-title-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.overview-title-line h1 {
+  margin: 0;
+  color: var(--washi);
+  font: 500 clamp(34px, 5vw, 62px)/.92 var(--font-display);
+  letter-spacing: -.045em;
+}
+.overview-title-block p {
+  max-width: 610px;
+  margin: 13px 0 0;
+  color: var(--washi-dim);
+  font: 400 13px/1.55 var(--font-body);
+}
+.overview-live-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid var(--ink-edge-hi);
+  border-radius: 99px;
+  color: var(--washi-low);
+  font: 600 9px/1 var(--font-ui);
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+.overview-live-mark > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--washi-low);
+}
+.overview-live-mark.connected { color: var(--moss); }
+.overview-live-mark.connected > span {
+  background: var(--moss);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--moss) 18%, transparent);
+}
+.overview-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.overview-hero-actions .version-badge {
+  margin-right: 6px;
+  white-space: nowrap;
+}
+.overview-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--ink-edge-hi);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ink-soft) 82%, transparent);
+  color: var(--washi-dim);
+  cursor: pointer;
+  transition: transform var(--t-snap) var(--ease), color var(--t-snap) var(--ease),
+    background var(--t-snap) var(--ease), border-color var(--t-snap) var(--ease);
+}
+.overview-icon-btn svg,
+.overview-search svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.overview-icon-btn:hover { color: var(--washi); border-color: var(--washi-low); transform: translateY(-1px); }
+.overview-icon-btn.primary { background: var(--washi); color: var(--ink); border-color: var(--washi); }
+.overview-icon-btn.spinning svg { animation: overview-spin .8s linear infinite; }
+@keyframes overview-spin { to { transform: rotate(360deg); } }
+
+.overview-ledger {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 22px 0 20px;
+  border-block: 1px solid var(--ink-edge);
+}
+.overview-ledger > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px clamp(10px, 1.6vw, 22px);
+  border-right: 1px solid var(--ink-edge);
+}
+.overview-ledger > div:first-child { padding-left: 0; }
+.overview-ledger > div:last-child { border-right: 0; }
+.overview-ledger strong {
+  color: var(--washi);
+  font: 500 24px/1 var(--font-display);
+}
+.overview-ledger span {
+  overflow: hidden;
+  color: var(--washi-low);
+  font: 600 9px/1.2 var(--font-ui);
+  letter-spacing: .12em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.overview-ledger .signal strong { color: var(--moss); }
+.overview-ledger .attention strong { color: var(--vermillion-hi); }
+
+.overview-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 10px 0 14px;
+  background: color-mix(in srgb, var(--ink) 91%, transparent);
+  backdrop-filter: blur(16px);
+}
+.overview-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(520px, 48vw);
+  min-width: 240px;
+  height: 42px;
+  padding: 0 13px;
+  border: 1px solid var(--ink-edge);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink-soft) 76%, transparent);
+  color: var(--washi-low);
+  transition: border-color var(--t-snap) var(--ease), background var(--t-snap) var(--ease);
+}
+.overview-search:focus-within {
+  border-color: var(--accent-blue);
+  background: var(--ink-soft);
+  color: var(--accent-blue);
+}
+.overview-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--washi);
+  font: 400 13px/1 var(--font-body);
+}
+.overview-search input::placeholder { color: var(--washi-low); }
+.overview-search button {
+  border: 0;
+  background: transparent;
+  color: var(--washi-low);
+  font-size: 20px;
+}
+.overview-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--ink-edge);
+  border-radius: 9px;
+  background: var(--ink-soft);
+}
+.overview-tabs button {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--washi-low);
+  font: 600 10px/1 var(--font-ui);
+  cursor: pointer;
+}
+.overview-tabs button span { opacity: .65; margin-left: 3px; }
+.overview-tabs button.active { background: var(--ink-soft-2); color: var(--washi); }
+
+.overview-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 4px 0 15px;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--vermillion) 46%, var(--ink-edge));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--vermillion) 9%, var(--ink-soft));
+  color: var(--vermillion-hi);
+  font: 500 12px/1.35 var(--font-body);
+}
+.overview-error button { border: 0; background: transparent; color: inherit; font: 600 10px/1 var(--font-ui); text-transform: uppercase; }
+
+.overview-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(310px, .85fr);
+  align-items: start;
+  gap: clamp(24px, 3vw, 46px);
+}
+.overview-board.single-column { grid-template-columns: minmax(0, 1fr); }
+.overview-section { min-width: 0; }
+.overview-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  min-height: 46px;
+  margin-bottom: 10px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--ink-edge-hi);
+}
+.overview-section-head > div { display: flex; align-items: baseline; gap: 10px; }
+.overview-section-head h2 {
+  margin: 0;
+  color: var(--washi);
+  font: 500 17px/1 var(--font-display);
+  letter-spacing: .01em;
+}
+.overview-section-head > span,
+.section-index {
+  color: var(--washi-low);
+  font: 600 9px/1 var(--font-ui);
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+.section-index { color: var(--ochre); }
+
+.agent-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.agent-card {
+  position: relative;
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid var(--ink-edge);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--ink-soft) 88%, transparent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .08);
+  overflow: hidden;
+  transition: transform var(--t-snap) var(--ease), border-color var(--t-snap) var(--ease), background var(--t-snap) var(--ease);
+}
+.agent-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+}
+.agent-card:hover { transform: translateY(-2px); border-color: var(--ink-edge-hi); background: var(--ink-soft); }
+.agent-card.current { border-color: color-mix(in srgb, var(--current-ring) 44%, var(--ink-edge)); }
+.agent-card.current::before { background: var(--current-ring); }
+.agent-card.busy::before { background: var(--moss); }
+.agent-card.expanded { grid-column: 1 / -1; }
+.agent-card-open {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-card-avatar,
+.contact-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  background-position: center;
+  background-size: cover;
+  color: var(--ink);
+  font: 600 19px/1 var(--font-display);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.16);
+}
+.agent-presence {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--ink-soft);
+  border-radius: 50%;
+  background: var(--washi-low);
+}
+.agent-presence.busy { background: var(--moss); }
+.agent-presence.unread { background: var(--vermillion-hi); }
+.agent-card-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
+.agent-card-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.agent-card-heading strong { overflow: hidden; color: var(--washi); font: 500 16px/1.15 var(--font-display); text-overflow: ellipsis; white-space: nowrap; }
+.agent-card-heading > span { flex: 0 0 auto; color: var(--washi-low); font: 500 9px/1 var(--font-ui); }
+.agent-card-preview { overflow: hidden; color: var(--washi-dim); font: 400 12px/1.3 var(--font-body); text-overflow: ellipsis; white-space: nowrap; }
+.agent-card-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--washi-low);
+  font: 600 9px/1.2 var(--font-ui);
+  letter-spacing: .08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.agent-card-status i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.agent-card-status.busy { color: var(--moss); }
+.agent-card-status.attention:not(.busy) { color: var(--vermillion-hi); }
+.agent-card-tags { display: flex; gap: 5px; margin-top: 13px; overflow: hidden; }
+.agent-card-tags span {
+  min-width: 0;
+  max-width: 38%;
+  overflow: hidden;
+  padding: 4px 7px;
+  border: 1px solid var(--ink-edge);
+  border-radius: 5px;
+  color: var(--washi-low);
+  font: 500 9px/1 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-card-tags span:first-child { color: var(--accent-blue); }
+.agent-card-tags .warm { color: var(--current-ring); }
+.agent-context { position: relative; height: 3px; margin-top: 12px; border-radius: 3px; background: var(--ink-edge); }
+.agent-context > span { display: block; height: 100%; border-radius: inherit; background: var(--moss); }
+.agent-context small { position: absolute; right: 0; top: -13px; color: var(--washi-low); font: 500 8px/1 var(--font-ui); }
+.agent-card-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin-top: 13px; }
+.agent-card-actions button,
+.agent-danger-row button,
+.contact-card > button,
+.archive-list button,
+.overview-empty button {
+  min-height: 31px;
+  padding: 0 8px;
+  border: 1px solid var(--ink-edge);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--washi-dim);
+  font: 600 9px/1 var(--font-ui);
+  letter-spacing: .04em;
+  cursor: pointer;
+}
+.agent-card-actions button:hover,
+.agent-danger-row button:hover,
+.contact-card > button:hover,
+.archive-list button:hover { border-color: var(--ink-edge-hi); color: var(--washi); }
+.agent-card-actions button.solid { border-color: var(--washi); background: var(--washi); color: var(--ink); }
+
+.agent-card-detail { margin: 14px -3px -3px; padding-top: 14px; border-top: 1px solid var(--ink-edge); animation: overview-detail-in .18s var(--ease); }
+@keyframes overview-detail-in { from { opacity: 0; transform: translateY(-5px); } }
+.agent-card-detail dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0; background: var(--ink-edge); }
+.agent-card-detail dl > div { min-width: 0; padding: 9px 10px; background: var(--ink-soft); }
+.agent-card-detail dt { margin-bottom: 4px; color: var(--washi-low); font: 600 8px/1 var(--font-ui); letter-spacing: .1em; text-transform: uppercase; }
+.agent-card-detail dd { margin: 0; overflow: hidden; color: var(--washi-dim); font: 400 11px/1.25 var(--font-body); text-overflow: ellipsis; white-space: nowrap; }
+.agent-toggle-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.agent-toggle-row button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 35px;
+  padding: 0 10px;
+  border: 1px solid var(--ink-edge);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--washi-low);
+  font: 600 9px/1 var(--font-ui);
+}
+.agent-toggle-row button i { position: relative; width: 24px; height: 13px; border-radius: 10px; background: var(--ink-edge-hi); }
+.agent-toggle-row button i::after { content: ''; position: absolute; left: 2px; top: 2px; width: 9px; height: 9px; border-radius: 50%; background: var(--washi-dim); transition: transform var(--t-snap) var(--ease); }
+.agent-toggle-row button.on { color: var(--moss); border-color: color-mix(in srgb, var(--moss) 40%, var(--ink-edge)); }
+.agent-toggle-row button.on i { background: color-mix(in srgb, var(--moss) 42%, var(--ink-edge)); }
+.agent-toggle-row button.on i::after { background: var(--moss); transform: translateX(11px); }
+.agent-toggle-row button:disabled { opacity: .45; }
+.agent-danger-row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.agent-danger-row > span { margin-right: auto; color: var(--vermillion-hi); font: 500 10px/1 var(--font-body); }
+.agent-danger-row button.danger { border-color: color-mix(in srgb, var(--vermillion) 60%, var(--ink-edge)); color: var(--vermillion-hi); }
+
+.contact-stack { display: flex; flex-direction: column; gap: 7px; }
+.contact-card,
+.archive-list article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 11px;
+  border: 1px solid var(--ink-edge);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--ink-soft) 70%, transparent);
+}
+.contact-avatar { width: 38px; height: 38px; border-radius: 11px; font-size: 16px; }
+.contact-copy { min-width: 0; }
+.contact-copy > span { display: flex; align-items: baseline; gap: 7px; }
+.contact-copy strong,
+.archive-list strong { color: var(--washi); font: 500 13px/1.2 var(--font-display); }
+.contact-copy small { color: var(--washi-low); font: 600 8px/1 var(--font-ui); letter-spacing: .08em; text-transform: uppercase; }
+.contact-copy p { display: -webkit-box; margin: 4px 0 0; overflow: hidden; color: var(--washi-low); font: 400 10px/1.35 var(--font-body); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.contact-card > button { min-width: 48px; color: var(--moss); border-color: color-mix(in srgb, var(--moss) 35%, var(--ink-edge)); }
+.archive-list { display: flex; flex-direction: column; gap: 8px; }
+.archive-list article > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.archive-list small { overflow: hidden; color: var(--washi-low); font: 400 10px/1.25 var(--font-body); text-overflow: ellipsis; white-space: nowrap; }
+.archive-list button { color: var(--moss); }
+.archive-section { max-width: 880px; }
+
+.overview-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  min-height: 290px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+}
+.overview-empty > span { color: var(--ochre); font: 500 50px/1 var(--font-display); }
+.overview-empty h2 { margin: 12px 0 5px; color: var(--washi); font: 500 20px/1.2 var(--font-display); }
+.overview-empty p { margin: 0 0 15px; color: var(--washi-low); font: 400 12px/1.4 var(--font-body); }
+
+@media (max-width: 1180px) {
+  .agent-card-grid { grid-template-columns: minmax(0, 1fr); }
+  .agent-card.expanded { grid-column: auto; }
+  .overview-board { grid-template-columns: minmax(0, 1.35fr) minmax(280px, .8fr); }
+}
+
+@media (max-width: 780px) {
+  .overview-shell { padding-inline: 14px; padding-top: calc(env(safe-area-inset-top) + 18px); }
+  .overview-hero { gap: 12px; padding-bottom: 18px; }
+  .overview-title-line h1 { font-size: 38px; }
+  .overview-title-block p { max-width: 280px; margin-top: 9px; font-size: 11px; }
+  .overview-kicker { font-size: 8px; margin-bottom: 8px; }
+  .overview-hero-actions { gap: 5px; }
+  .overview-hero-actions .version-badge { display: none; }
+  .overview-icon-btn { width: 37px; height: 37px; }
+  .overview-ledger { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-block: 15px 10px; }
+  .overview-ledger > div { padding: 10px 12px; }
+  .overview-ledger > div:first-child { padding-left: 12px; }
+  .overview-ledger > div:nth-child(2) { border-right: 0; }
+  .overview-ledger > div:nth-child(-n+2) { border-bottom: 1px solid var(--ink-edge); }
+  .overview-ledger strong { font-size: 20px; }
+  .overview-toolbar { align-items: stretch; flex-direction: column; gap: 8px; padding-top: 8px; }
+  .overview-search { width: 100%; min-width: 0; }
+  .overview-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(max-content, 1fr); overflow-x: auto; }
+  .overview-tabs button { padding-inline: 9px; }
+  .overview-board { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .agent-card-grid { grid-template-columns: minmax(0, 1fr); }
+  .agent-card { padding: 13px; }
+  .agent-card:hover { transform: none; }
+  .agent-card-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .agent-card-actions button { min-height: 36px; }
+  .agent-card-detail dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .agent-toggle-row { grid-template-columns: minmax(0, 1fr); }
+  .agent-toggle-row button { min-height: 42px; }
+  .agent-danger-row { align-items: stretch; flex-wrap: wrap; }
+  .agent-danger-row > span { width: 100%; }
+  .agent-danger-row button { min-height: 38px; flex: 1; }
+  .contact-card { padding: 10px; }
+  .contact-copy p { -webkit-line-clamp: 1; }
+  .contact-card > button { min-height: 38px; }
+}
+
+@media (max-width: 410px) {
+  .overview-live-mark { display: none; }
+  .overview-title-block p { max-width: 220px; }
+  .overview-icon-btn { width: 35px; height: 35px; }
+  .overview-title-line h1 { font-size: 34px; }
+  .agent-card-heading strong { font-size: 15px; }
+  .agent-card-tags span { max-width: 46%; }
+  .contact-card { grid-template-columns: auto minmax(0, 1fr); }
+  .contact-card > button { grid-column: 2; justify-self: start; min-width: 74px; }
+}
