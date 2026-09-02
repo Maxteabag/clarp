@@ -214,7 +214,6 @@ def _synthesize(*, cfg, row: dict, agent: dict,
         )
 
     def run(selected: str) -> int:
-                out_path=out_path, on_chunk=on_chunk, trace_id=trace_id)
         if selected == CARTESIA:
             if not (cartesia_voice and cfg.cartesia_key()):
                 raise CartesiaError("Cartesia key or voice is not configured")
