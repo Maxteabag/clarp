@@ -31,14 +31,12 @@ Requirements:
 
 - Linux with a systemd user session, or macOS 14+
 - x86_64 or arm64
-- `git`, `curl`, and [uv](https://docs.astral.sh/uv/)
+- `curl` (the installer fetches [uv](https://docs.astral.sh/uv/) if needed)
 - 4 GB RAM minimum; 8 GB recommended for local transcription
 - Internet access during installation and provider sign-in
 
 ```bash
-git clone --depth 1 https://github.com/Maxteabag/clarp
-cd clarp
-./setup.sh
+curl -fsSL https://maxteabag.github.io/clarp-site/install.sh | bash
 ```
 
 With a real terminal, `setup.sh` opens the Textual setup interface. Choose the

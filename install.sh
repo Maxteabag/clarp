@@ -123,7 +123,10 @@ cp "$REPO_DIR/toolchain/README.md" \
    "$STAGE/toolchain/"
 cp "$REPO_DIR/LICENSE.md" "$STAGE/LICENSE.md"
 cp "$REPO_DIR/COMMERCIAL_LICENSE.md" "$STAGE/COMMERCIAL_LICENSE.md"
-SOURCE_REMOTE="$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
+SOURCE_REMOTE="${CLARP_SOURCE_REMOTE:-$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)}"
+if [[ -z "$SOURCE_REMOTE" ]]; then
+    SOURCE_REMOTE="https://github.com/Maxteabag/clarp.git"
+fi
 case "$SOURCE_REMOTE" in
     http://*@*|https://*@*)
         echo "   WARNING: origin URL contains userinfo; omitting it from release metadata" >&2

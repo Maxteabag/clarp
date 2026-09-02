@@ -2,18 +2,16 @@
 
 ## Bootstrap
 
-Clarp's first distribution uses a tagged Git checkout and one command:
+Do not clone the repository. Install with:
 
 ```bash
-git clone --depth 1 --branch VERSION https://github.com/Maxteabag/clarp
-cd clarp
-./setup.sh
+curl -fsSL https://maxteabag.github.io/clarp-site/install.sh | bash
 ```
 
-The checkout is only installation source. Runtime files are copied into a
-versioned release under `~/.local/share/clarp/releases/`; deleting the
-checkout does not stop the installed server. The installer records the source
-checkout for `clarp-admin update`.
+That downloads a source snapshot, runs the setup wizard, and copies a versioned
+release under `~/.local/share/clarp/releases/`. `clarp-admin update` pulls later
+releases from GitHub. Developers who want a git checkout can still clone
+`https://github.com/Maxteabag/clarp` and run `./setup.sh`.
 
 ## Requirements
 
