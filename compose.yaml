@@ -1,0 +1,25 @@
+services:
+  clarp:
+    image: ${CLARP_IMAGE:-ghcr.io/maxteabag/clarp:stable}
+    build:
+      context: .
+    restart: unless-stopped
+    ports:
+      - "${CLARP_LISTEN_ADDR:-127.0.0.1}:${CLARP_PORT:-7682}:7682"
+    volumes:
+      - clarp-data:/data
+    environment:
+      CLARP_SERVER_NAME: ${CLARP_SERVER_NAME:-Clarp Docker}
+      CLARP_COMPOSE_PROJECT: ${CLARP_COMPOSE_PROJECT:-}
+      CLARP_COMPOSE_DIRECTORY: ${CLARP_COMPOSE_DIRECTORY:-}
+      CLARP_COMPOSE_FILES: ${CLARP_COMPOSE_FILES:-compose.yaml}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    stop_grace_period: 45s
+
+volumes:
+  clarp-data:

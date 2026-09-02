@@ -1,0 +1,27 @@
+services:
+  clarp:
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    ports: !reset []
+
+  tailscale:
+    image: tailscale/tailscale:stable
+    entrypoint: ["/bin/sh", "/config/entrypoint.sh"]
+    hostname: ${TS_HOSTNAME:-clarp-docker}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: ${TS_HOSTNAME:-clarp-docker}
+    volumes:
+      - clarp-tailscale-data:/var/lib/tailscale
+      - ./docker/tailscale:/config:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "tailscale", "status", "--json"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  clarp-tailscale-data:

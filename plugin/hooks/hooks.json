@@ -1,0 +1,33 @@
+{
+  "description": "Clarp's agent-state reporters. Each hook records a row the server broadcasts over SSE (agent-state / agent-activity) so the PWA and iOS clients can render what an agent is doing. Every hook is a sensor: it writes state and exits 0, and never returns a permission decision. Registering them here rather than in ~/.claude/settings.json means Clarp writes nothing into the user's Claude Code configuration — the server passes --plugin-dir when it launches the CLI.",
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command",
+                     "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pwa_source_flag.py\"" } ] }
+    ],
+    "PreToolUse": [
+      { "hooks": [ { "type": "command",
+                     "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/tool_activity.py\"" } ] }
+    ],
+    "PostToolUse": [
+      { "hooks": [ { "type": "command",
+                     "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/tool_finished.py\"" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command",
+                     "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/stop_state.py\"" } ] }
+    ],
+    "PreCompact": [
+      { "hooks": [ { "type": "command",
+                     "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pre_compact.py\"" } ] }
+    ],
+    "Notification": [
+      { "hooks": [ { "type": "command",
+                     "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/notification_state.py\"" } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command",
+                     "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent_stop.py\"" } ] }
+    ]
+  }
+}

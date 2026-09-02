@@ -1,0 +1,8 @@
+Mike, Rachel, Domi, Bella, Antoni, Elli, Josh, Arnold, Adam, Sam,
+clarp, gh, git, GitHub, PR, repo, claude, Claude Code,
+Tailscale, systemd, Linux, bash, zsh,
+faster-whisper, Whisper, Silero, VAD, PWA, SSE, MP3, FFmpeg,
+pwa, server.py, app.js, styles.css, manifest.json, sw.js,
+Anthropic, OpenAI, Python, JavaScript, TypeScript, React, Vue,
+Supabase, Postgres, DuckDB, ClickHouse, SQLite, MySQL,
+npm, pnpm, yarn, pip, mise, uv, pyenv,

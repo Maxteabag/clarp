@@ -1,0 +1,27 @@
+[Unit]
+Description=Clarp server (agent dispatch, voice, audio relay)
+
+[Service]
+# @@SHARE@@ is filled in by install.sh from the resolved data dir, so a
+# non-default $XDG_DATA_HOME is honoured instead of assuming ~/.local/share.
+# systemd user services inherit only a bare PATH (typically
+# /usr/local/bin:/usr/bin). The server shells out to the configured agent CLIs
+# to run turns. Those usually live in a user prefix (~/.local/bin) or a version
+# manager shim (mise/npm), so without this line /send fails at runtime with a
+# 500. install.sh fills this in from where the tools actually resolve.
+Environment="PATH=@@SERVICE_PATH@@"
+Environment="CLARP_SHARE_DIR=@@SHARE_ENV@@"
+Environment="CLARP_CONFIG_DIR=@@CONFIG_ENV@@"
+Environment="CLARP_CACHE_DIR=@@CACHE_ENV@@"
+Environment="CLAUDE_PWA_CONFIG=@@CONFIG_FILE_ENV@@"
+Environment="CLAUDE_PWA_DB=@@DATABASE_ENV@@"
+Environment="CLAUDE_PWA_LOG_DIR=@@LOG_ENV@@"
+UMask=0077
+ExecStart=@@PYTHON@@ @@SERVER@@
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,14 @@
+.git
+.github
+.firecrawl
+.pytest_cache
+.swiftpm
+.build
+ios-native
+node_modules
+tests
+vad-harness
+*.png
+**/__pycache__
+**/*.pyc
+**/.DS_Store

@@ -1,0 +1,142 @@
+# claude-pwa configuration.
+# Copied to ~/.config/clarp/config.toml by install.sh on first install.
+# All keys are optional — anything you leave out uses the defaults shown here.
+
+[server]
+# Network interface to bind. Default loopback is safe for a fresh install.
+# To expose the app, prefer `tailscale serve`; direct Tailnet binding is also
+# supported when deliberately configured.
+bind_addr = "127.0.0.1"
+port      = 7682
+
+# Bearer-token auth. Empty = no auth check (trust the network).
+# Set to a long random string (e.g. `python -c "import secrets; print(secrets.token_urlsafe(32))"`)
+# to require `Authorization: Bearer <token>` (or `?token=<token>` on URLs that
+# can't carry headers, like iOS Shortcuts) on every endpoint.
+auth_token = ""
+
+# App session the client picks when no session has been selected yet.
+default_session = "claude"
+
+[tts]
+# cartesia | elevenlabs | deepgram | kokoro | piper | iphone | none
+provider = "cartesia"
+# Explicit fallback only. Use none to avoid moving work to another paid API.
+fallback = "none"
+
+
+[cartesia]
+# API key. If empty, falls back to CARTESIA_API_KEY.
+api_key = ""
+model = "sonic-3.5"
+
+[deepgram]
+# API key. If empty, falls back to DEEPGRAM_API_KEY.
+api_key = ""
+model = "flux-haley-en"
+
+[openai]
+# Used by the optional Oracle Mode Realtime proxy. The permanent key remains
+# on this Computer and is never returned to the iPhone.
+# If empty, falls back to OPENAI_API_KEY.
+api_key = ""
+realtime_model = "gpt-realtime-2.1"
+realtime_voice = "cedar"
+
+[network]
+# Phone connectivity is explicit. "tailscale" uses HTTPS Serve, "lan" uses
+# Bonjour discovery, "manual" records an existing HTTPS proxy, and "off" is
+# local-only. Configure with `clarp-admin network use ...` or `clarp-tui`.
+mode = "off"
+advertise_lan = false
+
+[elevenlabs]
+# API key. If empty, falls back to the ELEVEN_API_KEY environment variable.
+api_key = ""
+# Model + speed for TTS synthesis. eleven_flash_v2_5 is the lowest-latency model.
+model   = "eleven_flash_v2_5"
+speed   = 1.2
+
+[local_tts]
+# Provider-specific voice. Empty selects Clarp's provider default.
+voice = ""
+
+[whisper]
+# Local transcription provider and model for /transcribe. Setup selects
+# faster-whisper on Linux and whisper.cpp on macOS.
+# Manage installed models with `clarp-admin transcription ...`. Model weights
+# are stored in provider caches and are never bundled in a Clarp release.
+enabled = true
+provider = "faster-whisper"
+model   = "small.en"
+compute = "int8"
+
+[agents]
+# Optional LLM overrides for turns dispatched through the app. Leave empty to
+# use each CLI's own default. These trade quality for lower time-to-first-word
+# on hands-free voice turns — the agent starts talking sooner.
+#   claude_model           e.g. a faster Claude model passed as `claude --model`
+#   codex_model            passed as `codex exec --model`
+#   codex_reasoning_effort "low" | "medium" | "high" — "low" is the biggest
+#                          latency win for Codex (less thinking before output)
+#   agy_model              passed as `agy --model` (flag name unverified — test first)
+# These are the DEFAULTS; each agent can override its own model/effort (set at
+# create time, on relaunch, or live while running) — the per-agent value wins.
+# Claude CLI provider:
+#   "claude" = official Claude Code CLI (default)
+#   "clarp"  = clarp wrapper
+# Env override: CLAUDE_PWA_CLAUDE_CLI=claude|clarp
+claude_cli             = "claude"
+claude_model           = ""
+claude_effort          = ""   # low | medium | high | xhigh | max
+codex_model            = ""
+codex_reasoning_effort = ""   # low | medium | high
+agy_model              = ""   # agy has no reasoning-effort knob
+grok_model             = ""   # passed as `grok --model`
+grok_effort            = ""   # low | medium | high
+opencode_model         = ""   # provider/model, e.g. anthropic/claude-sonnet-4-5
+opencode_effort        = ""   # passed as `opencode run --variant`
+
+# Persona name -> ElevenLabs voice id. The full built-in roster (see
+# config.DEFAULT_ROSTER) ALWAYS applies — this [roster] section MERGES over it,
+# so you only list personas you want to add or whose voice you want to override.
+# (You do NOT need to copy the built-ins here; an out-of-date copy used to
+# silently hide newer personas, which merge semantics now prevent.)
+# [roster]
+# Mike   = "nPczCjzI2devNBz1zQrb"   # override a built-in persona's voice
+# Custom = "yoZ06aMxZJJ28mfd3POQ"   # add a brand-new persona
+
+# Optional: override the voice-picker catalogue surfaced in the agent
+# settings UI. Default catalogue has ~30 entries; uncomment to replace.
+# [[voice_catalog]]
+# id    = "nPczCjzI2devNBz1zQrb"
+# label = "Brian — warm male"
+
+[audio]
+# Audio delivery strategy.
+#   "raw-pcm" (default)     — Cartesia WebSocket raw PCM over
+#                              /clips/<id>/stream. Native iOS plays chunks
+#                              directly through AVAudioEngine.
+#   "chunked-file"          — /clips/<id>/stream (chunked
+#                              Transfer-Encoding) + /audio/<file>.mp3
+#                              fallback. Starts playback as soon as first
+#                              TTS bytes arrive.
+#   "hls"                    — ffmpeg-segmented playlist + AAC chunks.
+#                              Conservative full-clip path; requires
+#                              `ffmpeg` on PATH.
+# Env override: CLAUDE_PWA_DELIVERY=raw-pcm|hls|chunked-file
+# delivery = "raw-pcm"
+
+# [apns]
+# Push notifications: when an agent finishes its turn and is waiting on you,
+# the server sends a "your turn" alert to registered iOS devices. Disabled
+# until key_path + key_id + team_id are all set, then it's best-effort (a
+# failed push never breaks a turn). Create the .p8 in the Apple developer
+# portal under Keys (enable "Apple Push Notifications service"). The .p8 is a
+# secret — keep it out of git, e.g. ~/.config/clarp/AuthKey_XXXX.p8.
+# key_path    = "~/.config/clarp/AuthKey_XXXXXXXXXX.p8"
+# key_id      = "XXXXXXXXXX"          # the .p8 Key ID
+# team_id     = "XXXXXXXXXX"          # Apple Developer Team ID
+# bundle_id   = "com.maxteabag.clarp" # the app's bundle id (default shown)
+# environment = "production"          # production (TestFlight/App Store) | sandbox
+# # The .p8 path may also be supplied via the APNS_KEY_PATH env var.

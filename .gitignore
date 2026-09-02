@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+.vitest/
+.pytest_cache/
+package-lock.json
+
+# Playwright debug artifacts
+.playwright-mcp/
+.firecrawl/
+
+# Generated orchestration / demo scratch state
+.omx/
+.demo/
+
+# Firecrawl scrape cache
+.firecrawl/
+
+# Rust build output for the Tauri desktop shell
+src-tauri/target/
+
+# Playwright output
+test-results/
+playwright-report/
+
+# Built PWA bundle — install.sh / Docker run npm run build
+static/

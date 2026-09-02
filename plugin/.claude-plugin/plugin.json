@@ -1,0 +1,10 @@
+{
+  "name": "clarp",
+  "version": "1.0.0",
+  "description": "Reports Claude Code agent state and live tool activity to the Clarp server, so the PWA and iOS clients can show what an agent is doing in real time. State only — it never changes a tool decision and produces no audio.",
+  "author": {
+    "name": "Clarp",
+    "email": "noreply@localhost"
+  },
+  "keywords": ["clarp", "state", "activity", "observability"]
+}

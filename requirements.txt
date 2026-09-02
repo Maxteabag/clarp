@@ -1,0 +1,16 @@
+av>=16.0
+faster-whisper>=1.0; sys_platform == "linux"
+# Push-based file watching for the transcript tailer (Phase B progressive
+# TTS). Linux-only inotify(7) wrapper — zero CPU when idle, sub-ms wakeup.
+inotify_simple>=1.3; sys_platform == "linux"
+# APNs push notifications (server/lib/apns.py): a "your turn" alert when an
+# agent finishes its turn. APNs requires HTTP/2 (httpx[http2] → h2) and a
+# token-based ES256 provider JWT (PyJWT, same as the App Store Connect client).
+httpx[http2]>=0.27
+PyJWT[crypto]>=2.8
+qrcode>=8.2
+textual>=8.2.8,<9
+# ElevenLabs' streaming client imports the `websocket` module. Developer
+# machines often provide it transitively; clean images do not.
+websocket-client>=1.8
+zeroconf>=0.150.4,<1

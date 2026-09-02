@@ -1,0 +1,4 @@
+interface:
+  display_name: "Calendar"
+  short_description: "Ask the Clarp iOS app to add Apple Calendar events"
+  default_prompt: "Create an Apple Calendar event through the Clarp app."

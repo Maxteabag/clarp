@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "skills": [
+    {"id": "clarp-media", "pack": "core", "description": "Publish files into Clarp chat"},
+    {"id": "clarp-sessions", "pack": "core", "description": "Resolve Clarp agents and sessions"},
+    {"id": "clarp-self-prompt", "pack": "core", "description": "Prompt an agent now or later"},
+    {"id": "clarp-background-jobs", "pack": "core", "description": "Register and cancel background jobs"},
+    {"id": "clarp-artifacts", "pack": "core", "description": "Shared secure artifact transport used by enabled artifact skills"},
+    {"id": "clarp-decisions", "pack": "artifacts", "description": "Request explicit yes or no approval"},
+    {"id": "clarp-documents", "pack": "artifacts", "description": "Publish durable formatted documents"},
+    {"id": "clarp-research", "pack": "artifacts", "description": "Publish sourced research briefs"},
+    {"id": "clarp-code-changes", "pack": "artifacts", "description": "Publish repository changes and reviews", "default_enabled": false},
+    {"id": "clarp-data", "pack": "artifacts", "description": "Publish tables and chart-ready datasets"},
+    {"id": "clarp-audio", "pack": "artifacts", "description": "Publish playable audio deliverables"},
+    {"id": "clarp-video", "pack": "artifacts", "description": "Publish embedded video deliverables"},
+    {"id": "clarp-files", "pack": "artifacts", "description": "Publish previewable downloadable files"},
+    {"id": "clarp-releases", "pack": "artifacts", "description": "Publish verified software releases", "default_enabled": false},
+    {"id": "clarp-directories", "pack": "artifacts", "description": "Publish safe file-explorer directory shortcuts"},
+    {"id": "clarp-github-actions", "pack": "artifacts", "description": "Track GitHub Actions workflow runs", "requires": ["gh"]},
+    {"id": "clarp-tasks", "pack": "core", "description": "Track durable multi-step work plans"},
+    {"id": "clarp-agent-communication", "pack": "core", "description": "Send agent-to-agent work"},
+    {"id": "clarp-agent-admin", "pack": "core", "description": "Create and refine agent personas"},
+    {"id": "clarp-server-admin", "pack": "core", "description": "Diagnose and maintain Clarp"},
+    {"id": "clarp-transcription", "pack": "core", "description": "Manage transcription models"},
+    {"id": "clarp-voice-adapters", "pack": "core", "description": "Manage custom server voice adapters"},
+    {"id": "clarp-calendar", "pack": "native", "description": "Request Apple Calendar events"},
+    {"id": "clarp-location", "pack": "native", "description": "Request phone location"},
+    {"id": "clarp-message-watch", "pack": "messaging", "description": "Watch expected replies", "requires": ["wacli or himalaya"]},
+    {"id": "clarp-whatsapp", "pack": "messaging", "description": "Use a paired WhatsApp account", "requires": ["wacli"]},
+    {"id": "clarp-email", "pack": "messaging", "description": "Read and send configured email", "requires": ["himalaya"]}
+  ]
+}

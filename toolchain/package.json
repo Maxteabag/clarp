@@ -1,0 +1,14 @@
+{
+  "name": "clarp-agent-toolchain",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned vendor CLIs managed by a Clarp installation",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.258",
+    "@openai/codex": "0.150.1"
+  },
+  "engines": {
+    "node": ">=22 <23"
+  }
+}

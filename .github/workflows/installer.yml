@@ -1,0 +1,66 @@
+name: Cross-platform installer
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "install.sh"
+      - "setup.sh"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "toolchain/**"
+      - "server/lib/service_manager.py"
+      - "server/lib/xdg.py"
+      - "server/lib/whispercpp.py"
+      - "server/lib/transcription_*.py"
+      - "server/lib/bonjour.py"
+      - "server/lib/device_pairing.py"
+      - "server/lib/tts_providers.py"
+      - "bin/clarp-tui.py"
+      - "scripts/install_agent_toolchain.py"
+      - "tests/integration/test_versioned_installer.py"
+      - "tests/unit/test_agent_toolchain_installer.py"
+      - "tests/unit/test_service_manager.py"
+      - ".github/workflows/installer.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.18"
+          enable-cache: true
+      - name: Sync locked Python environment
+        run: uv sync --frozen
+      - name: Cross-platform installer and service tests
+        run: >-
+          uv run pytest
+          tests/integration/test_versioned_installer.py
+          tests/unit/test_agent_toolchain_installer.py
+          tests/unit/test_service_manager.py
+          tests/unit/test_paths.py
+          tests/unit/test_transcript_watcher.py
+          tests/unit/test_transcription_models.py
+          tests/unit/test_stt.py
+          tests/unit/test_bonjour.py
+          tests/unit/test_device_pairing.py
+          tests/unit/test_tts_providers.py
+          tests/unit/test_clarp_tui.py
+      - name: Build pinned macOS Whisper runtime
+        if: runner.os == 'macOS'
+        run: >-
+          uv run python -c
+          'import pathlib,tempfile; from server.lib.whispercpp import build_runtime;
+          print(build_runtime(pathlib.Path(tempfile.mkdtemp(prefix="clarp-whispercpp-"))))'
+      - name: Validate pinned agent packages
+        working-directory: toolchain
+        run: npm ci --ignore-scripts --no-audit --no-fund

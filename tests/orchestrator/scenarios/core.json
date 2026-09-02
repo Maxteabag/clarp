@@ -1,0 +1,212 @@
+[
+  {
+    "name": "misheard Mike routes to Mike",
+    "utterance": "hey Mark can you check the logs",
+    "requested_session": "antoni",
+    "model_response": {
+      "kind": "agent_message",
+      "target_session": "mike",
+      "confidence": 0.96,
+      "addressing": true,
+      "text_to_send": "can you check the logs",
+      "reason": "Mark is likely Mike from the roster and context."
+    },
+    "expected": {"action": "route", "session": "mike"},
+    "dispatched": true,
+    "expected_dispatch_text": "can you check the logs"
+  },
+  {
+    "name": "explicit Antoni address routes away from sticky",
+    "utterance": "Antoni can you review the mobile sidebar",
+    "requested_session": "mike",
+    "model_response": {
+      "kind": "agent_message",
+      "target_session": "antoni",
+      "confidence": 0.94,
+      "addressing": true,
+      "text_to_send": "can you review the mobile sidebar",
+      "reason": "Antoni was addressed directly."
+    },
+    "expected": {"action": "route", "session": "antoni"},
+    "dispatched": true,
+    "expected_dispatch_text": "can you review the mobile sidebar"
+  },
+  {
+    "name": "sticky continuation routes with moderate confidence",
+    "utterance": "also check the failing test",
+    "requested_session": "mike",
+    "model_response": {
+      "kind": "agent_message",
+      "target_session": "mike",
+      "confidence": 0.62,
+      "addressing": false,
+      "text_to_send": "also check the failing test",
+      "reason": "The utterance continues the sticky Mike thread."
+    },
+    "expected": {"action": "route", "session": "mike"},
+    "dispatched": true,
+    "expected_dispatch_text": "also check the failing test"
+  },
+  {
+    "name": "mention is status not route",
+    "utterance": "what is Mike doing",
+    "requested_session": "antoni",
+    "model_response": {
+      "kind": "status_query",
+      "target_session": "mike",
+      "confidence": 0.91,
+      "addressing": false,
+      "status_text": "Mike is checking the logs.",
+      "reason": "The user referred to Mike in third person."
+    },
+    "expected": {"action": "status", "session": "mike"},
+    "dispatched": false
+  },
+  {
+    "name": "third person mention while sticky stays status",
+    "utterance": "what did Rachel just say about Mike",
+    "requested_session": "mike",
+    "model_response": {
+      "kind": "status_query",
+      "target_session": "rachel",
+      "confidence": 0.84,
+      "addressing": false,
+      "status_text": "Rachel was discussing Mike's last update.",
+      "reason": "The user asks about Rachel in third person."
+    },
+    "expected": {"action": "status", "session": "rachel"},
+    "dispatched": false
+  },
+  {
+    "name": "uncertain context asks clarification",
+    "utterance": "can you tighten the sidebar",
+    "requested_session": "mike",
+    "model_response": {
+      "kind": "ambiguous",
+      "target_session": "antoni",
+      "confidence": 0.52,
+      "addressing": false,
+      "spoken_text": "Was that for Antoni?",
+      "reason": "The UI context fits Antoni but not enough for an automatic route."
+    },
+    "expected": {"action": "clarify", "session": "antoni"},
+    "dispatched": false
+  },
+  {
+    "name": "low confidence agent message clarifies",
+    "utterance": "can you tighten the sidebar",
+    "requested_session": "mike",
+    "model_response": {
+      "kind": "agent_message",
+      "target_session": "antoni",
+      "confidence": 0.49,
+      "addressing": false,
+      "reason": "Antoni is plausible but not safe enough."
+    },
+    "expected": {"action": "clarify", "session": "antoni"},
+    "dispatched": false
+  },
+  {
+    "name": "unknown target clarifies instead of routing",
+    "utterance": "send this to Marcus",
+    "requested_session": "mike",
+    "model_response": {
+      "kind": "agent_message",
+      "target_session": "marcus",
+      "confidence": 0.88,
+      "addressing": true,
+      "reason": "Marcus is not an active session."
+    },
+    "expected": {"action": "clarify", "session": "mike"},
+    "dispatched": false
+  },
+  {
+    "name": "pending yes sends held utterance",
+    "utterance": "yes",
+    "requested_session": "mike",
+    "pending_utterances": [
+      {
+        "pending_id": "pending-antoni",
+        "utterance": "can you tighten the sidebar",
+        "requested_session": "mike",
+        "candidate_session": "antoni",
+        "speak_as_session": "mike"
+      }
+    ],
+    "model_response": {
+      "kind": "recipient_correction",
+      "target_session": "antoni",
+      "pending_id": "pending-antoni",
+      "confidence": 0.97,
+      "addressing": true,
+      "reason": "The user confirmed Antoni."
+    },
+    "expected": {"action": "route", "session": "antoni"},
+    "dispatched": true,
+    "expected_dispatch_text": "can you tighten the sidebar"
+  },
+  {
+    "name": "repeat last does not dispatch",
+    "utterance": "say that again",
+    "requested_session": "mike",
+    "model_response": {
+      "kind": "control",
+      "target_session": "mike",
+      "confidence": 0.9,
+      "control_action": "repeat_last",
+      "reason": "The user is asking for replay, not a new agent turn."
+    },
+    "expected": {"action": "control", "session": "mike"},
+    "dispatched": false
+  },
+  {
+    "name": "who am I talking to is control not agent prompt",
+    "utterance": "who am I talking to",
+    "requested_session": "mike",
+    "model_response": {
+      "kind": "control",
+      "target_session": "mike",
+      "confidence": 0.92,
+      "control_action": "current_agent",
+      "reason": "The user asks the interface for current focus."
+    },
+    "expected": {"action": "control", "session": "mike"},
+    "dispatched": false
+  },
+  {
+    "name": "switch focus agent control",
+    "utterance": "switch me to Rachel",
+    "requested_session": "mike",
+    "model_response": {
+      "kind": "agent_control",
+      "target_session": "rachel",
+      "confidence": 0.93,
+      "control_action": "switch_focus",
+      "reason": "The user asked to switch focus."
+    },
+    "expected": {"action": "control", "session": "rachel"},
+    "dispatched": false
+  },
+  {
+    "name": "nonsense dictation is ignored",
+    "utterance": "purple banana skyr omega table",
+    "requested_session": "mike",
+    "model_response": {
+      "kind": "ignored",
+      "confidence": 0.94,
+      "addressing": false,
+      "reason": "The utterance is nonsensical and unrelated to any agent context."
+    },
+    "expected": {"action": "ignored", "session": "mike"},
+    "dispatched": false
+  },
+  {
+    "name": "model failure falls back to legacy",
+    "utterance": "Mike can you check this",
+    "requested_session": "mike",
+    "model_exception": "simulated timeout",
+    "model_response": {},
+    "expected": {"action": "fallback", "session": "mike"},
+    "dispatched": false
+  }
+]

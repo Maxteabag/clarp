@@ -1,0 +1,4 @@
+interface:
+  display_name: "Clarp Voice Adapters"
+  short_description: "Manage custom server voice adapters"
+  default_prompt: "Inspect and manage custom Clarp voice adapters safely."

@@ -1,0 +1,4 @@
+{
+  "claude": {"name": "Mike", "voice_id": "nPczCjzI2devNBz1zQrb", "backend": "claude"},
+  "rachel": {"name": "Rachel", "voice_id": "21m00Tcm4TlvDq8ikWAM", "backend": "codex"}
+}

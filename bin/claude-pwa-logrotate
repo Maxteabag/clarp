@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Compact every JSONL log older than today into Parquet and delete the JSONL.
+# Driven by claude-pwa-logrotate.service / .timer.
+set -euo pipefail
+
+LOG_DIR="${CLAUDE_PWA_LOG_DIR:-$HOME/.cache/clarp/logs}"
+TODAY="$(date -u +%F)"
+
+cd "$LOG_DIR"
+shopt -s nullglob
+for jsonl in *.jsonl; do
+  day="${jsonl%.jsonl}"
+  if [[ "$day" == "$TODAY" ]]; then
+    continue
+  fi
+  parquet="${day}.parquet"
+  # Skip if already compacted (and not empty).
+  if [[ -s "$parquet" ]]; then
+    rm -f "$jsonl"
+    continue
+  fi
+  echo "compacting $jsonl → $parquet"
+  duckdb -c "COPY (
+      SELECT * FROM read_json(
+        '$jsonl',
+        format='newline_delimited',
+        columns={
+          ts: 'VARCHAR', source: 'VARCHAR', event: 'VARCHAR',
+          level: 'VARCHAR', session: 'VARCHAR', backend_session_id: 'VARCHAR',
+          persona: 'VARCHAR', clip_url: 'VARCHAR',
+          duration_ms: 'DOUBLE', detail: 'JSON'
+        },
+        ignore_errors=true)
+    ) TO '$parquet' (FORMAT PARQUET, COMPRESSION ZSTD);"
+  rm -f "$jsonl"
+done
