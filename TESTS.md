@@ -245,6 +245,11 @@ tests/
     test_sanitize.py
     test_word_similarity.py
     test_vocab_prompt.py
+    test_vocab_schema.py
+    test_vocab_budget.py
+    test_vocab_generators.py
+    test_vocab_compile.py
+    test_stt_decode.py
   state/                      — JS state machine + queue (vitest)
     state-machine.test.js
     audio-queue.test.js
