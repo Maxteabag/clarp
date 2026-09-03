@@ -63,6 +63,14 @@ and they are the one source of truth shared with the tests.
 
 ## Notes for editing
 
+- **Layout lives with its component.** `desktop/DesktopShell.svelte` owns the
+  rail | workspace seam (PaneForge, persisted under
+  `paneforge:clarp-desktop-shell`), the rail's pixel bounds and the
+  narrow-window rule; `desktop/PaneNode.svelte` owns pane splits, with the
+  tree's `ratio` as the source of truth. Their CSS is in the component, not
+  `styles.css` — a rule about the rail that is not in `Sidebar.svelte` is in
+  the wrong place.
+
 - **Prose vs chrome.** `styles.css` sets monospace as the default and opts the
   turn body back into a proportional face. Keep new chrome in mono.
 - **Ids matter.** `styles.css` masks button icons off ids like
