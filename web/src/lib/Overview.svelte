@@ -124,6 +124,29 @@
     }
   }
 
+  async function toggleSchedule(sched) {
+    if (mutationKey) return;
+    mutationKey = `sched:${sched.schedule_id}`;
+    actionError = '';
+    try {
+      const response = await fetch('/agent-schedules/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schedule_id: sched.schedule_id, enabled: !sched.enabled }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to toggle schedule');
+      }
+      await refreshSessions();
+      flash(`Schedule ${sched.enabled ? 'disabled' : 'enabled'}`, 1400);
+    } catch (error) {
+      actionError = error.message;
+    } finally {
+      mutationKey = '';
+    }
+  }
+
   async function releaseAgent(row) {
     if (row.name === 'Mike' || mutationKey) return;
     mutationKey = `${row.session}:release`;
@@ -290,6 +313,24 @@
                           <span>Push alerts</span><i></i>
                         </button>
                       </div>
+                      {#if row.schedules?.length}
+                        <div class="agent-schedules-block">
+                          <span class="agent-schedules-heading">Scheduled Tasks</span>
+                          {#each row.schedules as sched (sched.schedule_id)}
+                            <div class="agent-schedule-row">
+                              <div class="agent-schedule-meta">
+                                <strong>{sched.name}</strong>
+                                <code>{sched.cron_expression}</code>
+                                <small>{sched.prompt}</small>
+                              </div>
+                              <button class="agent-toggle-btn" class:on={sched.enabled} disabled={!!mutationKey} aria-pressed={sched.enabled}
+                                      onclick={() => toggleSchedule(sched)}>
+                                <span>{sched.enabled ? 'On' : 'Off'}</span><i></i>
+                              </button>
+                            </div>
+                          {/each}
+                        </div>
+                      {/if}
                       <div class="agent-danger-row">
                         <button onclick={() => postAgentSetting(row, '/agent-archive', { archived: true }, `${row.name} archived`)}>Archive chat</button>
                         {#if row.name !== 'Mike'}

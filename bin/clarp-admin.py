@@ -1727,6 +1727,55 @@ def cmd_uninstall(args) -> int:
     return 0
 
 
+def cmd_schedule(args) -> int:
+    cmd = args.schedule_command
+    if cmd == "list":
+        query = f"?session={urllib.parse.quote(args.session)}" if getattr(args, "session", None) else ""
+        res = api_request("GET", f"/agent-schedules{query}")
+        schedules = res.get("schedules", [])
+        if not schedules:
+            print("No scheduled jobs found.")
+            return 0
+        for s in schedules:
+            status = "ENABLED" if s.get("enabled") else "DISABLED"
+            print(f"• [{status}] {s.get('name')} (ID: {s.get('schedule_id')})")
+            print(f"   Session: {s.get('session')} | Cron: {s.get('cron_expression')}")
+            print(f"   Prompt:  {s.get('prompt')}")
+            if s.get("next_run_at"):
+                dt = datetime.fromtimestamp(s["next_run_at"] / 1000.0, tz=timezone.utc)
+                print(f"   Next:    {dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            print("")
+        return 0
+    elif cmd == "add":
+        payload = {
+            "session": args.session,
+            "name": args.name,
+            "cron_expression": args.cron,
+            "prompt": args.prompt,
+            "enabled": not args.disabled,
+        }
+        res = api_request("POST", "/agent-schedules", payload)
+        sched = res.get("schedule", {})
+        print(f"✓ Created schedule '{sched.get('name')}' ({sched.get('schedule_id')}) for {args.session}")
+        return 0
+    elif cmd == "toggle":
+        if not args.enable and not args.disable:
+            raise SystemExit("Must specify --enable or --disable")
+        payload = {
+            "schedule_id": args.schedule_id,
+            "enabled": True if args.enable else False,
+        }
+        api_request("POST", "/agent-schedules/toggle", payload)
+        print(f"✓ Schedule {args.schedule_id} {'enabled' if args.enable else 'disabled'}")
+        return 0
+    elif cmd == "remove":
+        payload = {"schedule_id": args.schedule_id}
+        api_request("POST", "/agent-schedules/delete", payload)
+        print(f"✓ Schedule {args.schedule_id} removed")
+        return 0
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="clarp-admin", description=__doc__)
     sub = result.add_subparsers(dest="command", required=True)
@@ -1986,6 +2035,31 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     calendar.add_argument("--calendar", default="")
     calendar.add_argument("--all-day", action="store_true")
     calendar.set_defaults(func=cmd_calendar)
+
+    schedule = sub.add_parser("schedule").add_subparsers(
+        dest="schedule_command", required=True)
+    sched_list = schedule.add_parser("list")
+    sched_list.add_argument("--session", "-s", default=None, help="filter by session")
+    sched_list.set_defaults(func=cmd_schedule)
+
+    sched_add = schedule.add_parser("add")
+    sched_add.add_argument("session", help="agent session name")
+    sched_add.add_argument("--name", "-n", required=True, help="name for the scheduled job")
+    sched_add.add_argument("--cron", "-c", required=True, help="cron expression (e.g. '0 8:30 * * 1-5' or '@daily')")
+    sched_add.add_argument("--prompt", "-p", required=True, help="prompt to dispatch on schedule")
+    sched_add.add_argument("--disabled", action="store_true", help="create initially disabled")
+    sched_add.set_defaults(func=cmd_schedule)
+
+    sched_toggle = schedule.add_parser("toggle")
+    sched_toggle.add_argument("schedule_id", help="schedule ID")
+    sched_toggle.add_argument("--enable", action="store_true", help="enable schedule")
+    sched_toggle.add_argument("--disable", action="store_true", help="disable schedule")
+    sched_toggle.set_defaults(func=cmd_schedule)
+
+    sched_rm = schedule.add_parser("remove")
+    sched_rm.add_argument("schedule_id", help="schedule ID to remove")
+    sched_rm.set_defaults(func=cmd_schedule)
+
     return result
 
 

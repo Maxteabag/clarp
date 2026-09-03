@@ -3137,6 +3137,13 @@ html.desktop .speaking { bottom: calc(var(--dock-h) + 16px); }
 .agent-toggle-row button.on i { background: color-mix(in srgb, var(--moss) 42%, var(--ink-edge)); }
 .agent-toggle-row button.on i::after { background: var(--moss); transform: translateX(11px); }
 .agent-toggle-row button:disabled { opacity: .45; }
+.agent-schedules-block { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--ink-edge); }
+.agent-schedules-heading { display: block; margin-bottom: 6px; color: var(--washi-low); font: 600 8px/1 var(--font-ui); letter-spacing: .1em; text-transform: uppercase; }
+.agent-schedule-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid var(--ink-edge); border-radius: 6px; margin-bottom: 6px; background: var(--ink-soft); }
+.agent-schedule-meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.agent-schedule-meta strong { font: 600 11px/1.2 var(--font-ui); color: var(--washi); }
+.agent-schedule-meta code { font: 400 10px/1 monospace; color: var(--gold); }
+.agent-schedule-meta small { font: 400 10px/1.2 var(--font-body); color: var(--washi-low); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agent-danger-row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 10px; }
 .agent-danger-row > span { margin-right: auto; color: var(--vermillion-hi); font: 500 10px/1 var(--font-body); }
 .agent-danger-row button.danger { border-color: color-mix(in srgb, var(--vermillion) 60%, var(--ink-edge)); color: var(--vermillion-hi); }
