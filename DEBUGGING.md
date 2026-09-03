@@ -177,6 +177,138 @@ WHERE broadcast_at IS NOT NULL
 ORDER BY created_at DESC;
 ```
 
+## What the transcriber was sent, and what it heard
+
+Every `/transcribe` compiles a vocabulary payload and records it in
+`vocab_runs` (state database) before inference; the transcript and model
+latency are written to the same row afterwards. The run id travels in the
+`transcribe` event's detail and in the `/transcribe` response as
+`vocab_run_id`, and `/vocab/run?trace_id=…` returns the row.
+
+```sql
+-- The prompt behind the last ten transcripts, with what was dropped and why
+SELECT run_id, session, provider, model, used || '/' || capacity AS budget,
+       form, transcript, latency_ms, payload, dropped_json
+FROM vocab_runs ORDER BY run_id DESC LIMIT 10;
+
+-- Which packs are earning their budget
+SELECT json_extract(value, '$.pack') AS pack, count(*) AS terms_sent
+FROM vocab_runs, json_each(vocab_runs.included_json)
+WHERE created_at > (unixepoch('now') * 1000) - 86400000
+GROUP BY pack ORDER BY terms_sent DESC;
+
+-- Runs where the model never answered
+SELECT run_id, session, created_at FROM vocab_runs
+WHERE transcript = '' AND latency_ms = 0 ORDER BY run_id DESC LIMIT 20;
+```
+
+With `transcription.retain_audio` on (POST `/transcription-providers`
+`{"retain_audio": true}`), the clip itself is kept under
+`~/.cache/clarp/heard/<trace_id>.<ext>` with a JSON sidecar, capped at 500
+clips or 14 days. `/transcription-audio?trace_id=…` serves it, and
+`/vocab/run` adds `audio_url` when one exists, so a garbled transcript can be
+listened to next to the exact prompt that produced it.
+## Audio corruption diagnostics
+
+Every time playback goes wrong on a client, the web app records what went
+wrong, where in the clip, and what the world looked like at that instant. The
+monitor lives in `static/lib/audio-faults.js`, is attached in
+`web/src/stores/audio.svelte.js`, and reports through `/clog` as two events:
+
+* `client:audioFault` — one row per fault. `detail.kind` is one of
+  `stall`, `decode-error`, `load-fail`, `load-timeout`, `play-rejected`,
+  `premature-end`, `end-timeout`, `time-jump`, `rate-drift`, `aborted`.
+* `client:audioClipSummary` — one row per clip, faulty or not, so healthy
+  clips give a baseline (stall counts, latency, whether sound was reached).
+
+Each record carries three blocks in `detail`:
+
+| block        | what it holds                                                                 |
+|--------------|-------------------------------------------------------------------------------|
+| `element`    | playhead (`current_s`, `position_pct`), `buffered_ahead_ms`, `ready_state`, `network_state`, `rate`, `volume`, `element_muted`, MediaError name |
+| `latency`    | `broadcast_to_queued_ms`, `queued_to_play_start_ms`, `play_start_to_sound_ms` |
+| `conditions` | network (`online`, `net_type`, `net_rtt_ms`), `visibility`, `focused`, battery, `sse_open`, `mic_recording`/`mic_capturing`/`mic_level`, `queue_len`, `machine_state`, adapter version |
+
+Stalls are measured from the element's `waiting`/`stalled` event to the next
+`playing`; anything under 250 ms is counted in the summary but not reported as
+a fault. A stall record also carries `at_stall_start` — the element snapshot
+from the moment the stall began — because by the time it ends the buffer has
+usually recovered.
+
+`mic_level` is the same band-limited energy the voice-activity detector uses
+(0 when the mic is off). The browser exposes no output loudness for an
+`<audio>` element without routing it through Web Audio, which changes the
+playback path on iOS, so output level is reported as the element's `volume`
+and `element_muted` only.
+
+Two views flatten the JSON in `telemetry.sqlite`:
+
+```sql
+-- Every fault today, newest first
+SELECT ts, kind, clip_id, delivery, at_s, duration_s, stall_ms,
+       buffered_ahead_ms, ready_state, net_type, net_rtt_ms, visibility,
+       mic_recording, mic_level, queue_len
+FROM telemetry.audio_faults
+WHERE substr(ts, 1, 10) = date('now')
+ORDER BY ts DESC;
+
+-- Which kinds of fault happen, and under which delivery
+SELECT kind, delivery, count(*) AS n, round(avg(stall_ms)) AS avg_stall_ms
+FROM telemetry.audio_faults
+GROUP BY kind, delivery ORDER BY n DESC;
+
+-- Faulty share of clips per delivery path over the last 24h
+SELECT delivery, count(*) AS clips,
+       sum(CASE WHEN ok THEN 0 ELSE 1 END) AS faulty,
+       round(avg(stall_total_ms)) AS avg_stall_ms,
+       round(avg(play_start_to_sound_ms)) AS avg_to_sound_ms
+FROM telemetry.audio_clip_health
+WHERE ts > (unixepoch('now') * 1000) - 86400000
+GROUP BY delivery;
+
+-- Was the server side to blame? Join the clip's producer state.
+SELECT f.ts, f.kind, f.at_s, f.stall_ms, c.producer_status, c.bytes, c.error,
+       c.broadcast_at, c.completed_at
+FROM telemetry.audio_faults f
+JOIN clip_lifecycle c ON c.clip_id = f.clip_id
+ORDER BY f.ts DESC LIMIT 30;
+
+-- Did the provider pause? Server-side chunk gaps (tts_worker:synthChunkGap)
+-- next to the client stalls for the same clip.
+SELECT g.ts_iso, g.clip_id, json_extract(g.detail, '$.gap_ms') AS server_gap_ms,
+       json_extract(g.detail, '$.chunk_idx') AS chunk_idx,
+       f.kind, f.stall_ms AS client_stall_ms, f.at_s
+FROM telemetry.diagnostic_events g
+LEFT JOIN telemetry.audio_faults f ON f.clip_id = g.clip_id
+WHERE g.source = 'tts_worker' AND g.event = 'synthChunkGap'
+ORDER BY g.ts DESC LIMIT 30;
+
+-- Per-clip producer pacing summary (tts_worker:synthPacing)
+SELECT ts_iso, clip_id, json_extract(detail, '$.delivery') AS delivery,
+       json_extract(detail, '$.chunks') AS chunks,
+       json_extract(detail, '$.first_chunk_ms') AS first_chunk_ms,
+       json_extract(detail, '$.max_gap_ms') AS max_gap_ms,
+       json_extract(detail, '$.gaps_over_threshold') AS gaps_over,
+       json_extract(detail, '$.outcome') AS outcome
+FROM telemetry.diagnostic_events
+WHERE source = 'tts_worker' AND event = 'synthPacing'
+ORDER BY ts DESC LIMIT 30;
+
+-- The whole story of one bad turn
+SELECT ts_iso, source, event,
+       coalesce(json_extract(detail, '$.kind'), json_extract(detail, '$.msg'), '') AS what
+FROM telemetry.diagnostic_events
+WHERE trace_id = (SELECT trace_id FROM telemetry.audio_faults ORDER BY ts DESC LIMIT 1)
+ORDER BY ts;
+```
+
+Reading a record: a `stall` with `buffered_ahead_ms = 0`, `network_state = 2`
+and a poor `net_type` is the network not keeping up; the same stall with a
+healthy buffer and `visibility = hidden` is the browser throttling a
+backgrounded tab; a `decode-error` at a fixed `at_s` across clips of one
+`delivery` points at the producer; `time-jump` and `rate-drift` are the
+element itself misbehaving (seen on iOS after an interruption).
+
 ## File layout
 
 ```

@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 64
+_SCHEMA_VERSION = 66
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -454,9 +454,11 @@ CREATE TABLE messages (
     origin TEXT NOT NULL DEFAULT 'user',
     sender_agent_id TEXT,
     prompt_admission_id TEXT,
+    trace_id TEXT,
     UNIQUE(agent_id, backend_session_id, seq)
 );
 CREATE INDEX idx_messages_agent_seq ON messages(agent_id, backend_session_id, seq);
+CREATE INDEX idx_messages_trace ON messages(trace_id) WHERE trace_id IS NOT NULL;
 CREATE INDEX idx_messages_agent_timestamp ON messages(agent_id, timestamp);
 CREATE INDEX idx_messages_agent_revision ON messages(agent_id, backend_session_id, revision);
 
@@ -1200,6 +1202,94 @@ CREATE VIEW clip_lifecycle AS
     c.completed_at,
     c.error
     FROM clips c;
+
+CREATE TABLE vocab_packs (
+    pack_id    TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'static'
+               CHECK(kind IN ('static', 'dynamic')),
+    generator  TEXT NOT NULL DEFAULT '',
+    priority   REAL NOT NULL DEFAULT 1.0,
+    floor      INTEGER NOT NULL DEFAULT 0,
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vocab_packs_name ON vocab_packs(name);
+
+CREATE TABLE vocab_terms (
+    term_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    pack_id         TEXT NOT NULL REFERENCES vocab_packs(pack_id)
+                    ON DELETE CASCADE,
+    text            TEXT NOT NULL,
+    say_as          TEXT NOT NULL DEFAULT '',
+    often_heard_as  TEXT NOT NULL DEFAULT '',
+    rarity          REAL NOT NULL DEFAULT 0.5,
+    source          TEXT NOT NULL DEFAULT 'manual',
+    created_at      INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vocab_terms_pack_text
+    ON vocab_terms(pack_id, text COLLATE NOCASE);
+
+CREATE TABLE vocab_profiles (
+    profile_id TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vocab_profiles_name ON vocab_profiles(name);
+
+CREATE TABLE vocab_profile_packs (
+    profile_id TEXT NOT NULL REFERENCES vocab_profiles(profile_id)
+               ON DELETE CASCADE,
+    pack_id    TEXT NOT NULL REFERENCES vocab_packs(pack_id)
+               ON DELETE CASCADE,
+    position   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (profile_id, pack_id)
+);
+
+-- A profile binds to an agent or a team, never both; the CHECK keeps the
+-- "exactly one owner" rule in the database rather than in every caller.
+CREATE TABLE vocab_assignments (
+    assignment_id TEXT PRIMARY KEY,
+    profile_id    TEXT NOT NULL REFERENCES vocab_profiles(profile_id)
+                  ON DELETE CASCADE,
+    agent_id      TEXT REFERENCES agents(agent_id) ON DELETE CASCADE,
+    team_id       TEXT,
+    created_at    INTEGER NOT NULL,
+    CHECK ((agent_id IS NULL) <> (team_id IS NULL))
+);
+CREATE UNIQUE INDEX vocab_assignments_agent
+    ON vocab_assignments(agent_id) WHERE agent_id IS NOT NULL;
+CREATE UNIQUE INDEX vocab_assignments_team
+    ON vocab_assignments(team_id) WHERE team_id IS NOT NULL;
+
+-- One row per compile. This is the transparency contract: it must always be
+-- possible to answer "what exactly did we send to the model, and what did we
+-- leave out?" for any transcript the user is looking at.
+CREATE TABLE vocab_runs (
+    run_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id      TEXT REFERENCES agents(agent_id) ON DELETE SET NULL,
+    session       TEXT NOT NULL DEFAULT '',
+    trace_id      TEXT NOT NULL DEFAULT '',
+    profile_id    TEXT,
+    provider      TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    unit          TEXT NOT NULL,
+    capacity      INTEGER NOT NULL,
+    used          INTEGER NOT NULL,
+    form          TEXT NOT NULL,
+    rarity_floor  REAL NOT NULL DEFAULT 0,
+    payload       TEXT NOT NULL DEFAULT '',
+    included_json TEXT NOT NULL DEFAULT '[]',
+    dropped_json  TEXT NOT NULL DEFAULT '[]',
+    transcript    TEXT NOT NULL DEFAULT '',
+    latency_ms    INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL
+);
+CREATE INDEX vocab_runs_recent ON vocab_runs(created_at DESC);
+CREATE INDEX vocab_runs_trace ON vocab_runs(trace_id)
+    WHERE trace_id <> '';
 """
 
 
@@ -1234,6 +1324,10 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v63(con)
             if version < 64:
                 _migrate_to_v64(con)
+            if version < 65:
+                _migrate_to_v65(con)
+            if version < 66:
+                _migrate_to_v66(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1346,7 +1440,7 @@ def _migrate_to_v63(con: sqlite3.Connection) -> None:
     )
 
 
-def _migrate_to_v64(con: sqlite3.Connection) -> None:
+def _migrate_to_v66(con: sqlite3.Connection) -> None:
     """Agent scheduled jobs for recurring autonomous session turns."""
     con.execute("""
         CREATE TABLE IF NOT EXISTS agent_schedules (
@@ -1388,3 +1482,127 @@ def reset_for_tests(path: pathlib.Path | None = None) -> None:
     with _TRANSACTION_LOCK:
         _TRANSACTION_OWNERS.clear()
         _LAST_LOCK_REPORT_AT = 0.0
+
+
+def _migrate_to_v64(con: sqlite3.Connection) -> None:
+    """Transcription context packs: terms, packs, profiles, runs.
+
+    Packs are ranked sources rather than fixed lists, so nothing here stores a
+    length - how deep a pack is drawn is decided at compile time against the
+    active model's budget. `vocab_runs` records every compile so a transcript
+    can always be traced back to the exact prompt that produced it.
+    """
+    # Comments are stripped before splitting because prose in a `--` line may
+    # itself contain a semicolon, which would otherwise cut a statement in two.
+    # `executescript` is not an option - it issues its own COMMIT, which would
+    # break the transaction `_migrate` opened around all upgrades.
+    stripped = "\n".join(
+        line.split("--", 1)[0] for line in _V64_SQL.splitlines())
+    for statement in stripped.split(";"):
+        text = statement.strip()
+        if text:
+            con.execute(text)
+
+
+def _migrate_to_v65(con: sqlite3.Connection) -> None:
+    """A user message remembers the trace of the turn that carried it.
+
+    That is the link from a transcript bubble back to the vocabulary run and
+    the retained audio behind it - the "what was sent" the app can now show
+    for one message rather than for the agent as a whole.
+    """
+    con.execute("ALTER TABLE messages ADD COLUMN trace_id TEXT")
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_trace ON messages(trace_id)"
+        " WHERE trace_id IS NOT NULL")
+
+
+_V64_SQL = """
+CREATE TABLE vocab_packs (
+    pack_id    TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'static'
+               CHECK(kind IN ('static', 'dynamic')),
+    generator  TEXT NOT NULL DEFAULT '',
+    priority   REAL NOT NULL DEFAULT 1.0,
+    floor      INTEGER NOT NULL DEFAULT 0,
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vocab_packs_name ON vocab_packs(name);
+
+CREATE TABLE vocab_terms (
+    term_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    pack_id         TEXT NOT NULL REFERENCES vocab_packs(pack_id)
+                    ON DELETE CASCADE,
+    text            TEXT NOT NULL,
+    say_as          TEXT NOT NULL DEFAULT '',
+    often_heard_as  TEXT NOT NULL DEFAULT '',
+    rarity          REAL NOT NULL DEFAULT 0.5,
+    source          TEXT NOT NULL DEFAULT 'manual',
+    created_at      INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vocab_terms_pack_text
+    ON vocab_terms(pack_id, text COLLATE NOCASE);
+
+CREATE TABLE vocab_profiles (
+    profile_id TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vocab_profiles_name ON vocab_profiles(name);
+
+CREATE TABLE vocab_profile_packs (
+    profile_id TEXT NOT NULL REFERENCES vocab_profiles(profile_id)
+               ON DELETE CASCADE,
+    pack_id    TEXT NOT NULL REFERENCES vocab_packs(pack_id)
+               ON DELETE CASCADE,
+    position   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (profile_id, pack_id)
+);
+
+-- A profile binds to an agent or a team, never both; the CHECK keeps the
+-- "exactly one owner" rule in the database rather than in every caller.
+CREATE TABLE vocab_assignments (
+    assignment_id TEXT PRIMARY KEY,
+    profile_id    TEXT NOT NULL REFERENCES vocab_profiles(profile_id)
+                  ON DELETE CASCADE,
+    agent_id      TEXT REFERENCES agents(agent_id) ON DELETE CASCADE,
+    team_id       TEXT,
+    created_at    INTEGER NOT NULL,
+    CHECK ((agent_id IS NULL) <> (team_id IS NULL))
+);
+CREATE UNIQUE INDEX vocab_assignments_agent
+    ON vocab_assignments(agent_id) WHERE agent_id IS NOT NULL;
+CREATE UNIQUE INDEX vocab_assignments_team
+    ON vocab_assignments(team_id) WHERE team_id IS NOT NULL;
+
+-- One row per compile. This is the transparency contract: it must always be
+-- possible to answer "what exactly did we send to the model, and what did we
+-- leave out?" for any transcript the user is looking at.
+CREATE TABLE vocab_runs (
+    run_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id      TEXT REFERENCES agents(agent_id) ON DELETE SET NULL,
+    session       TEXT NOT NULL DEFAULT '',
+    trace_id      TEXT NOT NULL DEFAULT '',
+    profile_id    TEXT,
+    provider      TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    unit          TEXT NOT NULL,
+    capacity      INTEGER NOT NULL,
+    used          INTEGER NOT NULL,
+    form          TEXT NOT NULL,
+    rarity_floor  REAL NOT NULL DEFAULT 0,
+    payload       TEXT NOT NULL DEFAULT '',
+    included_json TEXT NOT NULL DEFAULT '[]',
+    dropped_json  TEXT NOT NULL DEFAULT '[]',
+    transcript    TEXT NOT NULL DEFAULT '',
+    latency_ms    INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL
+);
+CREATE INDEX vocab_runs_recent ON vocab_runs(created_at DESC);
+CREATE INDEX vocab_runs_trace ON vocab_runs(trace_id)
+    WHERE trace_id <> '';
+"""

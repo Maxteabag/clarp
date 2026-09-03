@@ -2406,7 +2406,13 @@ def test_post_transcribe_preserves_hands_free_header(running_server):
     assert status == 200
     data = json.loads(body)
     assert data["hands_free"] is False
-    assert ctx.stt.calls[-1][2] == "Technical vocabulary: SwiftUI Cloudflare."
+    # The glossary still drives ordinary (non-delegation) turns, but it is now
+    # compiled through the context-pack budget rather than concatenated: terms
+    # are fitted to the model's capacity and emitted best-last, because Whisper
+    # weights the tail of `initial_prompt` most heavily.
+    prompt = ctx.stt.calls[-1][2]
+    assert "SwiftUI" in prompt and "Cloudflare" in prompt
+    assert "Mike" not in prompt and "Rachel" not in prompt
 
 
 def test_recoverable_clips_endpoint_returns_interrupted_session_audio(

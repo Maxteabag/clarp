@@ -279,6 +279,17 @@ class Handler(BaseHTTPRequestHandler):
         "/managed-skills": "_handle_managed_skills",
         "/transcription-capabilities": "_handle_transcription_capabilities",
         "/transcription-guidance": "_handle_transcription_guidance_get",
+        "/transcription-providers": "_handle_transcription_providers_get",
+        "/vocab/packs": "_handle_vocab_packs_get",
+        "/vocab/terms": "_handle_vocab_terms_get",
+        "/vocab/profiles": "_handle_vocab_profiles_get",
+        "/vocab/profile": "_handle_vocab_profile_get",
+        "/vocab/assignments": "_handle_vocab_assignments_get",
+        "/vocab/budgets": "_handle_vocab_budgets_get",
+        "/vocab/preview": "_handle_vocab_preview_get",
+        "/vocab/runs": "_handle_vocab_runs_get",
+        "/vocab/run": "_handle_vocab_run_get",
+        "/transcription-audio": "_handle_transcription_audio_get",
         "/clips/recoverable": "_handle_recoverable_clips",
         "/server-info": "_handle_server_info",
         "/paired-devices": "_handle_paired_devices",
@@ -331,6 +342,19 @@ class Handler(BaseHTTPRequestHandler):
         "/transcription-models/install": "_handle_transcription_model_install",
         "/transcription-models/remove": "_handle_transcription_model_remove",
         "/transcription-guidance": "_handle_transcription_guidance_post",
+        "/transcription-providers": "_handle_transcription_providers_post",
+        "/vocab/packs": "_handle_vocab_packs_post",
+        "/vocab/packs/update": "_handle_vocab_packs_update",
+        "/vocab/packs/delete": "_handle_vocab_packs_delete",
+        "/vocab/terms": "_handle_vocab_terms_post",
+        "/vocab/terms/update": "_handle_vocab_terms_update",
+        "/vocab/terms/delete": "_handle_vocab_terms_delete",
+        "/vocab/profiles": "_handle_vocab_profiles_post",
+        "/vocab/profiles/delete": "_handle_vocab_profiles_delete",
+        "/vocab/profiles/packs": "_handle_vocab_profile_packs_post",
+        "/vocab/profiles/packs/remove": "_handle_vocab_profile_packs_remove",
+        "/vocab/assign": "_handle_vocab_assign_post",
+        "/vocab/unassign": "_handle_vocab_unassign_post",
         "/pairing/exchange": "_handle_pairing_exchange",
         "/paired-devices/revoke": "_handle_paired_device_revoke",
         "/tts/providers": "_handle_tts_providers_post",
@@ -767,6 +791,14 @@ class Handler(BaseHTTPRequestHandler):
                     return serve_growing(self, target)
                 return self._send_file(target)
             return self._send(403, b"forbidden")
+        if path.startswith("/stt/stream"):
+            # Provider-owned turn taking: the phone streams PCM, the relay
+            # forwards it to the chosen recogniser and returns its turn events.
+            from urllib.parse import parse_qs, urlparse
+            from lib.stt_stream import serve_stt_stream
+            parsed = parse_qs(urlparse(self.path).query)
+            return serve_stt_stream(
+                self, {k: (v[0] if v else "") for k, v in parsed.items()})
         if path.startswith("/terminal/"):
             # Interactive terminal WS: spawns the agent's CLI in a PTY resumed
             # on the same session id and bridges raw bytes both ways.
@@ -1368,6 +1400,337 @@ class Handler(BaseHTTPRequestHandler):
         payload = self._transcription_guidance_payload()
         payload["ok"] = True
         self._send(200, json.dumps(payload).encode(), "application/json")
+
+    def _handle_transcription_providers_get(self):
+        from lib import stt_providers
+        self._send(200, json.dumps(stt_providers.status()).encode(),
+                   "application/json")
+
+    def _handle_transcription_providers_post(self):
+        from lib import stt_providers
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        try:
+            payload = stt_providers.update_settings(data)
+        except ValueError as exc:
+            return self._send(
+                400, json.dumps({"error": str(exc)}).encode(), "application/json")
+        payload["ok"] = True
+        self._send(200, json.dumps(payload).encode(), "application/json")
+
+    # ---- vocabulary: packs, terms, profiles, assignments, preview, runs ----
+    #
+    # The transparency contract behind the iOS vocabulary screens: everything
+    # the compiler will do is previewable, and everything it did is readable.
+
+    def _query(self) -> dict[str, str]:
+        from urllib.parse import parse_qs, urlparse
+        parsed = parse_qs(urlparse(self.path).query)
+        return {k: (v[0] if v else "") for k, v in parsed.items()}
+
+    def _json_ok(self, payload) -> None:
+        self._send(200, json.dumps(payload).encode(), "application/json")
+
+    def _json_error(self, code: int, message: str) -> None:
+        self._send(code, json.dumps({"error": message}).encode(), "application/json")
+
+    def _vocab_body(self) -> dict | None:
+        data = self._read_json()
+        if not isinstance(data, dict):
+            self._json_error(400, "bad json")
+            return None
+        return data
+
+    def _handle_vocab_packs_get(self):
+        from lib import vocab_store
+        counts = vocab_store.pack_term_counts()
+        packs = vocab_store.list_packs()
+        for pack in packs:
+            pack["terms"] = counts.get(pack["pack_id"], 0)
+        self._json_ok({"packs": packs})
+
+    def _handle_vocab_packs_post(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        name = str(data.get("name") or "").strip()
+        if not name:
+            return self._json_error(400, "name is required")
+        kind = str(data.get("kind") or "static")
+        if kind not in ("static", "dynamic"):
+            return self._json_error(400, "kind must be static or dynamic")
+        try:
+            pack_id = vocab_store.create_pack(
+                name, kind=kind, generator=str(data.get("generator") or ""),
+                priority=float(data.get("priority", 1.0)),
+                floor=int(data.get("floor", 0)),
+                enabled=bool(data.get("enabled", True)))
+        except sqlite3.IntegrityError:
+            return self._json_error(409, "a pack with that name exists")
+        except (TypeError, ValueError) as exc:
+            return self._json_error(400, str(exc))
+        for term in data.get("terms") or []:
+            if isinstance(term, str):
+                vocab_store.add_term(pack_id, term)
+            elif isinstance(term, dict):
+                vocab_store.add_term(
+                    pack_id, str(term.get("text") or ""),
+                    rarity=float(term.get("rarity", 0.5)),
+                    say_as=str(term.get("say_as") or ""),
+                    often_heard_as=str(term.get("often_heard_as") or ""))
+        self._json_ok({"ok": True, "pack_id": pack_id})
+
+    def _handle_vocab_packs_update(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        pack_id = str(data.get("pack_id") or "")
+        if not pack_id:
+            return self._json_error(400, "pack_id is required")
+        try:
+            if "enabled" in data:
+                vocab_store.set_pack_enabled(pack_id, bool(data["enabled"]))
+            vocab_store.update_pack(
+                pack_id, name=data.get("name"),
+                priority=data.get("priority"), floor=data.get("floor"))
+        except sqlite3.IntegrityError:
+            return self._json_error(409, "a pack with that name exists")
+        except (TypeError, ValueError) as exc:
+            return self._json_error(400, str(exc))
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_packs_delete(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        pack_id = str(data.get("pack_id") or "")
+        if not pack_id:
+            return self._json_error(400, "pack_id is required")
+        vocab_store.delete_pack(pack_id)
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_terms_get(self):
+        from lib import vocab_store
+        pack_id = self._query().get("pack_id", "")
+        if not pack_id:
+            return self._json_error(400, "pack_id is required")
+        self._json_ok({"pack_id": pack_id, "terms": vocab_store.list_terms(pack_id)})
+
+    def _handle_vocab_terms_post(self):
+        from lib import vocab_store
+        from lib.vocab_generators import estimate_rarity
+        data = self._vocab_body()
+        if data is None:
+            return
+        pack_id = str(data.get("pack_id") or "")
+        text = str(data.get("text") or "").strip()
+        if not pack_id or not text:
+            return self._json_error(400, "pack_id and text are required")
+        rarity = data.get("rarity")
+        try:
+            added = vocab_store.add_term(
+                pack_id, text,
+                rarity=float(rarity) if rarity is not None else estimate_rarity(text),
+                say_as=str(data.get("say_as") or ""),
+                often_heard_as=str(data.get("often_heard_as") or ""),
+                source=str(data.get("source") or "manual"))
+        except sqlite3.IntegrityError:
+            return self._json_error(404, "no such pack")
+        except (TypeError, ValueError) as exc:
+            return self._json_error(400, str(exc))
+        self._json_ok({"ok": True, "added": added})
+
+    def _handle_vocab_terms_update(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        try:
+            term_id = int(data.get("term_id"))
+        except (TypeError, ValueError):
+            return self._json_error(400, "term_id is required")
+        try:
+            updated = vocab_store.update_term(
+                term_id, text=data.get("text"), say_as=data.get("say_as"),
+                often_heard_as=data.get("often_heard_as"), rarity=data.get("rarity"))
+        except sqlite3.IntegrityError:
+            return self._json_error(409, "that term already exists in the pack")
+        except (TypeError, ValueError) as exc:
+            return self._json_error(400, str(exc))
+        self._json_ok({"ok": True, "updated": updated})
+
+    def _handle_vocab_terms_delete(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        try:
+            term_id = int(data.get("term_id"))
+        except (TypeError, ValueError):
+            return self._json_error(400, "term_id is required")
+        vocab_store.delete_term(term_id)
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_profiles_get(self):
+        from lib import vocab_store
+        self._json_ok({"profiles": vocab_store.list_profiles()})
+
+    def _handle_vocab_profile_get(self):
+        from lib import vocab_store
+        profile_id = self._query().get("profile_id", "")
+        detail = vocab_store.profile_detail(profile_id) if profile_id else None
+        if detail is None:
+            return self._json_error(404, "no such profile")
+        self._json_ok(detail)
+
+    def _handle_vocab_profiles_post(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        name = str(data.get("name") or "").strip()
+        if not name:
+            return self._json_error(400, "name is required")
+        try:
+            profile_id = vocab_store.create_profile(name)
+        except sqlite3.IntegrityError:
+            return self._json_error(409, "a profile with that name exists")
+        for position, pack_id in enumerate(data.get("pack_ids") or []):
+            vocab_store.add_pack_to_profile(profile_id, str(pack_id), position)
+        self._json_ok({"ok": True, "profile_id": profile_id})
+
+    def _handle_vocab_profiles_delete(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        profile_id = str(data.get("profile_id") or "")
+        if not profile_id:
+            return self._json_error(400, "profile_id is required")
+        vocab_store.delete_profile(profile_id)
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_profile_packs_post(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        profile_id = str(data.get("profile_id") or "")
+        pack_id = str(data.get("pack_id") or "")
+        if not profile_id or not pack_id:
+            return self._json_error(400, "profile_id and pack_id are required")
+        try:
+            vocab_store.add_pack_to_profile(
+                profile_id, pack_id, int(data.get("position", 0)))
+        except sqlite3.IntegrityError:
+            return self._json_error(404, "no such profile or pack")
+        except (TypeError, ValueError) as exc:
+            return self._json_error(400, str(exc))
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_profile_packs_remove(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        profile_id = str(data.get("profile_id") or "")
+        pack_id = str(data.get("pack_id") or "")
+        if not profile_id or not pack_id:
+            return self._json_error(400, "profile_id and pack_id are required")
+        vocab_store.remove_pack_from_profile(profile_id, pack_id)
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_assignments_get(self):
+        from lib import vocab_store
+        self._json_ok({"assignments": vocab_store.assignments()})
+
+    def _handle_vocab_assign_post(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        profile_id = str(data.get("profile_id") or "")
+        if not profile_id:
+            return self._json_error(400, "profile_id is required")
+        try:
+            vocab_store.assign_profile(
+                profile_id, agent_id=str(data.get("agent_id") or ""),
+                team_id=str(data.get("team_id") or ""))
+        except ValueError as exc:
+            return self._json_error(400, str(exc))
+        except sqlite3.IntegrityError:
+            return self._json_error(404, "no such profile")
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_unassign_post(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        agent_id = str(data.get("agent_id") or "")
+        team_id = str(data.get("team_id") or "")
+        if not agent_id and not team_id:
+            return self._json_error(400, "agent_id or team_id is required")
+        vocab_store.unassign(agent_id=agent_id, team_id=team_id)
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_budgets_get(self):
+        from lib import stt_providers
+        from lib.vocab_compile import describe_budgets
+        self._json_ok({"budgets": describe_budgets(),
+                       "engine": stt_providers.selected_engine(),
+                       "models": stt_providers.cloud_models()})
+
+    def _handle_vocab_preview_get(self):
+        query = self._query()
+        preview = getattr(self.ctx, "vocab_preview", None)
+        if not callable(preview):
+            return self._json_error(503, "vocabulary preview unavailable")
+        try:
+            payload = preview(
+                session=query.get("session", ""),
+                requested_model=query.get("model", ""),
+                delegated=_truthy_header(query.get("delegated", "")))
+        except Exception as exc:  # noqa: BLE001
+            log_exception("vocabPreviewFail", exc)
+            return self._json_error(500, "vocabulary preview failed")
+        self._json_ok(payload)
+
+    def _handle_vocab_runs_get(self):
+        from lib import vocab_store
+        query = self._query()
+        try:
+            limit = max(1, min(200, int(query.get("limit") or 20)))
+        except ValueError:
+            limit = 20
+        self._json_ok({"runs": vocab_store.recent_runs(
+            limit, session=query.get("session", ""))})
+
+    def _handle_vocab_run_get(self):
+        from lib import heard_audio, vocab_store
+        trace_id = self._query().get("trace_id", "")
+        run = vocab_store.run_for_trace(trace_id) if trace_id else None
+        if run is None:
+            return self._json_error(404, "no run for that trace")
+        kept = heard_audio.lookup(
+            RuntimePaths.from_home(pathlib.Path.home()).cache_dir, trace_id)
+        run["audio_url"] = f"/transcription-audio?trace_id={trace_id}" if kept else None
+        self._json_ok(run)
+
+    def _handle_transcription_audio_get(self):
+        """The clip the transcriber was given for one trace, if retained."""
+        from lib import heard_audio
+        trace_id = self._query().get("trace_id", "")
+        kept = heard_audio.lookup(
+            RuntimePaths.from_home(pathlib.Path.home()).cache_dir, trace_id)
+        if kept is None:
+            return self._json_error(404, "no retained audio for that trace")
+        path, meta = kept
+        self._send_file(path, meta.get("content_type") or "application/octet-stream")
 
     def _handle_transcription_model_install(self):
         from lib.transcription_models import start_install
@@ -3423,8 +3786,11 @@ class Handler(BaseHTTPRequestHandler):
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a") as f:
                 for it in items:
+                    line_detail = it.get('detail', '')
+                    if isinstance(line_detail, dict):
+                        line_detail = json.dumps(line_detail, separators=(",", ":"))
                     f.write(f"{time.strftime('%H:%M:%S')} client   "
-                            f"{it.get('event','?')} {it.get('detail','')}\n")
+                            f"{it.get('event','?')} {line_detail}\n")
         except OSError as e:
             log_exception("clogWriteFail", e, detail=str(log_path))
 
@@ -3771,10 +4137,41 @@ class Handler(BaseHTTPRequestHandler):
         if getattr(self.ctx.stt, "available", True) is False:
             return self._send(503, b'{"error":"server transcription disabled"}',
                               "application/json")
+        if not requested_model:
+            # A cloud engine chosen in settings stands in for the server
+            # default; an explicit header from the client still wins.
+            try:
+                from lib import stt_providers
+                engine = stt_providers.selected_engine()
+                if stt_providers.is_cloud_model(engine):
+                    requested_model = engine
+            except Exception as e:  # noqa: BLE001
+                log_exception("sttEngineSettingFail", e)
         if not requested_model and not self.ctx.stt.ready.is_set():
             return self._send(503, b'{"error":"whisper model loading"}',
                               "application/json")
-        prompt = self.ctx.vocab_prompt(delegated=hands_free)
+        # The trace is minted before compiling so the vocab run, the
+        # transcribe event and everything downstream share one id.
+        trace_id = _trace.new_id()
+        self._trace_id = trace_id
+        try:
+            focus = RuntimePaths.from_home(pathlib.Path.home()).app_session.read_text().strip()
+        except OSError:
+            focus = ""
+        vocab_run_id = 0
+        vocab_fn = getattr(self.ctx, "vocab_for_transcription", None)
+        if callable(vocab_fn):
+            try:
+                vocab = vocab_fn(delegated=hands_free, session=focus,
+                                 trace_id=trace_id,
+                                 requested_model=requested_model)
+                prompt, vocab_run_id = vocab.payload, vocab.run_id
+            except Exception as e:  # noqa: BLE001 - biasing never blocks STT
+                log_exception("vocabForTranscribeFail", e)
+                prompt = self.ctx.vocab_prompt(delegated=hands_free)
+        else:
+            prompt = self.ctx.vocab_prompt(delegated=hands_free)
+        started = time.monotonic()
         try:
             # Authoritative transcript: wait for the whisper lock rather than
             # 429 — best-effort live-transcription partials must yield to it.
@@ -3803,6 +4200,22 @@ class Handler(BaseHTTPRequestHandler):
             health.mark_error("stt", e)
             log_exception("transcribeFail", e)
             return self._send(500, f'{{"error":"{e}"}}'.encode(), "application/json")
+        latency_ms = int((time.monotonic() - started) * 1000)
+        try:
+            from lib import heard_audio
+            heard_audio.retain(
+                RuntimePaths.from_home(pathlib.Path.home()).cache_dir,
+                trace_id=trace_id, audio_bytes=audio_bytes, content_type=ctype,
+                session=focus, run_id=vocab_run_id, model=requested_model or "")
+        except Exception as e:  # noqa: BLE001 - diagnostics never block a turn
+            log_exception("heardAudioFail", e)
+        if vocab_run_id:
+            try:
+                from lib import vocab_store
+                vocab_store.update_run_result(
+                    vocab_run_id, transcript=text, latency_ms=latency_ms)
+            except Exception as e:  # noqa: BLE001
+                log_exception("vocabRunUpdateFail", e)
 
         # Run the user's utterance against any pending heralds. Affirmatives
         # with a name release that agent's held buffer; mentions / declines
@@ -3826,16 +4239,9 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 log_exception("heraldIntentFail", e)
 
-        # Start a new trace id for the focused app session (if any). The client
-        # echoes it back in subsequent /send + /clog calls so the whole
-        # turn — STT, send, hook, Claude reply, TTS, broadcast, play —
-        # carries one queryable id.
-        trace_id = _trace.new_id()
-        self._trace_id = trace_id
-        try:
-            focus = RuntimePaths.from_home(pathlib.Path.home()).app_session.read_text().strip()
-        except OSError:
-            focus = ""
+        # The client echoes the trace id back in subsequent /send + /clog
+        # calls so the whole turn — STT, send, hook, Claude reply, TTS,
+        # broadcast, play — carries one queryable id.
         if focus:
             agents_db.set_trace_for_session(focus, trace_id)
         eventlog.emit("server", "transcribe", trace_id=trace_id, session=focus or None,
@@ -3843,7 +4249,9 @@ class Handler(BaseHTTPRequestHandler):
                       detail={"text": text, "ends_terminal": ends_terminal,
                               "herald_consumed": herald_consumed,
                               "hands_free": hands_free,
-                              "orchestrator_skip_herald": skip_herald})
+                              "orchestrator_skip_herald": skip_herald,
+                              "vocab_run_id": vocab_run_id or None,
+                              "stt_latency_ms": latency_ms})
 
         # Blank the text when the utterance was a herald grant/decline so the
         # client's empty-text guard skips dispatch — it released the buffer,
@@ -3854,6 +4262,7 @@ class Handler(BaseHTTPRequestHandler):
                     "herald_consumed": herald_consumed,
                     "hands_free": hands_free,
                     "orchestrator_skip_herald": skip_herald,
+                    "vocab_run_id": vocab_run_id or None,
                     "cached": False}
         try:
             transcription_results.store(
