@@ -34,11 +34,13 @@ UPSTREAM_TIMEOUT_SEC = 15.0
 UPSTREAM_FLUSH_GRACE_SEC = 4.0
 
 # Flux tuning. eot_threshold is how sure the model must be before EndOfTurn;
-# eager_eot_threshold opens the speculative EagerEndOfTurn earlier; the
-# timeout is the provider's own hard ceiling in ms.
+# eager_eot_threshold opens the speculative EagerEndOfTurn earlier. The model
+# decides: eot_timeout_ms is Flux's own timer that would end a turn on
+# silence regardless of its verdict, so it sits at the provider's maximum
+# (60 s) rather than the 5 s default - the same rule as the native gate.
 DEFAULT_EOT_THRESHOLD = 0.7
 DEFAULT_EAGER_EOT_THRESHOLD = 0.5
-DEFAULT_EOT_TIMEOUT_MS = 5000
+DEFAULT_EOT_TIMEOUT_MS = 60_000
 
 _FLUX_EVENTS = {
     "StartOfTurn": "start",
