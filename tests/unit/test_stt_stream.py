@@ -37,6 +37,7 @@ def test_flux_url_clamps_tuning_and_repeats_keyterms():
     assert q["eot_threshold"] == ["0.50"]
     assert q["eager_eot_threshold"] == ["0.90"]
     assert q["eot_timeout_ms"] == ["500"]
+    assert parse_qs(urlparse(flux_url()).query)["eot_timeout_ms"] == ["60000"]
     assert q["keyterm"] == ["Clarp", "Knut Thomas"]
     assert "eager_eot_threshold" not in parse_qs(
         urlparse(flux_url(eager_eot_threshold=None)).query)
