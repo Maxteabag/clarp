@@ -35,6 +35,8 @@ export const app = $state({
   status: {},
   conn: 'connecting',
   showReconnect: false,
+  /** The server is answering 401: the saved token is wrong (issue #10). */
+  authRejected: false,
   toast: '',
   version: '',
   /** Bumped on every snapshot patch so time-dependent views re-derive. */

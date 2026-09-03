@@ -42,6 +42,24 @@ export function getAuthToken() {
   try { return localStorage.getItem(AUTH_KEY) || ''; } catch (_) { return ''; }
 }
 
+// A 401 means the saved token is stale or wrong, and the only way back is a
+// fresh `?token=` link. The store is told once per transition so the shell can
+// show how to get that link (issue #10); no store is imported here to keep
+// this module free of UI dependencies.
+let authListener = null;
+let authKnownRejected = false;
+export function onAuthChange(fn) { authListener = fn; }
+function authRejected() {
+  if (authKnownRejected) return;
+  authKnownRejected = true;
+  try { authListener && authListener(true); } catch (_) {}
+}
+function authAccepted() {
+  if (!authKnownRejected) return;
+  authKnownRejected = false;
+  try { authListener && authListener(false); } catch (_) {}
+}
+
 // Wrap window.fetch so no call site has to remember the header. Kept as a
 // global override rather than an exported helper because the vendored
 // libraries and the audio element issue their own requests.
@@ -68,7 +86,12 @@ export function installAuthFetch() {
       opts.headers = h;
     }
     return nativeFetch(input, token ? opts : init).then(
-      (res) => { noteFetch(health, { path, ok: res.ok }); return res; },
+      (res) => {
+        noteFetch(health, { path, ok: res.ok, status: res.status });
+        if (res.status === 401) authRejected();
+        else if (res.ok) authAccepted();
+        return res;
+      },
       (err) => { noteFetch(health, { path, ok: false }); throw err; },
     );
   };

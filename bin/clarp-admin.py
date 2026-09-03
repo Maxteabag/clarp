@@ -46,11 +46,23 @@ def run(*args: str, cwd: Path | None = None, check: bool = True,
     return subprocess.run(args, cwd=cwd, check=check, text=True, env=env)
 
 
+# Where every install ultimately came from. install.sh falls back to this when
+# the source has no git metadata (the curl | bash quick start unpacks a
+# tarball), and so must the updater, or a quick-start install can never update
+# itself (issue #12).
+CANONICAL_SOURCE_REMOTE = "https://github.com/Maxteabag/clarp.git"
+
+
 def git_origin(repo: Path) -> str:
     result = subprocess.run(
         ["git", "remote", "get-url", "origin"], cwd=repo,
         text=True, capture_output=True, check=False)
-    value = result.stdout.strip()
+    return sanitize_remote(result.stdout.strip())
+
+
+def sanitize_remote(value: str) -> str:
+    """Drop embedded credentials, query and fragment from an http(s) remote."""
+    value = (value or "").strip()
     parsed = urllib.parse.urlsplit(value)
     if parsed.scheme in {"http", "https"}:
         host = parsed.netloc
@@ -63,6 +75,27 @@ def git_origin(repo: Path) -> str:
         value = urllib.parse.urlunsplit(
             (parsed.scheme, host, parsed.path, "", ""))
     return value
+
+
+def resolve_update_remote(state: dict) -> str:
+    """The remote to fetch updates from, never empty.
+
+    install.json records what git reported at setup time, which is nothing for
+    a tarball. install.sh always resolves a remote and writes it next to the
+    release, so that file is the second source, and the canonical repository
+    is the last, exactly as install.sh itself falls back.
+    """
+    candidates = [str(state.get("source_remote") or "")]
+    for path in (SHARE / "current/SOURCE_REMOTE", SHARE / "SOURCE_REMOTE"):
+        try:
+            candidates.append(path.read_text())
+        except OSError:
+            continue
+    for candidate in candidates:
+        remote = sanitize_remote(candidate)
+        if remote:
+            return remote
+    return CANONICAL_SOURCE_REMOTE
 
 
 def stable_release_tags(tags: list[str]) -> list[str]:
@@ -645,7 +678,7 @@ def _execute_setup(backend: str, transcription: str, bind: str | None,
             for skill_id in chosen: link_skill(skill_id)
             write_json(INSTALL_STATE, {
                 "source_repo": str(REPO), "skills": chosen,
-                "source_remote": git_origin(REPO),
+                "source_remote": git_origin(REPO) or resolve_update_remote({}),
                 "channel": channel, "backend": backend,
                 "transcription": transcription, "python": sys.executable,
                 "toolchain": toolchain,
@@ -687,7 +720,46 @@ def _execute_setup(backend: str, transcription: str, bind: str | None,
                     except SystemExit:
                         pass
         raise
-    print("\nClarp setup complete. Run `clarp-admin doctor` for diagnostics.")
+    print(setup_complete_message())
+    return 0
+
+
+def pwa_access_url() -> str:
+    """The link that provisions a browser with the auth token in one open.
+
+    The PWA reads `?token=` on first visit and stores it; without this link a
+    user has to find the token in config.toml by hand, and a browser holding a
+    stale token can only recover by opening a fresh one (issue #10).
+    """
+    cfg = _network_config()
+    token = str(cfg.get("server", {}).get("auth_token") or "").strip()
+    base = _pairing_public_url() + "/"
+    if not token:
+        return base
+    return base + "?" + urllib.parse.urlencode({"token": token})
+
+
+def setup_complete_message() -> str:
+    return (
+        "\nClarp setup complete. Run `clarp-admin doctor` for diagnostics."
+        f"\n\nOpen the PWA with this link (it carries the auth token):"
+        f"\n  {pwa_access_url()}"
+        "\nPrint it again any time with `clarp-admin url` (add --qr for a phone)."
+    )
+
+
+def cmd_url(args) -> int:
+    url = pwa_access_url()
+    if args.json:
+        print(json.dumps({"url": url}, indent=2))
+        return 0
+    if args.qr:
+        import qrcode
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(url)
+        qr.make(fit=True)
+        qr.print_ascii(invert=True)
+    print(url)
     return 0
 
 
@@ -1559,10 +1631,7 @@ def cmd_update(args) -> int:
     if not (source / ".git").exists() and not (source / ".git").is_file():
         source = SHARE / "update-source"
         if not (source / ".git").exists():
-            remote = str(state.get("source_remote") or "").strip()
-            if not remote:
-                raise SystemExit(
-                    "source repository unavailable and no update remote was recorded")
+            remote = resolve_update_remote(state)
             source.parent.mkdir(parents=True, exist_ok=True)
             run("git", "clone", "--filter=blob:none", remote, str(source))
     # Quick-start clones are shallow. Refresh remote branch heads explicitly as
@@ -1783,6 +1852,11 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     stt_remove.set_defaults(func=cmd_transcription)
 
     sub.add_parser("doctor").set_defaults(func=cmd_doctor)
+    url = sub.add_parser(
+        "url", help="print the PWA link that carries the auth token")
+    url.add_argument("--qr", action="store_true", help="also print a QR code")
+    url.add_argument("--json", action="store_true")
+    url.set_defaults(func=cmd_url)
     sub.add_parser("paths").set_defaults(func=cmd_paths)
     sub.add_parser("sessions").set_defaults(func=cmd_sessions)
     onboard = sub.add_parser("onboard")
