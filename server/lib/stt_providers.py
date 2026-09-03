@@ -49,9 +49,11 @@ CATALOG: tuple[dict, ...] = (
          {"id": "elevenlabs:scribe_v2", "model": "scribe_v2",
           "name": "ElevenLabs Scribe v2", "biasing": "keyterms"},
      )},
+    # Cartesia's realtime socket transcribes but relies on the client's
+    # `finalize` for turn ends - no end-of-turn detection of its own.
     {"id": "cartesia", "name": "Cartesia Ink", "kind": "cloud",
      "credential": "CARTESIA_API_KEY", "streaming": True,
-     "turn_detection": "own", "turn_detection_model": "ink-2",
+     "turn_detection": "native", "turn_detection_model": "",
      "models": (
          {"id": "cartesia:ink-whisper", "model": "ink-whisper",
           "name": "Cartesia Ink-Whisper", "biasing": "none"},
@@ -139,6 +141,10 @@ def status() -> dict:
         "engine": engine,
         "turn_taking": strategy,
         "retain_audio": retain_audio(),
+        "stream_path": "/stt/stream",
+        "provider_turn_taking_available": bool(
+            selected_row and selected_row["turn_detection"] == "own"
+            and selected_row["available"]),
         "turn_taking_options": [
             {"id": TURN_NATIVE, "name": "Native (on-device VAD + Smart Turn)",
              "available": True},
