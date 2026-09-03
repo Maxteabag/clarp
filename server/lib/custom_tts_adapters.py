@@ -21,6 +21,7 @@ import time
 from typing import Any
 
 from .deployment import LAYOUT
+from .voice_markup import strip_ssml_for_plain_tts
 
 
 SCHEMA_VERSION = 1
@@ -55,6 +56,10 @@ class AdapterManifest:
     audio_format: str
     timeout_seconds: int
     protocol: str = "tts"
+    # Whether the engine parses SSML. Off by default so a new adapter never
+    # has <break> pause tags read aloud; only engines that honour the markup
+    # opt in and receive it intact.
+    ssml: bool = False
 
     def provider_row(self) -> dict[str, Any]:
         return {
@@ -67,6 +72,7 @@ class AdapterManifest:
             "can_fallback": self.can_fallback,
             "supports_preview": True,
             "allows_custom_voice": False,
+            "ssml": self.ssml,
             "license": self.license,
             "installed": True,
             "available": True,
@@ -145,6 +151,7 @@ def load_manifest(
         license=(str(data.get("license") or "").strip() or None),
         audio_format=audio_format,
         timeout_seconds=timeout,
+        ssml=bool(data.get("ssml", False)),
     )
 
 
@@ -397,6 +404,8 @@ def _audio_operation(
     on_chunk=None,
 ) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    if not manifest.ssml:
+        text = strip_ssml_for_plain_tts(text)
     suffix = ".wav" if manifest.audio_format == "audio/wav" else ".mp3"
     with tempfile.TemporaryDirectory(prefix=f"clarp-adapter-{manifest.id}-") as temp:
         produced = Path(temp) / f"audio{suffix}"

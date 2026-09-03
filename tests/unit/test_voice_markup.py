@@ -8,6 +8,7 @@ from lib.voice_markup import (
     spoken_chunks_for_tts,
     spoken_for_tts,
     strip_hidden_blocks,
+    strip_ssml_for_plain_tts,
 )
 
 
@@ -102,6 +103,20 @@ def test_spoken_for_tts_unwraps_vox_keeps_breaks_drops_speed():
     assert "</speed>" not in out
     assert "now" in out
     assert "<vox>" not in out and "</vox>" not in out
+
+
+def test_strip_ssml_for_plain_tts_replaces_tags_with_a_space():
+    # An engine that does not parse SSML would otherwise read the tag aloud
+    # ("break time equals 300 milliseconds"); replacing with a space keeps the
+    # neighbouring words apart (issue #14).
+    assert strip_ssml_for_plain_tts('one<break time="300ms"/>two') == "one two"
+    assert strip_ssml_for_plain_tts(
+        'ready <break time="350ms"/> now, <speed ratio="0.9">go</speed>'
+        '<volume value="+2dB">loud</volume><emotion name="calm"/>'
+    ) == "ready now, go loud"
+    assert strip_ssml_for_plain_tts("plain words") == "plain words"
+    assert strip_ssml_for_plain_tts("") == ""
+    assert strip_ssml_for_plain_tts(None) == ""
 
 
 def test_spoken_for_tts_empty():

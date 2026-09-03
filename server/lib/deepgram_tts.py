@@ -7,6 +7,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from .voice_markup import strip_ssml_for_plain_tts
+
 
 class DeepgramError(RuntimeError):
     pass
@@ -19,6 +21,8 @@ def synthesize(*, text: str, voice_id: str, out_path: Path | None,
         raise DeepgramError("Deepgram API key is not configured")
     if not voice_id:
         raise DeepgramError("Deepgram voice is not configured")
+    # Aura/Flux do not parse SSML; a surviving <break> tag is read aloud.
+    text = strip_ssml_for_plain_tts(text)
     query = urllib.parse.urlencode({
         "model": voice_id, "encoding": "mp3", "container": "none"})
     api_version = "v2" if voice_id.startswith("flux-") else "v1"
