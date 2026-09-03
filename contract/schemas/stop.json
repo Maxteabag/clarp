@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://clarp.local/contract/schemas/stop.json",
-  "$title": "POST /stop",
+  "title": "POST /stop",
   "description": "Terminates the running turn. Queue state travels over SSE (queue-updated), not in this response.",
   "type": "object",
   "additionalProperties": true,

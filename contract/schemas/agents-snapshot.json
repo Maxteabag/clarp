@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://clarp.local/contract/schemas/agents-snapshot.json",
-  "$title": "GET /agents/snapshot",
+  "title": "GET /agents/snapshot",
   "description": "Bootstrap read model. head_revision + conversation_id tell a client whether its cached chat is current.",
   "type": "object",
   "additionalProperties": true,

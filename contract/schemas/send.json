@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://clarp.local/contract/schemas/send.json",
-  "$title": "POST /send",
+  "title": "POST /send",
   "description": "200 means accepted, not delivered. Delivery is proven when u-<client_msg_id> appears in /log.",
   "type": "object",
   "additionalProperties": true,
