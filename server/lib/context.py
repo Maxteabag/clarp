@@ -240,6 +240,62 @@ class ServerContext:
             payload=result.payload, run_id=result.run_id,
             provider=provider, model=model)
 
+    def vocab_preview(self, *, session: str = "", requested_model: str = "",
+                      delegated: bool = False) -> dict:
+        """What the next compile would send, per pack, without recording it.
+
+        The live budget meter in the app calls this as the user toggles packs,
+        so it must reflect exactly the inputs a real turn would use.
+        """
+        from . import agents as agents_db
+        from . import vocab_store
+        from .vocab_compile import Sources, compile_for
+        from .workspace_vocab import sources_for
+
+        provider, model = self._transcription_provider_model(requested_model)
+        agent: dict = {}
+        if session:
+            try:
+                agent = agents_db.get_by_session(session) or {}
+            except Exception as e:  # noqa: BLE001
+                log_exception("vocabAgentLookupFail", e)
+        agent_id = str(agent.get("agent_id") or "")
+        static, profile_id = self._vocab_static_packs(
+            delegated=delegated, agent_id=agent_id)
+        workspace = sources_for(agent.get("cwd"))
+        include_names = delegated and delegation_agent_names_enabled()
+        result = compile_for(
+            provider=provider, model=model, static_packs=static,
+            sources=Sources(
+                agent_names=(
+                    tuple(self.active_agent_names()) if include_names else ()),
+                project_name=workspace.project_name,
+                identifiers=workspace.identifiers,
+                branches=workspace.branches,
+                commit_subjects=workspace.commit_subjects,
+                recent_transcripts=(
+                    vocab_store.recent_transcripts(session) if session else ()),
+                corrections=vocab_store.corrections(),
+            ))
+        audit = result.audit()
+        per_pack: dict[str, dict] = {}
+        for term in audit["included"]:
+            slot = per_pack.setdefault(term["pack"], {"included": 0, "dropped": 0})
+            slot["included"] += 1
+        for term in audit["dropped"]:
+            slot = per_pack.setdefault(term["pack"], {"included": 0, "dropped": 0})
+            slot["dropped"] += 1
+        return {
+            "provider": provider, "model": model, "session": session,
+            "agent_id": agent_id, "profile_id": profile_id,
+            "unit": audit["unit"], "capacity": audit["capacity"],
+            "used": audit["used"], "headroom": audit["headroom"],
+            "form": audit["form"], "rarity_floor": audit["rarity_floor"],
+            "payload": audit["payload"],
+            "included": audit["included"], "dropped": audit["dropped"],
+            "packs": [{"pack": name, **counts} for name, counts in per_pack.items()],
+        }
+
     def _transcription_provider_model(self, requested_model: str
                                       ) -> tuple[str, str]:
         selected = (requested_model or "").strip()

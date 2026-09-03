@@ -99,6 +99,64 @@ def pack_terms(pack_id: str, pack_name: str) -> list[Term]:
     ]
 
 
+def update_pack(pack_id: str, *, name: str | None = None,
+                priority: float | None = None, floor: int | None = None) -> bool:
+    fields, values = [], []
+    if name is not None and name.strip():
+        fields.append("name=?"); values.append(name.strip())
+    if priority is not None:
+        fields.append("priority=?"); values.append(float(priority))
+    if floor is not None:
+        fields.append("floor=?"); values.append(int(floor))
+    if not fields:
+        return False
+    fields.append("updated_at=?"); values.append(now_ms())
+    values.append(pack_id)
+    cur = conn().execute(
+        f"UPDATE vocab_packs SET {', '.join(fields)} WHERE pack_id=?", tuple(values))
+    conn().commit()
+    return cur.rowcount > 0
+
+
+def pack_term_counts() -> dict[str, int]:
+    rows = conn().execute(
+        "SELECT pack_id, count(*) FROM vocab_terms GROUP BY pack_id").fetchall()
+    return {r[0]: int(r[1]) for r in rows}
+
+
+def list_terms(pack_id: str) -> list[dict]:
+    rows = conn().execute(
+        "SELECT term_id, text, say_as, often_heard_as, rarity, source, created_at"
+        " FROM vocab_terms WHERE pack_id=? ORDER BY rarity DESC, text COLLATE NOCASE",
+        (pack_id,)).fetchall()
+    return [
+        {"term_id": r[0], "text": r[1], "say_as": r[2], "often_heard_as": r[3],
+         "rarity": float(r[4]), "source": r[5], "created_at": r[6]}
+        for r in rows
+    ]
+
+
+def update_term(term_id: int, *, text: str | None = None,
+                say_as: str | None = None, often_heard_as: str | None = None,
+                rarity: float | None = None) -> bool:
+    fields, values = [], []
+    if text is not None and text.strip():
+        fields.append("text=?"); values.append(text.strip())
+    if say_as is not None:
+        fields.append("say_as=?"); values.append(say_as.strip())
+    if often_heard_as is not None:
+        fields.append("often_heard_as=?"); values.append(often_heard_as.strip())
+    if rarity is not None:
+        fields.append("rarity=?"); values.append(max(0.0, min(1.0, float(rarity))))
+    if not fields:
+        return False
+    values.append(int(term_id))
+    cur = conn().execute(
+        f"UPDATE vocab_terms SET {', '.join(fields)} WHERE term_id=?", tuple(values))
+    conn().commit()
+    return cur.rowcount > 0
+
+
 def delete_term(term_id: int) -> None:
     conn().execute("DELETE FROM vocab_terms WHERE term_id=?", (term_id,))
     conn().commit()
@@ -114,6 +172,69 @@ def create_profile(name: str) -> str:
         " VALUES (?,?,?,?)", (profile_id, name.strip(), ts, ts))
     conn().commit()
     return profile_id
+
+
+def list_profiles() -> list[dict]:
+    rows = conn().execute(
+        "SELECT p.profile_id, p.name,"
+        " (SELECT count(*) FROM vocab_profile_packs pp WHERE pp.profile_id=p.profile_id),"
+        " (SELECT count(*) FROM vocab_assignments a WHERE a.profile_id=p.profile_id)"
+        " FROM vocab_profiles p ORDER BY p.name").fetchall()
+    return [{"profile_id": r[0], "name": r[1], "packs": int(r[2]),
+             "assignments": int(r[3])} for r in rows]
+
+
+def profile_detail(profile_id: str) -> dict | None:
+    row = conn().execute(
+        "SELECT profile_id, name FROM vocab_profiles WHERE profile_id=?",
+        (profile_id,)).fetchone()
+    if not row:
+        return None
+    packs = conn().execute(
+        "SELECT pp.pack_id, pp.position, p.name, p.kind, p.enabled"
+        " FROM vocab_profile_packs pp JOIN vocab_packs p ON p.pack_id=pp.pack_id"
+        " WHERE pp.profile_id=? ORDER BY pp.position, p.name", (profile_id,)).fetchall()
+    assigned = conn().execute(
+        "SELECT agent_id, team_id FROM vocab_assignments WHERE profile_id=?",
+        (profile_id,)).fetchall()
+    return {
+        "profile_id": row[0], "name": row[1],
+        "packs": [{"pack_id": r[0], "position": r[1], "name": r[2],
+                   "kind": r[3], "enabled": bool(r[4])} for r in packs],
+        "assignments": [{"agent_id": r[0] or "", "team_id": r[1] or ""}
+                        for r in assigned],
+    }
+
+
+def delete_profile(profile_id: str) -> None:
+    conn().execute("DELETE FROM vocab_assignments WHERE profile_id=?", (profile_id,))
+    conn().execute("DELETE FROM vocab_profile_packs WHERE profile_id=?", (profile_id,))
+    conn().execute("DELETE FROM vocab_profiles WHERE profile_id=?", (profile_id,))
+    conn().commit()
+
+
+def remove_pack_from_profile(profile_id: str, pack_id: str) -> None:
+    conn().execute(
+        "DELETE FROM vocab_profile_packs WHERE profile_id=? AND pack_id=?",
+        (profile_id, pack_id))
+    conn().commit()
+
+
+def unassign(*, agent_id: str = "", team_id: str = "") -> None:
+    if agent_id.strip():
+        conn().execute("DELETE FROM vocab_assignments WHERE agent_id=?", (agent_id.strip(),))
+    if team_id.strip():
+        conn().execute("DELETE FROM vocab_assignments WHERE team_id=?", (team_id.strip(),))
+    conn().commit()
+
+
+def assignments() -> list[dict]:
+    rows = conn().execute(
+        "SELECT a.profile_id, p.name, a.agent_id, a.team_id"
+        " FROM vocab_assignments a JOIN vocab_profiles p ON p.profile_id=a.profile_id"
+        " ORDER BY a.created_at").fetchall()
+    return [{"profile_id": r[0], "profile_name": r[1], "agent_id": r[2] or "",
+             "team_id": r[3] or ""} for r in rows]
 
 
 def add_pack_to_profile(profile_id: str, pack_id: str, position: int = 0) -> None:
