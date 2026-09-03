@@ -34,6 +34,18 @@ token="$(docker exec "$NAME" python3 -c \
 curl -fsS -H "Authorization: Bearer $token" \
     "http://127.0.0.1:${PORT}/status" >/dev/null
 
+server_info="$(curl -fsS -H "Authorization: Bearer $token" "http://127.0.0.1:${PORT}/server-info")"
+python3 -c '
+import json, sys
+sys.path.insert(0, "tests/contract")
+import schema_check
+info = json.loads(sys.argv[1])
+schema = json.load(open("contract/schemas/server-info.json"))
+schema_check.validate(info, schema)
+version = str(info.get("clarp_version", ""))
+assert version and version[0].isdigit(), f"invalid clarp_version: {version!r}"
+' "$server_info"
+
 server_id="$(docker exec "$NAME" sqlite3 /data/clarp/state.sqlite \
     "select value from settings where key='server_instance_id';")"
 [[ -n "$server_id" ]]

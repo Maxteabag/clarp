@@ -54,6 +54,7 @@ COPY scripts ./scripts
 COPY bin/clarp-admin.py ./bin/clarp-admin.py
 COPY bin/clarp-tui.py ./bin/clarp-tui.py
 COPY config.example.toml ./config.example.toml
+COPY pyproject.toml ./pyproject.toml
 COPY LICENSE.md COMMERCIAL_LICENSE.md ./
 ARG CLARP_VERSION=dev
 RUN printf '%s\n' "$CLARP_VERSION" > ./DEPLOYED_VERSION \
