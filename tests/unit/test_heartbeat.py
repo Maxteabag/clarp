@@ -650,3 +650,42 @@ def test_heartbeat_prompt_and_noop_are_tagged_in_messages():
     ]
     assert [m["origin"] for m in visible] == ["heartbeat", "heartbeat"]
     assert heartbeat._state_for(aid).noop_streak == 0  # noqa: SLF001
+
+
+def test_interrupted_agent_with_usage_limit_revives_after_interval(monkeypatch):
+    _heartbeat_test_env(monkeypatch, base=40, cap=160)
+    aid = _agent("revive_test")
+    agents_db.record_state(aid, AgentState.INTERRUPTED, {
+        "reason": "usage_limit",
+        "message": "Usage limit reached",
+    })
+    db.conn().execute(
+        "UPDATE state_log SET ts = 1000000 WHERE agent_id = ?",
+        (aid,),
+    )
+    assert heartbeat.pending_heartbeat_agents(now=1010.0) == []
+
+    due = heartbeat.pending_heartbeat_agents(now=1041.0)
+    assert [a["agent_id"] for a in due] == [aid]
+
+    agent_row = agents_db.get_by_agent_id(aid)
+    prompt = heartbeat.heartbeat_prompt_text(agent_row)
+    assert prompt.startswith(heartbeat.INTERRUPTED_HEARTBEAT_PREFIX)
+    assert heartbeat.should_skip_heartbeat_prompt(prompt)
+
+
+def test_user_stopped_agent_never_revives(monkeypatch):
+    _heartbeat_test_env(monkeypatch, base=40, cap=160)
+    aid = _agent("user_stopped_test")
+    agents_db.record_state(aid, AgentState.INTERRUPTED, {
+        "source": "user_stop",
+        "message": "Turn stopped",
+    })
+    db.conn().execute(
+        "UPDATE state_log SET ts = 1000000 WHERE agent_id = ?",
+        (aid,),
+    )
+    assert heartbeat.pending_heartbeat_agents(now=2000.0) == []
+    agent_row = agents_db.get_by_agent_id(aid)
+    assert heartbeat.agent_schedule(agent_row, now=2000.0)["next_heartbeat_at"] is None
+

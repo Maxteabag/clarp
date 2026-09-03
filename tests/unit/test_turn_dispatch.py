@@ -878,6 +878,24 @@ def test_usage_limit_notifies_without_retry(tmp_path):
     assert state["detail"]["message"] == "Usage limit reached"
 
 
+def test_heartbeat_turn_failure_records_heartbeat_noop(tmp_path, monkeypatch):
+    service, backends, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
+    recorded = []
+    monkeypatch.setattr(
+        "lib.heartbeat.record_heartbeat_noop",
+        lambda aid: recorded.append(aid),
+    )
+    service.dispatch(text="Heartbeat check", requested_session="mike", trace_id="t",
+                     origin="heartbeat", synthesize_audio=False)
+    _, call = backends.spawned[0]
+    call["on_error"]("RESOURCE_EXHAUSTED: exceeded your current quota")
+
+    state = agents_db.latest_state(agent_id)
+    assert state["kind"] == AgentState.INTERRUPTED
+    assert recorded == [agent_id]
+
+
+
 def test_codex_usage_limit_terminal_references_provider_event(
     tmp_path, monkeypatch,
 ):

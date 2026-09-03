@@ -40,6 +40,11 @@ RESTART_HEARTBEAT_PREFIX = (
     "interrupted. Re-establish the current workspace state and continue any "
     "unfinished active commitment without repeating completed work.\n\n"
 )
+INTERRUPTED_HEARTBEAT_PREFIX = (
+    "Your previous turn was interrupted or paused by a system limit. "
+    "Re-establish the current workspace state and continue any unfinished "
+    "active commitment without repeating completed work.\n\n"
+)
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 30 * 60
 MIN_WAKE_SPACING_SEC = 30
 FLOOD_WINDOW_SEC = 60
@@ -92,13 +97,30 @@ def reset_for_tests() -> None:
         _STATE_BY_AGENT.clear()
 
 
+def _is_user_stopped(latest: dict[str, Any]) -> bool:
+    detail = latest.get("detail") or {}
+    if not isinstance(detail, dict):
+        return False
+    return bool(
+        detail.get("source") == "user_stop"
+        or detail.get("reason") == "interrupted"
+    )
+
+
 def heartbeat_prompt_text(agent: dict | None = None) -> str:
     """Return the bounded heartbeat prompt plus explicit durable plan state."""
+    prefix = ""
+    if agent:
+        agent_id = str(agent.get("agent_id") or "").strip()
+        if agent_id:
+            latest = agents_db.latest_state(agent_id) or {}
+            if latest.get("kind") == AgentState.INTERRUPTED and not _is_user_stopped(latest):
+                prefix = INTERRUPTED_HEARTBEAT_PREFIX
     if not agent:
-        return HEARTBEAT_PROMPT
+        return prefix + HEARTBEAT_PROMPT
     session = str(agent.get("session") or "").strip()
     if not session:
-        return HEARTBEAT_PROMPT
+        return prefix + HEARTBEAT_PROMPT
     try:
         from . import task_plans
 
@@ -107,7 +129,7 @@ def heartbeat_prompt_text(agent: dict | None = None) -> str:
         log_exception("heartbeatPlanLoadFail", e, detail=session)
         plan = None
     if not plan:
-        return HEARTBEAT_PROMPT + "\n\nDurable plan: none active."
+        return prefix + HEARTBEAT_PROMPT + "\n\nDurable plan: none active."
     lines = [f"Durable plan: {str(plan.get('title') or '')[:240]}"]
     shown = 0
     for item in plan.get("items") or []:
@@ -126,7 +148,7 @@ def heartbeat_prompt_text(agent: dict | None = None) -> str:
             break
     if shown == 0:
         lines.append("- No pending, in-progress, or blocked items.")
-    return HEARTBEAT_PROMPT + "\n\n" + "\n".join(lines)
+    return prefix + HEARTBEAT_PROMPT + "\n\n" + "\n".join(lines)
 
 
 def restart_heartbeat_prompt_text(agent: dict) -> str:
@@ -328,7 +350,13 @@ def _reset_backoff_locked(state: _HeartbeatState) -> None:
 
 
 def should_skip_heartbeat_prompt(text: str) -> bool:
-    return str(text or "").strip() == HEARTBEAT_PROMPT
+    clean = str(text or "").strip()
+    return (
+        clean == HEARTBEAT_PROMPT
+        or clean.startswith(HEARTBEAT_PROMPT)
+        or clean.startswith(RESTART_HEARTBEAT_PREFIX)
+        or clean.startswith(INTERRUPTED_HEARTBEAT_PREFIX)
+    )
 
 
 def strip_heartbeat_ack(text: str) -> tuple[bool, str]:
@@ -446,7 +474,9 @@ def _skip_reason(*, agent: dict, state: _HeartbeatState, now: float) -> str:
     _wake_from_external_signal(agent_id, state)
     latest = agents_db.latest_state(agent_id) or {}
     latest_kind = latest.get("kind")
-    if latest_kind in (AgentState.INTERRUPTED, AgentState.WAITING):
+    if latest_kind == AgentState.WAITING:
+        return str(latest_kind)
+    if latest_kind == AgentState.INTERRUPTED and _is_user_stopped(latest):
         return str(latest_kind)
     if agents_db.is_busy(agent_id):
         return "busy"
@@ -457,10 +487,16 @@ def _skip_reason(*, agent: dict, state: _HeartbeatState, now: float) -> str:
     recent = _recent_real_activity_reason(agent_id, now)
     if recent:
         return recent
-    if state.last_started and now - state.last_started < MIN_WAKE_SPACING_SEC:
+    interrupted_at = (
+        float(latest.get("ts") or 0.0) / 1000.0
+        if latest_kind == AgentState.INTERRUPTED
+        else 0.0
+    )
+    last_event = max(state.last_started, interrupted_at)
+    if last_event and now - last_event < MIN_WAKE_SPACING_SEC:
         return "min-spacing"
     interval = _effective_interval_sec(state)
-    if state.last_started and now - state.last_started < interval:
+    if last_event and now - last_event < interval:
         return "not-due"
     if _flooded(state, now):
         return "flood"
@@ -496,21 +532,34 @@ def agent_schedule(agent: dict, *, now: float | None = None) -> dict:
     interval = int(_effective_interval_sec(state))
     next_at = None
     if agent.get("heartbeat_enabled") and not state.dormant:
-        next_at = state.last_started + interval if state.last_started else current
-        quiet_period = _quiet_period_sec()
-        if quiet_period > 0:
-            try:
-                last_activity_ms = _last_real_message_activity_ms(
-                    agent_id)
-            except Exception as e:  # noqa: BLE001
-                log_exception(
-                    "heartbeatScheduleActivityFail", e,
-                    detail=agent_id)
-                last_activity_ms = 0
-            if last_activity_ms:
-                next_at = max(
-                    next_at, last_activity_ms / 1000.0 + quiet_period)
-        next_at = max(current, next_at)
+        latest = agents_db.latest_state(agent_id) or {}
+        latest_kind = latest.get("kind")
+        if latest_kind == AgentState.WAITING or (
+            latest_kind == AgentState.INTERRUPTED and _is_user_stopped(latest)
+        ):
+            next_at = None
+        else:
+            interrupted_at = (
+                float(latest.get("ts") or 0.0) / 1000.0
+                if latest_kind == AgentState.INTERRUPTED
+                else 0.0
+            )
+            last_event = max(state.last_started, interrupted_at)
+            next_at = last_event + interval if last_event else current
+            quiet_period = _quiet_period_sec()
+            if quiet_period > 0:
+                try:
+                    last_activity_ms = _last_real_message_activity_ms(
+                        agent_id)
+                except Exception as e:  # noqa: BLE001
+                    log_exception(
+                        "heartbeatScheduleActivityFail", e,
+                        detail=agent_id)
+                    last_activity_ms = 0
+                if last_activity_ms:
+                    next_at = max(
+                        next_at, last_activity_ms / 1000.0 + quiet_period)
+            next_at = max(current, next_at)
     return {
         "enabled": bool(agent.get("heartbeat_enabled")),
         "last_started_at": int(state.last_started * 1000) if state.last_started else None,
