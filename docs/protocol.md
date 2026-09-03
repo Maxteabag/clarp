@@ -260,8 +260,7 @@ about 20 s.
 
 `{"session": "rachel"}`. Terminates the running turn, records an
 `interrupted` state, pauses the queue, and broadcasts `agent-state` and
-`queue-updated`. Response: `{"ok": true, "terminated": n, "queue_depth": …,
-"queue_paused": true, "queue_revision": …}`.
+`queue-updated`. Response: `{"ok": true, "terminated": n}`.
 
 Related: `GET /turn-queue?session=` lists queued turns; `POST /turn-queue/<id>/send`
 releases one.

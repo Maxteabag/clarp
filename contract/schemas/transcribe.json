@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clarp.local/contract/schemas/transcribe.json",
+  "$title": "POST /transcribe",
+  "description": "Request is a binary audio body (Content-Type of the recording). Response carries the text plus the trace_id to pass on the following /send.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["text", "trace_id"],
+  "properties": {
+    "text": {"type": "string"},
+    "trace_id": {"type": "string"},
+    "transcription_id": {"type": "string"},
+    "ends_terminal": {"type": "boolean"},
+    "hands_free": {"type": "boolean"},
+    "herald_consumed": {"type": "boolean"},
+    "orchestrator_skip_herald": {"type": "boolean"},
+    "cached": {"type": "boolean"}
+  }
+}

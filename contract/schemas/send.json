@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clarp.local/contract/schemas/send.json",
+  "$title": "POST /send",
+  "description": "200 means accepted, not delivered. Delivery is proven when u-<client_msg_id> appears in /log.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok", "session", "dispatch", "trace_id"],
+  "properties": {
+    "ok": {"type": "boolean"},
+    "session": {"type": "string"},
+    "dispatch": {"type": "string"},
+    "queued": {"type": "boolean"},
+    "queue_depth": {"type": "integer"},
+    "queue_revision": {"type": "integer"},
+    "trace_id": {"type": "string"},
+    "error": {"type": "string"},
+    "orchestrator": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "action": {"type": "string"},
+        "decision_id": {"type": ["string", "null"]},
+        "decision": {}
+      }
+    }
+  }
+}
