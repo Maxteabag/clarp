@@ -39,13 +39,19 @@ _BUDGETS: dict[str, Budget] = {
     "whisper.cpp": Budget(
         provider="whisper.cpp", model="*", unit=Unit.TOKENS,
         capacity=WHISPER_PROMPT_TOKENS, supports_prose=True),
+    # Deepgram permits 500 tokens of keyterms and recommends far fewer;
+    # 50 terms keeps every term's weight meaningful.
     "deepgram": Budget(
         provider="deepgram", model="nova-3", unit=Unit.TERMS, capacity=50),
+    # Cartesia's batch endpoint takes no biasing at all. A zero budget is the
+    # honest declaration; the app shows it and the compiler spends nothing.
     "cartesia": Budget(
-        provider="cartesia", model="ink-2", unit=Unit.TERMS, capacity=100),
+        provider="cartesia", model="ink-whisper", unit=Unit.TERMS, capacity=0),
+    # Scribe v2 accepts up to 1000 keyterms under 50 characters; 100 is where
+    # ElevenLabs' own billing minimum kicks in, and plenty for one turn.
     "elevenlabs": Budget(
-        provider="elevenlabs", model="scribe-v2-realtime", unit=Unit.TERMS,
-        capacity=50, max_term_chars=20),
+        provider="elevenlabs", model="scribe_v2", unit=Unit.TERMS,
+        capacity=100, max_term_chars=49),
     "assemblyai": Budget(
         provider="assemblyai", model="universal-3", unit=Unit.WORDS,
         capacity=1500, supports_prose=True),
