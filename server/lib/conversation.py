@@ -123,7 +123,7 @@ def load_conversation(*, session: str, after_revision: int = 0,
                     "parse_ms": round((parsed_at - parse_started) * 1000, 3),
                     "store_ms": round((stored_at - parsed_at) * 1000, 3),
                     "total_ms": round((stored_at - import_started) * 1000, 3),
-                    "source_bytes": latest.stat().st_size,
+                    "source_bytes": transcript_import_cache.source_size(latest),
                 },
             )
 

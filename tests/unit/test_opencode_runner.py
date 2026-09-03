@@ -119,3 +119,104 @@ def test_sqlite_transcript_roundtrip(tmp_path):
     path = opencode_transcript.find_latest_jsonl("ses_1", home=tmp_path)
     turns = opencode_transcript.parse_turns(path)
     assert [row["role"] for row in turns] == ["user", "assistant"]
+
+
+class _Recorder:
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        return len(self.calls)
+
+
+def _voice_agent(monkeypatch, *, focused="someone-else"):
+    monkeypatch.setattr(opencode_runner.agents_db,
+                        "latest_turn_synthesize_audio", lambda _agent_id: True)
+    monkeypatch.setattr(opencode_runner.agents_db, "get_by_agent_id",
+                        lambda _agent_id: {"persona": "Mike", "voice_id": "voice-1"})
+    monkeypatch.setattr(opencode_runner.agents_db, "get_focus", lambda: focused)
+    monkeypatch.setattr(opencode_runner.agents_db, "get_trace", lambda _agent_id: "trace-db")
+
+
+def test_speak_enqueues_with_voice_identity(monkeypatch):
+    _voice_agent(monkeypatch)
+    enqueue = _Recorder()
+    st = opencode_runner._TurnState()
+    text = "<speak>Pong.</speak>\n\npong"
+    opencode_runner._speak(text, st, agent_id="a1", session="mike-1",
+                           trace_id="trace-arg", enqueue=enqueue)
+    # Same block again in a later event: spoken once.
+    opencode_runner._speak(text, st, agent_id="a1", session="mike-1",
+                           trace_id="trace-arg", enqueue=enqueue)
+    assert len(enqueue.calls) == 1
+    call = enqueue.calls[0]
+    assert call["voice_id"] == "voice-1"
+    assert call["source"] == "pwa"
+    assert call["session"] == "mike-1"
+    assert call["agent_id"] == "a1"
+    assert call["trace_id"] == "trace-db"
+    assert call["synthesize_audio"] is True
+    assert call["text"] == "Mike here. Pong."
+
+
+def test_speak_skips_unmarked_text_and_focused_prefix(monkeypatch):
+    _voice_agent(monkeypatch, focused="a1")
+    enqueue = _Recorder()
+    st = opencode_runner._TurnState()
+    opencode_runner._speak("plain prose only", st, agent_id="a1",
+                           session="s", trace_id="", enqueue=enqueue)
+    assert enqueue.calls == []
+    opencode_runner._speak("<speak>Hi.</speak>", st, agent_id="a1",
+                           session="s", trace_id="", enqueue=enqueue)
+    assert [c["text"] for c in enqueue.calls] == ["Hi."]
+
+
+def test_speak_is_silent_without_voice_turn(monkeypatch):
+    monkeypatch.setattr(opencode_runner.agents_db,
+                        "latest_turn_synthesize_audio", lambda _agent_id: False)
+    enqueue = _Recorder()
+    opencode_runner._speak("<speak>Hi.</speak>", opencode_runner._TurnState(),
+                           agent_id="a1", session="s", trace_id="", enqueue=enqueue)
+    assert enqueue.calls == []
+
+
+def test_broadcast_sends_one_event_dict():
+    class Stream:
+        def __init__(self):
+            self.events = []
+
+        def broadcast(self, event_dict):
+            self.events.append(event_dict)
+
+    stream = Stream()
+    opencode_runner._broadcast(stream, "a1", "mike-1")
+    assert stream.events == [{
+        "type": "transcript-updated", "agent_id": "a1", "session": "mike-1",
+    }]
+
+
+def test_step_start_is_thinking_not_a_tool(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    events = [
+        {"type": "step_start", "sessionID": "ses_x", "part": {"type": "step-start"}},
+        {"type": "text", "sessionID": "ses_x", "part": {"type": "text", "text": "ok"}},
+        {"type": "step_finish", "sessionID": "ses_x", "part": {"type": "step-finish"}},
+    ]
+    _install_fake_opencode(
+        bin_dir, "".join(json.dumps(row) + "\n" for row in events))
+    states: list[str] = []
+    monkeypatch.setattr(opencode_runner, "_record_state",
+                        lambda _agent_id, kind, _detail: states.append(kind))
+    monkeypatch.setattr(opencode_runner.agents_db, "get_by_agent_id", lambda _id: None)
+    monkeypatch.setattr(opencode_runner.agents_db,
+                        "latest_turn_synthesize_audio", lambda _id: False)
+    handle = opencode_runner.spawn_turn(
+        text="hello", cwd=tmp_path, agent_id="a1", session="s",
+        on_session_init=lambda _sid: True, enqueue=lambda **_k: 1,
+    )
+    handle.drain_thread.join(timeout=5)
+    assert "thinking" in states
+    assert "tool" not in states
