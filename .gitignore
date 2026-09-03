@@ -25,3 +25,9 @@ playwright-report/
 
 # Built PWA bundle — install.sh / Docker run npm run build
 static/app/
+
+# Local Docker Compose overrides
+compose.override.yaml
+compose.override.yml
+*.override.yaml
+*.override.yml
