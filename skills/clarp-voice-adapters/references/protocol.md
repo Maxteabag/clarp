@@ -14,9 +14,17 @@ relative executable. Schema version 1 requires all three operations:
   "audio_format": "audio/mpeg",
   "default_voice": "voice-one",
   "can_fallback": true,
+  "ssml": false,
   "timeout_seconds": 120
 }
 ```
+
+`ssml` declares whether the engine parses SSML. It defaults to `false`, in
+which case Clarp strips `<break>`, `<speed>`, `<volume>` and `<emotion>` tags
+(each replaced by a space) before `preview` and `synthesize`, so a plain
+text-to-speech model never reads "break time equals 300 milliseconds" aloud.
+Set it to `true` only for an engine that honours the markup; it then receives
+`<break>` pause tags intact.
 
 `default_voice` is required and must exactly match an ID returned by the
 `voices` operation. The manager verifies this before installation so heralds

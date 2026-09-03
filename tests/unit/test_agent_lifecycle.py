@@ -152,6 +152,27 @@ def test_lifecycle_service_preserves_voice_when_relaunch_omits_one(tmp_path):
     assert agents_db.favorite_paths()[0]["path"] == str(other)
 
 
+def test_lifecycle_service_preserves_cwd_when_relaunch_omits_one(tmp_path):
+    """A relaunch inherits the directory, like it inherits voice and backend.
+
+    Without this an omitted cwd falls back to $HOME, which silently moves the
+    agent out of its repo on a host and is refused outright in a container.
+    """
+    ctx = _ctx(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(repo), session="rachel",
+    )
+
+    AgentLifecycleService(ctx).create({
+        "name": "Rachel",
+        "replace_sid": "rachel",
+    })
+
+    assert agents_db.get_by_session("rachel")["cwd"] == str(repo)
+
+
 def test_path_usage_ranks_by_count_then_recency(tmp_path):
     first = tmp_path / "first"
     second = tmp_path / "second"

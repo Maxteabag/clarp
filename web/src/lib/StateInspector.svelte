@@ -171,7 +171,7 @@
           <span class="state-key">server contact:</span>
           <span class="state-val" class:match={verdict.state === Health.OK}
                 class:warn={verdict.state === Health.STALE}
-                class:error={verdict.state === Health.WEDGED}>
+                class:error={verdict.state === Health.WEDGED || verdict.state === Health.UNAUTHORIZED}>
             {verdict.state}{verdict.reason ? ` · ${verdict.reason}` : ''}
           </span>
         </div>

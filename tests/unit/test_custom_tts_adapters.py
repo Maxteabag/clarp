@@ -16,13 +16,15 @@ def _isolate_preview_cache(tmp_path, monkeypatch):
         custom_tts_adapters, "PREVIEW_CACHE", tmp_path / "voice-previews")
 
 
-def _package(root: Path, *, adapter_id: str = "custom.test") -> Path:
+def _package(root: Path, *, adapter_id: str = "custom.test",
+             ssml: bool | None = None) -> Path:
     root.mkdir(parents=True)
     executable = root / "adapter"
     executable.write_text("""#!/usr/bin/env python3
 import json, pathlib, sys, wave
 request = json.load(sys.stdin)
 operation = request.get("operation")
+pathlib.Path(__file__).with_name("last-request.json").write_text(json.dumps(request))
 if operation == "voices":
     print(json.dumps({"ok": True, "voices": [
         {"id": "warm", "name": "Warm", "description": "Warm test voice"},
@@ -50,8 +52,46 @@ else:
         "audio_format": "audio/wav",
         "default_voice": "warm",
         "can_fallback": True,
+        **({} if ssml is None else {"ssml": ssml}),
     }))
     return root
+
+
+def _last_request(package: Path) -> dict:
+    return json.loads((package / "last-request.json").read_text())
+
+
+SPOKEN = 'repo is clean <break time="350ms"/> nothing broken.'
+
+
+def test_adapter_without_ssml_capability_receives_no_break_tags(tmp_path, monkeypatch):
+    # Default is no SSML: a new adapter is safe by default and never has the
+    # pause markup read aloud (issue #14).
+    package = _package(tmp_path / "installed/custom.test")
+    monkeypatch.setattr(custom_tts_adapters, "ROOT", tmp_path / "installed")
+    manifest = custom_tts_adapters.get("custom.test")
+    assert manifest.ssml is False
+    assert manifest.provider_row()["ssml"] is False
+
+    custom_tts_adapters.synthesize(
+        manifest, text=SPOKEN, voice="warm", out_path=tmp_path / "out.mp3")
+    assert _last_request(package)["text"] == "repo is clean nothing broken."
+
+    custom_tts_adapters.preview(
+        manifest, text=SPOKEN, voice="warm", out_path=tmp_path / "preview.mp3")
+    assert "<break" not in _last_request(package)["text"]
+
+
+def test_adapter_declaring_ssml_receives_break_tags_intact(tmp_path, monkeypatch):
+    package = _package(tmp_path / "installed/custom.test", ssml=True)
+    monkeypatch.setattr(custom_tts_adapters, "ROOT", tmp_path / "installed")
+    manifest = custom_tts_adapters.get("custom.test")
+    assert manifest.ssml is True
+    assert manifest.provider_row()["ssml"] is True
+
+    custom_tts_adapters.synthesize(
+        manifest, text=SPOKEN, voice="warm", out_path=tmp_path / "out.mp3")
+    assert _last_request(package)["text"] == SPOKEN
 
 
 def test_install_discover_and_test_complete_adapter(tmp_path, monkeypatch):

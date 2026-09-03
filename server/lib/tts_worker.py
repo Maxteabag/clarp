@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import agents as agents_db
+from . import clip_pacing
 from . import health
 from . import tts_queue
 from .clip_delivery import ClipDelivery, ClipDeliverySession
@@ -303,21 +304,32 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
             session=session, row=row, agent=agent, trace_id=trace_id,
         )
 
+    # Chunk pacing: a pause between provider chunks is the server-side
+    # twin of a client stall, and the only way to tell the two apart later.
+    paced_feed, finish_pacing = clip_pacing.track(
+        session.feed,
+        clip_id=getattr(session, "clip_id", None),
+        delivery=getattr(delivery, "name", ""),
+        emit=_emit,
+        context=_event_context(row, agent),
+    )
     try:
         bytes_written = _synthesize(
             cfg=cfg,
             row=row,
             agent=agent,
             out_path=session.target_path,
-            on_chunk=session.feed,
+            on_chunk=paced_feed,
             trace_id=trace_id,
             delivery_fields=session.sse_fields,
         )
     except Exception as e:  # provider adapters normalize failures to queue state
         session.fail(str(e))
+        finish_pacing("failed")
         return _PwaStreamResult(False, error=str(e))
 
     final = session.finalize(total_bytes=bytes_written)
+    finish_pacing("complete")
 
     if publish_late:
         _publish_clip_event(

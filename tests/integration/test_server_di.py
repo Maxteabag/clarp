@@ -131,6 +131,31 @@ def test_production_startup_requests_restart_heartbeat_recovery(
         srv.server_close()
 
 
+def test_production_startup_marks_restart_interrupted_turns(
+    fake_ctx, monkeypatch,
+):
+    """Issue #11: the previous process's in-flight turn is marked before the
+    restart heartbeat asks the agent to carry on."""
+    from lib import heartbeat, interrupted_turns
+
+    order: list[str] = []
+    monkeypatch.setattr(
+        interrupted_turns, "recover_after_restart",
+        lambda stream=None: order.append("mark") or [])
+    monkeypatch.setattr(
+        heartbeat.HeartbeatScheduler,
+        "run_restart_recovery_once",
+        lambda _scheduler: order.append("heartbeat") or 0,
+    )
+    srv = build_server(
+        fake_ctx, _free_port(), bind_addr="127.0.0.1",
+        restart_recovery=True)
+    try:
+        assert order == ["mark", "heartbeat"]
+    finally:
+        srv.server_close()
+
+
 def test_injected_test_server_does_not_run_restart_recovery(
     fake_ctx, monkeypatch,
 ):

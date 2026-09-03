@@ -15,7 +15,11 @@ def validate_workspace_path(path: pathlib.Path) -> pathlib.Path:
     root = workspace_root()
     resolved = path.expanduser().resolve()
     if root is not None and not resolved.is_relative_to(root):
-        raise ValueError(f"path is outside the Clarp workspace root: {root}")
+        # Name the rejected path, not just the root. The common cause is an
+        # omitted cwd falling back to $HOME, and a message that quotes only the
+        # root reads as if the root itself were refused.
+        raise ValueError(
+            f"path {resolved} is outside the Clarp workspace root {root}")
     return resolved
 
 

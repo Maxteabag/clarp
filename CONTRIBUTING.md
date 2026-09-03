@@ -49,6 +49,28 @@ to a disposable container; never point it at a server you care about.
 - **No compatibility shims.** Server and clients ship together. When a shape
   changes, change the producer and every consumer; do not keep the old path.
 
+## When a new model ships
+
+The container pins the agent CLIs (`CLAUDE_CODE_VERSION`, `CODEX_VERSION` in the
+`Dockerfile`). A model refuses a CLI older than its own minimum — every turn
+comes back `400 ... does not support this model; version X or newer is
+required` — and a container user cannot fix that from inside: `stable` only
+publishes on a `v*` tag, so the pin is what they are stuck with until the next
+release.
+
+So a model release means a release here:
+
+1. Bump `CLAUDE_CODE_VERSION` (and `CODEX_VERSION` while you are there) in the
+   `Dockerfile`.
+2. Tag it — `git tag vX.Y.Z && git push origin vX.Y.Z`. A push to `main` only
+   publishes `edge`; `stable` needs the tag.
+3. On each deployment: `docker compose pull && docker compose up -d`.
+4. **Relaunch the running agents.** A live agent keeps the CLI process it
+   started with, so it keeps failing until it is relaunched — updating the
+   package alone does nothing for it. Pass `resume_session_id` when you
+   relaunch, or the agent comes back with its chat history on screen and no
+   memory of it.
+
 ## Commits and pull requests
 
 Write the commit message for the person reading `git log` in a year: what
