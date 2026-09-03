@@ -16,4 +16,8 @@ these files are the parts a computer can verify.
   exist.
 - `ios/` — `sync-fixtures.sh` copies the fixtures into the clarp-ios
   CoreBehaviorTests target (separate repo, separate PR).
-- `reference-client/` — minimal working client (phase 4).
+- `reference-client/` — `clarp-client.mjs`, a minimal working client
+  (135 lines, no dependencies beyond global fetch).
+  `tests/contract/test_reference_client.py` runs it through one turn
+  against the harness. If it cannot stay small while passing, the
+  contract is too complex.
