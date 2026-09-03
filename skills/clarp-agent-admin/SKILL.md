@@ -46,6 +46,30 @@ POST /personas {name, voice_id, personality, avatar_base64, avatar_symbol}
 persona's voice, personality, and avatar. `DELETE /personas/<name>` removes a
 non-builtin.
 
+## Scheduled Jobs
+
+Configure recurring autonomous turns for agent sessions:
+
+```bash
+# List scheduled jobs for a session
+clarp-admin schedule list --session <session>
+
+# Add a scheduled job (standard 5-part cron or @daily, @hourly, @weekly)
+clarp-admin schedule add <session> \
+  --name "Morning Briefing" \
+  --cron "0 8:30 * * 1-5" \
+  --prompt "Check Outlook mail & calendar and summarize key tasks."
+
+# Toggle enable/disable
+clarp-admin schedule toggle <schedule_id> --enable
+clarp-admin schedule toggle <schedule_id> --disable
+
+# Remove a schedule
+clarp-admin schedule remove <schedule_id>
+```
+
+Schedules are exposed on `GET /agents/snapshot` under `agent.schedules` and can be toggled directly from the Clarp PWA and native iOS apps.
+
 Never register a new personality in the server source — the roster, Cartesia
 voice, and personality tables in `lib/config.py`, or an avatar in
 `static/avatars/`. That path is for built-ins only, and none of it takes

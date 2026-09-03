@@ -48,6 +48,26 @@
           "archived_at": {"type": ["integer", "string", "null"]},
           "heartbeat_enabled": {"type": "boolean"},
           "dreaming_enabled": {"type": "boolean"},
+          "schedules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["schedule_id", "agent_id", "session", "name", "cron_expression", "prompt", "enabled", "created_at", "updated_at"],
+              "properties": {
+                "schedule_id": {"type": "string"},
+                "agent_id": {"type": "string"},
+                "session": {"type": "string"},
+                "name": {"type": "string"},
+                "cron_expression": {"type": "string"},
+                "prompt": {"type": "string"},
+                "enabled": {"type": "boolean"},
+                "last_run_at": {"type": ["integer", "null"]},
+                "next_run_at": {"type": ["integer", "null"]},
+                "created_at": {"type": "integer"},
+                "updated_at": {"type": "integer"}
+              }
+            }
+          },
           "team_ids": {"type": "array", "items": {"type": "string"}}
         }
       }
