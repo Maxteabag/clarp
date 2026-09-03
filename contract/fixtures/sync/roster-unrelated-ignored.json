@@ -1,0 +1,16 @@
+{
+  "title": "roster and wake-ups for other sessions are ignored",
+  "area": "sync",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [{"id": "m1", "role": "assistant", "text": "one", "revision": 1}], "latest_revision": 1, "has_more": false, "missing": false}}},
+    {"sse": {"type": "agent-roster", "kind": "created", "session": "mike"}},
+    {"sse": {"type": "transcript-updated", "session": "mike"}},
+    {"sse": {"type": "agent-focus", "session": "mike", "agent_id": "other"}}
+  ],
+  "expect": {
+    "effects": ["fetch_tail"],
+    "cursor": 1,
+    "turn_ids": ["m1"]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "title": "an acked clip never replays after reconnect",
+  "area": "audio",
+  "steps": [
+    {"replayCheck": {"clip_id": 5, "seen": [3, 5]}},
+    {"replayCheck": {"clip_id": 6, "seen": [3, 5]}}
+  ],
+  "expect": {
+    "effects": [],
+    "replays": [true, false]
+  }
+}

@@ -7,8 +7,13 @@ these files are the parts a computer can verify.
   endpoints plus `sse.json` for the eleven core event types. Every schema
   allows additional properties: the core is additive-only and clients must
   ignore what they do not know.
-- `fixtures/` — golden sync/delivery/audio scenarios (phase 3).
+- `fixtures/` — golden sync/delivery/audio scenarios: JSON steps plus the
+  expected end state, seeded from bugs both clients already hit. The vitest
+  runner (`tests/contract/fixtures.test.js`) feeds them through the pure
+  modules (`static/lib/conversation-sync.js`, `delivery.js`, `protocol.js`);
+  `tests/contract/test_fixtures_validate.py` checks the embedded payloads
+  against `schemas/` so fixtures cannot describe a server that does not
+  exist.
+- `ios/` — `sync-fixtures.sh` copies the fixtures into the clarp-ios
+  CoreBehaviorTests target (separate repo, separate PR).
 - `reference-client/` — minimal working client (phase 4).
-
-`tests/contract/` runs the conformance suite against the real server. A
-shape disagreement fails there: fix the server or the prose, not the schema.

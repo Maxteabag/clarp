@@ -1,0 +1,19 @@
+{
+  "title": "a retry reuses the id and confirms once",
+  "area": "delivery",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [{"id": "m0", "role": "assistant", "text": "hi", "revision": 1}], "latest_revision": 1, "has_more": false, "missing": false}}},
+    {"send": {"client_msg_id": "a", "session": "rachel", "text": "question", "at": 1000000}},
+    {"send": {"client_msg_id": "a", "session": "rachel", "text": "question", "at": 1001000, "retry": true}},
+    {"log": {"mode": "delta", "response": {"conversation_id": "c1", "turns": [{"id": "u-a", "role": "user", "text": "question", "revision": 2}], "latest_revision": 2, "has_more": false, "missing": false}}},
+    {"confirm": true}
+  ],
+  "expect": {
+    "effects": ["fetch_tail"],
+    "cursor": 2,
+    "turn_ids": ["m0", "u-a"],
+    "delivered": ["a"],
+    "pending": []
+  }
+}
