@@ -204,7 +204,13 @@
   />
 {/if}
 
-{#if app.showReconnect}
+{#if app.authRejected}
+  <!-- The server is reachable and refusing every request: the saved token is
+       wrong. Waiting or reconnecting cannot fix that, only a fresh link can. -->
+  <div class="reconnect auth-rejected" role="alert">
+    <span>Server rejected the saved token. Run <code>clarp-admin url</code> on the server and open the link it prints.</span>
+  </div>
+{:else if app.showReconnect}
   <button class="reconnect" aria-label="Reconnect" onclick={() => {
     app.showReconnect = false;
     scheduleReconnect();

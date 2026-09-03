@@ -10,7 +10,7 @@
 // as `client.playerAdapterLoaded ver=N` on import so we can tell from a
 // trace whether the iPhone's PWA actually picked up our latest JS or is
 // running a stale SW-cached copy.
-export const PLAYER_ADAPTER_VERSION = 'stage7-history-typography';
+export const PLAYER_ADAPTER_VERSION = 'stage8-fault-monitor';
 
 /**
  * @typedef {{ url: string, session: string, ts?: number, streamable?: boolean,
@@ -27,12 +27,17 @@ export const PLAYER_ADAPTER_VERSION = 'stage7-history-typography';
  * @param {number} [opts.loadTimeoutMs]    fallback after canplaythrough never fires
  * @param {(event: string, detail?: string) => void} [opts.log]  — diagnostics hook
  * @param {(on: boolean) => void} [opts.showSpeaking]  — UI hook
+ * @param {object} [opts.faults]  — audio-faults monitor ({begin, note, end});
+ *   receives the faults this adapter can see but the element never reports as
+ *   events: load timeouts, play() rejections, the end-safety timer firing.
  */
 export function createPlayerAdapter(audioEl, opts = {}) {
   const speed = opts.speed ?? 1.2;
   const loadTimeoutMs = opts.loadTimeoutMs ?? 5000;
   const log = opts.log || (() => {});
   const showSpeaking = opts.showSpeaking || (() => {});
+  const faults = opts.faults || null;
+  const noteFault = (kind, extra) => { try { faults?.note(kind, extra); } catch (_) {} };
 
   return {
     async play(clip) {
@@ -73,6 +78,7 @@ export function createPlayerAdapter(audioEl, opts = {}) {
       audioEl.playbackRate = speed;
       audioEl.defaultPlaybackRate = speed;
       showSpeaking(true);
+      try { faults?.begin(clip, { queuedAt: clip._queuedAt || null }); } catch (_) {}
 
       if (!directStream && audioEl.readyState < 3) {
         log('playWaiting', `rs=${audioEl.readyState}`);
@@ -86,6 +92,7 @@ export function createPlayerAdapter(audioEl, opts = {}) {
           const onFail  = () => {
             cleanup();
             log('playLoadFail', `code=${audioEl.error && audioEl.error.code}`);
+            // The monitor's own 'error' listener records this one.
             res();
           };
           audioEl.addEventListener('canplaythrough', onReady, { once: true });
@@ -93,6 +100,7 @@ export function createPlayerAdapter(audioEl, opts = {}) {
           const timer = setTimeout(() => {
             cleanup();
             log('playLoadTimeout', `rs=${audioEl.readyState}`);
+            noteFault('load-timeout', { ready_state: audioEl.readyState, waited_ms: loadTimeoutMs });
             res();
           }, loadTimeoutMs);
         });
@@ -106,6 +114,8 @@ export function createPlayerAdapter(audioEl, opts = {}) {
       } catch (err) {
         log('playFail', err && err.name);
         showSpeaking(false);
+        noteFault('play-rejected', { error_name: (err && err.name) || String(err) });
+        try { faults?.end({ premature: false, reason: 'play-rejected' }); } catch (_) {}
         // Treat as premature so the scheduler can re-queue (iOS NotAllowed).
         return { premature: true, duration: 0, currentTime: 0 };
       }
@@ -124,6 +134,7 @@ export function createPlayerAdapter(audioEl, opts = {}) {
           : 30000;
         const safety = setTimeout(() => {
           log('playEndTimeout', `cap=${cap}ms cur=${audioEl.currentTime}`);
+          noteFault('end-timeout', { cap_ms: Math.round(cap) });
           finish(false);
         }, cap);
         const finish = premature => {
@@ -131,6 +142,7 @@ export function createPlayerAdapter(audioEl, opts = {}) {
           audioEl.removeEventListener('ended', onEnd);
           audioEl.removeEventListener('error', onError);
           showSpeaking(false);
+          try { faults?.end({ premature }); } catch (_) {}
           resolve({
             premature,
             duration: audioEl.duration || 0,

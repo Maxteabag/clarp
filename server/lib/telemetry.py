@@ -97,6 +97,53 @@ SELECT s.trace_id,s.sent_ms,
   FROM sent s LEFT JOIN first_synth fs ON fs.trace_id=s.trace_id
   LEFT JOIN first_play fp ON fp.trace_id=s.trace_id
   LEFT JOIN done dn ON dn.trace_id=s.trace_id ORDER BY s.sent_ms DESC;
+CREATE VIEW IF NOT EXISTS audio_faults AS
+SELECT ts_iso AS ts,ts,trace_id,clip_id,clip_url,session,
+       json_extract(detail,'$.kind') AS kind,
+       json_extract(detail,'$.delivery') AS delivery,
+       json_extract(detail,'$.stall_ms') AS stall_ms,
+       json_extract(detail,'$.element.current_s') AS at_s,
+       json_extract(detail,'$.element.duration_s') AS duration_s,
+       json_extract(detail,'$.element.position_pct') AS position_pct,
+       json_extract(detail,'$.element.buffered_ahead_ms') AS buffered_ahead_ms,
+       json_extract(detail,'$.element.ready_state') AS ready_state,
+       json_extract(detail,'$.element.network_state') AS network_state,
+       json_extract(detail,'$.element.rate') AS rate,
+       json_extract(detail,'$.element.volume') AS volume,
+       json_extract(detail,'$.element.error_name') AS error_name,
+       json_extract(detail,'$.latency.broadcast_to_queued_ms') AS broadcast_to_queued_ms,
+       json_extract(detail,'$.latency.queued_to_play_start_ms') AS queued_to_play_start_ms,
+       json_extract(detail,'$.latency.play_start_to_sound_ms') AS play_start_to_sound_ms,
+       json_extract(detail,'$.conditions.online') AS online,
+       json_extract(detail,'$.conditions.net_type') AS net_type,
+       json_extract(detail,'$.conditions.net_rtt_ms') AS net_rtt_ms,
+       json_extract(detail,'$.conditions.visibility') AS visibility,
+       json_extract(detail,'$.conditions.sse_open') AS sse_open,
+       json_extract(detail,'$.conditions.mic_recording') AS mic_recording,
+       json_extract(detail,'$.conditions.mic_capturing') AS mic_capturing,
+       json_extract(detail,'$.conditions.mic_level') AS mic_level,
+       json_extract(detail,'$.conditions.queue_len') AS queue_len,
+       json_extract(detail,'$.conditions.machine_state') AS machine_state,
+       json_extract(detail,'$.conditions.battery_level') AS battery_level,
+       detail
+  FROM diagnostic_events WHERE source='client' AND event='audioFault';
+CREATE VIEW IF NOT EXISTS audio_clip_health AS
+SELECT ts_iso AS ts,ts,trace_id,clip_id,clip_url,session,
+       json_extract(detail,'$.delivery') AS delivery,
+       json_extract(detail,'$.ok') AS ok,
+       json_extract(detail,'$.faults') AS faults,
+       json_extract(detail,'$.stall_count') AS stall_count,
+       json_extract(detail,'$.stall_total_ms') AS stall_total_ms,
+       json_extract(detail,'$.played_ms') AS played_ms,
+       json_extract(detail,'$.reached_sound') AS reached_sound,
+       json_extract(detail,'$.latency.broadcast_to_queued_ms') AS broadcast_to_queued_ms,
+       json_extract(detail,'$.latency.queued_to_play_start_ms') AS queued_to_play_start_ms,
+       json_extract(detail,'$.latency.play_start_to_sound_ms') AS play_start_to_sound_ms,
+       json_extract(detail,'$.conditions.net_type') AS net_type,
+       json_extract(detail,'$.conditions.visibility') AS visibility,
+       json_extract(detail,'$.conditions.mic_level') AS mic_level,
+       detail
+  FROM diagnostic_events WHERE source='client' AND event='audioClipSummary';
 """
 
 

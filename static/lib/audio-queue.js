@@ -43,6 +43,7 @@ export function createScheduler({
   currentSession,
   log = _diagLog,
   onClipStatus = () => {},
+  now = () => Date.now(),
 }) {
   const queue = [];
   const seen = new Set();
@@ -62,6 +63,9 @@ export function createScheduler({
     }
     seen.add(key);
     if (clip.ts > lastAudioTs) lastAudioTs = clip.ts;
+    // When the client first held the clip; the fault monitor measures the
+    // queue wait and the broadcast-to-queue lag from this.
+    clip._queuedAt = now();
     queue.push(clip);
     onClipStatus(clip, ClipStatus.QUEUED);
     tick();

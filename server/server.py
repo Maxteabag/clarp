@@ -3679,8 +3679,11 @@ class Handler(BaseHTTPRequestHandler):
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a") as f:
                 for it in items:
+                    line_detail = it.get('detail', '')
+                    if isinstance(line_detail, dict):
+                        line_detail = json.dumps(line_detail, separators=(",", ":"))
                     f.write(f"{time.strftime('%H:%M:%S')} client   "
-                            f"{it.get('event','?')} {it.get('detail','')}\n")
+                            f"{it.get('event','?')} {line_detail}\n")
         except OSError as e:
             log_exception("clogWriteFail", e, detail=str(log_path))
 
@@ -4584,6 +4587,13 @@ def build_server(ctx: ServerContext, port: int,
     broadcast_boot_version(ctx)
     resume_persisted_agents(ctx)
     if restart_recovery:
+        # Mark the turns the previous process took down with it before the
+        # restart heartbeat asks the agents to carry on (issue #11).
+        from lib import interrupted_turns
+        interrupted = interrupted_turns.recover_after_restart(
+            stream=getattr(ctx, "stream", None))
+        if interrupted:
+            log("turnRestartRecovery", f"marked={len(interrupted)}")
         restart_heartbeats = heartbeat_scheduler.run_restart_recovery_once()
         if restart_heartbeats:
             log("heartbeatRestartRecovery", f"sent={restart_heartbeats}")

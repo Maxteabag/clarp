@@ -106,6 +106,13 @@ class AgentLifecycleService:
             if not data.get("backend"):
                 backend = backends.normalize(current.get("backend"))
             existing_agent = agents_db.get_by_session(replace_sid) or {}
+            # A relaunch inherits the agent's directory the same way it inherits
+            # voice and backend. Without this an omitted cwd falls back to $HOME:
+            # on a host that silently wakes the agent up outside its repo, and in
+            # a container it is rejected as outside the workspace root.
+            if not str(data.get("cwd") or "").strip():
+                cwd = _existing_cwd(
+                    current.get("cwd") or existing_agent.get("cwd"))
             previous_backend = backends.normalize(existing_agent.get("backend"))
             retained_model = str(existing_agent.get("model") or "").strip()
             retained_effort = str(existing_agent.get("effort") or "").strip()

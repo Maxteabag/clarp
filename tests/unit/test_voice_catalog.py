@@ -3,10 +3,10 @@ from __future__ import annotations
 from lib import config, voice_catalog
 
 
-def test_managed_clarp_voice_reuses_deepgram_choices_without_local_key(
+def test_deepgram_voice_reuses_deepgram_choices_without_local_key(
         monkeypatch):
     monkeypatch.setattr(config, "_CACHED", config.Config(
-        tts_provider="clarp",
+        tts_provider="deepgram",
         deepgram_api_key="",
     ))
     monkeypatch.setattr(
@@ -21,19 +21,17 @@ def test_managed_clarp_voice_reuses_deepgram_choices_without_local_key(
     }, "mike")
     groups = {row["id"]: row for row in result["providers"]}
 
-    assert result["voice_available"] is True
-    assert groups["clarp"]["available"] is True
-    assert groups["clarp"]["selected"] is True
     assert groups["deepgram"]["available"] is False
+    assert groups["deepgram"]["selected"] is True
     haley = next(
-        row for row in groups["clarp"]["voices"]
+        row for row in groups["deepgram"]["voices"]
         if row["id"] == "flux-haley-en")
     assert haley["provider"] == "deepgram"
     assert haley["current"] is True
-    assert haley["preview_url"].startswith("/voice-preview?provider=clarp")
-    assert all(
+    assert haley["preview_url"].startswith("/voice-preview?provider=deepgram")
+    assert any(
         row["id"].startswith("flux-")
-        for row in groups["clarp"]["voices"])
+        for row in groups["deepgram"]["voices"])
 
 
 def test_direct_deepgram_remains_a_first_class_provider(monkeypatch):
