@@ -397,6 +397,11 @@ def test_send_accepts_and_delivery_is_identity(core_server):
     assert status == 400
     status, raw = _post(base, "/send", json.dumps("{nope").encode())
     assert status == 400, "a JSON string body must not kill the connection"
+    # The guard lives in _read_json, so every JSON handler gets it.
+    status, raw = _post(base, "/select", json.dumps("rachel").encode())
+    assert status == 400, "/select must reject a non-object JSON body"
+    status, raw = _post(base, "/clips/ack", json.dumps(["queued"]).encode())
+    assert status == 400, "/clips/ack must reject a non-object JSON body"
 
 
 def test_stop_select_ack_recoverable_transcribe(core_server):
@@ -484,18 +489,25 @@ def test_sse_replay_and_event_shapes(core_server):
                               "session": "rachel", "agent_id": _agent_id(),
                               "persona": "Rachel", "trace_id": "sse-trace",
                               "streamable": False})
-        # Injected extension-shape events: they ride the real serialization
-        # and replay path; content is crafted, transport is not.
+        # remote-action through its real HTTP producer.
+        with urllib.request.urlopen(
+                base + "/remote-action?action=stop-agent", timeout=10) as r:
+            assert r.status == 200
+        # Injected events: transcript-updated, user-notification and tts-error
+        # need a live backend turn, a classified completion, or a failing TTS
+        # provider to occur naturally. These ride the real serialization and
+        # replay path with server-shaped content (notification ids are
+        # pn-<sha1> strings); only the trigger is faked.
         ctx.stream.broadcast({"type": "transcript-updated", "session": "rachel",
                               "agent_id": _agent_id(),
                               "backend_session_id": "backend-1"})
         ctx.stream.broadcast({"type": "user-notification",
-                              "notification_id": 7, "session": "rachel",
+                              "notification_id": "pn-contract0000000007",
+                              "session": "rachel",
                               "agent_id": _agent_id(), "persona": "Rachel",
                               "preview": "done", "reason": "turn-complete"})
         ctx.stream.broadcast({"type": "tts-error", "session": "rachel",
                               "message": "quota exceeded"})
-        ctx.stream.broadcast({"type": "remote-action", "action": "stop-agent"})
         _wait_for(sub, {"agent-state", "queue-updated", "agent-focus",
                         "audio", "transcript-updated", "user-notification",
                         "tts-error", "remote-action", "server-version"})
