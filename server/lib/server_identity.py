@@ -79,7 +79,13 @@ def clarp_version() -> str:
         from importlib.metadata import version
         return version("clarp-server")
     except Exception:  # noqa: BLE001 - no distribution installed
-        return ""
+        pass
+    for env_var in ("CLARP_IMAGE_VERSION", "CLARP_VERSION", "DEPLOYED_VERSION"):
+        val = os.environ.get(env_var, "").strip().lstrip("v")
+        match = re.match(r"^(\d+\.\d+(?:\.\d+)?)", val)
+        if match:
+            return match.group(1)
+    return ""
 
 
 def get_server_info() -> dict[str, object]:
