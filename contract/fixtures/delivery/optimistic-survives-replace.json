@@ -1,0 +1,89 @@
+{
+  "title": "a tail reload after replace_required keeps unfiled optimistic bubbles",
+  "area": "delivery",
+  "steps": [
+    {
+      "open": true
+    },
+    {
+      "log": {
+        "mode": "tail",
+        "response": {
+          "conversation_id": "c1",
+          "turns": [
+            {
+              "id": "m0",
+              "role": "assistant",
+              "text": "hi",
+              "revision": 1
+            }
+          ],
+          "latest_revision": 1,
+          "has_more": false,
+          "missing": false
+        }
+      }
+    },
+    {
+      "optimistic": {
+        "id": "u-a",
+        "text": "question"
+      }
+    },
+    {
+      "log": {
+        "mode": "delta",
+        "response": {
+          "conversation_id": "c1",
+          "turns": [],
+          "latest_revision": 0,
+          "has_more": false,
+          "missing": false,
+          "replace_required": true
+        }
+      }
+    },
+    {
+      "log": {
+        "mode": "tail",
+        "response": {
+          "conversation_id": "c1",
+          "turns": [
+            {
+              "id": "m0",
+              "role": "assistant",
+              "text": "hi",
+              "revision": 1
+            },
+            {
+              "id": "m1",
+              "role": "assistant",
+              "text": "rebuilt",
+              "revision": 2
+            }
+          ],
+          "latest_revision": 2,
+          "has_more": false,
+          "missing": false
+        }
+      }
+    }
+  ],
+  "expect": {
+    "effects": [
+      "fetch_tail",
+      "drop_cache",
+      "fetch_tail"
+    ],
+    "cursor": 2,
+    "turn_ids": [
+      "m0",
+      "m1"
+    ],
+    "visible_ids": [
+      "m0",
+      "m1",
+      "u-a"
+    ]
+  }
+}

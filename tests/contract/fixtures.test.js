@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   applyLog, applySnapshot, beginFetch, blankSync, endFetch, isClipReplay,
-  onEvent, onOpen, pickClipSource,
+  onEvent, onOpen, pickClipSource, visibleTurns,
 } from '../../static/lib/conversation-sync.js';
 import { AgentState } from '../../static/lib/protocol.js';
 import {
@@ -43,6 +43,7 @@ function runFixture(fx) {
   const effects = [];
   const clipSources = [];
   const replays = [];
+  const optimistic = [];
   let stale = [];
   const currentTurns = () => sync.order.map((id) => sync.turns[id]);
   for (const step of fx.steps) {
@@ -72,20 +73,26 @@ function runFixture(fx) {
       clipSources.push(pickClipSource(step.clip));
     } else if (step.replayCheck !== undefined) {
       replays.push(isClipReplay(step.replayCheck.clip_id, step.replayCheck.seen));
+    } else if (step.optimistic !== undefined) {
+      // The bubble a client paints before POST /send returns.
+      optimistic.push({ role: 'user', optimistic: true, revision: 0, ...step.optimistic });
     } else {
       throw new Error(`unknown fixture step ${JSON.stringify(step)}`);
     }
   }
-  return { sync, delivery, effects, clipSources, replays, stale };
+  return { sync, delivery, effects, clipSources, replays, stale, optimistic };
 }
 
 describe.each(loadFixtures())('$name: $title', ({ body }) => {
   it('ends in the expected state', () => {
-    const { sync, delivery, effects, clipSources, replays, stale } = runFixture(body);
+    const { sync, delivery, effects, clipSources, replays, stale, optimistic } = runFixture(body);
     const ex = body.expect;
     expect(effects).toEqual(ex.effects ?? []);
     if ('cursor' in ex) expect(sync.cursor).toBe(ex.cursor);
     if ('turn_ids' in ex) expect(sync.order).toEqual(ex.turn_ids);
+    if ('visible_ids' in ex) {
+      expect(visibleTurns(sync, optimistic).turns.map((t) => t.id)).toEqual(ex.visible_ids);
+    }
     if ('texts' in ex) expect(sync.order.map((id) => sync.turns[id].text)).toEqual(ex.texts);
     if ('missing' in ex) expect(sync.missing).toBe(ex.missing);
     if ('hasMore' in ex) expect(sync.hasMore).toBe(ex.hasMore);

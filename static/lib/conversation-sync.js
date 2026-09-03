@@ -14,6 +14,10 @@
 // Effects are strings the adapter turns into requests: fetch_tail,
 // fetch_delta, fetch_older, drop_cache. Unknown event types and unknown
 // fields are ignored, never thrown on (additive-only policy).
+//
+// The PWA's conversation store (web/src/stores/conversations.svelte.js) is
+// an adapter over this file and the golden fixtures in contract/fixtures
+// pin its behaviour, so a change here is a change to every client.
 
 export const Effects = Object.freeze({
   FETCH_TAIL: 'fetch_tail',
@@ -31,15 +35,32 @@ export function blankSync(session) {
     order: [],
     hasMore: false,
     missing: false,
+    latestTs: '',
     loaded: false,
     pendingFetch: null,
     wakeWhileFetching: false,
   };
 }
 
+/** Drop the cache. A request already in flight stays in flight. */
 function resetSync(state) {
   const next = blankSync(state.session);
+  next.pendingFetch = state.pendingFetch;
+  next.wakeWhileFetching = state.wakeWhileFetching;
   return next;
+}
+
+/**
+ * Ask for a delta. While a fetch is in flight the wake-up is remembered and
+ * endFetch() turns it into exactly one follow-up, so a burst costs at most
+ * two round trips.
+ */
+export function requestDelta(state) {
+  if (state.pendingFetch) {
+    if (state.wakeWhileFetching) return { state, effects: [] };
+    return { state: { ...state, wakeWhileFetching: true }, effects: [] };
+  }
+  return { state, effects: [Effects.FETCH_DELTA] };
 }
 
 /** Open-chat: load once, otherwise refresh with a delta (handled by caller). */
@@ -61,7 +82,7 @@ export function applySnapshot(state, row) {
     return { state: resetSync(state), effects: [Effects.DROP_CACHE, Effects.FETCH_TAIL] };
   }
   if (state.loaded && head > state.cursor) {
-    return { state, effects: [Effects.FETCH_DELTA] };
+    return requestDelta(state);
   }
   return { state, effects: [] };
 }
@@ -73,12 +94,13 @@ export function applySnapshot(state, row) {
 export function applyLog(state, response, mode) {
   const d = (response && typeof response === 'object') ? response : {};
   if (mode === 'tail') {
-    const next = blankSync(state.session);
+    const next = resetSync(state);
     next.loaded = true;
     next.conversationId = String(d.conversation_id || '');
     next.cursor = Number(d.latest_revision) || 0;
     next.hasMore = !!d.has_more;
     next.missing = !!d.missing;
+    next.latestTs = String(d.latest_ts || '');
     for (const t of Array.isArray(d.turns) ? d.turns : []) {
       if (t && t.id) {
         next.turns[t.id] = t;
@@ -144,10 +166,7 @@ export function onEvent(state, event) {
   const type = String(ev.type || '');
   if (type === 'transcript-updated') {
     if (String(ev.session || '') !== state.session) return { state, effects: [] };
-    if (state.pendingFetch) {
-      return { state: { ...state, wakeWhileFetching: true }, effects: [] };
-    }
-    return { state, effects: [Effects.FETCH_DELTA] };
+    return requestDelta(state);
   }
   if (type === 'agent-roster') {
     const kind = String(ev.kind || '');
@@ -175,6 +194,22 @@ export function endFetch(state) {
   const woken = state.wakeWhileFetching;
   const next = { ...state, pendingFetch: null, wakeWhileFetching: false };
   return { state: next, effects: woken ? [Effects.FETCH_DELTA] : [] };
+}
+
+/**
+ * What the transcript shows: the server's turns in order, then the
+ * optimistic user bubbles the server has not filed yet. A bubble whose id
+ * came back in /log is dropped from the optimistic list; the server row
+ * carries it now (identity by id, never by text or position).
+ */
+export function visibleTurns(state, optimistic) {
+  const known = new Set(state.order);
+  const pending = (Array.isArray(optimistic) ? optimistic : [])
+    .filter((t) => t && t.id && !known.has(t.id));
+  return {
+    turns: [...state.order.map((id) => state.turns[id]), ...pending],
+    optimistic: pending,
+  };
 }
 
 /** Clip URL precedence: playlist_url beats stream_url beats url. */

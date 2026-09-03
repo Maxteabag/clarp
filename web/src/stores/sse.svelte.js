@@ -9,7 +9,7 @@ import {
   rememberUserNotification, setConn, setVersion, syncStatus,
 } from './app.svelte.js';
 import {
-  appendActivity, appendThinking, refreshAll, removeLiveThinking, reset, wake,
+  appendActivity, appendThinking, handleSseEvent, refreshAll, removeLiveThinking, wake,
 } from './conversations.svelte.js';
 import {
   audio, bumpLastAudioTs, lastAudioTs, PLAYER_ADAPTER_VERSION, scheduler,
@@ -150,16 +150,17 @@ function handleEvent(ev) {
     clog('agentRoster', `${ev.kind}:${ev.session || ''}`);
     if (ev.kind === 'deleted' && ev.session) agentSnapshot.remove(ev.session);
     refreshAgentSnapshot().catch(() => {});
-    // Relaunch / fork keeps the session id but the conversation is new.
+    // Relaunch / fork keeps the session id but the conversation is new; the
+    // conversation store's reducer decides what that means for the cache.
+    handleSseEvent(ev);
     const isReset = ev.kind === 'relaunched' || ev.kind === 'forked' || ev.kind === 'created';
-    if (isReset && ev.session) reset(ev.session);
     if (isReset) hooks.closeOverview?.();
 
   } else if (ev.type === SSEType.AGENT_FOCUS) {
     mirrorFocus(ev.session || '', ev.agent_id || '');
 
   } else if (ev.type === SSEType.TRANSCRIPT_UPDATED) {
-    wake(ev.session);
+    handleSseEvent(ev);
 
   } else if (ev.type === SSEType.USER_NOTIFICATION) {
     rememberUserNotification(ev);
