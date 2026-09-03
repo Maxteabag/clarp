@@ -29,6 +29,15 @@ from .vocab import (
 )
 
 
+@dataclass(frozen=True)
+class TranscriptionVocab:
+    """What /transcribe sends the model, and the audit row it belongs to."""
+    payload: str
+    run_id: int
+    provider: str
+    model: str
+
+
 def resolve_root(self_file: pathlib.Path, env) -> pathlib.Path:
     """Locate the project root by looking for static/index.html.
 
@@ -167,6 +176,109 @@ class ServerContext:
         that is the path that makes a transcript traceable to its prompt.
         """
         return self.vocab_compile_result(delegated=delegated).payload
+
+    def vocab_for_transcription(
+        self,
+        *,
+        delegated: bool,
+        session: str = "",
+        trace_id: str = "",
+        requested_model: str = "",
+    ) -> "TranscriptionVocab":
+        """Everything a real /transcribe needs from the vocabulary system.
+
+        Resolves the focused agent (its profile, its workspace), the provider
+        and model actually answering, the recent speech and known corrections,
+        compiles, and writes the audit row. Returns the payload plus the run id
+        so the handler can attach the transcript and latency afterwards.
+        """
+        from . import agents as agents_db
+        from . import vocab_store
+        from .vocab_compile import Sources, compile_and_record
+        from .workspace_vocab import sources_for
+
+        provider, model = self._transcription_provider_model(requested_model)
+        agent: dict = {}
+        if session:
+            try:
+                agent = agents_db.get_by_session(session) or {}
+            except Exception as e:  # noqa: BLE001
+                log_exception("vocabAgentLookupFail", e)
+        agent_id = str(agent.get("agent_id") or "")
+
+        static, profile_id = self._vocab_static_packs(
+            delegated=delegated, agent_id=agent_id)
+        try:
+            recent = vocab_store.recent_transcripts(session) if session else ()
+        except Exception as e:  # noqa: BLE001
+            log_exception("vocabRecentFail", e)
+            recent = ()
+        try:
+            known = vocab_store.corrections()
+        except Exception as e:  # noqa: BLE001
+            log_exception("vocabCorrectionsFail", e)
+            known = ()
+        workspace = sources_for(agent.get("cwd"))
+        include_names = delegated and delegation_agent_names_enabled()
+
+        result = compile_and_record(
+            provider=provider, model=model, static_packs=static,
+            sources=Sources(
+                agent_names=(
+                    tuple(self.active_agent_names()) if include_names else ()),
+                project_name=workspace.project_name,
+                identifiers=workspace.identifiers,
+                branches=workspace.branches,
+                commit_subjects=workspace.commit_subjects,
+                recent_transcripts=recent,
+                corrections=known,
+            ),
+            agent_id=agent_id, session=session, trace_id=trace_id,
+            profile_id=profile_id,
+        )
+        return TranscriptionVocab(
+            payload=result.payload, run_id=result.run_id,
+            provider=provider, model=model)
+
+    def _transcription_provider_model(self, requested_model: str
+                                      ) -> tuple[str, str]:
+        selected = (requested_model or "").strip()
+        if selected and selected != "server-default":
+            if ":" in selected:
+                provider, model = selected.split(":", 1)
+                return provider, model
+            return selected, ""
+        stt = self.stt
+        provider = str(getattr(stt, "provider", "") or "faster-whisper")
+        model = str(getattr(stt, "model_name", "") or "")
+        return provider, model
+
+    def _vocab_static_packs(self, *, delegated: bool, agent_id: str):
+        """Glossary setting plus the agent's assigned profile, if any."""
+        from . import vocab_store
+        from .vocab_budget import Pack, Term
+        from .vocab_generators import estimate_rarity
+
+        static: list[Pack] = []
+        profile_id: str | None = None
+        if not delegated:
+            glossary = read_technical_glossary()
+            terms = tuple(
+                Term(text=line, pack="glossary", rarity=estimate_rarity(line))
+                for line in (l.strip() for l in glossary.splitlines())
+                if line
+            )
+            if terms:
+                static.append(Pack(
+                    name="glossary", terms=terms, priority=1.5, floor=3))
+        if agent_id:
+            try:
+                profile_id = vocab_store.profile_for_agent(agent_id)
+                if profile_id:
+                    static.extend(vocab_store.profile_packs(profile_id))
+            except Exception as e:  # noqa: BLE001
+                log_exception("vocabProfileFail", e)
+        return static, profile_id
 
     def vocab_compile_result(
         self,
