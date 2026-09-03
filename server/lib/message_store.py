@@ -197,6 +197,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                         client_msg_id: str, text: str,
                         origin: str = "user", sender_agent_id: str | None = None,
                         prompt_admission_id: str = "",
+                        trace_id: str = "",
                         ) -> dict[str, Any] | None:
     """Record a user message the moment /send accepts it, keyed by the
     client-authored `client_msg_id` (idempotency key).
@@ -224,7 +225,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
             agent_id=agent_id, client_admission_id=client_msg_id,
         )
     existing = database.execute(
-        """SELECT timestamp, text, revision, origin, sender_agent_id
+        """SELECT timestamp, text, revision, origin, sender_agent_id, trace_id
              FROM messages WHERE message_id = ?""",
         (msg_id,),
     ).fetchone()
@@ -235,6 +236,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
             "tools": [], "display_cells": [],
             "origin": existing["origin"] or "user",
             "sender_agent_id": existing["sender_agent_id"] or "",
+            "trace_id": existing["trace_id"] or "",
             "revision": int(existing["revision"]),
             "created": False,
         }
@@ -253,14 +255,14 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                message_id, agent_id, backend_session_id, source_file, seq,
                role, timestamp, text, kind, tool_name, tools_json,
                display_cells_json, updated_at, revision, origin,
-               sender_agent_id, prompt_admission_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               sender_agent_id, prompt_admission_id, trace_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(message_id) DO NOTHING""",
         (
             msg_id, agent_id, backend_session_id, f"client:{client_msg_id}", seq,
             "user", timestamp, text, None, None, "[]", "[]",
             timestamp_ms, revision, origin, sender_agent_id,
-            prompt_admission_id or None,
+            prompt_admission_id or None, (trace_id or "").strip() or None,
         ),
     )
     if inserted.rowcount != 1:
@@ -275,6 +277,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
             origin=origin,
             sender_agent_id=sender_agent_id,
             prompt_admission_id=prompt_admission_id,
+            trace_id=trace_id,
         )
     database.execute(
         """INSERT INTO conversation_heads (
@@ -295,6 +298,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
         "display_cells": [],
         "origin": origin,
         "sender_agent_id": sender_agent_id or "",
+        "trace_id": (trace_id or "").strip(),
         "revision": revision,
         "created": True,
     }
@@ -1257,7 +1261,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         order = "m.revision ASC, COALESCE(m.timestamp, '') ASC, m.seq ASC"
         query = f"""SELECT m.message_id, m.role, m.timestamp, m.text, m.kind,
                            m.tool_name, m.tools_json, m.display_cells_json,
-                           m.revision, m.origin, m.sender_agent_id,
+                           m.revision, m.origin, m.sender_agent_id, m.trace_id,
                            sender.persona AS sender_name,
                            sender.session AS sender_session
                       FROM messages m
@@ -1269,13 +1273,13 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
     else:
         query = f"""SELECT m.message_id, m.role, m.timestamp, m.text, m.kind,
                            m.tool_name, m.tools_json, m.display_cells_json,
-                           m.revision, m.origin, m.sender_agent_id,
+                           m.revision, m.origin, m.sender_agent_id, m.trace_id,
                            sender.persona AS sender_name,
                            sender.session AS sender_session
                       FROM (
                             SELECT message_id, role, timestamp, text, kind,
                                    tool_name, tools_json, display_cells_json,
-                                   seq, revision, origin, sender_agent_id
+                                   seq, revision, origin, sender_agent_id, trace_id
                               FROM messages m
                              WHERE {where}
                              ORDER BY COALESCE(timestamp, '') DESC, seq DESC
@@ -1314,6 +1318,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
             ),
             "origin": (row["origin"] or "user"),
             "sender_agent_id": (row["sender_agent_id"] or ""),
+            "trace_id": (row["trace_id"] or ""),
             "sender_name": (row["sender_name"] or ""),
             "sender_session": (row["sender_session"] or ""),
             "revision": int(row["revision"]),
