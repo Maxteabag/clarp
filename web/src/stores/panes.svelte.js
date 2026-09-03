@@ -8,6 +8,7 @@ import {
   navigatePanes,
   toggleZoom,
   resizeSplit,
+  setSplitRatio as setSplitRatioInTree,
   equalizeSplits,
   getLeafPanes,
   findPane,
@@ -82,6 +83,12 @@ export function toggleZoomActive() {
 
 export function resizeActiveSplit(delta) {
   panesState.tree = resizeSplit(panesState.tree, panesState.tree.activeId, delta);
+}
+
+// A drag on a split's resizer, reported by the pane view.
+export function setSplitRatio(splitId, ratio) {
+  const next = setSplitRatioInTree(panesState.tree, splitId, ratio);
+  if (next !== panesState.tree) panesState.tree = next;
 }
 
 export function equalizePaneSplits() {

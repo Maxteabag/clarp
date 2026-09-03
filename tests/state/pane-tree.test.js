@@ -7,6 +7,7 @@ import {
   navigatePanes,
   toggleZoom,
   resizeSplit,
+  setSplitRatio,
   equalizeSplits,
   getLeafPanes,
 } from '../../static/lib/pane-tree.js';
@@ -98,5 +99,23 @@ describe('PaneTree - Split & Navigation Logic', () => {
 
     tree = equalizeSplits(tree);
     expect(tree.root.ratio).toBe(0.5);
+  });
+
+  it('resizes only the split nearest the active pane', () => {
+    let tree = createPaneTree('p1');
+    tree = splitPane(tree, tree.activeId, 'vertical', 'p2');
+    tree = splitPane(tree, tree.activeId, 'horizontal', 'p3');
+    tree = resizeSplit(tree, tree.activeId, 0.1);
+    expect(tree.root.ratio).toBe(0.5);
+    expect(tree.root.second.ratio).toBeCloseTo(0.6);
+  });
+
+  it('sets a split ratio by id and returns the same tree when unchanged', () => {
+    let tree = createPaneTree('p1');
+    tree = splitPane(tree, tree.activeId, 'vertical', 'p2');
+    const next = setSplitRatio(tree, tree.root.id, 0.3);
+    expect(next.root.ratio).toBeCloseTo(0.3);
+    expect(setSplitRatio(next, next.root.id, 0.3)).toBe(next);
+    expect(setSplitRatio(next, next.root.id, 0.02).root.ratio).toBe(0.15);
   });
 });

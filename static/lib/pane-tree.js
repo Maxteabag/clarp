@@ -157,32 +157,46 @@ export function toggleZoom(tree, targetId = tree.activeId) {
   };
 }
 
+function clampRatio(ratio) {
+  return Math.max(0.15, Math.min(0.85, ratio));
+}
+
+// Nudge the split nearest the target pane. Every ancestor split contains the
+// target too, but resizing all of them at once moved every seam on the path
+// to the root; the pane's own boundary is the one the user means.
 export function resizeSplit(tree, targetId, delta) {
   function transform(node) {
     if (!node || node.kind === 'leaf') return node;
-    const hasTargetInFirst = !!findPane(node.first, targetId);
-    const hasTargetInSecond = !!findPane(node.second, targetId);
-
-    if (hasTargetInFirst || hasTargetInSecond) {
-      const nextRatio = Math.max(0.15, Math.min(0.85, (node.ratio || 0.5) + delta));
-      return {
-        ...node,
-        ratio: nextRatio,
-        first: transform(node.first),
-        second: transform(node.second),
-      };
+    const inFirst = !!findPane(node.first, targetId);
+    const inSecond = !!findPane(node.second, targetId);
+    if (!inFirst && !inSecond) return node;
+    const child = inFirst ? node.first : node.second;
+    if (child.kind === 'split') {
+      return inFirst
+        ? { ...node, first: transform(node.first) }
+        : { ...node, second: transform(node.second) };
     }
-    return {
-      ...node,
-      first: transform(node.first),
-      second: transform(node.second),
-    };
+    return { ...node, ratio: clampRatio((node.ratio || 0.5) + delta) };
   }
+  return { ...tree, root: transform(tree.root) };
+}
 
-  return {
-    ...tree,
-    root: transform(tree.root),
-  };
+// Set a split's ratio outright. The resizable-pane view reports drags this
+// way; returning the same tree when nothing changed keeps a no-op layout
+// report from re-rendering every pane.
+export function setSplitRatio(tree, splitId, ratio) {
+  const next = clampRatio(ratio);
+  function transform(node) {
+    if (!node || node.kind === 'leaf') return node;
+    if (node.id === splitId) {
+      return Math.abs((node.ratio || 0.5) - next) < 1e-4 ? node : { ...node, ratio: next };
+    }
+    const first = transform(node.first);
+    const second = transform(node.second);
+    return first === node.first && second === node.second ? node : { ...node, first, second };
+  }
+  const root = transform(tree.root);
+  return root === tree.root ? tree : { ...tree, root };
 }
 
 export function equalizeSplits(tree) {
