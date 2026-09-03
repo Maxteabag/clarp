@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clarp.local/contract/schemas/server-info.json",
+  "title": "GET /server-info",
+  "description": "Host identity, version window, and feature gates. capabilities.features is the only feature gate clients may use.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["server_id", "name", "deployment_mode", "version", "default_cwd", "clarp_version", "min_app_version", "capabilities"],
+  "properties": {
+    "server_id": {"type": "string"},
+    "name": {"type": "string"},
+    "deployment_mode": {"type": "string"},
+    "version": {"type": "string"},
+    "image_version": {"type": "string"},
+    "default_cwd": {"type": "string"},
+    "clarp_version": {"type": "string"},
+    "min_app_version": {"type": "string"},
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["version", "features"],
+      "properties": {
+        "version": {"type": "integer"},
+        "features": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

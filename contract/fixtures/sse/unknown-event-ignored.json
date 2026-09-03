@@ -1,0 +1,16 @@
+{
+  "title": "unknown event types never break sync",
+  "area": "sse",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [{"id": "m1", "role": "assistant", "text": "one", "revision": 1}], "latest_revision": 1, "has_more": false, "missing": false}}},
+    {"sse": {"type": "something-new", "session": "rachel", "future": 1}},
+    {"sse": {"type": "transcript-updated", "session": "mike"}},
+    {"sse": {"type": "agent-focus", "session": "rachel", "agent_id": "x"}}
+  ],
+  "expect": {
+    "effects": ["fetch_tail"],
+    "cursor": 1,
+    "turn_ids": ["m1"]
+  }
+}

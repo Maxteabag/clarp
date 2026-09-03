@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clarp.local/contract/schemas/clips-ack.json",
+  "$title": "POST /clips/ack",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["status"],
+      "properties": {
+        "clip_id": {"type": "integer"},
+        "url": {"type": "string"},
+        "status": {"$ref": "#/$defs/clip-status"},
+        "error": {"type": "string"},
+        "trace_id": {"type": "string"}
+      }
+    },
+    "clip-status": {
+      "type": "string",
+      "enum": ["synthesized", "broadcast", "queued", "held", "play-start", "play-ok", "play-fail"]
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ok", "updated"],
+      "properties": {
+        "ok": {"type": "boolean"},
+        "updated": {"type": "boolean"}
+      }
+    }
+  },
+  "description": "Playback acknowledgement. Top level validates the response; $defs/request validates what the client sends. Status values mirror ClipStatus in server/lib/protocol.py.",
+  "$ref": "#/$defs/response"
+}

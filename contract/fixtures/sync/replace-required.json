@@ -1,0 +1,15 @@
+{
+  "title": "replace_required drops the cache and reloads the tail",
+  "area": "sync",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [{"id": "u-a", "role": "user", "text": "q", "revision": 1}, {"id": "m1", "role": "assistant", "text": "a", "revision": 2}], "latest_revision": 2, "has_more": false, "missing": false}}},
+    {"log": {"mode": "delta", "response": {"conversation_id": "c1", "turns": [], "latest_revision": 2, "has_more": false, "missing": false, "replace_required": true}}},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [{"id": "u-b", "role": "user", "text": "rebuilt", "revision": 5}, {"id": "m9", "role": "assistant", "text": "rebuilt answer", "revision": 6}], "latest_revision": 6, "has_more": false, "missing": false}}}
+  ],
+  "expect": {
+    "effects": ["fetch_tail", "drop_cache", "fetch_tail"],
+    "cursor": 6,
+    "turn_ids": ["u-b", "m9"]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "title": "a preempted send never confirms and goes stale",
+  "area": "delivery",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [], "latest_revision": 0, "has_more": false, "missing": false}}},
+    {"send": {"client_msg_id": "a", "session": "rachel", "text": "first", "at": 1000000}},
+    {"send": {"client_msg_id": "b", "session": "rachel", "text": "second", "at": 1001000}},
+    {"log": {"mode": "delta", "response": {"conversation_id": "c1", "turns": [{"id": "u-b", "role": "user", "text": "second", "revision": 2}], "latest_revision": 2, "has_more": false, "missing": false}}},
+    {"confirm": true},
+    {"stale": {"now": 1030000, "timeoutMs": 20000}}
+  ],
+  "expect": {
+    "effects": ["fetch_tail"],
+    "cursor": 2,
+    "turn_ids": ["u-b"],
+    "delivered": ["b"],
+    "stale": ["a"],
+    "pending": ["u-a"]
+  }
+}
