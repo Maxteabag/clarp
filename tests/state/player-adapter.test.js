@@ -223,3 +223,58 @@ describe('createPlayerAdapter', () => {
     expect(audio.calls.pause).toBeGreaterThan(0);
   }, 8000);
 });
+
+describe('createPlayerAdapter fault hooks', () => {
+  function makeMonitor() {
+    const calls = [];
+    return {
+      calls,
+      begin(clip, info) { calls.push(['begin', clip.url, info.queuedAt]); },
+      note(kind, extra) { calls.push(['note', kind, extra]); },
+      end(result) { calls.push(['end', result.premature, result.reason]); },
+    };
+  }
+
+  it('brackets a clean clip with begin and end and reports nothing else', async () => {
+    const audio = makeFakeAudio({ readyState: 4 });
+    const faults = makeMonitor();
+    const adapter = createPlayerAdapter(audio, { loadTimeoutMs: 30, faults });
+    const p = adapter.play({ url: '/audio/a.mp3', session: 'rachel', _queuedAt: 123 });
+    setTimeout(() => audio.dispatch('ended'), 10);
+    await p;
+    expect(faults.calls).toEqual([['begin', '/audio/a.mp3', 123], ['end', false, undefined]]);
+  });
+
+  it('reports the load timeout the element never signals', async () => {
+    const audio = makeFakeAudio({ readyState: 1, neverReady: true });
+    const faults = makeMonitor();
+    const adapter = createPlayerAdapter(audio, { loadTimeoutMs: 20, faults });
+    const p = adapter.play({ url: '/audio/a.mp3', session: 'rachel' });
+    setTimeout(() => audio.dispatch('ended'), 60);
+    await p;
+    expect(faults.calls[1]).toEqual(['note', 'load-timeout', { ready_state: 1, waited_ms: 20 }]);
+  });
+
+  it('a rejected play() is recorded and the clip is closed', async () => {
+    const audio = makeFakeAudio({ readyState: 4 });
+    const err = new Error('gate'); err.name = 'NotAllowedError';
+    audio.play = () => Promise.reject(err);
+    const faults = makeMonitor();
+    const adapter = createPlayerAdapter(audio, { loadTimeoutMs: 20, faults });
+    const r = await adapter.play({ url: '/audio/a.mp3', session: 'rachel' });
+    expect(r.premature).toBe(true);
+    expect(faults.calls.slice(1)).toEqual([
+      ['note', 'play-rejected', { error_name: 'NotAllowedError' }],
+      ['end', false, 'play-rejected'],
+    ]);
+  });
+
+  it('a monitor that throws never breaks playback', async () => {
+    const audio = makeFakeAudio({ readyState: 4 });
+    const faults = { begin() { throw new Error('x'); }, note() { throw new Error('x'); }, end() { throw new Error('x'); } };
+    const adapter = createPlayerAdapter(audio, { loadTimeoutMs: 20, faults });
+    const p = adapter.play({ url: '/audio/a.mp3', session: 'rachel' });
+    setTimeout(() => audio.dispatch('ended'), 10);
+    await expect(p).resolves.toMatchObject({ premature: false });
+  });
+});
