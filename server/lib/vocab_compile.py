@@ -173,9 +173,10 @@ def compile_and_record(
                          static_packs=static_packs)
     try:
         from . import vocab_store
-        vocab_store.record_run(
+        run_id = vocab_store.record_run(
             result, provider=provider, model=model, agent_id=agent_id,
             session=session, trace_id=trace_id, profile_id=profile_id)
+        result.run_id = int(run_id or 0)
     except Exception as e:  # noqa: BLE001 - an audit row is not worth a turn
         log_exception("vocabRunRecordFail", e)
     return result

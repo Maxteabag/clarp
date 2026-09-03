@@ -3675,7 +3675,28 @@ class Handler(BaseHTTPRequestHandler):
         if not requested_model and not self.ctx.stt.ready.is_set():
             return self._send(503, b'{"error":"whisper model loading"}',
                               "application/json")
-        prompt = self.ctx.vocab_prompt(delegated=hands_free)
+        # The trace is minted before compiling so the vocab run, the
+        # transcribe event and everything downstream share one id.
+        trace_id = _trace.new_id()
+        self._trace_id = trace_id
+        try:
+            focus = RuntimePaths.from_home(pathlib.Path.home()).app_session.read_text().strip()
+        except OSError:
+            focus = ""
+        vocab_run_id = 0
+        vocab_fn = getattr(self.ctx, "vocab_for_transcription", None)
+        if callable(vocab_fn):
+            try:
+                vocab = vocab_fn(delegated=hands_free, session=focus,
+                                 trace_id=trace_id,
+                                 requested_model=requested_model)
+                prompt, vocab_run_id = vocab.payload, vocab.run_id
+            except Exception as e:  # noqa: BLE001 - biasing never blocks STT
+                log_exception("vocabForTranscribeFail", e)
+                prompt = self.ctx.vocab_prompt(delegated=hands_free)
+        else:
+            prompt = self.ctx.vocab_prompt(delegated=hands_free)
+        started = time.monotonic()
         try:
             # Authoritative transcript: wait for the whisper lock rather than
             # 429 — best-effort live-transcription partials must yield to it.
@@ -3704,6 +3725,14 @@ class Handler(BaseHTTPRequestHandler):
             health.mark_error("stt", e)
             log_exception("transcribeFail", e)
             return self._send(500, f'{{"error":"{e}"}}'.encode(), "application/json")
+        latency_ms = int((time.monotonic() - started) * 1000)
+        if vocab_run_id:
+            try:
+                from lib import vocab_store
+                vocab_store.update_run_result(
+                    vocab_run_id, transcript=text, latency_ms=latency_ms)
+            except Exception as e:  # noqa: BLE001
+                log_exception("vocabRunUpdateFail", e)
 
         # Run the user's utterance against any pending heralds. Affirmatives
         # with a name release that agent's held buffer; mentions / declines
@@ -3727,16 +3756,9 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 log_exception("heraldIntentFail", e)
 
-        # Start a new trace id for the focused app session (if any). The client
-        # echoes it back in subsequent /send + /clog calls so the whole
-        # turn — STT, send, hook, Claude reply, TTS, broadcast, play —
-        # carries one queryable id.
-        trace_id = _trace.new_id()
-        self._trace_id = trace_id
-        try:
-            focus = RuntimePaths.from_home(pathlib.Path.home()).app_session.read_text().strip()
-        except OSError:
-            focus = ""
+        # The client echoes the trace id back in subsequent /send + /clog
+        # calls so the whole turn — STT, send, hook, Claude reply, TTS,
+        # broadcast, play — carries one queryable id.
         if focus:
             agents_db.set_trace_for_session(focus, trace_id)
         eventlog.emit("server", "transcribe", trace_id=trace_id, session=focus or None,
@@ -3744,7 +3766,9 @@ class Handler(BaseHTTPRequestHandler):
                       detail={"text": text, "ends_terminal": ends_terminal,
                               "herald_consumed": herald_consumed,
                               "hands_free": hands_free,
-                              "orchestrator_skip_herald": skip_herald})
+                              "orchestrator_skip_herald": skip_herald,
+                              "vocab_run_id": vocab_run_id or None,
+                              "stt_latency_ms": latency_ms})
 
         # Blank the text when the utterance was a herald grant/decline so the
         # client's empty-text guard skips dispatch — it released the buffer,
@@ -3755,6 +3779,7 @@ class Handler(BaseHTTPRequestHandler):
                     "herald_consumed": herald_consumed,
                     "hands_free": hands_free,
                     "orchestrator_skip_herald": skip_herald,
+                    "vocab_run_id": vocab_run_id or None,
                     "cached": False}
         try:
             transcription_results.store(

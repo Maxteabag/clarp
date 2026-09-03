@@ -8,6 +8,7 @@ without a database.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 
 from .db import conn, now_ms
@@ -197,6 +198,57 @@ def record_run(result: CompileResult, *, provider: str, model: str,
          transcript, int(latency_ms), now_ms()))
     conn().commit()
     return int(cur.lastrowid)
+
+
+def update_run_result(run_id: int, *, transcript: str,
+                      latency_ms: int) -> bool:
+    """Attach what the model produced to the row that says what it was sent.
+
+    Written after transcription, so a run row with an empty transcript and
+    zero latency means the model never answered - itself worth knowing.
+    """
+    if not run_id:
+        return False
+    cur = conn().execute(
+        "UPDATE vocab_runs SET transcript=?, latency_ms=? WHERE run_id=?",
+        (transcript or "", int(latency_ms), int(run_id)))
+    conn().commit()
+    return cur.rowcount > 0
+
+
+def recent_transcripts(session: str, *, limit: int = 3) -> tuple[str, ...]:
+    """The last few things this session's user said, newest first.
+
+    Feeds the recent-speech pack: a term said a minute ago is the most likely
+    term to be said again, and the cheapest one to bias for.
+    """
+    if not session:
+        return ()
+    rows = conn().execute(
+        "SELECT transcript FROM vocab_runs"
+        " WHERE session=? AND transcript != ''"
+        " ORDER BY run_id DESC LIMIT ?", (session, int(limit))).fetchall()
+    return tuple(str(r[0]) for r in rows if r[0])
+
+
+def corrections(*, limit: int = 200) -> tuple[tuple[str, str], ...]:
+    """(heard, intended) pairs from every term with a recorded mishearing.
+
+    `often_heard_as` may list several mishearings separated by commas or
+    semicolons; each becomes its own pair so the compiler can weigh them.
+    """
+    rows = conn().execute(
+        "SELECT t.text, t.often_heard_as FROM vocab_terms t"
+        " JOIN vocab_packs p ON p.pack_id = t.pack_id"
+        " WHERE t.often_heard_as != '' AND p.enabled = 1"
+        " ORDER BY t.created_at DESC LIMIT ?", (int(limit),)).fetchall()
+    pairs: list[tuple[str, str]] = []
+    for intended, heard_list in rows:
+        for heard in re.split(r"[,;]", heard_list or ""):
+            heard = heard.strip()
+            if heard:
+                pairs.append((heard, str(intended)))
+    return tuple(pairs)
 
 
 def recent_runs(limit: int = 20, *, session: str = "") -> list[dict]:

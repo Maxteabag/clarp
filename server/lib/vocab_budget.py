@@ -130,6 +130,8 @@ class CompileResult:
     unit: str = Unit.TOKENS
     form: str = Form.TERMS
     rarity_floor: float = 0.0
+    # Set by compile_and_record once the audit row exists; 0 means unrecorded.
+    run_id: int = 0
 
     @property
     def headroom(self) -> int:
