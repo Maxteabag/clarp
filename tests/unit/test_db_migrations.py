@@ -65,6 +65,8 @@ def test_pre_release_databases_are_refused(tmp_path):
 def _shape_as_v61(con: sqlite3.Connection) -> None:
     """Rebuild the pre-v62 shape on top of a current database."""
     con.executescript("""
+        DROP INDEX idx_messages_trace;
+        ALTER TABLE messages DROP COLUMN trace_id;
         DROP TABLE vocab_runs;
         DROP TABLE vocab_assignments;
         DROP TABLE vocab_profile_packs;
