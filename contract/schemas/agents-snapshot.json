@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clarp.local/contract/schemas/agents-snapshot.json",
+  "$title": "GET /agents/snapshot",
+  "description": "Bootstrap read model. head_revision + conversation_id tell a client whether its cached chat is current.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["agents"],
+  "properties": {
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["agent_id", "session", "persona", "backend", "cwd"],
+        "properties": {
+          "agent_id": {"type": "string"},
+          "session": {"type": "string"},
+          "persona": {"type": "string"},
+          "backend": {"type": "string"},
+          "cwd": {"type": "string"},
+          "model": {"type": "string"},
+          "effort": {"type": "string"},
+          "voice_id": {"type": "string"},
+          "avatar_symbol": {"type": "string"},
+          "avatar_url": {"type": "string"},
+          "backend_session_id": {"type": "string"},
+          "conversation_id": {"type": "string"},
+          "head_revision": {"type": "integer"},
+          "last_message_id": {"type": "string"},
+          "last_message": {"type": "string"},
+          "alive": {"type": "boolean"},
+          "busy": {"type": "boolean"},
+          "focused": {"type": "boolean"},
+          "latest_state": {"type": ["string", "null"]},
+          "latest_state_ts": {"type": ["integer", "null"]},
+          "turn_started_at": {"type": "integer"},
+          "last_activity": {"type": "integer"},
+          "last_turn_end": {"type": "integer"},
+          "status_text": {"type": ["string", "null"]},
+          "compacting": {"type": "boolean"},
+          "context_tokens": {"type": ["integer", "null"]},
+          "context_window": {"type": ["integer", "null"]},
+          "queued_turn_count": {"type": "integer"},
+          "queued_turn_revision": {"type": "integer"},
+          "queue_paused": {"type": "boolean"},
+          "muted": {"type": "boolean"},
+          "archived_at": {"type": ["integer", "string", "null"]},
+          "heartbeat_enabled": {"type": "boolean"},
+          "dreaming_enabled": {"type": "boolean"},
+          "team_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "focus": {"type": ["string", "null"]},
+    "roster": {"type": "array", "items": {"type": "string"}},
+    "personas": {"type": "array"},
+    "available_mcp_servers": {"type": "array", "items": {"type": "string"}}
+  }
+}

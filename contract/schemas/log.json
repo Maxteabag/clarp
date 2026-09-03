@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clarp.local/contract/schemas/log.json",
+  "$title": "GET /log",
+  "description": "Conversation read model. Tail snapshot, after_revision delta, or before paging share one shape. replace_required is absent on some missing:true responses, so it stays optional.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["turns", "latest_revision", "has_more", "missing", "conversation_id"],
+  "properties": {
+    "conversation_id": {"type": "string"},
+    "turns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "role", "text", "revision"],
+        "properties": {
+          "id": {"type": "string"},
+          "role": {"type": "string"},
+          "text": {"type": "string"},
+          "timestamp": {"type": "string"},
+          "revision": {"type": "integer"},
+          "kind": {"type": ["string", "null"]},
+          "tool_name": {"type": ["string", "null"]},
+          "tools": {"type": "array"},
+          "display_cells": {"type": "array"},
+          "origin": {"type": "string"},
+          "sender_agent_id": {"type": ["string", "null"]},
+          "sender_name": {"type": ["string", "null"]},
+          "sender_session": {"type": ["string", "null"]},
+          "automation_kind": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "latest_revision": {"type": "integer"},
+    "has_more": {"type": "boolean"},
+    "replace_required": {"type": "boolean"},
+    "missing": {"type": "boolean"},
+    "latest_ts": {"type": "string"},
+    "cwd": {"type": "string"},
+    "file": {"type": ["string", "null"]},
+    "includes_automated": {"type": "boolean"}
+  }
+}
