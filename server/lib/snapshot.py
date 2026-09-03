@@ -6,7 +6,7 @@ from typing import Any
 import json
 
 from . import (agents as agents_db, backends, compaction, config,
-               message_store, team_store, turn_queue)
+               message_store, team_store, turn_queue, scheduler)
 from . import reconcile
 from . import personas as persona_store
 from .avatar_urls import versioned_avatar_url
@@ -93,6 +93,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "model":          a.get("model") or "",
             "effort":         a.get("effort") or "",
             "mcp_servers":    mcp_servers,
+            "schedules":      scheduler.list_schedules(agent_id=agent_id),
             "heartbeat_enabled": bool(a.get("heartbeat_enabled")),
             "dreaming_enabled": bool(a.get("dreaming_enabled")),
             "muted":          bool(a.get("muted")),

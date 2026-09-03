@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 63
+_SCHEMA_VERSION = 64
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1166,6 +1166,24 @@ CREATE INDEX idx_oracle_delegations_delivery
 CREATE INDEX idx_oracle_delegations_agent
     ON oracle_delegations(agent_id, created_at DESC);
 
+CREATE TABLE agent_schedules (
+    schedule_id     TEXT PRIMARY KEY,
+    agent_id        TEXT NOT NULL REFERENCES agents(agent_id),
+    session         TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    cron_expression TEXT NOT NULL,
+    prompt          TEXT NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    last_run_at     INTEGER,
+    next_run_at     INTEGER,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_agent_schedules_session
+    ON agent_schedules(session);
+CREATE INDEX idx_agent_schedules_next
+    ON agent_schedules(enabled, next_run_at);
+
 CREATE VIEW clip_lifecycle AS
     SELECT
     c.clip_id,
@@ -1214,6 +1232,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v62(con)
             if version < 63:
                 _migrate_to_v63(con)
+            if version < 64:
+                _migrate_to_v64(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1323,6 +1343,33 @@ def _migrate_to_v63(con: sqlite3.Connection) -> None:
     con.execute(
         """CREATE INDEX IF NOT EXISTS idx_oracle_delegations_agent
              ON oracle_delegations(agent_id, created_at DESC)"""
+    )
+
+
+def _migrate_to_v64(con: sqlite3.Connection) -> None:
+    """Agent scheduled jobs for recurring autonomous session turns."""
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS agent_schedules (
+            schedule_id     TEXT PRIMARY KEY,
+            agent_id        TEXT NOT NULL REFERENCES agents(agent_id),
+            session         TEXT NOT NULL,
+            name            TEXT NOT NULL,
+            cron_expression TEXT NOT NULL,
+            prompt          TEXT NOT NULL,
+            enabled         INTEGER NOT NULL DEFAULT 1,
+            last_run_at     INTEGER,
+            next_run_at     INTEGER,
+            created_at      INTEGER NOT NULL,
+            updated_at      INTEGER NOT NULL
+        )
+    """)
+    con.execute(
+        """CREATE INDEX IF NOT EXISTS idx_agent_schedules_session
+             ON agent_schedules(session)"""
+    )
+    con.execute(
+        """CREATE INDEX IF NOT EXISTS idx_agent_schedules_next
+             ON agent_schedules(enabled, next_run_at)"""
     )
 
 

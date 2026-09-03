@@ -321,6 +321,7 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/status": "_handle_oracle_status",
         "/oracle/delegations": "_handle_oracle_delegations_get",
         "/oracle/realtime": "_handle_oracle_realtime",
+        "/agent-schedules": "_handle_agent_schedules_get",
     }
     _ROOT_STATIC = {"/manifest.json", "/styles.css", "/icon.png"}
     _POST_ROUTES = {
@@ -378,6 +379,9 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/delegations": "_handle_oracle_delegation_create",
         "/oracle/delegations/ack": "_handle_oracle_delegation_ack",
         "/oracle/delegations/cancel": "_handle_oracle_delegation_cancel",
+        "/agent-schedules": "_handle_agent_schedules_post",
+        "/agent-schedules/toggle": "_handle_agent_schedules_toggle",
+        "/agent-schedules/delete": "_handle_agent_schedules_delete",
     }
     _PUT_ROUTES = {
         "/dreaming/settings": "_handle_dreaming_settings_put",
@@ -2377,6 +2381,91 @@ class Handler(BaseHTTPRequestHandler):
             "heartbeat_enabled": bool(fresh.get("heartbeat_enabled")),
         }).encode(), "application/json")
 
+    def _handle_agent_schedules_get(self):
+        from urllib.parse import parse_qs, urlparse
+        from lib import scheduler
+        query = parse_qs(urlparse(self.path).query)
+        session = (query.get("session", [""])[0] or "").strip()
+        agent_id = (query.get("agent_id", [""])[0] or "").strip()
+        schedules = scheduler.list_schedules(
+            session=session if session else None,
+            agent_id=agent_id if agent_id else None,
+        )
+        return self._send(200, json.dumps({"schedules": schedules}).encode(), "application/json")
+
+    def _handle_agent_schedules_post(self):
+        from lib import scheduler
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        session = str(data.get("session") or "").strip()
+        name = str(data.get("name") or "").strip()
+        cron = str(data.get("cron_expression") or data.get("cron") or "").strip()
+        prompt = str(data.get("prompt") or "").strip()
+        enabled = bool(data.get("enabled", True))
+        if not session or not name or not cron or not prompt:
+            return self._send(400, b'{"error":"session, name, cron_expression, and prompt are required"}', "application/json")
+        try:
+            item = scheduler.create_schedule(session, name, cron, prompt, enabled=enabled)
+        except ValueError as exc:
+            return self._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
+        return self._send(201, json.dumps({"ok": True, "schedule": item}).encode(), "application/json")
+
+    def _handle_agent_schedules_toggle(self):
+        from lib import scheduler
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        schedule_id = str(data.get("schedule_id") or "").strip()
+        enabled = data.get("enabled")
+        if not schedule_id or not isinstance(enabled, bool):
+            return self._send(400, b'{"error":"schedule_id and enabled boolean required"}', "application/json")
+        item = scheduler.update_schedule(schedule_id, enabled=enabled)
+        if not item:
+            return self._send(404, b'{"error":"schedule not found"}', "application/json")
+        return self._send(200, json.dumps({"ok": True, "schedule": item}).encode(), "application/json")
+
+    def _handle_agent_schedules_delete(self):
+        from lib import scheduler
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        schedule_id = str(data.get("schedule_id") or "").strip()
+        if not schedule_id:
+            return self._send(400, b'{"error":"schedule_id required"}', "application/json")
+        ok = scheduler.delete_schedule(schedule_id)
+        return self._send(200, json.dumps({"ok": ok}).encode(), "application/json")
+
+    def _handle_schedule_patch(self, schedule_id: str):
+        from lib import scheduler
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        enabled = data.get("enabled")
+        name = data.get("name")
+        cron = data.get("cron_expression") or data.get("cron")
+        prompt = data.get("prompt")
+        try:
+            item = scheduler.update_schedule(
+                schedule_id,
+                enabled=enabled if isinstance(enabled, bool) else None,
+                name=str(name).strip() if name else None,
+                cron_expression=str(cron).strip() if cron else None,
+                prompt=str(prompt).strip() if prompt else None,
+            )
+        except ValueError as exc:
+            return self._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
+        if not item:
+            return self._send(404, b'{"error":"schedule not found"}', "application/json")
+        return self._send(200, json.dumps({"ok": True, "schedule": item}).encode(), "application/json")
+
+    def _handle_schedule_delete(self, schedule_id: str):
+        from lib import scheduler
+        ok = scheduler.delete_schedule(schedule_id)
+        if not ok:
+            return self._send(404, b'{"error":"schedule not found"}', "application/json")
+        return self._send(200, json.dumps({"ok": True}).encode(), "application/json")
+
     def _handle_agent_archive(self):
         from lib import agents as agents_db
         data = self._read_json()
@@ -2904,10 +2993,20 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/transcription-results/"):
             return self._handle_transcription_result_delete(
                 path[len("/transcription-results/"):].strip("/"))
+        if path.startswith("/schedules/"):
+            return self._handle_schedule_delete(path[len("/schedules/"):].strip("/"))
         if self.path.startswith("/agents/"):
             return self._handle_delete_agent(self.path[len("/agents/"):])
         if path.startswith("/personas/"):
             return self._handle_delete_persona(path[len("/personas/"):].strip("/"))
+        return self._send(404, b"not found")
+
+    def do_PATCH(self):
+        if not self._authorized():
+            return self._reject_unauthorized()
+        path = self.path.split("?", 1)[0]
+        if path.startswith("/schedules/"):
+            return self._handle_schedule_patch(path[len("/schedules/"):].strip("/"))
         return self._send(404, b"not found")
 
     def _handle_transcription_result_delete(self, job_id: str):
@@ -4183,6 +4282,22 @@ def build_server(ctx: ServerContext, port: int,
     dreaming_scheduler = DreamingScheduler(send_dream=_send_agent_dream)
     dreaming_scheduler.start()
     srv.on_close(dreaming_scheduler.stop)
+
+    from lib.scheduler import AgentScheduleRunner
+
+    def _send_scheduled_job(session: str, text: str) -> None:
+        agent = agents_db.get_by_session(session)
+        if not agent:
+            return
+        TurnDispatchService(ctx).dispatch(
+            text=text, requested_session=session, trace_id=_trace.new_id(),
+            synthesize_audio=False, forced_session=session, origin="automation",
+        )
+
+    schedule_runner = AgentScheduleRunner(dispatch_turn=_send_scheduled_job)
+    schedule_runner.start()
+    srv.on_close(schedule_runner.stop)
+
     broadcast_boot_version(ctx)
     resume_persisted_agents(ctx)
     if restart_recovery:
