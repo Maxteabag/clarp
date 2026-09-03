@@ -787,6 +787,14 @@ class Handler(BaseHTTPRequestHandler):
                     return serve_growing(self, target)
                 return self._send_file(target)
             return self._send(403, b"forbidden")
+        if path.startswith("/stt/stream"):
+            # Provider-owned turn taking: the phone streams PCM, the relay
+            # forwards it to the chosen recogniser and returns its turn events.
+            from urllib.parse import parse_qs, urlparse
+            from lib.stt_stream import serve_stt_stream
+            parsed = parse_qs(urlparse(self.path).query)
+            return serve_stt_stream(
+                self, {k: (v[0] if v else "") for k, v in parsed.items()})
         if path.startswith("/terminal/"):
             # Interactive terminal WS: spawns the agent's CLI in a PTY resumed
             # on the same session id and bridges raw bytes both ways.
