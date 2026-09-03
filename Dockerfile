@@ -34,7 +34,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=node-runtime /usr/local/ /usr/local/
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl ffmpeg git gh jq openssh-client sqlite3 tini \
+      ca-certificates curl ffmpeg git gh iproute2 jq openssh-client sqlite3 tini \
     && npm install --global --allow-scripts=@anthropic-ai/claude-code \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" \

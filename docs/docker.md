@@ -19,8 +19,8 @@ export CLARP_IMAGE=ghcr.io/maxteabag/clarp:VERSION
 docker compose -p clarp-work up -d
 ```
 
-The default port is published only on host loopback at
-`http://127.0.0.1:7682`. Read the generated bearer token without printing the
+The default port is published on `0.0.0.0:7682` (or set `CLARP_LISTEN_ADDR=127.0.0.1`
+for loopback-only). Read the generated bearer token without printing the
 rest of the configuration:
 
 ```bash

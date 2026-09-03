@@ -94,26 +94,42 @@ if not list_devices():
     server_info = get_server_info()
     server_name = server_info.get("name", "Clarp Docker")
     server_id = server_info.get("server_id", "")
-    port = int(os.environ.get("CLAUDE_PWA_PORT", 7682))
+    port = int(os.environ.get("CLARP_PORT") or os.environ.get("CLAUDE_PWA_PORT", 7682))
 
     public_url = os.environ.get("CLARP_PUBLIC_URL", "").strip()
     if not public_url:
-        candidates = []
-        try:
-            import subprocess
-            out = subprocess.run(["ip", "-o", "-4", "addr", "show"], capture_output=True, text=True, timeout=2).stdout
-            for line in out.splitlines():
-                parts = line.split()
-                if len(parts) >= 4:
-                    ip = parts[3].split("/")[0]
-                    if not ip.startswith("127."):
-                        candidates.append(ip)
-        except Exception:
-            pass
-        ts_ips = [ip for ip in candidates if ip.startswith("100.") and 64 <= int(ip.split(".")[1]) <= 127]
-        lan_ips = [ip for ip in candidates if ip.startswith("192.168.") or ip.startswith("10.")]
-        best_ip = ts_ips[0] if ts_ips else (lan_ips[0] if lan_ips else "127.0.0.1")
-        public_url = f"http://{best_ip}:{port}"
+        host_override = os.environ.get("CLARP_HOST", "").strip()
+        if host_override:
+            public_url = f"http://{host_override}:{port}"
+        else:
+            candidates = set()
+            import socket
+            try:
+                for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                    candidates.add(info[4][0])
+            except Exception:
+                pass
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("1.1.1.1", 80))
+                candidates.add(s.getsockname()[0])
+                s.close()
+            except Exception:
+                pass
+            try:
+                import subprocess
+                out = subprocess.run(["ip", "-o", "-4", "addr", "show"], capture_output=True, text=True, timeout=2).stdout
+                for line in out.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        candidates.add(parts[3].split("/")[0])
+            except Exception:
+                pass
+            candidates.discard("127.0.0.1")
+            ts_ips = [ip for ip in candidates if ip.startswith("100.") and 64 <= int(ip.split(".")[1]) <= 127]
+            lan_ips = [ip for ip in candidates if ip.startswith("192.168.") or ip.startswith("10.")]
+            best_ip = ts_ips[0] if ts_ips else (lan_ips[0] if lan_ips else "127.0.0.1")
+            public_url = f"http://{best_ip}:{port}"
 
     try:
         record = issue(device_name="iPhone", scope="full", ttl_seconds=3600)
