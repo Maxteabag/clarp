@@ -4,6 +4,9 @@ services:
     build:
       context: .
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     ports:
       - "${CLARP_LISTEN_ADDR:-127.0.0.1}:${CLARP_PORT:-7682}:7682"
     volumes:
