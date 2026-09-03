@@ -330,6 +330,9 @@ For phone access, use both of these:
    `Authorization: Bearer <token>` or `?token=<token>`. The PWA picks the
    token up from `?token=` on first visit and stores it in `localStorage`,
    so the URL you bookmark is the one with the token in the query string.
+   Setup prints that link, and `clarp-admin url` (or `clarp-admin url --qr`)
+   prints it again. If the PWA says the server rejected the token, open the
+   link once more.
 
 Generate a token with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 

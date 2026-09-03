@@ -127,9 +127,16 @@ cp "$REPO_DIR/uv.lock" "$STAGE/uv.lock"
 mkdir -p "$STAGE/toolchain"
 cp "$REPO_DIR/toolchain/README.md" \
    "$REPO_DIR/toolchain/package.json" \
-   "$REPO_DIR/toolchain/package-lock.json" \
    "$REPO_DIR/toolchain/toolchain.json" \
    "$STAGE/toolchain/"
+# Only the managed toolchain reads the lockfile (its hash below), and a
+# missing one must not block an existing/none install (issue #8).
+if [[ -f "$REPO_DIR/toolchain/package-lock.json" ]]; then
+    cp "$REPO_DIR/toolchain/package-lock.json" "$STAGE/toolchain/"
+elif [[ "$TOOLCHAIN_MODE" == "managed" ]]; then
+    echo "ERROR: toolchain/package-lock.json is required for the managed toolchain" >&2
+    exit 1
+fi
 cp "$REPO_DIR/LICENSE.md" "$STAGE/LICENSE.md"
 cp "$REPO_DIR/COMMERCIAL_LICENSE.md" "$STAGE/COMMERCIAL_LICENSE.md"
 SOURCE_REMOTE="${CLARP_SOURCE_REMOTE:-$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)}"
