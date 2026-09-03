@@ -87,6 +87,58 @@ for item in managed_skills.status():
         managed_skills.set_enabled(str(item["id"]), True)
 from lib.personal_skills import repair_links as repair_personal_skill_links
 repair_personal_skill_links()
+
+from lib.device_pairing import list_devices, issue
+if not list_devices():
+    import urllib.parse
+    server_info = get_server_info()
+    server_name = server_info.get("name", "Clarp Docker")
+    server_id = server_info.get("server_id", "")
+    port = int(os.environ.get("CLAUDE_PWA_PORT", 7682))
+
+    public_url = os.environ.get("CLARP_PUBLIC_URL", "").strip()
+    if not public_url:
+        candidates = []
+        try:
+            import subprocess
+            out = subprocess.run(["ip", "-o", "-4", "addr", "show"], capture_output=True, text=True, timeout=2).stdout
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 4:
+                    ip = parts[3].split("/")[0]
+                    if not ip.startswith("127."):
+                        candidates.append(ip)
+        except Exception:
+            pass
+        ts_ips = [ip for ip in candidates if ip.startswith("100.") and 64 <= int(ip.split(".")[1]) <= 127]
+        lan_ips = [ip for ip in candidates if ip.startswith("192.168.") or ip.startswith("10.")]
+        best_ip = ts_ips[0] if ts_ips else (lan_ips[0] if lan_ips else "127.0.0.1")
+        public_url = f"http://{best_ip}:{port}"
+
+    try:
+        record = issue(device_name="iPhone", scope="full", ttl_seconds=3600)
+        query = urllib.parse.urlencode({
+            "name": server_name,
+            "url": public_url,
+            "code": record["code"],
+            "server_id": server_id,
+            "scope": record["scope"],
+            "expires_at": record["expires_at"],
+        })
+        pair_uri = f"clarp://pair?{query}"
+        import qrcode
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(pair_uri)
+        qr.make(fit=True)
+        print("\n" + "=" * 62, flush=True)
+        print(" Clarp Initial Setup: Scan to pair with iPhone", flush=True)
+        print("=" * 62, flush=True)
+        qr.print_ascii(invert=True)
+        print(f"Pairing URI: {pair_uri}", flush=True)
+        print(f"Target URL:  {public_url} (valid for 1 hour)", flush=True)
+        print("=" * 62 + "\n", flush=True)
+    except Exception as exc:
+        print(f"Notice: could not emit bootstrap pairing QR: {exc}", flush=True)
 PY
 
 exec "$@"

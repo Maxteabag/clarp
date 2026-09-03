@@ -1,0 +1,10 @@
+# Host networking mode: joins the host's existing Tailscale and LAN interfaces directly.
+# Usage:
+#   CLARP_PORT=7684 docker compose -f compose.yaml -f compose.host.yaml up -d
+services:
+  clarp:
+    network_mode: host
+    ports: !reset []
+    environment:
+      CLAUDE_PWA_BIND: ${CLARP_LISTEN_ADDR:-0.0.0.0}
+      CLAUDE_PWA_PORT: ${CLARP_PORT:-7682}

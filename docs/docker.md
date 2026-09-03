@@ -153,9 +153,19 @@ Do not commit an auth key to Compose or an environment file. Prefer a
 file-backed Docker secret for long-lived deployments. Userspace networking is
 the default, avoiding privileged mode, capabilities, and `/dev/net/tun`.
 
-### Host port mapping over Tailscale (Without Sidecar)
+### Host networking on an existing Tailscale machine
 
-If running the container directly on the host network with published ports (`CLARP_PORT=...`) instead of the Tailscale sidecar, note that host firewalls (such as UFW and `ufw-docker`) drop Tailscale CGNAT traffic (`100.64.0.0/10`) to Docker bridge subnets by default.
+If the host machine is already authenticated to your Tailnet, you do not need to create an extra Tailscale device or auth key. Run Clarp directly on the host network interfaces:
+
+```bash
+CLARP_PORT=7684 docker compose -f compose.yaml -f compose.host.yaml up -d
+```
+
+This joins the host's existing `tailscale0` and LAN interfaces directly without Docker bridge NAT, avoiding firewall forward drops and port translation.
+
+### Host port mapping over Tailscale (Bridge Mode without Sidecar)
+
+If running in standard bridge mode with published ports (`CLARP_PORT=...`) instead of host networking or the sidecar, note that host firewalls (such as UFW and `ufw-docker`) drop Tailscale CGNAT traffic (`100.64.0.0/10`) to Docker bridge subnets by default.
 
 Ensure the host firewall permits Tailscale traffic to reach the container:
 
@@ -167,8 +177,6 @@ sudo ufw allow in on tailscale0 to any port $CLARP_PORT proto tcp
 sudo iptables -I DOCKER-USER 2 -s 100.64.0.0/10 -j RETURN
 sudo iptables -I DOCKER-USER 2 -i tailscale0 -j RETURN
 ```
-
-Using the `compose.tailscale.yaml` sidecar avoids host firewall adjustments altogether because traffic terminates directly inside the container namespace.
 
 ## Personal skills
 
