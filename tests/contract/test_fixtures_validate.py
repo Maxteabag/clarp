@@ -17,7 +17,7 @@ from schema_check import validate  # noqa: E402
 FIXTURES = REPO / "contract" / "fixtures"
 AREAS = {"sync", "delivery", "sse", "audio", "state"}
 STEP_KEYS = {"open", "snapshot", "log", "sse", "beginFetch", "endFetch",
-             "send", "confirm", "stale", "clip", "replayCheck"}
+             "send", "confirm", "stale", "clip", "replayCheck", "optimistic"}
 LOG_MODES = {"tail", "delta", "older"}
 EFFECTS = {"fetch_tail", "fetch_delta", "fetch_older", "drop_cache"}
 
