@@ -300,6 +300,92 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
     }
 
 
+MARKER_ORIGIN = origins.MARKER_ORIGIN
+
+
+def marker_message_id(cause_message_id: str) -> str:
+    return f"marker-{cause_message_id}"
+
+
+def has_interruption_marker(cause_message_id: str) -> bool:
+    if not cause_message_id:
+        return False
+    return conn().execute(
+        "SELECT 1 FROM messages WHERE message_id = ? LIMIT 1",
+        (marker_message_id(cause_message_id),),
+    ).fetchone() is not None
+
+
+def record_interruption_marker(*, agent_id: str, backend_session_id: str,
+                               cause_message_id: str, text: str,
+                               ) -> dict[str, Any] | None:
+    """Write the visible "this turn was cut short" row under a user message.
+
+    A turn the server killed (restart, crash) never writes an assistant row,
+    so the user's message would sit unanswered with nothing to say why. The
+    marker is an assistant-role row with origin ``system``: it renders as a
+    normal reply, survives the automated-row filter, and is keyed by the
+    causing message so a second boot cannot add a second one. Returns the new
+    row, or None when the marker already exists.
+    """
+    if not agent_id or not cause_message_id:
+        return None
+    database = conn()
+    msg_id = marker_message_id(cause_message_id)
+    if database.execute(
+            "SELECT 1 FROM messages WHERE message_id = ?", (msg_id,)).fetchone():
+        return None
+    row = database.execute(
+        """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
+             FROM messages
+            WHERE agent_id = ? AND backend_session_id = ?""",
+        (agent_id, backend_session_id),
+    ).fetchone()
+    seq = min(int(row["next_seq"]), -1)
+    cause = database.execute(
+        f"""SELECT {_message_activity_sql()} AS ts_ms
+              FROM messages WHERE message_id = ?""",
+        (cause_message_id,),
+    ).fetchone()
+    # Display order is timestamp then seq, and the marker's seq is below the
+    # user row's, so its timestamp must be strictly later to sit under it.
+    timestamp_ms = now_ms()
+    if cause is not None and cause["ts_ms"] is not None:
+        timestamp_ms = max(timestamp_ms, int(cause["ts_ms"]) + 1)
+    timestamp = _iso_from_ms(timestamp_ms)
+    revision = _next_revision(database)
+    inserted = database.execute(
+        """INSERT INTO messages (
+               message_id, agent_id, backend_session_id, source_file, seq,
+               role, timestamp, text, kind, tool_name, tools_json,
+               display_cells_json, updated_at, revision, origin,
+               sender_agent_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(message_id) DO NOTHING""",
+        (
+            msg_id, agent_id, backend_session_id, f"marker:{cause_message_id}",
+            seq, "assistant", timestamp, text, None, None, "[]", "[]",
+            timestamp_ms, revision, MARKER_ORIGIN, None,
+        ),
+    )
+    if inserted.rowcount != 1:
+        return None
+    database.execute(
+        """INSERT INTO conversation_heads (
+               agent_id, backend_session_id, revision, replace_revision
+           ) VALUES (?, ?, ?, 0)
+           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+               revision = MAX(conversation_heads.revision, excluded.revision)""",
+        (agent_id, backend_session_id, revision),
+    )
+    return {
+        "id": msg_id, "role": "assistant", "timestamp": timestamp,
+        "text": text, "kind": None, "tool_name": None, "tools": [],
+        "display_cells": [], "origin": MARKER_ORIGIN, "sender_agent_id": "",
+        "revision": revision, "created": True,
+    }
+
+
 def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
                                   trace_id: str = "", text: str
                                   ) -> dict[str, Any] | None:
