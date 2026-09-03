@@ -12,7 +12,11 @@ Markup vocabulary:
   <speak>…</speak>  voice-channel gate — markers removed, inner text kept.
   <vox>…</vox>      audio-only fillers (um/uh/like) — display: dropped entirely;
                     TTS: unwrapped so the words are spoken.
-  <break/>          display: dropped; TTS: kept so the engine honours pauses.
+  <break/>          display: dropped; TTS: kept ONLY for engines that parse
+                    SSML (Cartesia, ElevenLabs). Deepgram and custom adapters
+                    that have not declared `ssml: true` in their manifest get
+                    it stripped at the provider boundary via
+                    strip_ssml_for_plain_tts, otherwise the tag is read aloud.
   <speed/> <volume/> <emotion/>  display + TTS: dropped; Cartesia does not
                     reliably honour them and leaked tags are worse than no tag.
 """
@@ -108,6 +112,21 @@ def spoken_for_tts(text: str | None) -> str:
     s = _VOX_TAG_RE.sub("", s)
     s = _TTS_DROP_SSML_RE.sub("", s)
     s = _INLINE_WS_RE.sub(" ", s).strip()
+    return _SPACE_BEFORE_PUNCT_RE.sub(r"\1", s)
+
+
+def strip_ssml_for_plain_tts(text: str | None) -> str:
+    """Remove every SSML tag for an engine that does not parse SSML.
+
+    Each tag becomes a single space, never the empty string: `one<break/>two`
+    must reach the model as "one two", not "onetwo". Applied at the provider
+    boundary (custom adapters without `ssml: true`, Deepgram) after the normal
+    spoken-text pipeline has already kept <break> for SSML-capable engines.
+    """
+    if not text:
+        return ""
+    s = _SSML_RE.sub(" ", text)
+    s = " ".join(s.split())
     return _SPACE_BEFORE_PUNCT_RE.sub(r"\1", s)
 
 
