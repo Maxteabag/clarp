@@ -844,6 +844,7 @@ class TurnDispatchService:
                 origin=spec.origin,
                 sender_agent_id=spec.sender_agent_id or None,
                 prompt_admission_id=spec.prompt_admission_id,
+                trace_id=spec.trace_id,
             )
             if appended and getattr(self.ctx, "stream", None) is not None:
                 self.ctx.stream.broadcast({

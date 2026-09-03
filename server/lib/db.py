@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 64
+_SCHEMA_VERSION = 65
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -454,9 +454,11 @@ CREATE TABLE messages (
     origin TEXT NOT NULL DEFAULT 'user',
     sender_agent_id TEXT,
     prompt_admission_id TEXT,
+    trace_id TEXT,
     UNIQUE(agent_id, backend_session_id, seq)
 );
 CREATE INDEX idx_messages_agent_seq ON messages(agent_id, backend_session_id, seq);
+CREATE INDEX idx_messages_trace ON messages(trace_id) WHERE trace_id IS NOT NULL;
 CREATE INDEX idx_messages_agent_timestamp ON messages(agent_id, timestamp);
 CREATE INDEX idx_messages_agent_revision ON messages(agent_id, backend_session_id, revision);
 
@@ -1304,6 +1306,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v63(con)
             if version < 64:
                 _migrate_to_v64(con)
+            if version < 65:
+                _migrate_to_v65(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1451,6 +1455,19 @@ def _migrate_to_v64(con: sqlite3.Connection) -> None:
         text = statement.strip()
         if text:
             con.execute(text)
+
+
+def _migrate_to_v65(con: sqlite3.Connection) -> None:
+    """A user message remembers the trace of the turn that carried it.
+
+    That is the link from a transcript bubble back to the vocabulary run and
+    the retained audio behind it - the "what was sent" the app can now show
+    for one message rather than for the agent as a whole.
+    """
+    con.execute("ALTER TABLE messages ADD COLUMN trace_id TEXT")
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_trace ON messages(trace_id)"
+        " WHERE trace_id IS NOT NULL")
 
 
 _V64_SQL = """
