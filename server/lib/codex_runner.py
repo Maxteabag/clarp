@@ -821,3 +821,32 @@ def _broadcast_transcript(stream: Any, agent_id: str, session: str) -> None:
         })
     except Exception as e:                     # noqa: BLE001
         log_exception("codexBroadcastFail", e, detail=agent_id)
+
+
+# ---- orchestrator routing -------------------------------------------------
+
+def routing_cmd(prompt: str, *, model: str = "", effort: str = "") -> list[str]:
+    """argv for one ephemeral ``codex exec --json`` request (orchestrator)."""
+    cmd = build_cmd(model=model, reasoning_effort=effort, isolated=True)
+    cmd.append(prompt)
+    return cmd
+
+
+def routing_text(stdout: str) -> str:
+    """The final agent message of a ``codex exec --json`` run."""
+    final_text = ""
+    for line in (stdout or "").splitlines():
+        try:
+            event = json.loads(line)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(event, dict) or event.get("type") != "item.completed":
+            continue
+        item = event.get("item")
+        if isinstance(item, dict) and item.get("type") == "agent_message":
+            candidate = item.get("text")
+            if isinstance(candidate, str) and candidate.strip():
+                final_text = candidate
+    if not final_text:
+        raise ValueError("codex orchestrator returned no agent message")
+    return final_text

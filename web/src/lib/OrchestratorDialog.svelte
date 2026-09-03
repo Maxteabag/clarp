@@ -5,14 +5,19 @@
 
   let { open = $bindable() } = $props();
 
-  const PROVIDER_DETAIL = {
-    claude: 'Runs an isolated Claude Code request on this Computer.',
-    codex: 'Runs an isolated Codex CLI request on this Computer.',
-    agy: 'Runs an isolated Antigravity request on this Computer.',
-    grok: 'Runs an isolated Grok Build request on this Computer.',
-    opencode: 'Runs an isolated OpenCode request on this Computer.',
-    openai: 'Uses the configured OpenAI API key directly.',
-  };
+  // Routing providers an older Host does not list itself. A Host that sends
+  // `providers` on /orchestrator/settings replaces this wholesale.
+  const FALLBACK_OPTIONS = [
+    { id: 'claude', label: 'Claude', kind: 'backend', catalog_backend: 'claude',
+      detail: 'Runs an isolated Claude Code request on this Computer.' },
+    { id: 'codex', label: 'Codex', kind: 'backend', catalog_backend: 'codex',
+      detail: 'Runs an isolated Codex CLI request on this Computer.' },
+    { id: 'agy', label: 'Antigravity', kind: 'backend', catalog_backend: 'agy',
+      detail: 'Runs an isolated Antigravity request on this Computer.' },
+    { id: 'openai', label: 'OpenAI API', kind: 'api', catalog_backend: 'codex',
+      detail: 'Uses the configured OpenAI API key directly.',
+      effort_options: ['minimal', 'low', 'medium', 'high'] },
+  ];
 
   let enabled = $state(false);
   let fallbackOnly = $state(true);
@@ -24,20 +29,23 @@
   let last = $state('Loading...');
   let ignored = $state([]);
   let providers = $state({});
+  let options = $state(FALLBACK_OPTIONS);
 
-  // OpenAI routing reuses the discovered Codex catalogue — there is no
-  // separate OpenAI capability probe on the server.
-  const catalogueId = v => (v === 'openai' ? 'codex' : v);
-
-  let capability = $derived(providers[catalogueId(provider)] || {});
+  let option = $derived(
+    options.find(o => o.id === provider) || { id: provider, label: provider, kind: 'backend',
+                                             catalog_backend: provider, detail: '' });
+  // The option names which catalogue row supplies its models (OpenAI reuses
+  // Codex's: there is no separate OpenAI capability probe on the server).
+  let capability = $derived(providers[option.catalog_backend || provider] || {});
   let models = $derived(capability.models || []);
   let efforts = $derived.by(() => {
+    if (Array.isArray(option.effort_options)) return option.effort_options;
     const m = models.find(row => row.id === model);
     if (Array.isArray(m?.supported_efforts)) return m.supported_efforts;
     return Array.isArray(capability.supported_efforts) ? capability.supported_efforts : [];
   });
   let providerHelp = $derived(
-    (PROVIDER_DETAIL[provider] || '') + (provider === 'openai'
+    (option.detail || '') + (option.kind === 'api'
       ? ' GPT choices reuse the discovered Codex catalogue; API access is checked when routing runs.'
       : ' Models and effort levels come from this Computer’s live capability catalogue.'));
 
@@ -57,6 +65,7 @@
       const d = await r.json();
       const s = d.settings || {};
       providers = catalogue?.providers || {};
+      options = Array.isArray(d.providers) && d.providers.length ? d.providers : FALLBACK_OPTIONS;
       enabled = !!s.enabled;
       fallbackOnly = s.fallback_only !== false;
       confidence = s.confidence_threshold || 0.78;
@@ -129,12 +138,9 @@
       <label class="start-field">
         <span>Routing AI provider</span>
         <select bind:value={provider} onchange={() => { model = ''; effort = ''; }}>
-          <option value="claude">Claude</option>
-          <option value="codex">Codex</option>
-          <option value="agy">Antigravity</option>
-          <option value="grok">Grok</option>
-          <option value="opencode">OpenCode</option>
-          <option value="openai">OpenAI API</option>
+          {#each options as o (o.id)}
+            <option value={o.id}>{o.label}{o.installed === false ? ' (not installed)' : ''}</option>
+          {/each}
         </select>
       </label>
       <label class="start-field">

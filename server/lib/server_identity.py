@@ -18,6 +18,38 @@ _NAME_KEY = "server_display_name"
 # prompt when either side is behind.
 MIN_APP_VERSION = "1.0"
 
+# Product surfaces this Host implements, advertised on /server-info so an
+# older app can hide an entry point the Host lacks instead of showing a dead
+# toggle, and a newer app can hide one this Host has not grown yet. Names are
+# stable ids, not endpoints; add one when a feature ships, never rename.
+CAPABILITIES_VERSION = 1
+FEATURES: tuple[str, ...] = (
+    "teams",
+    "oracle",
+    "dreaming",
+    "heartbeat",
+    "location",
+    "calendar",
+    "media",
+    "artifacts",
+    "background_jobs",
+    "herald",
+    "personalities",
+    "managed_skills",
+    "agent_portraits",
+    "remote_action",
+    "orchestrator",
+    "backend_auth",
+    "transcription",
+    "tts",
+    "pairing",
+    "diagnostics",
+)
+
+
+def capabilities() -> dict[str, object]:
+    return {"version": CAPABILITIES_VERSION, "features": list(FEATURES)}
+
 def _pyproject_candidates() -> list[pathlib.Path]:
     """pyproject.toml next to the code, in either layout.
 
@@ -50,7 +82,7 @@ def clarp_version() -> str:
         return ""
 
 
-def get_server_info() -> dict[str, str]:
+def get_server_info() -> dict[str, object]:
     server_id = get_text(_ID_KEY).strip()
     if not server_id:
         server_id = str(uuid.uuid4())
@@ -80,4 +112,5 @@ def get_server_info() -> dict[str, str]:
         "default_cwd": default_cwd,
         "clarp_version": clarp_version(),
         "min_app_version": MIN_APP_VERSION,
+        "capabilities": capabilities(),
     }

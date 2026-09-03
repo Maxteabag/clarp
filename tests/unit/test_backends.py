@@ -176,3 +176,49 @@ def test_stream_kwargs_strips_synthesize_audio():
     assert out["text"] == "hi"
     assert out["stream"] is None
     assert out["voice_preamble"] is True
+
+
+def test_catalogue_fields_carry_presentation_and_capability_flags():
+    claude = backends.catalogue_fields("claude")
+    assert claude["detail"] == "Runs on Claude Code."
+    assert claude["brand"] == {
+        "field_top": "#e08b6a", "field_bottom": "#c9603d",
+        "tint_dark": "#d97757", "tint_light": "#b85433",
+    }
+    assert claude["sort_index"] == 0 and claude["hidden"] is False
+    assert claude["supports_fork"] and claude["supports_mcp"]
+    assert claude["supports_compact"] and claude["supports_routing"]
+    assert claude["supports_auth"] and claude["login_kind"] == "cli"
+    assert claude["supports_usage"] and claude["effort_ui"] == "picker"
+
+    codex = backends.catalogue_fields("codex")
+    assert codex["supports_steer"] and codex["login_kind"] == "device_code"
+
+    agy = backends.catalogue_fields("antigravity")
+    assert agy["effort_ui"] == "folded_into_model"
+    assert agy["effort_help"] == "Included in model choice"
+    assert agy["supports_auth"] is False and agy["login_kind"] == "none"
+
+    # OpenCode has no compaction machinery, so the flag says so instead of
+    # the client showing a Compact button that the Host rejects.
+    opencode = backends.catalogue_fields("opencode")
+    assert opencode["supports_compact"] is False
+    assert opencode["supports_resume"] is True and opencode["resumable"] is True
+
+    # An unregistered id still yields a complete, neutral row.
+    unknown = backends.catalogue_fields("future-cli")
+    assert unknown["symbol"] == "cpu" and unknown["brand"] == backends.DEFAULT_BRAND.as_dict()
+    assert unknown["sort_index"] == len(backends.ids())
+
+
+def test_routing_and_auth_adapters_are_derived_from_the_registry():
+    assert [a.id for a in backends.routing_adapters()] == list(backends.ids())
+    assert [a.id for a in backends.auth_adapters()] == ["claude", "codex"]
+
+
+def test_adapter_rejects_unknown_enumerations():
+    import pytest
+    with pytest.raises(ValueError):
+        backends.BackendAdapter(id="x", label="X", required_binary="x", login_kind="magic")
+    with pytest.raises(ValueError):
+        backends.BackendAdapter(id="x", label="X", required_binary="x", effort_ui="dial")

@@ -303,8 +303,20 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   `/agent-voice` — per-agent toggles: `{"session", "<flag>": bool}`.
 - `GET /past-sessions?backend=&cwd=` — resumable backend conversations for
   the start dialog.
-- `GET /agent-model-options` — the model catalogue: `providers.<id>.models[]`
-  with `id`, `label`, `default_effort`, `supported_efforts`, and provenance.
+- `GET /agent-model-options` — the backend catalogue. `providers.<id>` is
+  everything a chooser needs for one CLI: `label`, `detail`, `badge` (a
+  bundled mark name), `symbol` (icon fallback), `brand` (`field_top`,
+  `field_bottom`, `tint_dark`, `tint_light` as `#rrggbb`), `sort_index`,
+  `hidden`, `installed`, the capability flags `supports_fork`,
+  `supports_resume`, `supports_steer`, `supports_compact`, `supports_mcp`,
+  `supports_routing`, `supports_auth`, `supports_usage`, `login_kind`
+  (`none` | `device_code` | `cli` | `api_key`), `effort_ui` (`picker` |
+  `hidden` | `folded_into_model`) with `effort_help`, and `models[]` with
+  `id`, `label`, `default_effort`, `supported_efforts`, and provenance.
+  Clients render this list rather than a bundled enum: cards are the
+  installed, unhidden rows (plus the backend an existing agent runs on),
+  and every Fork / Resume / Compact / MCP control follows its flag. A flag
+  the Host does not send means the client's old default, never "no".
 - `GET /voices?for=<session>` — voice catalogue with availability.
 - `GET /dirs?path=` — directory completion for the start dialog.
 - `POST /clog` — batched client diagnostics `{"events": [{"event", "detail",
@@ -383,3 +395,19 @@ speaks to). The app compares those with its own version and
 `HostCompatibilityPolicy.minimumHostVersion` and shows a one-time "update the
 Host" or "update the app" dialog per (Host, Host version, app version). A
 server that predates these fields is treated as older than any minimum.
+
+Inside that window, features are negotiated per surface rather than by
+version. `/server-info` also carries `capabilities.features`, the product
+surfaces this Host implements (`teams`, `oracle`, `dreaming`, …,
+`server_identity.FEATURES`), so a client hides an entry point the Host
+lacks instead of showing a dead toggle; a Host that sends no block hides
+nothing. The same idea drives the per-surface catalogues: backends
+(`/agent-model-options`, above), sign-in rows (`/backend-auth` lists every
+registry adapter whose `login_kind` is not `none`, with that `login_kind`
+on the row), and routing providers (`/orchestrator/settings` returns
+`providers[]` with `id`, `label`, `detail`, `kind` `backend` | `api`,
+`catalog_backend` naming the `/agent-model-options` row that supplies its
+models, `installed`, and `effort_options`; a `POST` with a provider outside
+that list is a 400). Adding a CLI is a server adapter with its
+presentation and flags; no client release is needed for it to look
+intentional.

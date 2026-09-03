@@ -1,9 +1,12 @@
 """AI-CLI backend registry.
 
 Each coding CLI is a ``BackendAdapter``: dispatch, history, catalogue
-metadata, and (optional) compaction. Clients do not hardcode provider
-ids — they render ``/agent-model-options``. Adding a provider is a
-server adapter plus a registry line.
+metadata, presentation, capability flags, and (optional) compaction,
+routing and sign-in. Clients do not hardcode provider ids — they render
+``/agent-model-options``, including the label, brand colours, symbol and
+``supports_*`` flags carried here, so a new CLI looks intentional in the
+apps without an app release. Adding a provider is a server adapter plus a
+registry line.
 """
 from __future__ import annotations
 
@@ -30,6 +33,42 @@ class BackendCapabilities:
 
 
 @dataclass(frozen=True)
+class BackendBrand:
+    """Chooser colours as ``#rrggbb`` strings.
+
+    Served on the catalogue so a client never has to ship a palette per CLI:
+    a new adapter picks its own field and tint and every app renders it.
+    """
+    field_top: str
+    field_bottom: str
+    tint_dark: str
+    tint_light: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "field_top": self.field_top,
+            "field_bottom": self.field_bottom,
+            "tint_dark": self.tint_dark,
+            "tint_light": self.tint_light,
+        }
+
+
+# Neutral treatment for an adapter that declares no brand of its own.
+DEFAULT_BRAND = BackendBrand("#2a3142", "#151820", "#a8b4c8", "#4a5568")
+DEFAULT_SYMBOL = "cpu"
+
+# How a client obtains credentials for the CLI. "none" hides the sign-in row.
+LOGIN_KINDS = ("none", "device_code", "cli", "api_key")
+# How a client offers the effort control. "folded_into_model" means the model
+# id already encodes the effort (AGY), so the picker is replaced by a note.
+EFFORT_UIS = ("picker", "hidden", "folded_into_model")
+# Where effort evidence lives: per model ("model"), one list for the whole
+# provider ("provider"), or a provider flag whose compatibility with a chosen
+# model is unknown ("provider_flag").
+EFFORT_SCOPES = ("model", "provider", "provider_flag")
+
+
+@dataclass(frozen=True)
 class BackendAdapter:
     """One coding CLI the Host can run as an agent backend."""
     id: str
@@ -41,6 +80,22 @@ class BackendAdapter:
     efforts: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     badge: str = ""
+    # Presentation the chooser needs; nothing here requires a client build.
+    detail: str = ""
+    symbol: str = DEFAULT_SYMBOL
+    brand: BackendBrand = DEFAULT_BRAND
+    hidden: bool = False
+    # Capability flags advertised on the catalogue. Compact, routing and auth
+    # are derived from the machinery below rather than declared twice.
+    supports_mcp: bool = False
+    supports_usage: bool = False
+    login_kind: str = "none"
+    effort_ui: str = "picker"
+    effort_help: str = ""
+    effort_scope: str = "provider"
+    # Module exposing routing_cmd()/routing_text() for one isolated
+    # orchestrator request. Empty means the CLI cannot route.
+    routing_module: str = ""
     runner_module: str = ""
     transcript_module: str = ""
     extra_interrupt_modules: tuple[str, ...] = ()
@@ -54,6 +109,50 @@ class BackendAdapter:
     uses_codex_app_server: bool = False
     claude_session_catalog: bool = False
     resumable: bool = True
+
+    def __post_init__(self) -> None:
+        if self.login_kind not in LOGIN_KINDS:
+            raise ValueError(f"{self.id}: unknown login_kind {self.login_kind!r}")
+        if self.effort_ui not in EFFORT_UIS:
+            raise ValueError(f"{self.id}: unknown effort_ui {self.effort_ui!r}")
+        if self.effort_scope not in EFFORT_SCOPES:
+            raise ValueError(f"{self.id}: unknown effort_scope {self.effort_scope!r}")
+
+    @property
+    def supports_compact(self) -> bool:
+        return bool(self.compact_launch and self.compact_command)
+
+    @property
+    def supports_routing(self) -> bool:
+        return bool(self.routing_module)
+
+    @property
+    def supports_auth(self) -> bool:
+        return self.login_kind != "none"
+
+    def catalogue_fields(self, sort_index: int) -> dict[str, Any]:
+        """The presentation and capability block of one catalogue row."""
+        return {
+            "label": self.label,
+            "detail": self.detail or f"Runs on {self.label}.",
+            "badge": self.badge,
+            "symbol": self.symbol or DEFAULT_SYMBOL,
+            "brand": self.brand.as_dict(),
+            "sort_index": sort_index,
+            "hidden": self.hidden,
+            "supports_fork": bool(self.supports_fork),
+            "resumable": bool(self.resumable),
+            "supports_resume": bool(self.resumable),
+            "supports_steer": bool(self.supports_steer),
+            "supports_compact": self.supports_compact,
+            "supports_mcp": bool(self.supports_mcp),
+            "supports_routing": self.supports_routing,
+            "supports_auth": self.supports_auth,
+            "supports_usage": bool(self.supports_usage),
+            "login_kind": self.login_kind,
+            "effort_ui": self.effort_ui,
+            "effort_help": self.effort_help,
+        }
 
     def capabilities(self) -> BackendCapabilities:
         binary = self.required_binary
@@ -77,6 +176,14 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         supports_fork=True, supports_transcript_streaming=True,
         efforts=("low", "medium", "high", "xhigh", "max"),
         badge="BackendClaude",
+        detail="Runs on Claude Code.",
+        symbol="sparkles",
+        brand=BackendBrand("#e08b6a", "#c9603d", "#d97757", "#b85433"),
+        supports_mcp=True,
+        supports_usage=True,
+        login_kind="cli",
+        effort_scope="model",
+        routing_module="clarp_runner",
         runner_module="clarp_runner",
         transcript_module="transcript_log",
         config_model_field="claude_model",
@@ -103,6 +210,13 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         supports_steer=True,
         efforts=("low", "medium", "high"),
         badge="BackendCodex",
+        detail="Runs on the Codex CLI.",
+        symbol="terminal",
+        brand=BackendBrand("#2b2f3c", "#14161d", "#c0caf5", "#3c4257"),
+        supports_usage=True,
+        login_kind="device_code",
+        effort_scope="model",
+        routing_module="codex_runner",
         runner_module="codex_app_server",
         transcript_module="codex_transcript",
         extra_interrupt_modules=("codex_runner",),
@@ -125,6 +239,15 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         efforts=("low", "medium", "high"),
         aliases=("antigravity",),
         badge="BackendAntigravity",
+        detail="Runs on Antigravity.",
+        symbol="circle.hexagongrid",
+        brand=BackendBrand("#1d2742", "#0e1424", "#4c8ef7", "#2b6ed6"),
+        # AGY model ids carry their own effort suffix ("...-flash-high"), so
+        # the effort picker is folded into the model choice.
+        effort_ui="folded_into_model",
+        effort_help="Included in model choice",
+        effort_scope="provider_flag",
+        routing_module="agy_runner",
         runner_module="agy_runner",
         transcript_module="agy_transcript",
         config_model_field="agy_model",
@@ -152,6 +275,10 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         id=GROK, label="Grok", required_binary="grok",
         efforts=("low", "medium", "high"),
         badge="BackendGrok",
+        detail="Runs on Grok Build.",
+        symbol="xmark.circle",
+        brand=BackendBrand("#1a1a1a", "#0a0a0a", "#e8e8e8", "#222222"),
+        routing_module="grok_runner",
         runner_module="grok_runner",
         transcript_module="grok_transcript",
         config_model_field="grok_model",
@@ -168,6 +295,10 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         efforts=("low", "medium", "high", "max"),
         aliases=("open-code", "opencode-ai"),
         badge="BackendOpenCode",
+        detail="Runs on OpenCode.",
+        symbol="chevron.left.forwardslash.chevron.right",
+        brand=BackendBrand("#16352b", "#0b1c16", "#5ee4b5", "#1f8a65"),
+        routing_module="opencode_runner",
         runner_module="opencode_runner",
         transcript_module="opencode_transcript",
         config_model_field="opencode_model",
@@ -204,6 +335,30 @@ def adapters() -> tuple[BackendAdapter, ...]:
 
 def ids() -> tuple[str, ...]:
     return tuple(a.id for a in _ADAPTERS)
+
+
+def catalogue_fields(backend: str | None) -> dict[str, Any]:
+    """Presentation + capability flags for one ``/agent-model-options`` row.
+
+    An unregistered id gets the neutral defaults so a catalogue row is
+    always complete; ``sort_index`` follows registry order.
+    """
+    adapter = get(backend)
+    if adapter is None:
+        return BackendAdapter(
+            id=str(backend or ""), label=str(backend or ""), required_binary="",
+        ).catalogue_fields(len(_ADAPTERS))
+    return adapter.catalogue_fields(_ADAPTERS.index(adapter))
+
+
+def routing_adapters() -> tuple[BackendAdapter, ...]:
+    """Adapters that can answer one isolated orchestrator request."""
+    return tuple(a for a in _ADAPTERS if a.supports_routing)
+
+
+def auth_adapters() -> tuple[BackendAdapter, ...]:
+    """Adapters whose CLI has a sign-in the Host can drive."""
+    return tuple(a for a in _ADAPTERS if a.supports_auth)
 
 
 def get(backend: str | None) -> BackendAdapter | None:

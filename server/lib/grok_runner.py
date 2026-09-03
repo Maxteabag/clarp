@@ -308,3 +308,26 @@ def _broadcast(stream: Any, agent_id: str, session: str) -> None:
         })
     except Exception as error:  # noqa: BLE001
         log_exception("grokBroadcastFail", error)
+
+
+# ---- orchestrator routing -------------------------------------------------
+
+def routing_cmd(prompt: str, *, model: str = "", effort: str = "") -> list[str]:
+    """argv for one headless Grok Build request with no session (orchestrator)."""
+    return build_cmd(model=model, effort=effort) + ["-p", prompt]
+
+
+def routing_text(stdout: str) -> str:
+    """Concatenated assistant text of a streaming-json run."""
+    text = ""
+    for raw in (stdout or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(ev, dict):
+            text += _assistant_delta(ev)
+    return text

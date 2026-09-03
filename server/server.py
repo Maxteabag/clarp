@@ -1028,8 +1028,10 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_file(path)
 
     def _handle_orchestrator_settings_get(self):
+        from lib.orchestrator import provider_options
         body = json.dumps({
             "settings": get_orchestrator_settings().__dict__,
+            "providers": provider_options(),
             "recent_decisions": recent_orchestrator_decisions(5),
             "ignored_decisions": recent_orchestrator_ignored_decisions(20),
         }).encode()
@@ -1399,8 +1401,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_backend_auth(self):
         from lib.backend_auth import status, task
+        from lib import backends
         body = {"backends": status(), "tasks": {
-            backend: task(backend) for backend in ("claude", "codex")}}
+            adapter.id: task(adapter.id) for adapter in backends.auth_adapters()}}
         self._send(200, json.dumps(body).encode(), "application/json")
 
     def _handle_backend_auth_login(self):
@@ -2589,7 +2592,12 @@ class Handler(BaseHTTPRequestHandler):
         data = self._read_json()
         if data is None:
             return self._send(400, b'{"error":"bad json"}', "application/json")
-        settings = update_orchestrator_settings(data)
+        try:
+            settings = update_orchestrator_settings(data)
+        except ValueError as exc:
+            return self._send(
+                400, json.dumps({"error": str(exc)}).encode(),
+                "application/json")
         return self._send(
             200,
             json.dumps({"ok": True, "settings": settings.__dict__}).encode(),

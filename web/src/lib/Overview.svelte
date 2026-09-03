@@ -8,10 +8,15 @@
   import {
     buildAgentOverview, formatRelativeActivity,
   } from '@core/agent-overview.js';
+  import { labelFor, loadBackendCatalogue } from '../stores/backends.svelte.js';
 
   let {
     open = $bindable(), onStart, onRelaunch, onVoice, onOrchestrator,
   } = $props();
+
+  $effect(() => {
+    if (open) loadBackendCatalogue();
+  });
 
   let query = $state('');
   let section = $state(isDesktop ? 'all' : 'chats');
@@ -60,14 +65,10 @@
     return AVATAR_PALETTE[name] || 'var(--ochre)';
   }
 
+  // Labels come from the Host catalogue so a backend this build has never
+  // seen still reads as its own name rather than a raw id.
   function backendLabel(value) {
-    const backend = String(value || '').toLowerCase();
-    if (backend === 'claude') return 'Claude';
-    if (backend === 'codex') return 'Codex';
-    if (backend === 'agy') return 'AGY';
-    if (backend === 'grok') return 'Grok';
-    if (backend === 'opencode') return 'OpenCode';
-    return value || 'Agent';
+    return value ? labelFor(value) : 'Agent';
   }
 
   function contextPercent(row) {

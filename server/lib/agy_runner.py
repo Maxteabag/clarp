@@ -876,3 +876,26 @@ def _broadcast_transcript(stream: Any, agent_id: str, session: str) -> None:
                           "agent_id": agent_id, "session": session})
     except Exception as e:                                 # noqa: BLE001
         log_exception("agyBroadcastFail", e, detail=agent_id)
+
+
+# ---- orchestrator routing -------------------------------------------------
+
+def routing_cmd(prompt: str, *, model: str = "", effort: str = "") -> list[str]:
+    """argv for one isolated AGY request (orchestrator).
+
+    Plain output (no stream-json) so the reply is the router's JSON, and no
+    catalogue admission: the orchestrator's model pin was validated on save.
+    The prompt stays bound to ``--print=`` (see ``build_cmd``).
+    """
+    cmd = [AGY_BIN, "--dangerously-skip-permissions"]
+    if model:
+        cmd += ["--model", model]
+    if effort:
+        cmd += ["--effort", effort]
+    cmd.append(f"--print={prompt}")
+    return cmd
+
+
+def routing_text(stdout: str) -> str:
+    """The reply text of a ``routing_cmd`` run."""
+    return stdout or ""
