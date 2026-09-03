@@ -160,12 +160,60 @@ class ServerContext:
         return names
 
     def vocab_prompt(self, *, delegated: bool) -> str:
-        return build_initial_prompt(
-            read_technical_glossary(),
-            self.active_agent_names(),
-            include_agent_names=(
-                delegated and delegation_agent_names_enabled()),
-            include_technical_glossary=not delegated,
+        """Legacy string form of the biasing prompt.
+
+        Retained for callers that only want a prompt. Prefer
+        `vocab_compile_result` when the caller can record the audit row -
+        that is the path that makes a transcript traceable to its prompt.
+        """
+        return self.vocab_compile_result(delegated=delegated).payload
+
+    def vocab_compile_result(
+        self,
+        *,
+        delegated: bool,
+        provider: str = "faster-whisper",
+        model: str = "",
+        recent_transcripts: tuple[str, ...] = (),
+        corrections: tuple[tuple[str, str], ...] = (),
+    ):
+        """Compile this turn's biasing payload against the active model.
+
+        The two long-standing settings still govern what may contribute:
+        delegation turns are primed with agent names, ordinary turns with the
+        user's technical glossary. Everything below that is new - the glossary
+        becomes a static pack and the rest is generated, then all of it is
+        fitted to whatever the provider actually accepts.
+        """
+        from .vocab_budget import Pack, Term
+        from .vocab_compile import Sources, compile_for
+        from .vocab_generators import estimate_rarity
+
+        include_names = delegated and delegation_agent_names_enabled()
+        static: list[Pack] = []
+        if not delegated:
+            glossary = read_technical_glossary()
+            terms = tuple(
+                Term(text=line, pack="glossary", rarity=estimate_rarity(line))
+                for line in (l.strip() for l in glossary.splitlines())
+                if line
+            )
+            if terms:
+                # Curated by hand, so it earns a floor: a term the user typed
+                # should not be crowded out by generated workspace noise.
+                static.append(Pack(
+                    name="glossary", terms=terms, priority=1.5, floor=3))
+
+        return compile_for(
+            provider=provider,
+            model=model,
+            static_packs=static,
+            sources=Sources(
+                agent_names=(
+                    tuple(self.active_agent_names()) if include_names else ()),
+                recent_transcripts=recent_transcripts,
+                corrections=corrections,
+            ),
         )
 
     def deployed_version(self) -> str:
