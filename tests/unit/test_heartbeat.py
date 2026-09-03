@@ -689,3 +689,43 @@ def test_user_stopped_agent_never_revives(monkeypatch):
     agent_row = agents_db.get_by_agent_id(aid)
     assert heartbeat.agent_schedule(agent_row, now=2000.0)["next_heartbeat_at"] is None
 
+
+def test_interrupted_agent_fixed_interval_and_dormancy_after_11_hours(monkeypatch):
+    _heartbeat_test_env(monkeypatch, base=40, cap=160)
+    aid = _agent("interrupted_fixed")
+    agents_db.record_state(aid, AgentState.INTERRUPTED, {
+        "reason": "usage_limit",
+        "message": "Usage limit reached",
+    })
+    db.conn().execute(
+        "UPDATE state_log SET ts = 10000000 WHERE agent_id = ?",
+        (aid,),
+    )
+    for _ in range(8):
+        heartbeat.record_heartbeat_noop(aid)
+
+    state = heartbeat._state_for(aid)  # noqa: SLF001
+    assert state.noop_streak == 8
+    assert state.dormant is False
+
+    agent_row = agents_db.get_by_agent_id(aid)
+    schedule = heartbeat.agent_schedule(agent_row, now=10_100.0)
+    assert schedule["effective_interval_sec"] == 40
+    assert schedule["dormant"] is False
+
+    heartbeat.pending_heartbeat_agents(now=10_000.0 + 11 * 3600 + 10)
+    assert state.dormant is True
+    assert heartbeat.agent_schedule(agent_row, now=10_000.0 + 11 * 3600 + 10)["next_heartbeat_at"] is None
+
+
+def test_default_backoff_cap_is_one_hour(monkeypatch):
+    for name in (
+        "CLAUDE_PWA_HEARTBEAT_INTERVAL_SEC",
+        "CLAUDE_PWA_HEARTBEAT_BACKOFF_CAP_SEC",
+        "CLAUDE_PWA_HEARTBEAT_DORMANT_AFTER_NOOPS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    settings = heartbeat.get_settings()
+    assert settings.backoff_cap_sec == 3600
+
+

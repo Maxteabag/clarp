@@ -46,6 +46,8 @@ INTERRUPTED_HEARTBEAT_PREFIX = (
     "active commitment without repeating completed work.\n\n"
 )
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 30 * 60
+DEFAULT_BACKOFF_CAP_SEC = 60 * 60  # 1 hour maximum heartbeat interval cap
+MAX_INTERRUPTED_RETRY_SEC = 11 * 60 * 60  # 11 hours maximum retry duration for interrupted agents
 MIN_WAKE_SPACING_SEC = 30
 FLOOD_WINDOW_SEC = 60
 FLOOD_THRESHOLD = 5
@@ -107,6 +109,16 @@ def _is_user_stopped(latest: dict[str, Any]) -> bool:
     )
 
 
+def _is_restart_interrupted(latest: dict) -> bool:
+    """A turn the previous server process took down with it (issue #11).
+
+    The restart heartbeat already tells the agent its turn may have been cut,
+    so the system-limit wording would only be noise on top of it.
+    """
+    detail = latest.get("detail") or {}
+    return isinstance(detail, dict) and detail.get("source") == "server_restart"
+
+
 def heartbeat_prompt_text(agent: dict | None = None) -> str:
     """Return the bounded heartbeat prompt plus explicit durable plan state."""
     prefix = ""
@@ -114,7 +126,9 @@ def heartbeat_prompt_text(agent: dict | None = None) -> str:
         agent_id = str(agent.get("agent_id") or "").strip()
         if agent_id:
             latest = agents_db.latest_state(agent_id) or {}
-            if latest.get("kind") == AgentState.INTERRUPTED and not _is_user_stopped(latest):
+            if (latest.get("kind") == AgentState.INTERRUPTED
+                    and not _is_user_stopped(latest)
+                    and not _is_restart_interrupted(latest)):
                 prefix = INTERRUPTED_HEARTBEAT_PREFIX
     if not agent:
         return prefix + HEARTBEAT_PROMPT
@@ -194,7 +208,7 @@ def get_settings() -> HeartbeatSettings:
     cap = settings_store.get_int(
         KEY_BACKOFF_CAP_SEC,
         default=_env_int(
-            "CLAUDE_PWA_HEARTBEAT_BACKOFF_CAP_SEC", 4 * 60 * 60, minimum=1),
+            "CLAUDE_PWA_HEARTBEAT_BACKOFF_CAP_SEC", DEFAULT_BACKOFF_CAP_SEC, minimum=1),
         minimum=interval,
         maximum=86_400,
     )
@@ -284,12 +298,15 @@ def record_heartbeat_noop_once(agent_id: str, accounting_key: str) -> None:
 def _record_heartbeat_noop(agent_id: str) -> None:
     if not agent_id:
         return
+    latest = agents_db.latest_state(agent_id) or {}
+    is_interrupted = latest.get("kind") == AgentState.INTERRUPTED and not _is_user_stopped(latest)
     with _STATE_LOCK:
         state = _state_for_locked(agent_id)
         state.noop_streak += 1
-        dormant_after = _dormant_after_noops()
-        if dormant_after > 0 and state.noop_streak >= dormant_after:
-            state.dormant = True
+        if not is_interrupted:
+            dormant_after = _dormant_after_noops()
+            if dormant_after > 0 and state.noop_streak >= dormant_after:
+                state.dormant = True
         snapshot = _state_snapshot(state)
     _persist_state_snapshot(agent_id, snapshot)
     log("heartbeatNoop",
@@ -492,10 +509,15 @@ def _skip_reason(*, agent: dict, state: _HeartbeatState, now: float) -> str:
         if latest_kind == AgentState.INTERRUPTED
         else 0.0
     )
+    is_interrupted = latest_kind == AgentState.INTERRUPTED and not _is_user_stopped(latest)
+    if is_interrupted and interrupted_at and (now - interrupted_at) >= MAX_INTERRUPTED_RETRY_SEC:
+        with _STATE_LOCK:
+            state.dormant = True
+        return "dormant"
     last_event = max(state.last_started, interrupted_at)
     if last_event and now - last_event < MIN_WAKE_SPACING_SEC:
         return "min-spacing"
-    interval = _effective_interval_sec(state)
+    interval = _effective_interval_sec(state, is_interrupted=is_interrupted)
     if last_event and now - last_event < interval:
         return "not-due"
     if _flooded(state, now):
@@ -505,11 +527,18 @@ def _skip_reason(*, agent: dict, state: _HeartbeatState, now: float) -> str:
     return ""
 
 
-def _effective_interval_sec(state: _HeartbeatState, agent: dict | None = None) -> float:
+def _effective_interval_sec(
+    state: _HeartbeatState,
+    agent: dict | None = None,
+    *,
+    is_interrupted: bool = False,
+) -> float:
     # Timing policy is Computer-owned; `agent` is accepted so callers can
     # pass the row they already hold.
     base = _base_interval_sec()
     cap = _backoff_cap_sec()
+    if is_interrupted:
+        return min(base, cap)
     if state.noop_streak <= 0:
         return base
     strategy = _backoff_strategy()
@@ -529,21 +558,26 @@ def agent_schedule(agent: dict, *, now: float | None = None) -> dict:
     current_state = _state_for(agent_id)
     _wake_from_external_signal(agent_id, current_state)
     state = _state_snapshot(_state_for(agent_id))
-    interval = int(_effective_interval_sec(state))
+    latest = agents_db.latest_state(agent_id) or {}
+    latest_kind = latest.get("kind")
+    is_interrupted = latest_kind == AgentState.INTERRUPTED and not _is_user_stopped(latest)
+    interrupted_at = (
+        float(latest.get("ts") or 0.0) / 1000.0
+        if latest_kind == AgentState.INTERRUPTED
+        else 0.0
+    )
+    if is_interrupted and interrupted_at and (current - interrupted_at) >= MAX_INTERRUPTED_RETRY_SEC:
+        with _STATE_LOCK:
+            current_state.dormant = True
+        state.dormant = True
+    interval = int(_effective_interval_sec(state, is_interrupted=is_interrupted))
     next_at = None
     if agent.get("heartbeat_enabled") and not state.dormant:
-        latest = agents_db.latest_state(agent_id) or {}
-        latest_kind = latest.get("kind")
         if latest_kind == AgentState.WAITING or (
             latest_kind == AgentState.INTERRUPTED and _is_user_stopped(latest)
         ):
             next_at = None
         else:
-            interrupted_at = (
-                float(latest.get("ts") or 0.0) / 1000.0
-                if latest_kind == AgentState.INTERRUPTED
-                else 0.0
-            )
             last_event = max(state.last_started, interrupted_at)
             next_at = last_event + interval if last_event else current
             quiet_period = _quiet_period_sec()
