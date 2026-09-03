@@ -141,6 +141,28 @@ def test_v63_adds_durable_oracle_delegations(tmp_path):
             "idx_oracle_delegations_agent"} <= _names(upgraded, "index")
 
 
+def test_v64_adds_the_permanent_voice_timeline(tmp_path):
+    path = tmp_path / "v61.sqlite"
+    con = _fresh(path)
+    _shape_as_v61(con)
+    con.execute("DROP TABLE voice_events")
+    con.commit()
+    con.close()
+
+    upgraded = _connect(path)
+    db._migrate(upgraded)
+
+    assert "voice_events" in _names(upgraded, "table")
+    assert {
+        "event_id", "ts", "client_ts", "mono_ms", "received_at", "clock_offset_ms",
+        "source", "client_id", "session", "utterance_id", "trace_id", "event",
+        "duration_ms", "level_db", "peak_db", "text", "detail",
+    } == _columns(upgraded, "voice_events")
+    assert {"idx_voice_events_ts", "idx_voice_events_session_ts",
+            "idx_voice_events_utterance", "idx_voice_events_trace"} <= _names(
+                upgraded, "index")
+
+
 def test_upgraded_database_matches_fresh_schema(tmp_path):
     """The migration and _SCHEMA_SQL must describe the same shape."""
     fresh = _fresh(tmp_path / "fresh.sqlite")

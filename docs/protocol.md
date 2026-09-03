@@ -379,6 +379,7 @@ any subset. Payload shapes are documented in the handler docstrings in
 | Background jobs and updates | `/background-jobs`, `/server-update`, `/status`, `/compact`, `/managed-skills`, `/diagnostics/settings` | `background_jobs.py`, `server_update.py`, `managed_skills.py` |
 | Location and calendar | `/location`, `/location/request`, `/calendar/request`, `/calendar/response` | `location.py`, `calendar_request.py` |
 | Prompt history | `/identity/prompt-history` | `prompt_history.py` |
+| Voice timeline | `POST /voice-events`, `GET /voice-events`, `GET /voice-events/utterances`; `/transcribe` headers `X-Utterance-ID`, `X-Client-Ts` | `voice_events.py`, `audio_metrics.py`, `docs/voice-tracing.md` |
 | Diagnostics | `/crash` (MetricKit), `/diagnostics/health` | `ios_diagnostics.py`, `health.py` |
 
 ## Compatibility policy

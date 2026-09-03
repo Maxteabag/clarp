@@ -36,6 +36,7 @@ from lib.config import persona_personality  # noqa: E402
 from lib.context import ServerContext  # noqa: E402
 from lib import db  # noqa: E402
 from lib import eventlog  # noqa: E402
+from lib import audio_metrics, voice_events  # noqa: E402
 from lib import health  # noqa: E402
 from lib import agents as agents_db  # noqa: E402
 from lib import backends  # noqa: E402
@@ -197,6 +198,63 @@ def _raw_query_value(path: str, key: str) -> str:
     return ""
 
 
+def _header_int(raw: str | None) -> int | None:
+    try:
+        return int(float(raw)) if raw not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+# /clips/ack statuses that are moments on the voice timeline.
+_PLAY_EVENTS = {"play-start": "play_start", "play-ok": "play_end",
+                "play-fail": "play_fail"}
+
+
+def _clip_session_and_trace(clip_id: int | None) -> tuple[str | None, str | None]:
+    if clip_id is None:
+        return None, None
+    try:
+        row = db.conn().execute(
+            """SELECT a.session AS session, c.trace_id AS trace_id
+                 FROM clips c LEFT JOIN agents a ON a.agent_id = c.agent_id
+                WHERE c.clip_id = ?""", (clip_id,)).fetchone()
+    except Exception:  # noqa: BLE001
+        return None, None
+    if row is None:
+        return None, None
+    return (row["session"] or None), (row["trace_id"] or None)
+
+
+def _spawn_voice_metrics(audio_bytes: bytes, ctype: str, *, session, trace_id,
+                         utterance_id, transcript) -> None:
+    """Level and integrity metrics for the capture, off the request thread.
+
+    Decoding a 30 s clip costs tens of milliseconds; the request has already
+    waited for STT, so the numbers land a beat later as a `level` row (and a
+    `corrupt` row when they look wrong).
+    """
+    def work() -> None:
+        try:
+            metrics = audio_metrics.analyze(audio_bytes, ctype)
+            reasons = audio_metrics.corruption_reasons(metrics, transcript=transcript)
+            voice_events.record(
+                "level", source="server", session=session, trace_id=trace_id,
+                utterance_id=utterance_id, duration_ms=metrics.get("duration_ms"),
+                level_db=metrics.get("rms_db"), peak_db=metrics.get("peak_db"),
+                detail=metrics)
+            if reasons:
+                voice_events.record(
+                    "corrupt", source="server", session=session, trace_id=trace_id,
+                    utterance_id=utterance_id,
+                    detail={"reasons": reasons, "metrics": metrics})
+        except Exception as e:  # noqa: BLE001
+            log_exception("voiceMetricsFail", e, detail=utterance_id or "")
+        finally:
+            db.close_local()
+
+    threading.Thread(target=work, name="voice-metrics", daemon=True).start()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ClaudePWA/1.0"
     # HTTP/1.1 so the tailscale-serve reverse proxy (and any direct client)
@@ -280,6 +338,8 @@ class Handler(BaseHTTPRequestHandler):
         "/transcription-capabilities": "_handle_transcription_capabilities",
         "/transcription-guidance": "_handle_transcription_guidance_get",
         "/clips/recoverable": "_handle_recoverable_clips",
+        "/voice-events": "_handle_voice_events_get",
+        "/voice-events/utterances": "_handle_voice_utterances_get",
         "/server-info": "_handle_server_info",
         "/paired-devices": "_handle_paired_devices",
         "/server-update": "_handle_server_update_status",
@@ -344,6 +404,7 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-portrait-generation": "_handle_agent_portrait_generation_start",
         "/select": "_handle_select",
         "/clog": "_handle_clog",
+        "/voice-events": "_handle_voice_events_post",
         "/agents": "_handle_create_agent",
         "/personas": "_handle_create_persona",
         "/personas/update": "_handle_update_persona",
@@ -682,6 +743,7 @@ class Handler(BaseHTTPRequestHandler):
     _LIMITED_DEVICE_POST_EXACT = frozenset({
         "/send", "/transcribe", "/upload", "/select", "/focus",
         "/clips/ack", "/clog", "/location", "/calendar/response",
+        "/voice-events",
     })
 
     def _device_forbidden(self, path: str, method: str) -> bool:
@@ -3536,6 +3598,12 @@ class Handler(BaseHTTPRequestHandler):
                     body["error"] = orchestrated.error
                 if orchestrated.ok and transcription_id:
                     transcription_results.delete(transcription_id)
+                    self._record_voice(
+                        "send", session=orchestrated.session or None,
+                        trace_id=trace_id, utterance_id=transcription_id,
+                        text=text, detail={"orchestrator": orchestrated.action,
+                                           "dispatch": orchestrated.dispatch,
+                                           "client_msg_id": client_msg_id})
                 return self._send(status, json.dumps(body).encode(), "application/json")
         try:
             result = TurnDispatchService(self.ctx).dispatch(
@@ -3559,6 +3627,12 @@ class Handler(BaseHTTPRequestHandler):
                                     "queue_revision": result.queue_revision,
                                     "trace_id": trace_id}).encode(),
                    "application/json")
+        if transcription_id:
+            self._record_voice(
+                "send", session=result.session, trace_id=trace_id,
+                utterance_id=transcription_id, text=text,
+                detail={"dispatch": result.backend, "queued": result.queued,
+                        "client_msg_id": client_msg_id, "hands_free": hands_free})
 
     def _handle_clip_ack(self):
         data = self._read_json()
@@ -3589,6 +3663,12 @@ class Handler(BaseHTTPRequestHandler):
                       clip_url=url or None,
                       detail={"clip_id": clip_id, "status": status,
                               "updated": ok, "error": error})
+        play_event = _PLAY_EVENTS.get(status)
+        if play_event:
+            clip_session, clip_trace = _clip_session_and_trace(clip_id)
+            self._record_voice(
+                play_event, session=clip_session, trace_id=trace_id or clip_trace,
+                detail={"clip_id": clip_id, "url": url or None, "error": error})
         self._send(200, json.dumps({"ok": True, "updated": ok}).encode(),
                    "application/json")
 
@@ -3608,12 +3688,19 @@ class Handler(BaseHTTPRequestHandler):
         from lib import transcription_results
 
         requested_model = (self.headers.get("X-Transcription-Model") or "").strip()
+        # Voice timeline identity: the client names the utterance (defaults to
+        # its idempotent transcription id) and may stamp its own clock.
+        utterance_id = (self.headers.get("X-Utterance-ID")
+                        or self.headers.get("X-Transcription-ID") or "").strip()[:128]
+        client_ts = _header_int(self.headers.get("X-Client-Ts"))
         try:
             n = int(self.headers.get("Content-Length", "0"))
         except ValueError as e:
             log_exception("transcribeReadFail", e)
+            self._record_voice_corrupt(utterance_id, client_ts, "bad_content_length")
             return self._send(400, f'{{"error":"{e}"}}'.encode(), "application/json")
         if n <= 0 or n > 25 * 1024 * 1024:  # cap at 25 MB per clip
+            self._record_voice_corrupt(utterance_id, client_ts, "bad_size", bytes=n)
             return self._send(400, b'{"error":"bad size"}', "application/json")
         # Once the body read starts, a disconnect means there is nothing
         # useful left to drain before responding.  BufferedReader.read(n)
@@ -3626,6 +3713,8 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as e:
             self.close_connection = True
             log_exception("transcribeReadFail", e)
+            self._record_voice_corrupt(utterance_id, client_ts, "upload_read_error",
+                                       expected=n, error=str(e)[:200])
             return self._send(
                 408, b'{"error":"incomplete audio upload"}',
                 "application/json")
@@ -3633,6 +3722,8 @@ class Handler(BaseHTTPRequestHandler):
             log("transcribeReadIncomplete",
                 f"expected={n} received={len(audio_bytes)}")
             self.close_connection = True
+            self._record_voice_corrupt(utterance_id, client_ts, "incomplete_upload",
+                                       expected=n, received=len(audio_bytes))
             return self._send(
                 408, b'{"error":"incomplete audio upload"}',
                 "application/json")
@@ -3659,14 +3750,106 @@ class Handler(BaseHTTPRequestHandler):
                                   "application/json")
             if cached is not None:
                 cached["cached"] = True
+                self._record_voice("retry", utterance_id=utterance_id,
+                                   client_ts=client_ts,
+                                   trace_id=cached.get("trace_id"),
+                                   text=cached.get("text"),
+                                   detail={"bytes": n, "content_type": ctype})
                 return self._send(200, json.dumps(cached).encode(),
                                   "application/json")
             return self._transcribe_uncached(
                 audio_bytes, ctype, hands_free, requested_model,
-                transcription_id, fingerprint)
+                transcription_id, fingerprint,
+                utterance_id=utterance_id, client_ts=client_ts)
+
+    def _record_voice(self, event: str, **fields) -> None:
+        """Best-effort voice-timeline row; never fails the request."""
+        try:
+            session = fields.pop("session", None)
+            if session is None:
+                session = self._focused_session() or self.ctx.default_session or None
+            voice_events.record(event, source="server", session=session, **fields)
+        except Exception as e:  # noqa: BLE001
+            log_exception("voiceEventRecordFail", e, detail=event)
+
+    def _record_voice_corrupt(self, utterance_id: str, client_ts: int | None,
+                              reason: str, **detail) -> None:
+        self._record_voice("corrupt", utterance_id=utterance_id or None,
+                           client_ts=client_ts,
+                           detail={"reasons": [reason], **detail})
+
+    def _focused_session(self) -> str:
+        try:
+            return RuntimePaths.from_home(pathlib.Path.home()).app_session.read_text().strip()
+        except OSError:
+            return ""
+
+    def _handle_voice_events_post(self):
+        """Client half of the voice timeline (lib/voice_events.py).
+
+        Body: {"source": "ios"|"pwa", "client_id": "...", "sent_at": <client
+        wall-clock ms>, "session": "<default>", "events": [{"event", "ts",
+        "mono_ms", "utterance_id", "trace_id", "session", "duration_ms",
+        "level_db", "peak_db", "text", "detail"}]}. The server measures the
+        clock offset from sent_at and stores corrected timestamps.
+        """
+        data = self._read_json()
+        if data is None:
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        events = data.get("events")
+        if not isinstance(events, list):
+            return self._send(400, b'{"error":"events must be a list"}',
+                              "application/json")
+        if len(events) > voice_events.MAX_BATCH:
+            return self._send(413, b'{"error":"batch too large"}', "application/json")
+        source = str(data.get("source") or "other").strip().lower()
+        result = voice_events.record_batch(
+            source=source, events=events,
+            client_id=(str(data.get("client_id") or "").strip() or None),
+            sent_at=data.get("sent_at"),
+            default_session=(str(data.get("session") or "").strip() or None),
+        )
+        body = {"ok": True, "stored": result["stored"],
+                "clock_offset_ms": result["clock_offset_ms"],
+                "server_now": voice_events.now_ms()}
+        self._send(200, json.dumps(body).encode(), "application/json")
+
+    def _voice_query_params(self) -> dict:
+        from urllib.parse import parse_qs, urlparse
+        qs = parse_qs(urlparse(self.path).query)
+        def one(name):
+            return (qs.get(name, [""])[0] or "").strip()
+        def num(name):
+            raw = one(name)
+            if not raw:
+                return None
+            try:
+                return int(float(raw))
+            except ValueError:
+                return None
+        return {"session": one("session") or None, "since": num("since"),
+                "until": num("until"), "utterance_id": one("utterance_id") or None,
+                "trace_id": one("trace_id") or None, "event": one("event") or None,
+                "limit": num("limit")}
+
+    def _handle_voice_events_get(self):
+        """GET /voice-events?session=&since=&until=&utterance_id=&trace_id=&event=&limit="""
+        params = self._voice_query_params()
+        limit = params.pop("limit") or 500
+        rows = voice_events.query(limit=limit, **params)
+        self._send(200, json.dumps({"events": rows}).encode(), "application/json")
+
+    def _handle_voice_utterances_get(self):
+        """GET /voice-events/utterances?session=&since=&until=&limit= — one row per utterance."""
+        params = self._voice_query_params()
+        rows = voice_events.utterances(
+            session=params["session"], since=params["since"],
+            until=params["until"], limit=params["limit"] or 100)
+        self._send(200, json.dumps({"utterances": rows}).encode(), "application/json")
 
     def _transcribe_uncached(self, audio_bytes, ctype, hands_free,
-                             requested_model, transcription_id, fingerprint):
+                             requested_model, transcription_id, fingerprint,
+                             utterance_id: str = "", client_ts: int | None = None):
         from lib import transcription_results
 
         if getattr(self.ctx.stt, "available", True) is False:
@@ -3698,11 +3881,16 @@ class Handler(BaseHTTPRequestHandler):
                               "application/json")
         except STTBusyError:
             health.mark_error("stt", "busy")
+            self._record_voice("error", utterance_id=utterance_id or None,
+                               client_ts=client_ts, detail={"message": "whisper busy"})
             return self._send(429, b'{"error":"whisper busy"}',
                               "application/json")
         except Exception as e:
             health.mark_error("stt", e)
             log_exception("transcribeFail", e)
+            self._record_voice("error", utterance_id=utterance_id or None,
+                               client_ts=client_ts,
+                               detail={"message": str(e)[:300], "stage": "stt"})
             return self._send(500, f'{{"error":"{e}"}}'.encode(), "application/json")
 
         # Run the user's utterance against any pending heralds. Affirmatives
@@ -3745,6 +3933,19 @@ class Handler(BaseHTTPRequestHandler):
                               "herald_consumed": herald_consumed,
                               "hands_free": hands_free,
                               "orchestrator_skip_herald": skip_herald})
+        self._record_voice(
+            "transcript", session=focus or self.ctx.default_session or None,
+            trace_id=trace_id,
+            utterance_id=utterance_id or None, client_ts=client_ts,
+            duration_ms=round(_dur * 1000, 1) if _dur else None, text=text,
+            detail={"bytes": len(audio_bytes), "content_type": ctype,
+                    "hands_free": hands_free, "ends_terminal": ends_terminal,
+                    "herald_consumed": herald_consumed,
+                    "model": requested_model or "server-default"})
+        _spawn_voice_metrics(audio_bytes, ctype,
+                             session=focus or self.ctx.default_session or None,
+                             trace_id=trace_id, utterance_id=utterance_id or None,
+                             transcript=text)
 
         # Blank the text when the utterance was a herald grant/decline so the
         # client's empty-text guard skips dispatch — it released the buffer,
