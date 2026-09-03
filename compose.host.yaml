@@ -8,3 +8,4 @@ services:
     environment:
       CLAUDE_PWA_BIND: ${CLARP_LISTEN_ADDR:-0.0.0.0}
       CLAUDE_PWA_PORT: ${CLARP_PORT:-7682}
+      CLARP_PORT: ${CLARP_PORT:-7682}
