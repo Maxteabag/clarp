@@ -1,0 +1,14 @@
+{
+  "title": "an accepted send that never lands goes stale",
+  "area": "delivery",
+  "steps": [
+    {"send": {"client_msg_id": "a", "session": "rachel", "text": "lost", "at": 1000000}},
+    {"stale": {"now": 1025000, "timeoutMs": 20000}}
+  ],
+  "expect": {
+    "effects": [],
+    "delivered": [],
+    "stale": ["a"],
+    "pending": ["u-a"]
+  }
+}

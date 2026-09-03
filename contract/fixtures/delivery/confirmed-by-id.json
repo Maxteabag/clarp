@@ -1,0 +1,18 @@
+{
+  "title": "delivery is the u- id coming back in the transcript",
+  "area": "delivery",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [{"id": "m0", "role": "assistant", "text": "hi", "revision": 1}], "latest_revision": 1, "has_more": false, "missing": false}}},
+    {"send": {"client_msg_id": "a", "session": "rachel", "text": "question", "at": 1000000}},
+    {"log": {"mode": "delta", "response": {"conversation_id": "c1", "turns": [{"id": "u-a", "role": "user", "text": "question", "revision": 2}, {"id": "m1", "role": "assistant", "text": "answer", "revision": 3}], "latest_revision": 3, "has_more": false, "missing": false}}},
+    {"confirm": true}
+  ],
+  "expect": {
+    "effects": ["fetch_tail"],
+    "cursor": 3,
+    "turn_ids": ["m0", "u-a", "m1"],
+    "delivered": ["a"],
+    "pending": []
+  }
+}
