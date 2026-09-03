@@ -1372,6 +1372,9 @@ details.tool.error { border-color: rgba(200, 65, 42, .45); }
 }
 .reconnect span { font-size: 12px; color: var(--washi-low); letter-spacing: .04em; }
 .reconnect.hidden { display: none; }
+.reconnect.auth-rejected::before { content: 'Not authorized'; }
+.reconnect.auth-rejected { max-width: 320px; }
+.reconnect.auth-rejected code { color: var(--washi); font: 12px/1.4 var(--font-mono, monospace); }
 
 /* ============================================================
    Agent overview — vertical list of all known agents
