@@ -47,6 +47,50 @@ describe('assess', () => {
     expect(h.fetchErrors).toBe(1);
   });
 
+  // Issue #10: a server that answers 401 to everything is reachable. Calling
+  // that "never reached the server" sends people to debug the network when the
+  // problem is the saved token.
+  it('separates a server that refuses from one that is absent', () => {
+    const h = createHealth(0);
+    for (let i = 0; i < 50; i++) noteFetch(h, { path: '/events', ok: false, status: 401, at: 1000 + i * 3000 });
+    const v = assess(h, { now: 200000 });
+    expect(v.state).toBe(Health.UNAUTHORIZED);
+    expect(v.reason).toBe('server rejected the token');
+    expect(h.lastResponseAt).toBe(1000 + 49 * 3000);
+    expect(h.lastFetchAt).toBe(0);
+  });
+
+  it('does not call an answering server unreachable', () => {
+    const h = createHealth(0);
+    noteFetch(h, { path: '/log', ok: false, status: 500, at: 1000 });
+    const v = assess(h, { now: 200000 });
+    expect(v.state).toBe(Health.WEDGED);
+    expect(v.reason).not.toBe('never reached the server');
+    expect(v.reason).toMatch(/500/);
+  });
+
+  it('clears the unauthorized verdict once a request succeeds', () => {
+    const h = createHealth(0);
+    noteFetch(h, { path: '/events', ok: false, status: 401, at: 1000 });
+    expect(assess(h, { now: 2000 }).state).toBe(Health.UNAUTHORIZED);
+    noteFetch(h, { path: '/log', ok: true, status: 200, at: 3000 });
+    expect(assess(h, { now: 4000 }).state).toBe(Health.OK);
+    expect(h.rejected).toBe(0);
+  });
+
+  it('reports unauthorized before quiet even right after load', () => {
+    const h = createHealth(0);
+    noteFetch(h, { path: '/agents/snapshot', ok: false, status: 401, at: 500 });
+    expect(assess(h, { now: 600 }).state).toBe(Health.UNAUTHORIZED);
+  });
+
+  it('still treats a network failure as no contact', () => {
+    const h = createHealth(0);
+    noteFetch(h, { path: '/log', ok: false, at: 1000 });
+    expect(h.lastResponseAt).toBe(0);
+    expect(assess(h, { now: 200000 }).reason).toBe('never reached the server');
+  });
+
   it('counts traffic for the panel', () => {
     const h = createHealth(0);
     noteFetch(h, { path: '/log', at: 1 });
