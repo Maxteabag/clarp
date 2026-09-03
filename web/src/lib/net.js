@@ -140,7 +140,10 @@ export function setClogFlushInterval(ms) {
 }
 
 export function clog(event, detail, extra) {
-  const row = { event, detail: String(detail ?? '') };
+  // Objects go through intact: the server stores detail as JSON and the
+  // audio_faults view reads fields out of it.
+  const structured = detail !== null && typeof detail === 'object';
+  const row = { event, detail: structured ? detail : String(detail ?? '') };
   if (trace.id) row.trace_id = trace.id;
   if (extra && typeof extra === 'object') Object.assign(row, extra);
   buf.push(row);
