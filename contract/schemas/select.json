@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://clarp.local/contract/schemas/select.json",
-  "$title": "POST /select",
+  "title": "POST /select",
   "description": "Moves server-wide focus. Clients apply the agent-focus broadcast; they must not re-post.",
   "type": "object",
   "additionalProperties": true,

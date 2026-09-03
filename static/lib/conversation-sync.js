@@ -89,15 +89,16 @@ export function applyLog(state, response, mode) {
   }
   if (mode === 'older') {
     const known = new Set(state.order);
+    const turns = { ...state.turns };
     const older = [];
     for (const t of Array.isArray(d.turns) ? d.turns : []) {
       if (t && t.id && !known.has(t.id)) {
         known.add(t.id);
         older.push(t.id);
-        state.turns[t.id] = t;
+        turns[t.id] = t;
       }
     }
-    const next = { ...state, order: [...older, ...state.order], hasMore: !!d.has_more };
+    const next = { ...state, turns, order: [...older, ...state.order], hasMore: !!d.has_more };
     return { state: next, effects: [] };
   }
   // mode === 'delta'

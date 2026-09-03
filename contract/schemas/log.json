@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://clarp.local/contract/schemas/log.json",
-  "$title": "GET /log",
+  "title": "GET /log",
   "description": "Conversation read model. Tail snapshot, after_revision delta, or before paging share one shape. replace_required is absent on some missing:true responses, so it stays optional.",
   "type": "object",
   "additionalProperties": true,
