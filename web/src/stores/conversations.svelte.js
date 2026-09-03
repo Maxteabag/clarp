@@ -1,17 +1,27 @@
 // One conversation per agent, kept in sync with the server exactly the way
-// docs/protocol.md describes:
+// docs/protocol.md describes. The decisions live in the pure reducer
+// (@core/conversation-sync.js, the one the golden fixtures in
+// contract/fixtures run against); this store is its adapter. It owns the
+// Svelte state the panes read, turns effects into /log requests, and adds
+// what only a UI needs: optimistic bubbles, live activity rows, scroll
+// pinning.
 //
-//   open  → GET /log?session (tail snapshot)
-//   wake  → GET /log?session&after_revision=<cursor> (delta, upsert by id)
-//   replace_required or a new conversation_id → reload the tail
-//   optimistic user turn keyed `u-<client_msg_id>` → confirmed when the server
+//   open  → onOpen → fetch_tail when nothing is cached, else a delta
+//   wake  → onEvent(transcript-updated) → fetch_delta, coalesced in flight
+//   /log  → applyLog → upsert by id; replace_required or a new
+//           conversation_id → drop_cache + fetch_tail
+//   optimistic user turn keyed `u-<client_msg_id>` → shown until the server
 //   returns a turn with the same id
 //
 // Every pane reads its own session from here, so two panes never share a
 // transcript and switching back to an agent paints from memory.
 
 import { isLoggableActivity } from '@core/activity-view-model.js';
-import { AgentState } from '@core/protocol.js';
+import {
+  Effects, applyLog, applySnapshot, beginFetch, blankSync, endFetch, onEvent,
+  onOpen, requestDelta, visibleTurns,
+} from '@core/conversation-sync.js';
+import { AgentState, SSEType } from '@core/protocol.js';
 import { registerModule } from '@core/client-health.js';
 import { clog, instanceId } from '../lib/net.js';
 import { delivery } from './delivery.svelte.js';
@@ -25,14 +35,35 @@ const MAX_ACTIVITY_ROWS = 80;
 const WAKE_DEBOUNCE_MS = 100;
 
 export const conversations = $state({
-  /** session → ConversationState */
+  /** session → ConversationState (the view the panes render) */
   bySession: {},
 });
+
+/**
+ * Reducer state per session. Plain objects outside $state: the reducer
+ * returns fresh ones on every step and only the projection is reactive.
+ */
+const syncStates = new Map();
+
+function syncOf(session) {
+  let s = syncStates.get(session);
+  if (!s) {
+    s = blankSync(session);
+    syncStates.set(session, s);
+  }
+  return s;
+}
+
+function setSync(session, state) {
+  syncStates.set(session, state);
+}
 
 function blank(session) {
   return {
     session,
     turns: [],
+    /** Optimistic user bubbles the server has not filed yet. */
+    optimistic: [],
     activity: [],
     conversationId: '',
     latestRevision: 0,
@@ -76,14 +107,63 @@ export function placeholderFor(conv) {
   return '';
 }
 
+// ---- projection -------------------------------------------------------------
+
+/**
+ * Paint the reducer state into the pane's view. `bump` says when the scroll
+ * pin should follow: 'always' for a fresh tail, 'appended' when a delta added
+ * a turn, 'never' for older history prepended above the fold.
+ */
+function project(session, { bump = 'appended', resetActivity = false } = {}) {
+  const conv = entry(session);
+  const sync = syncOf(session);
+  const view = visibleTurns(sync, conv.optimistic);
+  const appended = view.turns.length > conv.turns.length;
+  conv.turns = view.turns;
+  conv.optimistic = view.optimistic;
+  conv.conversationId = sync.conversationId;
+  conv.latestRevision = sync.cursor;
+  if (sync.latestTs) conv.latestTs = sync.latestTs;
+  conv.hasMore = sync.hasMore;
+  conv.missing = sync.missing;
+  conv.status = 'ready';
+  conv.error = '';
+  if (resetActivity) conv.activity = [];
+  if (bump === 'always' || (bump === 'appended' && appended)) {
+    removeLiveThinking(session);
+    conv.appendSeq++;
+  }
+  confirmFromTurns(delivery, conv.turns);
+}
+
+/** Effects the reducer asked for, outside a running request. */
+function runEffects(session, effects) {
+  for (const fx of effects) {
+    if (fx === Effects.DROP_CACHE) dropCache(session);
+    else if (fx === Effects.FETCH_TAIL) reload(session).catch(() => {});
+    else if (fx === Effects.FETCH_DELTA) refresh(session).catch(() => {});
+    else if (fx === Effects.FETCH_OLDER) loadOlder(session).catch(() => {});
+  }
+}
+
+function dropCache(session) {
+  const cur = syncOf(session);
+  const next = blankSync(session);
+  // A request already in flight stays in flight; the cache is what resets.
+  next.pendingFetch = cur.pendingFetch;
+  next.wakeWhileFetching = cur.wakeWhileFetching;
+  setSync(session, next);
+  conversations.bySession[session] = blank(session);
+}
+
 // ---- fetching -------------------------------------------------------------
 //
-// One request per session at a time. A wake-up that arrives mid-flight sets
-// `dirty`, and the fetch runs once more when the current one settles, so a
-// burst of transcript-updated events costs at most two round trips.
+// One request per session at a time. A wake-up that arrives mid-flight is
+// remembered by the reducer (requestDelta) and endFetch turns it into one
+// follow-up delta, so a burst of transcript-updated events costs at most two
+// round trips.
 
 const inflight = new Map();   // session → Promise
-const dirty = new Set();
 const wakeTimers = new Map();
 
 async function fetchLog(session, params) {
@@ -93,22 +173,26 @@ async function fetchLog(session, params) {
   return r.json();
 }
 
-function run(session, job) {
+function run(session, kind, job) {
   if (inflight.has(session)) {
-    dirty.add(session);
+    setSync(session, requestDelta(syncOf(session)).state);
     return inflight.get(session);
   }
+  setSync(session, beginFetch(syncOf(session), kind).state);
   const p = (async () => {
     try {
       await job();
     } finally {
       inflight.delete(session);
-      // A wake-up that arrived mid-flight gets one follow-up delta, but only
-      // for a healthy conversation: a failed load waits for the user to reopen
-      // or refresh the chat instead of retrying in a loop.
-      const again = dirty.delete(session);
-      if (again && conversations.bySession[session]?.status === 'ready') {
-        refresh(session).catch(() => {});
+      const r = endFetch(syncOf(session));
+      setSync(session, r.state);
+      // The follow-up runs for a healthy conversation (a delta) or one whose
+      // cache was dropped mid-flight (a tail). A failed load waits for the
+      // user to reopen or refresh the chat instead of retrying in a loop.
+      if (r.effects.includes(Effects.FETCH_DELTA)) {
+        const status = conversations.bySession[session]?.status;
+        if (status === 'ready') refresh(session).catch(() => {});
+        else if (status === 'empty') reload(session).catch(() => {});
       }
     }
   })();
@@ -116,17 +200,25 @@ function run(session, job) {
   return p;
 }
 
+/** Fetch and apply a tail snapshot inside a running job. */
+async function loadTail(session) {
+  const d = await fetchLog(session, {});
+  const r = applyLog(syncOf(session), d, 'tail');
+  setSync(session, r.state);
+  entry(session).cwd = d.cwd || '';
+  project(session, { bump: 'always', resetActivity: true });
+}
+
 /** Load the newest page, replacing whatever is cached. */
 export function reload(session) {
   if (!session) return Promise.resolve();
-  return run(session, async () => {
+  return run(session, 'tail', async () => {
     const conv = entry(session);
     conv.status = 'loading';
     conv.error = '';
     const t0 = performance.now();
     try {
-      const d = await fetchLog(session, {});
-      applySnapshot(conv, d);
+      await loadTail(session);
       clog('conversationLoad', `${session} turns=${conv.turns.length} rev=${conv.latestRevision} dur=${Math.round(performance.now() - t0)}ms`);
     } catch (err) {
       conv.status = 'error';
@@ -140,8 +232,9 @@ export function reload(session) {
 export function ensureLoaded(session) {
   if (!session) return Promise.resolve();
   const conv = entry(session);
-  if (conv.status === 'empty' || conv.status === 'error') return reload(session);
-  return refresh(session);
+  if (conv.status === 'error') return reload(session);
+  const r = onOpen(syncOf(session));
+  return r.effects.includes(Effects.FETCH_TAIL) ? reload(session) : refresh(session);
 }
 
 /** Pull every change after the cursor. */
@@ -150,17 +243,23 @@ export function refresh(session) {
   const conv = entry(session);
   if (conv.status === 'error') return Promise.resolve();
   if (conv.status === 'empty') return reload(session);
-  return run(session, async () => {
+  return run(session, 'delta', async () => {
     try {
-      const d = await fetchLog(session, { after_revision: String(conv.latestRevision || 0) });
-      if (d.replace_required || (conv.conversationId && d.conversation_id
-          && d.conversation_id !== conv.conversationId)) {
+      const cursor = syncOf(session).cursor || 0;
+      const d = await fetchLog(session, { after_revision: String(cursor) });
+      const r = applyLog(syncOf(session), d, 'delta');
+      setSync(session, r.state);
+      if (r.effects.includes(Effects.DROP_CACHE)) {
         clog('conversationReplace', `${session} ${d.replace_required ? 'replace_required' : 'new conversation'}`);
-        applySnapshot(conv, await fetchLog(session, {}));
+        // Optimistic bubbles stay: the server may still be filing them.
+        await loadTail(session);
         return;
       }
-      applyDelta(conv, d);
-      if (d.has_more) dirty.add(session);
+      project(session);
+      if (r.effects.includes(Effects.FETCH_DELTA)) {
+        // has_more: the backlog continues after this request settles.
+        setSync(session, requestDelta(syncOf(session)).state);
+      }
     } catch (_) {
       // Network blips are silent: the next wake-up retries.
     }
@@ -173,13 +272,12 @@ export function loadOlder(session) {
   if (!conv) return Promise.resolve();
   const oldest = conv.turns[0];
   if (!oldest || !conv.hasMore) return Promise.resolve();
-  return run(session, async () => {
+  return run(session, 'older', async () => {
     try {
       const d = await fetchLog(session, { before: oldest.id });
-      const known = new Set(conv.turns.map(t => t.id));
-      const older = (d.turns || []).filter(t => t && t.id && !known.has(t.id));
-      conv.turns = [...older, ...conv.turns];
-      conv.hasMore = !!d.has_more;
+      const r = applyLog(syncOf(session), d, 'older');
+      setSync(session, r.state);
+      project(session, { bump: 'never' });
     } catch (_) {}
   });
 }
@@ -196,11 +294,9 @@ export function reconcileWithSnapshot(agents = []) {
   for (const row of agents) {
     const conv = conversations.bySession[row.session];
     if (!conv || conv.status !== 'ready') continue;
-    if (row.conversation_id && conv.conversationId && row.conversation_id !== conv.conversationId) {
-      reset(row.session);
-    } else if ((Number(row.head_revision) || 0) > conv.latestRevision) {
-      refresh(row.session).catch(() => {});
-    }
+    const r = applySnapshot(syncOf(row.session), row);
+    setSync(row.session, r.state);
+    runEffects(row.session, r.effects);
   }
 }
 
@@ -210,70 +306,39 @@ export function wake(session) {
   if (wakeTimers.has(session)) return;
   wakeTimers.set(session, setTimeout(() => {
     wakeTimers.delete(session);
-    refresh(session).catch(() => {});
+    const r = onEvent(syncOf(session), { type: SSEType.TRANSCRIPT_UPDATED, session });
+    setSync(session, r.state);
+    runEffects(session, r.effects);
   }, WAKE_DEBOUNCE_MS));
+}
+
+/**
+ * Roster and transcript events for chats the user has opened. Everything
+ * else is ignored here: SSE traffic for agents nobody opened must not create
+ * conversations, or a reconnect would fetch the whole roster.
+ */
+export function handleSseEvent(ev) {
+  const session = ev && ev.session;
+  if (!session || !conversations.bySession[session]) return;
+  if (ev.type === SSEType.TRANSCRIPT_UPDATED) {
+    wake(session);
+    return;
+  }
+  const r = onEvent(syncOf(session), ev);
+  setSync(session, r.state);
+  runEffects(session, r.effects);
 }
 
 /** Relaunch or fork: the agent keeps its session but the conversation is new. */
 export function reset(session) {
   if (!session) return;
-  conversations.bySession[session] = blank(session);
+  dropCache(session);
   reload(session).catch(() => {});
 }
 
 export function forget(session) {
   delete conversations.bySession[session];
-}
-
-// ---- merging --------------------------------------------------------------
-
-function applySnapshot(conv, d) {
-  const incoming = (d.turns || []).filter(t => t && t.id);
-  const ids = new Set(incoming.map(t => t.id));
-  // Optimistic bubbles the server has not filed yet stay visible.
-  const pending = conv.turns.filter(t => t.optimistic && !ids.has(t.id));
-  conv.turns = [...incoming, ...pending];
-  conv.conversationId = d.conversation_id || '';
-  conv.latestRevision = Number(d.latest_revision) || 0;
-  conv.latestTs = d.latest_ts || '';
-  conv.hasMore = !!d.has_more;
-  conv.missing = !!d.missing;
-  conv.cwd = d.cwd || '';
-  conv.status = 'ready';
-  conv.error = '';
-  conv.activity = [];
-  conv.appendSeq++;
-  confirmFromTurns(delivery, conv.turns);
-}
-
-function applyDelta(conv, d) {
-  const incoming = (d.turns || []).filter(t => t && t.id);
-  if (incoming.length) {
-    const byId = new Map(conv.turns.map((t, i) => [t.id, i]));
-    const next = [...conv.turns];
-    let appended = false;
-    for (const t of incoming) {
-      const i = byId.get(t.id);
-      if (i === undefined) {
-        byId.set(t.id, next.length);
-        next.push(t);
-        appended = true;
-      } else {
-        next[i] = t;
-      }
-    }
-    conv.turns = next;
-    if (appended) {
-      removeLiveThinking(conv.session);
-      conv.appendSeq++;
-    }
-    confirmFromTurns(delivery, conv.turns);
-  }
-  conv.latestRevision = Math.max(conv.latestRevision, Number(d.latest_revision) || 0);
-  if (d.latest_ts) conv.latestTs = d.latest_ts;
-  if (d.conversation_id) conv.conversationId = d.conversation_id;
-  conv.missing = !!d.missing && !conv.turns.length;
-  conv.status = 'ready';
+  syncStates.delete(session);
 }
 
 // ---- local writes -----------------------------------------------------------
@@ -284,10 +349,12 @@ export function addOptimisticTurn(session, id, text) {
   if (!session || !id || !text) return;
   const conv = entry(session);
   if (conv.turns.some(t => t.id === id)) return;
-  conv.turns = [...conv.turns, {
+  const turn = {
     id, role: 'user', text, timestamp: new Date().toISOString(),
     optimistic: true, tools: [], display_cells: [], revision: 0,
-  }];
+  };
+  conv.optimistic = [...conv.optimistic, turn];
+  conv.turns = [...conv.turns, turn];
   conv.appendSeq++;
 }
 
@@ -295,7 +362,9 @@ export function markTurnFailed(session, id) {
   if (!session || !id) return;
   const conv = conversations.bySession[session];
   if (!conv) return;
-  conv.turns = conv.turns.map(t => (t.id === id ? { ...t, failed: true } : t));
+  const fail = t => (t.id === id ? { ...t, failed: true } : t);
+  conv.optimistic = conv.optimistic.map(fail);
+  conv.turns = conv.turns.map(fail);
 }
 
 // ---- live activity rows -----------------------------------------------------

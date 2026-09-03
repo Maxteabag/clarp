@@ -1,0 +1,50 @@
+{
+  "title": "a wake-up during the first tail load still runs one delta afterwards",
+  "area": "sync",
+  "steps": [
+    {
+      "open": true
+    },
+    {
+      "beginFetch": "tail"
+    },
+    {
+      "sse": {
+        "type": "transcript-updated",
+        "session": "rachel"
+      }
+    },
+    {
+      "log": {
+        "mode": "tail",
+        "response": {
+          "conversation_id": "c1",
+          "turns": [
+            {
+              "id": "m1",
+              "role": "assistant",
+              "text": "one",
+              "revision": 1
+            }
+          ],
+          "latest_revision": 1,
+          "has_more": false,
+          "missing": false
+        }
+      }
+    },
+    {
+      "endFetch": true
+    }
+  ],
+  "expect": {
+    "effects": [
+      "fetch_tail",
+      "fetch_delta"
+    ],
+    "cursor": 1,
+    "turn_ids": [
+      "m1"
+    ]
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "title": "a snapshot that says we are behind coalesces into the fetch already in flight",
+  "area": "sync",
+  "steps": [
+    {
+      "open": true
+    },
+    {
+      "log": {
+        "mode": "tail",
+        "response": {
+          "conversation_id": "c1",
+          "turns": [
+            {
+              "id": "m1",
+              "role": "assistant",
+              "text": "one",
+              "revision": 1
+            }
+          ],
+          "latest_revision": 1,
+          "has_more": false,
+          "missing": false
+        }
+      }
+    },
+    {
+      "beginFetch": "delta"
+    },
+    {
+      "snapshot": {
+        "session": "rachel",
+        "conversation_id": "c1",
+        "head_revision": 3
+      }
+    },
+    {
+      "snapshot": {
+        "session": "rachel",
+        "conversation_id": "c1",
+        "head_revision": 3
+      }
+    },
+    {
+      "endFetch": true
+    }
+  ],
+  "expect": {
+    "effects": [
+      "fetch_tail",
+      "fetch_delta"
+    ],
+    "cursor": 1,
+    "turn_ids": [
+      "m1"
+    ]
+  }
+}

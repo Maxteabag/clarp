@@ -1,0 +1,74 @@
+{
+  "title": "an optimistic bubble shows after the server turns until its id comes back",
+  "area": "delivery",
+  "steps": [
+    {
+      "open": true
+    },
+    {
+      "log": {
+        "mode": "tail",
+        "response": {
+          "conversation_id": "c1",
+          "turns": [
+            {
+              "id": "m0",
+              "role": "assistant",
+              "text": "hi",
+              "revision": 1
+            }
+          ],
+          "latest_revision": 1,
+          "has_more": false,
+          "missing": false
+        }
+      }
+    },
+    {
+      "optimistic": {
+        "id": "u-a",
+        "text": "question"
+      }
+    },
+    {
+      "optimistic": {
+        "id": "u-b",
+        "text": "second"
+      }
+    },
+    {
+      "log": {
+        "mode": "delta",
+        "response": {
+          "conversation_id": "c1",
+          "turns": [
+            {
+              "id": "u-a",
+              "role": "user",
+              "text": "question",
+              "revision": 2
+            }
+          ],
+          "latest_revision": 2,
+          "has_more": false,
+          "missing": false
+        }
+      }
+    }
+  ],
+  "expect": {
+    "effects": [
+      "fetch_tail"
+    ],
+    "cursor": 2,
+    "turn_ids": [
+      "m0",
+      "u-a"
+    ],
+    "visible_ids": [
+      "m0",
+      "u-a",
+      "u-b"
+    ]
+  }
+}
