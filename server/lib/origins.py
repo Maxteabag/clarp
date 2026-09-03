@@ -29,6 +29,11 @@ change to the routine set must be mirrored there. The coupling is guarded by
 """
 from __future__ import annotations
 
+# Rows the server writes on its own behalf into a conversation — today only
+# the "turn interrupted by server restart" marker. Not automation (the user is
+# meant to see it) and not a reply (it must never be pushed as one).
+MARKER_ORIGIN = "system"
+
 # Axis A — our own scheduled automation, never a real external signal.
 ROUTINE_AUTOMATION_ORIGINS = frozenset({"heartbeat", "leader_tick", "dreaming"})
 
