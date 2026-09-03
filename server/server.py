@@ -598,10 +598,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             n = int(self.headers.get("Content-Length", "0"))
             self._body_consumed = True
-            return json.loads(self.rfile.read(n)) if n > 0 else {}
+            data = json.loads(self.rfile.read(n)) if n > 0 else {}
         except (ValueError, json.JSONDecodeError) as e:
             log_exception("requestJsonParseFail", e, detail=self.path)
             return None
+        if not isinstance(data, dict):
+            # Every handler does data.get(...): a JSON string, array, or
+            # number body must read as "bad json", not kill the connection.
+            log("requestJsonNotObject", f"{self.path} {type(data).__name__}")
+            return None
+        return data
 
     # --- Auth gate -------------------------------------------------------
     #
@@ -3411,7 +3417,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_send(self):
         data = self._read_json()
-        if not isinstance(data, dict):
+        if data is None:
             return self._send(400, b"bad json")
         text = (data.get("text") or "").strip()
         session = (data.get("session") or self.ctx.default_session).strip() or self.ctx.default_session

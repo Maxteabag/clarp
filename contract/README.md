@@ -3,8 +3,9 @@
 Machine-checkable core client contract. `docs/protocol.md` is the prose;
 these files are the parts a computer can verify.
 
-- `schemas/` — hand-written JSON Schema (draft 2020-12) for the eight core
-  endpoints plus `sse.json` for the eleven core event types. Every schema
+- `schemas/` — hand-written JSON Schema (draft 2020-12) for the nine core
+  endpoints, `sse.json` for the eleven core event types, and
+  `clips-recoverable.json` for the voice-recovery extension. Every schema
   allows additional properties: the core is additive-only and clients must
   ignore what they do not know.
 - `fixtures/` — golden sync/delivery/audio scenarios: JSON steps plus the
@@ -17,7 +18,7 @@ these files are the parts a computer can verify.
 - `ios/` — `sync-fixtures.sh` copies the fixtures into the clarp-ios
   CoreBehaviorTests target (separate repo, separate PR).
 - `reference-client/` — `clarp-client.mjs`, a minimal working client
-  (135 lines, no dependencies beyond global fetch).
+  (under 250 lines, no dependencies beyond global fetch).
   `tests/contract/test_reference_client.py` runs it through one turn
   against the harness. If it cannot stay small while passing, the
   contract is too complex.

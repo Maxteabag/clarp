@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://clarp.local/contract/schemas/sse.json",
-  "$title": "GET /events (SSE)",
+  "title": "GET /events (SSE)",
   "description": "One text/event-stream per client. Durable events carry an SSE id: line; after replay the server always sends a bare agent-roster nudge. Top level validates the envelope; validate each data payload against the $def named by its wire type (see type-to-def in tests/contract/test_core_shapes.py). Enum values mirror server/lib/protocol.py.",
   "type": "object",
   "additionalProperties": true,
@@ -105,7 +105,7 @@
       "required": ["type", "session", "notification_id"],
       "properties": {
         "type": {"const": "user-notification"},
-        "notification_id": {"type": ["integer", "string"]},
+        "notification_id": {"type": "string"},
         "session": {"type": "string"},
         "agent_id": {"type": "string"},
         "persona": {"type": "string"},

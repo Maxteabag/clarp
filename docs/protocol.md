@@ -246,10 +246,13 @@ Rules:
 Response `200`:
 
 ```json
-{ "ok": true, "session": "rachel", "dispatch": "spawned | queued | …",
+{ "ok": true, "session": "rachel", "dispatch": "codex",
   "queued": false, "trace_id": "…",
   "orchestrator": { "action": "route | fallback | …", "decision_id": "…", "decision": {} } }
 ```
+
+`dispatch` names the backend that took the turn (`claude`, `codex`, …);
+`queued` is true when the turn waits behind a running one.
 
 `200` means accepted, not delivered. Delivery is proven when a `/log` response
 contains a turn with id `u-<client_msg_id>`. A client that wants a delivery
@@ -397,9 +400,9 @@ client sniffs versions to decide whether a surface exists.
 
 An old client is guaranteed:
 
-- the eight core endpoints: `GET /agents/snapshot`, `GET /log`,
-  `GET /events` (SSE), `POST /send`, `POST /stop`, `POST /transcribe`,
-  `POST /select`, `POST /clips/ack`
+- the nine core endpoints: `GET /server-info`, `GET /agents/snapshot`,
+  `GET /log`, `GET /events` (SSE), `POST /send`, `POST /stop`,
+  `POST /transcribe`, `POST /select`, `POST /clips/ack`
 - the eleven core event types: `transcript-updated`, `agent-state`,
   `agent-activity`, `agent-roster`, `agent-focus`, `queue-updated`,
   `user-notification`, `audio`, `tts-error`, `server-version`,
