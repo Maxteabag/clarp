@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 63
+_SCHEMA_VERSION = 64
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1166,6 +1166,30 @@ CREATE INDEX idx_oracle_delegations_delivery
 CREATE INDEX idx_oracle_delegations_agent
     ON oracle_delegations(agent_id, created_at DESC);
 
+CREATE TABLE voice_events (
+    event_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              INTEGER NOT NULL,
+    client_ts       INTEGER,
+    mono_ms         INTEGER,
+    received_at     INTEGER NOT NULL,
+    clock_offset_ms INTEGER,
+    source          TEXT NOT NULL,
+    client_id       TEXT,
+    session         TEXT,
+    utterance_id    TEXT,
+    trace_id        TEXT,
+    event           TEXT NOT NULL,
+    duration_ms     REAL,
+    level_db        REAL,
+    peak_db         REAL,
+    text            TEXT,
+    detail          TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX idx_voice_events_ts ON voice_events(ts);
+CREATE INDEX idx_voice_events_session_ts ON voice_events(session, ts);
+CREATE INDEX idx_voice_events_utterance ON voice_events(utterance_id, ts);
+CREATE INDEX idx_voice_events_trace ON voice_events(trace_id, ts);
+
 CREATE VIEW clip_lifecycle AS
     SELECT
     c.clip_id,
@@ -1214,6 +1238,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v62(con)
             if version < 63:
                 _migrate_to_v63(con)
+            if version < 64:
+                _migrate_to_v64(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1325,6 +1351,44 @@ def _migrate_to_v63(con: sqlite3.Connection) -> None:
              ON oracle_delegations(agent_id, created_at DESC)"""
     )
 
+
+def _migrate_to_v64(con: sqlite3.Connection) -> None:
+    """Permanent voice timeline (lib/voice_events.py).
+
+    One row per moment of a voice exchange, on a server-corrected clock.
+    Lives here rather than in telemetry.sqlite because it is never pruned.
+    """
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS voice_events (
+            event_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts              INTEGER NOT NULL,
+            client_ts       INTEGER,
+            mono_ms         INTEGER,
+            received_at     INTEGER NOT NULL,
+            clock_offset_ms INTEGER,
+            source          TEXT NOT NULL,
+            client_id       TEXT,
+            session         TEXT,
+            utterance_id    TEXT,
+            trace_id        TEXT,
+            event           TEXT NOT NULL,
+            duration_ms     REAL,
+            level_db        REAL,
+            peak_db         REAL,
+            text            TEXT,
+            detail          TEXT NOT NULL DEFAULT '{}'
+        )
+    """)
+    for statement in (
+        "CREATE INDEX IF NOT EXISTS idx_voice_events_ts ON voice_events(ts)",
+        "CREATE INDEX IF NOT EXISTS idx_voice_events_session_ts"
+        " ON voice_events(session, ts)",
+        "CREATE INDEX IF NOT EXISTS idx_voice_events_utterance"
+        " ON voice_events(utterance_id, ts)",
+        "CREATE INDEX IF NOT EXISTS idx_voice_events_trace"
+        " ON voice_events(trace_id, ts)",
+    ):
+        con.execute(statement)
 
 
 def now_ms() -> int:
