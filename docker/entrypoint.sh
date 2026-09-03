@@ -46,16 +46,24 @@ from lib.instance_backup import apply_pending_restore
 apply_pending_restore()
 
 home = Path.home()
-links = {
-    home / ".claude": LAYOUT.claude_home,
-    home / ".codex": LAYOUT.codex_home,
-}
-for link, target in links.items():
+claude_json = LAYOUT.claude_home / ".claude.json"
+if not claude_json.exists():
+    claude_json.touch(mode=0o600)
+
+links = [
+    (home / ".claude", LAYOUT.claude_home, True),
+    (home / ".codex", LAYOUT.codex_home, True),
+    (home / ".claude.json", claude_json, False),
+]
+for link, target, is_dir in links:
     if link.is_symlink() and link.resolve() == target.resolve():
         continue
     if link.exists() or link.is_symlink():
-        raise SystemExit(f"refusing to replace existing container path: {link}")
-    link.symlink_to(target, target_is_directory=True)
+        try:
+            link.unlink()
+        except OSError:
+            raise SystemExit(f"refusing to replace existing container path: {link}")
+    link.symlink_to(target, target_is_directory=is_dir)
 
 config = LAYOUT.config_file
 if not config.exists():
