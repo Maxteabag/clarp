@@ -20,8 +20,14 @@ RUN npm ci --ignore-scripts --no-audit --no-fund && npm run build
 
 FROM python:3.12-slim-bookworm AS runtime
 
-ARG CLAUDE_CODE_VERSION=2.1.250
-ARG CODEX_VERSION=0.150.1
+# Bump these when a new model ships. A model rejects a CLI older than its own
+# minimum ("does not support this model; version X or newer is required"), and
+# a container user cannot fix that from inside: `stable` only publishes on a
+# version tag, so whatever is pinned here is what they are stuck with until the
+# next release. Updating means a new tag, a repull, and relaunching the running
+# agents - a live agent keeps the CLI process it started with.
+ARG CLAUDE_CODE_VERSION=2.1.259
+ARG CODEX_VERSION=0.153.0
 ARG CLARP_UPDATE_REMOTE=""
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
