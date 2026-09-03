@@ -65,6 +65,12 @@ def test_pre_release_databases_are_refused(tmp_path):
 def _shape_as_v61(con: sqlite3.Connection) -> None:
     """Rebuild the pre-v62 shape on top of a current database."""
     con.executescript("""
+        DROP TABLE vocab_runs;
+        DROP TABLE vocab_assignments;
+        DROP TABLE vocab_profile_packs;
+        DROP TABLE vocab_profiles;
+        DROP TABLE vocab_terms;
+        DROP TABLE vocab_packs;
         DROP TABLE oracle_delegations;
         ALTER TABLE tts_queue ADD COLUMN mode TEXT NOT NULL DEFAULT 'pwa';
         ALTER TABLE agents ADD COLUMN heartbeat_interval_sec INTEGER NOT NULL DEFAULT 1800;
