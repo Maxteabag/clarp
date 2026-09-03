@@ -1,0 +1,15 @@
+{
+  "title": "unknown fields on known events are ignored",
+  "area": "sse",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [{"id": "m1", "role": "assistant", "text": "one", "revision": 1}], "latest_revision": 1, "has_more": false, "missing": false}}},
+    {"sse": {"type": "transcript-updated", "session": "rachel", "future_flag": true, "nested": {"a": [1, 2]}}},
+    {"log": {"mode": "delta", "response": {"conversation_id": "c1", "turns": [], "latest_revision": 1, "has_more": false, "missing": false}}}
+  ],
+  "expect": {
+    "effects": ["fetch_tail", "fetch_delta"],
+    "cursor": 1,
+    "turn_ids": ["m1"]
+  }
+}

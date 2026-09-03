@@ -1,0 +1,14 @@
+{
+  "title": "missing conversation renders empty, not an error",
+  "area": "sync",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "", "turns": [], "latest_revision": 0, "has_more": false, "missing": true}}}
+  ],
+  "expect": {
+    "effects": ["fetch_tail"],
+    "cursor": 0,
+    "turn_ids": [],
+    "missing": true
+  }
+}

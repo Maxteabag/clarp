@@ -1,0 +1,15 @@
+{
+  "title": "roster relaunch for our session resets the cache",
+  "area": "sync",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [{"id": "m1", "role": "assistant", "text": "old", "revision": 1}], "latest_revision": 1, "has_more": false, "missing": false}}},
+    {"sse": {"type": "agent-roster", "kind": "relaunched", "session": "rachel"}},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c2", "turns": [{"id": "n1", "role": "assistant", "text": "fresh", "revision": 7}], "latest_revision": 7, "has_more": false, "missing": false}}}
+  ],
+  "expect": {
+    "effects": ["fetch_tail", "drop_cache", "fetch_tail"],
+    "cursor": 7,
+    "turn_ids": ["n1"]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "title": "clip source precedence: playlist beats stream beats file",
+  "area": "audio",
+  "steps": [
+    {"clip": {"type": "audio", "url": "/audio/a.mp3"}},
+    {"clip": {"type": "audio", "url": "/audio/b.mp3", "stream_url": "/clips/2/stream"}},
+    {"clip": {"type": "audio", "url": "/audio/c.mp3", "stream_url": "/clips/3/stream", "playlist_url": "/clips/3/list.m3u8"}},
+    {"clip": {"type": "audio"}}
+  ],
+  "expect": {
+    "effects": [],
+    "clip_sources": ["file", "stream", "playlist", null]
+  }
+}

@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clarp.local/contract/schemas/sse.json",
+  "$title": "GET /events (SSE)",
+  "description": "One text/event-stream per client. Durable events carry an SSE id: line; after replay the server always sends a bare agent-roster nudge. Top level validates the envelope; validate each data payload against the $def named by its wire type (see type-to-def in tests/contract/test_core_shapes.py). Enum values mirror server/lib/protocol.py.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["type"],
+  "properties": {
+    "type": {"type": "string"},
+    "event_id": {"type": "integer"}
+  },
+  "$defs": {
+    "transcript-updated": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "session"],
+      "properties": {
+        "type": {"const": "transcript-updated"},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "backend_session_id": {"type": "string"}
+      }
+    },
+    "agent-state": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "session", "agent_id", "kind"],
+      "properties": {
+        "type": {"const": "agent-state"},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "persona": {"type": "string"},
+        "kind": {"$ref": "#/$defs/agent-state-kind"},
+        "ts": {"type": "integer"},
+        "detail": {"type": ["object", "string", "null"]},
+        "status_text": {"type": "string"}
+      }
+    },
+    "agent-state-kind": {
+      "type": "string",
+      "enum": ["thinking", "tool", "idle", "spawned", "stopped", "done", "compacting", "waiting", "interrupted", "background"]
+    },
+    "agent-activity": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "session"],
+      "properties": {
+        "type": {"const": "agent-activity"},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "persona": {"type": "string"},
+        "kind": {"type": "string"},
+        "phase": {"type": "string"},
+        "status": {"$ref": "#/$defs/activity-status"},
+        "tool": {"type": "string"},
+        "action": {"type": "string"},
+        "summary": {"type": "string"},
+        "file_path": {"type": "string"},
+        "ts": {"type": "integer"}
+      }
+    },
+    "activity-status": {
+      "type": "string",
+      "enum": ["running", "ok", "error", "recorded"]
+    },
+    "agent-roster": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type"],
+      "properties": {
+        "type": {"const": "agent-roster"},
+        "kind": {"type": "string"},
+        "session": {"type": "string"}
+      }
+    },
+    "agent-focus": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type"],
+      "properties": {
+        "type": {"const": "agent-focus"},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"}
+      }
+    },
+    "queue-updated": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "session", "agent_id", "queue_depth", "queue_paused", "queue_revision"],
+      "properties": {
+        "type": {"const": "queue-updated"},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "queue_depth": {"type": "integer"},
+        "queue_paused": {"type": "boolean"},
+        "queue_started": {"type": "boolean"},
+        "queue_revision": {"type": "integer"},
+        "client_msg_id": {"type": "string"}
+      }
+    },
+    "user-notification": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "session", "notification_id"],
+      "properties": {
+        "type": {"const": "user-notification"},
+        "notification_id": {"type": ["integer", "string"]},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "persona": {"type": "string"},
+        "done_ts": {"type": "integer"},
+        "source_message_id": {"type": "string"},
+        "cause_message_id": {"type": "string"},
+        "origin": {"type": "string"},
+        "push": {"type": "boolean"},
+        "badge": {"type": "boolean"},
+        "unread": {"type": "boolean"},
+        "muted": {"type": "boolean"},
+        "preview": {"type": "string"},
+        "reason": {"type": "string"}
+      }
+    },
+    "audio": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "url"],
+      "properties": {
+        "type": {"const": "audio"},
+        "clip_id": {"type": "integer"},
+        "url": {"type": "string"},
+        "name": {"type": "string"},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "persona": {"type": "string"},
+        "trace_id": {"type": "string"},
+        "streamable": {"type": "boolean"},
+        "delivery": {"type": "string"},
+        "stream_url": {"type": "string"},
+        "playlist_url": {"type": "string"},
+        "complete_url": {"type": "string"},
+        "audio_format": {"type": "string"},
+        "preview": {"type": "string"}
+      }
+    },
+    "tts-error": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "session"],
+      "properties": {
+        "type": {"const": "tts-error"},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "persona": {"type": "string"},
+        "message": {"type": "string"},
+        "error": {"type": "string"}
+      }
+    },
+    "server-version": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "version"],
+      "properties": {
+        "type": {"const": "server-version"},
+        "version": {"type": "string"}
+      }
+    },
+    "remote-action": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "action"],
+      "properties": {
+        "type": {"const": "remote-action"},
+        "action": {"$ref": "#/$defs/client-action"}
+      }
+    },
+    "client-action": {
+      "type": "string",
+      "enum": ["record", "record-toggle", "stop-agent"]
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "title": "wake while fetching runs exactly one more fetch",
+  "area": "sync",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [{"id": "m1", "role": "assistant", "text": "one", "revision": 1}], "latest_revision": 1, "has_more": false, "missing": false}}},
+    {"beginFetch": "delta"},
+    {"sse": {"type": "transcript-updated", "session": "rachel"}},
+    {"sse": {"type": "transcript-updated", "session": "rachel"}},
+    {"endFetch": true},
+    {"log": {"mode": "delta", "response": {"conversation_id": "c1", "turns": [{"id": "m2", "role": "assistant", "text": "two", "revision": 2}], "latest_revision": 2, "has_more": false, "missing": false}}}
+  ],
+  "expect": {
+    "effects": ["fetch_tail", "fetch_delta"],
+    "cursor": 2,
+    "turn_ids": ["m1", "m2"]
+  }
+}
