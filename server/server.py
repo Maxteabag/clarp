@@ -3490,6 +3490,10 @@ class Handler(BaseHTTPRequestHandler):
         # the two match by identity. A client that sends none gets the trace id.
         client_msg_id = (data.get("client_msg_id") or "").strip() or trace_id
         transcription_id = (data.get("transcription_id") or "").strip()
+        # Voice timeline identity for this turn: an explicit utterance id, else
+        # the transcription job id the client already sends.
+        voice_utterance_id = ((data.get("utterance_id") or "").strip()
+                              or transcription_id)[:128]
         if transcription_id:
             from lib import transcription_results
             try:
@@ -3598,9 +3602,10 @@ class Handler(BaseHTTPRequestHandler):
                     body["error"] = orchestrated.error
                 if orchestrated.ok and transcription_id:
                     transcription_results.delete(transcription_id)
+                if orchestrated.ok and voice_utterance_id:
                     self._record_voice(
                         "send", session=orchestrated.session or None,
-                        trace_id=trace_id, utterance_id=transcription_id,
+                        trace_id=trace_id, utterance_id=voice_utterance_id,
                         text=text, detail={"orchestrator": orchestrated.action,
                                            "dispatch": orchestrated.dispatch,
                                            "client_msg_id": client_msg_id})
@@ -3627,10 +3632,10 @@ class Handler(BaseHTTPRequestHandler):
                                     "queue_revision": result.queue_revision,
                                     "trace_id": trace_id}).encode(),
                    "application/json")
-        if transcription_id:
+        if voice_utterance_id:
             self._record_voice(
                 "send", session=result.session, trace_id=trace_id,
-                utterance_id=transcription_id, text=text,
+                utterance_id=voice_utterance_id, text=text,
                 detail={"dispatch": result.backend, "queued": result.queued,
                         "client_msg_id": client_msg_id, "hands_free": hands_free})
 

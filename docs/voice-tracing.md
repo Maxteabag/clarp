@@ -20,10 +20,12 @@ thing: rich, noisy, gone after a day.
 
 ## Identity
 
-- **`utterance_id`** ties the client's rows to the server's. Use the same
-  value as the idempotent transcription job id sent as `X-Transcription-ID`
-  on `/transcribe` (or send `X-Utterance-ID` explicitly), and as
-  `transcription_id` on the following `/send`.
+- **`utterance_id`** ties the client's rows to the server's. Send it as
+  `X-Utterance-ID` on `/transcribe` and as `utterance_id` on the following
+  `/send`; both fall back to the transcription job id (`X-Transcription-ID`,
+  `transcription_id`) when absent. A hands-free turn assembled from several
+  captures should use the turn's job id for all of them so the rollup sees
+  one utterance.
 - **`trace_id`** ties the server side of the turn together: `/transcribe`
   mints it, `/send` echoes it, TTS clips carry it, `/clips/ack` reports it.
   Playback rows only know the trace; the rollup joins them to the utterance

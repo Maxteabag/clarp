@@ -199,7 +199,7 @@ def test_transcribe_files_transcript_level_and_links_send(running):
         status, out = _post(base, "/send", {
             "session": "rachel", "text": "turn left ahead",
             "client_msg_id": "c-1", "trace_id": trace_id,
-            "transcription_id": "job-7"})
+            "transcription_id": "job-7-seg-0", "utterance_id": "job-7"})
     finally:
         TurnDispatchService.dispatch = real  # type: ignore[method-assign]
     assert status == 200, out
