@@ -16,8 +16,25 @@ _path_locks: dict[str, threading.Lock] = {}
 _imported: dict[str, tuple[int, int]] = {}
 
 
+def source_path(path: pathlib.Path) -> pathlib.Path:
+    """The file whose mtime/size track ``path``.
+
+    Backends that keep every session in one database describe a transcript as
+    ``<database>#<session_id>`` (see ``opencode_transcript``). That pseudo-path
+    is not a file; its change signature is the database's.
+    """
+    raw = str(path)
+    if "#" in raw and not path.exists():
+        return pathlib.Path(raw.split("#", 1)[0])
+    return path
+
+
+def source_size(path: pathlib.Path) -> int:
+    return source_path(path).stat().st_size
+
+
 def _signature(path: pathlib.Path) -> tuple[int, int]:
-    stat = path.stat()
+    stat = source_path(path).stat()
     return stat.st_mtime_ns, stat.st_size
 
 

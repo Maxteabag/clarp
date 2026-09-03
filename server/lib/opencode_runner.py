@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import threading
@@ -17,10 +18,14 @@ from .log import log, log_exception
 from .proc_util import attach_stderr_drain, stderr_text
 from .process_registry import ProcessRegistry, TurnHandle
 from .protocol import AgentState, SSEType, TurnSource
-from .voice_markup import spoken_chunks_for_tts
+from .voice_markup import spoken_chunks_for_tts, spoken_for_tts
 
 
 OPENCODE_BIN = "opencode"
+
+# Only text the model explicitly marked speakable reaches the voice channel;
+# the same contract Claude hooks and the Codex runner use.
+_SPEAK_RE = re.compile(r"<speak>(.*?)</speak>", re.DOTALL | re.IGNORECASE)
 _REGISTRY = ProcessRegistry(log_exception=log_exception)
 
 
@@ -179,8 +184,13 @@ def _drain_stdout(
                     _bind(st, sid, on_session_init=on_session_init,
                           on_error=on_error, trace_id=trace_id)
                 etype = str(ev.get("type") or ev.get("event") or "")
-                if etype in {"tool_use", "tool_start", "tool.running",
-                             "step_start"}:
+                if etype == "step_start":
+                    _record_state(agent_id, AgentState.THINKING, {
+                        "dispatch": "opencode", "trace_id": trace_id,
+                    })
+                    _broadcast(stream, agent_id, session)
+                    continue
+                if etype in {"tool_use", "tool_start", "tool.running"}:
                     name = ""
                     part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
                     name = str(part.get("tool") or ev.get("tool")
@@ -251,16 +261,50 @@ def _bind(st: _TurnState, session_id: str, *, on_session_init, on_error,
 
 def _speak(text: str, st: _TurnState, *, agent_id: str, session: str,
            trace_id: str, enqueue) -> None:
-    for chunk in spoken_chunks_for_tts(text):
-        key = chunk.strip()
+    """Enqueue each ``<speak>`` block of ``text`` as a TTS clip.
+
+    Mirrors the Codex runner: only voice turns speak, only explicitly marked
+    regions are spoken, and a block is spoken once per turn even when the
+    same text arrives in more than one event.
+    """
+    if not agent_id or not agents_db.latest_turn_synthesize_audio(agent_id):
+        return
+    blocks = [spoken_for_tts(m.group(1).strip()) for m in _SPEAK_RE.finditer(text)]
+    blocks = [b for b in blocks if b]
+    if not blocks:
+        return
+    agent = agents_db.get_by_agent_id(agent_id)
+    if agent is None:
+        return
+    persona = agent.get("persona") or ""
+    voice_id = agent.get("voice_id") or ""
+    focused = agents_db.get_focus()
+    trace = agents_db.get_trace(agent_id) or trace_id or None
+    for block in blocks:
+        key = block.strip()
         if not key or key in st.seen_speak:
             continue
         st.seen_speak.add(key)
-        try:
-            enqueue(session=session, agent_id=agent_id, text=chunk,
-                    trace_id=trace_id)
-        except Exception as error:  # noqa: BLE001
-            log_exception("opencodeSpeakFail", error, detail=trace_id)
+        for index, chunk in enumerate(spoken_chunks_for_tts(block)):
+            payload_text = chunk
+            # Persona prefix only the first chunk of each explicit speak block.
+            if (index == 0 and persona and agent_id != focused
+                    and not chunk.lower().startswith(persona.lower())):
+                payload_text = f"{persona} here. {chunk}"
+            try:
+                qid = enqueue(
+                    agent_id=agent_id,
+                    text=payload_text,
+                    voice_id=voice_id,
+                    session=session,
+                    source=TurnSource.PWA,
+                    trace_id=trace,
+                    synthesize_audio=True,
+                )
+                log("opencodeEnqueue",
+                    f"agent={agent_id} qid={qid} chars={len(chunk)}")
+            except Exception as error:  # noqa: BLE001
+                log_exception("opencodeSpeakFail", error, detail=trace_id)
 
 
 def _record_state(agent_id: str, kind: str, detail: dict[str, Any]) -> None:
@@ -276,9 +320,10 @@ def _broadcast(stream: Any, agent_id: str, session: str) -> None:
     if stream is None or not agent_id:
         return
     try:
-        stream.broadcast(SSEType.TRANSCRIPT_UPDATED, {
-            "agent_id": agent_id, "session": session,
-            "source": TurnSource.PWA,
+        stream.broadcast({
+            "type": SSEType.TRANSCRIPT_UPDATED,
+            "agent_id": agent_id,
+            "session": session,
         })
     except Exception as error:  # noqa: BLE001
         log_exception("opencodeBroadcastFail", error)
