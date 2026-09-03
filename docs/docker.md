@@ -29,12 +29,13 @@ docker compose -p clarp-work exec clarp python3 -c \
 ```
 
 Complete provider sign-in inside this node. The iOS Computer Settings screen
-can start the same server-scoped device flows.
+can start the same server-scoped device flows. For interactive terminal login,
+use `-it` (or `-T` when piping standard input programmatically):
 
 ```bash
-docker compose -p clarp-work exec clarp claude auth login --claudeai
-docker compose -p clarp-work exec clarp codex login --device-auth
-docker compose -p clarp-work exec clarp gh auth login
+docker compose -p clarp-work exec -it clarp claude auth login --claudeai
+docker compose -p clarp-work exec -it clarp codex login --device-auth
+docker compose -p clarp-work exec -it clarp gh auth login
 ```
 
 Generate an import link after selecting the phone-reachable URL:
