@@ -36,3 +36,7 @@ When diagnosing or managing Clarp inside a Docker container:
   * When automating or scripting the login flow via agent/subprocess, use `-T` and keep the standard input stream connected to feed the callback code to the active prompt without terminating the session or expiring challenge parameters.
   * Ensure the container has working outbound DNS (configured in `compose.yaml`) before initiating OAuth token exchanges.
 
+- Tailscale and phone connectivity:
+  * Prefer the `compose.tailscale.yaml` sidecar mode for isolated Tailnet identity, auto-HTTPS, and zero host firewall conflicts.
+  * If publishing ports on the host directly (`CLARP_PORT=...`), ensure host firewalls (`ufw` / `DOCKER-USER`) allow Tailscale CGNAT traffic (`100.64.0.0/10` / `tailscale0`) to forward to Docker bridge networks.
+
