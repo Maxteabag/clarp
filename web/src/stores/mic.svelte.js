@@ -143,6 +143,7 @@ function startCapture() {
       ? new MediaRecorder(mediaStream, { mimeType: recordedMime })
       : new MediaRecorder(mediaStream);
   } catch (e) {
+    clog('recorderFail', `MediaRecorder: ${e && e.name}: ${e && e.message}`);
     flash(`recorder: ${e.message}`, 3000);
     return;
   }
@@ -153,7 +154,11 @@ function startCapture() {
   // Timeslice mode: on iOS this fires ondataavailable during the recording
   // instead of only on stop, so a dead pipeline is detectable early.
   try { recorder.start(Timing.MEDIA_RECORDER_TIMESLICE_MS); }
-  catch (e) { flash(`recorder start: ${e.message}`, 3000); return; }
+  catch (e) {
+    clog('recorderFail', `start: ${e && e.name}: ${e && e.message}`);
+    flash(`recorder start: ${e.message}`, 3000);
+    return;
+  }
   mic.capturing = true;
   captureStartedAt = Date.now();
   silenceStartedAt = 0;
@@ -307,22 +312,29 @@ export async function startAlwaysOn() {
 }
 
 export function stopAlwaysOn() {
+  // commitPending() re-enters here after a single-shot clip; nothing to do.
+  if (!alwaysOn && !mic.capturing) return;
   alwaysOn = false;
   mic.recording = false;
-  mic.capturing = false;
   if (vadFrame) cancelAnimationFrame(vadFrame);
+  // stopCapture() guards on mic.capturing, so it has to run while the flag is
+  // still set. onCaptureEnd (the recorder's onstop) clears the flag once the
+  // clip is in hand; clearing it here first meant the recorder was never
+  // stopped and tap-to-record silently discarded every clip (issue #13).
   stopCapture();
   flash('Listening off', 1500);
 }
 
 export async function micTap() {
-  if (alwaysOn) { stopAlwaysOn(); singleShot = false; return; }
+  // The second tap ends the clip. singleShot stays set so onCaptureEnd sends
+  // the transcript at once instead of waiting out the hands-free grace timer.
+  if (alwaysOn) { stopAlwaysOn(); return; }
   try { await ensureMic(); }
   catch (e) { flash(`mic permission: ${e.message || e.name}`, 4500); return; }
   singleShot = true;
   alwaysOn = true;
   mic.recording = true;
-  flash('Recording (tap to cancel)', 1500);
+  flash('Recording (tap to send)', 1500);
   if (!mic.capturing) startCapture();
   vadTick();
 }
@@ -330,7 +342,7 @@ export async function micTap() {
 /** Remote-action / URL-action entry point. */
 export function toggleRecord() {
   unlockAudio();
-  if (alwaysOn) { stopAlwaysOn(); singleShot = false; }
+  if (alwaysOn) stopAlwaysOn();
   else { singleShot = true; micTap(); }
 }
 
