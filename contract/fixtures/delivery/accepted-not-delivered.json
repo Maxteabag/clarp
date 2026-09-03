@@ -1,0 +1,16 @@
+{
+  "title": "HTTP 200 is acceptance, not delivery",
+  "area": "delivery",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [{"id": "m0", "role": "assistant", "text": "hi", "revision": 1}], "latest_revision": 1, "has_more": false, "missing": false}}},
+    {"send": {"client_msg_id": "a", "session": "rachel", "text": "question", "at": 1000000}},
+    {"stale": {"now": 1005000, "timeoutMs": 20000}}
+  ],
+  "expect": {
+    "effects": ["fetch_tail"],
+    "delivered": [],
+    "stale": [],
+    "pending": ["u-a"]
+  }
+}

@@ -260,8 +260,7 @@ about 20 s.
 
 `{"session": "rachel"}`. Terminates the running turn, records an
 `interrupted` state, pauses the queue, and broadcasts `agent-state` and
-`queue-updated`. Response: `{"ok": true, "terminated": n, "queue_depth": …,
-"queue_paused": true, "queue_revision": …}`.
+`queue-updated`. Response: `{"ok": true, "terminated": n}`.
 
 Related: `GET /turn-queue?session=` lists queued turns; `POST /turn-queue/<id>/send`
 releases one.
@@ -381,11 +380,35 @@ any subset. Payload shapes are documented in the handler docstrings in
 
 ## Compatibility policy
 
-The server and its clients ship as one release family. There are no
-versioned endpoints and no compatibility shims for older clients: when a
-field changes, the server, the PWA, and the native app change together, and
-the cross-wire constant test enforces the shared vocabulary. The database
-schema follows the same rule (`server/lib/db.py`).
+The core conversation protocol is **additive-only**. Fields and event
+types are added, never renamed, removed, or retyped. A change that cannot
+be expressed additively ships as a new event type or a new endpoint, and
+the old one keeps working until `min_app_version` (below) moves past
+every client that used it. The database schema follows the same rule
+(`server/lib/db.py`).
+
+Clients **must ignore** unknown event types and unknown fields on known
+types, and must treat a missing optional field as the documented default.
+A client that follows this rule keeps working when the server grows; a
+client that refuses unknown traffic breaks on every minor release.
+
+`/server-info` `capabilities.features` is the **only** feature gate. No
+client sniffs versions to decide whether a surface exists.
+
+An old client is guaranteed:
+
+- the eight core endpoints: `GET /agents/snapshot`, `GET /log`,
+  `GET /events` (SSE), `POST /send`, `POST /stop`, `POST /transcribe`,
+  `POST /select`, `POST /clips/ack`
+- the eleven core event types: `transcript-updated`, `agent-state`,
+  `agent-activity`, `agent-roster`, `agent-focus`, `queue-updated`,
+  `user-notification`, `audio`, `tts-error`, `server-version`,
+  `remote-action`
+- the sync algorithm ("The sync algorithm" below): revision cursors,
+  `replace_required`, `conversation_id` changes, `has_more` paging
+- clip URL precedence: `playlist_url`, then `stream_url`, then `url`
+- delivery: a send is delivered if and only if its `u-<client_msg_id>`
+  appears in `/log`. HTTP 200 means accepted, not delivered.
 
 The one place a version *is* negotiated is the App Store app, which cannot be
 upgraded in lockstep with the server. `GET /server-info` carries

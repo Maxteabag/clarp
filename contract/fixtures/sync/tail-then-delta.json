@@ -1,0 +1,16 @@
+{
+  "title": "tail then delta appends by id",
+  "area": "sync",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [{"id": "u-a", "role": "user", "text": "hi", "revision": 1}, {"id": "m1", "role": "assistant", "text": "hello", "revision": 2}], "latest_revision": 2, "has_more": false, "missing": false}}},
+    {"snapshot": {"session": "rachel", "conversation_id": "c1", "head_revision": 2}},
+    {"sse": {"type": "transcript-updated", "session": "rachel"}},
+    {"log": {"mode": "delta", "response": {"conversation_id": "c1", "turns": [{"id": "m2", "role": "assistant", "text": "more", "revision": 3}], "latest_revision": 3, "has_more": false, "missing": false}}}
+  ],
+  "expect": {
+    "effects": ["fetch_tail", "fetch_delta"],
+    "cursor": 3,
+    "turn_ids": ["u-a", "m1", "m2"]
+  }
+}

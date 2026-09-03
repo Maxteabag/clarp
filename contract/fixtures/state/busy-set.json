@@ -1,0 +1,10 @@
+{
+  "title": "busy means thinking, tool, or compacting — nothing else",
+  "area": "state",
+  "steps": [],
+  "expect": {
+    "effects": [],
+    "busy": ["thinking", "tool", "compacting"],
+    "notBusy": ["idle", "done", "stopped", "interrupted", "waiting", "background", "spawned"]
+  }
+}
