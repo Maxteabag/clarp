@@ -3324,8 +3324,11 @@ class Handler(BaseHTTPRequestHandler):
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a") as f:
                 for it in items:
+                    line_detail = it.get('detail', '')
+                    if isinstance(line_detail, dict):
+                        line_detail = json.dumps(line_detail, separators=(",", ":"))
                     f.write(f"{time.strftime('%H:%M:%S')} client   "
-                            f"{it.get('event','?')} {it.get('detail','')}\n")
+                            f"{it.get('event','?')} {line_detail}\n")
         except OSError as e:
             log_exception("clogWriteFail", e, detail=str(log_path))
 

@@ -11,6 +11,7 @@ import { clog, trace } from '../lib/net.js';
 import { app, flash } from './app.svelte.js';
 import {
   machine, playerAdapter, scheduler, tick, unlockAudio,
+  addConditionSource,
 } from './audio.svelte.js';
 import { send, sendText } from './send.svelte.js';
 
@@ -42,6 +43,19 @@ let pendingText = '';
 let graceTimer = null;
 let captureStopWatchdog = null;
 let energyAboveSince = 0;
+let lastEnergy = 0;       // most recent VAD energy reading (0 when idle)
+let lastEnergyAt = 0;
+
+// What the microphone saw when audio went wrong: whether we were listening,
+// whether a clip was being captured, and how loud the room was. A stall while
+// the user is talking over the agent reads very differently from one in
+// silence.
+addConditionSource(() => ({
+  mic_recording: mic.recording,
+  mic_capturing: mic.capturing,
+  mic_level: Math.round(lastEnergy),
+  mic_level_age_ms: lastEnergyAt ? Date.now() - lastEnergyAt : null,
+}));
 
 function pickMimeType() {
   if (!window.MediaRecorder) return '';
@@ -272,6 +286,8 @@ function vadTick() {
   if (!alwaysOn || !analyser) return;
   const energy = readEnergy();
   const now = Date.now();
+  lastEnergy = energy;
+  lastEnergyAt = now;
   if (singleShot) {
     // Tap-to-record: no auto-stop, the user controls it with a second tap.
   } else if (!mic.capturing) {

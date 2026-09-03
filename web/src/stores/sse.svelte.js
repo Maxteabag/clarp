@@ -14,6 +14,7 @@ import {
 import {
   audio, bumpLastAudioTs, lastAudioTs, PLAYER_ADAPTER_VERSION, scheduler,
   unlockAudio,
+  addConditionSource,
 } from './audio.svelte.js';
 
 let es = null;
@@ -78,6 +79,11 @@ export function connectSSE() {
 export function sseIsOpen() {
   return !!es && es.readyState === 1;
 }
+
+addConditionSource(() => ({
+  sse_open: sseIsOpen(),
+  sse_ready_state: es ? es.readyState : null,
+}));
 
 export function forceReconnect() {
   reconnectMs = Timing.SSE_RECONNECT_BASE_MS;
