@@ -10,7 +10,7 @@ export default {
     },
   },
   test: {
-    include: ['tests/state/**/*.test.js', 'tests/sim-e2e/**/*.test.js'],
+    include: ['tests/state/**/*.test.js', 'tests/sim-e2e/**/*.test.js', 'tests/contract/**/*.test.js'],
     environment: 'node',
     testTimeout: 30000,
     hookTimeout: 20000,

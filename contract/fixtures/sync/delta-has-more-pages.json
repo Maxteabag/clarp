@@ -1,0 +1,16 @@
+{
+  "title": "delta with has_more pages oldest-first until caught up",
+  "area": "sync",
+  "steps": [
+    {"open": true},
+    {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [{"id": "m0", "role": "assistant", "text": "zero", "revision": 1}], "latest_revision": 1, "has_more": false, "missing": false}}},
+    {"sse": {"type": "transcript-updated", "session": "rachel"}},
+    {"log": {"mode": "delta", "response": {"conversation_id": "c1", "turns": [{"id": "m1", "role": "assistant", "text": "one", "revision": 2}, {"id": "m2", "role": "assistant", "text": "two", "revision": 3}], "latest_revision": 2, "has_more": true, "missing": false}}},
+    {"log": {"mode": "delta", "response": {"conversation_id": "c1", "turns": [{"id": "m3", "role": "assistant", "text": "three", "revision": 4}], "latest_revision": 4, "has_more": false, "missing": false}}}
+  ],
+  "expect": {
+    "effects": ["fetch_tail", "fetch_delta", "fetch_delta"],
+    "cursor": 4,
+    "turn_ids": ["m0", "m1", "m2", "m3"]
+  }
+}

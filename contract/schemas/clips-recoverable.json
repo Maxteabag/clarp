@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clarp.local/contract/schemas/clips-recoverable.json",
+  "$title": "GET /clips/recoverable",
+  "description": "Recent clips a suspended client may still want to play. Each entry is an audio event payload.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["events"],
+  "properties": {
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["type"],
+        "properties": {
+          "type": {"type": "string"}
+        }
+      }
+    }
+  }
+}
