@@ -215,15 +215,35 @@ clarp-admin prompt --server work --to rachel \
 The address is always `(peer, session)`. The peer token is stored with mode
 `0600` inside this node's volume and is redacted from `peers list` output.
 
-## Explicit host workspaces
+## Accessing host files and credentials
 
-An advanced operator may bind a repository into `/data/workspace`, but this
-grants Clarp agents write and delete access to that host directory. The normal
-workflow is to clone inside the private volume, push a branch, and open a pull
-request using `gh`.
+To allow container agents to work directly on host repositories and reuse existing host GitHub / Git authentication without re-authenticating, create a local `compose.override.yaml` (which is automatically ignored by git):
 
-Never mount the Docker socket. Clarp reports update instructions but does not
-control Docker itself.
+```yaml
+# compose.override.yaml
+services:
+  clarp:
+    # Run as your host UID:GID so file permissions match and Claude Code permits --dangerously-skip-permissions
+    user: "1000:1000"
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+      - /home/clarp:size=64m,mode=1777
+    environment:
+      # Reuse host GitHub CLI authentication
+      GH_CONFIG_DIR: /host/home/USER/.config/gh
+    volumes:
+      # Mount host filesystem
+      - /:/host
+      # Reuse host Git identity (name, email, helpers)
+      - /home/USER/.config/git:/home/clarp/.config/git:ro
+```
+
+When switching an existing volume to a custom UID, ensure the data volume ownership matches:
+```bash
+docker run --rm -v clarp_clarp-data:/data alpine chown -R 1000:1000 /data
+```
+
+Never mount the Docker socket (`/var/run/docker.sock`). Clarp reports update instructions but does not control Docker itself.
 
 ## Removal
 
