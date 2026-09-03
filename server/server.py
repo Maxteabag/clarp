@@ -289,6 +289,7 @@ class Handler(BaseHTTPRequestHandler):
         "/vocab/preview": "_handle_vocab_preview_get",
         "/vocab/runs": "_handle_vocab_runs_get",
         "/vocab/run": "_handle_vocab_run_get",
+        "/transcription-audio": "_handle_transcription_audio_get",
         "/clips/recoverable": "_handle_recoverable_clips",
         "/server-info": "_handle_server_info",
         "/paired-devices": "_handle_paired_devices",
@@ -1698,12 +1699,26 @@ class Handler(BaseHTTPRequestHandler):
             limit, session=query.get("session", ""))})
 
     def _handle_vocab_run_get(self):
-        from lib import vocab_store
+        from lib import heard_audio, vocab_store
         trace_id = self._query().get("trace_id", "")
         run = vocab_store.run_for_trace(trace_id) if trace_id else None
         if run is None:
             return self._json_error(404, "no run for that trace")
+        kept = heard_audio.lookup(
+            RuntimePaths.from_home(pathlib.Path.home()).cache_dir, trace_id)
+        run["audio_url"] = f"/transcription-audio?trace_id={trace_id}" if kept else None
         self._json_ok(run)
+
+    def _handle_transcription_audio_get(self):
+        """The clip the transcriber was given for one trace, if retained."""
+        from lib import heard_audio
+        trace_id = self._query().get("trace_id", "")
+        kept = heard_audio.lookup(
+            RuntimePaths.from_home(pathlib.Path.home()).cache_dir, trace_id)
+        if kept is None:
+            return self._json_error(404, "no retained audio for that trace")
+        path, meta = kept
+        self._send_file(path, meta.get("content_type") or "application/octet-stream")
 
     def _handle_transcription_model_install(self):
         from lib.transcription_models import start_install
@@ -4076,6 +4091,14 @@ class Handler(BaseHTTPRequestHandler):
             log_exception("transcribeFail", e)
             return self._send(500, f'{{"error":"{e}"}}'.encode(), "application/json")
         latency_ms = int((time.monotonic() - started) * 1000)
+        try:
+            from lib import heard_audio
+            heard_audio.retain(
+                RuntimePaths.from_home(pathlib.Path.home()).cache_dir,
+                trace_id=trace_id, audio_bytes=audio_bytes, content_type=ctype,
+                session=focus, run_id=vocab_run_id, model=requested_model or "")
+        except Exception as e:  # noqa: BLE001 - diagnostics never block a turn
+            log_exception("heardAudioFail", e)
         if vocab_run_id:
             try:
                 from lib import vocab_store

@@ -134,9 +134,11 @@ def status() -> dict:
     strategy = selected_turn_taking()
     models = cloud_models()
     selected_row = next((m for m in models if m["id"] == engine), None)
+    from .heard_audio import enabled as retain_audio
     return {
         "engine": engine,
         "turn_taking": strategy,
+        "retain_audio": retain_audio(),
         "turn_taking_options": [
             {"id": TURN_NATIVE, "name": "Native (on-device VAD + Smart Turn)",
              "available": True},
@@ -173,8 +175,14 @@ def update_settings(data: dict) -> dict:
     row = _model_row(engine)
     if strategy == TURN_PROVIDER and not (row and _definition(row["id"].split(":")[0])["turn_detection"] == "own"):
         raise ValueError("provider-owned turn taking needs an engine that detects turns")
+    retain = data.get("retain_audio")
+    if retain is not None and not isinstance(retain, bool):
+        raise ValueError("retain_audio must be boolean")
     settings_store.set_text(ENGINE_KEY, engine)
     settings_store.set_text(TURN_TAKING_KEY, strategy)
+    if retain is not None:
+        from .heard_audio import set_enabled
+        set_enabled(retain)
     return status()
 
 

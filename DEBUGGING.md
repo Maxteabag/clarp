@@ -177,6 +177,38 @@ WHERE broadcast_at IS NOT NULL
 ORDER BY created_at DESC;
 ```
 
+## What the transcriber was sent, and what it heard
+
+Every `/transcribe` compiles a vocabulary payload and records it in
+`vocab_runs` (state database) before inference; the transcript and model
+latency are written to the same row afterwards. The run id travels in the
+`transcribe` event's detail and in the `/transcribe` response as
+`vocab_run_id`, and `/vocab/run?trace_id=…` returns the row.
+
+```sql
+-- The prompt behind the last ten transcripts, with what was dropped and why
+SELECT run_id, session, provider, model, used || '/' || capacity AS budget,
+       form, transcript, latency_ms, payload, dropped_json
+FROM vocab_runs ORDER BY run_id DESC LIMIT 10;
+
+-- Which packs are earning their budget
+SELECT json_extract(value, '$.pack') AS pack, count(*) AS terms_sent
+FROM vocab_runs, json_each(vocab_runs.included_json)
+WHERE created_at > (unixepoch('now') * 1000) - 86400000
+GROUP BY pack ORDER BY terms_sent DESC;
+
+-- Runs where the model never answered
+SELECT run_id, session, created_at FROM vocab_runs
+WHERE transcript = '' AND latency_ms = 0 ORDER BY run_id DESC LIMIT 20;
+```
+
+With `transcription.retain_audio` on (POST `/transcription-providers`
+`{"retain_audio": true}`), the clip itself is kept under
+`~/.cache/clarp/heard/<trace_id>.<ext>` with a JSON sidecar, capped at 500
+clips or 14 days. `/transcription-audio?trace_id=…` serves it, and
+`/vocab/run` adds `audio_url` when one exists, so a garbled transcript can be
+listened to next to the exact prompt that produced it.
+
 ## File layout
 
 ```
