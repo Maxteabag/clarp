@@ -2,6 +2,12 @@
 
 Credentials remain owned by each CLI.  Clarp only invokes documented CLI
 commands and returns bounded, scrubbed human-readable output to the client.
+
+Which CLIs get a sign-in row is decided by the backend registry: every
+adapter with ``login_kind != "none"`` is listed, in registry order, and the
+CLI-specific commands live in ``_DRIVERS`` here. A new backend therefore
+appears in Settings the moment its adapter declares a login kind and a
+driver is added below; no client change is needed.
 """
 from __future__ import annotations
 
@@ -14,7 +20,10 @@ import shutil
 import subprocess
 import threading
 import time
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from . import backends
 
 _lock = threading.Lock()
 _tasks: dict[str, dict[str, Any]] = {}
@@ -110,19 +119,119 @@ def _jwt_expiry_ms(value: str) -> int:
         return 0
 
 
+@dataclass(frozen=True)
+class _StatusReading:
+    """What one ``status_argv`` run said about the local sign-in."""
+    logged_in: bool
+    account: str = ""
+    method: str = ""
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class _AuthDriver:
+    """The documented commands one CLI exposes for sign-in."""
+    status_argv: tuple[str, ...]
+    login_argv: tuple[str, ...]
+    logout_argv: tuple[str, ...]
+    read_status: Callable[[subprocess.CompletedProcess[str]], _StatusReading]
+    credential_metadata: Callable[[], tuple[bool, int]]
+    validate: Callable[[], None]
+
+
+def _claude_status(result: subprocess.CompletedProcess[str]) -> _StatusReading:
+    data = json.loads(result.stdout) if result.stdout.strip() else {}
+    return _StatusReading(
+        logged_in=result.returncode == 0 and bool(data.get("loggedIn")),
+        account=str(data.get("email") or ""),
+        method=str(data.get("authMethod") or data.get("apiProvider") or ""),
+        error=_failure_summary(result.stderr) if result.returncode != 0 else "",
+    )
+
+
+def _claude_credentials() -> tuple[bool, int]:
+    path = pathlib.Path.home() / ".claude/.credentials.json"
+    payload = json.loads(path.read_text())
+    login = payload.get("claudeAiOauth") or {}
+    token = str(login.get("accessToken") or "")
+    return bool(token), int(login.get("expiresAt") or 0)
+
+
+def _claude_validate() -> None:
+    from . import backend_usage
+    backend_usage.fetch_claude_usage(timeout=6)
+
+
+def _codex_status(result: subprocess.CompletedProcess[str]) -> _StatusReading:
+    output = (result.stdout + result.stderr).strip()
+    logged_in = result.returncode == 0 and "logged in" in output.lower()
+    return _StatusReading(
+        logged_in=logged_in,
+        method=(output.removeprefix("Logged in using ").strip()
+                if result.returncode == 0 else ""),
+        # A non-zero exit with output is a configuration failure worth
+        # showing; "Not logged in" alone is a plain signed-out state.
+        error="" if result.returncode == 0 else _failure_summary(output),
+    )
+
+
+def _codex_credentials() -> tuple[bool, int]:
+    path = pathlib.Path.home() / ".codex/auth.json"
+    payload = json.loads(path.read_text())
+    tokens = payload.get("tokens") or {}
+    token = str(tokens.get("access_token") or payload.get("OPENAI_API_KEY") or "")
+    return bool(token), _jwt_expiry_ms(token)
+
+
+def _codex_validate() -> None:
+    from . import backend_usage
+    backend_usage.fetch_codex_usage(timeout=6)
+
+
+_DRIVERS: dict[str, _AuthDriver] = {
+    backends.CLAUDE: _AuthDriver(
+        status_argv=("auth", "status", "--json"),
+        login_argv=("auth", "login", "--claudeai"),
+        logout_argv=("auth", "logout"),
+        read_status=_claude_status,
+        credential_metadata=_claude_credentials,
+        validate=_claude_validate,
+    ),
+    backends.CODEX: _AuthDriver(
+        status_argv=("login", "status"),
+        login_argv=("login", "--device-auth"),
+        logout_argv=("logout",),
+        read_status=_codex_status,
+        credential_metadata=_codex_credentials,
+        validate=_codex_validate,
+    ),
+}
+
+
+def _driver(backend: str) -> _AuthDriver | None:
+    adapter = backends.get(backend)
+    if adapter is None or not adapter.supports_auth:
+        return None
+    return _DRIVERS.get(adapter.id)
+
+
+def _executable(backend: str) -> str | None:
+    adapter = backends.get(backend)
+    if adapter is None:
+        return None
+    binary = adapter.required_binary
+    if adapter.id == backends.CLAUDE:
+        from . import clarp_runner
+        binary = clarp_runner.configured_claude_bin()
+    return shutil.which(binary)
+
+
 def _credential_metadata(backend: str) -> tuple[bool, int]:
+    driver = _driver(backend)
+    if driver is None:
+        return False, 0
     try:
-        if backend == "claude":
-            path = pathlib.Path.home() / ".claude/.credentials.json"
-            payload = json.loads(path.read_text())
-            login = payload.get("claudeAiOauth") or {}
-            token = str(login.get("accessToken") or "")
-            return bool(token), int(login.get("expiresAt") or 0)
-        path = pathlib.Path.home() / ".codex/auth.json"
-        payload = json.loads(path.read_text())
-        tokens = payload.get("tokens") or {}
-        token = str(tokens.get("access_token") or payload.get("OPENAI_API_KEY") or "")
-        return bool(token), _jwt_expiry_ms(token)
+        return driver.credential_metadata()
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False, 0
 
@@ -134,11 +243,10 @@ def _validation(backend: str, *, force: bool = False) -> tuple[str, str]:
     if cached and not force and now - cached[0] < _VALIDATION_TTL_SECONDS:
         return cached[1], cached[2]
     try:
-        from . import backend_usage
-        if backend == "claude":
-            backend_usage.fetch_claude_usage(timeout=6)
-        else:
-            backend_usage.fetch_codex_usage(timeout=6)
+        driver = _driver(backend)
+        if driver is None:
+            raise RuntimeError(f"{backend} has no sign-in validation")
+        driver.validate()
         state, error = "valid", ""
     except Exception as exc:  # noqa: BLE001 — provider errors become bounded state
         error = _failure_summary(str(exc))
@@ -157,75 +265,45 @@ def _validation(backend: str, *, force: bool = False) -> tuple[str, str]:
 
 
 def status(*, validate: bool = True) -> list[dict[str, Any]]:
+    """One row per registry adapter that has a sign-in, in registry order."""
     rows: list[dict[str, Any]] = []
-    claude = shutil.which("claude")
-    if claude:
+    for adapter in backends.auth_adapters():
+        driver = _DRIVERS.get(adapter.id)
+        if driver is None:
+            continue
+        base = {"id": adapter.id, "name": adapter.label,
+                "login_kind": adapter.login_kind}
+        executable = _executable(adapter.id)
+        if executable is None:
+            rows.append({**base, "installed": False, "logged_in": False})
+            continue
         try:
-            result = _run([claude, "auth", "status", "--json"])
-            data = json.loads(result.stdout) if result.stdout.strip() else {}
-            present, expires_at = _credential_metadata("claude")
-            locally_logged_in = result.returncode == 0 and bool(data.get("loggedIn"))
-            cli_error = _failure_summary(result.stderr) if result.returncode != 0 else ""
+            result = _run([executable, *driver.status_argv])
+            reading = driver.read_status(result)
+            present, expires_at = _credential_metadata(adapter.id)
             state, validation_error = "signed_out", ""
-            if locally_logged_in:
+            if reading.logged_in:
                 if expires_at and expires_at <= int(time.time() * 1000):
                     state = "expired"
                 elif validate:
-                    state, validation_error = _validation("claude")
+                    state, validation_error = _validation(adapter.id)
                 else:
                     state = "unverified"
             elif present:
-                state = "error" if cli_error else "invalid"
+                state = "error" if reading.error else "invalid"
             rows.append({
-                "id": "claude", "name": "Claude", "installed": True,
+                **base, "installed": True,
                 "logged_in": state == "valid",
-                "account": data.get("email") or "",
-                "method": data.get("authMethod") or data.get("apiProvider") or "",
+                "account": reading.account,
+                "method": reading.method,
                 "state": state, "credential_present": present,
                 "can_logout": present, "expires_at": expires_at,
                 "validation_error": validation_error,
-                "error": cli_error,
+                "error": reading.error,
             })
         except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
-            rows.append({"id": "claude", "name": "Claude", "installed": True,
-                         "logged_in": False, "error": str(exc)})
-    else:
-        rows.append({"id": "claude", "name": "Claude", "installed": False,
-                     "logged_in": False})
-
-    codex = shutil.which("codex")
-    if codex:
-        try:
-            result = _run([codex, "login", "status"])
-            output = (result.stdout + result.stderr).strip()
-            present, expires_at = _credential_metadata("codex")
-            locally_logged_in = result.returncode == 0 and "logged in" in output.lower()
-            state, validation_error = "signed_out", ""
-            if locally_logged_in:
-                if expires_at and expires_at <= int(time.time() * 1000):
-                    state = "expired"
-                elif validate:
-                    state, validation_error = _validation("codex")
-                else:
-                    state = "unverified"
-            elif present:
-                state = "error" if output else "invalid"
-            rows.append({
-                "id": "codex", "name": "Codex", "installed": True,
-                "logged_in": state == "valid",
-                "method": output.removeprefix("Logged in using ").strip()
-                          if result.returncode == 0 else "",
-                "state": state, "credential_present": present,
-                "can_logout": present, "expires_at": expires_at,
-                "validation_error": validation_error,
-                "error": "" if result.returncode == 0 else _failure_summary(output),
-            })
-        except (OSError, subprocess.SubprocessError) as exc:
-            rows.append({"id": "codex", "name": "Codex", "installed": True,
-                         "logged_in": False, "error": str(exc)})
-    else:
-        rows.append({"id": "codex", "name": "Codex", "installed": False,
-                     "logged_in": False})
+            rows.append({**base, "installed": True, "logged_in": False,
+                         "error": str(exc)})
     return rows
 
 
@@ -235,9 +313,11 @@ def task(backend: str) -> dict[str, Any]:
 
 
 def start_login(backend: str) -> dict[str, Any]:
-    executable = shutil.which(backend)
-    if backend not in {"claude", "codex"} or executable is None:
+    driver = _driver(backend)
+    executable = _executable(backend)
+    if driver is None or executable is None:
         raise ValueError(f"{backend} CLI is not installed")
+    backend = backends.normalize(backend)
     with _lock:
         _validation_cache.pop(backend, None)
         current = _tasks.get(backend)
@@ -249,8 +329,7 @@ def start_login(backend: str) -> dict[str, Any]:
         _tasks[backend] = _task_value(
             backend, "running", "", started_at=started_at)
 
-    argv = ([executable, "login", "--device-auth"] if backend == "codex"
-            else [executable, "auth", "login", "--claudeai"])
+    argv = [executable, *driver.login_argv]
 
     def worker() -> None:
         try:
@@ -313,8 +392,9 @@ def submit_login_code(backend: str, code: str) -> dict[str, Any]:
     `claude auth login` cannot be answered out of band: the code has to reach
     the running process on stdin, so the client posts it here.
     """
-    if backend not in {"claude", "codex"}:
+    if _driver(backend) is None:
         raise ValueError(f"{backend} CLI is not installed")
+    backend = backends.normalize(backend)
     value = str(code or "").strip()
     if not value:
         raise ValueError("Authorization code is required")
@@ -346,11 +426,12 @@ def submit_login_code(backend: str, code: str) -> dict[str, Any]:
 
 
 def logout(backend: str) -> dict[str, Any]:
-    executable = shutil.which(backend)
-    if backend not in {"claude", "codex"} or executable is None:
+    driver = _driver(backend)
+    executable = _executable(backend)
+    if driver is None or executable is None:
         raise ValueError(f"{backend} CLI is not installed")
-    argv = ([executable, "auth", "logout"] if backend == "claude"
-            else [executable, "logout"])
+    backend = backends.normalize(backend)
+    argv = [executable, *driver.logout_argv]
     result = _run(argv, timeout=30)
     output = (result.stdout + result.stderr).strip()
     if result.returncode != 0:

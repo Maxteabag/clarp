@@ -641,3 +641,89 @@ def test_disabled_or_non_hands_free_skips_orchestrator(tmp_path):
         synthesize_audio=True,
         dispatch=lambda **_: None,
     ) is None
+
+
+def test_provider_options_list_every_routing_backend_plus_openai(monkeypatch):
+    from lib import orchestrator
+    monkeypatch.setattr(orchestrator.shutil, "which",
+                        lambda name: f"/bin/{name}" if name in {"claude", "grok"} else None)
+    options = orchestrator.provider_options()
+    ids = [row["id"] for row in options]
+    assert ids == ["claude", "codex", "agy", "grok", "opencode", "openai"]
+    by_id = {row["id"]: row for row in options}
+    assert by_id["grok"]["installed"] is True and by_id["codex"]["installed"] is False
+    assert by_id["grok"]["kind"] == "backend" and by_id["grok"]["catalog_backend"] == "grok"
+    assert by_id["openai"]["kind"] == "api" and by_id["openai"]["catalog_backend"] == "codex"
+    assert by_id["openai"]["effort_options"] == ["minimal", "low", "medium", "high"]
+    assert by_id["claude"]["detail"] == "Runs an isolated Claude request on this Host."
+
+
+def test_update_settings_normalizes_aliases_and_rejects_unknown_providers():
+    from lib import orchestrator
+    settings = orchestrator.update_settings({"provider": "antigravity"})
+    assert settings.provider == "agy"
+    settings = orchestrator.update_settings({"provider": "gpt"})
+    assert settings.provider == "openai"
+    with pytest.raises(ValueError, match="unsupported orchestrator provider"):
+        orchestrator.update_settings({"provider": "gemini-cli"})
+
+
+def test_call_model_routes_grok_through_its_runner(monkeypatch):
+    calls = []
+    monkeypatch.setattr("lib.orchestrator.shutil.which", lambda name: f"/bin/{name}")
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                '{"type":"turn_started"}\n'
+                '{"type":"assistant","role":"assistant","content":"{\\"kind\\":\\"ignored\\","}\n'
+                '{"type":"assistant","role":"assistant","content":"\\"confidence\\":1}"}\n'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("lib.orchestrator.subprocess.run", fake_run)
+    raw = call_model(
+        {"utterance": "noise", "agents": [], "pending": []},
+        OrchestratorSettings(provider="grok", model="grok-4.6", effort="low"),
+    )
+    assert raw["kind"] == "ignored"
+    cmd = calls[0]
+    assert cmd[0] == "grok" and "--output-format" in cmd
+    assert cmd[cmd.index("--model") + 1] == "grok-4.6"
+    assert cmd[cmd.index("--reasoning-effort") + 1] == "low"
+    assert cmd[-2] == "-p"
+
+
+def test_call_model_routes_opencode_through_its_runner(monkeypatch):
+    calls = []
+    monkeypatch.setattr("lib.orchestrator.shutil.which", lambda name: f"/bin/{name}")
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"type":"text","part":{"text":"{\\"kind\\":\\"ignored\\",\\"confidence\\":1}"}}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr("lib.orchestrator.subprocess.run", fake_run)
+    raw = call_model(
+        {"utterance": "noise", "agents": [], "pending": []},
+        OrchestratorSettings(provider="opencode", model="opencode/gpt-5.4", effort="high"),
+    )
+    assert raw["kind"] == "ignored"
+    cmd = calls[0]
+    assert cmd[:2] == ["opencode", "run"]
+    assert cmd[cmd.index("--model") + 1] == "opencode/gpt-5.4"
+    assert cmd[cmd.index("--variant") + 1] == "high"
+
+
+def test_call_model_rejects_a_provider_the_registry_cannot_route():
+    with pytest.raises(RuntimeError, match="unsupported orchestrator provider"):
+        call_model(
+            {"utterance": "noise", "agents": [], "pending": []},
+            OrchestratorSettings(provider="gemini-cli"),
+        )

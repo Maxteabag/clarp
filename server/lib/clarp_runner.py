@@ -528,3 +528,28 @@ def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str
             })
     except Exception as e:                            # noqa: BLE001
         log_exception("clarpLivePartialFail", e, detail=trace_id or agent_id)
+
+
+# ---- orchestrator routing -------------------------------------------------
+
+def routing_cmd(prompt: str, *, model: str = "", effort: str = "") -> list[str]:
+    """argv for one isolated, non-persisted Claude request (orchestrator).
+
+    Plain text output: the router's JSON is the whole reply.
+    """
+    cmd = [
+        configured_claude_bin(), "-p",
+        "--dangerously-skip-permissions",
+        "--no-session-persistence",
+    ]
+    if model:
+        cmd += ["--model", model]
+    if effort:
+        cmd += ["--effort", effort]
+    cmd.append(prompt)
+    return cmd
+
+
+def routing_text(stdout: str) -> str:
+    """The reply text of a ``routing_cmd`` run."""
+    return stdout or ""

@@ -39,8 +39,13 @@ jobs:
             --severity CRITICAL \
             clarp:test
 
+  # Tags publish the versioned image plus `stable`; every push to main
+  # publishes `edge`, so a client lane (the iOS live-Host suite) can test
+  # against unreleased server changes by pulling a tag instead of building.
   publish:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      github.event_name == 'push' &&
+      (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
     needs: integration
     runs-on: ubuntu-latest
     permissions:
@@ -63,7 +68,9 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
-            type=raw,value=stable,enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=main-,enable=${{ github.ref == 'refs/heads/main' }}
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -76,5 +83,5 @@ jobs:
           provenance: false
           sbom: false
           build-args: |
-            CLARP_VERSION=${{ github.ref_name }}
+            CLARP_VERSION=${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('main-{0}', github.sha) }}
             CLARP_UPDATE_REMOTE=${{ github.server_url }}/${{ github.repository }}.git

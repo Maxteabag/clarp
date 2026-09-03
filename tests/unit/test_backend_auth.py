@@ -263,3 +263,39 @@ def test_failure_summary_drops_the_unanswered_stdin_prompt():
     summary = backend_auth._failure_summary(
         _CLAUDE_PROMPT + "Login failed: Request failed with status code 400")
     assert summary == "Login failed: Request failed with status code 400"
+
+
+def test_status_rows_come_from_the_registry_with_login_kind(monkeypatch):
+    monkeypatch.setattr(backend_auth.shutil, "which", lambda name: None)
+    rows = backend_auth.status()
+    assert [row["id"] for row in rows] == ["claude", "codex"]
+    assert rows[0]["login_kind"] == "cli"
+    assert rows[1]["login_kind"] == "device_code"
+    assert all(row["installed"] is False for row in rows)
+
+
+def test_login_refuses_backends_without_a_sign_in(monkeypatch):
+    import pytest
+    monkeypatch.setattr(backend_auth.shutil, "which", lambda name: f"/bin/{name}")
+    with pytest.raises(ValueError):
+        backend_auth.start_login("grok")
+    with pytest.raises(ValueError):
+        backend_auth.logout("opencode")
+    with pytest.raises(ValueError):
+        backend_auth.submit_login_code("agy", "ABCD-12345")
+
+
+def test_login_accepts_registry_aliases(monkeypatch):
+    monkeypatch.setattr(backend_auth.shutil, "which", lambda name: f"/bin/{name}")
+    calls = []
+
+    def fake_run(argv, timeout=8):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(backend_auth, "_run", fake_run)
+    monkeypatch.setattr(backend_auth, "status",
+                        lambda validate=True: [{"id": "claude"}, {"id": "codex"}])
+    row = backend_auth.logout("codex")
+    assert row["id"] == "codex"
+    assert calls[-1] == ["/bin/codex", "logout"]

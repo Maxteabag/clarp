@@ -282,3 +282,36 @@ def _broadcast(stream: Any, agent_id: str, session: str) -> None:
         })
     except Exception as error:  # noqa: BLE001
         log_exception("opencodeBroadcastFail", error)
+
+
+# ---- orchestrator routing -------------------------------------------------
+
+def routing_cmd(prompt: str, *, model: str = "", effort: str = "") -> list[str]:
+    """argv for one ``opencode run`` request with no session (orchestrator)."""
+    return build_cmd(model=model, effort=effort) + [prompt]
+
+
+def routing_text(stdout: str) -> str:
+    """Concatenated assistant text of an ``opencode run --format json`` run."""
+    text = ""
+    for raw in (stdout or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        etype = str(ev.get("type") or ev.get("event") or "")
+        if etype not in {"text", "message", "assistant", "output"}:
+            continue
+        if str(ev.get("role") or "") in {"user", "system"}:
+            continue
+        text += (_text_from(ev.get("part"))
+                 or _text_from(ev.get("text"))
+                 or _text_from(ev.get("content"))
+                 or _text_from(ev.get("delta"))
+                 or _text_from(ev))
+    return text

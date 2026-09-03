@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -22,7 +23,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
 from . import agents as agents_db
-from . import backends, clarp_runner, codex_runner, config, eventlog, settings_store
+from . import backends, config, eventlog, settings_store
 from .db import conn, now_ms
 from .log import log_exception
 from .prompt_admissions import PromptAdmission
@@ -33,6 +34,11 @@ from .protocol import SSEType
 DEFAULT_PROVIDER = "openai"
 DEFAULT_MODEL = "gpt-5.4-mini"
 DEFAULT_EFFORT = "low"
+OPENAI_PROVIDER = "openai"
+_OPENAI_ALIASES = {"openai", "gpt"}
+# Codex is the catalogue that lists GPT models; the OpenAI API path reuses it.
+OPENAI_CATALOG_BACKEND = backends.CODEX
+OPENAI_EFFORTS = ("minimal", "low", "medium", "high")
 DEFAULT_TIMEOUT_MS = 30000
 ORCHESTRATOR_VOICE_ID = "79f8b5fb-2cc8-479a-80df-29f7a7cf1a3e"
 
@@ -128,18 +134,78 @@ class OrchestratorOutcome:
     status: int = 200
 
 
+def normalize_provider(raw: str | None) -> str:
+    """Canonical routing provider id: a registry backend id or "openai".
+
+    Aliases the registry knows (antigravity, claude-code, open-code) and the
+    OpenAI spellings collapse; anything else is returned lower-cased so the
+    caller can reject it.
+    """
+    value = (raw or "").strip().lower()
+    if value in _OPENAI_ALIASES:
+        return OPENAI_PROVIDER
+    if value == "claude-code":
+        return backends.CLAUDE
+    adapter = backends.get(value)
+    return adapter.id if adapter else value
+
+
+def provider_options() -> list[dict[str, Any]]:
+    """Routing providers this Host can run: catalogue backends plus OpenAI.
+
+    Served on /orchestrator/settings so the clients' provider dropdown is the
+    registry, not a bundled enum. ``installed`` is a cheap PATH check, not the
+    full capability probe; ``effort_options`` null means "derive from the
+    /agent-model-options row named by catalog_backend".
+    """
+    rows: list[dict[str, Any]] = []
+    for adapter in backends.routing_adapters():
+        binary = adapter.required_binary
+        if adapter.id == backends.CLAUDE:
+            from . import clarp_runner
+            binary = clarp_runner.configured_claude_bin()
+        rows.append({
+            "id": adapter.id,
+            "label": adapter.label,
+            "detail": f"Runs an isolated {adapter.label} request on this Host.",
+            "kind": "backend",
+            "catalog_backend": adapter.id,
+            "installed": shutil.which(binary) is not None,
+            "effort_options": None,
+        })
+    rows.append({
+        "id": OPENAI_PROVIDER,
+        "label": "OpenAI API",
+        "detail": "Uses the configured OpenAI API key directly.",
+        "kind": "api",
+        "catalog_backend": OPENAI_CATALOG_BACKEND,
+        "installed": bool(config.load().openai_key()),
+        "effort_options": list(OPENAI_EFFORTS),
+    })
+    return rows
+
+
+def is_routing_provider(raw: str | None) -> bool:
+    provider = normalize_provider(raw)
+    if provider == OPENAI_PROVIDER:
+        return True
+    adapter = backends.get(provider)
+    return adapter is not None and adapter.supports_routing
+
+
 def get_settings() -> OrchestratorSettings:
     cfg = config.load()
     provider_default = DEFAULT_PROVIDER
     provider = settings_store.get_text(KEY_PROVIDER, default=provider_default).strip()
     provider = provider or provider_default
-    if provider.lower() in {"agy", "antigravity"}:
+    canonical = normalize_provider(provider)
+    if canonical == backends.AGY:
         model_default = cfg.agy_model.strip()
-    elif provider.lower() in {"openai", "gpt"}:
+    elif canonical == OPENAI_PROVIDER:
         model_default = DEFAULT_MODEL
     else:
         model_default = ""
-    effort_default = DEFAULT_EFFORT if provider.lower() in {"openai", "gpt"} else ""
+    effort_default = DEFAULT_EFFORT if canonical == OPENAI_PROVIDER else ""
     timeout_raw = settings_store.get_text(
         KEY_TIMEOUT_MS, default=str(DEFAULT_TIMEOUT_MS)
     ).strip()
@@ -184,7 +250,9 @@ def update_settings(data: dict[str, Any]) -> OrchestratorSettings:
         settings_store.set_text(KEY_CONFIDENCE_THRESHOLD, str(threshold))
     if "provider" in data:
         provider = str(data.get("provider") or DEFAULT_PROVIDER).strip() or DEFAULT_PROVIDER
-        settings_store.set_text(KEY_PROVIDER, provider)
+        if not is_routing_provider(provider):
+            raise ValueError(f"unsupported orchestrator provider: {provider}")
+        settings_store.set_text(KEY_PROVIDER, normalize_provider(provider))
     if "model" in data:
         settings_store.set_text(KEY_MODEL, str(data.get("model") or "").strip())
     if "effort" in data:
@@ -1094,49 +1162,24 @@ def _name_candidates(utterance: str, agents: list[dict[str, Any]]) -> list[dict[
 
 
 def call_model(packet: dict[str, Any], settings: OrchestratorSettings) -> dict[str, Any]:
-    provider = settings.provider.strip().lower()
-    if provider not in {
-        "agy", "antigravity", "claude", "claude-code", "codex", "openai", "gpt"
-    }:
-        raise RuntimeError(f"unsupported orchestrator provider: {settings.provider}")
+    """Ask the configured provider for one routing decision.
+
+    OpenAI goes straight to the API. Every other provider is a registry
+    backend whose ``routing_module`` builds the one-shot argv and extracts
+    the reply text, so a new CLI can route the moment its adapter says so.
+    """
+    provider = normalize_provider(settings.provider)
     prompt = _model_prompt(packet)
-    if provider in {"openai", "gpt"}:
+    if provider == OPENAI_PROVIDER:
         return _call_openai(prompt, settings)
-    if provider in {"claude", "claude-code"}:
-        binary = clarp_runner.configured_claude_bin()
-        if shutil.which(binary) is None:
-            raise FileNotFoundError(f"{binary} is not on PATH")
-        cmd = [
-            binary,
-            "-p",
-            "--dangerously-skip-permissions",
-            "--no-session-persistence",
-        ]
-        if settings.model:
-            cmd += ["--model", settings.model]
-        if settings.effort:
-            cmd += ["--effort", settings.effort]
-        cmd.append(prompt)
-    elif provider == "codex":
-        binary = codex_runner.CODEX_BIN
-        if shutil.which(binary) is None:
-            raise FileNotFoundError(f"{binary} is not on PATH")
-        cmd = codex_runner.build_cmd(
-            model=settings.model,
-            reasoning_effort=settings.effort,
-            isolated=True,
-        )
-        cmd.append(prompt)
-    else:
-        binary = "agy"
-        if shutil.which(binary) is None:
-            raise FileNotFoundError(f"{binary} is not on PATH")
-        cmd = [binary, "--dangerously-skip-permissions"]
-        if settings.model:
-            cmd += ["--model", settings.model]
-        if settings.effort:
-            cmd += ["--effort", settings.effort]
-        cmd.append(f"--print={prompt}")
+    adapter = backends.get(provider)
+    if adapter is None or not adapter.supports_routing:
+        raise RuntimeError(f"unsupported orchestrator provider: {settings.provider}")
+    runner = importlib.import_module(f"lib.{adapter.routing_module}")
+    cmd = runner.routing_cmd(prompt, model=settings.model, effort=settings.effort)
+    binary = cmd[0]
+    if shutil.which(binary) is None:
+        raise FileNotFoundError(f"{binary} is not on PATH")
     from .launch_paths import existing_workspace_path
     proc = subprocess.run(
         cmd,
@@ -1151,32 +1194,10 @@ def call_model(packet: dict[str, Any], settings: OrchestratorSettings) -> dict[s
     )
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or proc.stdout or f"{binary} rc={proc.returncode}")[:1000])
-    if provider == "codex":
-        return _extract_codex_json(proc.stdout or "")
-    return _extract_json(proc.stdout or "")
+    return _extract_json(runner.routing_text(proc.stdout or ""))
 
 
-def _extract_codex_json(text: str) -> dict[str, Any]:
-    """Extract the final agent JSON object from ``codex exec --json`` output."""
-    final_text = ""
-    for line in (text or "").splitlines():
-        try:
-            event = json.loads(line)
-        except (TypeError, json.JSONDecodeError):
-            continue
-        if event.get("type") != "item.completed":
-            continue
-        item = event.get("item")
-        if isinstance(item, dict) and item.get("type") == "agent_message":
-            candidate = item.get("text")
-            if isinstance(candidate, str) and candidate.strip():
-                final_text = candidate
-    if not final_text:
-        raise ValueError("codex orchestrator returned no agent message")
-    return _extract_json(final_text)
-
-
-_OPENAI_EFFORTS = {"minimal", "low", "medium", "high"}
+_OPENAI_EFFORTS = set(OPENAI_EFFORTS)
 
 
 def _call_openai(prompt: str, settings: OrchestratorSettings) -> dict[str, Any]:

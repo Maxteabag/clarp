@@ -541,9 +541,18 @@ def _discover_provider(
         catalog_source = _source(
             "static_fallback", "bundled compatibility catalog",
             observed_at, "unknown")
+    adapter = _adapter(provider_id)
+    # "model": efforts are per model (see each model row); "provider": one
+    # list for the whole CLI; "provider_flag": a CLI flag whose compatibility
+    # with the chosen model is unknown.
+    effort_scope = adapter.effort_scope if adapter else "provider"
+    efforts = list(adapter.efforts) if adapter and adapter.efforts else []
+    from . import backends
     return {
         "id": provider_id,
-        "label": (adapter.label if (adapter := _adapter(provider_id)) else provider_id),
+        # Presentation and supports_* flags: the client renders these, so a
+        # new adapter looks intentional without an app release.
+        **backends.catalogue_fields(provider_id),
         "installed": installed,
         "availability": availability,
         "cli_version": cli_version,
@@ -555,20 +564,14 @@ def _discover_provider(
         "authentication_source": _source(
             "not_observed", "backend_auth status is not joined in P1",
             observed_at, "unknown"),
-        "supports_fork": bool(adapter.supports_fork) if adapter else False,
-        "badge": adapter.badge if adapter else "",
-        "resumable": bool(adapter.resumable) if adapter else True,
         "supported_efforts": (
-            list(_static_efforts("agy")) if provider_id == "agy" else (
-                list(adapter.efforts) if adapter and adapter.efforts
-                and provider_id not in {"claude", "codex"} else None
-            )
+            efforts if efforts and effort_scope != "model" else None
         ),
         "supported_efforts_scope": (
-            "provider_flag" if provider_id == "agy" else None
+            "provider_flag" if effort_scope == "provider_flag" else None
         ),
         "model_effort_compatibility": (
-            "unknown" if provider_id == "agy" else None
+            "unknown" if effort_scope == "provider_flag" else None
         ),
         "models": models,
         "source": catalog_source,

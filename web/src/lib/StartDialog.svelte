@@ -7,7 +7,7 @@
   import { audio } from '../stores/audio.svelte.js';
   import { reset } from '../stores/conversations.svelte.js';
   import {
-    normalizeBackend, resumableBackend, supportsForkBackend,
+    normalizeBackend, resumableBackend, supportsForkBackend, supportsResumeBackend,
     backendLabel, catalogBackendIds,
   } from '@core/agent-launch.js';
   import { AgentBackend } from '@core/protocol.js';
@@ -70,7 +70,12 @@
     return [...new Set(source.flatMap(m => m.supported_efforts || []))];
   });
   let canFork = $derived(supportsForkBackend(backend, catalogue));
-  let backendIds = $derived(catalogBackendIds(catalogue));
+  let canResume = $derived(supportsResumeBackend(backend, catalogue));
+  // Installed, unhidden providers plus the one the agent being relaunched
+  // already runs on, so a CLI that went missing does not vanish mid-chat.
+  let backendIds = $derived(catalogBackendIds(catalogue, {
+    current: replaceSid ? existing.backend : backend,
+  }));
 
   // Seed the form when the dialog opens.
   $effect(() => {
@@ -105,6 +110,7 @@
   // and disabled.
   $effect(() => {
     if (mode === 'fork' && !canFork) mode = 'fresh';
+    if (mode === 'resume' && !canResume) mode = 'fresh';
   });
 
   let catalogueLoaded = false;
@@ -306,7 +312,8 @@
           <input type="radio" checked={mode === 'fresh'} onchange={() => onModeChange('fresh')} /> Fresh
         </label>
         <label>
-          <input type="radio" checked={mode === 'resume'} onchange={() => onModeChange('resume')} /> Resume…
+          <input type="radio" checked={mode === 'resume'} disabled={!canResume}
+                 onchange={() => onModeChange('resume')} /> Resume…
         </label>
         <label>
           <input type="radio" checked={mode === 'fork'} disabled={!canFork}

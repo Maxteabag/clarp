@@ -67,3 +67,14 @@ def test_clarp_version_reads_pyproject_in_checkout_and_release_layouts():
     assert [c.parent.name for c in candidates][:2] == ["server", server_identity._pyproject_candidates()[1].parent.name]
     assert any(c.is_file() for c in candidates)
     assert server_identity.clarp_version() and server_identity.clarp_version()[0].isdigit()
+
+
+def test_server_identity_advertises_product_features(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLARP_SHARE_DIR", str(tmp_path))
+
+    info = server_identity.get_server_info()
+
+    block = info["capabilities"]
+    assert block["version"] == server_identity.CAPABILITIES_VERSION
+    assert {"teams", "oracle", "dreaming", "orchestrator"} <= set(block["features"])
+    assert block["features"] == list(server_identity.FEATURES)

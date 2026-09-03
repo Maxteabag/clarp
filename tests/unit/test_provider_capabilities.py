@@ -440,3 +440,32 @@ def test_claude_model_pin_drops_legacy_default():
     assert capabilities.claude_model_pin(" DEFAULT ") == ""
     assert capabilities.claude_model_pin(None) == ""
     assert capabilities.claude_model_pin("claude-fable-5-1[1m]") == "claude-fable-5-1[1m]"
+
+
+def test_catalog_rows_advertise_presentation_and_flags():
+    from lib import provider_capabilities
+    observed = provider_capabilities._iso_now(0)
+    row = provider_capabilities._discover_provider(
+        "opencode", observed, resolve=lambda _name: None,
+        run=lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    assert row["installed"] is False
+    assert row["label"] == "OpenCode" and row["detail"] == "Runs on OpenCode."
+    assert row["brand"]["tint_dark"] == "#5ee4b5"
+    assert row["supports_compact"] is False and row["supports_resume"] is True
+    assert row["effort_ui"] == "picker" and row["login_kind"] == "none"
+    # Provider-wide efforts still surface for a provider-scoped CLI.
+    assert row["supported_efforts"] == ["low", "medium", "high", "max"]
+
+    agy = provider_capabilities._discover_provider(
+        "agy", observed, resolve=lambda _name: None,
+        run=lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    assert agy["supported_efforts_scope"] == "provider_flag"
+    assert agy["model_effort_compatibility"] == "unknown"
+    assert agy["effort_ui"] == "folded_into_model"
+
+    claude = provider_capabilities._discover_provider(
+        "claude", observed, resolve=lambda _name: None,
+        run=lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    # Claude efforts are per model, so the provider row carries none.
+    assert claude["supported_efforts"] is None
+    assert claude["supports_mcp"] is True and claude["sort_index"] == 0
