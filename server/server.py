@@ -3411,7 +3411,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_send(self):
         data = self._read_json()
-        if data is None:
+        if not isinstance(data, dict):
             return self._send(400, b"bad json")
         text = (data.get("text") or "").strip()
         session = (data.get("session") or self.ctx.default_session).strip() or self.ctx.default_session
