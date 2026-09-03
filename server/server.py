@@ -279,6 +279,7 @@ class Handler(BaseHTTPRequestHandler):
         "/managed-skills": "_handle_managed_skills",
         "/transcription-capabilities": "_handle_transcription_capabilities",
         "/transcription-guidance": "_handle_transcription_guidance_get",
+        "/transcription-providers": "_handle_transcription_providers_get",
         "/clips/recoverable": "_handle_recoverable_clips",
         "/server-info": "_handle_server_info",
         "/paired-devices": "_handle_paired_devices",
@@ -330,6 +331,7 @@ class Handler(BaseHTTPRequestHandler):
         "/transcription-models/install": "_handle_transcription_model_install",
         "/transcription-models/remove": "_handle_transcription_model_remove",
         "/transcription-guidance": "_handle_transcription_guidance_post",
+        "/transcription-providers": "_handle_transcription_providers_post",
         "/pairing/exchange": "_handle_pairing_exchange",
         "/paired-devices/revoke": "_handle_paired_device_revoke",
         "/tts/providers": "_handle_tts_providers_post",
@@ -1362,6 +1364,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 400, json.dumps({"error": str(exc)}).encode(), "application/json")
         payload = self._transcription_guidance_payload()
+        payload["ok"] = True
+        self._send(200, json.dumps(payload).encode(), "application/json")
+
+    def _handle_transcription_providers_get(self):
+        from lib import stt_providers
+        self._send(200, json.dumps(stt_providers.status()).encode(),
+                   "application/json")
+
+    def _handle_transcription_providers_post(self):
+        from lib import stt_providers
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        try:
+            payload = stt_providers.update_settings(data)
+        except ValueError as exc:
+            return self._send(
+                400, json.dumps({"error": str(exc)}).encode(), "application/json")
         payload["ok"] = True
         self._send(200, json.dumps(payload).encode(), "application/json")
 
@@ -3672,6 +3692,16 @@ class Handler(BaseHTTPRequestHandler):
         if getattr(self.ctx.stt, "available", True) is False:
             return self._send(503, b'{"error":"server transcription disabled"}',
                               "application/json")
+        if not requested_model:
+            # A cloud engine chosen in settings stands in for the server
+            # default; an explicit header from the client still wins.
+            try:
+                from lib import stt_providers
+                engine = stt_providers.selected_engine()
+                if stt_providers.is_cloud_model(engine):
+                    requested_model = engine
+            except Exception as e:  # noqa: BLE001
+                log_exception("sttEngineSettingFail", e)
         if not requested_model and not self.ctx.stt.ready.is_set():
             return self._send(503, b'{"error":"whisper model loading"}',
                               "application/json")

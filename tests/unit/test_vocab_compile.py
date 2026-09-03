@@ -24,7 +24,9 @@ def sources(**kw) -> Sources:
 def test_each_known_provider_has_its_documented_budget():
     assert budget_for("faster-whisper").capacity == 223
     assert budget_for("faster-whisper").unit == Unit.TOKENS
-    assert budget_for("elevenlabs").max_term_chars == 20
+    assert budget_for("elevenlabs").max_term_chars == 49
+    assert budget_for("elevenlabs").capacity == 100
+    assert budget_for("cartesia").capacity == 0
     assert budget_for("assemblyai").unit == Unit.WORDS
 
 

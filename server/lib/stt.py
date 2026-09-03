@@ -145,10 +145,17 @@ class WhisperSTT:
                 "provider": self.provider, "model": self.model_name,
                 "weight": _model_weight(self.model_name),
             })
+        from . import stt_providers
+        known = {item["id"] for item in models}
+        models.extend(
+            item for item in stt_providers.cloud_models(available_only=True)
+            if item["id"] not in known)
         from .transcription_models import catalog_status
         return {
             "available": True,
             "default_model": default_id,
+            "engine": stt_providers.selected_engine(),
+            "turn_taking": stt_providers.selected_turn_taking(),
             "models": models,
             "catalog": catalog_status(),
             "adapters": inventory(),
@@ -167,6 +174,12 @@ class WhisperSTT:
             return self.transcribe_bytes(
                 audio_bytes, content_type, vocab_prompt, wait=wait)
         provider = selected.split(":", 1)[0] if ":" in selected else ""
+        from . import stt_providers
+        if stt_providers.is_cloud_model(selected):
+            # Cloud engines need no warm-up and no inference lock: the
+            # provider serialises nothing on our side.
+            return stt_providers.transcribe(
+                selected, audio_bytes, content_type, vocab_prompt)
         from .custom_stt_adapters import get as custom_adapter, models as custom_models
         manifest = custom_adapter(provider)
         with self._variants_lock:
