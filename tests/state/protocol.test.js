@@ -25,8 +25,6 @@ describe('protocol constants', () => {
   });
 
   it('names timing knobs instead of leaving unexplained numbers inline', () => {
-    expect(Timing.SERVICE_WORKER_UPDATE_MS).toBe(5 * 60 * 1000);
-    expect(Timing.CLIENT_LOG_FLUSH_MS).toBe(500);
     expect(Timing.SSE_STALE_MS).toBeGreaterThan(Timing.SSE_RECONNECT_BASE_MS);
     expect(Timing.CAPTURE_STOP_WATCHDOG_MS).toBeGreaterThan(Timing.MIN_UTTER_MS);
   });

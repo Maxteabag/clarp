@@ -12,6 +12,39 @@ import pathlib
 import sqlite3
 import tempfile
 import time
+import os
+import sys
+
+
+def synthetic_snapshot():
+    """No live state: benchmark real query paths against an owned temporary DB."""
+    with tempfile.TemporaryDirectory(prefix='clarp-snapshot-benchmark-') as directory:
+        root = pathlib.Path(directory)
+        for name, suffix in {
+            'CLAUDE_PWA_DB': 'state.sqlite', 'CLARP_TELEMETRY_DB': 'telemetry.sqlite',
+            'CLAUDE_PWA_CONFIG': 'absent.toml', 'CLAUDE_PWA_LOG_DIR': 'logs',
+            'CLARP_CONFIG_DIR': 'config', 'CLARP_DATA_DIR': 'data',
+            'CLARP_SHARE_DIR': 'data', 'CLARP_CACHE_DIR': 'cache',
+        }.items():
+            os.environ[name] = str(root / suffix)
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'server'))
+        from lib import agents, db
+        from lib.snapshot import build_agent_snapshot
+        result = []
+        previous = 0
+        for count in (1, 10, 50, 100):
+            for i in range(previous, count):
+                agents.create_agent(persona=f'Bench{i}', session=f'bench-{i}', voice_id='', cwd=str(root))
+            build_agent_snapshot(None)
+            statements = []
+            db.conn().set_trace_callback(statements.append)
+            build_agent_snapshot(None)
+            db.conn().set_trace_callback(None)
+            result.append({'agents': count, 'sqlite_statements': len(statements),
+                           **timed(lambda: build_agent_snapshot(None), iterations=20)})
+            previous = count
+        db.close_local()
+        print(json.dumps({'workload': 'synthetic idle agents, no transcripts', 'snapshots': result}, indent=2))
 
 
 def percentile(values: list[float], fraction: float) -> float:
@@ -41,9 +74,14 @@ def connect(path: pathlib.Path) -> sqlite3.Connection:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--database", type=pathlib.Path, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--database", type=pathlib.Path)
+    mode.add_argument("--synthetic-snapshot", action='store_true')
     parser.add_argument("--session", default="")
     args = parser.parse_args()
+    if args.synthetic_snapshot:
+        synthetic_snapshot()
+        return 0
     with tempfile.TemporaryDirectory(prefix="clarp-benchmark-") as directory:
         snapshot = pathlib.Path(directory) / "snapshot.sqlite"
         with sqlite3.connect(f"file:{args.database}?mode=ro", uri=True) as source, \

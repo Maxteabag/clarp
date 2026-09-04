@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+from functools import lru_cache
 from typing import Any
 
 from .activity import summarize_tool_activity
@@ -245,7 +246,22 @@ def context_tokens_from_jsonl(path: pathlib.Path, tail_bytes: int = 1_000_000) -
     cheap to call on every snapshot. Returns None if no usage is found.
     """
     try:
-        size = path.stat().st_size
+        stat = path.stat()
+    except OSError:
+        return None
+    return _context_tokens_cached(str(path.resolve()), stat.st_dev, stat.st_ino,
+                                  stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns,
+                                  tail_bytes)
+
+
+@lru_cache(maxsize=256)
+def _context_tokens_cached(path_string: str, device: int, inode: int,
+                           size: int, mtime_ns: int, ctime_ns: int,
+                           tail_bytes: int) -> int | None:
+    # File identity protects replacement/truncation; timestamps protect edits
+    # of the same length. Only a small derived integer is retained per version.
+    path = pathlib.Path(path_string)
+    try:
         with path.open("rb") as f:
             if size > tail_bytes:
                 f.seek(size - tail_bytes)

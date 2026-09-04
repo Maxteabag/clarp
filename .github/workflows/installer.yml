@@ -43,7 +43,7 @@ jobs:
         run: uv sync --frozen
       - name: Cross-platform installer and service tests
         run: >-
-          uv run pytest
+          uv run --frozen --group dev python -m pytest -n 2
           tests/integration/test_versioned_installer.py
           tests/unit/test_agent_toolchain_installer.py
           tests/unit/test_service_manager.py
