@@ -527,6 +527,50 @@ def test_get_snapshot_returns_seeded_data(running_server):
     assert next(a for a in data["agents"] if a["session"] == "claude")["persona"] == "Mike"
 
 
+@pytest.mark.parametrize("endpoint", ["/agent-file", "/agent-files"])
+@pytest.mark.parametrize("credential_kind", ["bearer", "cookie", "query"])
+@pytest.mark.parametrize("scope", ["limited", "full", "administrator"])
+def test_host_file_browsing_requires_full_device_scope(
+    running_server, tmp_path, endpoint, credential_kind, scope,
+):
+    from urllib.parse import urlencode
+    from lib import device_pairing
+
+    base, ctx, _srv = running_server
+    ctx.auth_token = "administrator-secret"
+    if scope == "administrator":
+        token = ctx.auth_token
+    else:
+        issued = device_pairing.issue(device_name="Test phone", scope=scope)
+        token = device_pairing.exchange(issued["code"])["token"]
+    secret = tmp_path / "secret.txt"
+    secret.write_text("host secret")
+    query = {"session": "claude", "root": str(tmp_path)}
+    if endpoint == "/agent-file":
+        query["path"] = secret.name
+    headers = {}
+    if credential_kind == "bearer":
+        headers["Authorization"] = f"Bearer {token}"
+    elif credential_kind == "cookie":
+        headers["Cookie"] = f"claude_pwa_token={token}"
+    else:
+        query["token"] = token
+    request = urllib.request.Request(
+        f"{base}{endpoint}?{urlencode(query)}", headers=headers)
+    if scope == "limited":
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(request, timeout=2)
+        assert error.value.code == 403
+        assert b"host secret" not in error.value.read()
+    else:
+        with urllib.request.urlopen(request, timeout=2) as response:
+            payload = json.load(response)
+        if endpoint == "/agent-file":
+            assert payload["content"] == "host secret"
+        else:
+            assert "secret.txt" in [row["name"] for row in payload["entries"]]
+
+
 def test_one_time_pairing_issues_revocable_device_credential(fake_ctx):
     from lib import device_pairing
 
