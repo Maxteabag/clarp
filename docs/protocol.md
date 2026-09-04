@@ -205,8 +205,24 @@ Event types and payloads:
 | `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview` | A voice clip is ready. See §6. |
 | `tts-error` | `session`, `agent_id`, `persona`, `message`, `error` | Synthesis failed; tell the user instead of playing silence. |
 | `server-version` | `version` | Server restarted on a new version; reload the client when it differs from the last one seen. |
-| `remote-action` | `action` ∈ record, record-toggle, stop-agent | A shortcut asked the client to act (native and PWA both honour it). |
+| `remote-action` | `action` ∈ record, record-toggle, stop-agent, controller-event | A live shortcut/controller asked the client to act. These input events are never replayed after reconnect. |
 | `provider-limit`, `artifact-updated`, `attention-updated`, `background-job-updated`, `location-request`, `calendar-request` | see extension surfaces | Ignore if the client does not implement the surface. |
+
+`controller-event` is the simulation/relay form of a physical controller
+input. `POST /remote-action` with `action=controller-event` also carries
+`controller_event_id`, `button` (`primary` or `secondary`),
+`controller_event`, `duration_ms`, `age_ms`, `queued`, and optionally
+`controller_id`. Controller events are live input, never durable state: the
+Host deliberately excludes every `remote-action` from SSE reconnect replay.
+Clients must additionally reject `queued=true` or `age_ms>0` to prevent an old
+press from acting after a Bluetooth reconnect.
+
+Valid `controller_event` values are `down`, `up`, `single-click`,
+`double-click`, `hold`, four `swipe-*` directions, and the reserved
+`rotate-clockwise` / `rotate-counterclockwise` pair. Phone-direct Flic Duo
+integration supports the button and swipe events. Flic officially requires a
+Hub for Hold & Twist, so rotation remains a separately negotiated experimental
+input rather than a production-critical command.
 
 Agent states (`kind` / `latest_state`): `thinking`, `tool`, `compacting` are
 **busy**; `idle`, `done`, `stopped`, `interrupted`, `waiting`, `background`,
