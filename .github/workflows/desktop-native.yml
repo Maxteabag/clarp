@@ -108,7 +108,13 @@ jobs:
       - name: Install Flatpak tooling
         run: |
           sudo apt-get update
-          sudo apt-get install --yes flatpak flatpak-builder libopengl0 zsync
+          sudo apt-get install --yes \
+            flatpak \
+            flatpak-builder \
+            libegl1 \
+            libglx0 \
+            libopengl0 \
+            zsync
 
       - name: Build bundled AppImage
         env:
