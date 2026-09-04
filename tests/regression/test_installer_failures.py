@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import os
 from pathlib import Path
+import pty
 import shutil
 import subprocess
 import sys
@@ -111,6 +112,68 @@ exit 2
     assert not extracted_source.exists(), (
         "quick start left its downloaded source tree behind"
     )
+
+
+def test_advertised_pipe_install_preserves_interactive_terminal_input(tmp_path):
+    """The documented ``curl ... | bash`` route must still reach an interactive TUI.
+
+    Even when the command itself runs in a terminal, bash reads the installer
+    from a pipe. ``get.sh`` currently passes that exhausted pipe to setup, so
+    setup sees non-terminal stdin and exits instead of opening its wizard.
+    """
+    archive = tmp_path / "fixture.tar.gz"
+    setup = b"#!/bin/sh\n[ -t 0 ] || exit 42\nexit 0\n"
+    with tarfile.open(archive, "w:gz") as out:
+        for name, content in (
+            ("setup.sh", setup),
+            ("install.sh", b"#!/bin/sh\nexit 0\n"),
+        ):
+            info = tarfile.TarInfo(f"clarp-fixture/{name}")
+            info.mode = 0o755
+            info.size = len(content)
+            out.addfile(info, io.BytesIO(content))
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _executable(
+        fake_bin / "curl",
+        """
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then cp "$CLARP_TEST_ARCHIVE" "$2"; exit 0; fi
+  shift
+done
+exit 2
+""",
+    )
+    _executable(fake_bin / "uv", "exit 0\n")
+    temp_root = tmp_path / "downloads"
+    temp_root.mkdir()
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
+            "TMPDIR": str(temp_root),
+            "CLARP_TEST_ARCHIVE": str(archive),
+        }
+    )
+    master, slave = pty.openpty()
+    try:
+        process = subprocess.Popen(
+            ["bash", "-c", f"cat {ROOT / 'get.sh'} | bash"],
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            env=env,
+        )
+        os.close(slave)
+        slave = -1
+        returncode = process.wait(timeout=30)
+    finally:
+        if slave >= 0:
+            os.close(slave)
+        os.close(master)
+
+    assert returncode == 0
 
 
 def test_archive_install_uses_the_supplied_release_identity(tmp_path):

@@ -116,6 +116,14 @@ which fixes belong together.
   still alive. Claude/Codex subagents are descendants and are not separately
   registered. Custom adapter processes already use the safer
   `start_new_session=True` plus `killpg` pattern.
+- **The durable turn ledger never reaches a terminal state.** Dispatch calls
+  `agents.open_turn()`, but no production caller invokes `agents.close_turn()`.
+  Clean completion and restart recovery both leave `ended_at IS NULL` rows.
+  Trace gates, source/audio policy, snapshots, and reconciliation all query
+  those supposedly active rows.
+- **Claude can open the same logical turn twice.** Server dispatch opens a row,
+  then the UserPromptSubmit hook opens another with the same trace. There is no
+  uniqueness constraint or idempotent open operation.
 
 ### Heartbeats and scheduled autonomy
 
@@ -142,6 +150,11 @@ which fixes belong together.
   then `exec`s `setup.sh`; successful `exec` discards the parent shell and its
   trap. The downloaded source tree remains, and setup persists that temporary
   path as `source_repo`.
+- **The advertised interactive pipe cannot reach the wizard.** Even in a real
+  terminal, `curl ... | bash` gives the installer process piped stdin. `get.sh`
+  passes the exhausted pipe to `setup.sh`, whose `-t 0` check rejects it as a
+  non-terminal invocation. A pseudo-terminal regression exits with the
+  fixture's non-TTY failure code.
 - **Clean archive releases identify as `unknown-dirty`.** `install.sh` derives
   both version and dirty state exclusively from Git metadata. It ignores a
   supplied release identity even though archive installs intentionally have no
@@ -176,7 +189,51 @@ which fixes belong together.
   `p`, and `s` tags to be spoken aloud. This is the same boundary failure as
   #14 with a wider vocabulary.
 
-Current red count: **17 tests** across Python and JavaScript.
+### Delivery, replay, and database availability
+
+- **A retry after synchronous spawn failure is silently discarded.** The user
+  row is committed before the CLI is spawned. If spawn then fails, iOS/PWA
+  retries the same `client_msg_id`; the existing user row is treated as proof
+  of completed admission, so the server returns a deduplicated success without
+  starting a backend. The message remains permanently unanswered.
+- **SSE's replay/live handoff duplicates overlap events.** The handler
+  subscribes first, then queries durable replay. An event arriving in that
+  window is returned by both SQLite and the subscriber queue. This is mostly
+  cosmetic for idempotent state events, but a native calendar/location event is
+  a one-shot action and can execute twice.
+- **Paired-device authentication turns every request into a write.** Token
+  validation reads the device row and immediately updates `last_seen_at`.
+  Holding an unrelated `BEGIN IMMEDIATE` proves the valid device can no longer
+  authenticate even a WAL-readable GET: the audit receives `database is
+  locked`. This explains why one writer can make the iOS-facing server appear
+  wholly unavailable rather than merely read-only degraded.
+- **Deleting an agent leaves its durable background jobs running.** Agent
+  deletion cancels task plans and artifacts, but neither the background-job
+  rows nor their exact worker identities are terminalized.
+
+Current red count: **25 tests** across Python and JavaScript.
+
+## Native-client reference findings
+
+The private `clarp-ios` `origin/main` tree was inspected read-only; the dirty
+local checkout was not updated or modified. This is protocol evidence, not a
+request to copy native build/signing material into this repository.
+
+- The native outbox correctly retries ambiguous `/send` failures with the same
+  stable message id. That makes the server's persisted-before-spawn hole above
+  user-visible and deterministic.
+- The native SSE client persists `Last-Event-ID`, but it does not suppress a
+  duplicate id delivered twice within one connection. Calendar handling calls
+  the native writer for each event, so the replay/live overlap needs an
+  exactly-once fence on at least one side.
+- `/teams` now caches a successful result for ten seconds, but calls made while
+  the first slow request is still in flight are not coalesced. This can still
+  amplify a slow/locked server before any response populates the cache—the same
+  traffic family observed during the EliteBook overload incident.
+- The native client validates the stable server instance identity before
+  accepting snapshots. That is a sound boundary and should be extended to SSE
+  cursor epochs so a restored/reinstalled server cannot inherit an unrelated
+  event cursor solely because it uses the same URL.
 
 ## Research method and stop condition
 
@@ -208,3 +265,11 @@ search produces only duplicate or lower-value variants.
   `addConditionSource` dependency; the three pre-existing #13 regression tests
   are green, while the three new mic lifecycle cases fail for their intended
   assertions.
+- 2026-09-04: inspected the already-fetched private `clarp-ios` `origin/main`
+  without touching its dirty checkout. Used its outbox, SSE, one-shot native
+  action, server-identity, and `/teams` behavior to test the server at the
+  protocol boundaries it actually serves today.
+- 2026-09-04: expanded the reproduced red set from 17 to 25 with the
+  persisted-before-spawn retry hole, never-closed/duplicate turn rows, SSE
+  replay overlap, paired-auth write coupling, interactive-pipe bootstrap,
+  and orphaned background work after agent deletion.
