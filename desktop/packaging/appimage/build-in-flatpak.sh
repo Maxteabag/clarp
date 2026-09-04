@@ -65,7 +65,9 @@ chmod 0755 "$TOOL_DIR/linuxdeploy" "$TOOL_DIR/linuxdeploy-plugin-qt"
 
 flatpak remote-add --user --if-not-exists \
   flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install --user --noninteractive -y flathub org.kde.Sdk//6.11
+flatpak install --user --noninteractive -y flathub \
+  org.kde.Platform//6.11 \
+  org.kde.Sdk//6.11
 
 IMAGE_NAME="Clarp-${VERSION}-x86_64.AppImage"
 UPDATE_OWNER="${CLARP_UPDATE_OWNER:-Maxteabag}"
