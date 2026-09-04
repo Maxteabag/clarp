@@ -14,6 +14,11 @@ on:
       - "contract/**"
       - ".github/workflows/desktop-native.yml"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing v* tag to rebuild and publish
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -76,19 +81,26 @@ jobs:
           if-no-files-found: error
 
   release-bundles:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     needs: linux
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Verify release version
         id: version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${RELEASE_TAG#v}"
           project_version="$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' pyproject.toml | head -n 1)"
           test "$version" = "$project_version"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
@@ -96,7 +108,7 @@ jobs:
       - name: Install Flatpak tooling
         run: |
           sudo apt-get update
-          sudo apt-get install --yes flatpak flatpak-builder zsync
+          sudo apt-get install --yes flatpak flatpak-builder libopengl0 zsync
 
       - name: Build bundled AppImage
         env:
@@ -132,6 +144,7 @@ jobs:
       - name: Publish GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
@@ -141,12 +154,12 @@ jobs:
             "dist/Clarp-$VERSION-x86_64.AppImage.sha256"
             "dist/Clarp-$VERSION-x86_64.flatpak"
           )
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+            gh release create "$RELEASE_TAG" "${assets[@]}" \
               --verify-tag \
               --generate-notes \
               --latest \
-              --title "Clarp $GITHUB_REF_NAME"
+              --title "Clarp $RELEASE_TAG"
           fi
