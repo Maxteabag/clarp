@@ -111,6 +111,72 @@ def _post_with_headers(url, body: dict, headers: dict):
         return r.status, r.read()
 
 
+def test_sse_event_seen_during_replay_is_not_delivered_again_as_live(fake_ctx):
+    """Subscribe-before-replay prevents loss but needs an overlap fence.
+
+    An event broadcast after subscription and before the replay query is both
+    in SQLite and in the subscriber queue. Sending both copies can execute
+    one-shot native actions (calendar/location requests) twice.
+    """
+    class ReplayOverlapStream(AudioStream):
+        def __init__(self, audio_dir):
+            super().__init__(audio_dir)
+            self.injected = False
+
+        def subscribe(self, maxsize=128):
+            subscriber = super().subscribe(maxsize=maxsize)
+            if not self.injected:
+                self.injected = True
+                self.broadcast({
+                    "type": "calendar-request",
+                    "request_id": "calendar-overlap",
+                    "session": "claude",
+                    "title": "Exactly once",
+                })
+            return subscriber
+
+        def recent(self, since_event_id=None):
+            events = super().recent(since_event_id)
+            # A live sentinel ends the read after the overlap queue is drained;
+            # a correct implementation must not hang waiting for a second copy.
+            self.broadcast_ephemeral({"type": "audit-drained"})
+            return events
+
+    fake_ctx.stream = ReplayOverlapStream(fake_ctx.audio_dir)
+    port = _free_port()
+    srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    copies = []
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/events", timeout=2
+        ) as response:
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                line = response.readline().decode().strip()
+                if not line.startswith("data: "):
+                    continue
+                event = json.loads(line.removeprefix("data: "))
+                if event.get("type") == "audit-drained":
+                    break
+                if event.get("request_id") == "calendar-overlap":
+                    copies.append(event)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+    assert len(copies) == 1
+
+
+
+
+
+
+
+
+
+
 def test_production_startup_requests_restart_heartbeat_recovery(
     fake_ctx, monkeypatch,
 ):
