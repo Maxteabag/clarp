@@ -13,6 +13,15 @@ Rectangle {
     color: "#171923"
     objectName: "settingsPanel"
 
+    function ttsChoices(includeNone) {
+        const choices = includeNone ? [{ id: "none", label: "No fallback" }] : [];
+        for (const provider of (controller.ttsProviderStatus.providers || [])) {
+            if (provider.available !== false && provider.installed !== false)
+                choices.push({ id: String(provider.id), label: String(provider.name || provider.label || provider.id) });
+        }
+        return choices;
+    }
+
     ScrollView {
         id: settingsScroll
         anchors.fill: parent
@@ -115,6 +124,21 @@ Rectangle {
                     value: String(root.controller.ttsProviderStatus.provider || "Unknown")
                         + (String(root.controller.ttsProviderStatus.fallback || "none") !== "none"
                             ? "  →  " + String(root.controller.ttsProviderStatus.fallback) : "")
+                }
+                SettingsLink {
+                    label: "Voice routing"
+                    detail: "Choose primary and fallback providers"
+                    onClicked: {
+                        const primary = root.ttsChoices(false);
+                        const fallback = root.ttsChoices(true);
+                        primaryProvider.model = primary;
+                        fallbackProvider.model = fallback;
+                        primaryProvider.currentIndex = Math.max(0,
+                            primary.findIndex(item => item.id === String(root.controller.ttsProviderStatus.provider || "")));
+                        fallbackProvider.currentIndex = Math.max(0,
+                            fallback.findIndex(item => item.id === String(root.controller.ttsProviderStatus.fallback || "none")));
+                        ttsDialog.open();
+                    }
                 }
             }
 
@@ -244,6 +268,41 @@ Rectangle {
             color: "#6d728a"
             font.family: "JetBrains Mono"
             font.pixelSize: 9
+        }
+    }
+
+    Dialog {
+        id: ttsDialog
+        anchors.centerIn: parent
+        modal: true
+        title: "Voice routing"
+        standardButtons: Dialog.Save | Dialog.Cancel
+        onAccepted: root.controller.setTtsProviders(
+            String(primaryProvider.currentValue || ""),
+            String(fallbackProvider.currentValue || "none"), "")
+        ColumnLayout {
+            width: 360
+            Label { text: "Primary provider" }
+            ComboBox {
+                id: primaryProvider
+                Layout.fillWidth: true
+                textRole: "label"
+                valueRole: "id"
+            }
+            Label { text: "Fallback" }
+            ComboBox {
+                id: fallbackProvider
+                Layout.fillWidth: true
+                textRole: "label"
+                valueRole: "id"
+            }
+            Text {
+                Layout.fillWidth: true
+                text: "Changing to a local provider may briefly restart the Host."
+                color: "#6d728a"
+                font.pixelSize: 9
+                wrapMode: Text.Wrap
+            }
         }
     }
 

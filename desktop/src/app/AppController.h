@@ -292,6 +292,8 @@ class AppController : public QObject {
     Q_INVOKABLE void loadMedia(const QString& session);
     Q_INVOKABLE void loadPromptHistory(const QString& session, bool loadMore = false);
     Q_INVOKABLE void loadSettingsStatus();
+    Q_INVOKABLE void setTtsProviders(const QString& provider, const QString& fallback,
+                                     const QString& voice = {});
     Q_INVOKABLE void loadMessageToolDetails(const QString& session,
                                             const QString& messageId);
 

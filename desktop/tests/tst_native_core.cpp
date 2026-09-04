@@ -1757,6 +1757,15 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
                                   .toString(),
                               QStringLiteral("cartesia"), 3'000);
     QTRY_VERIFY_WITH_TIMEOUT(!controller.settingsStatusLoading(), 3'000);
+    controller.setTtsProviders(QStringLiteral("cartesia"), QStringLiteral("elevenlabs"), {});
+    QTRY_VERIFY_WITH_TIMEOUT(
+        server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/tts/providers")), 3'000);
+    const QJsonObject ttsRequest = server.requestJson(
+        QStringLiteral("POST"), QStringLiteral("/tts/providers"));
+    QCOMPARE(ttsRequest.value(QStringLiteral("provider")).toString(),
+             QStringLiteral("cartesia"));
+    QCOMPARE(ttsRequest.value(QStringLiteral("fallback")).toString(),
+             QStringLiteral("elevenlabs"));
     controller.updateTeam(QStringLiteral("team-1"), QStringLiteral("Renamed"),
                           QStringLiteral("#123456"), QStringLiteral("agent-rachel"));
     QTRY_VERIFY_WITH_TIMEOUT(

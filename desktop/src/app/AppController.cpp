@@ -1745,6 +1745,22 @@ void AppController::loadSettingsStatus() {
               QStringLiteral("/tts/providers"));
 }
 
+void AppController::setTtsProviders(const QString& provider, const QString& fallback,
+                                    const QString& voice) {
+    if (provider.trimmed().isEmpty()) {
+        return;
+    }
+    ++m_settingsStatusPending;
+    emit settingsStatusChanged();
+    m_api.postJson(QStringLiteral("settings-action:tts"),
+                   QStringLiteral("/tts/providers"),
+                   {{QStringLiteral("provider"), provider.trimmed()},
+                    {QStringLiteral("fallback"),
+                     fallback.trimmed().isEmpty() ? QStringLiteral("none")
+                                                  : fallback.trimmed()},
+                    {QStringLiteral("voice"), voice.trimmed()}});
+}
+
 void AppController::loadMessageToolDetails(const QString& session,
                                            const QString& messageId) {
     if (session.isEmpty() || messageId.isEmpty()) {
@@ -1919,6 +1935,12 @@ void AppController::setErrorMessage(const QString& message) {
 }
 
 void AppController::handleJson(const QString& tag, const QJsonObject& object) {
+    if (tag == QStringLiteral("settings-action:tts")) {
+        m_ttsProviderStatus = object.toVariantMap();
+        m_settingsStatusPending = std::max(0, m_settingsStatusPending - 1);
+        emit settingsStatusChanged();
+        return;
+    }
     if (tag.startsWith(QStringLiteral("tool-details:"))) {
         const QVariantMap request = m_toolDetailRequests.take(tag);
         const QString session = request.value(QStringLiteral("session")).toString();
@@ -2412,6 +2434,14 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
 
 void AppController::handleRequestFailure(const QString& tag, const QString& message,
                                          int statusCode) {
+    if (tag == QStringLiteral("settings-action:tts")) {
+        m_settingsStatusPending = std::max(0, m_settingsStatusPending - 1);
+        emit settingsStatusChanged();
+        setErrorMessage(statusCode > 0
+                            ? QStringLiteral("%1 (HTTP %2)").arg(message).arg(statusCode)
+                            : message);
+        return;
+    }
     if (tag.startsWith(QStringLiteral("tool-details:"))) {
         m_toolDetailRequests.remove(tag);
         return;

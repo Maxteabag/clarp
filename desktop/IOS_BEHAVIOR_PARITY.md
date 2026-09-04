@@ -32,7 +32,7 @@ Car Mode and CarPlay are explicitly out of scope.
 | Agent profile | Identity, prompt history, media, artifacts, heartbeat history, teams, context/compact, task plan, queue, model/effort/MCP, schedules and autonomy | Implemented |
 | Updates | Attention/decisions with pending feedback, active/recent jobs with progress, artifacts, action refresh and stale-response fencing | Implemented |
 | Teams | Team list/messages, members, leader, create/edit/delete and independent refresh fencing | Implemented |
-| Settings | Chat/voice preferences, Host auth entry point, orchestrator, live diagnostics, transcription/TTS status and keyboard reference | Implemented for desktop scope |
+| Settings | Chat/voice preferences, Host auth entry point, orchestrator, live diagnostics, transcription status, operational TTS routing and keyboard reference | Implemented for desktop scope |
 | Voice | Tap recording, concurrent cancellable background transcription with chat ownership, playback/mute/stop and explicit state | Implemented for desktop scope |
 | New session | Where to Session to Run, resume/fork/new, backend/model/effort/MCP | Implemented |
 | Files and terminal | Per-pane actions open the local agent folder and a terminal in its working directory | Implemented |
