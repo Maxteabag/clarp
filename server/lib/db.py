@@ -263,10 +263,10 @@ def conn() -> sqlite3.Connection:
     c = getattr(_LOCAL, "conn", None)
     if c is not None:
         return c
-    c = _open_connection()
     # Migrate exactly once per process (idempotent + serialized). WAL means
     # every per-thread connection sees the migrated schema on the shared file.
     with _CONN_LOCK:
+        c = _open_connection()
         if not _MIGRATED:
             _migrate(c)
             _MIGRATED = True
@@ -1475,10 +1475,13 @@ def now_ms() -> int:
 def reset_for_tests(path: pathlib.Path | None = None) -> None:
     """Test helper: close cached connection so a new path takes effect."""
     global DB_PATH, _MIGRATED, _LAST_LOCK_REPORT_AT
-    if path is not None:
-        DB_PATH = path
-    _MIGRATED = False
-    close_local()
+    # Opening and migrating a connection form one operation. A worker that
+    # opens the previous test's file must not mark the next file migrated.
+    with _CONN_LOCK:
+        if path is not None:
+            DB_PATH = path
+        _MIGRATED = False
+        close_local()
     with _TRANSACTION_LOCK:
         _TRANSACTION_OWNERS.clear()
         _LAST_LOCK_REPORT_AT = 0.0

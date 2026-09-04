@@ -9,13 +9,6 @@ from .db import conn, now_ms
 from .protocol import ClipProducerStatus, ClipStatus
 
 
-def _clip_columns() -> set[str]:
-    try:
-        return {row["name"] for row in conn().execute("PRAGMA table_info(clips)").fetchall()}
-    except sqlite3.Error:
-        return set()
-
-
 def record_clip(*, agent_id: str, path: str, voice_id: str | None = None,
                 trace_id: str | None = None, byte_count: int | None = None,
                 turn_id: int | None = None,
@@ -27,22 +20,16 @@ def record_clip(*, agent_id: str, path: str, voice_id: str | None = None,
         raise ValueError(f"invalid clip status: {status}")
     if producer_status is not None and producer_status not in ClipProducerStatus.valid():
         raise ValueError(f"invalid clip producer status: {producer_status}")
-    columns = _clip_columns()
     try:
         names = [
             "agent_id", "runtime_id", "turn_id", "path", "voice_id", "bytes",
-            "trace_id", "created_at", "status",
+            "trace_id", "created_at", "status", "producer_status", "completed_at",
         ]
         values: list[Any] = [
             agent_id, rt, turn_id, path, voice_id, byte_count, trace_id,
-            now_ms(), status,
+            now_ms(), status, producer_status or ClipProducerStatus.COMPLETE,
+            now_ms() if producer_status in (None, ClipProducerStatus.COMPLETE) else None,
         ]
-        if "producer_status" in columns:
-            names.append("producer_status")
-            values.append(producer_status or ClipProducerStatus.COMPLETE)
-        if "completed_at" in columns and (producer_status in (None, ClipProducerStatus.COMPLETE)):
-            names.append("completed_at")
-            values.append(now_ms())
         placeholders = ", ".join("?" for _ in names)
         cur = conn().execute(
             f"INSERT INTO clips ({', '.join(names)}) VALUES ({placeholders})",
@@ -61,19 +48,15 @@ def mark_clip_producer_status(*, clip_id: int, producer_status: str,
                               error: str | None = None) -> bool:
     if producer_status not in ClipProducerStatus.valid():
         raise ValueError(f"invalid clip producer status: {producer_status}")
-    columns = _clip_columns()
-    if "producer_status" not in columns:
-        return False
     fields = ["producer_status = ?"]
     values: list[Any] = [producer_status]
     if byte_count is not None:
         fields.append("bytes = ?")
         values.append(byte_count)
     if producer_status in (ClipProducerStatus.COMPLETE, ClipProducerStatus.FAILED):
-        if "completed_at" in columns:
-            fields.append("completed_at = COALESCE(completed_at, ?)")
-            values.append(now_ms())
-    if error is not None and "error" in columns:
+        fields.append("completed_at = COALESCE(completed_at, ?)")
+        values.append(now_ms())
+    if error is not None:
         fields.append("error = ?")
         values.append(error[:500])
     values.append(clip_id)

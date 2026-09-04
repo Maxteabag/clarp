@@ -10,7 +10,7 @@ design is in [ARCHITECTURE.md](ARCHITECTURE.md) and the client contract in
 git clone https://github.com/Maxteabag/clarp
 cd clarp
 uv sync --frozen          # Python 3.12+, locked environment in .venv
-npm install               # Svelte, Vite, vitest, Playwright
+npm ci                   # Svelte, Vite, vitest, Playwright from the lockfile
 ```
 
 Run `uv run python server/runtime.py` and `uv run python server/server.py` in
@@ -48,8 +48,11 @@ to a disposable container; never point it at a server you care about.
   include the result when you change anything under `web/src` or `static/lib`.
 - **Runtime compatibility is deliberate.** The private runtime RPC must remain
   compatible while an older runtime finishes turns beside a newer HTTP server.
-  Add protocol fields; do not repurpose them. The external client protocol
-  still changes producer and consumers together.
+  Add protocol fields; do not repurpose them. Host and native clients also
+  release independently: the external core contract is additive, unknown
+  response fields are ignored, and optional features use capabilities.
+  Breaking changes require a protocol version and an explicit upgrade path.
+  Internal implementation details do not need compatibility wrappers.
 
 ## When a new model ships
 

@@ -11,6 +11,8 @@ or the /preview handler. Nothing scans the directory.
 """
 from __future__ import annotations
 
+from . import clip_store
+
 import json
 import pathlib
 import queue
@@ -141,7 +143,7 @@ class AudioStream:
         if event_dict.get("type") == SSEType.AUDIO:
             try:
                 from . import agents as _agents
-                _agents.mark_clip_status(
+                clip_store.mark_clip_status(
                     clip_id=event_dict.get("clip_id"),
                     url=event_dict.get("url"),
                     status=ClipStatus.BROADCAST,

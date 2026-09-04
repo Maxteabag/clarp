@@ -22,6 +22,7 @@ src-tauri/target/
 # Playwright output
 test-results/
 playwright-report/
+.qa/
 
 # Built PWA bundle — install.sh / Docker run npm run build
 static/app/

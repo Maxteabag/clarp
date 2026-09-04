@@ -1,6 +1,8 @@
 {
   "title": "an accepted send that never lands goes stale",
   "area": "delivery",
+  "clients": ["web"],
+  "client_scope_reason": "Web delivery-ledger timeout state; native retries use its durable outbox policy.",
   "steps": [
     {"send": {"client_msg_id": "a", "session": "rachel", "text": "lost", "at": 1000000}},
     {"stale": {"now": 1025000, "timeoutMs": 20000}}

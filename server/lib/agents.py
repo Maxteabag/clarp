@@ -511,6 +511,55 @@ def is_busy(agent_id: str) -> bool:
     return bool(s) and s["kind"] in AgentState.busy_states()
 
 
+def dashboard_states() -> dict[str, dict[str, Any]]:
+    """Read state clocks together, preserving state-id ordering for tied times."""
+    rows = conn().execute("""
+        WITH history AS (
+            SELECT s.*, ROW_NUMBER() OVER (
+                       PARTITION BY s.agent_id ORDER BY ts DESC, state_id DESC) AS rank,
+                   LAG(kind) OVER (
+                       PARTITION BY s.agent_id ORDER BY ts, state_id) AS previous,
+                   MAX(CASE WHEN kind IN ('done', 'idle', 'stopped') THEN ts END)
+                       OVER (PARTITION BY s.agent_id) AS last_end
+              FROM state_log s JOIN agents a USING (agent_id)
+             WHERE a.deleted_at IS NULL
+        )
+        SELECT agent_id,
+               MAX(CASE WHEN rank = 1 THEN kind END) AS kind,
+               MAX(CASE WHEN rank = 1 THEN ts END) AS ts,
+               MAX(CASE WHEN rank = 1 THEN detail END) AS detail,
+               MIN(CASE WHEN kind IN ('thinking', 'tool', 'compacting')
+                         AND ts > COALESCE(last_end, 0) THEN ts END) AS turn_started_at,
+               MAX(CASE WHEN kind = 'done' OR
+                         (kind = 'idle' AND previous IN ('thinking', 'tool'))
+                        THEN ts END) AS last_turn_end
+          FROM history GROUP BY agent_id
+    """).fetchall()
+    result = {}
+    for row in rows:
+        state = dict(row)
+        try:
+            state['detail'] = json.loads(state['detail'] or '{}')
+        except json.JSONDecodeError:
+            state['detail'] = {}
+        result[row['agent_id']] = state
+    return result
+
+
+def dashboard_runtimes() -> dict[str, dict[str, Any]]:
+    rows = conn().execute("""
+        SELECT a.agent_id,
+               (SELECT backend_session_id FROM runtimes r
+                 WHERE r.agent_id = a.agent_id AND ended_at IS NULL
+                 ORDER BY started_at DESC LIMIT 1) AS backend_session_id,
+               (SELECT started_at FROM turns t
+                 WHERE t.agent_id = a.agent_id AND ended_at IS NULL
+                 ORDER BY started_at DESC LIMIT 1) AS open_turn_started_at
+          FROM agents a WHERE a.deleted_at IS NULL
+    """).fetchall()
+    return {row['agent_id']: dict(row) for row in rows}
+
+
 def last_activity(agent_id: str) -> int:
     """Epoch ms of the most recent real conversation message for this agent.
 
@@ -606,25 +655,6 @@ def record_clip(*, agent_id: str, path: str, voice_id: str | None = None,
         byte_count=byte_count, turn_id=turn_id, producer_status=producer_status,
         status=status, runtime_id=current_runtime_id,
     )
-
-
-def mark_clip_producer_status(*, clip_id: int,
-                              producer_status: str,
-                              byte_count: int | None = None,
-                              error: str | None = None) -> bool:
-    from .clip_store import mark_clip_producer_status as _mark
-    return _mark(
-        clip_id=clip_id, producer_status=producer_status,
-        byte_count=byte_count, error=error,
-    )
-
-
-def mark_clip_status(*, clip_id: int | None = None,
-                     url: str | None = None,
-                     status: str,
-                     error: str | None = None) -> bool:
-    from .clip_store import mark_clip_status as _mark
-    return _mark(clip_id=clip_id, url=url, status=status, error=error)
 
 
 # ---- focus + trace markers --------------------------------------------

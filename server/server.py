@@ -11,6 +11,8 @@ Endpoints (see Handler.do_GET / do_POST for the dispatch tables):
 """
 from __future__ import annotations
 
+from lib import clip_store
+
 import gzip
 import json
 import mimetypes
@@ -4095,7 +4097,7 @@ class Handler(BaseHTTPRequestHandler):
         trace_id = (data.get("trace_id") or None)
         self._trace_id = trace_id
         try:
-            ok = agents_db.mark_clip_status(
+            ok = clip_store.mark_clip_status(
                 clip_id=clip_id,
                 url=url,
                 status=status,

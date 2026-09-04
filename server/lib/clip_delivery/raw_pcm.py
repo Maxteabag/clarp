@@ -1,6 +1,8 @@
 """Native low-latency raw PCM delivery."""
 from __future__ import annotations
 
+from .. import clip_store
+
 import pathlib
 import time
 
@@ -147,7 +149,7 @@ class RawPcmSession:
         size = (self._target.stat().st_size if self._target.exists()
                 else total_bytes)
         try:
-            agents_db.mark_clip_producer_status(
+            clip_store.mark_clip_producer_status(
                 clip_id=self._clip_id,
                 producer_status=ClipProducerStatus.COMPLETE,
                 byte_count=size,
@@ -193,7 +195,7 @@ class RawPcmSession:
         except OSError:
             pass
         try:
-            agents_db.mark_clip_producer_status(
+            clip_store.mark_clip_producer_status(
                 clip_id=self._clip_id,
                 producer_status=ClipProducerStatus.FAILED,
                 error=error,
@@ -206,4 +208,3 @@ class RawPcmSession:
             except Exception as e:  # noqa: BLE001
                 log_exception("clipBrokerFailCleanup", e,
                               detail=str(self._clip_id))
-

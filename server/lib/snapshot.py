@@ -13,39 +13,44 @@ from .avatar_urls import versioned_avatar_url
 from .log import log_exception
 from .activity import state_activity_event
 from .transcript_log import context_tokens_from_jsonl, find_latest_jsonl
-from .protocol import AgentBackend
+from .protocol import AgentBackend, AgentState
 
 
 def build_agent_snapshot(ctx) -> dict[str, Any]:
-    """Return the UI's full agent snapshot without mutating agent state."""
+    """Reconcile liveness and project the dashboard from batched database reads."""
     rows = []
     focus = agents_db.get_focus()
     team_memberships = team_store.memberships_by_agent()
     queue_states = turn_queue.states()
+    states = agents_db.dashboard_states()
+    runtimes = agents_db.dashboard_runtimes()
+    messages = message_store.dashboard_messages()
+    schedules: dict[str, list] = {}
+    for schedule in scheduler.list_schedules():
+        schedules.setdefault(schedule['agent_id'], []).append(schedule)
     for a in agents_db.list_agents():
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
         # Re-derive truth from reality before reading derived state (INV1-3):
         # a stuck busy row, a ghost session or a phantom in-flight slot is
         # repaired here, at read time, not on the next send.
+        state = states.get(agent_id, {})
+        rt = runtimes.get(agent_id, {})
+        bsid = rt.get('backend_session_id') or ''
         try:
-            reconcile.reconcile_agent(agent_id, backend)
+            repaired = reconcile.reconcile_agent(
+                agent_id, backend, observed_state=state, bound_session=bsid)
+            if 'state' in repaired:
+                # Repairs are rare writes. Re-read their clocks so this very
+                # response still reflects recovery, including unread timing.
+                state = agents_db.latest_state(agent_id) or {}
+                state['turn_started_at'] = agents_db.turn_started_at(agent_id)
+                state['last_turn_end'] = agents_db.last_turn_end(agent_id)
+            if 'ghost_session' in repaired:
+                bsid = ''
         except Exception as e:  # noqa: BLE001
             log_exception("snapshotReconcileFail", e, detail=agent_id)
-        state = agents_db.latest_state(agent_id) or {}
         active = bool(backends.active_handles(backend, agent_id))
-        rt = agents_db.conn().execute(
-            """SELECT backend_session_id FROM runtimes
-                WHERE agent_id = ? AND ended_at IS NULL
-                ORDER BY started_at DESC LIMIT 1""",
-            (agent_id,),
-        ).fetchone()
-        open_turn = agents_db.conn().execute(
-            """SELECT started_at FROM turns
-                WHERE agent_id = ? AND ended_at IS NULL
-                ORDER BY started_at DESC LIMIT 1""",
-            (agent_id,),
-        ).fetchone()
         latest_state = state.get("kind")
         if active and latest_state not in {"thinking", "tool", "compacting", "background"}:
             latest_state = "thinking"
@@ -58,18 +63,17 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         status_text = str(a.get("custom_status") or "").strip() or None
         if status_text is None and state.get("kind") == "background":
             status_text = str(_sdetail.get("label") or "").strip() or None
-        turn_started_at = agents_db.turn_started_at(agent_id)
-        if active and not turn_started_at and open_turn:
-            turn_started_at = int(open_turn["started_at"] or 0)
-        bsid = (rt and rt["backend_session_id"]) or ""
-        message_head = message_store.last_message_head(agent_id=agent_id)
+        turn_started_at = int(state.get('turn_started_at') or 0)
+        if active and not turn_started_at:
+            turn_started_at = int(rt.get('open_turn_started_at') or 0)
+        message = messages.get(agent_id, {})
+        message_head = message.get('head', {'preview': '', 'message_id': ''})
         # Agree with /log's contract: no bound backend session means an empty
         # conversation at revision 0. Querying with an empty session id
         # dropped the WHERE clause and returned the MAX over every
         # conversation, so the client saw a head it could never reach and
         # reloaded the full transcript on every poll (audit bug D1).
-        head_revision = (message_store.latest_revision(
-            agent_id=agent_id, backend_session_id=bsid) if bsid else 0)
+        head_revision = message.get('revisions', {}).get(bsid, 0) if bsid else 0
         # Context-window occupancy from the transcript (Claude only — Codex/agy
         # auto-compact in their own loops, so an empty gauge there correctly
         # signals "managed automatically"). Computed from the last assistant
@@ -93,17 +97,17 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "model":          a.get("model") or "",
             "effort":         a.get("effort") or "",
             "mcp_servers":    mcp_servers,
-            "schedules":      scheduler.list_schedules(agent_id=agent_id),
+            "schedules":      schedules.get(agent_id, []),
             "heartbeat_enabled": bool(a.get("heartbeat_enabled")),
             "dreaming_enabled": bool(a.get("dreaming_enabled")),
             "muted":          bool(a.get("muted")),
             "archived_at":    a.get("archived_at"),
             "backend_session_id": bsid,
             "alive":          True,
-            "busy":           active or bool(agents_db.is_busy(agent_id)),
+            "busy":           active or state.get('kind') in AgentState.busy_states(),
             "focused":        agent_id == focus,
-            "last_activity":  agents_db.last_activity(agent_id),
-            "last_turn_end":  agents_db.last_turn_end(agent_id),
+            "last_activity":  message.get('activity', 0),
+            "last_turn_end":  int(state.get('last_turn_end') or 0),
             # Eager last-message preview for the agent-list overview, so the
             # client shows it without opening each chat.
             "last_message":   message_head["preview"],

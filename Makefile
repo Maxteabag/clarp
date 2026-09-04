@@ -3,7 +3,7 @@
 test: py js
 
 py:
-	uv run --frozen pytest
+	uv run --frozen --group dev python -m pytest
 
 js:
 	npx vitest run

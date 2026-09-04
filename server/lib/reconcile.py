@@ -64,7 +64,9 @@ def has_live_work(agent_id: str, backend: str) -> bool:
 
 
 def reconcile_agent(agent_id: str, backend: str | None = None, *,
-                    home: pathlib.Path | None = None) -> dict[str, Any]:
+                    home: pathlib.Path | None = None,
+                    observed_state: dict[str, Any] | None = None,
+                    bound_session: str | None = None) -> dict[str, Any]:
     """Repair one agent's derived state. Returns what was repaired."""
     repaired: dict[str, Any] = {}
     agent = agents_db.get_by_agent_id(agent_id) if backend is None else None
@@ -72,20 +74,29 @@ def reconcile_agent(agent_id: str, backend: str | None = None, *,
     live = has_live_work(agent_id, backend)
 
     # INV1 — busy ⇔ live work
-    state = agents_db.latest_state(agent_id) or {}
+    state = observed_state if observed_state is not None else (agents_db.latest_state(agent_id) or {})
     kind = str(state.get("kind") or "")
     if kind in _PROCESS_BUSY_KINDS and not live:
-        agents_db.record_state(agent_id, AgentState.IDLE,
-                               {"reason": "reconcile", "was": kind})
-        log("reconcileStuckBusy", f"agent={agent_id} was={kind} → idle")
-        repaired["state"] = kind
+        # Batch projections can predate a transition to background/done or a
+        # newly spawned turn. Revalidate only the rare would-repair path.
+        if observed_state is not None:
+            state = agents_db.latest_state(agent_id) or {}
+            kind = str(state.get('kind') or '')
+            live = has_live_work(agent_id, backend)
+        if kind in _PROCESS_BUSY_KINDS and not live:
+            agents_db.record_state(agent_id, AgentState.IDLE,
+                                   {"reason": "reconcile", "was": kind})
+            log("reconcileStuckBusy", f"agent={agent_id} was={kind} → idle")
+            repaired["state"] = kind
 
     # INV2 — bound Claude session ⇔ transcript exists
     if backend == backends.CLAUDE and not live:
-        bsid = agents_db.live_backend_session(agent_id)
+        bsid = bound_session if bound_session is not None else agents_db.live_backend_session(agent_id)
         if bsid:
             from .transcript_log import find_latest_jsonl
-            if find_latest_jsonl(bsid, projects_root=_projects_root(home)) is None:
+            if (find_latest_jsonl(bsid, projects_root=_projects_root(home)) is None
+                    and agents_db.live_backend_session(agent_id) == bsid
+                    and not has_live_work(agent_id, backend)):
                 agents_db.end_current_runtime(agent_id)
                 log("reconcileGhostSession",
                     f"agent={agent_id} bsid={bsid} has no transcript; unbound")

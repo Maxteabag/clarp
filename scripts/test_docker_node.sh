@@ -4,7 +4,7 @@ set -euo pipefail
 IMAGE="${CLARP_TEST_IMAGE:-clarp:test}"
 NAME="clarp-container-test-$$"
 VOLUME="clarp-container-test-$$"
-PORT="${CLARP_TEST_PORT:-17692}"
+PORT="${CLARP_TEST_PORT:-}"
 
 cleanup() {
     docker rm -f "$NAME" >/dev/null 2>&1 || true
@@ -17,6 +17,7 @@ docker volume create "$VOLUME" >/dev/null
 docker run -d --name "$NAME" \
     -p "127.0.0.1:${PORT}:7682" \
     -v "$VOLUME:/data" "$IMAGE" >/dev/null
+PORT="$(docker port "$NAME" 7682/tcp | head -1 | sed 's/.*://')"
 
 for _ in $(seq 1 60); do
     status="$(docker inspect "$NAME" --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')"
