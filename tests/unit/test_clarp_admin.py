@@ -804,6 +804,35 @@ def test_doctor_fails_for_missing_configured_apns_key(tmp_path, monkeypatch, cap
     assert "FAIL  APNs signing key" in capsys.readouterr().out
 
 
+def test_doctor_checks_the_backend_selected_at_setup(tmp_path, monkeypatch, capsys):
+    share = tmp_path / "share"
+    current = share / "current"
+    current.mkdir(parents=True)
+    runtime = tmp_path / "environment/bin/python"
+    runtime.parent.mkdir(parents=True)
+    runtime.write_text("")
+    (current / "SERVICE_PYTHON").write_text(str(runtime) + "\n")
+    config = tmp_path / "config.toml"
+    config.write_text('[tts]\nprovider = "none"\nfallback = "none"\n')
+    install_state = tmp_path / "install.json"
+    install_state.write_text('{"backend":"codex"}\n')
+    monkeypatch.setattr(admin, "SHARE", share)
+    monkeypatch.setattr(admin, "CONFIG_FILE", config)
+    monkeypatch.setattr(admin, "INSTALL_STATE", install_state)
+    monkeypatch.setenv("CLAUDE_PWA_CONFIG", str(config))
+    from lib import config as config_module
+    config_module.reset_cache()
+    monkeypatch.setattr(
+        admin, "installed_command",
+        lambda name: "/usr/bin/claude" if name == "claude" else None)
+    monkeypatch.setattr(admin.service_manager, "is_active", lambda: True)
+
+    assert admin.cmd_doctor(None) == 1
+    output = capsys.readouterr().out
+    assert "codex" in output.lower()
+    assert "missing" in output.lower()
+
+
 def test_releases_only_returns_completed_installs(tmp_path, monkeypatch):
     root = tmp_path / "share/releases"
     complete = root / "complete"; complete.mkdir(parents=True)

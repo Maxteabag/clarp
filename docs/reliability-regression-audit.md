@@ -159,11 +159,12 @@ which fixes belong together.
   both version and dirty state exclusively from Git metadata. It ignores a
   supplied release identity even though archive installs intentionally have no
   `.git` directory.
-- **A pre-activation environment failure leaves an unsafe rollback candidate.**
+- **A pre-activation environment failure leaves an orphan release directory.**
   The staging directory is moved into `releases/` and its cleanup trap removed
   before `uv lock`/`uv sync`; the activation rollback trap is installed later.
-  A failure in between leaves an incomplete unmarked directory visible to the
-  rollback inventory.
+  A failure in between leaves an incomplete unmarked directory. It is correctly
+  excluded from `clarp-admin rollback` because it lacks `INSTALL_OK`, but it is
+  never removed and repeated failures accumulate disk state.
 
 ### Client state and voice boundaries
 
