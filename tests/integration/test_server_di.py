@@ -135,6 +135,13 @@ def test_sse_event_seen_during_replay_is_not_delivered_again_as_live(fake_ctx):
                 })
             return subscriber
 
+        def recent(self, since_event_id=None):
+            events = super().recent(since_event_id)
+            # A live sentinel ends the read after the overlap queue is drained;
+            # a correct implementation must not hang waiting for a second copy.
+            self.broadcast_ephemeral({"type": "audit-drained"})
+            return events
+
     fake_ctx.stream = ReplayOverlapStream(fake_ctx.audio_dir)
     port = _free_port()
     srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
@@ -146,11 +153,13 @@ def test_sse_event_seen_during_replay_is_not_delivered_again_as_live(fake_ctx):
             f"http://127.0.0.1:{port}/events", timeout=2
         ) as response:
             deadline = time.monotonic() + 2
-            while len(copies) < 2 and time.monotonic() < deadline:
+            while time.monotonic() < deadline:
                 line = response.readline().decode().strip()
                 if not line.startswith("data: "):
                     continue
                 event = json.loads(line.removeprefix("data: "))
+                if event.get("type") == "audit-drained":
+                    break
                 if event.get("request_id") == "calendar-overlap":
                     copies.append(event)
     finally:

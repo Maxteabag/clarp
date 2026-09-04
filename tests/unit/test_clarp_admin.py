@@ -826,6 +826,7 @@ def test_doctor_checks_the_backend_selected_at_setup(tmp_path, monkeypatch, caps
         admin, "installed_command",
         lambda name: "/usr/bin/claude" if name == "claude" else None)
     monkeypatch.setattr(admin.service_manager, "is_active", lambda: True)
+    monkeypatch.setattr(admin.service_manager, "is_runtime_active", lambda: True)
 
     assert admin.cmd_doctor(None) == 1
     output = capsys.readouterr().out

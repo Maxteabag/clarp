@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import threading
 import time
+from types import SimpleNamespace
 
 from lib import agents as agents_db
 from lib import (
@@ -18,6 +19,7 @@ from lib import (
     interrupted_turns,
     message_store,
     reconcile,
+    runtime_startup,
     scheduler,
 )
 from lib.protocol import AgentState
@@ -56,13 +58,20 @@ def _due_schedule(session: str, *, prompt: str = "Do the durable work") -> dict:
     return scheduler.get_schedule(item["schedule_id"]) or {}
 
 
-def test_production_boot_order_does_not_erase_interrupted_turn_evidence():
-    """Issue #11's recovery must run before generic stale-state repair.
+def _recover_runtime():
+    return runtime_startup.recover_runtime(
+        SimpleNamespace(stream=None),
+        SimpleNamespace(recover_queued=lambda: 0),
+        restore_agents=lambda _ctx: None,
+        restart_agents=lambda: [],
+    )
 
-    The production ``__main__`` path currently calls ``reconcile_all`` before
-    ``build_server(..., restart_recovery=True)``. Reconciliation changes the
-    stale THINKING row to IDLE, so restart recovery no longer recognizes the
-    orphaned turn and never writes its user-visible marker.
+
+def test_production_boot_order_does_not_erase_interrupted_turn_evidence():
+    """A runtime crash records dead work before stale-state reconciliation.
+
+    HTTP replacement never owns this recovery. Exercise the production runtime
+    entry point with the real SQLite recovery and reconciliation functions.
     """
     agent_id = _agent("restart-order")
     backend_session_id = _live_runtime(agent_id, "restart-order")
@@ -83,11 +92,9 @@ def test_production_boot_order_does_not_erase_interrupted_turn_evidence():
         },
     )
 
-    # Mirror the ordering in server/server.py's production entry point.
-    reconcile.reconcile_all()
-    recovered = interrupted_turns.recover_after_restart()
+    result = _recover_runtime()
 
-    assert [row["agent_id"] for row in recovered] == [agent_id]
+    assert result["interrupted"] == 1
     assert agents_db.latest_state(agent_id)["kind"] == AgentState.INTERRUPTED
     visible = message_store.list_messages(
         agent_id=agent_id,
@@ -125,7 +132,7 @@ def test_restart_recovery_closes_the_orphaned_durable_turn():
         },
     )
 
-    assert len(interrupted_turns.recover_after_restart()) == 1
+    assert _recover_runtime()["interrupted"] == 1
 
     open_rows = db.conn().execute(
         "SELECT COUNT(*) AS n FROM turns WHERE agent_id=? AND ended_at IS NULL",
@@ -174,7 +181,7 @@ def test_restart_finalizes_running_subagent_cells():
         },
     )
 
-    assert len(interrupted_turns.recover_after_restart()) == 1
+    assert _recover_runtime()["interrupted"] == 1
 
     rows = message_store.list_messages(
         agent_id=agent_id,
@@ -291,29 +298,34 @@ def test_non_user_interruption_is_not_mistaken_for_an_explicit_stop(monkeypatch)
     assert [agent["agent_id"] for agent in due] == [agent_id]
 
 
-def test_restart_heartbeat_retries_an_agent_whose_first_dispatch_failed(monkeypatch):
-    """The once-per-process latch must not permanently consume failed work."""
-    monkeypatch.setenv("CLAUDE_PWA_HEARTBEAT_QUIET_PERIOD_SEC", "0")
-    flaky = _agent("restart-flaky")
-    healthy = _agent("restart-healthy")
-    _live_runtime(flaky, "restart-flaky")
-    _live_runtime(healthy, "restart-healthy")
-    attempts: list[str] = []
+def test_runtime_crash_recovery_isolates_continuity_dispatch_failure():
+    """The new runtime continues recovering healthy agents after one failure.
 
-    def send(session: str, _text: str) -> None:
+    The old audit tested a legacy HTTP scheduler latch. That is not the runtime
+    startup path. Retry/backoff for failed crash-continuity prompts remains a
+    separate design question; never replay healthy agents to retry one failure.
+    """
+    attempts = []
+
+    def send(**kwargs):
+        session = kwargs["requested_session"]
         attempts.append(session)
-        if session == "restart-flaky" and attempts.count(session) == 1:
+        if session == "restart-flaky":
             raise RuntimeError("database was briefly locked")
 
-    worker = heartbeat.HeartbeatScheduler(
-        send_heartbeat=send,
-        now=lambda: 1_000.0,
+    result = runtime_startup.recover_runtime(
+        SimpleNamespace(stream=None),
+        SimpleNamespace(dispatch=send, recover_queued=lambda: 0),
+        restore_agents=lambda _ctx: None,
+        mark_interrupted=lambda **_kwargs: [],
+        reconcile=lambda: 0,
+        restart_agents=lambda: [
+            {"session": "restart-flaky"}, {"session": "restart-healthy"}],
+        restart_prompt=lambda _agent: "Continue after runtime crash",
     )
 
-    assert worker.run_restart_recovery_once() == 1
-    assert worker.run_restart_recovery_once() == 1
-    assert attempts.count("restart-flaky") == 2
-    assert attempts.count("restart-healthy") == 1
+    assert result["restart_heartbeats"] == 1
+    assert attempts == ["restart-flaky", "restart-healthy"]
 
 
 def test_failed_scheduled_dispatch_remains_due_for_retry():

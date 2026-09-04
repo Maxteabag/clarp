@@ -4,13 +4,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import signal
-import subprocess
 import sys
 import time
 
 import pytest
 
-from lib.process_registry import ProcessRegistry, TurnHandle
+from lib import agents, clarp_runner
 
 
 pytestmark = pytest.mark.skipif(
@@ -29,7 +28,7 @@ def _process_alive(pid: int) -> bool:
         return False
 
 
-def test_interrupt_terminates_the_backend_process_tree(tmp_path):
+def test_interrupt_terminates_the_backend_process_tree(tmp_path, monkeypatch):
     """Claude/Codex subagents are descendants, not registry entries of their own.
 
     The registry currently sends SIGTERM only to the top-level CLI. This proves
@@ -38,19 +37,19 @@ def test_interrupt_terminates_the_backend_process_tree(tmp_path):
     this same lifecycle requirement.
     """
     pid_file = tmp_path / "child-pid"
-    parent = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            (
-                "import pathlib,subprocess,sys,time; "
-                "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
-                "pathlib.Path(sys.argv[1]).write_text(str(child.pid)); "
-                "time.sleep(60)"
-            ),
-            str(pid_file),
-        ]
-    )
+    executable = tmp_path / "backend.py"
+    executable.write_text(
+        "import pathlib,subprocess,sys,time\n"
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n"
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))\n"
+        "time.sleep(60)\n")
+    monkeypatch.setattr(clarp_runner.shutil, "which", lambda _name: sys.executable)
+    monkeypatch.setattr(clarp_runner, "build_cmd", lambda *a, **kw: [sys.executable, str(executable)])
+    agent_id = agents.create_agent(
+        persona="Fixture", voice_id="", cwd=str(tmp_path), session="fixture")
+    handle = clarp_runner.spawn_turn(
+        text="fixture", cwd=tmp_path, session="fixture", agent_id=agent_id)
+    parent = handle.proc
     child_pid = 0
     try:
         deadline = time.monotonic() + 5
@@ -59,9 +58,7 @@ def test_interrupt_terminates_the_backend_process_tree(tmp_path):
         assert pid_file.is_file(), "fixture parent never spawned its child"
         child_pid = int(pid_file.read_text())
 
-        registry = ProcessRegistry(log_exception=lambda *_args, **_kwargs: None)
-        registry.register("agent", TurnHandle(parent, None))
-        assert registry.interrupt("agent", event="testInterrupt") == 1
+        assert clarp_runner.interrupt(agent_id) == 1
         parent.wait(timeout=5)
 
         deadline = time.monotonic() + 1
@@ -76,3 +73,5 @@ def test_interrupt_terminates_the_backend_process_tree(tmp_path):
             parent.wait(timeout=5)
         if child_pid and _process_alive(child_pid):
             os.kill(child_pid, signal.SIGKILL)
+        if handle.drain_thread:
+            handle.drain_thread.join(timeout=5)
