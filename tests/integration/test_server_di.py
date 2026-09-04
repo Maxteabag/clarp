@@ -160,6 +160,90 @@ def test_sse_event_seen_during_replay_is_not_delivered_again_as_live(fake_ctx):
     assert len(copies) == 1
 
 
+def test_slow_clients_cannot_create_unbounded_request_threads(fake_ctx):
+    """The prior overload reached hundreds of threads and exhausted host FDs."""
+    port = _free_port()
+    srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    sockets = []
+    subscriber_count = 0
+    try:
+        for _ in range(48):
+            sock = socket.create_connection(("127.0.0.1", port), timeout=2)
+            sock.sendall(
+                b"GET /events HTTP/1.1\r\n"
+                b"Host: 127.0.0.1\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            sockets.append(sock)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            with fake_ctx.stream._subs_lock:  # noqa: SLF001
+                subscriber_count = len(fake_ctx.stream._subs)  # noqa: SLF001
+            if subscriber_count == len(sockets):
+                break
+            time.sleep(0.01)
+    finally:
+        for sock in sockets:
+            sock.close()
+        # Wake every SSE handler so closed sockets are noticed immediately.
+        fake_ctx.stream.broadcast({"type": "test-cleanup"})
+        srv.shutdown()
+        srv.server_close()
+
+    assert subscriber_count <= 32
+
+
+def test_limited_device_cannot_read_arbitrary_host_files(running_server, tmp_path):
+    """A limited token must not be able to read config and escalate to admin."""
+    from urllib.parse import urlencode
+    from lib import device_pairing
+
+    base, ctx, _srv = running_server
+    ctx.auth_token = "administrator-secret"
+    issued = device_pairing.issue(device_name="Limited phone", scope="limited")
+    device = device_pairing.exchange(issued["code"])
+    secret = tmp_path / "secret.txt"
+    secret.write_text("host secret")
+    query = urlencode({
+        "session": "claude",
+        "root": str(tmp_path),
+        "path": secret.name,
+    })
+    request = urllib.request.Request(
+        f"{base}/agent-file?{query}",
+        headers={"Authorization": f"Bearer {device['token']}"},
+    )
+
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(request, timeout=2)
+
+    assert error.value.code == 403
+
+
+def test_transcription_provider_errors_remain_valid_json(running_server):
+    base, ctx, _srv = running_server
+
+    class ExplodingSTT(StubSTT):
+        def transcribe_bytes(self, *_args, **_kwargs):
+            raise RuntimeError('provider said "invalid"\nretry later')
+
+    ctx.stt = ExplodingSTT(text="")
+    try:
+        _post_raw(
+            base + "/transcribe",
+            b"voice audio",
+            {"Content-Type": "audio/webm"},
+        )
+        raise AssertionError("transcription error should return HTTP 500")
+    except urllib.error.HTTPError as error:
+        assert error.code == 500
+        payload = json.loads(error.read())
+
+    assert payload == {"error": 'provider said "invalid"\nretry later'}
+
+
 def test_production_startup_requests_restart_heartbeat_recovery(
     fake_ctx, monkeypatch,
 ):

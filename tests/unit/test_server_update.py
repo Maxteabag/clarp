@@ -18,6 +18,17 @@ def test_update_remote_falls_back_to_release_metadata(tmp_path, monkeypatch):
     assert server_update._update_remote() == "https://example.test/clarp.git"
 
 
+def test_in_app_update_remote_has_the_same_canonical_fallback_as_admin(
+    tmp_path, monkeypatch,
+):
+    """Issue #12 must not remain fixed in only one of two updater paths."""
+    monkeypatch.delenv("CLARP_UPDATE_REMOTE", raising=False)
+    monkeypatch.setenv("CLARP_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("CLARP_SHARE_DIR", str(tmp_path / "share"))
+
+    assert server_update._update_remote() == "https://github.com/Maxteabag/clarp.git"
+
+
 def test_update_remote_strips_http_credentials(monkeypatch):
     monkeypatch.setenv(
         "CLARP_UPDATE_REMOTE",
