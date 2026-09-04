@@ -139,6 +139,26 @@ def test_active_handles_routes_by_backend(monkeypatch):
     assert backends.active_handles("agy", "x") == ["agy:x"]
 
 
+def test_active_handles_any_includes_compatibility_runner_without_duplicates(monkeypatch):
+    from lib import clarp_runner, codex_app_server, codex_runner
+
+    class Handle:
+        def is_alive(self):
+            return True
+
+    claude = Handle()
+    codex = Handle()
+    monkeypatch.setattr(clarp_runner, "active_handles", lambda _aid: [claude])
+    monkeypatch.setattr(codex_app_server, "active_handles", lambda _aid: [codex])
+    monkeypatch.setattr(codex_runner, "active_handles", lambda _aid: [codex])
+
+    handles = backends.active_handles_any("x")
+
+    assert claude in handles
+    assert codex in handles
+    assert handles.count(codex) == 1
+
+
 def test_history_dispatch_picks_codex_parser(monkeypatch):
     from lib import codex_transcript
     from lib import transcript_log

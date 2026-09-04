@@ -1699,16 +1699,27 @@ class DreamingScheduler:
         for run in active_runs():
             sent += self._advance_run(run)
         for agent in pending_dreaming_agents(now=self.now()):
-            run = create_dream_run(
-                agent,
-                local_date=agent["dreaming_local_date"],
-                timezone_name=agent["dreaming_timezone"],
-                timezone_source=agent["dreaming_timezone_source"],
-            )
-            sent += self._advance_run(run)
+            from .agent_lifecycle import AgentLifecycleService
+            with AgentLifecycleService._lifecycle_gate.read():
+                # Revalidate after acquiring the lease: reset may have completed
+                # after pending_dreaming_agents() built its snapshot.
+                if agents_db.get_by_agent_id(agent["agent_id"]) is None:
+                    continue
+                run = create_dream_run(
+                    agent,
+                    local_date=agent["dreaming_local_date"],
+                    timezone_name=agent["dreaming_timezone"],
+                    timezone_source=agent["dreaming_timezone_source"],
+                )
+                sent += self._advance_run(run)
         return sent
 
     def _advance_run(self, run: dict[str, Any]) -> int:
+        from .agent_lifecycle import AgentLifecycleService
+        with AgentLifecycleService._lifecycle_gate.read():
+            return self._advance_run_locked(run)
+
+    def _advance_run_locked(self, run: dict[str, Any]) -> int:
         agent = agents_db.get_by_agent_id(run["agent_id"])
         if not agent or not dreaming_enabled(agent):
             return 0

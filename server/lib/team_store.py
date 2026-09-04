@@ -429,42 +429,62 @@ def capture_assistant_message(*, agent_id: str, source_message_id: str,
     inserted = 0
     ts = now_ms()
     c = conn()
-    for team in teams:
-        team_id = team["team_id"]
-        members = [
-            row["agent_id"] for row in c.execute(
-                "SELECT agent_id FROM team_members WHERE team_id = ?",
-                (team_id,),
-            ).fetchall()
-        ]
-        for block in blocks:
-            team_message_id = _new_team_message_id(
-                team_id, source_message_id, block
-            )
-            cur = c.execute(
-                """INSERT INTO team_messages (
-                       team_message_id, team_id, source_agent_id,
-                       source_message_id, trace_id, text, created_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(team_id, source_message_id, text) DO NOTHING""",
-                (
-                    team_message_id, team_id, agent_id, source_message_id,
-                    trace_id or "", block, ts,
-                ),
-            )
-            if cur.rowcount <= 0:
-                continue
-            inserted += 1
-            for member_id in members:
-                if member_id == agent_id:
-                    continue
-                c.execute(
-                    """INSERT INTO team_inbox (
-                           team_message_id, agent_id, status
-                       ) VALUES (?, ?, 'unread')
-                       ON CONFLICT(team_message_id, agent_id) DO NOTHING""",
-                    (team_message_id, member_id),
+    owns_transaction = not c.in_transaction
+    if owns_transaction:
+        c.execute("BEGIN IMMEDIATE")
+    try:
+        source = c.execute(
+            "SELECT 1 FROM agents WHERE agent_id=? AND deleted_at IS NULL",
+            (agent_id,),
+        ).fetchone()
+        if source is None:
+            if owns_transaction:
+                c.execute("COMMIT")
+            return 0
+        for team in teams:
+            team_id = team["team_id"]
+            members = [
+                row["agent_id"] for row in c.execute(
+                    """SELECT m.agent_id FROM team_members m
+                         JOIN agents a ON a.agent_id=m.agent_id
+                        WHERE m.team_id=? AND a.deleted_at IS NULL""",
+                    (team_id,),
+                ).fetchall()
+            ]
+            for block in blocks:
+                team_message_id = _new_team_message_id(
+                    team_id, source_message_id, block
                 )
+                cur = c.execute(
+                    """INSERT INTO team_messages (
+                           team_message_id, team_id, source_agent_id,
+                           source_message_id, trace_id, text, created_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(team_id, source_message_id, text) DO NOTHING""",
+                    (
+                        team_message_id, team_id, agent_id, source_message_id,
+                        trace_id or "", block, ts,
+                    ),
+                )
+                if cur.rowcount <= 0:
+                    continue
+                inserted += 1
+                for member_id in members:
+                    if member_id == agent_id:
+                        continue
+                    c.execute(
+                        """INSERT INTO team_inbox (
+                               team_message_id, agent_id, status
+                           ) VALUES (?, ?, 'unread')
+                           ON CONFLICT(team_message_id, agent_id) DO NOTHING""",
+                        (team_message_id, member_id),
+                    )
+        if owns_transaction:
+            c.execute("COMMIT")
+    except BaseException:
+        if owns_transaction and c.in_transaction:
+            c.execute("ROLLBACK")
+        raise
     return inserted
 
 

@@ -103,6 +103,21 @@ def begin(*, delegation_id: str, trace_id: str, client_msg_id: str,
 def dispatch(*, ctx, delegation_id: str, session: str,
              request_text: str, authenticated_at_admission: bool,
              owner_principal: str = "administrator") -> dict:
+    from .agent_lifecycle import AgentLifecycleService
+    with AgentLifecycleService._lifecycle_gate.read():
+        return _dispatch(
+            ctx=ctx,
+            delegation_id=delegation_id,
+            session=session,
+            request_text=request_text,
+            authenticated_at_admission=authenticated_at_admission,
+            owner_principal=owner_principal,
+        )
+
+
+def _dispatch(*, ctx, delegation_id: str, session: str,
+              request_text: str, authenticated_at_admission: bool,
+              owner_principal: str = "administrator") -> dict:
     """Idempotently admit a silent, durable agent turn for Oracle."""
     from . import agents as agents_db
     from . import message_store, prompt_admissions

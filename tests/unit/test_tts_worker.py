@@ -104,6 +104,29 @@ def test_drain_when_queue_empty_returns_false(env, patch_eleven):
     assert synth_one(audio_dir=env["audio_dir"]) is False
 
 
+def test_enqueue_rejects_deleted_session_owner(env):
+    agents_db.soft_delete(env["agent_id"])
+
+    with pytest.raises(ValueError, match="session changed"):
+        tts_queue.enqueue(
+            agent_id=env["agent_id"], text="stale", voice_id="V_MIKE",
+            session="claude", source=TurnSource.PWA)
+
+    assert tts_queue.pending_count() == 0
+
+
+def test_claim_marks_orphaned_queued_audio_failed(env):
+    tts_queue.enqueue(
+        agent_id=env["agent_id"], text="queued", voice_id="V_MIKE",
+        session="claude", source=TurnSource.PWA)
+    agents_db.soft_delete(env["agent_id"])
+
+    assert tts_queue.claim_next() is None
+
+    [row] = tts_queue.recent(limit=1)
+    assert row["status"] == tts_queue.FAILED
+
+
 def test_synth_failure_marks_row_failed(env, monkeypatch):
     from lib import eleven_http, eleven_ws, tts_worker
     def _boom_http(text, voice_id, out_path, **kw):

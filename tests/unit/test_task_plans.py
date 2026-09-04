@@ -101,3 +101,21 @@ def test_stale_updates_cannot_rewrite_cancelled_plan(tmp_path):
         task_plans.update_item(
             task_plans.item_key(old["plan_id"], "step"), "completed")
     assert task_plans.get(old["plan_id"])["status"] == "cancelled"
+
+
+def test_plan_creation_revalidates_session_owner_inside_transaction(
+    tmp_path, monkeypatch,
+):
+    agent_id = agents.create_agent(
+        persona="Mike", voice_id="v", cwd=str(tmp_path), session="mike")
+    stale = agents.get_by_session("mike")
+    agents.soft_delete(agent_id)
+    monkeypatch.setattr(agents, "get_by_session", lambda _session: stale)
+
+    with pytest.raises(ValueError, match="session changed"):
+        task_plans.create(
+            session="mike", title="Stale",
+            items=[{"id": "one", "title": "Must not appear"}],
+        )
+
+    assert db.conn().execute("SELECT COUNT(*) FROM task_plans").fetchone()[0] == 0

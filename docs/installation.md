@@ -213,6 +213,22 @@ Existing mode validates the selected commands on `PATH` and leaves their
 versions and upgrades to the user. None mode defers backend setup. Setup never
 installs global npm packages silently.
 
+If Git or another child process depends on a desktop credential agent, put the
+required socket in the service environment rather than editing the generated
+systemd unit or LaunchAgent:
+
+```toml
+[env]
+SSH_AUTH_SOCK = "~/.bitwarden-ssh-agent.sock"
+```
+
+Values in `[env]` are inherited by the Clarp server and its agent turns, and
+`~` expands to the installing user's home directory. On an interactive install,
+Clarp also carries the current `SSH_AUTH_SOCK` into the generated service when
+the key is not explicitly configured. Re-running setup regenerates service
+files from this configuration, so direct edits to those generated files are
+not durable.
+
 ## Managed skills
 
 Clarp owns only individually namespaced `clarp-*` links. Personal skill files
@@ -243,6 +259,7 @@ Default core:
 - `clarp-agent-communication`
 - `clarp-server-admin`
 - `clarp-transcription`
+- `clarp-transcription-model-installation`
 - `clarp-voice-adapters`
 
 Optional packs contain only Clarp-native and messaging integrations. Developer,
@@ -256,6 +273,11 @@ URLs. Its small built-in catalog covers managed Faster-Whisper downloads on
 Linux and managed `whisper.cpp` builds/downloads on macOS. Capability discovery
 validates the local Clarp registry; transcription never downloads a model
 implicitly.
+
+The iOS app shows supported choices and their size/language tradeoffs, but does
+not start a Host download itself. Ask an agent on that Host to use the
+`clarp-transcription-model-installation` skill; it confirms the exact model,
+runs the supported manager, and verifies the live capability response.
 
 Custom transcription adapters are installed with the `clarp-transcription`
 skill and are discovered from the Computer rather than hard-coded in the app.

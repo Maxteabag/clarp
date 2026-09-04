@@ -48,13 +48,28 @@ def enqueue(*,
         from .log import log
         log("ttsSuppressedSilentTurn", f"agent={agent_id} session={session}")
         return 0
-    cur = conn().execute(
-        """INSERT INTO tts_queue (agent_id, text, voice_id, session,
-                                  source, trace_id, status, enqueued_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (agent_id, text, voice_id, session, source, trace_id,
-         QUEUED, now_ms()),
-    )
+    connection = conn()
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        owner = connection.execute(
+            """SELECT agent_id FROM agents
+                 WHERE agent_id=? AND session=? AND deleted_at IS NULL""",
+            (agent_id, session),
+        ).fetchone()
+        if owner is None:
+            raise ValueError(
+                f"agent session changed before TTS enqueue: {session}")
+        cur = connection.execute(
+            """INSERT INTO tts_queue (agent_id, text, voice_id, session,
+                                      source, trace_id, status, enqueued_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (agent_id, text, voice_id, session, source, trace_id,
+             QUEUED, now_ms()),
+        )
+        connection.execute("COMMIT")
+    except BaseException:
+        connection.execute("ROLLBACK")
+        raise
     return int(cur.lastrowid or 0)
 
 
@@ -62,25 +77,45 @@ def claim_next() -> dict[str, Any] | None:
     """Atomically claim the oldest queued row. Returns the row dict, or
     None if there's nothing queued."""
     c = conn()
-    row = c.execute(
-        """SELECT queue_id, agent_id, text, voice_id, session,
-                  source, trace_id, enqueued_at
-             FROM tts_queue
-            WHERE status = ?
-            ORDER BY enqueued_at LIMIT 1""",
-        (QUEUED,),
-    ).fetchone()
-    if row is None:
-        return None
-    cur = c.execute(
-        """UPDATE tts_queue SET status = ?, claimed_at = ?
-            WHERE queue_id = ? AND status = ?""",
-        (SYNTHESIZING, now_ms(), row["queue_id"], QUEUED),
-    )
+    c.execute("BEGIN IMMEDIATE")
+    try:
+        row = c.execute(
+            """SELECT q.queue_id,q.agent_id,q.text,q.voice_id,q.session,
+                      q.source,q.trace_id,q.enqueued_at,
+                      a.agent_id AS live_agent_id
+                 FROM tts_queue q
+                 LEFT JOIN agents a ON a.agent_id=q.agent_id
+                   AND a.session=q.session AND a.deleted_at IS NULL
+                WHERE q.status=?
+                ORDER BY q.enqueued_at LIMIT 1""",
+            (QUEUED,),
+        ).fetchone()
+        if row is None:
+            c.execute("COMMIT")
+            return None
+        if row["live_agent_id"] is None:
+            c.execute(
+                """UPDATE tts_queue SET status=?,completed_at=?,error=?
+                     WHERE queue_id=? AND status=?""",
+                (FAILED, now_ms(), "agent session no longer active",
+                 row["queue_id"], QUEUED),
+            )
+            c.execute("COMMIT")
+            return None
+        cur = c.execute(
+            """UPDATE tts_queue SET status = ?, claimed_at = ?
+                WHERE queue_id = ? AND status = ?""",
+            (SYNTHESIZING, now_ms(), row["queue_id"], QUEUED),
+        )
+        c.execute("COMMIT")
+    except BaseException:
+        c.execute("ROLLBACK")
+        raise
     if cur.rowcount == 0:
-        # Lost the race — another claimer got it.
         return None
-    return dict(row)
+    result = dict(row)
+    result.pop("live_agent_id", None)
+    return result
 
 
 def mark_done(queue_id: int, *, clip_id: int | None = None) -> None:

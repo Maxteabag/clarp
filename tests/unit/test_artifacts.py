@@ -326,3 +326,52 @@ def test_agent_deletion_cancels_pending_decisions(tmp_path):
     assert artifacts.attention() == []
     row = artifacts.get(created["artifact_id"])
     assert row["decision"]["status"] == "cancelled"
+
+
+def test_artifact_creation_revalidates_session_owner_inside_transaction(
+    tmp_path, monkeypatch,
+):
+    agent_id = _agent(tmp_path)
+    stale = agents.get_by_session("mike")
+    agents.soft_delete(agent_id)
+    monkeypatch.setattr(artifacts, "_agent", lambda _session: stale)
+
+    with pytest.raises(ValueError, match="session changed"):
+        artifacts.create(
+            session="mike", type="document", title="Stale",
+            payload={"content": "Must not appear"},
+        )
+
+    assert artifacts.list_artifacts(agent_id=agent_id) == []
+
+
+def test_artifact_update_rejects_deleted_owner(tmp_path):
+    agent_id = _agent(tmp_path)
+    artifact = artifacts.create(
+        session="mike", type="document", title="Before",
+        payload={"content": "Before"},
+    )
+    agents.soft_delete(agent_id)
+
+    with pytest.raises(ValueError, match="owner is no longer active"):
+        artifacts.update(artifact["artifact_id"], {"title": "After"})
+
+
+def test_media_publish_revalidates_session_owner_inside_transaction(
+    tmp_path, monkeypatch,
+):
+    agent_id = _agent(tmp_path)
+    stale = agents.get_by_session("mike")
+    agents.soft_delete(agent_id)
+    monkeypatch.setattr(
+        media_store.agents_db, "get_by_session", lambda _session: stale)
+
+    with pytest.raises(media_store.MediaError, match="session changed") as error:
+        media_store.publish(
+            session="mike", blob=b"%PDF-1.7\nstale", source_name="stale.pdf",
+            content_type="application/pdf", media_dir=tmp_path / "media",
+        )
+
+    assert error.value.status == 409
+    assert db.conn().execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 0
+    assert list((tmp_path / "media/blobs").rglob("*.pdf")) == []

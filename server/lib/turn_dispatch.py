@@ -6,7 +6,9 @@ import re
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from functools import wraps
 from typing import Any, Callable
 
 from . import agents as agents_db
@@ -44,6 +46,7 @@ _INFLIGHT: dict[str, str] = {}
 _QUEUED: dict[str, list] = {}
 _CLAIMED_AT: dict[str, float] = {}
 _RECOVERY_LOCK = threading.Lock()
+_ROUTING_ADMISSIONS = 0
 
 # Placeholder trace owning the in-flight slot while an interactive terminal is
 # attached to an agent. A normal turn routed to that agent queues behind it
@@ -51,6 +54,17 @@ _RECOVERY_LOCK = threading.Lock()
 # drains via drain_after_terminal() when the terminal closes.
 _TERMINAL_SENTINEL = "terminal"
 _STOPPING_SENTINEL = "stopping"
+
+
+def _serialize_lifecycle(method):
+    """Keep admission through runner registration outside identity swaps."""
+    @wraps(method)
+    def wrapped(*args, **kwargs):
+        # Imported lazily to avoid the lifecycle -> turn-dispatch cycle.
+        from .agent_lifecycle import AgentLifecycleService
+        with AgentLifecycleService._lifecycle_gate.read():
+            return method(*args, **kwargs)
+    return wrapped
 
 
 def _terminal_live(agent_id: str) -> bool:
@@ -287,6 +301,7 @@ class TurnDispatchService:
             self.retry_scheduler(1.0, self.recover_queued)
         return recovered
 
+    @_serialize_lifecycle
     def dispatch(self, *, text: str, requested_session: str,
                  trace_id: str, synthesize_audio: bool = True,
                  forced_session: str = "",
@@ -314,7 +329,9 @@ class TurnDispatchService:
                           "routed_by_orchestrator": routed_by_orchestrator,
                       })
         if forced_session:
-            if not agents_db.get_by_session(forced_session):
+            forced_agent, forced_session = agents_db.resolve_live_session(
+                forced_session)
+            if forced_agent is None:
                 raise DispatchError(404, "unknown forced agent")
             target = SendTarget(
                 session=forced_session,
@@ -530,6 +547,7 @@ class TurnDispatchService:
         self._mark_spawned(spec)
         return DispatchResult(session=session, backend=backend)
 
+    @_serialize_lifecycle
     def dispatch_queued(self, queue_id: str) -> DispatchResult:
         """Explicitly send one durable item while leaving the queue paused."""
         row = turn_queue.claim(queue_id)
@@ -897,6 +915,7 @@ class TurnDispatchService:
             raise DispatchError(500, "could not bind backend session") from e
         return backend_session_id
 
+    @_serialize_lifecycle
     def _spawn_attempt(self, spec: _TurnSpec, *, attempt: int) -> bool:
         """Reject a stale attempt; AGY rechecks around state/Popen itself."""
         with _TURN_LOCK:
@@ -1385,6 +1404,55 @@ def clear_for_agent(
         dropped = len(_QUEUED.pop(agent_id, []) or [])
     durable_dropped = 0 if preserve_queue else turn_queue.remove_for_agent(agent_id)
     return max(dropped, durable_dropped)
+
+
+def reset_blockers(agent_ids: list[str]) -> dict[str, list[str]]:
+    """Snapshot process-local reasons an agent is not safe to reset."""
+    with _TURN_LOCK:
+        return {
+            "spawning": [
+                agent_id for agent_id in agent_ids if agent_id in _CLAIMED_AT
+            ],
+            "terminals": [
+                agent_id for agent_id in agent_ids
+                if _terminal_live(agent_id)
+                or _INFLIGHT.get(agent_id) == _TERMINAL_SENTINEL
+            ],
+            "turns": [
+                agent_id for agent_id in agent_ids
+                if agent_id in _INFLIGHT
+                and _INFLIGHT.get(agent_id) != _TERMINAL_SENTINEL
+            ],
+            "memory_queues": [
+                agent_id for agent_id in agent_ids if _QUEUED.get(agent_id)
+            ],
+            # Routing chooses its target after a model call, so conservatively
+            # block every reset while any hands-free admission is unresolved.
+            "routing": list(agent_ids) if _ROUTING_ADMISSIONS else [],
+        }
+
+
+@contextmanager
+def orchestrator_admission(requested_session: str, *, default_session: str = ""):
+    """Track slow model routing without holding a lifecycle read lease."""
+    global _ROUTING_ADMISSIONS
+    from .agent_lifecycle import AgentLifecycleService
+
+    with AgentLifecycleService._lifecycle_gate.read():
+        active_session = requested_session
+        if not agents_db.get_by_session(active_session):
+            active_session = agents_db.get_focus_session()
+        if not active_session or not agents_db.get_by_session(active_session):
+            active_session = default_session
+        if not active_session or not agents_db.get_by_session(active_session):
+            active_session = requested_session
+        with _TURN_LOCK:
+            _ROUTING_ADMISSIONS += 1
+    try:
+        yield active_session
+    finally:
+        with _TURN_LOCK:
+            _ROUTING_ADMISSIONS = max(0, _ROUTING_ADMISSIONS - 1)
 
 
 def owns_inflight_trace(agent_id: str, trace_id: str) -> bool:

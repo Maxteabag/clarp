@@ -210,15 +210,36 @@ def create(*, session: str, type: str, title: str, summary: str = "",
     payload = _payload(payload)
     _require_payload(type, payload, artifact_id, str(agent["session"]))
     now = db.now_ms()
-    db.conn().execute(
-        """INSERT INTO artifacts(artifact_id,agent_id,session,type,title,summary,
-               status,reference_id,payload_json,created_at,updated_at,completed_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (artifact_id, agent["agent_id"], agent["session"], type, title[:300],
-         strip_hidden_blocks(summary).strip()[:4000], status,
-         strip_hidden_blocks(reference_id).strip()[:500],
-         json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False),
-         now, now, now if status in {"completed", "cancelled", "expired"} else None))
+    connection = db.conn()
+    owns_transaction = not connection.in_transaction
+    if owns_transaction:
+        connection.execute("BEGIN IMMEDIATE")
+    try:
+        owner = connection.execute(
+            """SELECT agent_id FROM agents
+                 WHERE session=? AND deleted_at IS NULL""",
+            (agent["session"],),
+        ).fetchone()
+        if owner is None or str(owner["agent_id"]) != str(agent["agent_id"]):
+            raise ValueError(
+                f"agent session changed before artifact creation: {agent['session']}")
+        connection.execute(
+            """INSERT INTO artifacts(artifact_id,agent_id,session,type,title,summary,
+                   status,reference_id,payload_json,created_at,updated_at,completed_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (artifact_id, agent["agent_id"], agent["session"], type, title[:300],
+             strip_hidden_blocks(summary).strip()[:4000], status,
+             strip_hidden_blocks(reference_id).strip()[:500],
+             json.dumps(payload, ensure_ascii=False, separators=(",", ":"),
+                        allow_nan=False),
+             now, now,
+             now if status in {"completed", "cancelled", "expired"} else None))
+        if owns_transaction:
+            connection.execute("COMMIT")
+    except BaseException:
+        if owns_transaction and connection.in_transaction:
+            connection.execute("ROLLBACK")
+        raise
     return get(artifact_id) or {}
 
 
@@ -357,13 +378,31 @@ def update(artifact_id: str, data: dict) -> dict:
     now = db.now_ms()
     completed = (current["completed_at"] if status == current["status"] else
                  (now if status in {"completed", "cancelled", "expired"} else None))
-    db.conn().execute(
-        """UPDATE artifacts SET title=?,summary=?,status=?,payload_json=?,updated_at=?,
-                  completed_at=? WHERE artifact_id=?""",
-        (title[:300],
-         strip_hidden_blocks(str(data.get("summary") if "summary" in data else current["summary"]))[:4000],
-         status, json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-         now, completed, artifact_id))
+    connection = db.conn()
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        owner = connection.execute(
+            """SELECT g.agent_id FROM artifacts a JOIN agents g
+                 ON g.agent_id=a.agent_id
+                WHERE a.artifact_id=? AND g.deleted_at IS NULL
+                  AND g.session=a.session""",
+            (artifact_id,),
+        ).fetchone()
+        if owner is None:
+            raise ValueError("artifact owner is no longer active")
+        connection.execute(
+            """UPDATE artifacts SET title=?,summary=?,status=?,payload_json=?,updated_at=?,
+                      completed_at=? WHERE artifact_id=?""",
+            (title[:300],
+             strip_hidden_blocks(str(
+                 data.get("summary") if "summary" in data else current["summary"]))[:4000],
+             status, json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+             now, completed, artifact_id))
+        connection.execute("COMMIT")
+    except BaseException:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK")
+        raise
     return get(artifact_id) or {}
 
 
@@ -405,7 +444,14 @@ def resolve(decision_id: str, *, choice: str, expected_revision: int) -> tuple[d
     _expire_decisions()
     con = db.conn(); con.execute("BEGIN IMMEDIATE")
     try:
-        row = con.execute("SELECT * FROM artifact_decisions WHERE decision_id=?", (decision_id,)).fetchone()
+        row = con.execute(
+            """SELECT d.* FROM artifact_decisions d
+                 JOIN artifacts a ON a.artifact_id=d.artifact_id
+                 JOIN agents g ON g.agent_id=a.agent_id
+                WHERE d.decision_id=? AND g.deleted_at IS NULL
+                  AND g.session=a.session""",
+            (decision_id,),
+        ).fetchone()
         if not row: raise ValueError("decision not found")
         if row["expires_at"] is not None and int(row["expires_at"]) <= db.now_ms():
             raise ValueError("decision expired")

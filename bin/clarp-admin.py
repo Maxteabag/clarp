@@ -946,7 +946,27 @@ def cmd_paths(_args) -> int:
     return 0
 
 
-def cmd_sessions(_args) -> int:
+def cmd_sessions(args) -> int:
+    if getattr(args, "sessions_command", "list") == "reset":
+        try:
+            response = api_request("POST", "/agents/reset", {
+                "sessions": args.sessions,
+            })
+        except urllib.error.HTTPError as exc:
+            try:
+                payload = json.loads(exc.read())
+                message = payload.get("message") or payload.get("error")
+            except (OSError, ValueError, AttributeError):
+                message = ""
+            raise SystemExit(message or f"agent reset failed: HTTP {exc.code}") from exc
+        if args.json:
+            print(json.dumps(response, indent=2))
+        else:
+            for item in response.get("resets", []):
+                print(
+                    f"{item['persona']}: {item['old_session']} -> "
+                    f"{item['new_session']}")
+        return 0
     from lib import db
 
     rows = db.conn().execute(
@@ -1928,7 +1948,13 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     url.add_argument("--json", action="store_true")
     url.set_defaults(func=cmd_url)
     sub.add_parser("paths").set_defaults(func=cmd_paths)
-    sub.add_parser("sessions").set_defaults(func=cmd_sessions)
+    sessions = sub.add_parser("sessions")
+    sessions.set_defaults(func=cmd_sessions, sessions_command="list")
+    session_commands = sessions.add_subparsers(dest="sessions_command")
+    reset_sessions = session_commands.add_parser("reset")
+    reset_sessions.add_argument("sessions", nargs="+")
+    reset_sessions.add_argument("--json", action="store_true")
+    reset_sessions.set_defaults(func=cmd_sessions)
     onboard = sub.add_parser("onboard")
     onboard.add_argument("--url", default="")
     onboard.add_argument("--name", default="")

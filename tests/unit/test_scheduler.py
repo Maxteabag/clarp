@@ -148,6 +148,39 @@ def test_schedule_runner_execution(tmp_path: pathlib.Path):
     count2 = runner.tick()
     assert count2 == 0
 
+
+def test_schedule_runner_reloads_session_after_lifecycle_wait(
+    tmp_path: pathlib.Path, monkeypatch,
+):
+    from lib.agent_store import save_agents, load_agents
+    save_agents({
+        "old-session": {
+            "name": "Worker", "voice_id": "V2", "cwd": str(tmp_path),
+            "backend": "claude",
+        }
+    })
+    agent = load_agents()["old-session"]
+    sched = scheduler.create_schedule(
+        session=agent["session"], name="Migrating", cron_expression="* * * * *",
+        prompt="Run after reset",
+    )
+    now = db.now_ms()
+    with db.conn() as connection:
+        connection.execute(
+            """UPDATE agent_schedules SET session='fresh-session',next_run_at=?
+                 WHERE schedule_id=?""",
+            (now - 1, sched["schedule_id"]),
+        )
+    stale = {**sched, "next_run_at": now - 1, "session": "old-session"}
+    monkeypatch.setattr(scheduler, "due_schedules", lambda _now: [stale])
+    dispatched = []
+
+    assert scheduler.AgentScheduleRunner(
+        dispatch_turn=lambda session, prompt: dispatched.append((session, prompt))
+    ).tick() == 1
+
+    assert dispatched == [("fresh-session", "Run after reset")]
+
 def test_snapshot_includes_schedules(tmp_path: pathlib.Path):
     from lib.agent_store import save_agents, load_agents
     from lib.snapshot import build_agent_snapshot

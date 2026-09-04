@@ -659,6 +659,15 @@ def test_durable_queue_recovers_after_dispatch_state_loss(tmp_path):
     assert turn_queue.status("u-recover") == "started"
 
 
+def test_orchestrator_admission_falls_back_to_live_default(tmp_path):
+    _service, _backends, _agent_id = _make_service(tmp_path)
+
+    with _td.orchestrator_admission(
+        "retired-session", default_session="mike"
+    ) as session:
+        assert session == "mike"
+
+
 def test_queue_during_claim_to_spawn_window_stays_serial(tmp_path):
     import threading
     service, backends, _agent_id = _make_service(tmp_path)
