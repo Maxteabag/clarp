@@ -56,6 +56,7 @@ class FakeEventSource {
 }
 
 let timeouts;
+let nextTimeoutId;
 
 async function loadStore() {
   vi.resetModules();
@@ -65,13 +66,20 @@ async function loadStore() {
 beforeEach(() => {
   FakeEventSource.instances = [];
   timeouts = [];
+  nextTimeoutId = 1;
   app.authRejected = false;
   clog.mockClear();
   noteSseEvent.mockClear();
   setConn.mockClear();
   vi.stubGlobal('EventSource', FakeEventSource);
-  vi.stubGlobal('setTimeout', fn => { timeouts.push(fn); return timeouts.length; });
-  vi.stubGlobal('clearTimeout', () => {});
+  vi.stubGlobal('setTimeout', fn => {
+    const id = nextTimeoutId++;
+    timeouts.push({ id, fn });
+    return id;
+  });
+  vi.stubGlobal('clearTimeout', id => {
+    timeouts = timeouts.filter(timer => timer.id !== id);
+  });
   vi.stubGlobal('setInterval', () => 1);
   vi.stubGlobal('clearInterval', () => {});
   vi.stubGlobal('localStorage', {
@@ -92,7 +100,7 @@ describe('SSE reconnect ownership', () => {
     });
 
     store.scheduleReconnect();
-    timeouts.shift()();
+    timeouts.shift().fn();
 
     expect(FakeEventSource.instances).toHaveLength(2);
     expect(FakeEventSource.instances[1].url).toContain('last_event_id=417');
@@ -105,7 +113,7 @@ describe('SSE reconnect ownership', () => {
     store.scheduleReconnect();
     store.scheduleReconnect();
     expect(timeouts).toHaveLength(1);
-    timeouts.shift()();
+    timeouts.shift().fn();
 
     expect(FakeEventSource.instances).toHaveLength(2);
   });

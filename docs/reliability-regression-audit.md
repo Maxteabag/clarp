@@ -1,9 +1,15 @@
 # Clarp reliability and regression audit
 
-Status: active investigation  
-Audience: Clarp maintainers  
-Started: 2026-09-04  
-Baseline: `origin/main` at `a95d9b0` (`v0.6.4`)
+Status: draft umbrella; historical findings reclassified
+Audience: Clarp maintainers
+Started: 2026-09-04
+Original baseline: `a95d9b0` (`v0.6.4`)
+Current rebase: `eeecc72` (#34)
+
+**Read the [runtime-boundary reassessment](reliability-audit-runtime.md) first.**
+It runs the full 53-case failure inventory, distinguishes defects from invalid
+contracts, links priority fixes, and defines focused draft TDD slices. The
+findings below are historical hypotheses and do not all remain accepted.
 
 ## Direct answer so far
 
@@ -97,7 +103,7 @@ These are hypotheses to turn into executable contracts or revise with evidence:
 - What is the minimum server/client compatibility window, especially for an iOS
   release that cannot be updated atomically with the server?
 
-## Confirmed red regressions
+## Historical red regressions (reclassified above)
 
 These are executable failures on the baseline, not brainstorming items. The
 tests are intentionally red in this draft audit PR until maintainers decide
@@ -348,3 +354,9 @@ search produces only duplicate or lower-value variants.
   schedule dispatch, model-monitor and request-thread amplification, PWA SSE
   cursor/timer/auth behavior, in-app update fallback, limited-token file read,
   and invalid JSON error responses. Added a green archive test for #8.
+
+- Runtime rebase: ported the five audit commits onto `eeecc72`; corrected runtime,
+  process, SSE, timer and doctor fixtures. Original run: 53 red plus one guard.
+  Adapted inventory: 51 red and 3 green, with a separate per-case relevance review.
+  Priority fixes are PRs #35 and #36; all remaining work is tracked in draft
+  TDD slices linked from the reassessment. No audit red tests were merged.
