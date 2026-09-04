@@ -285,21 +285,33 @@ def pending_heartbeat_agents(*, now: float | None = None) -> list[dict]:
     return due
 
 
-def record_heartbeat_noop(agent_id: str) -> None:
-    _record_heartbeat_noop(agent_id)
+def record_heartbeat_noop(agent_id: str, *, is_interrupted: bool | None = None) -> None:
+    if is_interrupted is not None:
+        _record_heartbeat_noop(agent_id, is_interrupted=is_interrupted)
+    else:
+        _record_heartbeat_noop(agent_id)
 
 
-def record_heartbeat_noop_once(agent_id: str, accounting_key: str) -> None:
+def record_heartbeat_noop_once(
+    agent_id: str,
+    accounting_key: str,
+    *,
+    is_interrupted: bool | None = None,
+) -> None:
     if not _claim_accounting_key(agent_id, accounting_key, "noop"):
         return
-    _record_heartbeat_noop(agent_id)
+    if is_interrupted is not None:
+        _record_heartbeat_noop(agent_id, is_interrupted=is_interrupted)
+    else:
+        _record_heartbeat_noop(agent_id)
 
 
-def _record_heartbeat_noop(agent_id: str) -> None:
+def _record_heartbeat_noop(agent_id: str, *, is_interrupted: bool | None = None) -> None:
     if not agent_id:
         return
-    latest = agents_db.latest_state(agent_id) or {}
-    is_interrupted = latest.get("kind") == AgentState.INTERRUPTED and not _is_user_stopped(latest)
+    if is_interrupted is None:
+        latest = agents_db.latest_state(agent_id) or {}
+        is_interrupted = latest.get("kind") == AgentState.INTERRUPTED and not _is_user_stopped(latest)
     with _STATE_LOCK:
         state = _state_for_locked(agent_id)
         state.noop_streak += 1

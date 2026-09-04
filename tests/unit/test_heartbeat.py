@@ -729,3 +729,17 @@ def test_default_backoff_cap_is_one_hour(monkeypatch):
     assert settings.backoff_cap_sec == 3600
 
 
+def test_record_heartbeat_noop_with_explicit_is_interrupted_prevents_dormancy(monkeypatch):
+    _heartbeat_test_env(monkeypatch, base=40, cap=160)
+    aid = _agent("interrupted_explicit")
+    # Even if database state is still THINKING, passing is_interrupted=True protects the agent
+    agents_db.record_state(aid, AgentState.THINKING, {})
+    for _ in range(10):
+        heartbeat.record_heartbeat_noop(aid, is_interrupted=True)
+
+    state = heartbeat._state_for(aid)  # noqa: SLF001
+    assert state.noop_streak == 10
+    assert state.dormant is False
+
+
+
