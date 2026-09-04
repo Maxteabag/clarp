@@ -685,7 +685,7 @@ class Handler(BaseHTTPRequestHandler):
         "/backend-auth", "/server-update", "/managed-skills",
         "/orchestrator/", "/herald/", "/personalities/",
         "/automation-settings", "/paired-devices", "/tts/providers",
-        "/oracle/",
+        "/oracle/", "/agent-file",
     )
     _LIMITED_DEVICE_POST_EXACT = frozenset({
         "/send", "/transcribe", "/upload", "/select", "/focus",
