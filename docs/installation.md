@@ -242,6 +242,7 @@ Default core:
 - `clarp-background-jobs`
 - `clarp-agent-communication`
 - `clarp-server-admin`
+- `clarp-issue-reporting`
 - `clarp-transcription`
 - `clarp-voice-adapters`
 
