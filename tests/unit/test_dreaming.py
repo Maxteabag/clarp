@@ -484,6 +484,37 @@ def test_stale_sent_round_is_requeued_and_dispatched(monkeypatch):
     assert retried["sent_at"] > stale_sent_at
 
 
+def test_fast_dream_completion_cannot_be_regressed_back_to_sent(monkeypatch):
+    aid = _agent("dream-fast")
+    agents_db.update_agent(aid, dreaming_enabled=True)
+    agent = agents_db.get_by_agent_id(aid)
+    run = dreaming.create_dream_run(
+        agent,
+        local_date="2026-09-04",
+        timezone_name="UTC",
+        timezone_source="test",
+    )
+    dream_round = dreaming.list_dream_runs(session="dream-fast")[0]["rounds"][0]
+
+    def complete_synchronously(_session: str, _prompt: str) -> bool:
+        dreaming.record_round_output(
+            agent_id=aid,
+            run_id=run["run_id"],
+            round_id=dream_round["round_id"],
+            stage=dream_round["stage"],
+            response="D1 [new]: Continue safely",
+        )
+        return True
+
+    worker = dreaming.DreamingScheduler(send_dream=complete_synchronously)
+
+    assert worker._advance_run(run) == 1  # noqa: SLF001
+    current = dreaming.list_dream_runs(session="dream-fast")[0]["rounds"][0]
+    assert current["status"] == "completed"
+
+
+
+
 def test_isolated_dream_dispatch_uses_snapshot_without_touching_live_chat(monkeypatch):
     aid = _agent("dreamtest")
     agent = agents_db.get_by_session("dreamtest")
