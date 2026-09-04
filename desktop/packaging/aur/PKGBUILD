@@ -1,6 +1,6 @@
 # Maintainer: Clarp contributors
 pkgname=clarp-desktop
-pkgver=0.1.0
+pkgver=0.6.7
 pkgrel=1
 pkgdesc='Native Qt desktop client for Clarp agents'
 arch=('x86_64' 'aarch64')

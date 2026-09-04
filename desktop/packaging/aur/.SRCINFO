@@ -1,6 +1,6 @@
 pkgbase = clarp-desktop
 	pkgdesc = Native Qt desktop client for Clarp agents
-	pkgver = 0.1.0
+	pkgver = 0.6.7
 	pkgrel = 1
 	url = https://github.com/Maxteabag/clarp
 	arch = x86_64
@@ -16,7 +16,7 @@ pkgbase = clarp-desktop
 	depends = qt6-multimedia-ffmpeg
 	depends = qt6-svg
 	depends = qt6-wayland
-	source = clarp-desktop-0.1.0.tar.gz::https://github.com/Maxteabag/clarp/archive/refs/tags/v0.1.0.tar.gz
+	source = clarp-desktop-0.6.7.tar.gz::https://github.com/Maxteabag/clarp/archive/refs/tags/v0.6.7.tar.gz
 	sha256sums = SKIP
 
 pkgname = clarp-desktop

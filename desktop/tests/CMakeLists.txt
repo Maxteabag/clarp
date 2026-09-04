@@ -43,6 +43,9 @@ target_link_libraries(clarp-desktop-tests PRIVATE
 clarp_apply_quality_settings(clarp-desktop-tests)
 
 add_test(NAME clarp-desktop-core COMMAND clarp-desktop-tests)
+set_tests_properties(clarp-desktop-core PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software"
+)
 
 add_test(
     NAME clarp-desktop-native-only

@@ -24,7 +24,7 @@ int main(int argc, char* argv[]) {
     QApplication::setApplicationDisplayName(QStringLiteral("Clarp"));
     QApplication::setOrganizationName(QStringLiteral("MaxTeaBag"));
     QApplication::setOrganizationDomain(QStringLiteral("maxteabag.com"));
-    QApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QApplication::setApplicationVersion(QStringLiteral(CLARP_DESKTOP_VERSION));
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QApplication application(argc, argv);
