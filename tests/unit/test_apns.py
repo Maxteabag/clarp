@@ -4,6 +4,8 @@ minted from a throwaway P-256 key so the real crypto path is still exercised.
 """
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from lib import apns, config
@@ -105,6 +107,83 @@ def test_apns_config_parses(tmp_path):
     assert cfg.apns_team_id == "TEAMID1234"
     assert cfg.apns_bundle_id == "com.maxteabag.clarp"
     assert cfg.apns_environment == "production"
+
+
+def test_apns_legacy_config_directory_falls_back_to_current_key(tmp_path):
+    current = tmp_path / "clarp"
+    current.mkdir()
+    key = current / "AuthKey_TEST123.p8"
+    key.write_text("key")
+    cfgfile = current / "config.toml"
+    legacy_key = tmp_path / "claude-pwa" / key.name
+    cfgfile.write_text(
+        "[apns]\n"
+        f'key_path = "{legacy_key}"\n'
+        'key_id = "ABC123KEYID"\n'
+        'team_id = "TEAMID1234"\n'
+    )
+    config.reset_cache_for_tests()
+
+    cfg = config.load(cfgfile)
+
+    assert cfg.apns_key_file() == str(key)
+    assert cfg.apns_enabled() is True
+
+
+def test_apns_legacy_fallback_anchors_relative_config_path(tmp_path, monkeypatch):
+    current = tmp_path / "config" / "clarp"
+    current.mkdir(parents=True)
+    key = current / "AuthKey_TEST123.p8"
+    key.write_text("key")
+    legacy_key = current.parent / "claude-pwa" / key.name
+    cfgfile = current / "config.toml"
+    cfgfile.write_text(
+        "[apns]\n"
+        f'key_path = "{legacy_key}"\n'
+        'key_id = "ABC123KEYID"\n'
+        'team_id = "TEAMID1234"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    config.reset_cache_for_tests()
+
+    cfg = config.load(pathlib.Path("config/clarp/config.toml"))
+
+    assert cfg.apns_key_file() == str(key)
+    assert cfg.apns_enabled() is True
+
+
+def test_apns_unrelated_legacy_named_directory_does_not_redirect(tmp_path):
+    current = tmp_path / "config" / "clarp"
+    current.mkdir(parents=True)
+    key = current / "AuthKey_TEST123.p8"
+    key.write_text("key")
+    configured = tmp_path / "backup" / "claude-pwa" / key.name
+    cfgfile = current / "config.toml"
+    cfgfile.write_text(
+        "[apns]\n"
+        f'key_path = "{configured}"\n'
+        'key_id = "ABC123KEYID"\n'
+        'team_id = "TEAMID1234"\n'
+    )
+    config.reset_cache_for_tests()
+
+    cfg = config.load(cfgfile)
+
+    assert cfg.apns_key_file() == str(configured)
+    assert cfg.apns_enabled() is False
+
+
+def test_apns_missing_key_file_is_disabled(tmp_path):
+    cfgfile = tmp_path / "config.toml"
+    cfgfile.write_text(
+        "[apns]\n"
+        f'key_path = "{tmp_path / "missing.p8"}"\n'
+        'key_id = "ABC123KEYID"\n'
+        'team_id = "TEAMID1234"\n'
+    )
+    config.reset_cache_for_tests()
+
+    assert config.load(cfgfile).apns_enabled() is False
 
 
 # --------------------------------------------------------------------------

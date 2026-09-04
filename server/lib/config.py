@@ -174,6 +174,7 @@ DEFAULT_CATALOG: list[dict[str, str]] = [
 
 @dataclass(frozen=True)
 class Config:
+    _config_path: str = field(default="", repr=False, compare=False)
     bind_addr: str = "127.0.0.1"
     port: int = 7682
     auth_token: str = ""                 # empty = no auth check
@@ -293,15 +294,37 @@ class Config:
         return self.auth_token_or_env(self.openai_api_key, "OPENAI_API_KEY")
 
     def apns_enabled(self) -> bool:
-        """True when enough is configured to mint an APNs token and send.
-        The .p8 may also come from the APNS_KEY_PATH env var as a fallback."""
-        key_path = self.apns_key_path or os.environ.get("APNS_KEY_PATH", "")
-        return bool(key_path and self.apns_key_id and self.apns_team_id)
+        """True when configured APNs credentials include a readable key file."""
+        key_file = self.apns_key_file()
+        return bool(
+            key_file
+            and self.apns_key_id
+            and self.apns_team_id
+            and pathlib.Path(key_file).is_file()
+            and os.access(key_file, os.R_OK)
+        )
 
     def apns_key_file(self) -> str:
-        """The configured .p8 path, expanded."""
+        """The configured .p8 path, including the legacy app-name fallback.
+
+        Early Clarp installs moved their config directory from ``claude-pwa``
+        to ``clarp`` without rewriting an absolute APNs key path stored inside
+        config.toml. Prefer the configured path while it exists, then recover
+        only that exact legacy-directory shape beside the active config.
+        """
         raw = (self.apns_key_path or os.environ.get("APNS_KEY_PATH", "")).strip()
-        return os.path.expanduser(raw) if raw else ""
+        if not raw:
+            return ""
+        configured = pathlib.Path(raw).expanduser()
+        if configured.is_file():
+            return str(configured)
+        config_file = pathlib.Path(
+            self._config_path or _resolve_config_path()).expanduser()
+        legacy_parent = config_file.parent.parent / "claude-pwa"
+        if configured.parent != legacy_parent:
+            return str(configured)
+        migrated = config_file.parent / configured.name
+        return str(migrated) if migrated.is_file() else str(configured)
 
     def cartesia_voice_for(self, persona: str) -> str | None:
         """Cartesia voice id for a persona, or None if unmapped."""
@@ -343,6 +366,7 @@ def load(path: pathlib.Path | None = None) -> Config:
         return _CACHED
     if path is None:
         path = _resolve_config_path()
+    path = path.expanduser().resolve(strict=False)
     data: dict[str, Any] = {}
     try:
         with path.open("rb") as f:
@@ -389,6 +413,7 @@ def load(path: pathlib.Path | None = None) -> Config:
     fallback = str(tts.get("fallback", "none")).strip().lower()
     cartesia_voices = cartesia.get("voices")
     _CACHED = Config(
+        _config_path     = str(path),
         bind_addr       = str(server.get("bind_addr", "127.0.0.1")),
         port            = int(server.get("port", 7682)),
         auth_token      = str(server.get("auth_token", "")),

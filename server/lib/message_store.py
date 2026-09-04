@@ -347,7 +347,7 @@ def record_interruption_marker(*, agent_id: str, backend_session_id: str,
     ).fetchone()
     seq = min(int(row["next_seq"]), -1)
     cause = database.execute(
-        f"""SELECT {_message_activity_sql()} AS ts_ms
+        f"""SELECT {_message_activity_sql()} AS ts_ms, updated_at
               FROM messages WHERE message_id = ?""",
         (cause_message_id,),
     ).fetchone()
@@ -355,7 +355,14 @@ def record_interruption_marker(*, agent_id: str, backend_session_id: str,
     # user row's, so its timestamp must be strictly later to sit under it.
     timestamp_ms = now_ms()
     if cause is not None and cause["ts_ms"] is not None:
-        timestamp_ms = max(timestamp_ms, int(cause["ts_ms"]) + 1)
+        # SQLite's julianday conversion can round a millisecond timestamp down
+        # by one. Include the durable write clock so a fast restart cannot give
+        # the marker the same display timestamp and sort it above its user row.
+        timestamp_ms = max(
+            timestamp_ms,
+            int(cause["ts_ms"]) + 1,
+            int(cause["updated_at"] or 0) + 1,
+        )
     timestamp = _iso_from_ms(timestamp_ms)
     revision = _next_revision(database)
     inserted = database.execute(
