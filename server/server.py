@@ -337,6 +337,7 @@ class Handler(BaseHTTPRequestHandler):
     _ROOT_STATIC = {"/manifest.json", "/styles.css", "/icon.png"}
     _POST_ROUTES = {
         "/send": "_handle_send",
+        "/dreaming/run": "_handle_dreaming_run_post",
         "/orchestrator/route-delegation": "_handle_orchestrator_route_delegation",
         "/transcribe": "_handle_transcribe",
         "/transcription-models/install": "_handle_transcription_model_install",
@@ -2997,8 +2998,58 @@ class Handler(BaseHTTPRequestHandler):
             "contract": settings.as_dict(),
         }).encode(), "application/json")
 
-    def _handle_dreaming_settings_get(self):
+    def _dreaming_backend_options(self):
+        """Backends the dreaming picker may offer, with their effort levels.
+
+        Model lists are deliberately not duplicated here — a client already
+        fetches `/agent-model-options` for the full catalogue and can filter it
+        by the chosen backend id.
+        """
+        from lib import backends
+        options = [{
+            "id": "",
+            "label": "Same as the agent",
+            "efforts": [],
+        }]
+        for backend_id in backends.ids():
+            fields = backends.catalogue_fields(backend_id)
+            options.append({
+                "id": backend_id,
+                "label": fields.get("label") or backend_id,
+                "efforts": list(backends.valid_efforts(backend_id)),
+            })
+        return options
+
+    def _handle_dreaming_run_post(self):
+        """Start one dream immediately, with an optional pinned recipe."""
         from lib import dreaming
+        data = self._read_json()
+        if data is None:
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        session = str(data.get("session") or "").strip()
+        if not session:
+            return self._send(400, b'{"error":"session required"}',
+                              "application/json")
+        try:
+            run = dreaming.start_manual_run(
+                session,
+                seed_strategy=str(data.get("seed_strategy") or "").strip(),
+                context_dose=str(data.get("context_dose") or "").strip(),
+            )
+        except ValueError as e:
+            return self._send(
+                409, json.dumps({"error": str(e)}).encode(), "application/json")
+        return self._send(200, json.dumps({
+            "ok": True,
+            "run_id": run.get("run_id"),
+            "session": run.get("session"),
+            "seed_strategy": run.get("seed_strategy"),
+            "context_dose": run.get("context_dose"),
+            "seed_material": run.get("seed_material"),
+        }).encode(), "application/json")
+
+    def _handle_dreaming_settings_get(self):
+        from lib import dream_seeds, dreaming
         return self._send(200, json.dumps({
             "ok": True,
             "settings": dreaming.get_settings().as_dict(),
@@ -3016,9 +3067,17 @@ class Handler(BaseHTTPRequestHandler):
                     dreaming.DREAM_TOKEN_BUDGET_MAX,
                 ],
             },
+            # Everything a client needs to draw the dreaming backend/model/
+            # effort pickers without shipping its own catalogue. An empty
+            # choice means "inherit the agent's own backend".
+            "options": {
+                "backends": self._dreaming_backend_options(),
+                "seed_strategies": list(dream_seeds.STRATEGIES),
+                "context_doses": list(dream_seeds.CONTEXT_DOSES),
+            },
         }).encode(), "application/json")
 
-    def _handle_dreaming_settings_put(self):
+    def _handle_dreaming_settings_put(self):  # noqa: D401
         from lib import dreaming
         data = self._read_json()
         if data is None:

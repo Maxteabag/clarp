@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 66
+_SCHEMA_VERSION = 67
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -792,6 +792,9 @@ CREATE TABLE dream_runs (
     updated_at INTEGER NOT NULL,
     finished_at INTEGER,
     last_error TEXT,
+    seed_strategy TEXT NOT NULL DEFAULT 'control',
+    context_dose TEXT NOT NULL DEFAULT 'full',
+    seed_material TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 CREATE INDEX idx_dream_runs_agent_status ON dream_runs(agent_id, status, started_at DESC);
@@ -813,6 +816,8 @@ CREATE TABLE dream_threads (
     artifact_ref TEXT NOT NULL DEFAULT '',
     evidence_summary TEXT NOT NULL DEFAULT '',
     guardrail_refusals TEXT NOT NULL DEFAULT '[]',
+    killed_reason TEXT NOT NULL DEFAULT '',
+    origin_note TEXT NOT NULL DEFAULT '',
     UNIQUE(run_id, thread_index),
     FOREIGN KEY (run_id) REFERENCES dream_runs(run_id)
 );
@@ -1328,6 +1333,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v65(con)
             if version < 66:
                 _migrate_to_v66(con)
+            if version < 67:
+                _migrate_to_v67(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1515,6 +1522,31 @@ def _migrate_to_v65(con: sqlite3.Connection) -> None:
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_trace ON messages(trace_id)"
         " WHERE trace_id IS NOT NULL")
+
+
+def _migrate_to_v67(con: sqlite3.Connection) -> None:
+    """Dreaming records its recipe, and a thread records why it died.
+
+    A run is now an experiment: which seeding strategy produced its ideas and
+    how much of the live session was in context are recorded per run, so two
+    nights can be compared instead of merely read. `killed_reason` closes the
+    other half - the ledger used to show only what survived.
+    """
+    con.execute(
+        "ALTER TABLE dream_runs ADD COLUMN seed_strategy TEXT NOT NULL"
+        " DEFAULT 'control'")
+    con.execute(
+        "ALTER TABLE dream_runs ADD COLUMN context_dose TEXT NOT NULL"
+        " DEFAULT 'full'")
+    con.execute(
+        "ALTER TABLE dream_runs ADD COLUMN seed_material TEXT NOT NULL"
+        " DEFAULT ''")
+    con.execute(
+        "ALTER TABLE dream_threads ADD COLUMN killed_reason TEXT NOT NULL"
+        " DEFAULT ''")
+    con.execute(
+        "ALTER TABLE dream_threads ADD COLUMN origin_note TEXT NOT NULL"
+        " DEFAULT ''")
 
 
 _V64_SQL = """

@@ -208,7 +208,11 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
     BackendAdapter(
         id=CODEX, label="Codex", required_binary="codex",
         supports_steer=True,
-        efforts=("low", "medium", "high"),
+        # The live catalogue (`codex debug models`) reports xhigh/max on every
+        # currently listed model and ultra on the 5.6 family; the old
+        # three-level tuple silently dropped anything above `high`, so a pinned
+        # xhigh agent ran at the CLI default instead.
+        efforts=("low", "medium", "high", "xhigh", "max", "ultra"),
         badge="BackendCodex",
         detail="Runs on the Codex CLI.",
         symbol="terminal",

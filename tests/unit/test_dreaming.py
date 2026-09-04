@@ -191,6 +191,10 @@ def test_scheduler_runs_deep_investigation_ledger_to_one_visible_digest():
     scheduler = dreaming.DreamingScheduler(
         send_dream=lambda session, text: sent.append((session, text)),
         now=lambda: now,
+        # The nightly path now varies its seeding recipe; this test is about
+        # the round chain, so pin the control arm and let the strategy-specific
+        # shapes be covered separately.
+        recipe_chooser=lambda: ("control", "full"),
     )
 
     assert scheduler.run_once() == 1
@@ -318,6 +322,10 @@ def test_completed_round_kicks_next_round_without_scheduler_poll():
         chain_delay_sec=0.01,
         chain_retry_sec=0.01,
         chain_attempts=20,
+        # This test drives the seed -> fanout -> ... chain, so the recipe has
+        # to be fixed; the nightly path otherwise draws an arm at random and
+        # the roleplay arm opens with a different first stage.
+        recipe_chooser=lambda: ("control", "full"),
     )
 
     def complete_current_round() -> None:
@@ -717,3 +725,197 @@ def test_snapshot_strips_all_routine_origins_not_just_some():
     assert "origin=heartbeat" not in snapshot
     assert "origin=dreaming" not in snapshot
     assert "Automated leader_tick check" not in snapshot
+
+
+# --- seeding strategies, context dose, and the parse honesty fix ------------
+
+def test_markdown_headed_slate_parses_instead_of_falling_back():
+    """A `### D1 [new]: ...` slate is the shape models actually emit.
+
+    The original pattern accepted only a bare or bulleted `D1:`, so a
+    well-formed heading slate parsed as zero directions and the run silently
+    branched on whatever prose the fallback scraped up.
+    """
+    seed = "\n".join([
+        "## Active directions",
+        "### D1 [new]: Build the stability reconciler so drifted state heals",
+        "### D2 [uncertain]: The iOS composer churn is the same disease",
+        "**D3 [new]:** A third focus store lives outside set_focus",
+        "## Anti-promoted",
+        "- D4 [already-fixed]: The restart marker already ships today",
+    ])
+    items = dreaming._parse_slate_items(seed)
+    titles = [item["title"] for item in items]
+    assert len(titles) == 4
+    assert titles[0].startswith("Build the stability reconciler")
+    assert titles[2].startswith("A third focus store")
+    assert [item["anti_promoted"] for item in items] == [False, False, False, True]
+    assert all(item["origin_note"] == "" for item in items)
+
+
+def test_bold_metadata_fields_are_extracted():
+    text = "\n".join([
+        "**Evidence status:** confirmed",
+        "**Altitude:** worktree",
+        "- Evidence summary: the reconciler is wired and its tests pass",
+        "### Guardrail refused: make deploy | deploys are forbidden",
+    ])
+    meta = dreaming._parse_thread_metadata(text)
+    assert meta["evidence_status"] == "confirmed"
+    assert meta["altitude"] == "worktree"
+    assert meta["evidence_summary"].startswith("the reconciler is wired")
+    assert meta["guardrail_refusals"] == ["make deploy | deploys are forbidden"]
+
+
+def test_failed_slate_parse_is_recorded_rather_than_fabricated():
+    """A degraded parse must be visible, not disguised as a healthy run."""
+    _agent("dozy")
+    run = dreaming.create_dream_run(
+        agents_db.get_by_session("dozy"),
+        local_date="2026-06-24", timezone_name="UTC", timezone_source="test")
+    dreaming.record_round_output(
+        agent_id=agents_db.get_by_session("dozy")["agent_id"],
+        run_id=run["run_id"],
+        round_id=dreaming.list_dream_runs(session="dozy")[0]["rounds"][0]["round_id"],
+        stage="seed",
+        response="I looked around and nothing in particular stood out to me.",
+    )
+    dreaming._ensure_next_rounds(run["run_id"])
+    threads = dreaming.list_dream_runs(session="dozy")[0]["threads"]
+    assert threads, "a degraded parse still has to produce threads to work on"
+    assert any(t["origin_note"] for t in threads), "padding must be tagged"
+    assert dreaming.get_run(run["run_id"])["last_error"]
+
+
+def test_roleplay_runs_the_blind_day_before_it_sees_the_product():
+    _agent("dreamer")
+    run = dreaming.create_dream_run(
+        agents_db.get_by_session("dreamer"),
+        local_date="2026-06-24", timezone_name="UTC", timezone_source="test",
+        seed_strategy="roleplay", context_dose="none")
+    assert run["seed_strategy"] == "roleplay"
+    assert run["seed_material"] in dreaming.dream_seeds.ROLEPLAY_PERSONAS
+
+    first = dreaming.list_dream_runs(session="dreamer")[0]["rounds"][0]
+    assert first["stage"] == "roleplay_day"
+    assert "stage=ROLEPLAY_DAY" in first["prompt"]
+    # The blind constraint is the whole point of the arm.
+    assert "You do not know what this machine is for" in first["prompt"]
+    assert "Do not propose solutions" in first["prompt"]
+
+    dreaming.record_round_output(
+        agent_id=agents_db.get_by_session("dreamer")["agent_id"],
+        run_id=run["run_id"], round_id=first["round_id"],
+        stage="roleplay_day",
+        response="07:00 handover. 09:20 rewrote the same note on paper twice.",
+    )
+    dreaming._ensure_next_rounds(run["run_id"])
+    rounds = dreaming.list_dream_runs(session="dreamer")[0]["rounds"]
+    reveal = next(r for r in rounds if r["stage"] == "seed")
+    assert "role-play reveal" in reveal["prompt"]
+    assert "Now read the actual project" in reveal["prompt"]
+
+
+def test_context_dose_none_withholds_the_session_snapshot():
+    _agent("doze")
+    agent = agents_db.get_by_session("doze")
+    withheld = dreaming._dose_snapshot(agent, "none")
+    assert "withheld" in withheld
+    assert "Recent real conversation snapshot:\n-" not in withheld
+    full = dreaming._dose_snapshot(agent, "full")
+    assert "withheld" not in full
+
+
+def test_manual_run_bypasses_the_nightly_window():
+    _agent("dodo")
+    run = dreaming.start_manual_run("dodo", seed_strategy="lenses",
+                                    context_dose="fragments")
+    assert run["seed_strategy"] == "lenses"
+    assert run["context_dose"] == "fragments"
+    assert run["seed_material"], "the lens arm must record which lenses it drew"
+    # A second concurrent run on one agent would interleave two ledgers.
+    try:
+        dreaming.start_manual_run("dodo")
+    except ValueError as e:
+        assert "already has an active dream run" in str(e)
+    else:
+        raise AssertionError("expected a refusal for a concurrent manual run")
+
+    # A manual run counts against the night's quota, so the nightly scheduler
+    # cannot follow it with a second randomly-seeded run for the same agent.
+    agent = agents_db.get_by_session("dodo")
+    assert agent["dreaming_last_local_date"] == run["local_date"]
+    assert dreaming.dream_runs_for_agent_date(
+        agent["agent_id"], run["local_date"]) == 1
+
+
+def test_completed_digest_reaches_the_chat_and_an_artifact():
+    """The night's one visible output has to leave the ledger.
+
+    Dreams run in an isolated backend session that is deliberately never
+    written to the chat read model, so for five real runs the digest was
+    recorded and then seen by nobody. Delivery is the whole point of the
+    feature, so it gets a test rather than a hope.
+    """
+    from lib import artifacts, message_store
+
+    aid = _agent("dozer")
+    bsid = "backend-dream"
+    agents_db.bind_backend_session(aid, bsid)
+    run = dreaming.create_dream_run(
+        agents_db.get_by_session("dozer"),
+        local_date="2026-06-24", timezone_name="UTC", timezone_source="test",
+        seed_strategy="foreign", context_dose="none")
+    run_id = run["run_id"]
+    round_id = dreaming.list_dream_runs(session="dozer")[0]["rounds"][0]["round_id"]
+
+    digest = "Dream Digest\n\nOne ranked idea, with evidence and a next step."
+    dreaming.record_final_digest(
+        agent_id=aid, run_id=run_id, round_id=round_id, digest=digest)
+
+    rows = [m for m in message_store.list_messages(
+        agent_id=aid, backend_session_id=bsid, limit=50)
+        if m.get("origin") == "dreaming"]
+    assert len(rows) == 1, "exactly one visible row per night"
+    assert digest in rows[0]["text"]
+
+    published = [a for a in artifacts.list_artifacts(session="dozer")
+                 if a.get("reference_id") == run_id]
+    assert len(published) == 1
+    assert published[0]["type"] == "document"
+    # The recipe travels with the digest, otherwise a ranked set of ideas
+    # cannot be attributed to the seeding arm that produced it.
+    payload = artifacts.get(published[0]["artifact_id"])["payload"]
+    assert payload["seed_strategy"] == "foreign"
+    assert payload["context_dose"] == "none"
+    assert payload["content"] == digest
+
+
+def test_digest_delivery_is_idempotent():
+    """A retried transcript import must not post the digest twice."""
+    from lib import message_store
+
+    aid = _agent("dozy2")
+    bsid = "backend-dream-2"
+    agents_db.bind_backend_session(aid, bsid)
+    run = dreaming.create_dream_run(
+        agents_db.get_by_session("dozy2"),
+        local_date="2026-06-24", timezone_name="UTC", timezone_source="test")
+    run_id = run["run_id"]
+
+    from lib import artifacts
+
+    for _ in range(3):
+        dreaming._deliver_digest(
+            run_id=run_id, agent_id=aid, digest="Dream Digest\n\nSame text.")
+
+    rows = [m for m in message_store.list_messages(
+        agent_id=aid, backend_session_id=bsid, limit=50)
+        if m.get("origin") == "dreaming"]
+    assert len(rows) == 1
+    # The artifact side has to be idempotent too. This assertion is the one
+    # that matters: the message insert is guarded by message_id, so a broken
+    # artifact path would otherwise stay hidden behind a swallowed exception.
+    published = [a for a in artifacts.list_artifacts(session="dozy2")
+                 if a.get("reference_id") == run_id]
+    assert len(published) == 1

@@ -87,7 +87,12 @@ def test_per_agent_mute_defaults_off_and_persists():
 def test_clean_effort_per_backend():
     assert backends.clean_effort(backends.CLAUDE, "xhigh") == "xhigh"
     assert backends.clean_effort(backends.CLAUDE, "MAX") == "max"     # normalized
-    assert backends.clean_effort(backends.CODEX, "xhigh") == ""       # codex max is high
+    # `codex debug models` reports xhigh/max on every listed model and ultra on
+    # the 5.6 family; the adapter used to stop at "high", which silently
+    # downgraded a pinned xhigh agent to the CLI default.
+    assert backends.clean_effort(backends.CODEX, "xhigh") == "xhigh"
+    assert backends.clean_effort(backends.CODEX, "ultra") == "ultra"
+    assert backends.clean_effort(backends.CODEX, "bogus") == ""
     assert backends.clean_effort(backends.CODEX, "low") == "low"
     assert backends.clean_effort(backends.AGY, "low") == "low"
     assert backends.clean_effort(backends.CLAUDE, "bogus") == ""
