@@ -25,6 +25,7 @@ permissions:
 
 jobs:
   linux:
+    if: github.event_name != 'workflow_dispatch' || inputs.release_tag == ''
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
@@ -82,8 +83,10 @@ jobs:
 
   release-bundles:
     if: >-
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+      always() &&
+      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '' ||
+      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') &&
+      needs.linux.result == 'success')
     needs: linux
     runs-on: ubuntu-24.04
     permissions:
