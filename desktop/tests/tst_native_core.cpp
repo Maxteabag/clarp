@@ -12,6 +12,7 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSignalSpy>
@@ -193,6 +194,8 @@ class FakeClarpServer final : public QTcpServer {
                           {QStringLiteral("latest_state"), QStringLiteral("idle")},
                           {QStringLiteral("mcp_servers"),
                            QJsonArray{QStringLiteral("github")}},
+                          {QStringLiteral("team_ids"),
+                           QJsonArray{QStringLiteral("team-1")}},
                           {QStringLiteral("schedules"),
                            QJsonArray{QJsonObject{
                                {QStringLiteral("schedule_id"), QStringLiteral("sched-test")},
@@ -302,6 +305,90 @@ class FakeClarpServer final : public QTcpServer {
                       }}});
             return;
         }
+        if (path.startsWith("/identity/prompt-history")) {
+            respond(socket, 200,
+                    {{QStringLiteral("prompts"),
+                      QJsonArray{QJsonObject{
+                          {QStringLiteral("turn_id"), QStringLiteral("prompt-1")},
+                          {QStringLiteral("text"), QStringLiteral("Make the desktop intuitive")},
+                          {QStringLiteral("preview"), QStringLiteral("Make the desktop intuitive")},
+                          {QStringLiteral("content_status"), QStringLiteral("available")},
+                          {QStringLiteral("created_at"), QStringLiteral("2026-09-04T18:00:00Z")},
+                          {QStringLiteral("prompt_origin"),
+                           QJsonObject{{QStringLiteral("channel"), QStringLiteral("chat")}}},
+                      }}},
+                     {QStringLiteral("page"),
+                      QJsonObject{{QStringLiteral("has_more"), false},
+                                  {QStringLiteral("next_before"), QJsonValue::Null}}}});
+            return;
+        }
+        if (path.startsWith("/agent-heartbeat/status")) {
+            respond(socket, 200,
+                    {{QStringLiteral("session"), QStringLiteral("rachel")},
+                     {QStringLiteral("schedule"),
+                      QJsonObject{{QStringLiteral("enabled"), true},
+                                  {QStringLiteral("dormant"), false},
+                                  {QStringLiteral("next_heartbeat_at"), 1'788'000'060'000.0}}},
+                     {QStringLiteral("history"),
+                      QJsonArray{QJsonObject{
+                          {QStringLiteral("id"), QStringLiteral("heartbeat-1")},
+                          {QStringLiteral("text"), QStringLiteral("Checked the current work")},
+                          {QStringLiteral("updated_at"), 1'788'000'000'000.0},
+                      }}}});
+            return;
+        }
+        if (path.startsWith("/diagnostics/health")) {
+            respond(socket, 200,
+                    {{QStringLiteral("ready"), true},
+                     {QStringLiteral("checks"),
+                      QJsonObject{{QStringLiteral("stt_ready"), true},
+                                  {QStringLiteral("ffmpeg_ready"), true}}},
+                     {QStringLiteral("tts_queue"),
+                      QJsonObject{{QStringLiteral("pending"), 0},
+                                  {QStringLiteral("in_flight"), 0}}}});
+            return;
+        }
+        if (path.startsWith("/transcription-capabilities")) {
+            respond(socket, 200,
+                    {{QStringLiteral("available"), true},
+                     {QStringLiteral("default_model"), QStringLiteral("faster-whisper:small.en")},
+                     {QStringLiteral("models"),
+                      QJsonArray{QJsonObject{
+                          {QStringLiteral("id"), QStringLiteral("faster-whisper:small.en")},
+                          {QStringLiteral("name"), QStringLiteral("Small English")},
+                      }}}});
+            return;
+        }
+        if (path.startsWith("/tts/providers")) {
+            respond(socket, 200,
+                    {{QStringLiteral("provider"), QStringLiteral("cartesia")},
+                     {QStringLiteral("fallback"), QStringLiteral("elevenlabs")},
+                     {QStringLiteral("providers"),
+                      QJsonArray{QJsonObject{{QStringLiteral("id"), QStringLiteral("cartesia")},
+                                             {QStringLiteral("available"), true}}}}});
+            return;
+        }
+        if (path == "/media" || path.startsWith("/media?")) {
+            respond(socket, 200,
+                    {{QStringLiteral("session"), QStringLiteral("rachel")},
+                     {QStringLiteral("assets"),
+                      QJsonArray{QJsonObject{
+                          {QStringLiteral("asset_id"), QStringLiteral("asset-1")},
+                          {QStringLiteral("session"), QStringLiteral("rachel")},
+                          {QStringLiteral("source_name"), QStringLiteral("result.png")},
+                          {QStringLiteral("mime_type"), QStringLiteral("image/png")},
+                          {QStringLiteral("caption"), QStringLiteral("Rendered result")},
+                          {QStringLiteral("url"), QStringLiteral("/media/asset-1")},
+                          {QStringLiteral("width"), 1},
+                          {QStringLiteral("height"), 1},
+                      }}}});
+            return;
+        }
+        if (path == "/media/asset-1") {
+            respondBytes(socket, QByteArray("\x89PNG\r\n\x1a\nfixture", 15),
+                         QByteArray("image/png"));
+            return;
+        }
         if (path.startsWith("/attention")) {
             respond(socket, 200,
                     {{QStringLiteral("items"),
@@ -323,6 +410,9 @@ class FakeClarpServer final : public QTcpServer {
                           {QStringLiteral("title"), QStringLiteral("Native verification")},
                           {QStringLiteral("status"), QStringLiteral("running")},
                           {QStringLiteral("can_cancel"), true},
+                          {QStringLiteral("metadata"),
+                           QJsonObject{{QStringLiteral("completed"), 3},
+                                       {QStringLiteral("total"), 10}}},
                       }}}});
             return;
         }
@@ -357,6 +447,7 @@ class FakeClarpServer final : public QTcpServer {
                           {QStringLiteral("name"), QStringLiteral("Desktop crew")},
                           {QStringLiteral("color"), QStringLiteral("#596083")},
                           {QStringLiteral("leader_agent_id"), QStringLiteral("agent-rachel")},
+                          {QStringLiteral("nudge_enabled"), false},
                           {QStringLiteral("member_agent_ids"),
                            QJsonArray{QStringLiteral("agent-rachel")}},
                       }}}});
@@ -755,6 +846,27 @@ void NativeCoreTest::activityRowsUpdateInPlaceBySemanticIdentity() {
     QCOMPARE(changes.count(), 2);
     QCOMPARE(inserts.count(), 0);
     QCOMPARE(removes.count(), 0);
+
+    ConversationModel details;
+    details.openSession(QStringLiteral("details"));
+    details.applyLog(
+        {{QStringLiteral("conversation_id"), QStringLiteral("conversation")},
+         {QStringLiteral("turns"),
+          QJsonArray{QJsonObject{{QStringLiteral("id"), QStringLiteral("message-1")},
+                                 {QStringLiteral("role"), QStringLiteral("assistant")},
+                                 {QStringLiteral("text"), QStringLiteral("Done")},
+                                 {QStringLiteral("tool_details_available"), true},
+                                 {QStringLiteral("activity_count"), 1},
+                                 {QStringLiteral("revision"), 1}}}},
+         {QStringLiteral("latest_revision"), 1}},
+        ConversationModel::LoadKind::Tail);
+    details.applyToolDetails(
+        QStringLiteral("message-1"),
+        {{QStringLiteral("tools"),
+          QJsonArray{QJsonObject{{QStringLiteral("name"), QStringLiteral("Read")},
+                                 {QStringLiteral("summary"), QStringLiteral("Loaded file")}}}},
+         {QStringLiteral("display_cells"), QJsonArray{}}});
+    QCOMPARE(details.data(details.index(0, 0), ConversationModel::ToolsRole).toList().size(), 1);
 }
 
 void NativeCoreTest::olderHistoryPrependsWithoutReorderingTheTail() {
@@ -847,6 +959,15 @@ void NativeCoreTest::optimisticDeliveryStaysVisibleUntilConfirmed() {
     QCOMPARE(messageIds(cached),
              QStringList({QStringLiteral("one"), QStringLiteral("two"),
                           QStringLiteral("u-pending")}));
+
+    ConversationModel retry;
+    retry.openSession(QStringLiteral("retry"));
+    retry.addOptimistic(QStringLiteral("failed"), QStringLiteral("Try this again"));
+    retry.markDeliveryFailed(QStringLiteral("failed"));
+    QCOMPARE(retry.takeFailedMessageForRetry(QStringLiteral("u-failed")),
+             QStringLiteral("Try this again"));
+    QCOMPARE(retry.rowCount(), 0);
+    QVERIFY(retry.takeFailedMessageForRetry(QStringLiteral("u-failed")).isEmpty());
 }
 
 void NativeCoreTest::conversationChangeRequestsReplacement() {
@@ -910,6 +1031,9 @@ void NativeCoreTest::clipSourcePrecedenceMatchesContract() {
 }
 
 void NativeCoreTest::wavEncodingProducesAValidPcmHeader() {
+    QCOMPARE(voiceDeliverySession(QStringLiteral("rachel"), QStringLiteral("bella")),
+             QStringLiteral("rachel"));
+    QCOMPARE(voiceDeliverySession({}, QStringLiteral("bella")), QStringLiteral("bella"));
     QAudioFormat format;
     format.setSampleRate(16'000);
     format.setChannelCount(1);
@@ -1195,9 +1319,10 @@ void NativeCoreTest::paneDraftIsDurableAndScopedToServerAndConversation() {
                               + QUuid::createUuid().toString(QUuid::WithoutBraces);
     qputenv("CLARP_BASE_URL", localBase.toUtf8());
     qputenv("CLARP_SHARED_FILESYSTEM_HOST", localBase.toUtf8());
-    QTemporaryFile attachment;
+    QTemporaryFile attachment(QDir::temp().filePath(QStringLiteral("clarp-XXXXXX.png")));
     QVERIFY(attachment.open());
-    QCOMPARE(attachment.write("desktop attachment"), 18);
+    const QByteArray pngBytes("\x89PNG\r\n\x1a\nfixture", 15);
+    QCOMPARE(attachment.write(pngBytes), pngBytes.size());
     attachment.flush();
     {
         AppController first;
@@ -1209,6 +1334,13 @@ void NativeCoreTest::paneDraftIsDurableAndScopedToServerAndConversation() {
         QCOMPARE(first.composerAttachments(QStringLiteral("pane-a"),
                                             QStringLiteral("rachel")).size(),
                  1);
+        QCOMPARE(first.composerAttachments(QStringLiteral("pane-a"),
+                                            QStringLiteral("rachel"))
+                     .first()
+                     .toMap()
+                     .value(QStringLiteral("content_type"))
+                     .toString(),
+                 QStringLiteral("image/png"));
     }
     {
         AppController relaunched;
@@ -1267,10 +1399,11 @@ void NativeCoreTest::transcriptCacheRestoresDurableRowsWithoutStaleRegression() 
          {QStringLiteral("has_more"), true}},
         ConversationModel::LoadKind::Tail);
     original.addOptimistic(QStringLiteral("pending"), QStringLiteral("Do not persist"));
+    original.markDeliveryFailed(QStringLiteral("pending"));
     original.showTransientThinking(QStringLiteral("Rachel"));
 
     const QJsonObject snapshot = original.cacheSnapshot();
-    QCOMPARE(snapshot.value(QStringLiteral("turns")).toArray().size(), 2);
+    QCOMPARE(snapshot.value(QStringLiteral("turns")).toArray().size(), 3);
     QVERIFY(cache.save(QStringLiteral("https://host-a.example"), QStringLiteral("rachel"),
                        snapshot));
     QVERIFY(cache.load(QStringLiteral("https://host-b.example"), QStringLiteral("rachel"))
@@ -1280,7 +1413,10 @@ void NativeCoreTest::transcriptCacheRestoresDurableRowsWithoutStaleRegression() 
     restored.openSession(QStringLiteral("rachel"));
     QVERIFY(restored.restoreCacheSnapshot(
         cache.load(QStringLiteral("https://host-a.example"), QStringLiteral("rachel"))));
-    QCOMPARE(messageIds(restored), QStringList({QStringLiteral("one"), QStringLiteral("two")}));
+    QCOMPARE(messageIds(restored),
+             QStringList({QStringLiteral("one"), QStringLiteral("two"),
+                          QStringLiteral("u-pending")}));
+    QVERIFY(restored.data(restored.index(2, 0), ConversationModel::DeliveryFailedRole).toBool());
     QCOMPARE(restored.latestRevision(), 2);
     QVERIFY(restored.hasMore());
 
@@ -1295,7 +1431,9 @@ void NativeCoreTest::transcriptCacheRestoresDurableRowsWithoutStaleRegression() 
                                  {QStringLiteral("revision"), 1}}}},
          {QStringLiteral("latest_revision"), 1}},
         ConversationModel::LoadKind::Tail);
-    QCOMPARE(messageIds(restored), QStringList({QStringLiteral("one"), QStringLiteral("two")}));
+    QCOMPARE(messageIds(restored),
+             QStringList({QStringLiteral("one"), QStringLiteral("two"),
+                          QStringLiteral("u-pending")}));
     QCOMPARE(restored.latestRevision(), 2);
 
     restored.applyLog({{QStringLiteral("conversation_id"), QString{}},
@@ -1444,9 +1582,14 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
     controller.loadUpdates();
     QTRY_COMPARE_WITH_TIMEOUT(controller.attentionItems().size(), 1, 3'000);
     QTRY_COMPARE_WITH_TIMEOUT(controller.backgroundJobs().size(), 1, 3'000);
+    QCOMPARE(controller.backgroundJobProgress(controller.backgroundJobs().first().toMap()), 0.3);
     QTRY_COMPARE_WITH_TIMEOUT(controller.updateArtifacts().size(), 1, 3'000);
     QTRY_VERIFY_WITH_TIMEOUT(!controller.updatesLoading(), 3'000);
+    QCOMPARE(controller.artifactsForSession(QStringLiteral("rachel")).size(), 1);
+    QVERIFY(controller.artifactsForSession(QStringLiteral("bella")).isEmpty());
     controller.resolveDecision(QStringLiteral("decision-1"), QStringLiteral("yes"), 4);
+    QVERIFY(controller.updateActionPending(QStringLiteral("decision"),
+                                           QStringLiteral("decision-1")));
     QTRY_VERIFY_WITH_TIMEOUT(server.receivedRequest(
                                  QStringLiteral("POST"),
                                  QStringLiteral("/decisions/decision-1/resolve")),
@@ -1457,6 +1600,9 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
              QStringLiteral("accepted"));
     QCOMPARE(decisionRequest.value(QStringLiteral("expected_revision")).toInt(), 4);
     QVERIFY(!decisionRequest.contains(QStringLiteral("revision")));
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.updateActionPending(
+                                 QStringLiteral("decision"), QStringLiteral("decision-1")),
+                             3'000);
 
     controller.loadTeams();
     QTRY_COMPARE_WITH_TIMEOUT(controller.teams().size(), 1, 3'000);
@@ -1464,6 +1610,10 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
     QTRY_COMPARE_WITH_TIMEOUT(controller.teamMessages().size(), 1, 3'000);
     QCOMPARE(controller.agentNameById(QStringLiteral("agent-rachel")), QStringLiteral("Rachel"));
     QCOMPARE(controller.teamAgentChoices().size(), 1);
+    QCOMPARE(controller.agentDetails(QStringLiteral("rachel"))
+                 .value(QStringLiteral("team_ids"))
+                 .toList(),
+             QVariantList{QStringLiteral("team-1")});
     QCOMPARE(controller.availableMcpServers().size(), 2);
     QCOMPARE(controller.agentDetails(QStringLiteral("rachel"))
                  .value(QStringLiteral("mcp_servers"))
@@ -1504,6 +1654,39 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
         controller.profileTaskPlan().value(QStringLiteral("plan_id")).toString(),
         QStringLiteral("plan-1"), 3'000);
     QTRY_VERIFY_WITH_TIMEOUT(!controller.profileLoading(), 3'000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controller.profileHeartbeat().value(QStringLiteral("history")).toList().size(), 1,
+        3'000);
+    controller.loadMedia(QStringLiteral("rachel"));
+    QTRY_COMPARE_WITH_TIMEOUT(controller.mediaForSession(QStringLiteral("rachel")).size(), 1,
+                              3'000);
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.mediaSource(QStringLiteral("asset-1")).isEmpty(), 3'000);
+    QVERIFY(controller.mediaSource(QStringLiteral("asset-1"))
+                .toString()
+                .startsWith(QStringLiteral("data:image/png;base64,")));
+    const QString renderedMedia = controller.resolveMediaMarkdown(
+        QStringLiteral("![Rendered result](clarp-media://asset/asset-1)"));
+    QVERIFY(renderedMedia.startsWith(QStringLiteral("![Rendered result](data:image/png;base64,")));
+    QVERIFY(renderedMedia.endsWith(u')'));
+    controller.loadPromptHistory(QStringLiteral("rachel"));
+    QTRY_COMPARE_WITH_TIMEOUT(controller.profilePrompts().size(), 1, 3'000);
+    QCOMPARE(controller.profilePrompts().first().toMap().value(QStringLiteral("turn_id")).toString(),
+             QStringLiteral("prompt-1"));
+    QVERIFY(!controller.profilePromptsHaveMore());
+    controller.loadSettingsStatus();
+    QTRY_VERIFY_WITH_TIMEOUT(controller.diagnosticsHealth()
+                                 .value(QStringLiteral("ready"))
+                                 .toBool(),
+                             3'000);
+    QTRY_VERIFY_WITH_TIMEOUT(controller.transcriptionCapabilities()
+                                 .value(QStringLiteral("available"))
+                                 .toBool(),
+                             3'000);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.ttsProviderStatus()
+                                  .value(QStringLiteral("provider"))
+                                  .toString(),
+                              QStringLiteral("cartesia"), 3'000);
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.settingsStatusLoading(), 3'000);
     controller.updateTeam(QStringLiteral("team-1"), QStringLiteral("Renamed"),
                           QStringLiteral("#123456"), QStringLiteral("agent-rachel"));
     QTRY_VERIFY_WITH_TIMEOUT(
@@ -1518,6 +1701,14 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
                                  QStringLiteral("DELETE"),
                                  QStringLiteral("/teams/team-1/members/agent-rachel")),
                              3'000);
+    controller.setTeamNudging(QStringLiteral("team-1"), true);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/team-nudging")), 3'000);
+    const QJsonObject nudgeRequest = server.requestJson(
+        QStringLiteral("POST"), QStringLiteral("/team-nudging"));
+    QCOMPARE(nudgeRequest.value(QStringLiteral("team_id")).toString(),
+             QStringLiteral("team-1"));
+    QVERIFY(nudgeRequest.value(QStringLiteral("nudge_enabled")).toBool());
     controller.setAgentLlm(QStringLiteral("rachel"), QStringLiteral("gpt-test"),
                            QStringLiteral("high"));
     QTRY_VERIFY_WITH_TIMEOUT(
@@ -1526,6 +1717,15 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
                            QVariantList{QStringLiteral("github")});
     QTRY_VERIFY_WITH_TIMEOUT(
         server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/agent-mcp")), 3'000);
+    controller.createAgent(QStringLiteral("New Agent"), QStringLiteral("/tmp"),
+                           QStringLiteral("claude"), {}, {}, {}, QStringLiteral("fresh"), {},
+                           QVariantList{QStringLiteral("github")});
+    QTRY_VERIFY_WITH_TIMEOUT(
+        server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/agents")), 3'000);
+    QCOMPARE(server.requestJson(QStringLiteral("POST"), QStringLiteral("/agents"))
+                 .value(QStringLiteral("mcp_servers"))
+                 .toArray(),
+             QJsonArray{QStringLiteral("github")});
     controller.releaseAgent(QStringLiteral("mike"));
     QVERIFY(controller.errorMessage().contains(QStringLiteral("protected")));
     QVERIFY(!server.receivedRequest(QStringLiteral("DELETE"), QStringLiteral("/agents/mike")));

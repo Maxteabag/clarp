@@ -265,6 +265,21 @@ Rectangle {
                                         }
                                     }
                                     MenuItem {
+                                        text: {
+                                            const team = root.selectedTeam();
+                                            return team && Boolean(team.nudge_enabled)
+                                                ? "Disable leader nudging"
+                                                : "Enable leader nudging";
+                                        }
+                                        onTriggered: {
+                                            const team = root.selectedTeam();
+                                            if (team)
+                                                root.controller.setTeamNudging(
+                                                    root.controller.selectedTeamId,
+                                                    !Boolean(team.nudge_enabled));
+                                        }
+                                    }
+                                    MenuItem {
                                         text: "Delete team…"
                                         onTriggered: deleteDialog.open()
                                     }

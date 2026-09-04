@@ -66,7 +66,9 @@ class ConversationModel : public QAbstractListModel {
     bool restoreCacheSnapshot(const QJsonObject& snapshot);
     void addOptimistic(const QString& clientMessageId, const QString& text);
     void markDeliveryFailed(const QString& clientMessageId);
+    [[nodiscard]] QString takeFailedMessageForRetry(const QString& messageId);
     void applyActivityEvent(const QJsonObject& event);
+    bool applyToolDetails(const QString& messageId, const QJsonObject& details);
     void clearActivity();
     void showTransientThinking(const QString& persona);
     void clearRunningActivity();

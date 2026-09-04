@@ -14,6 +14,10 @@ Rectangle {
         agentRevision;
         return controller.agentDetails(session);
     }
+    readonly property var artifacts: {
+        const allArtifacts = controller.updateArtifacts;
+        return allArtifacts.length >= 0 ? controller.artifactsForSession(session) : [];
+    }
     signal closeRequested
     signal queueRequested(string session)
     signal voiceRequested(string session, string name)
@@ -195,6 +199,74 @@ Rectangle {
                     }
 
                     ProfileCard {
+                        title: "PROMPT HISTORY"
+                        Repeater {
+                            model: root.controller.profilePrompts
+                            delegate: Rectangle {
+                                id: promptRow
+                                required property var modelData
+                                Layout.fillWidth: true
+                                implicitHeight: promptColumn.implicitHeight + 14
+                                radius: 4
+                                color: "#181b26"
+                                border.color: "#2c3042"
+                                ColumnLayout {
+                                    id: promptColumn
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: 7
+                                    spacing: 4
+                                    TextEdit {
+                                        Layout.fillWidth: true
+                                        readOnly: true
+                                        selectByMouse: true
+                                        wrapMode: TextEdit.Wrap
+                                        text: String(promptRow.modelData.text
+                                            || promptRow.modelData.preview || "")
+                                        color: "#b9bdd1"
+                                        font.pixelSize: 10
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: String(promptRow.modelData.created_at || "")
+                                            + "  ·  "
+                                            + String((promptRow.modelData.prompt_origin || {}).channel || "chat")
+                                        color: "#61667e"
+                                        font.family: "JetBrains Mono"
+                                        font.pixelSize: 8
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                visible: root.controller.profilePrompts.length === 0
+                                    && !root.controller.profilePromptsLoading
+                                Layout.fillWidth: true
+                                text: "No authenticated prompts recorded yet"
+                                color: "#666b82"
+                                font.pixelSize: 9
+                            }
+                            Item { Layout.fillWidth: true }
+                            BusyIndicator {
+                                visible: root.controller.profilePromptsLoading
+                                running: visible
+                                implicitWidth: 18
+                                implicitHeight: 18
+                            }
+                            Button {
+                                visible: root.controller.profilePromptsHaveMore
+                                text: "Load older"
+                                enabled: !root.controller.profilePromptsLoading
+                                onClicked: root.controller.loadPromptHistory(root.session, true)
+                            }
+                        }
+                    }
+
+                    ProfileCard {
                         id: llmCard
                         title: "MODEL & EFFORT"
                         readonly property var modelRows: root.controller.modelsForBackend(
@@ -264,6 +336,72 @@ Rectangle {
                     }
 
                     ProfileCard {
+                        id: heartbeatCard
+                        title: "HEARTBEAT"
+                        readonly property var schedule: root.controller.profileHeartbeat.schedule || {}
+                        readonly property var history: root.controller.profileHeartbeat.history || []
+                        ProfileInfo {
+                            label: "State"
+                            value: heartbeatCard.schedule.dormant ? "Dormant"
+                                : heartbeatCard.schedule.enabled ? "Active" : "Off"
+                        }
+                        Repeater {
+                            model: heartbeatCard.history
+                            delegate: RowLayout {
+                                id: heartbeatRow
+                                required property var modelData
+                                Layout.fillWidth: true
+                                Rectangle {
+                                    Layout.preferredWidth: 6
+                                    Layout.preferredHeight: 6
+                                    radius: 3
+                                    color: "#899f7d"
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: String(heartbeatRow.modelData.text || "Heartbeat check")
+                                    color: "#aeb2c8"
+                                    font.pixelSize: 9
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+                        Text {
+                            visible: heartbeatCard.history.length === 0
+                            text: heartbeatCard.schedule.enabled
+                                ? "No heartbeat history yet" : "Heartbeat is off"
+                            color: "#666b82"
+                            font.pixelSize: 9
+                        }
+                    }
+
+                    ProfileCard {
+                        visible: (root.details.team_ids || []).length > 0
+                        Layout.preferredHeight: visible ? implicitHeight : 0
+                        title: "TEAMS"
+                        Repeater {
+                            model: root.details.team_ids || []
+                            delegate: RowLayout {
+                                id: teamMembership
+                                required property string modelData
+                                Layout.fillWidth: true
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.controller.teamNameById(teamMembership.modelData)
+                                    color: "#adb1c7"
+                                    font.pixelSize: 10
+                                }
+                                Text {
+                                    text: teamMembership.modelData
+                                    color: "#62677e"
+                                    font.family: "JetBrains Mono"
+                                    font.pixelSize: 8
+                                }
+                            }
+                        }
+                    }
+
+                    ProfileCard {
                         visible: String(root.details.backend || "") === "claude"
                             && root.controller.availableMcpServers.length > 0
                         Layout.preferredHeight: visible ? implicitHeight : 0
@@ -299,6 +437,72 @@ Rectangle {
                             text: "Compact context"
                             enabled: String(root.details.state || "") !== "compacting"
                             onClicked: compactDialog.open()
+                        }
+                    }
+
+                    ProfileCard {
+                        title: "IMAGES"
+                        MediaGallery {
+                            Layout.fillWidth: true
+                            controller: root.controller
+                            session: root.session
+                            compact: false
+                        }
+                    }
+
+                    ProfileCard {
+                        title: "ARTIFACTS"
+                        Repeater {
+                            model: root.artifacts
+                            delegate: Rectangle {
+                                id: artifactRow
+                                required property var modelData
+                                Layout.fillWidth: true
+                                implicitHeight: artifactColumn.implicitHeight + 14
+                                radius: 4
+                                color: "#181b26"
+                                border.color: "#2c3042"
+                                ColumnLayout {
+                                    id: artifactColumn
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: 7
+                                    spacing: 2
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: String(artifactRow.modelData.title || "Artifact")
+                                            color: "#bfc3d7"
+                                            font.pixelSize: 10
+                                            font.weight: Font.DemiBold
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            text: String(artifactRow.modelData.type || "item").toUpperCase()
+                                            color: "#777d99"
+                                            font.family: "JetBrains Mono"
+                                            font.pixelSize: 8
+                                        }
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: String(artifactRow.modelData.summary || "")
+                                        color: "#686d84"
+                                        font.pixelSize: 9
+                                        wrapMode: Text.Wrap
+                                        maximumLineCount: 3
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+                        }
+                        Text {
+                            visible: root.artifacts.length === 0
+                            text: "No artifacts for this agent yet"
+                            color: "#666b82"
+                            font.pixelSize: 9
                         }
                     }
 

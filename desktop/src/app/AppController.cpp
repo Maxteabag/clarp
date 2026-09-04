@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QDesktopServices>
+#include <QMimeDatabase>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSettings>
@@ -21,6 +22,7 @@ namespace {
 
 constexpr int DeliveryTimeoutMs = 20'000;
 constexpr qsizetype MaxPortraitBytes = 20 * 1024 * 1024;
+constexpr qsizetype MaxInlineMediaBytes = 20 * 1024 * 1024;
 constexpr qsizetype MaxComposerUploadBytes = 50 * 1024 * 1024;
 
 QString avatarUrlForAgent(const Agent& agent) {
@@ -181,8 +183,10 @@ AppController::AppController(QObject* parent)
     connect(&m_audio, &AudioController::transcriptionReady, this,
             [this](const QString& text, const QString& traceId, const QString& transcriptionId,
                    bool handsFree) {
-                sendMessageInternal(m_selectedSession, text, false, traceId, transcriptionId,
-                                    handsFree);
+                const QString target = voiceDeliverySession(m_voiceCaptureSession,
+                                                            m_selectedSession);
+                m_voiceCaptureSession.clear();
+                sendMessageInternal(target, text, false, traceId, transcriptionId, handsFree);
             });
     QTimer::singleShot(0, this, [this] {
         if (m_bearerToken.isEmpty()) {
@@ -258,6 +262,8 @@ quint64 AppController::agentRevision() const { return m_agentRevision; }
 
 quint64 AppController::avatarRevision() const { return m_avatarRevision; }
 
+quint64 AppController::mediaRevision() const { return m_mediaRevision; }
+
 QVariantList AppController::pastSessions() const { return m_pastSessions; }
 
 bool AppController::pastSessionsLoading() const { return m_pastSessionsLoading; }
@@ -278,6 +284,39 @@ ConversationModel* AppController::conversationForSession(const QString& session)
 
 QUrl AppController::avatarSource(const QString& session) const {
     return m_avatarSources.value(session);
+}
+
+QVariantList AppController::mediaForSession(const QString& session) const {
+    return m_mediaAssets.value(session);
+}
+
+QUrl AppController::mediaSource(const QString& assetId) const {
+    return m_mediaSources.value(assetId);
+}
+
+QString AppController::resolveMediaMarkdown(const QString& markdown) const {
+    QString rendered = markdown;
+    static const QRegularExpression mediaUri(
+        QStringLiteral(R"(clarp-media://asset/([A-Za-z0-9_-]+))"));
+    QRegularExpressionMatchIterator matches = mediaUri.globalMatch(markdown);
+    while (matches.hasNext()) {
+        const QRegularExpressionMatch match = matches.next();
+        const QUrl source = m_mediaSources.value(match.captured(1));
+        if (!source.isEmpty()) {
+            rendered.replace(match.captured(0), source.toString());
+        }
+    }
+    return rendered;
+}
+
+QVariantList AppController::artifactsForSession(const QString& session) const {
+    QVariantList result;
+    for (const QVariant& value : m_updateArtifacts) {
+        if (value.toMap().value(QStringLiteral("session")).toString() == session) {
+            result.append(value);
+        }
+    }
+    return result;
 }
 
 QString AppController::baseUrl() const { return m_baseUrl; }
@@ -365,6 +404,24 @@ bool AppController::profileLoading() const { return m_profileLoading; }
 
 QString AppController::profileError() const { return m_profileError; }
 
+QVariantList AppController::profilePrompts() const { return m_profilePrompts; }
+
+bool AppController::profilePromptsHaveMore() const { return m_profilePromptsHaveMore; }
+
+bool AppController::profilePromptsLoading() const { return m_profilePromptsLoading; }
+
+QVariantMap AppController::profileHeartbeat() const { return m_profileHeartbeat; }
+
+QVariantMap AppController::diagnosticsHealth() const { return m_diagnosticsHealth; }
+
+QVariantMap AppController::transcriptionCapabilities() const {
+    return m_transcriptionCapabilities;
+}
+
+QVariantMap AppController::ttsProviderStatus() const { return m_ttsProviderStatus; }
+
+bool AppController::settingsStatusLoading() const { return m_settingsStatusPending > 0; }
+
 void AppController::setBaseUrl(const QString& value) {
     const QString normalized = normalizedBaseUrl(value);
     if (m_baseUrl == normalized) {
@@ -396,10 +453,25 @@ void AppController::setBaseUrl(const QString& value) {
     m_turnQueueError.clear();
     m_turnQueuePaused = false;
     m_profileTaskPlan.clear();
+    m_profileHeartbeat.clear();
+    m_diagnosticsHealth.clear();
+    m_transcriptionCapabilities.clear();
+    m_ttsProviderStatus.clear();
+    m_settingsStatusPending = 0;
+    m_profilePrompts.clear();
     m_profileSession.clear();
     m_profileError.clear();
+    m_profilePromptCursor.clear();
+    m_profilePromptsHaveMore = false;
     m_modelCatalog.clear();
     m_availableMcpServers.clear();
+    m_mediaAssets.clear();
+    m_mediaSources.clear();
+    m_mediaGenerations.clear();
+    m_mediaListRequests.clear();
+    m_mediaContentRequests.clear();
+    m_promptHistoryRequests.clear();
+    m_toolDetailRequests.clear();
     m_pastSessions.clear();
     m_directorySuggestions.clear();
     m_favoritePaths.clear();
@@ -432,7 +504,10 @@ void AppController::setBaseUrl(const QString& value) {
     emit teamsChanged();
     emit turnQueueChanged();
     emit profileChanged();
+    emit settingsStatusChanged();
     emit modelCatalogChanged();
+    ++m_mediaRevision;
+    emit mediaChanged();
     emit pastSessionsChanged();
     emit pathsChanged();
     emit orchestratorChanged();
@@ -566,18 +641,26 @@ void AppController::resetTransientRequestState() {
     m_pendingUploads.clear();
     m_avatarRequests.clear();
     m_updateRequestsPending = 0;
+    m_pendingUpdateActions.clear();
     m_teamListLoading = false;
     m_teamMessagesLoading = false;
     m_turnQueueLoading = false;
     m_profileLoading = false;
+    m_profilePromptsLoading = false;
+    m_settingsStatusPending = 0;
     m_voicesLoading = false;
     m_orchestratorLoading = false;
     m_pastSessionsLoading = false;
     m_queueActionSessions.clear();
+    m_mediaListRequests.clear();
+    m_mediaContentRequests.clear();
+    m_promptHistoryRequests.clear();
+    m_toolDetailRequests.clear();
     emit updatesChanged();
     emit teamsChanged();
     emit turnQueueChanged();
     emit profileChanged();
+    emit settingsStatusChanged();
     emit voicesChanged();
     emit orchestratorChanged();
     emit pastSessionsChanged();
@@ -613,6 +696,14 @@ void AppController::sendMessage(const QString& text, bool queueIfBusy) {
 
 void AppController::sendMessageTo(const QString& session, const QString& text, bool queueIfBusy) {
     sendMessageInternal(session, text, queueIfBusy, {}, {}, false);
+}
+
+void AppController::retryFailedMessage(const QString& session, const QString& messageId) {
+    ConversationModel* model = ensureConversation(session);
+    const QString text = model->takeFailedMessageForRetry(messageId);
+    if (!text.isEmpty()) {
+        sendMessageTo(session, text, false);
+    }
 }
 
 void AppController::sendMessageInternal(const QString& targetSession, const QString& text,
@@ -667,6 +758,13 @@ void AppController::stopSession(const QString& session) {
     }
     m_api.postJson(QStringLiteral("stop:") + session, QStringLiteral("/stop"),
                    {{QStringLiteral("session"), session}});
+}
+
+void AppController::toggleRecordingForSession(const QString& session) {
+    if (!m_audio.recording() && !m_audio.transcribing()) {
+        m_voiceCaptureSession = session;
+    }
+    m_audio.toggleRecording();
 }
 
 void AppController::refreshSession(const QString& session) { requestTail(session); }
@@ -727,7 +825,8 @@ QVariantMap AppController::agentDetails(const QString& session) const {
             {QStringLiteral("heartbeat_enabled"), agent->heartbeatEnabled},
             {QStringLiteral("dreaming_enabled"), agent->dreamingEnabled},
             {QStringLiteral("schedules"), agent->schedules.toVariantList()},
-            {QStringLiteral("mcp_servers"), agent->mcpServers.toVariantList()}};
+            {QStringLiteral("mcp_servers"), agent->mcpServers.toVariantList()},
+            {QStringLiteral("team_ids"), agent->teamIds.toVariantList()}};
 }
 
 QString AppController::agentBackend(const QString& session) const {
@@ -757,6 +856,16 @@ QString AppController::agentNameById(const QString& agentId) const {
         }
     }
     return agentId;
+}
+
+QString AppController::teamNameById(const QString& teamId) const {
+    for (const QVariant& value : m_teams) {
+        const QVariantMap team = value.toMap();
+        if (team.value(QStringLiteral("team_id")).toString() == teamId) {
+            return team.value(QStringLiteral("name"), teamId).toString();
+        }
+    }
+    return teamId;
 }
 
 QVariantList AppController::teamAgentChoices() const {
@@ -903,7 +1012,7 @@ void AppController::refreshAgents() { requestSnapshot(); }
 void AppController::createAgent(const QString& name, const QString& workingDirectory,
                                 const QString& backend, const QString& model, const QString& effort,
                                 const QString& replaceSession, const QString& mode,
-                                const QString& pastSessionId) {
+                                const QString& pastSessionId, const QVariantList& mcpServers) {
     const QString trimmedName = name.trimmed();
     const QString trimmedDirectory = workingDirectory.trimmed();
     if (trimmedName.isEmpty() || trimmedDirectory.isEmpty() || backend.trimmed().isEmpty()) {
@@ -922,6 +1031,9 @@ void AppController::createAgent(const QString& name, const QString& workingDirec
     }
     if (!effort.trimmed().isEmpty()) {
         body.insert(QStringLiteral("effort"), effort.trimmed());
+    }
+    if (!mcpServers.isEmpty()) {
+        body.insert(QStringLiteral("mcp_servers"), QJsonArray::fromVariantList(mcpServers));
     }
     const bool defaultsChanged =
         m_lastWorkingDirectory != trimmedDirectory || m_lastBackend != backend.trimmed();
@@ -1129,13 +1241,21 @@ void AppController::attachLocalFile(const QString& paneId, const QString& sessio
         return;
     }
     const QString attachmentId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QMimeDatabase mimeDatabase;
+    QString contentType =
+        mimeDatabase.mimeTypeForFile(info, QMimeDatabase::MatchContent).name();
+    if (contentType.isEmpty() || contentType == QStringLiteral("application/octet-stream")) {
+        contentType = mimeDatabase.mimeTypeForFile(info, QMimeDatabase::MatchExtension).name();
+    }
+    if (contentType.isEmpty()) {
+        contentType = QStringLiteral("application/octet-stream");
+    }
     if (m_sharedFilesystem) {
         QVariantList attachments = composerAttachments(paneId, session);
         attachments.append(QVariantMap{{QStringLiteral("id"), attachmentId},
                                        {QStringLiteral("path"), info.canonicalFilePath()},
                                        {QStringLiteral("name"), info.fileName()},
-                                       {QStringLiteral("content_type"),
-                                        QStringLiteral("application/octet-stream")},
+                                       {QStringLiteral("content_type"), contentType},
                                        {QStringLiteral("local"), true},
                                        {QStringLiteral("status"), QStringLiteral("ready")}});
         storeComposerAttachments(session, attachments);
@@ -1153,8 +1273,7 @@ void AppController::attachLocalFile(const QString& paneId, const QString& sessio
                               {QStringLiteral("session"), session},
                               {QStringLiteral("id"), attachmentId},
                               {QStringLiteral("name"), info.fileName()},
-                              {QStringLiteral("content_type"),
-                               QStringLiteral("application/octet-stream")},
+                              {QStringLiteral("content_type"), contentType},
                               {QStringLiteral("local_source"), info.canonicalFilePath()},
                               {QStringLiteral("status"), QStringLiteral("uploading")}};
     m_pendingUploads.insert(tag, pending);
@@ -1163,8 +1282,7 @@ void AppController::attachLocalFile(const QString& paneId, const QString& sessio
     visiblePending.remove(QStringLiteral("pane_id"));
     attachments.append(visiblePending);
     storeComposerAttachments(session, attachments);
-    m_api.postBytes(tag, QStringLiteral("/upload"), bytes,
-                    QByteArrayLiteral("application/octet-stream"),
+    m_api.postBytes(tag, QStringLiteral("/upload"), bytes, contentType.toUtf8(),
                     {{QByteArrayLiteral("X-File-Name"),
                       QUrl::toPercentEncoding(info.fileName())},
                      {QByteArrayLiteral("X-Session"), session.toUtf8()},
@@ -1260,9 +1378,15 @@ void AppController::resolveDecision(const QString& decisionId, const QString& ch
          protocolChoice != QStringLiteral("rejected"))) {
         return;
     }
+    const QString actionKey = QStringLiteral("decision:") + decisionId;
+    if (m_pendingUpdateActions.contains(actionKey)) {
+        return;
+    }
+    m_pendingUpdateActions.insert(actionKey);
+    emit updatesChanged();
     const QString path = QStringLiteral("/decisions/%1/resolve")
                              .arg(QString::fromUtf8(QUrl::toPercentEncoding(decisionId)));
-    m_api.postJson(QStringLiteral("update-action:decision"), path,
+    m_api.postJson(QStringLiteral("update-action:decision:") + decisionId, path,
                    {{QStringLiteral("choice"), protocolChoice},
                     {QStringLiteral("expected_revision"), revision}});
 }
@@ -1271,9 +1395,37 @@ void AppController::cancelBackgroundJob(const QString& jobId) {
     if (jobId.isEmpty()) {
         return;
     }
-    m_api.deleteResource(QStringLiteral("update-action:job-cancel"),
+    const QString actionKey = QStringLiteral("job:") + jobId;
+    if (m_pendingUpdateActions.contains(actionKey)) {
+        return;
+    }
+    m_pendingUpdateActions.insert(actionKey);
+    emit updatesChanged();
+    m_api.deleteResource(QStringLiteral("update-action:job:") + jobId,
                          QStringLiteral("/background-jobs/%1")
                              .arg(QString::fromUtf8(QUrl::toPercentEncoding(jobId))));
+}
+
+bool AppController::updateActionPending(const QString& kind, const QString& id) const {
+    return m_pendingUpdateActions.contains(kind + u':' + id);
+}
+
+double AppController::backgroundJobProgress(const QVariantMap& job) const {
+    const QVariantMap metadata = job.value(QStringLiteral("metadata")).toMap();
+    const double explicitFraction = metadata.value(QStringLiteral("progress"), -1.0).toDouble();
+    if (explicitFraction >= 0.0) {
+        return std::clamp(explicitFraction, 0.0, 1.0);
+    }
+    const double completed =
+        metadata.value(QStringLiteral("completed"),
+                       metadata.value(QStringLiteral("current"), -1.0))
+            .toDouble();
+    const double total = metadata.value(QStringLiteral("total"), 0.0).toDouble();
+    if (completed >= 0.0 && total > 0.0) {
+        return std::clamp(completed / total, 0.0, 1.0);
+    }
+    const double percent = metadata.value(QStringLiteral("progress_percent"), -1.0).toDouble();
+    return percent >= 0.0 ? std::clamp(percent / 100.0, 0.0, 1.0) : -1.0;
 }
 
 void AppController::finishUpdateRequest(quint64 generation) {
@@ -1368,6 +1520,16 @@ void AppController::removeTeamMember(const QString& teamId, const QString& agent
                              .arg(QString::fromUtf8(QUrl::toPercentEncoding(teamId)),
                                   QString::fromUtf8(QUrl::toPercentEncoding(agentId)));
     m_api.deleteResource(QStringLiteral("team-action:remove-member"), path);
+}
+
+void AppController::setTeamNudging(const QString& teamId, bool enabled) {
+    if (teamId.isEmpty()) {
+        return;
+    }
+    m_api.postJson(QStringLiteral("team-action:nudging"),
+                   QStringLiteral("/team-nudging"),
+                   {{QStringLiteral("team_id"), teamId},
+                    {QStringLiteral("nudge_enabled"), enabled}});
 }
 
 void AppController::deleteTeam(const QString& teamId) {
@@ -1470,7 +1632,11 @@ void AppController::loadAgentProfile(const QString& session) {
     }
     m_profileSession = session;
     m_profileTaskPlan.clear();
+    m_profileHeartbeat.clear();
+    m_profilePrompts.clear();
     m_profileError.clear();
+    m_profilePromptCursor.clear();
+    m_profilePromptsHaveMore = false;
     m_profileLoading = true;
     const quint64 generation = ++m_profileGeneration;
     emit profileChanged();
@@ -1478,6 +1644,12 @@ void AppController::loadAgentProfile(const QString& session) {
     query.addQueryItem(QStringLiteral("session"), session);
     m_api.get(QStringLiteral("profile:%1:%2").arg(generation).arg(session),
               QStringLiteral("/task-plan"), query);
+    m_api.get(QStringLiteral("profile-heartbeat:%1:%2").arg(generation).arg(session),
+              QStringLiteral("/agent-heartbeat/status"), query);
+    loadMedia(session);
+    loadPromptHistory(session);
+    loadUpdates();
+    loadTeams();
 }
 
 void AppController::setAgentLlm(const QString& session, const QString& model,
@@ -1508,6 +1680,89 @@ void AppController::setAgentMcp(const QString& session, const QVariantList& serv
                    QStringLiteral("/agent-mcp"),
                    {{QStringLiteral("session"), session},
                     {QStringLiteral("mcp_servers"), QJsonArray::fromVariantList(servers)}});
+}
+
+void AppController::loadMedia(const QString& session) {
+    if (session.isEmpty()) {
+        return;
+    }
+    const quint64 generation = m_mediaGenerations.value(session) + 1;
+    m_mediaGenerations.insert(session, generation);
+    const QString tag = QStringLiteral("media-list:%1")
+                            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    m_mediaListRequests.insert(tag,
+                               {{QStringLiteral("session"), session},
+                                {QStringLiteral("generation"), generation}});
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("session"), session);
+    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("100"));
+    m_api.get(tag, QStringLiteral("/media"), query);
+}
+
+void AppController::loadPromptHistory(const QString& session, bool loadMore) {
+    if (session.isEmpty() ||
+        (loadMore && (session != m_profileSession || !m_profilePromptsHaveMore ||
+                      m_profilePromptCursor.isEmpty()))) {
+        return;
+    }
+    if (!loadMore) {
+        m_profileSession = session;
+        m_profilePrompts.clear();
+        m_profilePromptCursor.clear();
+        m_profilePromptsHaveMore = false;
+    }
+    const quint64 generation = ++m_promptHistoryGeneration;
+    m_profilePromptsLoading = true;
+    emit profileChanged();
+    const QString tag = QStringLiteral("prompt-history:%1")
+                            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    m_promptHistoryRequests.insert(
+        tag,
+        {{QStringLiteral("session"), session},
+         {QStringLiteral("generation"), generation},
+         {QStringLiteral("load_more"), loadMore}});
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("session"), session);
+    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("20"));
+    if (loadMore) {
+        query.addQueryItem(QStringLiteral("before"), m_profilePromptCursor);
+    }
+    m_api.get(tag, QStringLiteral("/identity/prompt-history"), query);
+}
+
+void AppController::loadSettingsStatus() {
+    const quint64 generation = ++m_settingsStatusGeneration;
+    m_settingsStatusPending = 3;
+    emit settingsStatusChanged();
+    m_api.get(QStringLiteral("settings-status:%1:diagnostics").arg(generation),
+              QStringLiteral("/diagnostics/health"));
+    m_api.get(QStringLiteral("settings-status:%1:transcription").arg(generation),
+              QStringLiteral("/transcription-capabilities"));
+    m_api.get(QStringLiteral("settings-status:%1:tts").arg(generation),
+              QStringLiteral("/tts/providers"));
+}
+
+void AppController::loadMessageToolDetails(const QString& session,
+                                           const QString& messageId) {
+    if (session.isEmpty() || messageId.isEmpty()) {
+        return;
+    }
+    for (const QVariantMap& request : std::as_const(m_toolDetailRequests)) {
+        if (request.value(QStringLiteral("session")).toString() == session &&
+            request.value(QStringLiteral("message_id")).toString() == messageId) {
+            return;
+        }
+    }
+    const QString tag = QStringLiteral("tool-details:%1")
+                            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    m_toolDetailRequests.insert(
+        tag,
+        {{QStringLiteral("session"), session},
+         {QStringLiteral("message_id"), messageId}});
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("session"), session);
+    query.addQueryItem(QStringLiteral("message_id"), messageId);
+    m_api.get(tag, QStringLiteral("/message-tool-details"), query);
 }
 
 void AppController::requestSnapshot() {
@@ -1661,6 +1916,108 @@ void AppController::setErrorMessage(const QString& message) {
 }
 
 void AppController::handleJson(const QString& tag, const QJsonObject& object) {
+    if (tag.startsWith(QStringLiteral("tool-details:"))) {
+        const QVariantMap request = m_toolDetailRequests.take(tag);
+        const QString session = request.value(QStringLiteral("session")).toString();
+        const QString messageId = request.value(QStringLiteral("message_id")).toString();
+        if (!session.isEmpty() && !messageId.isEmpty()) {
+            ensureConversation(session)->applyToolDetails(messageId, object);
+        }
+        return;
+    }
+    if (tag.startsWith(QStringLiteral("settings-status:"))) {
+        const quint64 generation = tag.section(u':', 1, 1).toULongLong();
+        if (generation != m_settingsStatusGeneration) {
+            return;
+        }
+        const QString kind = tag.section(u':', 2, 2);
+        if (kind == QStringLiteral("diagnostics")) {
+            m_diagnosticsHealth = object.toVariantMap();
+        } else if (kind == QStringLiteral("transcription")) {
+            m_transcriptionCapabilities = object.toVariantMap();
+        } else if (kind == QStringLiteral("tts")) {
+            m_ttsProviderStatus = object.toVariantMap();
+        }
+        m_settingsStatusPending = std::max(0, m_settingsStatusPending - 1);
+        emit settingsStatusChanged();
+        return;
+    }
+    if (tag.startsWith(QStringLiteral("profile-heartbeat:"))) {
+        const quint64 generation = tag.section(u':', 1, 1).toULongLong();
+        const QString session = tag.section(u':', 2);
+        if (generation != m_profileGeneration || session != m_profileSession) {
+            return;
+        }
+        m_profileHeartbeat = object.toVariantMap();
+        emit profileChanged();
+        return;
+    }
+    if (tag.startsWith(QStringLiteral("prompt-history:"))) {
+        const QVariantMap request = m_promptHistoryRequests.take(tag);
+        const QString session = request.value(QStringLiteral("session")).toString();
+        const quint64 generation = request.value(QStringLiteral("generation")).toULongLong();
+        if (session != m_profileSession || generation != m_promptHistoryGeneration) {
+            return;
+        }
+        const QVariantList incoming =
+            object.value(QStringLiteral("prompts")).toArray().toVariantList();
+        if (!request.value(QStringLiteral("load_more")).toBool()) {
+            m_profilePrompts = incoming;
+        } else {
+            QSet<QString> existing;
+            for (const QVariant& value : std::as_const(m_profilePrompts)) {
+                existing.insert(value.toMap().value(QStringLiteral("turn_id")).toString());
+            }
+            for (const QVariant& value : incoming) {
+                const QString id = value.toMap().value(QStringLiteral("turn_id")).toString();
+                if (id.isEmpty() || !existing.contains(id)) {
+                    m_profilePrompts.append(value);
+                    existing.insert(id);
+                }
+            }
+        }
+        const QJsonObject page = object.value(QStringLiteral("page")).toObject();
+        m_profilePromptsHaveMore = page.value(QStringLiteral("has_more")).toBool();
+        m_profilePromptCursor = page.value(QStringLiteral("next_before")).toString();
+        m_profilePromptsLoading = false;
+        emit profileChanged();
+        return;
+    }
+    if (tag.startsWith(QStringLiteral("media-list:"))) {
+        const QVariantMap request = m_mediaListRequests.take(tag);
+        const QString session = request.value(QStringLiteral("session")).toString();
+        const quint64 generation = request.value(QStringLiteral("generation")).toULongLong();
+        if (session.isEmpty() || m_mediaGenerations.value(session) != generation) {
+            return;
+        }
+        const QVariantList assets = object.value(QStringLiteral("assets")).toArray().toVariantList();
+        m_mediaAssets.insert(session, assets);
+        for (const QVariant& value : assets) {
+            const QVariantMap asset = value.toMap();
+            const QString assetId = asset.value(QStringLiteral("asset_id")).toString();
+            const QString mime = asset.value(QStringLiteral("mime_type")).toString();
+            const QString url = asset.value(QStringLiteral("url")).toString();
+            if (assetId.isEmpty()) {
+                continue;
+            }
+            if (!mime.startsWith(QStringLiteral("image/")) || url.isEmpty() ||
+                m_mediaSources.contains(assetId)) {
+                continue;
+            }
+            const QString contentTag = QStringLiteral("media-content:%1")
+                                           .arg(QUuid::createUuid().toString(
+                                               QUuid::WithoutBraces));
+            m_mediaContentRequests.insert(
+                contentTag,
+                {{QStringLiteral("asset_id"), assetId},
+                 {QStringLiteral("session"), session},
+                 {QStringLiteral("url"), url}});
+            m_api.getBytes(contentTag, url);
+        }
+        ++m_mediaRevision;
+        emit mediaChanged();
+        return;
+    }
     if (tag.startsWith(QStringLiteral("composer-upload:"))) {
         const QVariantMap pending = m_pendingUploads.take(tag);
         if (pending.isEmpty()) {
@@ -1687,7 +2044,6 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         QVariantList attachments = composerAttachments(paneId, session);
         QVariantMap attachment = pending;
         attachment.remove(QStringLiteral("pane_id"));
-        attachment.remove(QStringLiteral("local_source"));
         attachment.insert(QStringLiteral("path"), serverPath);
         attachment.insert(QStringLiteral("status"), QStringLiteral("ready"));
         const QString serverName = object.value(QStringLiteral("name")).toString();
@@ -1856,8 +2212,9 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         finishUpdateRequest(generation);
         return;
     }
-    if (tag == QStringLiteral("update-action:decision") ||
-        tag == QStringLiteral("update-action:job-cancel")) {
+    if (tag.startsWith(QStringLiteral("update-action:"))) {
+        m_pendingUpdateActions.remove(tag.section(u':', 1));
+        emit updatesChanged();
         loadUpdates();
         return;
     }
@@ -1998,6 +2355,32 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
 
 void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
                                 const QByteArray& contentType) {
+    if (tag.startsWith(QStringLiteral("media-content:"))) {
+        const QVariantMap request = m_mediaContentRequests.take(tag);
+        const QString assetId = request.value(QStringLiteral("asset_id")).toString();
+        const QString session = request.value(QStringLiteral("session")).toString();
+        const qsizetype separator = contentType.indexOf(';');
+        const QByteArray mime =
+            contentType.left(separator < 0 ? contentType.size() : separator).trimmed().toLower();
+        bool stillCurrent = false;
+        for (const QVariant& value : m_mediaAssets.value(session)) {
+            if (value.toMap().value(QStringLiteral("asset_id")).toString() == assetId) {
+                stillCurrent = true;
+                break;
+            }
+        }
+        if (assetId.isEmpty() || !stillCurrent || bytes.isEmpty() ||
+            bytes.size() > MaxInlineMediaBytes || !mime.startsWith("image/")) {
+            return;
+        }
+        m_mediaSources.insert(
+            assetId,
+            QUrl(QStringLiteral("data:%1;base64,%2")
+                     .arg(QString::fromLatin1(mime), QString::fromLatin1(bytes.toBase64()))));
+        ++m_mediaRevision;
+        emit mediaChanged();
+        return;
+    }
     if (!tag.startsWith(QStringLiteral("avatar:"))) {
         return;
     }
@@ -2026,6 +2409,39 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
 
 void AppController::handleRequestFailure(const QString& tag, const QString& message,
                                          int statusCode) {
+    if (tag.startsWith(QStringLiteral("tool-details:"))) {
+        m_toolDetailRequests.remove(tag);
+        return;
+    }
+    if (tag.startsWith(QStringLiteral("settings-status:"))) {
+        const quint64 generation = tag.section(u':', 1, 1).toULongLong();
+        if (generation != m_settingsStatusGeneration) {
+            return;
+        }
+        m_settingsStatusPending = std::max(0, m_settingsStatusPending - 1);
+        emit settingsStatusChanged();
+        return;
+    }
+    if (tag.startsWith(QStringLiteral("prompt-history:"))) {
+        const QVariantMap request = m_promptHistoryRequests.take(tag);
+        if (request.value(QStringLiteral("generation")).toULongLong() ==
+            m_promptHistoryGeneration) {
+            m_profilePromptsLoading = false;
+            m_profileError = statusCode > 0
+                                 ? QStringLiteral("%1 (HTTP %2)").arg(message).arg(statusCode)
+                                 : message;
+            emit profileChanged();
+        }
+        return;
+    }
+    if (tag.startsWith(QStringLiteral("media-list:"))) {
+        m_mediaListRequests.remove(tag);
+        return;
+    }
+    if (tag.startsWith(QStringLiteral("media-content:"))) {
+        m_mediaContentRequests.remove(tag);
+        return;
+    }
     if (tag.startsWith(QStringLiteral("composer-upload:"))) {
         const QVariantMap pending = m_pendingUploads.take(tag);
         if (!pending.isEmpty()) {
@@ -2097,6 +2513,7 @@ void AppController::handleRequestFailure(const QString& tag, const QString& mess
         return;
     }
     if (tag.startsWith(QStringLiteral("update-action:"))) {
+        m_pendingUpdateActions.remove(tag.section(u':', 1));
         m_updatesError =
             statusCode > 0 ? QStringLiteral("%1 (HTTP %2)").arg(message).arg(statusCode) : message;
         emit updatesChanged();

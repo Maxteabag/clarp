@@ -85,7 +85,7 @@ ApplicationWindow {
         } else if (action === "mute") {
             app.muted = !app.muted;
         } else if (action === "talk") {
-            app.audio.toggleRecording();
+            app.toggleRecordingForSession(app.selectedSession);
         }
         if (keepComposer && layoutChanged)
             app.requestComposerFocus(app.panes.activePaneId);

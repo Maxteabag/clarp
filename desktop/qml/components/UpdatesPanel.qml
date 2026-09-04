@@ -99,6 +99,11 @@ Rectangle {
                     Rectangle {
                         id: decision
                         required property var modelData
+                        readonly property bool actionPending: {
+                            root.controller.updatesLoading;
+                            return root.controller.updateActionPending(
+                                "decision", String(modelData.decision_id || ""));
+                        }
                         Layout.fillWidth: true
                         implicitHeight: decisionColumn.implicitHeight + 20
                         radius: 6
@@ -151,13 +156,16 @@ Rectangle {
                                 }
                                 Button {
                                     text: String(decision.modelData.no_label || "No")
+                                    enabled: !decision.actionPending
                                     implicitHeight: 28
                                     onClicked: root.controller.resolveDecision(
                                         String(decision.modelData.decision_id || ""),
                                         "no", Number(decision.modelData.revision || 0))
                                 }
                                 Button {
-                                    text: String(decision.modelData.yes_label || "Yes")
+                                    text: decision.actionPending ? "Resolving…"
+                                        : String(decision.modelData.yes_label || "Yes")
+                                    enabled: !decision.actionPending
                                     implicitHeight: 28
                                     onClicked: root.controller.resolveDecision(
                                         String(decision.modelData.decision_id || ""),
@@ -184,6 +192,12 @@ Rectangle {
                     Rectangle {
                         id: job
                         required property var modelData
+                        readonly property bool actionPending: {
+                            root.controller.updatesLoading;
+                            return root.controller.updateActionPending(
+                                "job", String(modelData.job_id || ""));
+                        }
+                        readonly property real progress: root.controller.backgroundJobProgress(modelData)
                         Layout.fillWidth: true
                         implicitHeight: jobRow.implicitHeight + 16
                         radius: 5
@@ -224,6 +238,14 @@ Rectangle {
                                     font.pixelSize: 9
                                     elide: Text.ElideRight
                                 }
+                                ProgressBar {
+                                    visible: job.progress >= 0 && root.isActiveJob(job.modelData)
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: visible ? 3 : 0
+                                    from: 0
+                                    to: 1
+                                    value: Math.max(0, job.progress)
+                                }
                             }
                             Text {
                                 text: String(job.modelData.status || "").toUpperCase()
@@ -235,6 +257,7 @@ Rectangle {
                                 visible: root.isActiveJob(job.modelData)
                                     && job.modelData.can_cancel !== false
                                 text: "×"
+                                enabled: !job.actionPending
                                 implicitWidth: 26
                                 implicitHeight: 26
                                 onClicked: root.controller.cancelBackgroundJob(

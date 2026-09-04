@@ -43,6 +43,7 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList availableMcpServers READ availableMcpServers NOTIFY agentRevisionChanged)
     Q_PROPERTY(quint64 agentRevision READ agentRevision NOTIFY agentRevisionChanged)
     Q_PROPERTY(quint64 avatarRevision READ avatarRevision NOTIFY avatarRevisionChanged)
+    Q_PROPERTY(quint64 mediaRevision READ mediaRevision NOTIFY mediaChanged)
     Q_PROPERTY(QVariantList pastSessions READ pastSessions NOTIFY pastSessionsChanged)
     Q_PROPERTY(bool pastSessionsLoading READ pastSessionsLoading NOTIFY pastSessionsChanged)
     Q_PROPERTY(QVariantList directorySuggestions READ directorySuggestions NOTIFY pathsChanged)
@@ -90,6 +91,15 @@ class AppController : public QObject {
     Q_PROPERTY(QString profileSession READ profileSession NOTIFY profileChanged)
     Q_PROPERTY(bool profileLoading READ profileLoading NOTIFY profileChanged)
     Q_PROPERTY(QString profileError READ profileError NOTIFY profileChanged)
+    Q_PROPERTY(QVariantList profilePrompts READ profilePrompts NOTIFY profileChanged)
+    Q_PROPERTY(bool profilePromptsHaveMore READ profilePromptsHaveMore NOTIFY profileChanged)
+    Q_PROPERTY(bool profilePromptsLoading READ profilePromptsLoading NOTIFY profileChanged)
+    Q_PROPERTY(QVariantMap profileHeartbeat READ profileHeartbeat NOTIFY profileChanged)
+    Q_PROPERTY(QVariantMap diagnosticsHealth READ diagnosticsHealth NOTIFY settingsStatusChanged)
+    Q_PROPERTY(QVariantMap transcriptionCapabilities READ transcriptionCapabilities
+                   NOTIFY settingsStatusChanged)
+    Q_PROPERTY(QVariantMap ttsProviderStatus READ ttsProviderStatus NOTIFY settingsStatusChanged)
+    Q_PROPERTY(bool settingsStatusLoading READ settingsStatusLoading NOTIFY settingsStatusChanged)
 
   public:
     explicit AppController(QObject* parent = nullptr);
@@ -110,6 +120,7 @@ class AppController : public QObject {
     [[nodiscard]] QVariantList availableMcpServers() const;
     [[nodiscard]] quint64 agentRevision() const;
     [[nodiscard]] quint64 avatarRevision() const;
+    [[nodiscard]] quint64 mediaRevision() const;
     [[nodiscard]] QVariantList pastSessions() const;
     [[nodiscard]] bool pastSessionsLoading() const;
     [[nodiscard]] QVariantList directorySuggestions() const;
@@ -119,6 +130,10 @@ class AppController : public QObject {
     [[nodiscard]] bool hasStoredCredential() const;
     Q_INVOKABLE [[nodiscard]] ConversationModel* conversationForSession(const QString& session);
     Q_INVOKABLE [[nodiscard]] QUrl avatarSource(const QString& session) const;
+    Q_INVOKABLE [[nodiscard]] QVariantList mediaForSession(const QString& session) const;
+    Q_INVOKABLE [[nodiscard]] QUrl mediaSource(const QString& assetId) const;
+    Q_INVOKABLE [[nodiscard]] QString resolveMediaMarkdown(const QString& markdown) const;
+    Q_INVOKABLE [[nodiscard]] QVariantList artifactsForSession(const QString& session) const;
     [[nodiscard]] QString baseUrl() const;
     [[nodiscard]] QString selectedSession() const;
     [[nodiscard]] QString selectedName() const;
@@ -157,6 +172,14 @@ class AppController : public QObject {
     [[nodiscard]] QString profileSession() const;
     [[nodiscard]] bool profileLoading() const;
     [[nodiscard]] QString profileError() const;
+    [[nodiscard]] QVariantList profilePrompts() const;
+    [[nodiscard]] bool profilePromptsHaveMore() const;
+    [[nodiscard]] bool profilePromptsLoading() const;
+    [[nodiscard]] QVariantMap profileHeartbeat() const;
+    [[nodiscard]] QVariantMap diagnosticsHealth() const;
+    [[nodiscard]] QVariantMap transcriptionCapabilities() const;
+    [[nodiscard]] QVariantMap ttsProviderStatus() const;
+    [[nodiscard]] bool settingsStatusLoading() const;
 
     void setBaseUrl(const QString& value);
     void setMuted(bool muted);
@@ -174,8 +197,10 @@ class AppController : public QObject {
     Q_INVOKABLE void sendMessage(const QString& text, bool queueIfBusy = false);
     Q_INVOKABLE void sendMessageTo(const QString& session, const QString& text,
                                    bool queueIfBusy = false);
+    Q_INVOKABLE void retryFailedMessage(const QString& session, const QString& messageId);
     Q_INVOKABLE void stopAgent();
     Q_INVOKABLE void stopSession(const QString& session);
+    Q_INVOKABLE void toggleRecordingForSession(const QString& session);
     Q_INVOKABLE void refreshSession(const QString& session);
     Q_INVOKABLE void loadOlderSession(const QString& session);
     Q_INVOKABLE [[nodiscard]] QString agentName(const QString& session) const;
@@ -187,6 +212,7 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] QString agentModel(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentEffort(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentNameById(const QString& agentId) const;
+    Q_INVOKABLE [[nodiscard]] QString teamNameById(const QString& teamId) const;
     Q_INVOKABLE [[nodiscard]] QVariantList teamAgentChoices() const;
     Q_INVOKABLE [[nodiscard]] QVariantList matchingAgents(const QString& query) const;
     Q_INVOKABLE [[nodiscard]] QVariantList modelsForBackend(const QString& backend) const;
@@ -202,7 +228,8 @@ class AppController : public QObject {
     Q_INVOKABLE void createAgent(const QString& name, const QString& workingDirectory,
                                  const QString& backend, const QString& model,
                                  const QString& effort, const QString& replaceSession = {},
-                                 const QString& mode = {}, const QString& pastSessionId = {});
+                                 const QString& mode = {}, const QString& pastSessionId = {},
+                                 const QVariantList& mcpServers = {});
     Q_INVOKABLE void releaseAgent(const QString& session);
     Q_INVOKABLE void setAgentHeartbeat(const QString& session, bool enabled);
     Q_INVOKABLE void setAgentDreaming(const QString& session, bool enabled);
@@ -239,6 +266,9 @@ class AppController : public QObject {
     Q_INVOKABLE void resolveDecision(const QString& decisionId, const QString& choice,
                                      int revision);
     Q_INVOKABLE void cancelBackgroundJob(const QString& jobId);
+    Q_INVOKABLE [[nodiscard]] bool updateActionPending(const QString& kind,
+                                                       const QString& id) const;
+    Q_INVOKABLE [[nodiscard]] double backgroundJobProgress(const QVariantMap& job) const;
     Q_INVOKABLE void loadTeams();
     Q_INVOKABLE void selectTeam(const QString& teamId);
     Q_INVOKABLE void createTeam(const QString& name, const QString& color = {});
@@ -246,6 +276,7 @@ class AppController : public QObject {
                                 const QString& color, const QString& leaderAgentId);
     Q_INVOKABLE void addTeamMember(const QString& teamId, const QString& agentId);
     Q_INVOKABLE void removeTeamMember(const QString& teamId, const QString& agentId);
+    Q_INVOKABLE void setTeamNudging(const QString& teamId, bool enabled);
     Q_INVOKABLE void deleteTeam(const QString& teamId);
     Q_INVOKABLE void loadTurnQueue(const QString& session);
     Q_INVOKABLE void updateQueuedTurn(const QString& queueId, const QString& text);
@@ -258,6 +289,11 @@ class AppController : public QObject {
                                  const QString& effort);
     Q_INVOKABLE void compactSession(const QString& session);
     Q_INVOKABLE void setAgentMcp(const QString& session, const QVariantList& servers);
+    Q_INVOKABLE void loadMedia(const QString& session);
+    Q_INVOKABLE void loadPromptHistory(const QString& session, bool loadMore = false);
+    Q_INVOKABLE void loadSettingsStatus();
+    Q_INVOKABLE void loadMessageToolDetails(const QString& session,
+                                            const QString& messageId);
 
   signals:
     void baseUrlChanged();
@@ -281,6 +317,7 @@ class AppController : public QObject {
     void modelCatalogChanged();
     void agentRevisionChanged();
     void avatarRevisionChanged();
+    void mediaChanged();
     void pastSessionsChanged();
     void pathsChanged();
     void launchDefaultsChanged();
@@ -293,6 +330,7 @@ class AppController : public QObject {
     void teamsChanged();
     void turnQueueChanged();
     void profileChanged();
+    void settingsStatusChanged();
 
   private:
     void requestSnapshot();
@@ -354,16 +392,23 @@ class AppController : public QObject {
     QString m_lastBackend;
     QString m_orchestratorLastDecision;
     QString m_composerFocusPane;
+    QString m_voiceCaptureSession;
     QString m_sharedFilesystemHostOverride;
     QHash<QString, QTimer*> m_deliveryTimers;
     QHash<QString, QTimer*> m_cacheTimers;
     QHash<QString, QString> m_deliverySessions;
     QSet<QString> m_logRequestsInFlight;
+    QSet<QString> m_pendingUpdateActions;
     QHash<QString, QString> m_pendingLogMode;
     QHash<QString, QUrl> m_avatarSources;
     QHash<QString, QString> m_avatarUrls;
     QHash<QString, QPair<QString, QString>> m_avatarRequests;
     QHash<QString, QString> m_avatarFailures;
+    QHash<QString, QVariantList> m_mediaAssets;
+    QHash<QString, QUrl> m_mediaSources;
+    QHash<QString, quint64> m_mediaGenerations;
+    QHash<QString, QVariantMap> m_mediaListRequests;
+    QHash<QString, QVariantMap> m_mediaContentRequests;
     QHash<QString, QVariantMap> m_pendingUploads;
     QVariantList m_attentionItems;
     QVariantList m_backgroundJobs;
@@ -378,8 +423,16 @@ class AppController : public QObject {
     QString m_turnQueueError;
     QHash<QString, QString> m_queueActionSessions;
     QVariantMap m_profileTaskPlan;
+    QVariantMap m_profileHeartbeat;
+    QVariantMap m_diagnosticsHealth;
+    QVariantMap m_transcriptionCapabilities;
+    QVariantMap m_ttsProviderStatus;
+    QVariantList m_profilePrompts;
     QString m_profileSession;
     QString m_profileError;
+    QString m_profilePromptCursor;
+    QHash<QString, QVariantMap> m_promptHistoryRequests;
+    QHash<QString, QVariantMap> m_toolDetailRequests;
     bool m_connecting = false;
     bool m_sending = false;
     bool m_muted = false;
@@ -392,6 +445,7 @@ class AppController : public QObject {
     bool m_hasStoredCredential = false;
     quint64 m_agentRevision = 0;
     quint64 m_avatarRevision = 0;
+    quint64 m_mediaRevision = 0;
     quint64 m_composerRevision = 0;
     quint64 m_nextAvatarRequest = 0;
     int m_updateRequestsPending = 0;
@@ -400,11 +454,16 @@ class AppController : public QObject {
     quint64 m_teamMessagesGeneration = 0;
     quint64 m_turnQueueGeneration = 0;
     quint64 m_profileGeneration = 0;
+    quint64 m_promptHistoryGeneration = 0;
+    quint64 m_settingsStatusGeneration = 0;
+    int m_settingsStatusPending = 0;
     bool m_teamListLoading = false;
     bool m_teamMessagesLoading = false;
     bool m_turnQueuePaused = false;
     bool m_turnQueueLoading = false;
     bool m_profileLoading = false;
+    bool m_profilePromptsHaveMore = false;
+    bool m_profilePromptsLoading = false;
     bool m_cacheEnabled = true;
 };
 

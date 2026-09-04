@@ -98,6 +98,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/ConversationPane.qml
         qml/components/DisplayCellCard.qml
         qml/components/MessageDelegate.qml
+        qml/components/MediaGallery.qml
         qml/components/OrchestratorDialog.qml
         qml/components/PaneLeaf.qml
         qml/components/AgentProfilePanel.qml

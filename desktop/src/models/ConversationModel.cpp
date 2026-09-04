@@ -28,6 +28,7 @@ QJsonObject messageToJson(const Message& message) {
             {QStringLiteral("automated"), message.automated},
             {QStringLiteral("activity_count"), message.activityCount},
             {QStringLiteral("tool_details_available"), message.toolDetailsAvailable},
+            {QStringLiteral("delivery_failed"), message.deliveryFailed},
             {QStringLiteral("tools"), message.tools},
             {QStringLiteral("display_cells"), message.displayCells}};
 }
@@ -206,7 +207,7 @@ void ConversationModel::applyLog(const QJsonObject& response, LoadKind kind) {
 QJsonObject ConversationModel::cacheSnapshot() const {
     QJsonArray turns;
     for (const Message& message : m_messages) {
-        if (message.activity || message.pending || message.deliveryFailed ||
+        if (message.activity || message.pending ||
             message.kind == QStringLiteral("live")) {
             continue;
         }
@@ -255,6 +256,20 @@ void ConversationModel::markDeliveryFailed(const QString& clientMessageId) {
     message.pending = false;
     const QModelIndex changed = index(row, 0);
     emit dataChanged(changed, changed, {PendingRole, DeliveryFailedRole});
+}
+
+QString ConversationModel::takeFailedMessageForRetry(const QString& messageId) {
+    const int row = m_byId.value(messageId, -1);
+    if (row < 0 || !m_messages.at(row).deliveryFailed) {
+        return {};
+    }
+    const QString text = m_messages.at(row).text;
+    beginRemoveRows({}, row, row);
+    m_messages.removeAt(row);
+    endRemoveRows();
+    rebuildIndex();
+    emit countChanged();
+    return text;
 }
 
 void ConversationModel::applyActivityEvent(const QJsonObject& event) {
@@ -359,6 +374,21 @@ void ConversationModel::applyActivityEvent(const QJsonObject& event) {
         emit countChanged();
     }
     rebuildIndex();
+}
+
+bool ConversationModel::applyToolDetails(const QString& messageId, const QJsonObject& details) {
+    const int row = m_byId.value(messageId, -1);
+    if (row < 0) {
+        return false;
+    }
+    Message& message = m_messages[row];
+    message.tools = details.value(QStringLiteral("tools")).toArray();
+    message.displayCells = details.value(QStringLiteral("display_cells")).toArray();
+    message.toolDetailsAvailable = false;
+    const QModelIndex changed = index(row, 0);
+    emit dataChanged(changed, changed,
+                     {ToolsRole, DisplayCellsRole, ToolDetailsAvailableRole});
+    return true;
 }
 
 void ConversationModel::clearActivity() {

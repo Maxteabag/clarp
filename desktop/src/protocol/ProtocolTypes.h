@@ -24,6 +24,7 @@ struct Agent {
     QString voiceId;
     QJsonArray schedules;
     QJsonArray mcpServers;
+    QJsonArray teamIds;
     qint64 latestStateTimestamp = 0;
     qint64 lastActivity = 0;
     qint64 headRevision = 0;
@@ -89,5 +90,7 @@ struct AudioClip {
 
 [[nodiscard]] bool isBusyState(const QString& state);
 [[nodiscard]] QString displayName(const Agent& agent);
+[[nodiscard]] QString voiceDeliverySession(const QString& captureSession,
+                                           const QString& currentSession);
 
 } // namespace clarp

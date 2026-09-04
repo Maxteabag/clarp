@@ -26,13 +26,13 @@ Car Mode and CarPlay are explicitly out of scope.
 | Streaming | Provisional live row, incomplete voice-markup shielding, final/live de-duplication, no structural reset per token | Implemented |
 | Activity | Semantic match key, running-to-terminal in-place update, Claude tools and Codex display cells share one presentation | Implemented |
 | Scrolling | Follow only while pinned, preserve history anchor, surface new content below, prepend older history | Implemented |
-| Composer | Always visible, per-Host/per-conversation durable draft, queue-if-busy, durable attachment chips, send without losing focus | Implemented |
-| Message rendering | Incremental-safe streaming text, final Markdown, code/tables/links, spoken-markup shielding, team/automation provenance, timestamps | Implemented |
+| Composer | Always visible, per-Host/per-conversation durable draft, queue-if-busy, multi-file picker/drag-drop, MIME-aware durable attachment chips, send without losing focus | Implemented |
+| Message rendering | Incremental-safe streaming text, selectable final Markdown, code/tables/links, authenticated inline media, lazy tool details, spoken-markup shielding, provenance and timestamps | Implemented |
 | Chat list | Stale-state rejection, unread semantics, stable diff updates, recent-activity ordering, preview, search | Implemented |
-| Agent profile | Identity, context/compact, task plan, queue editor, model/effort/MCP, schedules and autonomy toggles | Implemented |
-| Updates | Attention/decisions, active/recent jobs, artifacts, action refresh and stale-response fencing | Implemented |
+| Agent profile | Identity, prompt history, media, artifacts, heartbeat history, teams, context/compact, task plan, queue, model/effort/MCP, schedules and autonomy | Implemented |
+| Updates | Attention/decisions with pending feedback, active/recent jobs with progress, artifacts, action refresh and stale-response fencing | Implemented |
 | Teams | Team list/messages, members, leader, create/edit/delete and independent refresh fencing | Implemented |
-| Settings | Chat/voice preferences, Host auth entry point, orchestrator, diagnostics and keyboard reference | Implemented for desktop scope |
+| Settings | Chat/voice preferences, Host auth entry point, orchestrator, live diagnostics, transcription/TTS status and keyboard reference | Implemented for desktop scope |
 | Voice | Tap recording, background transcription ownership, playback/mute/stop and explicit state | Partial |
 | New session | Where to Session to Run, resume/fork/new, backend/model/effort/MCP | Implemented |
 | Files and terminal | Per-pane actions open the local agent folder and a terminal in its working directory | Implemented |

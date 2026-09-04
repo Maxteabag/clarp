@@ -88,6 +88,9 @@ Agent Agent::fromJson(const QJsonObject& object) {
     if (object.value(QStringLiteral("mcp_servers")).isArray()) {
         agent.mcpServers = object.value(QStringLiteral("mcp_servers")).toArray();
     }
+    if (object.value(QStringLiteral("team_ids")).isArray()) {
+        agent.teamIds = object.value(QStringLiteral("team_ids")).toArray();
+    }
     agent.latestStateTimestamp = integerValue(object, "latest_state_ts");
     agent.lastActivity = integerValue(object, "last_activity");
     agent.headRevision = integerValue(object, "head_revision");
@@ -127,6 +130,7 @@ Message Message::fromJson(const QJsonObject& object) {
     message.activityCount = static_cast<int>(integerValue(object, "activity_count"));
     message.automated = boolValue(object, "automated") || boolValue(object, "is_automated");
     message.toolDetailsAvailable = boolValue(object, "tool_details_available");
+    message.deliveryFailed = boolValue(object, "delivery_failed");
     if (object.value(QStringLiteral("tools")).isArray()) {
         message.tools = object.value(QStringLiteral("tools")).toArray();
     }
@@ -174,6 +178,10 @@ bool isBusyState(const QString& state) {
 
 QString displayName(const Agent& agent) {
     return agent.persona.isEmpty() ? agent.session : agent.persona;
+}
+
+QString voiceDeliverySession(const QString& captureSession, const QString& currentSession) {
+    return captureSession.isEmpty() ? currentSession : captureSession;
 }
 
 } // namespace clarp

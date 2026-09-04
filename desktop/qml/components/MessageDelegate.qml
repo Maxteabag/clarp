@@ -1,11 +1,14 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 
 Item {
     id: root
 
+    required property var controller
+    required property string session
     required property string messageId
     required property string authorRole
     required property string body
@@ -23,6 +26,7 @@ Item {
     required property var tools
     required property var displayCells
     required property int activityCount
+    required property bool toolDetailsAvailable
     required property bool showTools
     required property bool showTimestamp
     property bool activityExpanded: false
@@ -32,6 +36,11 @@ Item {
         || root.activityExpanded || root.presentedActivityCount === 1
     readonly property bool userAuthored: root.authorRole === "user"
         && root.origin !== "agent" && root.origin !== "automation"
+    readonly property int mediaRevision: controller.mediaRevision
+    readonly property string renderedBody: {
+        mediaRevision;
+        return controller.resolveMediaMarkdown(body);
+    }
 
     width: ListView.view ? ListView.view.width : 600
     visible: activity || body.length > 0 || displayCells.length > 0
@@ -132,14 +141,17 @@ Item {
                     color: root.deliveryFailed ? "#a45e6d" : "#555a73"
                 }
 
-                Text {
+                TextEdit {
                     id: messageText
                     anchors.fill: parent
                     anchors.leftMargin: root.userAuthored ? 10 : 2
                     anchors.rightMargin: 8
                     anchors.topMargin: root.userAuthored ? 8 : 5
                     anchors.bottomMargin: root.userAuthored ? 8 : 5
-                    text: root.body
+                    text: root.renderedBody
+                    readOnly: true
+                    selectByMouse: true
+                    persistentSelection: true
                     // Qt's Markdown parser is not incremental-safe when a
                     // stream ends halfway through a fence/list/tag. Present
                     // growing text plainly; the finalized row upgrades to
@@ -147,10 +159,7 @@ Item {
                     textFormat: root.messageKind === "live" ? Text.PlainText : Text.MarkdownText
                     wrapMode: Text.Wrap
                     color: "#b9bbcf"
-                    linkColor: "#9fa7ca"
                     font.pixelSize: 12
-                    lineHeight: 1.38
-                    lineHeightMode: Text.ProportionalHeight
                     onLinkActivated: link => Qt.openUrlExternally(link)
                 }
             }
@@ -175,7 +184,13 @@ Item {
             }
 
             HoverHandler { id: activityTap }
-            TapHandler { onTapped: root.activityExpanded = !root.activityExpanded }
+            TapHandler {
+                onTapped: {
+                    if (!root.activityExpanded && root.toolDetailsAvailable)
+                        root.controller.loadMessageToolDetails(root.session, root.messageId);
+                    root.activityExpanded = !root.activityExpanded;
+                }
+            }
         }
 
         ColumnLayout {
@@ -185,6 +200,15 @@ Item {
             Layout.leftMargin: 2
             Layout.rightMargin: 2
             spacing: 3
+
+            Button {
+                visible: root.toolDetailsAvailable
+                    && root.displayCells.length === 0 && root.tools.length === 0
+                text: "Load activity details"
+                implicitHeight: 26
+                onClicked: root.controller.loadMessageToolDetails(
+                    root.session, root.messageId)
+            }
 
             Repeater {
                 model: root.displayCells
@@ -221,15 +245,24 @@ Item {
             font.pixelSize: 8
         }
 
-        Text {
+        RowLayout {
             visible: root.pending || root.deliveryFailed
             Layout.alignment: root.userAuthored ? Qt.AlignRight : Qt.AlignLeft
             Layout.leftMargin: 4
             Layout.rightMargin: 4
-            text: root.deliveryFailed ? "Not delivered" : "Delivering…"
-            color: root.deliveryFailed ? "#b56f7c" : "#5f6278"
-            font.family: "JetBrains Mono"
-            font.pixelSize: 8
+            spacing: 6
+            Text {
+                text: root.deliveryFailed ? "Not delivered" : "Delivering…"
+                color: root.deliveryFailed ? "#b56f7c" : "#5f6278"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 8
+            }
+            Button {
+                visible: root.deliveryFailed
+                text: "Retry"
+                implicitHeight: 22
+                onClicked: root.controller.retryFailedMessage(root.session, root.messageId)
+            }
         }
     }
 }

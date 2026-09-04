@@ -86,6 +86,39 @@ Rectangle {
             }
 
             SettingsGroup {
+                title: "HOST STATUS"
+                SettingsInfo {
+                    label: "Diagnostics"
+                    value: root.controller.settingsStatusLoading
+                        ? "Checking…"
+                        : root.controller.diagnosticsHealth.ready ? "Ready" : "Needs attention"
+                }
+                SettingsInfo {
+                    label: "Speech to text"
+                    value: root.controller.transcriptionCapabilities.available
+                        ? "Available" : "Unavailable"
+                }
+                SettingsInfo {
+                    label: "Transcription model"
+                    value: String(root.controller.transcriptionCapabilities.default_model
+                        || "Server default")
+                }
+                SettingsInfo {
+                    label: "TTS queue"
+                    value: String((root.controller.diagnosticsHealth.tts_queue || {}).pending || 0)
+                        + " waiting  ·  "
+                        + String((root.controller.diagnosticsHealth.tts_queue || {}).in_flight || 0)
+                        + " active"
+                }
+                SettingsInfo {
+                    label: "Voice provider"
+                    value: String(root.controller.ttsProviderStatus.provider || "Unknown")
+                        + (String(root.controller.ttsProviderStatus.fallback || "none") !== "none"
+                            ? "  →  " + String(root.controller.ttsProviderStatus.fallback) : "")
+                }
+            }
+
+            SettingsGroup {
                 title: "KEYBOARD"
                 SettingsInfo { label: "Command palette"; value: "Ctrl+K" }
                 SettingsInfo { label: "Move between panes"; value: "Ctrl+Alt+Arrow" }
@@ -212,5 +245,10 @@ Rectangle {
             font.family: "JetBrains Mono"
             font.pixelSize: 9
         }
+    }
+
+    onVisibleChanged: {
+        if (visible)
+            controller.loadSettingsStatus();
     }
 }

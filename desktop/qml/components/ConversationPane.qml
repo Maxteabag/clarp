@@ -136,7 +136,8 @@ Rectangle {
         }
 
         Rectangle {
-            visible: root.active && root.controller.errorMessage.length > 0
+            visible: root.active && (root.controller.errorMessage.length > 0
+                || root.conversationModel.error.length > 0)
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 38 : 0
             color: "#2b2028"
@@ -148,15 +149,24 @@ Rectangle {
 
                 Text {
                     Layout.fillWidth: true
-                    text: root.controller.errorMessage
+                    text: root.controller.errorMessage || root.conversationModel.error
                     color: "#c9959e"
                     font.family: "JetBrains Mono"
                     font.pixelSize: 11
                     elide: Text.ElideRight
                 }
+                Button {
+                    visible: root.conversationModel.error.length > 0
+                    text: "Retry"
+                    implicitHeight: 26
+                    onClicked: root.controller.refreshSession(root.session)
+                }
                 ToolButton {
                     text: "×"
-                    onClicked: root.controller.clearError()
+                    onClicked: {
+                        root.controller.clearError();
+                        root.conversationModel.error = "";
+                    }
                 }
             }
         }
@@ -223,6 +233,8 @@ Rectangle {
             }
 
             delegate: MessageDelegate {
+                controller: root.controller
+                session: root.session
                 showTools: root.controller.toolsVisible
                 showTimestamp: root.controller.timestampsVisible
             }
@@ -281,6 +293,22 @@ Rectangle {
             paneId: root.paneId
             active: root.active
             onOpenConnection: root.openConnection()
+        }
+    }
+
+    onSessionChanged: {
+        if (session.length > 0 && controller.connected)
+            controller.loadMedia(session);
+    }
+    Component.onCompleted: {
+        if (session.length > 0 && controller.connected)
+            controller.loadMedia(session);
+    }
+    Connections {
+        target: root.controller
+        function onConnectedChanged() {
+            if (root.controller.connected && root.session.length > 0)
+                root.controller.loadMedia(root.session);
         }
     }
 

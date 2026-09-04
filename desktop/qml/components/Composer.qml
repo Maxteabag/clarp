@@ -12,6 +12,7 @@ Rectangle {
     required property string session
     required property string paneId
     required property bool active
+    property bool dropActive: false
     readonly property int agentRevision: controller.agentRevision
     readonly property int composerRevision: controller.composerRevision
     readonly property int queueCount: {
@@ -111,6 +112,20 @@ Rectangle {
                             anchors.fill: parent
                             anchors.leftMargin: 7
                             spacing: 3
+                            Image {
+                                visible: String(attachmentChip.modelData.content_type || "")
+                                    .startsWith("image/")
+                                Layout.preferredWidth: visible ? 18 : 0
+                                Layout.preferredHeight: visible ? 18 : 0
+                                source: {
+                                    const local = String(attachmentChip.modelData.local_source
+                                        || (attachmentChip.modelData.local
+                                            ? attachmentChip.modelData.path : "") || "");
+                                    return local.length > 0 ? "file://" + local : "";
+                                }
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                            }
                             Text {
                                 id: attachmentLabel
                                 Layout.fillWidth: true
@@ -270,7 +285,7 @@ Rectangle {
             enabled: !root.controller.audio.transcribing && root.session.length > 0
             implicitWidth: 28
             implicitHeight: 28
-            onClicked: root.controller.audio.toggleRecording()
+            onClicked: root.controller.toggleRecordingForSession(root.session)
             ToolTip.visible: hovered
             ToolTip.text: root.controller.audio.recording ? "Stop and transcribe" : "Talk · Ctrl+Shift+Space"
             contentItem: Text {
@@ -291,8 +306,45 @@ Rectangle {
     FileDialog {
         id: fileDialog
         title: "Attach a file"
-        fileMode: FileDialog.OpenFile
-        onAccepted: root.controller.attachLocalFile(root.paneId, root.session, selectedFile)
+        fileMode: FileDialog.OpenFiles
+        onAccepted: {
+            for (const file of selectedFiles)
+                root.controller.attachLocalFile(root.paneId, root.session, file);
+        }
+    }
+
+    DropArea {
+        anchors.fill: parent
+        enabled: root.active && root.session.length > 0
+        onEntered: drag => {
+            root.dropActive = drag.hasUrls;
+            drag.accepted = drag.hasUrls;
+        }
+        onExited: root.dropActive = false
+        onDropped: drop => {
+            root.dropActive = false;
+            for (const url of drop.urls)
+                root.controller.attachLocalFile(root.paneId, root.session, url);
+            drop.acceptProposedAction();
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        visible: root.dropActive
+        z: 40
+        radius: 4
+        color: "#d0262a3d"
+        border.color: "#a7addb"
+        border.width: 2
+        Text {
+            anchors.centerIn: parent
+            text: "DROP TO ATTACH"
+            color: "#d8dbef"
+            font.family: "JetBrains Mono"
+            font.pixelSize: 10
+            font.weight: Font.DemiBold
+        }
     }
 
     MouseArea {
