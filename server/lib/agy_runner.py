@@ -186,7 +186,7 @@ def spawn_turn(
                           {"dispatch": "agy", "trace_id": trace_id})
         process.append(subprocess.Popen(
             cmd, cwd=str(cwd), stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, start_new_session=(os.name == "posix"),
             env={**os.environ, "CLAUDE_PWA_SESSION": session},
         ))
     try:
@@ -201,7 +201,9 @@ def spawn_turn(
             pass
         raise
     attach_stderr_drain(proc)
-    handle = TurnHandle(proc=proc, drain_thread=None)   # type: ignore[arg-type]
+    handle = TurnHandle(
+        proc=proc, drain_thread=None,
+        process_group=proc.pid if os.name == "posix" else None)   # type: ignore[arg-type]
     if runtime_agent_id:
         _register(runtime_agent_id, handle)
     drain = threading.Thread(
@@ -299,11 +301,11 @@ def _drain_stream(
         log_exception("agyDrainFail", error, detail=trace_id)
         if proc.poll() is None:
             try:
-                proc.terminate()
+                handle.terminate()
                 proc.wait(timeout=2)
             except Exception:  # noqa: BLE001
                 try:
-                    proc.kill()
+                    handle.kill()
                 except Exception:  # noqa: BLE001
                     pass
         if st.terminal == "result":
