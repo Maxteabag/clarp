@@ -38,7 +38,7 @@ def test_tui_exposes_setup_pairing_and_provider_choices():
                 "#optional-skills", SelectionList).selected) == {
                     "clarp-calendar", "clarp-location"}
             assert len(app.query_one(
-                "#included-skills", SelectionList).selected) == 20
+                "#included-skills", SelectionList).selected) == 21
             manual_url = app.query_one("#manual-url-field")
             assert manual_url.display is False
             cartesia_key = app.query_one("#cartesia-key-field")

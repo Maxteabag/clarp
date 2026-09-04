@@ -102,8 +102,11 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     selected = json.loads((config / "install.json").read_text())["skills"]
     assert "clarp-tasks" in selected
     assert "clarp-agent-admin" in selected
+    assert "clarp-issue-reporting" in selected
     assert (home / ".claude/skills/clarp-tasks").is_symlink()
     assert (home / ".codex/skills/clarp-tasks").is_symlink()
+    assert (home / ".claude/skills/clarp-issue-reporting").is_symlink()
+    assert (home / ".codex/skills/clarp-issue-reporting").is_symlink()
     assert (share / "server.py").resolve() == (current / "server.py").resolve()
     for name in (
         "clarp-admin", "clarp-tui", "clarp-agent-tasks", "clarp-agent-artifacts",
