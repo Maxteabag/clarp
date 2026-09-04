@@ -1,11 +1,14 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from lib import agents as agents_db
 from lib import heartbeat, team_leader, team_store
 from lib import tts_queue
 from lib.protocol import AgentState
 from lib.turn_dispatch import (
+    DispatchError,
     MAX_ATTEMPTS,
     TurnDispatchService,
     _spoken_failure_text,
@@ -83,6 +86,18 @@ class _SteerableBackends(_Backends):
 
 class _CodexBackends(_Backends):
     CODEX = "codex"
+
+
+class _FailsFirstSpawnBackends(_Backends):
+    def __init__(self):
+        super().__init__()
+        self.spawn_attempts = 0
+
+    def spawn_turn(self, backend, **kwargs):
+        self.spawn_attempts += 1
+        if self.spawn_attempts == 1:
+            raise FileNotFoundError("backend CLI is temporarily unavailable")
+        return super().spawn_turn(backend, **kwargs)
 
 
 class _Stream:
@@ -175,6 +190,65 @@ def test_dispatch_service_is_mockable_without_http_or_processes(tmp_path, monkey
 
     call["on_result"]({"duration_ms": 50})
     assert agents_db.latest_state(agent_id)["kind"] == AgentState.DONE
+
+
+def test_clean_completion_closes_the_durable_turn_row(tmp_path):
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(
+        text="finish me", requested_session="mike", trace_id="trace-finished",
+        client_msg_id="message-finished", synthesize_audio=False,
+    )
+    _, call = backends.spawned[0]
+
+    call["on_result"]({"duration_ms": 50})
+
+    open_rows = agents_db.conn().execute(
+        "SELECT COUNT(*) AS n FROM turns WHERE agent_id=? AND ended_at IS NULL",
+        (agent_id,),
+    ).fetchone()["n"]
+    assert open_rows == 0
+
+
+def test_idempotent_retry_respawns_when_first_attempt_never_started(tmp_path):
+    """Persistence alone is not proof that the backend accepted the message.
+
+    The iOS outbox retries a failed `/send` with the same client id. If the
+    first request stored the user row and then failed to spawn the CLI, the
+    retry currently deduplicates on that row and returns without spawning.
+    """
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="V", cwd=str(tmp_path),
+        session="mike", backend="claude",
+    )
+    agents_db.start_runtime(agent_id, "mike")
+    backends = _FailsFirstSpawnBackends()
+    service = TurnDispatchService(
+        SimpleNamespace(
+            default_session="mike",
+            agents_path=tmp_path / "unused.json",
+            stream=_Stream(),
+        ),
+        backend_registry=backends,
+        home=tmp_path,
+        uuid_factory=lambda: "backend-session-1",
+    )
+
+    with pytest.raises(DispatchError, match="temporarily unavailable"):
+        service.dispatch(
+            text="do not strand me", requested_session="mike",
+            trace_id="trace-first", client_msg_id="stable-message",
+            synthesize_audio=False,
+        )
+
+    retry = service.dispatch(
+        text="do not strand me", requested_session="mike",
+        trace_id="trace-retry", client_msg_id="stable-message",
+        synthesize_audio=False,
+    )
+
+    assert retry.session == "mike"
+    assert backends.spawn_attempts == 2
+    assert len(backends.spawned) == 1
 
 
 def test_unheard_audio_context_reaches_provider_but_not_visible_user_row(tmp_path):
