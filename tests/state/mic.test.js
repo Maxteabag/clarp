@@ -20,6 +20,7 @@ vi.mock('../../web/src/stores/audio.svelte.js', () => ({
   machine: { startRecording() {}, endRecording() {}, settle() {} },
   playerAdapter: { interrupt() {} },
   scheduler: { flushOlderThan() {} },
+  addConditionSource() {},
   tick() {},
   unlockAudio,
   addConditionSource() {},
@@ -156,5 +157,51 @@ describe('tap-to-record', () => {
     await recorder.finish();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy.mock.calls[0][0]).toBe('/transcribe');
+  });
+
+  it('a second tap cancels a start that is still awaiting mic permission', async () => {
+    let grant;
+    const pendingPermission = new Promise(resolve => { grant = resolve; });
+    navigator.mediaDevices.getUserMedia = vi.fn(() => pendingPermission);
+    const m = await loadStore();
+
+    const firstTap = m.micTap();
+    const secondTap = m.micTap();
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+    grant(fakeStream());
+    await Promise.all([firstTap, secondTap]);
+
+    expect(recorders).toHaveLength(0);
+    expect(m.mic.recording).toBe(false);
+    expect(m.mic.capturing).toBe(false);
+  });
+
+  it('recovers and records diagnostics when MediaRecorder errors mid-capture', async () => {
+    const m = await loadStore();
+    const recorder = await tapAndSpeak(() => m.micTap());
+
+    expect(typeof recorder.onerror).toBe('function');
+    await recorder.onerror({ error: new Error('encoder died') });
+
+    expect(m.mic.capturing).toBe(false);
+    expect(clog).toHaveBeenCalledWith(
+      'recorderFail', expect.stringMatching(/encoder died/),
+    );
+  });
+
+  it('records a diagnostic when transcription returns an HTTP error', async () => {
+    fetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      text: async () => 'temporarily unavailable',
+    });
+    const m = await loadStore();
+    const recorder = await tapAndSpeak(() => m.micTap());
+    await m.micTap();
+    await recorder.finish();
+
+    expect(clog).toHaveBeenCalledWith(
+      'transcribeFail', expect.stringMatching(/503.*temporarily unavailable/),
+    );
   });
 });
