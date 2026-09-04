@@ -169,6 +169,19 @@ def test_reset_in_flight_recovers_stuck_rows(env, patch_eleven):
     assert r2 is not None and r2["queue_id"] == qid
 
 
+def test_worker_can_be_started_again_after_it_was_stopped(env):
+    from lib.tts_worker import TTSWorker
+
+    worker = TTSWorker(audio_dir=env["audio_dir"], interval_sec=10)
+    worker.stop()
+    worker.start()
+    try:
+        assert worker._stop.is_set() is False  # noqa: SLF001
+        assert worker._thread is not None and worker._thread.is_alive()  # noqa: SLF001
+    finally:
+        worker.stop()
+
+
 def test_silent_turn_is_suppressed_before_it_reaches_worker(env):
     assert tts_queue.enqueue(
         agent_id=env["agent_id"], text="silent", voice_id="V_MIKE",

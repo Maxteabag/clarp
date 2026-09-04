@@ -7,11 +7,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import threading
+import time
 
 from lib import agents as agents_db
 from lib import (
     background_jobs,
     db,
+    health,
     heartbeat,
     interrupted_turns,
     message_store,
@@ -132,6 +134,58 @@ def test_restart_recovery_closes_the_orphaned_durable_turn():
     assert open_rows == 0
 
 
+def test_restart_finalizes_running_subagent_cells():
+    """A killed child must not render as running forever after its parent dies."""
+    agent_id = _agent("subagent-restart")
+    backend_session_id = _live_runtime(agent_id, "subagent-restart")
+    message_store.record_user_message(
+        agent_id=agent_id,
+        backend_session_id=backend_session_id,
+        client_msg_id="subagent-parent-message",
+        text="Delegate this work",
+        origin="user",
+    )
+    message_store.store_transcript_turns(
+        agent_id=agent_id,
+        backend_session_id=backend_session_id,
+        source_file="/tmp/interrupted-subagent.jsonl",
+        turns=[{
+            "id": "assistant-subagent-cell",
+            "role": "assistant",
+            "timestamp": "2026-09-04T00:00:00Z",
+            "text": "",
+            "display_cells": [{
+                "id": "spawn-child",
+                "kind": "subagents",
+                "title": "Waiting for agents",
+                "summary": "1 agent",
+                "status": "running",
+                "lines": [],
+            }],
+        }],
+    )
+    agents_db.record_state(
+        agent_id,
+        AgentState.TOOL,
+        {
+            "trace_id": "subagent-parent-trace",
+            "backend_session_id": backend_session_id,
+            "origin": "user",
+        },
+    )
+
+    assert len(interrupted_turns.recover_after_restart()) == 1
+
+    rows = message_store.list_messages(
+        agent_id=agent_id,
+        backend_session_id=backend_session_id,
+        include_automated=False,
+    )
+    cells = [cell for row in rows for cell in row["display_cells"]]
+    assert cells
+    assert all(cell.get("status") != "running" for cell in cells)
+
+
 def test_one_trace_cannot_create_two_durable_turn_rows():
     """Server dispatch and Claude's UserPromptSubmit hook both call open_turn."""
     agent_id = _agent("one-turn")
@@ -176,6 +230,65 @@ def test_failed_periodic_heartbeat_is_retryable_without_waiting_a_full_interval(
     assert worker.run_once() == 0
     assert attempts == ["heartbeat-retry", "heartbeat-retry"]
     assert heartbeat._state_for(agent_id).last_started == 0.0  # noqa: SLF001
+
+
+def test_heartbeat_dispatch_failure_is_visible_in_subsystem_health(monkeypatch):
+    monkeypatch.setenv("CLAUDE_PWA_HEARTBEAT_INTERVAL_SEC", "60")
+    monkeypatch.setenv("CLAUDE_PWA_HEARTBEAT_BACKOFF_CAP_SEC", "60")
+    monkeypatch.setenv("CLAUDE_PWA_HEARTBEAT_QUIET_PERIOD_SEC", "0")
+    _agent("heartbeat-health", heartbeat_enabled=True)
+    health.reset_for_tests()
+    worker = heartbeat.HeartbeatScheduler(
+        send_heartbeat=lambda _session, _text: (_ for _ in ()).throw(
+            RuntimeError("heartbeat dispatch broke")
+        ),
+        now=lambda: 1_000.0,
+    )
+
+    assert worker.run_once() == 0
+
+    status = health.snapshot()["heartbeat"]
+    assert status["last_error_at"] is not None
+    assert "dispatch broke" in status["last_error"]
+
+
+def test_heartbeat_callback_must_confirm_that_dispatch_was_accepted(monkeypatch):
+    """The server callback can decline on a busy-race without raising."""
+    monkeypatch.setenv("CLAUDE_PWA_HEARTBEAT_INTERVAL_SEC", "60")
+    monkeypatch.setenv("CLAUDE_PWA_HEARTBEAT_BACKOFF_CAP_SEC", "60")
+    monkeypatch.setenv("CLAUDE_PWA_HEARTBEAT_QUIET_PERIOD_SEC", "0")
+    agent_id = _agent("heartbeat-declined", heartbeat_enabled=True)
+    attempts: list[str] = []
+
+    def decline(session: str, _text: str) -> bool:
+        attempts.append(session)
+        return False
+
+    worker = heartbeat.HeartbeatScheduler(
+        send_heartbeat=decline,
+        now=lambda: 1_000.0,
+    )
+
+    assert worker.run_once() == 0
+    assert heartbeat._state_for(agent_id).last_started == 0.0  # noqa: SLF001
+    assert attempts == ["heartbeat-declined"]
+
+
+def test_non_user_interruption_is_not_mistaken_for_an_explicit_stop(monkeypatch):
+    monkeypatch.setenv("CLAUDE_PWA_HEARTBEAT_INTERVAL_SEC", "60")
+    monkeypatch.setenv("CLAUDE_PWA_HEARTBEAT_BACKOFF_CAP_SEC", "60")
+    monkeypatch.setenv("CLAUDE_PWA_HEARTBEAT_QUIET_PERIOD_SEC", "0")
+    agent_id = _agent("heartbeat-interrupted", heartbeat_enabled=True)
+    agents_db.record_state(
+        agent_id,
+        AgentState.INTERRUPTED,
+        {"source": "backend", "reason": "interrupted"},
+    )
+    now = time.time() + 61
+
+    due = heartbeat.pending_heartbeat_agents(now=now)
+
+    assert [agent["agent_id"] for agent in due] == [agent_id]
 
 
 def test_restart_heartbeat_retries_an_agent_whose_first_dispatch_failed(monkeypatch):
@@ -256,6 +369,26 @@ def test_two_scheduler_workers_cannot_dispatch_the_same_due_run_twice(monkeypatc
     assert not failures
     assert not any(thread.is_alive() for thread in threads)
     assert dispatched == [("scheduled-once", "Do the durable work")]
+
+
+def test_schedule_disabled_after_due_read_cannot_still_dispatch(monkeypatch):
+    _agent("scheduled-disabled")
+    item = _due_schedule("scheduled-disabled")
+    real_due = scheduler.due_schedules
+    dispatched: list[tuple[str, str]] = []
+
+    def due_then_disable(now: int | None = None):
+        rows = real_due(now)
+        scheduler.update_schedule(item["schedule_id"], enabled=False)
+        return rows
+
+    monkeypatch.setattr(scheduler, "due_schedules", due_then_disable)
+    worker = scheduler.AgentScheduleRunner(
+        dispatch_turn=lambda session, prompt: dispatched.append((session, prompt))
+    )
+
+    assert worker.tick() == 0
+    assert dispatched == []
 
 
 def test_deleted_agent_cannot_leave_an_enabled_schedule_behind():

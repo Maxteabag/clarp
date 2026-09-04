@@ -197,6 +197,26 @@ def test_archive_install_uses_the_supplied_release_identity(tmp_path):
     assert version == "v9.9.9"
 
 
+def test_nonmanaged_archive_install_does_not_require_toolchain_lock(tmp_path):
+    """Green guard for Bjorn issue #8's original existing/none-mode failure."""
+    source = _archive_source(tmp_path)
+    (source / "toolchain/package-lock.json").unlink()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _executable(fake_bin / "systemctl", "exit 0\n")
+    env, home = _install_env(tmp_path, fake_bin)
+    env.update(
+        {
+            "CLARP_SKIP_ENV": "1",
+            "CLARP_TOOLCHAIN_MODE": "none",
+        }
+    )
+
+    subprocess.run([str(source / "install.sh")], env=env, check=True, timeout=60)
+
+    assert (home / ".local/share/clarp/current/server.py").is_file()
+
+
 def test_failure_before_activation_does_not_leave_a_rollback_candidate(tmp_path):
     """A half-prepared release must never appear in ``clarp-admin rollback``."""
     source = _archive_source(tmp_path)

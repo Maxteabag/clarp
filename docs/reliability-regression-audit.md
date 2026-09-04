@@ -210,8 +210,73 @@ which fixes belong together.
 - **Deleting an agent leaves its durable background jobs running.** Agent
   deletion cancels task plans and artifacts, but neither the background-job
   rows nor their exact worker identities are terminalized.
+- **Older queued TTS overwrites newer turn ownership.** Before synthesis, the
+  worker copies the queued row's trace into the agent-global current trace. If
+  a newer turn is live, its terminal callback then sees the old trace and
+  discards its own result as superseded.
+- **TTS restart recovery can duplicate speech and provider cost.** A crash after
+  clip creation/broadcast but before `tts_queue.mark_done()` leaves a
+  `synthesizing` row. Startup blindly requeues it although the completed clip
+  already exists.
+- **Server-herald-held replies are process-local only.** The real clip is kept
+  in `HeraldManager._buffers` without a durable `held` status or audio SSE row.
+  Restart loses the only reference, so neither replay nor `/clips/recoverable`
+  can return it.
+- **The audio janitor deletes durably held MP3s.** It uses only file mtime and
+  ignores clip status, while the recovery query intentionally treats held
+  clips as longer-lived. The database can advertise a clip whose file is gone.
+- **Playback status can move backward after success.** A late second-client
+  `queued` acknowledgement overwrites `play-ok`, making an already consumed
+  clip recoverable again.
+- **TTS error classification is provider-blind.** Any `401` is presented as
+  “ElevenLabs quota exceeded,” including a Cartesia invalid-key response.
 
-Current red count: **25 tests** across Python and JavaScript.
+### Connection, resource, and test-system failures
+
+- **PWA reconnects discard their durable SSE cursor.** The code reads neither
+  `MessageEvent.lastEventId` nor a persisted cursor before constructing a new
+  `EventSource`; the comment claiming Last-Event-ID replay therefore does not
+  hold after the app explicitly replaces the object.
+- **Reconnect timers are not coalesced.** Two error/reconnect signals schedule
+  two future `connectSSE()` calls; the second does not close the first newly
+  opened stream. This is a direct mechanism for duplicate live clients and
+  repeated remote actions.
+- **Known authentication rejection does not stop SSE retries.** The banner is
+  corrected by #10, but the client continues opening connections and adding
+  401 traffic instead of waiting for a replacement credential.
+- **Request concurrency remains unbounded.** The listen backlog is 128, but
+  `ThreadingHTTPServer` still creates one thread per accepted slow/SSE client.
+  A 48-client regression creates 48 simultaneous subscribers, preserving the
+  resource-exhaustion mechanism seen in the prior 380-thread/1,024-FD incident.
+- **Repeated active model-install requests create repeated monitor threads.**
+  Twenty idempotent calls against one running generation start twenty monitor
+  loops.
+- **A stopped TTS worker cannot be restarted.** Unlike the other worker
+  classes, `TTSWorker.start()` does not clear its stop event.
+- **Heartbeat failure is absent from subsystem health.** Errors are printed,
+  but `/diagnostics/health` has no heartbeat entry or failed-at timestamp.
+- **Fast regression suites are not required on pull requests.** Current CI
+  builds/runs Docker and a path-filtered installer subset, but does not run the
+  full Python and Vitest suites. Most tests in this audit would not gate a PR.
+- **The in-app updater repeats #12's split resolver.** `clarp-admin update` now
+  falls back to the canonical repository, but `server_update._update_remote()`
+  still returns empty when metadata is absent.
+
+### Security and error-contract failures
+
+- **A limited paired token can read arbitrary host files and escalate.** Every
+  GET is currently allowed for limited devices. `/agent-file` accepts an
+  arbitrary absolute root and intentionally reads anything accessible to the
+  server user, including the Clarp configuration containing the administrator
+  token. The integration reproduction receives the chosen secret with HTTP
+  200; this endpoint must require full scope (and the scope model needs a full
+  GET allowlist audit).
+- **Provider error strings are interpolated into JSON.** Quotes and newlines in
+  an STT error produce an invalid `application/json` response. Several other
+  handlers use the same hand-built pattern instead of `json.dumps`.
+
+Current red count: **46 tests** across Python and JavaScript. One additional
+green archive-install guard pins the original #8 non-managed lockfile fix.
 
 ## Native-client reference findings
 
@@ -234,6 +299,10 @@ request to copy native build/signing material into this repository.
   accepting snapshots. That is a sound boundary and should be extended to SSE
   cursor epochs so a restored/reinstalled server cannot inherit an unrelated
   event cursor solely because it uses the same URL.
+- Clip acknowledgement is server-global rather than per device/consumer. One
+  PWA or phone marking a clip `play-ok` prevents another client from recovering
+  it; late acknowledgements from the second client can also regress the shared
+  status. A delivery ledger needs `(clip_id, consumer_id)` identity.
 
 ## Research method and stop condition
 
@@ -273,3 +342,8 @@ search produces only duplicate or lower-value variants.
   persisted-before-spawn retry hole, never-closed/duplicate turn rows, SSE
   replay overlap, paired-auth write coupling, interactive-pipe bootstrap,
   and orphaned background work after agent deletion.
+- 2026-09-04: expanded from 25 to 46 red regressions across audio ownership and
+  recovery, dead subagent presentation, heartbeat admission/health, stale
+  schedule dispatch, model-monitor and request-thread amplification, PWA SSE
+  cursor/timer/auth behavior, in-app update fallback, limited-token file read,
+  and invalid JSON error responses. Added a green archive test for #8.
