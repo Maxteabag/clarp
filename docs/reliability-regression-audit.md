@@ -97,6 +97,87 @@ These are hypotheses to turn into executable contracts or revise with evidence:
 - What is the minimum server/client compatibility window, especially for an iOS
   release that cannot be updated atomically with the server?
 
+## Confirmed red regressions
+
+These are executable failures on the baseline, not brainstorming items. The
+tests are intentionally red in this draft audit PR until maintainers decide
+which fixes belong together.
+
+### Restart and process lifetime
+
+- **Production startup defeats issue #11's fix.** `server/server.py` calls
+  `reconcile.reconcile_all()` before `build_server(..., restart_recovery=True)`.
+  The first call rewrites stale busy state to `idle`; the later
+  `recover_after_restart()` therefore finds no orphaned turn and writes no
+  marker. Existing tests call recovery without reproducing production order.
+- **Stopping a turn does not stop its process tree.** `ProcessRegistry` sends
+  `terminate()` only to the registered top-level CLI. A deterministic Linux
+  test spawns one child, stops the registered parent, and proves the child is
+  still alive. Claude/Codex subagents are descendants and are not separately
+  registered. Custom adapter processes already use the safer
+  `start_new_session=True` plus `killpg` pattern.
+
+### Heartbeats and scheduled autonomy
+
+- **A failed periodic heartbeat consumes its cadence.** `last_started` is
+  persisted before dispatch. An exception is logged, but an immediate retry is
+  skipped for minimum spacing and then the configured interval.
+- **A failed restart heartbeat is never retried.** The once-only latch is set
+  before per-agent dispatch. One transient lock or backend error permanently
+  skips continuity recovery for that agent in the current server process.
+- **A scheduled run advances before dispatch.** If dispatch raises, `last_run`
+  and `next_run` already moved forward; a daily job is silently lost for a day.
+- **Two scheduler workers can double-dispatch one occurrence.** Selection and
+  advance are separate autocommit statements with no atomic claim. A barrier
+  test makes two workers read the same due row and both dispatch it.
+- **Deleting an agent leaves its schedule enabled and due.** Soft deletion
+  cancels task plans and artifacts, but not `agent_schedules`.
+- **Leap-day cron becomes permanently unscheduled.** The next-run search stops
+  after 366 days, so `0 0 29 2 *` starting in March 2025 returns `None` instead
+  of 2028-02-29.
+
+### Installation and update
+
+- **Quick-start source cleanup never runs.** `get.sh` installs an EXIT trap and
+  then `exec`s `setup.sh`; successful `exec` discards the parent shell and its
+  trap. The downloaded source tree remains, and setup persists that temporary
+  path as `source_repo`.
+- **Clean archive releases identify as `unknown-dirty`.** `install.sh` derives
+  both version and dirty state exclusively from Git metadata. It ignores a
+  supplied release identity even though archive installs intentionally have no
+  `.git` directory.
+- **A pre-activation environment failure leaves an unsafe rollback candidate.**
+  The staging directory is moved into `releases/` and its cleanup trap removed
+  before `uv lock`/`uv sync`; the activation rollback trap is installed later.
+  A failure in between leaves an incomplete unmarked directory visible to the
+  rollback inventory.
+
+### Client state and voice boundaries
+
+- **HTTP errors become fake network silence after any prior success.** Error
+  responses advance `lastResponseAt`, but `assess()` uses only last successful
+  fetch/SSE time once a success exists. Continuous 503 responses eventually
+  render as `no server contact`, the same state-conflation family as #10.
+- **A fast second mic tap starts a second permission request.** While the first
+  `getUserMedia()` is pending, the intent state still says stopped; the second
+  tap neither cancels nor coalesces and can leak a stream/start recording after
+  the user tried to stop.
+- **Mid-capture MediaRecorder errors have no handler.** There is no
+  `recorder.onerror`, so the state can remain capturing without a diagnostic or
+  resource reset.
+- **Transcription HTTP failures are not recorded in client diagnostics.** They
+  flash briefly but emit no `clog`, leaving no durable evidence after the UI
+  message disappears.
+- **`"ssml": "false"` enables SSML.** Manifest loading coerces arbitrary JSON
+  values with `bool(...)`; a truthy string opts a plain engine into receiving
+  raw markup.
+- **No-SSML mode strips only four tags.** `strip_ssml_for_plain_tts()` promises
+  to remove every SSML tag but leaves standard `prosody`, `emphasis`, `say-as`,
+  `p`, and `s` tags to be spoken aloud. This is the same boundary failure as
+  #14 with a wider vocabulary.
+
+Current red count: **17 tests** across Python and JavaScript.
+
 ## Research method and stop condition
 
 The audit uses repository issues and pull requests as incident evidence, then
@@ -116,3 +197,14 @@ search produces only duplicate or lower-value variants.
   `/home/peter/GIT/Clarp-bjowol-audit` from `origin/main` at `a95d9b0`.
 - 2026-09-04: found a separate dirty, ownership-uncertain
   `/home/peter/GIT/Clarp-hardening` worktree and left it untouched.
+- 2026-09-04: ran the pre-existing focused Python suites for restart recovery,
+  reconciliation, heartbeat, scheduling, process registry, and custom TTS;
+  114 tests passed before adding the new regressions.
+- 2026-09-04: added and reproduced 17 red regressions covering production boot
+  order, process descendants, heartbeat retry, schedule loss/duplication and
+  calendar range, installer archive/failure boundaries, client health, mic
+  lifecycle diagnostics, and no-SSML capability enforcement.
+- 2026-09-04: repaired the existing mic test mock to provide the newly required
+  `addConditionSource` dependency; the three pre-existing #13 regression tests
+  are green, while the three new mic lifecycle cases fail for their intended
+  assertions.
