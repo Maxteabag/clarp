@@ -335,6 +335,27 @@ def test_start_install_reuses_active_generation_after_server_restart(monkeypatch
         model_id, transcription_models.install_job_id(model_id))
 
 
+def test_repeated_active_install_requests_share_one_monitor_thread(monkeypatch):
+    """A polling/retrying client must not create one monitor per request."""
+    model_id = "faster-whisper:medium"
+    agents.create_agent(
+        persona="Mike", voice_id="voice", cwd="/tmp", session="mike")
+    monkeypatch.setattr(transcription_models, "installed_records", lambda: [])
+    background_jobs.upsert(
+        session="mike", job_id=transcription_models.install_job_id(model_id),
+        kind="transcription-model-install", title="Install", status="running",
+        worker_pid=4242, worker_start_token="boot:worker")
+    monitored = []
+    monkeypatch.setattr(
+        transcription_models, "_start_monitor",
+        lambda *args: monitored.append(args))
+
+    for _ in range(20):
+        transcription_models.start_install(model_id, session="mike")
+
+    assert len(monitored) == 1
+
+
 def test_registry_publication_does_not_outrun_active_job_truth(monkeypatch):
     model_id = "faster-whisper:medium"
     agents.create_agent(
