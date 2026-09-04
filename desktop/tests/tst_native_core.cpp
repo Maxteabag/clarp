@@ -214,6 +214,18 @@ class FakeClarpServer final : public QTcpServer {
             respondBytes(socket, QByteArray("\x89PNG\r\n", 6), QByteArray("image/png"));
             return;
         }
+        if (path == "/transcribe") {
+            ++m_transcribeCount;
+            respond(socket, 200,
+                    {{QStringLiteral("text"),
+                      QStringLiteral("Transcript %1").arg(m_transcribeCount)},
+                     {QStringLiteral("trace_id"),
+                      QStringLiteral("voice-trace-%1").arg(m_transcribeCount)},
+                     {QStringLiteral("transcription_id"),
+                      QStringLiteral("transcription-%1").arg(m_transcribeCount)},
+                     {QStringLiteral("hands_free"), false}});
+            return;
+        }
         if (path.startsWith("/agent-model-options")) {
             respond(socket, 200,
                     {{QStringLiteral("providers"),
@@ -526,6 +538,7 @@ class FakeClarpServer final : public QTcpServer {
     QPointer<QTcpSocket> m_heldUploadSocket;
     bool m_holdLogs = false;
     bool m_holdUploads = false;
+    int m_transcribeCount = 0;
 };
 
 QJsonObject loadFixture(const QString& relativePath) {
@@ -593,6 +606,7 @@ class NativeCoreTest final : public QObject {
     void appControllerCompletesCoreProtocolFlow();
     void contactsExcludeActivePersonas();
     void microphoneCanCaptureNativePcm();
+    void backgroundTranscriptionsKeepTheirChatOwnership();
 };
 
 void NativeCoreTest::sseParserHandlesChunksCommentsAndReplayIds() {
@@ -647,6 +661,10 @@ void NativeCoreTest::snapshotFiltersArchivedAgentsAndPatchesEvents() {
     QVERIFY(model.data(model.index(0, 0), AgentListModel::UnreadRole).toBool());
     model.clearUnread(QStringLiteral("rachel"));
     QVERIFY(!model.data(model.index(0, 0), AgentListModel::UnreadRole).toBool());
+    model.markTransportUnavailable();
+    QCOMPARE(model.data(model.index(0, 0), AgentListModel::StateRole).toString(),
+             QStringLiteral("offline"));
+    QVERIFY(!model.data(model.index(0, 0), AgentListModel::BusyRole).toBool());
 }
 
 void NativeCoreTest::agentSnapshotDiffsInPlaceAndRejectsStaleState() {
@@ -715,6 +733,49 @@ void NativeCoreTest::agentSnapshotDiffsInPlaceAndRejectsStaleState() {
     QCOMPARE(relaunched.data(relaunched.index(0, 0), AgentListModel::LastMessageRole)
                  .toString(),
              QString{});
+
+    AgentListModel queues;
+    queues.applyQueueEvent({{QStringLiteral("session"), QStringLiteral("rachel")},
+                            {QStringLiteral("queue_depth"), 4},
+                            {QStringLiteral("queue_revision"), 3}});
+    queues.applySnapshot(
+        {{QStringLiteral("agents"),
+          QJsonArray{QJsonObject{{QStringLiteral("agent_id"), QStringLiteral("a")},
+                                 {QStringLiteral("session"), QStringLiteral("rachel")},
+                                 {QStringLiteral("queued_turn_count"), 0},
+                                 {QStringLiteral("queue_revision"), 1}}}}});
+    QCOMPARE(queues.data(queues.index(0, 0), AgentListModel::QueueCountRole).toInt(), 4);
+    queues.applyQueueEvent({{QStringLiteral("session"), QStringLiteral("rachel")},
+                            {QStringLiteral("queue_depth"), 1},
+                            {QStringLiteral("queue_revision"), 2}});
+    QCOMPARE(queues.data(queues.index(0, 0), AgentListModel::QueueCountRole).toInt(), 4);
+    queues.applyQueueEvent({{QStringLiteral("session"), QStringLiteral("rachel")},
+                            {QStringLiteral("queue_depth"), 5},
+                            {QStringLiteral("queue_revision"), 4}});
+    QCOMPARE(queues.data(queues.index(0, 0), AgentListModel::QueueCountRole).toInt(), 5);
+
+    AgentListModel outgoing;
+    outgoing.applySnapshot(
+        {{QStringLiteral("agents"),
+          QJsonArray{agent(QStringLiteral("a"), QStringLiteral("rachel"), 100, 100,
+                           QStringLiteral("idle")),
+                     agent(QStringLiteral("b"), QStringLiteral("mike"), 200, 100,
+                           QStringLiteral("idle"))}}});
+    QCOMPARE(outgoing.data(outgoing.index(0, 0), AgentListModel::SessionRole).toString(),
+             QStringLiteral("mike"));
+    QVERIFY(outgoing.recordOutgoingActivity(QStringLiteral("rachel")));
+    QCOMPARE(outgoing.data(outgoing.index(0, 0), AgentListModel::SessionRole).toString(),
+             QStringLiteral("rachel"));
+    QCOMPARE(outgoing.data(outgoing.index(0, 0), AgentListModel::LastMessageRole).toString(),
+             QString{});
+    outgoing.applySnapshot(
+        {{QStringLiteral("agents"),
+          QJsonArray{agent(QStringLiteral("a"), QStringLiteral("rachel"), 250, 100,
+                           QStringLiteral("idle")),
+                     agent(QStringLiteral("b"), QStringLiteral("mike"), 300, 100,
+                           QStringLiteral("idle"))}}});
+    QCOMPARE(outgoing.data(outgoing.index(0, 0), AgentListModel::SessionRole).toString(),
+             QStringLiteral("mike"));
 }
 
 void NativeCoreTest::tailThenDeltaMatchesGoldenFixture() {
@@ -1509,6 +1570,15 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
                       {QStringLiteral("kind"), QStringLiteral("idle")},
                       {QStringLiteral("ts"), 901}});
     QTRY_COMPARE_WITH_TIMEOUT(controller.conversation()->rowCount(), 0, 3'000);
+    server.sendEvent({{QStringLiteral("type"), QStringLiteral("user-notification")},
+                      {QStringLiteral("session"), QStringLiteral("rachel")},
+                      {QStringLiteral("unread"), true},
+                      {QStringLiteral("preview"), QStringLiteral("Visible reply")}});
+    QTest::qWait(50);
+    QCOMPARE(controller.agents()
+                 ->data(controller.agents()->index(0, 0), AgentListModel::UnreadRole)
+                 .toBool(),
+             false);
     QTRY_COMPARE_WITH_TIMEOUT(controller.backendOptions().size(), 2, 3'000);
     QCOMPARE(controller.backendOptions().first().toMap().value(QStringLiteral("id")).toString(),
              QStringLiteral("claude"));
@@ -1802,6 +1872,38 @@ void NativeCoreTest::microphoneCanCaptureNativePcm() {
     audio.cancelRecording();
     QVERIFY(!audio.recording());
     QCOMPARE(errors.count(), 0);
+}
+
+void NativeCoreTest::backgroundTranscriptionsKeepTheirChatOwnership() {
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    AudioController audio;
+    audio.setEndpoint(QUrl(server.baseUrl()), QStringLiteral("test-token"));
+    QSignalSpy ready(&audio, &AudioController::transcriptionReady);
+
+    audio.transcribeRecording(QByteArray(2'000, 'a'), QStringLiteral("rachel"));
+    audio.transcribeRecording(QByteArray(2'000, 'b'), QStringLiteral("bella"));
+    QCOMPARE(audio.transcriptionsInFlight(), 2);
+    QCOMPARE(audio.transcriptionsForSession(QStringLiteral("rachel")), 1);
+    QCOMPARE(audio.transcriptionsForSession(QStringLiteral("bella")), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 2, 3'000);
+    QTRY_COMPARE_WITH_TIMEOUT(audio.transcriptionsInFlight(), 0, 3'000);
+
+    QSet<QString> targets;
+    for (const QList<QVariant>& arguments : ready) {
+        targets.insert(arguments.at(4).toString());
+    }
+    QCOMPARE(targets, QSet<QString>({QStringLiteral("rachel"), QStringLiteral("bella")}));
+
+    AudioController cancelled;
+    cancelled.setEndpoint(QUrl(server.baseUrl()), QStringLiteral("test-token"));
+    QSignalSpy cancelledReady(&cancelled, &AudioController::transcriptionReady);
+    cancelled.transcribeRecording(QByteArray(2'000, 'c'), QStringLiteral("rachel"));
+    QCOMPARE(cancelled.transcriptionsForSession(QStringLiteral("rachel")), 1);
+    cancelled.cancelTranscriptionsForSession(QStringLiteral("rachel"));
+    QTRY_COMPARE_WITH_TIMEOUT(cancelled.transcriptionsInFlight(), 0, 3'000);
+    QTest::qWait(50);
+    QCOMPARE(cancelledReady.count(), 0);
 }
 
 QTEST_MAIN(NativeCoreTest)

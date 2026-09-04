@@ -42,9 +42,9 @@ QVariant AgentListModel::data(const QModelIndex& index, int role) const {
     case AvatarSymbolRole:
         return agent.avatarSymbol;
     case StateRole:
-        return agent.latestState;
+        return m_transportAvailable ? agent.latestState : QStringLiteral("offline");
     case StatusTextRole:
-        return agent.statusText;
+        return m_transportAvailable ? agent.statusText : QString{};
     case LastMessageRole:
         return agent.lastMessage;
     case ConversationIdRole:
@@ -58,9 +58,9 @@ QVariant AgentListModel::data(const QModelIndex& index, int role) const {
     case QueueCountRole:
         return agent.queuedTurnCount;
     case AliveRole:
-        return agent.alive;
+        return m_transportAvailable && agent.alive;
     case BusyRole:
-        return agent.busy;
+        return m_transportAvailable && agent.busy;
     case FocusedRole:
         return agent.focused;
     case MutedRole:
@@ -112,6 +112,7 @@ QHash<int, QByteArray> AgentListModel::roleNames() const {
 }
 
 void AgentListModel::applySnapshot(const QJsonObject& snapshot) {
+    m_transportAvailable = true;
     QVector<Agent> next;
     const QJsonArray rows = snapshot.value(QStringLiteral("agents")).toArray();
     next.reserve(rows.size());
@@ -122,6 +123,10 @@ void AgentListModel::applySnapshot(const QJsonObject& snapshot) {
         Agent agent = Agent::fromJson(value.toObject());
         if (agent.session.isEmpty() || (m_archivedOnly ? !agent.archived : agent.archived)) {
             continue;
+        }
+        if (const auto rank = m_outgoingRanks.find(agent.session);
+            rank != m_outgoingRanks.end() && agent.lastActivity > rank->second) {
+            m_outgoingRanks.erase(rank);
         }
         if (const Agent* old = find(agent.session)) {
             agent.unread = old->unread;
@@ -139,11 +144,29 @@ void AgentListModel::applySnapshot(const QJsonObject& snapshot) {
                 agent.statusText = old->statusText;
                 agent.busy = old->busy;
             }
+            if (agent.queueRevision < old->queueRevision) {
+                agent.queueRevision = old->queueRevision;
+                agent.queuedTurnCount = old->queuedTurnCount;
+            }
+        }
+        if (const auto pending = m_pendingQueueEvents.find(agent.session);
+            pending != m_pendingQueueEvents.end()) {
+            const qint64 revision = pending->value(QStringLiteral("queue_revision")).toInteger();
+            if (revision >= agent.queueRevision) {
+                agent.queueRevision = revision;
+                agent.queuedTurnCount = pending->value(QStringLiteral("queue_depth")).toInt();
+            }
+            m_pendingQueueEvents.erase(pending);
         }
         next.append(std::move(agent));
     }
 
-    std::ranges::stable_sort(next, [](const Agent& left, const Agent& right) {
+    std::ranges::stable_sort(next, [this](const Agent& left, const Agent& right) {
+        const quint64 leftRank = m_outgoingRanks.value(left.session).first;
+        const quint64 rightRank = m_outgoingRanks.value(right.session).first;
+        if (leftRank != rightRank) {
+            return leftRank > rightRank;
+        }
         if (left.lastActivity != right.lastActivity) {
             return left.lastActivity > right.lastActivity;
         }
@@ -154,6 +177,13 @@ void AgentListModel::applySnapshot(const QJsonObject& snapshot) {
     QSet<QString> desiredSessions;
     for (const Agent& agent : std::as_const(next)) {
         desiredSessions.insert(agent.session);
+    }
+    for (auto it = m_outgoingRanks.begin(); it != m_outgoingRanks.end();) {
+        if (!desiredSessions.contains(it.key())) {
+            it = m_outgoingRanks.erase(it);
+        } else {
+            ++it;
+        }
     }
     bool structureChanged = false;
     for (int row = static_cast<int>(m_agents.size()) - 1; row >= 0; --row) {
@@ -227,12 +257,25 @@ void AgentListModel::applyFocusEvent(const QJsonObject& event) {
 }
 
 void AgentListModel::applyQueueEvent(const QJsonObject& event) {
-    const int row = m_bySession.value(event.value(QStringLiteral("session")).toString(), -1);
+    const QString session = event.value(QStringLiteral("session")).toString();
+    const int row = m_bySession.value(session, -1);
     if (row < 0) {
+        const qint64 incomingRevision =
+            event.value(QStringLiteral("queue_revision")).toInteger();
+        const qint64 pendingRevision =
+            m_pendingQueueEvents.value(session).value(QStringLiteral("queue_revision")).toInteger();
+        if (!session.isEmpty() && incomingRevision >= pendingRevision) {
+            m_pendingQueueEvents.insert(session, event);
+        }
         return;
     }
-    (*(m_agents.begin() + row)).queuedTurnCount =
-        event.value(QStringLiteral("queue_depth")).toInt();
+    Agent& agent = m_agents[row];
+    const qint64 revision = event.value(QStringLiteral("queue_revision")).toInteger();
+    if ((revision == 0 && agent.queueRevision > 0) || revision < agent.queueRevision) {
+        return;
+    }
+    agent.queueRevision = revision;
+    agent.queuedTurnCount = event.value(QStringLiteral("queue_depth")).toInt();
     notifyRow(row, {QueueCountRole});
 }
 
@@ -257,6 +300,33 @@ void AgentListModel::clearUnread(const QString& session) {
     notifyRow(row, {UnreadRole});
 }
 
+void AgentListModel::markTransportUnavailable() {
+    if (!m_transportAvailable) {
+        return;
+    }
+    m_transportAvailable = false;
+    if (!m_agents.isEmpty()) {
+        emit dataChanged(index(0, 0), index(static_cast<int>(m_agents.size()) - 1, 0),
+                         {StateRole, StatusTextRole, AliveRole, BusyRole});
+    }
+}
+
+bool AgentListModel::recordOutgoingActivity(const QString& session) {
+    const int row = m_bySession.value(session, -1);
+    if (row < 0) {
+        return false;
+    }
+    m_outgoingRanks.insert(
+        session, {++m_outgoingCounter, m_agents.at(row).lastActivity});
+    if (row > 0) {
+        beginMoveRows({}, row, row, {}, 0);
+        m_agents.move(row, 0);
+        endMoveRows();
+        rebuildIndex();
+    }
+    return true;
+}
+
 const Agent* AgentListModel::find(const QString& session) const {
     const int row = m_bySession.value(session, -1);
     return row < 0 ? nullptr : &m_agents.at(row);
@@ -277,6 +347,14 @@ QStringList AgentListModel::sessions() const {
 
 int AgentListModel::indexOfSession(const QString& session) const {
     return m_bySession.value(session, -1);
+}
+
+QString AgentListModel::displayState(const QString& session) const {
+    const Agent* agent = find(session);
+    if (agent == nullptr) {
+        return {};
+    }
+    return m_transportAvailable ? agent->latestState : QStringLiteral("offline");
 }
 
 void AgentListModel::rebuildIndex() {

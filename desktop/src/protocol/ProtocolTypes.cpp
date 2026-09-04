@@ -97,6 +97,7 @@ Agent Agent::fromJson(const QJsonObject& object) {
     agent.contextTokens = integerValue(object, "context_tokens");
     agent.contextWindow = integerValue(object, "context_window");
     agent.queuedTurnCount = static_cast<int>(integerValue(object, "queued_turn_count"));
+    agent.queueRevision = integerValue(object, "queue_revision");
     agent.alive = boolValue(object, "alive");
     agent.busy = boolValue(object, "busy") || isBusyState(agent.latestState);
     agent.focused = boolValue(object, "focused");

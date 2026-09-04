@@ -175,6 +175,14 @@ AppController::AppController(QObject* parent)
                                              : QStringLiteral("reconnecting"));
         if (m_sse.connected()) {
             requestSnapshot();
+        } else {
+            m_agents.markTransportUnavailable();
+            m_archivedAgents.markTransportUnavailable();
+            for (ConversationModel* model : std::as_const(m_conversations)) {
+                if (model != nullptr) {
+                    model->clearRunningActivity();
+                }
+            }
         }
     });
     connect(&m_sse, &SseClient::connectionError, this,
@@ -182,10 +190,8 @@ AppController::AppController(QObject* parent)
     connect(&m_audio, &AudioController::mediaError, this, &AppController::setErrorMessage);
     connect(&m_audio, &AudioController::transcriptionReady, this,
             [this](const QString& text, const QString& traceId, const QString& transcriptionId,
-                   bool handsFree) {
-                const QString target = voiceDeliverySession(m_voiceCaptureSession,
-                                                            m_selectedSession);
-                m_voiceCaptureSession.clear();
+                   bool handsFree, const QString& targetSession) {
+                const QString target = voiceDeliverySession(targetSession, m_selectedSession);
                 sendMessageInternal(target, text, false, traceId, transcriptionId, handsFree);
             });
     QTimer::singleShot(0, this, [this] {
@@ -714,6 +720,7 @@ void AppController::sendMessageInternal(const QString& targetSession, const QStr
         return;
     }
     ConversationModel* targetConversation = ensureConversation(targetSession);
+    m_agents.recordOutgoingActivity(targetSession);
     const QString clientId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     targetConversation->addOptimistic(clientId, trimmed);
     m_audio.silence();
@@ -761,10 +768,7 @@ void AppController::stopSession(const QString& session) {
 }
 
 void AppController::toggleRecordingForSession(const QString& session) {
-    if (!m_audio.recording() && !m_audio.transcribing()) {
-        m_voiceCaptureSession = session;
-    }
-    m_audio.toggleRecording();
+    m_audio.toggleRecordingForSession(session);
 }
 
 void AppController::refreshSession(const QString& session) { requestTail(session); }
@@ -795,8 +799,7 @@ QString AppController::agentName(const QString& session) const {
 }
 
 QString AppController::agentState(const QString& session) const {
-    const Agent* agent = m_agents.find(session);
-    return agent == nullptr ? QString{} : agent->latestState;
+    return m_agents.displayState(session);
 }
 
 int AppController::agentQueueCount(const QString& session) const {
@@ -816,7 +819,7 @@ QVariantMap AppController::agentDetails(const QString& session) const {
             {QStringLiteral("working_directory"), agent->workingDirectory},
             {QStringLiteral("model"), agent->model},
             {QStringLiteral("effort"), agent->effort},
-            {QStringLiteral("state"), agent->latestState},
+            {QStringLiteral("state"), m_agents.displayState(session)},
             {QStringLiteral("status_text"), agent->statusText},
             {QStringLiteral("context_tokens"), agent->contextTokens},
             {QStringLiteral("context_window"), agent->contextWindow},
@@ -2626,7 +2629,9 @@ void AppController::handleSseEvent(const QJsonObject& event) {
         }
     } else if (type == QStringLiteral("user-notification")) {
         m_agents.applyNotificationEvent(event);
-        if (session != m_selectedSession) {
+        if (session == m_selectedSession) {
+            m_agents.clearUnread(session);
+        } else {
             emit notificationRequested(event.value(QStringLiteral("persona")).toString(session),
                                        event.value(QStringLiteral("preview")).toString());
         }

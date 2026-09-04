@@ -33,10 +33,10 @@ Car Mode and CarPlay are explicitly out of scope.
 | Updates | Attention/decisions with pending feedback, active/recent jobs with progress, artifacts, action refresh and stale-response fencing | Implemented |
 | Teams | Team list/messages, members, leader, create/edit/delete and independent refresh fencing | Implemented |
 | Settings | Chat/voice preferences, Host auth entry point, orchestrator, live diagnostics, transcription/TTS status and keyboard reference | Implemented for desktop scope |
-| Voice | Tap recording, background transcription ownership, playback/mute/stop and explicit state | Partial |
+| Voice | Tap recording, concurrent cancellable background transcription with chat ownership, playback/mute/stop and explicit state | Implemented for desktop scope |
 | New session | Where to Session to Run, resume/fork/new, backend/model/effort/MCP | Implemented |
 | Files and terminal | Per-pane actions open the local agent folder and a terminal in its working directory | Implemented |
-| Reliability | Cache-first restore, monotonic revisions, stale endpoint/request fencing, coalesced transcript refresh, reconnect ownership | Implemented |
+| Reliability | Cache-first restore/outbox retry, monotonic transcript and queue revisions, stale endpoint/request/state fencing, coalesced refresh, reconnect ownership | Implemented |
 
 ## Required evidence
 

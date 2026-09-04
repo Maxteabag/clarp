@@ -19,6 +19,10 @@ Rectangle {
         agentRevision;
         return controller.agentQueueCount(session);
     }
+    readonly property int transcriptionCount: {
+        controller.audio.transcriptionsInFlight;
+        return controller.audio.transcriptionsForSession(session);
+    }
     readonly property var attachments: {
         composerRevision;
         return controller.composerAttachments(paneId, session);
@@ -30,7 +34,8 @@ Rectangle {
     readonly property string draftScope: paneId + "|" + session
     signal openConnection
 
-    implicitHeight: 46 + (queueCount > 0 ? 25 : 0) + (attachments.length > 0 ? 31 : 0)
+    implicitHeight: 46 + (transcriptionCount > 0 ? 25 : 0)
+        + (queueCount > 0 ? 25 : 0) + (attachments.length > 0 ? 31 : 0)
     color: root.active ? "#191a23" : "#151720"
     border.color: root.active ? "#4f5577" : "#272a39"
     border.width: 1
@@ -71,6 +76,31 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: 6
         spacing: 6
+
+        RowLayout {
+            visible: root.transcriptionCount > 0
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? 19 : 0
+            Text {
+                Layout.fillWidth: true
+                text: root.transcriptionCount === 1
+                    ? "Transcribing voice in background…"
+                    : root.transcriptionCount + " voice notes transcribing…"
+                color: "#8997b8"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 8
+                elide: Text.ElideRight
+            }
+            ToolButton {
+                visible: root.active
+                text: "×"
+                implicitWidth: 20
+                implicitHeight: 18
+                onClicked: root.controller.audio.cancelTranscriptionsForSession(root.session)
+                ToolTip.visible: hovered
+                ToolTip.text: "Cancel background transcription"
+            }
+        }
 
         Text {
             visible: root.queueCount > 0
@@ -281,8 +311,8 @@ Rectangle {
         ToolButton {
             id: recordButton
             visible: root.active
-            text: root.controller.audio.transcribing ? "…" : root.controller.audio.recording ? "■" : "●"
-            enabled: !root.controller.audio.transcribing && root.session.length > 0
+            text: root.controller.audio.recording ? "■" : "●"
+            enabled: root.session.length > 0
             implicitWidth: 28
             implicitHeight: 28
             onClicked: root.controller.toggleRecordingForSession(root.session)

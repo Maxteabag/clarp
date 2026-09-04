@@ -392,7 +392,6 @@ class AppController : public QObject {
     QString m_lastBackend;
     QString m_orchestratorLastDecision;
     QString m_composerFocusPane;
-    QString m_voiceCaptureSession;
     QString m_sharedFilesystemHostOverride;
     QHash<QString, QTimer*> m_deliveryTimers;
     QHash<QString, QTimer*> m_cacheTimers;

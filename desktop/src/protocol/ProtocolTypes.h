@@ -30,6 +30,7 @@ struct Agent {
     qint64 headRevision = 0;
     qint64 contextTokens = 0;
     qint64 contextWindow = 0;
+    qint64 queueRevision = 0;
     int queuedTurnCount = 0;
     bool alive = false;
     bool busy = false;
