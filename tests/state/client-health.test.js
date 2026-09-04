@@ -69,6 +69,19 @@ describe('assess', () => {
     expect(v.reason).toMatch(/500/);
   });
 
+  it('keeps counting error responses as contact after an earlier success', () => {
+    const h = createHealth(0);
+    noteFetch(h, { path: '/status', ok: true, status: 200, at: 1000 });
+    for (let at = 50000; at <= 200000; at += 50000) {
+      noteFetch(h, { path: '/status', ok: false, status: 503, at });
+    }
+
+    const v = assess(h, { now: 200001 });
+    expect(v.sinceMs).toBe(1);
+    expect(v.reason).toMatch(/503/);
+    expect(v.reason).not.toBe('no server contact');
+  });
+
   it('clears the unauthorized verdict once a request succeeds', () => {
     const h = createHealth(0);
     noteFetch(h, { path: '/events', ok: false, status: 401, at: 1000 });
