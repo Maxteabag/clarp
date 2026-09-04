@@ -217,8 +217,8 @@ def test_nonmanaged_archive_install_does_not_require_toolchain_lock(tmp_path):
     assert (home / ".local/share/clarp/current/server.py").is_file()
 
 
-def test_failure_before_activation_does_not_leave_a_rollback_candidate(tmp_path):
-    """A half-prepared release must never appear in ``clarp-admin rollback``."""
+def test_failure_before_activation_removes_the_incomplete_release_directory(tmp_path):
+    """A half-prepared release must not accumulate under ``releases/``."""
     source = _archive_source(tmp_path)
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

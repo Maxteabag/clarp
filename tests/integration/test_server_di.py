@@ -222,6 +222,22 @@ def test_limited_device_cannot_read_arbitrary_host_files(running_server, tmp_pat
     assert error.value.code == 403
 
 
+def test_access_log_redacts_query_credentials(capsys):
+    handler = object.__new__(server_module.Handler)
+    handler.address_string = lambda: "127.0.0.1"
+
+    handler.log_message(
+        '"%s" %s %s',
+        "GET /?token=top-secret-token HTTP/1.1",
+        "200",
+        "-",
+    )
+
+    logged = capsys.readouterr().out
+    assert "top-secret-token" not in logged
+    assert "REDACTED" in logged
+
+
 def test_transcription_provider_errors_remain_valid_json(running_server):
     base, ctx, _srv = running_server
 
