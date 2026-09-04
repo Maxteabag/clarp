@@ -1,0 +1,100 @@
+# Clarp Native Desktop
+
+Native Qt 6.11 desktop client for Clarp. It uses Qt Quick/QML for presentation
+and C++20 for protocol, state, networking, credentials, and media. It does not
+link Qt WebEngine or embed the PWA.
+
+The native client includes multi-pane conversations, revision-safe transcript
+sync, resumable SSE, agent lifecycle and schedule controls, voice selection,
+microphone transcription, authenticated audio playback, system notifications,
+tray controls, MPRIS media-key integration, a single-instance guard, and
+native Secret Service credential storage.
+
+## Requirements
+
+- CMake 3.22+
+- Ninja
+- Qt 6.11: Core, GUI, QML, Quick Controls, Network, Multimedia, SVG, and Test
+- A C++20 compiler
+- A freedesktop Secret Service provider (for example GNOME Keyring or KWallet)
+  for persistent paired-device credentials
+
+On Arch Linux:
+
+```bash
+sudo pacman -S --needed cmake ninja clang qt6-base qt6-declarative \
+  qt6-multimedia qt6-multimedia-ffmpeg qt6-svg qt6-wayland gnome-keyring
+```
+
+## Build and run
+
+```bash
+cd desktop
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+./build/dev/clarp-desktop
+```
+
+The client defaults to `http://127.0.0.1:7682`. A local native installation
+reads the existing administrator token from `~/.config/clarp/config.toml` when
+present. Remote installations should use `clarp-admin pair create` and enter
+the one-time `clp_…` code; the resulting revocable `cld_…` credential is kept
+through the freedesktop Secret Service DBus API.
+
+Environment overrides are useful for development:
+
+```bash
+CLARP_BASE_URL=https://computer.example.ts.net CLARP_TOKEN=cld_… \
+  ./build/dev/clarp-desktop
+```
+
+## Quality gates
+
+```bash
+cmake --preset release
+cmake --build --preset release
+
+CC=clang CXX=clang++ cmake --preset sanitizers
+cmake --build --preset sanitizers
+ctest --preset sanitizers
+
+cmake --preset analysis
+cmake --build --preset analysis
+
+cmake --build --preset dev --target all_qmllint
+```
+
+Set `CLARP_SCREENSHOT_PATH=/tmp/clarp.png` to run a deterministic two-second
+visual smoke capture. For headless CI, also set `QT_QPA_PLATFORM=offscreen` and
+`QT_QUICK_BACKEND=software`.
+
+The default scene graph uses GPU acceleration. On the development NVIDIA/
+Wayland system, a live release build measured about 129 MB PSS with the normal
+GPU backend and about 87 MB PSS with `QT_QUICK_BACKEND=software`; those are
+environment-specific reference numbers, not fixed requirements. The software
+backend is a useful low-memory fallback when GPU throughput matters less.
+
+## Distribution
+
+- Flatpak is the primary sandboxed channel:
+
+  ```bash
+  flatpak-builder --user --force-clean --install build/flatpak \
+    packaging/flatpak/com.maxteabag.Clarp.yml
+  flatpak run com.maxteabag.Clarp
+  ```
+
+- `packaging/appimage/build-appimage.sh` creates a portable AppImage using
+  `linuxdeploy` and `linuxdeploy-plugin-qt`. Build it in a stable Qt 6.11 SDK,
+  not against an accidentally partial rolling-distribution upgrade. Set
+  `CLARP_APPIMAGE_RUNTIME_FILE=/path/to/runtime-x86_64` for a fully offline
+  build; otherwise `appimagetool` downloads its runtime.
+- `packaging/aur/PKGBUILD` and `.SRCINFO` are ready for AUR publication once a
+  matching `v0.1.0` source tag exists. Replace `SKIP` with the release archive
+  checksum before publishing.
+
+AppImage releases must include a checksum and the dependency-license inventory
+described in `THIRD_PARTY_NOTICES.md`.
+
+See `REWRITE_PLAN.md` for the behavioral scope and completion gates.

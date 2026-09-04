@@ -1,0 +1,75 @@
+name: Native desktop
+
+on:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "contract/**"
+      - ".github/workflows/desktop-native.yml"
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - "contract/**"
+      - ".github/workflows/desktop-native.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6.11 and quality tools
+        run: >-
+          pacman -Syu --noconfirm
+          appstream
+          clang
+          cmake
+          ninja
+          qt6-base
+          qt6-declarative
+          qt6-multimedia
+          qt6-multimedia-ffmpeg
+          qt6-svg
+          qt6-wayland
+
+      - name: Release build with warnings as errors
+        working-directory: desktop
+        run: |
+          cmake --preset release
+          cmake --build --preset release --parallel
+          ctest --test-dir build/release --output-on-failure
+          cmake --build --preset release --target all_qmllint
+          appstreamcli validate --no-net packaging/linux/com.maxteabag.Clarp.metainfo.xml
+
+      - name: Address and undefined behavior sanitizers
+        working-directory: desktop
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake --preset sanitizers
+          cmake --build --preset sanitizers --parallel
+          ctest --preset sanitizers
+
+      - name: clang-tidy gate
+        working-directory: desktop
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake --preset analysis
+          cmake --build --preset analysis --parallel 2
+          ctest --test-dir build/analysis --output-on-failure
+
+      - name: Upload native executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: clarp-native-linux-unpackaged
+          path: desktop/build/release/clarp-desktop
+          if-no-files-found: error

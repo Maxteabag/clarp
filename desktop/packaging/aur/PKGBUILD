@@ -1,0 +1,36 @@
+# Maintainer: Clarp contributors
+pkgname=clarp-desktop
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Native Qt desktop client for Clarp agents'
+arch=('x86_64' 'aarch64')
+url='https://github.com/Maxteabag/clarp'
+license=('custom:PolyForm-Shield-1.0.0')
+depends=('glibc' 'gcc-libs' 'qt6-base' 'qt6-declarative'
+         'qt6-multimedia' 'qt6-multimedia-ffmpeg' 'qt6-svg' 'qt6-wayland')
+makedepends=('cmake' 'ninja')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cmake -S "clarp-$pkgver/desktop" -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_TESTING=OFF \
+    -DCLARP_WARNINGS_AS_ERRORS=ON
+  cmake --build build
+}
+
+check() {
+  cmake -S "clarp-$pkgver/desktop" -B build-tests -G Ninja \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DBUILD_TESTING=ON
+  cmake --build build-tests
+  ctest --test-dir build-tests --output-on-failure
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 "clarp-$pkgver/LICENSE.md" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE.md"
+}
