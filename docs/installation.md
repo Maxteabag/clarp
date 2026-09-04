@@ -201,6 +201,13 @@ switches the release atomically, restores its exact Python/toolchain metadata,
 and restarts systemd or launchd. Configuration and SQLite data are never stored
 inside a release.
 
+Native installations run two user services. `clarp.service` owns HTTP, SSE,
+and client-facing workers; `clarp-runtime.service` owns provider processes and
+continues across server updates. A runtime-affecting release rolls over only at
+an idle boundary. The one-time migration from a pre-runtime release refuses to
+start while an agent is marked busy, so the old monolithic service is never
+silently cut off during installation.
+
 ## Agent toolchains
 
 Managed mode downloads a checksummed Node runtime into Clarp's private data
@@ -212,6 +219,20 @@ in the vendors' normal user configuration directories.
 Existing mode validates the selected commands on `PATH` and leaves their
 versions and upgrades to the user. None mode defers backend setup. Setup never
 installs global npm packages silently.
+
+If Git or another child process depends on a desktop credential agent, put the
+required socket in the managed service environment:
+
+```toml
+[env]
+SSH_AUTH_SOCK = "~/.bitwarden-ssh-agent.sock"
+```
+
+Values in `[env]` are inherited by both `clarp.service` and
+`clarp-runtime.service`; `~` expands to the installing user's home directory.
+Clarp's own runtime variables cannot be overridden. Interactive setup also
+captures `SSH_AUTH_SOCK` when it is not explicit, and later managed updates
+preserve that captured value.
 
 ## Managed skills
 
@@ -244,6 +265,7 @@ Default core:
 - `clarp-server-admin`
 - `clarp-issue-reporting`
 - `clarp-transcription`
+- `clarp-transcription-model-installation`
 - `clarp-voice-adapters`
 
 Optional packs contain only Clarp-native and messaging integrations. Developer,
@@ -257,6 +279,11 @@ URLs. Its small built-in catalog covers managed Faster-Whisper downloads on
 Linux and managed `whisper.cpp` builds/downloads on macOS. Capability discovery
 validates the local Clarp registry; transcription never downloads a model
 implicitly.
+
+The native app shows supported choices and their size/language tradeoffs but
+does not start a Host download. Ask an agent on that Host to use the
+`clarp-transcription-model-installation` skill; it confirms the exact model,
+runs the supported manager, and verifies the live capability response.
 
 Custom transcription adapters are installed with the `clarp-transcription`
 skill and are discovered from the Computer rather than hard-coded in the app.

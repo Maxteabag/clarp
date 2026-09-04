@@ -2,10 +2,10 @@
 # Sync client assets into the running release — no service restart.
 #
 # Why this exists: `make deploy` runs the full install.sh, which cuts a new
-# release, copies server/lib/plugin/systemd, and restarts the
-# service. A restart interrupts in-flight agent turns, and deploying the
-# whole worktree ships anything else uncommitted in it. None of that is
-# wanted when the change is CSS, HTML or client JS.
+# release, copies server/lib/plugin/systemd, and restarts the HTTP service.
+# Agent turns continue in clarp-runtime, but deploying the whole worktree still
+# ships anything else uncommitted in it. That is not wanted when the change is
+# only CSS, HTML, or client JavaScript.
 #
 # Why it writes into the live release rather than repointing `current`:
 # server/lib/context.py resolves its root with

@@ -18,6 +18,14 @@ auth_token = ""
 # App session the client picks when no session has been selected yet.
 default_session = "claude"
 
+# Optional environment inherited by the Clarp server, runtime, and agent turns.
+# This is useful when credentials are exposed through a desktop SSH agent
+# rather than key files. `~` expands to this user's home directory. Clarp's own
+# runtime variables remain authoritative and cannot be overridden here.
+#
+# [env]
+# SSH_AUTH_SOCK = "~/.bitwarden-ssh-agent.sock"
+
 [tts]
 # cartesia | elevenlabs | deepgram | kokoro | piper | iphone | none
 provider = "cartesia"

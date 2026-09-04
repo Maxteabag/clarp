@@ -18,7 +18,7 @@ def test_macos_process_identity_and_liveness(monkeypatch):
     monkeypatch.setattr(background_jobs, "_macos_procargs", lambda _pid: raw_argv)
 
     def output(command, **_kwargs):
-        if command[:3] == ["sysctl", "-n", "kern.boottime"]:
+        if command[:3] == ["/usr/sbin/sysctl", "-n", "kern.boottime"]:
             return "{ sec = 123, usec = 0 }\n"
         if "lstart=" in command:
             return "Thu Aug 28 12:00:00 2026\n"
@@ -32,6 +32,7 @@ def test_macos_process_identity_and_liveness(monkeypatch):
     assert background_jobs.process_argv(42) == [
         "python", "worker.py", "--handle", "bg1:1:job"]
     assert background_jobs.worker_is_alive(42, token) is True
+    assert output(["/usr/sbin/sysctl", "-n", "kern.boottime"])
 
     monkeypatch.setattr(
         background_jobs.subprocess, "check_output",

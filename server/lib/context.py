@@ -123,6 +123,10 @@ class ServerContext:
     # Managed storage for agent-published images/media. SQLite remains the
     # authoritative index; files here are opaque blob storage.
     media_dir: pathlib.Path | None = None
+    # Production HTTP processes submit agent execution to a separately managed
+    # runtime. Tests and the runtime process itself leave this unset and run the
+    # injected/local dispatch implementation.
+    runtime_client: Any | None = None
 
     def __post_init__(self):
         if self.clip_broker is None:
@@ -408,7 +412,7 @@ class ServerContext:
             log_exception("speakAnnounceFail", e, detail=text[:60])
 
     @classmethod
-    def production(cls) -> "ServerContext":
+    def production(cls, *, connect_runtime: bool = True) -> "ServerContext":
         """Build the ctx used by the live server. Reads config.toml."""
         from .agent_store import AGENTS_FILE, get_roster  # local: avoid cycle
 
@@ -457,6 +461,10 @@ class ServerContext:
                     cfg.whisper_model, cfg.whisper_compute,
                     f"configured transcription model is not installed: {default_id}",
                     provider=provider)
+        runtime_client = None
+        if connect_runtime:
+            from .runtime_bridge import RuntimeClient
+            runtime_client = RuntimeClient(paths.runtime_socket)
         return cls(
             root=root,
             static=static,
@@ -470,4 +478,5 @@ class ServerContext:
             stream=stream,
             stt=stt,
             roster_names=tuple(get_roster().keys()),
+            runtime_client=runtime_client,
         )

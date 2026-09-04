@@ -44,6 +44,7 @@ _INFLIGHT: dict[str, str] = {}
 _QUEUED: dict[str, list] = {}
 _CLAIMED_AT: dict[str, float] = {}
 _RECOVERY_LOCK = threading.Lock()
+_RUNTIME_CLIENT: Any | None = None
 
 # Placeholder trace owning the in-flight slot while an interactive terminal is
 # attached to an agent. A normal turn routed to that agent queues behind it
@@ -51,6 +52,34 @@ _RECOVERY_LOCK = threading.Lock()
 # drains via drain_after_terminal() when the terminal closes.
 _TERMINAL_SENTINEL = "terminal"
 _STOPPING_SENTINEL = "stopping"
+
+
+def configure_runtime_client(client: Any | None) -> None:
+    global _RUNTIME_CLIENT
+    _RUNTIME_CLIENT = client
+
+
+def runtime_status() -> dict[str, Any]:
+    """Serializable ownership snapshot served to replaceable HTTP processes."""
+    from . import compaction
+    with _TURN_LOCK:
+        return {
+            "active": {
+                agent_id: trace_id
+                for agent_id, trace_id in _INFLIGHT.items()
+                if trace_id not in {_TERMINAL_SENTINEL, _STOPPING_SENTINEL}
+            },
+            "terminals": sorted(
+                agent_id for agent_id, trace_id in _INFLIGHT.items()
+                if trace_id == _TERMINAL_SENTINEL
+            ),
+            "spawning": sorted(_CLAIMED_AT),
+            "queued": {
+                agent_id: len(items) for agent_id, items in _QUEUED.items()
+                if items
+            },
+            "compactions": compaction.active_sessions(),
+        }
 
 
 def _terminal_live(agent_id: str) -> bool:
@@ -62,6 +91,9 @@ def _terminal_live(agent_id: str) -> bool:
 
 
 def _slot_is_spawning(agent_id: str) -> bool:
+    if _RUNTIME_CLIENT is not None:
+        return agent_id in set(
+            _RUNTIME_CLIENT.status().get("spawning") or ())
     return agent_id in _CLAIMED_AT
 
 
@@ -243,6 +275,9 @@ class TurnDispatchService:
 
     def recover_queued(self) -> int:
         """Re-admit durable explicit queues after a server restart."""
+        runtime = getattr(self.ctx, "runtime_client", None)
+        if runtime is not None:
+            return int(runtime.recover_queued())
         if not _RECOVERY_LOCK.acquire(blocking=False):
             return 0
         try:
@@ -301,6 +336,32 @@ class TurnDispatchService:
                  durable_queue_id: str = "",
                  unheard_audio_sessions: tuple[str, ...] = (),
                  allow_paused_queue: bool = False) -> DispatchResult:
+        runtime = getattr(self.ctx, "runtime_client", None)
+        if runtime is not None:
+            try:
+                return runtime.dispatch(
+                    text=text,
+                    requested_session=requested_session,
+                    trace_id=trace_id,
+                    synthesize_audio=synthesize_audio,
+                    forced_session=forced_session,
+                    routed_by_orchestrator=routed_by_orchestrator,
+                    client_msg_id=client_msg_id,
+                    origin=origin,
+                    sender_agent_id=sender_agent_id,
+                    prompt_admission=prompt_admission,
+                    prompt_admission_id=prompt_admission_id,
+                    queue_if_busy=queue_if_busy,
+                    skip_admission=skip_admission,
+                    durable_queue_id=durable_queue_id,
+                    unheard_audio_sessions=unheard_audio_sessions,
+                    allow_paused_queue=allow_paused_queue,
+                )
+            except Exception as exc:
+                from .runtime_bridge import RuntimeUnavailable
+                if isinstance(exc, RuntimeUnavailable):
+                    raise DispatchError(503, str(exc)) from exc
+                raise
         # NB: the live session->trace mapping is set only when a turn actually
         # spawns (see below / _finish_turn), NOT here — a message that merely
         # queues behind a busy agent must not move the trace, or the running
@@ -532,6 +593,15 @@ class TurnDispatchService:
 
     def dispatch_queued(self, queue_id: str) -> DispatchResult:
         """Explicitly send one durable item while leaving the queue paused."""
+        runtime = getattr(self.ctx, "runtime_client", None)
+        if runtime is not None:
+            try:
+                return runtime.dispatch_queued(queue_id)
+            except Exception as exc:
+                from .runtime_bridge import RuntimeUnavailable
+                if isinstance(exc, RuntimeUnavailable):
+                    raise DispatchError(503, str(exc)) from exc
+                raise
         row = turn_queue.claim(queue_id)
         if not row:
             raise DispatchError(404, "queued message not found")
@@ -1389,6 +1459,13 @@ def clear_for_agent(
 
 def owns_inflight_trace(agent_id: str, trace_id: str) -> bool:
     """Whether this server process still owns the exact running turn."""
+    if _RUNTIME_CLIENT is not None:
+        try:
+            active = _RUNTIME_CLIENT.status().get("active") or {}
+            return bool(trace_id) and str(active.get(agent_id) or "") == trace_id
+        except Exception:
+            return bool(trace_id) and agents_db.is_busy(agent_id) and \
+                agents_db.get_trace(agent_id) == trace_id
     with _TURN_LOCK:
         return bool(trace_id) and _INFLIGHT.get(agent_id) == trace_id
 
@@ -1401,6 +1478,23 @@ def snapshot_stop_state(agent_id: str) -> dict:
             "claimed_at": _CLAIMED_AT.get(agent_id),
             "queued": list(_QUEUED.get(agent_id) or []),
         }
+
+
+def begin_stop(agent_id: str) -> tuple[dict, int, bool]:
+    """Atomically install the Stop barrier in the process that owns turns."""
+    with _TURN_LOCK:
+        value = _INFLIGHT.get(agent_id)
+        snapshot = {
+            "trace_id": value if value not in {None, _STOPPING_SENTINEL} else "",
+            "claimed_at": _CLAIMED_AT.get(agent_id),
+            "queued": list(_QUEUED.get(agent_id) or []),
+        }
+        queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
+        turn_queue.set_paused(agent_id, True)
+        _INFLIGHT[agent_id] = _STOPPING_SENTINEL
+        _CLAIMED_AT.pop(agent_id, None)
+        dropped = len(_QUEUED.pop(agent_id, []) or [])
+    return snapshot, dropped, queue_was_paused
 
 
 def restore_stop_state(agent_id: str, snapshot: dict) -> None:
@@ -1443,6 +1537,14 @@ def prepare_queued_for_finish(
             _QUEUED[agent_id] = remaining
         else:
             _QUEUED.pop(agent_id, None)
+
+
+def complete_stop(
+    ctx, agent_id: str, snapshot: dict, cancelled_trace_ids: set[str], *,
+    backend_registry=backends,
+) -> None:
+    prepare_queued_for_finish(agent_id, snapshot, cancelled_trace_ids)
+    finish_stop(ctx, agent_id, backend_registry=backend_registry)
 
 
 def finish_stop(ctx, agent_id: str, *, backend_registry=backends) -> None:
