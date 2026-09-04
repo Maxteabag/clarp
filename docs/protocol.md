@@ -47,9 +47,15 @@ request is accepted. When it is set, every request must carry one of:
 
 The token is either the administrator token from `config.toml` or a paired
 device credential from `POST /pairing/exchange`. A paired device may have
-`limited` scope, which allows every `GET` and the core `POST`s (`/send`,
-`/transcribe`, `/upload`, `/select`, `/focus`, `/clips/ack`, `/clog`,
-`/location`, `/calendar/response`) and nothing else.
+`limited` scope, which allows conversation reads and the core `POST`s
+(`/send`, `/transcribe`, `/upload`, `/select`, `/focus`, `/clips/ack`, `/clog`,
+`/location`, `/calendar/response`, `/remote-action`). Administrative routes and
+Oracle require full scope. Host filesystem browsing (`/agent-file` and
+`/agent-files`) also requires full scope: a caller-selected root can contain
+configuration credentials, even though the operation is read-only.
+
+Limited scope is an API permission boundary, not an agent sandbox. It still
+allows sending work to agents that run with the host user's permissions.
 
 `GET /` and the static assets are public so a browser can load the shell
 before it has a token.
