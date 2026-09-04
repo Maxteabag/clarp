@@ -15,7 +15,9 @@ describe('protocol constants', () => {
   it('exports shared state/mode/action sets', () => {
     expect(AgentState.BUSY).toEqual(new Set(['thinking', 'tool', 'compacting']));
     expect(ActivityStatus.VALID).toEqual(new Set(['running', 'ok', 'error', 'recorded']));
-    expect(ClientAction.VALID).toEqual(new Set(['record', 'record-toggle', 'stop-agent']));
+    expect(ClientAction.VALID).toEqual(new Set([
+      'record', 'record-toggle', 'stop-agent', 'controller-event',
+    ]));
     expect(ClipStatus.VALID).toEqual(new Set([
       'synthesized', 'broadcast', 'queued', 'play-start', 'play-ok', 'play-fail', 'held',
     ]));

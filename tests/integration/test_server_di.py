@@ -338,6 +338,21 @@ def test_one_time_pairing_issues_revocable_device_credential(fake_ctx):
             headers={"Authorization": f"Bearer {token}"})
         assert status == 200
 
+        controller_events = fake_ctx.stream.subscribe()
+        status, body = _post_with_headers(
+            base + "/remote-action",
+            {
+                "action": "controller-event",
+                "button": "secondary",
+                "controller_event": "single-click",
+            },
+            {"Authorization": f"Bearer {token}"},
+        )
+        assert status == 200
+        assert json.loads(body)["controller_event_id"]
+        assert json.loads(controller_events.get(timeout=1))["action"] == "controller-event"
+        fake_ctx.stream.unsubscribe(controller_events)
+
         request = urllib.request.Request(
             base + "/managed-skills",
             data=b'{"skill_id":"clarp-calendar","enabled":true}',
@@ -2581,11 +2596,58 @@ def test_post_agents_resume_exposes_history_immediately(running_server, monkeypa
 
 def test_remote_action_broadcasts_to_sse(running_server):
     base, ctx, _srv = running_server
+    q = ctx.stream.subscribe()
     status, _ = _post(base + "/remote-action", {"action": "record-toggle"})
     assert status == 200
-    # Stream's recent buffer should include the broadcast event.
-    types = [ev["type"] for ev in ctx.stream.recent()]
-    assert "remote-action" in types
+    event = json.loads(q.get(timeout=1))
+    ctx.stream.unsubscribe(q)
+    assert event["type"] == "remote-action"
+    # Input events act only at the instant they arrive. A reconnect must never
+    # replay a stale toggle and unexpectedly start the microphone.
+    assert not any(ev["type"] == "remote-action" for ev in ctx.stream.recent())
+
+
+def test_controller_action_broadcasts_bounded_live_event(running_server):
+    base, ctx, _srv = running_server
+    q = ctx.stream.subscribe()
+    status, body = _post(base + "/remote-action", {
+        "action": "controller-event",
+        "controller_id": "duo-one",
+        "controller_event_id": "event-one",
+        "button": "secondary",
+        "controller_event": "swipe-right",
+        "duration_ms": 780,
+        "queued": False,
+        "ignored": "not forwarded",
+    })
+    assert status == 200
+    assert json.loads(body)["controller_event_id"] == "event-one"
+    event = json.loads(q.get(timeout=1))
+    ctx.stream.unsubscribe(q)
+    assert event == {
+        "type": "remote-action",
+        "action": "controller-event",
+        "controller_id": "duo-one",
+        "controller_event_id": "event-one",
+        "button": "secondary",
+        "controller_event": "swipe-right",
+        "duration_ms": 780,
+        "age_ms": 0,
+        "queued": False,
+        "ts": event["ts"],
+    }
+
+
+def test_controller_action_rejects_unknown_gesture(running_server):
+    base, _ctx, _srv = running_server
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + "/remote-action", {
+            "action": "controller-event",
+            "button": "primary",
+            "controller_event": "shake",
+        })
+    assert error.value.code == 400
+    assert json.loads(error.value.read())["error"] == "unknown controller_event"
 
 
 def test_turn_queue_can_be_listed_edited_deleted_and_paused_by_stop(running_server):

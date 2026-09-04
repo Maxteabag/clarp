@@ -14,7 +14,9 @@ def test_protocol_strings_match_wire_contract():
     assert SSEType.USER_NOTIFICATION == "user-notification"
 
     assert AgentState.busy_states() == {"thinking", "tool", "compacting"}
-    assert ClientAction.valid() == {"record", "record-toggle", "stop-agent"}
+    assert ClientAction.valid() == {
+        "record", "record-toggle", "stop-agent", "controller-event",
+    }
     assert ClipStatus.valid() == {
         "synthesized", "broadcast", "queued", "held",
         "play-start", "play-ok", "play-fail",

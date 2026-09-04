@@ -41,6 +41,17 @@ _STATEFUL_SINGLETON_TYPES = frozenset({
     SSEType.SERVER_VERSION,
 })
 
+# Actions describe user input at one instant and must never survive an SSE
+# reconnect. Keep this read-side fence even though current producers use
+# broadcast_ephemeral(): upgraded installations may still have action rows
+# persisted by an older release until the SSE retention window expires.
+_NON_REPLAYABLE_TYPES = frozenset({SSEType.REMOTE_ACTION})
+
+
+def _replayable(events: list[dict]) -> list[dict]:
+    return [event for event in events
+            if event.get("type") not in _NON_REPLAYABLE_TYPES]
+
 
 class SubscriberQueue(queue.Queue):
     """Per-SSE-subscriber event queue.
@@ -97,16 +108,17 @@ class AudioStream:
         if since_event_id is not None:
             try:
                 from . import agents as _agents
-                return _agents.events_after(since_event_id)
+                return _replayable(_agents.events_after(since_event_id))
             except Exception:
                 pass
         try:
             from . import agents as _agents
-            return _agents.recent_events(int(self.RECENT_WINDOW_SEC * 1000))
+            return _replayable(
+                _agents.recent_events(int(self.RECENT_WINDOW_SEC * 1000)))
         except Exception:
             pass
         with self._recent_lock:
-            return [ev for _, ev in self._recent]
+            return _replayable([ev for _, ev in self._recent])
 
     def broadcast(self, event_dict: dict) -> None:
         event_dict = dict(event_dict)
@@ -160,6 +172,18 @@ class AudioStream:
             cutoff = time.time() - self.RECENT_WINDOW_SEC
             while self._recent and self._recent[0][0] < cutoff:
                 self._recent.pop(0)
+        self._deliver(event_dict, sse_event_id=sse_event_id)
+
+    def broadcast_ephemeral(self, event_dict: dict) -> None:
+        """Deliver live input without recording it for reconnect replay.
+
+        Physical button edges and shortcut toggles describe an action at one
+        instant, not durable state. Replaying one later can unexpectedly start
+        a microphone or stop an agent.
+        """
+        self._deliver(dict(event_dict), sse_event_id=None)
+
+    def _deliver(self, event_dict: dict, *, sse_event_id: int | None) -> None:
         payload = json.dumps(event_dict)
         dead = []
         with self._subs_lock:
@@ -193,6 +217,7 @@ class AudioStream:
                 "type": event_dict.get("type"),
                 "session": event_dict.get("session"),
                 "subscribers": sub_count,
+                "ephemeral": sse_event_id is None,
             },
         )
         health.mark_success("sse")

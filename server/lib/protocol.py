@@ -146,10 +146,16 @@ class ClientAction:
     RECORD = "record"
     RECORD_TOGGLE = "record-toggle"
     STOP_AGENT = "stop-agent"
+    CONTROLLER_EVENT = "controller-event"
 
     @classmethod
     def valid(cls) -> set[str]:
-        return {cls.RECORD, cls.RECORD_TOGGLE, cls.STOP_AGENT}
+        return {
+            cls.RECORD,
+            cls.RECORD_TOGGLE,
+            cls.STOP_AGENT,
+            cls.CONTROLLER_EVENT,
+        }
 
 
 class TurnSource:
