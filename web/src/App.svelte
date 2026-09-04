@@ -15,6 +15,7 @@
   import StatusToast from './lib/StatusToast.svelte';
   import SvgDefs from './lib/SvgDefs.svelte';
   import VoiceDialog from './lib/VoiceDialog.svelte';
+  import CommandPalette from './lib/desktop/CommandPalette.svelte';
 
   import {
     app, isDesktop, refreshAgentSnapshot, setVersion,
@@ -31,7 +32,6 @@
   import {
     connectSSE, forceReconnect, scheduleReconnect, setSseHooks, sseIsOpen,
   } from './stores/sse.svelte.js';
-  import { composerRef } from './stores/composer.svelte.js';
   import {
     applyQuickChoice, handleGlobalKey, initKeyboard, setOverlay,
   } from './stores/input.svelte.js';
@@ -45,6 +45,7 @@
   let voiceOpen = $state(false);
   let orchestratorOpen = $state(false);
   let quickOpen = $state(false);
+  let commandOpen = $state(false);
 
   let startName = $state('');
   let startReplaceSid = $state('');
@@ -60,9 +61,10 @@
   // the keyboard away from the panes — no component needs its own handler.
   initKeyboard({
     onQuickSwitch: () => { quickOpen = true; },
+    onCommands: () => { commandOpen = true; },
     onSearch: () => { switcherOpen = true; },
     onOverview: () => { overviewOpen = true; },
-    onHelp: () => { overviewOpen = true; },
+    onHelp: () => { commandOpen = true; },
     onCloseOverlay: (name) => {
       if (name === 'switcher') switcherOpen = false;
       else if (name === 'overview') overviewOpen = false;
@@ -70,6 +72,7 @@
       else if (name === 'voice') voiceOpen = false;
       else if (name === 'orchestrator') orchestratorOpen = false;
       else if (name === 'quick') quickOpen = false;
+      else if (name === 'commands') commandOpen = false;
     },
   });
 
@@ -77,7 +80,8 @@
   // register as a dependency and the context would go stale.
   $effect(() => {
     const open = { switcher: switcherOpen, overview: overviewOpen, start: startOpen,
-                   voice: voiceOpen, orchestrator: orchestratorOpen, quick: quickOpen };
+                   voice: voiceOpen, orchestrator: orchestratorOpen, quick: quickOpen,
+                   commands: commandOpen };
     for (const [name, isOpen] of Object.entries(open)) setOverlay(name, isOpen);
   });
 
@@ -116,23 +120,6 @@
   // typing rather than pressing the mic leaves audio locked.
   function primeAudio() {
     try { unlockAudio(); } catch (_) {}
-  }
-
-  // Desktop only: clicking anywhere parks the caret back in the composer, so
-  // typing after scrolling or clicking a transcript row just works. On a
-  // phone this would pop the soft keyboard on every tap.
-  const FOCUS_KEEPERS =
-    'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
-
-  function refocusComposer(e) {
-    if (!isDesktop) return;
-    if (!composerRef.isVisible()) return;
-    if (e.target.closest && e.target.closest(FOCUS_KEEPERS)) return;
-    if (startOpen || voiceOpen || orchestratorOpen) return;
-    // Don't yank focus mid-selection — that would collapse the highlight.
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) return;
-    composerRef.focus();
   }
 
   // URL-action entry point: an iOS Shortcut on the Action Button opens
@@ -182,7 +169,6 @@
 <svelte:window
   onkeydown={handleGlobalKey}
   onpointerdowncapture={primeAudio}
-  onclick={refocusComposer}
   onpagehide={onPageHide}
   onpopstate={() => handleUrlAction('popstate')}
   onpageshow={e => { if (e.persisted) handleUrlAction('pageshow'); }}
@@ -251,6 +237,8 @@
   bind:open={quickOpen}
   onChoose={decision => applyQuickChoice(decision, name => openStart(name))}
 />
+
+<CommandPalette bind:open={commandOpen} />
 
 <StateInspector />
 

@@ -23,18 +23,18 @@ Rectangle {
     }
     readonly property color statusColor: status === "error" ? "#df7777" : status === "running" ? "#e7aa68" : "#6fbd98"
 
-    implicitHeight: toolColumn.implicitHeight + 20
-    radius: 11
-    color: "#19171d"
-    border.color: expanded ? "#4b3d55" : "#2b2731"
+    implicitHeight: toolColumn.implicitHeight + 14
+    radius: 5
+    color: "#171923"
+    border.color: expanded ? "#596083" : "#303347"
 
     ColumnLayout {
         id: toolColumn
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: 10
-        spacing: 6
+        anchors.margins: 7
+        spacing: 5
 
         RowLayout {
             Layout.fillWidth: true
@@ -48,22 +48,23 @@ Rectangle {
             }
             Text {
                 text: root.toolName
-                color: "#c9c1cc"
-                font.pixelSize: 11
+                color: "#9ea4c7"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 9
                 font.weight: Font.DemiBold
             }
             Text {
                 Layout.fillWidth: true
                 text: root.summary
-                color: "#756f7c"
-                font.pixelSize: 11
+                color: "#6e728b"
+                font.pixelSize: 10
                 elide: Text.ElideRight
             }
             Text {
                 visible: root.detail.length > 0
                 text: root.expanded ? "−" : "+"
-                color: "#8d8295"
-                font.pixelSize: 15
+                color: "#858aa7"
+                font.pixelSize: 13
             }
         }
 
@@ -71,8 +72,8 @@ Rectangle {
             visible: root.expanded && root.detail.length > 0
             Layout.fillWidth: true
             implicitHeight: detailText.implicitHeight + 16
-            radius: 7
-            color: "#111015"
+            radius: 3
+            color: "#13151d"
 
             TextEdit {
                 id: detailText
@@ -83,10 +84,10 @@ Rectangle {
                 readOnly: true
                 selectByMouse: true
                 wrapMode: TextEdit.WrapAnywhere
-                color: "#aaa3af"
-                selectionColor: "#674c74"
-                font.family: "monospace"
-                font.pixelSize: 11
+                color: "#aeb2ca"
+                selectionColor: "#565d82"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 9
             }
         }
     }

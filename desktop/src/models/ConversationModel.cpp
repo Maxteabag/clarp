@@ -2,6 +2,7 @@
 
 #include <QDateTime>
 #include <QJsonArray>
+#include <QRegularExpression>
 #include <QVariantList>
 #include <algorithm>
 
@@ -9,6 +10,27 @@ namespace clarp {
 namespace {
 
 QVariantList jsonArrayToVariantList(const QJsonArray& array) { return array.toVariantList(); }
+
+QJsonObject messageToJson(const Message& message) {
+    return {{QStringLiteral("id"), message.id},
+            {QStringLiteral("role"), message.role},
+            {QStringLiteral("text"), message.text},
+            {QStringLiteral("timestamp"), message.timestamp},
+            {QStringLiteral("revision"), message.revision},
+            {QStringLiteral("kind"), message.kind},
+            {QStringLiteral("tool_name"), message.toolName},
+            {QStringLiteral("origin"), message.origin},
+            {QStringLiteral("sender_name"), message.senderName},
+            {QStringLiteral("sender_agent_id"), message.senderAgentId},
+            {QStringLiteral("sender_session"), message.senderSession},
+            {QStringLiteral("trace_id"), message.traceId},
+            {QStringLiteral("category"), message.category},
+            {QStringLiteral("automated"), message.automated},
+            {QStringLiteral("activity_count"), message.activityCount},
+            {QStringLiteral("tool_details_available"), message.toolDetailsAvailable},
+            {QStringLiteral("tools"), message.tools},
+            {QStringLiteral("display_cells"), message.displayCells}};
+}
 
 } // namespace
 
@@ -29,7 +51,10 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const {
     case AuthorRole:
         return message.role;
     case BodyRole:
-        return message.text;
+        // displayText is deliberately allowed to be empty. During streaming a
+        // partial <speak>/<vox> tag must disappear instead of falling back to
+        // the raw protocol text and briefly flashing markup in the timeline.
+        return message.displayText;
     case TimestampRole:
         return message.timestamp;
     case RevisionRole:
@@ -52,6 +77,16 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const {
         return jsonArrayToVariantList(message.tools);
     case DisplayCellsRole:
         return jsonArrayToVariantList(message.displayCells);
+    case ActivityStatusRole:
+        return message.activityStatus;
+    case AutomatedRole:
+        return message.automated;
+    case CategoryRole:
+        return message.category;
+    case ToolDetailsAvailableRole:
+        return message.toolDetailsAvailable;
+    case ActivityCountRole:
+        return message.activityCount;
     default:
         return {};
     }
@@ -73,6 +108,11 @@ QHash<int, QByteArray> ConversationModel::roleNames() const {
         {ActivityRole, "activity"},
         {ToolsRole, "tools"},
         {DisplayCellsRole, "displayCells"},
+        {ActivityStatusRole, "activityStatus"},
+        {AutomatedRole, "automated"},
+        {CategoryRole, "category"},
+        {ToolDetailsAvailableRole, "toolDetailsAvailable"},
+        {ActivityCountRole, "activityCount"},
     };
 }
 
@@ -115,14 +155,19 @@ void ConversationModel::applyLog(const QJsonObject& response, LoadKind kind) {
         emit replacementRequired();
         return;
     }
-    if (kind != LoadKind::Tail && !m_conversationId.isEmpty() && !nextConversationId.isEmpty() &&
+    if (kind != LoadKind::Tail && kind != LoadKind::Replace &&
+        !m_conversationId.isEmpty() && !nextConversationId.isEmpty() &&
         nextConversationId != m_conversationId) {
         emit replacementRequired();
         return;
     }
 
     const QJsonArray turns = response.value(QStringLiteral("turns")).toArray();
-    if (kind == LoadKind::Tail) {
+    const bool replacesConversation =
+        kind == LoadKind::Replace ||
+        (kind == LoadKind::Tail &&
+         (m_conversationId.isEmpty() || nextConversationId != m_conversationId));
+    if (replacesConversation) {
         QVector<Message> rows;
         rows.reserve(turns.size());
         for (const auto& value : turns) {
@@ -131,6 +176,8 @@ void ConversationModel::applyLog(const QJsonObject& response, LoadKind kind) {
             }
         }
         replaceRows(std::move(rows));
+    } else if (kind == LoadKind::Older) {
+        prependRows(turns);
     } else {
         mergeRows(turns);
     }
@@ -139,7 +186,10 @@ void ConversationModel::applyLog(const QJsonObject& response, LoadKind kind) {
         m_conversationId = nextConversationId;
         emit conversationIdChanged();
     }
-    const qint64 revision = response.value(QStringLiteral("latest_revision")).toInteger();
+    const qint64 responseRevision =
+        response.value(QStringLiteral("latest_revision")).toInteger();
+    const qint64 revision =
+        replacesConversation ? responseRevision : std::max(m_latestRevision, responseRevision);
     if (m_latestRevision != revision) {
         m_latestRevision = revision;
         emit latestRevisionChanged();
@@ -153,11 +203,35 @@ void ConversationModel::applyLog(const QJsonObject& response, LoadKind kind) {
     setError({});
 }
 
+QJsonObject ConversationModel::cacheSnapshot() const {
+    QJsonArray turns;
+    for (const Message& message : m_messages) {
+        if (message.activity || message.pending || message.deliveryFailed ||
+            message.kind == QStringLiteral("live")) {
+            continue;
+        }
+        turns.append(messageToJson(message));
+    }
+    return {{QStringLiteral("conversation_id"), m_conversationId},
+            {QStringLiteral("turns"), turns},
+            {QStringLiteral("latest_revision"), m_latestRevision},
+            {QStringLiteral("has_more"), m_hasMore}};
+}
+
+bool ConversationModel::restoreCacheSnapshot(const QJsonObject& snapshot) {
+    if (snapshot.isEmpty() || !snapshot.value(QStringLiteral("turns")).isArray()) {
+        return false;
+    }
+    applyLog(snapshot, LoadKind::Tail);
+    return true;
+}
+
 void ConversationModel::addOptimistic(const QString& clientMessageId, const QString& text) {
     Message message;
     message.id = QStringLiteral("u-") + clientMessageId;
     message.role = QStringLiteral("user");
     message.text = text;
+    message.displayText = text;
     message.timestamp = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
     message.pending = true;
 
@@ -167,6 +241,7 @@ void ConversationModel::addOptimistic(const QString& clientMessageId, const QStr
     m_byId.insert(m_messages.last().id, row);
     endInsertRows();
     emit countChanged();
+    emit rowsAppended(true);
 }
 
 void ConversationModel::markDeliveryFailed(const QString& clientMessageId) {
@@ -183,17 +258,79 @@ void ConversationModel::markDeliveryFailed(const QString& clientMessageId) {
 }
 
 void ConversationModel::applyActivityEvent(const QJsonObject& event) {
-    clearActivity();
+    const QString action = event.value(QStringLiteral("activity_action"))
+                               .toString(event.value(QStringLiteral("action")).toString());
+    const QString tool = event.value(QStringLiteral("activity_tool"))
+                             .toString(event.value(QStringLiteral("tool")).toString());
+    const QString filePath = event.value(QStringLiteral("activity_file_path"))
+                                 .toString(event.value(QStringLiteral("file_path")).toString());
+    const QString phase = event.value(QStringLiteral("activity_phase"))
+                              .toString(event.value(QStringLiteral("phase")).toString());
+    const QString kind = event.value(QStringLiteral("activity_kind"))
+                             .toString(event.value(QStringLiteral("kind")).toString());
+    QString label;
+    for (const QString& candidate : {action, phase, tool, kind}) {
+        if (!candidate.isEmpty()) {
+            label = candidate;
+            break;
+        }
+    }
+    QString summary = event.value(QStringLiteral("activity_summary"))
+                          .toString(event.value(QStringLiteral("summary")).toString());
+    if (summary.isEmpty()) {
+        summary = tool;
+    }
+    if (label.isEmpty() && summary.isEmpty()) {
+        return;
+    }
+    QString status = event.value(QStringLiteral("activity_status"))
+                         .toString(event.value(QStringLiteral("status")).toString());
+    if (status.isEmpty()) {
+        const QString state = event.value(QStringLiteral("state")).toString();
+        status = state == QStringLiteral("thinking") || state == QStringLiteral("tool") ||
+                         state == QStringLiteral("compacting")
+                     ? QStringLiteral("running")
+                     : QStringLiteral("ok");
+    }
+    const QString matchKey = action + u'|' + tool + u'|' + filePath;
+
+    for (qsizetype offset = m_messages.size(); offset > 0; --offset) {
+        const int row = static_cast<int>(offset - 1);
+        Message& existing = *(m_messages.begin() + row);
+        if (!existing.activity || existing.activityMatchKey != matchKey) {
+            continue;
+        }
+        if (status == QStringLiteral("running") &&
+            existing.activityStatus != QStringLiteral("running")) {
+            continue;
+        }
+        if (status != QStringLiteral("running") &&
+            existing.activityStatus != QStringLiteral("running")) {
+            return;
+        }
+        existing.activityStatus = status;
+        if (!label.isEmpty()) {
+            existing.toolName = label;
+        }
+        if (!summary.isEmpty()) {
+            existing.text = summary;
+            existing.displayText = summary;
+        }
+        const QModelIndex changed = index(row, 0);
+        emit dataChanged(changed, changed, {BodyRole, ToolNameRole, ActivityStatusRole});
+        return;
+    }
+
     Message message;
-    message.id = QStringLiteral("activity:") + m_session;
+    message.id = QStringLiteral("activity:%1:%2").arg(m_session).arg(++m_activityCounter);
     message.role = QStringLiteral("activity");
     message.activity = true;
-    message.kind = event.value(QStringLiteral("kind")).toString();
-    message.toolName = event.value(QStringLiteral("tool")).toString();
-    message.text = event.value(QStringLiteral("summary")).toString();
-    if (message.text.isEmpty()) {
-        message.text = event.value(QStringLiteral("action")).toString();
-    }
+    message.kind = kind;
+    message.toolName = label;
+    message.text = summary;
+    message.displayText = summary;
+    message.activityStatus = status;
+    message.activityMatchKey = matchKey;
     message.timestamp = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
     const int row = static_cast<int>(m_messages.size());
     beginInsertRows({}, row, row);
@@ -201,6 +338,27 @@ void ConversationModel::applyActivityEvent(const QJsonObject& event) {
     rebuildIndex();
     endInsertRows();
     emit countChanged();
+    emit rowsAppended(false);
+
+    int activityOverflow = 0;
+    for (const Message& existingMessage : std::as_const(m_messages)) {
+        if (existingMessage.activity) {
+            ++activityOverflow;
+        }
+    }
+    activityOverflow -= 80;
+    for (int candidateRow = 0; candidateRow < m_messages.size() && activityOverflow > 0;) {
+        if (!m_messages.at(candidateRow).activity) {
+            ++candidateRow;
+            continue;
+        }
+        beginRemoveRows({}, candidateRow, candidateRow);
+        m_messages.removeAt(candidateRow);
+        endRemoveRows();
+        --activityOverflow;
+        emit countChanged();
+    }
+    rebuildIndex();
 }
 
 void ConversationModel::clearActivity() {
@@ -215,6 +373,29 @@ void ConversationModel::clearActivity() {
         rebuildIndex();
         emit countChanged();
     }
+}
+
+void ConversationModel::showTransientThinking(const QString& persona) {
+    applyActivityEvent({{QStringLiteral("activity_status"), QStringLiteral("running")},
+                        {QStringLiteral("activity_action"), QStringLiteral("thinking")},
+                        {QStringLiteral("activity_summary"),
+                         QStringLiteral("%1 is working")
+                             .arg(persona.isEmpty() ? QStringLiteral("Agent") : persona)}});
+}
+
+void ConversationModel::clearRunningActivity() {
+    for (qsizetype offset = m_messages.size(); offset > 0; --offset) {
+        const int row = static_cast<int>(offset - 1);
+        if (!m_messages.at(row).activity ||
+            m_messages.at(row).activityStatus != QStringLiteral("running")) {
+            continue;
+        }
+        beginRemoveRows({}, row, row);
+        m_messages.removeAt(row);
+        endRemoveRows();
+        emit countChanged();
+    }
+    rebuildIndex();
 }
 
 void ConversationModel::setLoading(bool loading) {
@@ -258,22 +439,17 @@ void ConversationModel::replaceRows(QVector<Message> rows) {
     for (const Message& pending : std::as_const(optimistic)) {
         rows.append(pending);
     }
-    std::ranges::stable_sort(rows, [](const Message& left, const Message& right) {
-        if (left.revision > 0 && right.revision > 0 && left.revision != right.revision) {
-            return left.revision < right.revision;
-        }
-        return left.timestamp < right.timestamp;
-    });
-
     beginResetModel();
     m_messages = std::move(rows);
     rebuildIndex();
     endResetModel();
     emit countChanged();
+    dropSupersededLiveTurns();
 }
 
 void ConversationModel::mergeRows(const QJsonArray& rows) {
-    bool changed = false;
+    bool inserted = false;
+    bool appended = false;
     for (const auto& value : rows) {
         if (!value.isObject()) {
             continue;
@@ -294,35 +470,121 @@ void ConversationModel::mergeRows(const QJsonArray& rows) {
             if (confirmed && m_messages.at(existing).id.startsWith(QStringLiteral("u-"))) {
                 emit deliveryConfirmed(m_messages.at(existing).id.sliced(2));
             }
-            changed = true;
             continue;
         }
-        const int insertAt = static_cast<int>(m_messages.size());
+        int insertAt = static_cast<int>(m_messages.size());
+        for (int row = 0; row < m_messages.size(); ++row) {
+            const Message& candidate = m_messages.at(row);
+            if (candidate.kind == QStringLiteral("live") &&
+                incoming.role == QStringLiteral("assistant") &&
+                incoming.kind != QStringLiteral("live") &&
+                (candidate.revision == 0 || incoming.revision >= candidate.revision)) {
+                insertAt = row + 1;
+                break;
+            }
+            if (candidate.pending || candidate.deliveryFailed ||
+                candidate.kind == QStringLiteral("live")) {
+                insertAt = row;
+                break;
+            }
+            if (incoming.revision > 0 && candidate.revision > incoming.revision) {
+                insertAt = row;
+                break;
+            }
+        }
+        const bool insertedAtEnd = insertAt == m_messages.size();
         beginInsertRows({}, insertAt, insertAt);
-        m_messages.append(std::move(incoming));
+        m_messages.insert(insertAt, std::move(incoming));
         endInsertRows();
-        changed = true;
-    }
-    if (changed) {
-        sortRows();
+        inserted = true;
+        appended = appended || insertedAtEnd;
         rebuildIndex();
-        emit countChanged();
     }
-    clearActivity();
+    if (inserted) {
+        emit countChanged();
+        if (appended) {
+            emit rowsAppended(false);
+        }
+        clearRunningActivity();
+    }
+    dropSupersededLiveTurns();
 }
 
-void ConversationModel::sortRows() {
-    emit layoutAboutToBeChanged();
-    std::ranges::stable_sort(m_messages, [](const Message& left, const Message& right) {
-        if (left.pending != right.pending) {
-            return !left.pending;
+void ConversationModel::prependRows(const QJsonArray& rows) {
+    QVector<Message> older;
+    older.reserve(rows.size());
+    for (const QJsonValue& value : rows) {
+        if (!value.isObject()) {
+            continue;
         }
-        if (left.revision > 0 && right.revision > 0 && left.revision != right.revision) {
-            return left.revision < right.revision;
+        Message incoming = Message::fromJson(value.toObject());
+        if (incoming.id.isEmpty() || m_byId.contains(incoming.id)) {
+            continue;
         }
-        return left.timestamp < right.timestamp;
-    });
-    emit layoutChanged();
+        older.append(std::move(incoming));
+    }
+    if (older.isEmpty()) {
+        return;
+    }
+    beginInsertRows({}, 0, static_cast<int>(older.size() - 1));
+    m_messages = older + m_messages;
+    endInsertRows();
+    rebuildIndex();
+    emit countChanged();
+    emit rowsPrepended();
+}
+
+void ConversationModel::dropSupersededLiveTurns() {
+    static const QRegularExpression tags(QStringLiteral("<[^>]+>"));
+    static const QRegularExpression whitespace(QStringLiteral("\\s+"));
+    const auto normalized = [&](QString text) {
+        text.remove(tags);
+        text.replace(whitespace, QStringLiteral(" "));
+        return text.trimmed();
+    };
+    for (qsizetype offset = m_messages.size(); offset > 0; --offset) {
+        const int row = static_cast<int>(offset - 1);
+        const Message& message = m_messages.at(row);
+        if (message.role != QStringLiteral("assistant") || message.kind != QStringLiteral("live")) {
+            continue;
+        }
+        const QString live = normalized(message.text);
+        bool covered = false;
+        // Prefer the protocol correlation ID. Older Hosts did not include it
+        // on live rows, so the fallback is deliberately narrow: only the next
+        // durable assistant row in this turn (ignoring transient activity)
+        // may supersede the live row. Earlier repeated answers are never
+        // allowed to hide a new stream.
+        for (int candidateRow = row + 1; candidateRow < m_messages.size(); ++candidateRow) {
+            const Message& candidate = m_messages.at(candidateRow);
+            if (candidate.activity) {
+                continue;
+            }
+            if (candidate.role == QStringLiteral("user") ||
+                candidate.kind == QStringLiteral("live")) {
+                break;
+            }
+            if (candidate.role != QStringLiteral("assistant")) {
+                continue;
+            }
+            const bool correlated =
+                (!message.traceId.isEmpty() && message.traceId == candidate.traceId) ||
+                message.traceId.isEmpty() || candidate.traceId.isEmpty();
+            const QString finalText = normalized(candidate.text);
+            covered = correlated && !live.isEmpty() && !finalText.isEmpty() &&
+                      (finalText == live || finalText.startsWith(live) ||
+                       live.startsWith(finalText));
+            break;
+        }
+        if (!covered) {
+            continue;
+        }
+        beginRemoveRows({}, row, row);
+        m_messages.removeAt(row);
+        endRemoveRows();
+        emit countChanged();
+    }
+    rebuildIndex();
 }
 
 } // namespace clarp

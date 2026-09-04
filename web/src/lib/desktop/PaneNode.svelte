@@ -66,11 +66,14 @@
     position: relative;
     z-index: 5;
     flex: 0 0 auto;
-    background: rgba(255, 255, 255, 0.08);
+    background: #10121a;
     transition: background var(--t-snap) var(--ease);
   }
-  :global(.split-resizer[data-direction="horizontal"]) { width: 6px; margin: 0 -3px; }
-  :global(.split-resizer[data-direction="vertical"]) { height: 6px; margin: -3px 0; }
+  :global(.split-resizer[data-direction="horizontal"]) { width: 8px; margin: 0; }
+  :global(.split-resizer[data-direction="vertical"]) { height: 8px; margin: 0; }
   :global(.split-resizer:hover),
-  :global(.split-resizer[data-active]) { background: var(--accent-blue); }
+  :global(.split-resizer[data-active]) { background: #656b91; }
+  :global(html[data-theme="day"] .split-resizer) { background: var(--ink-edge); }
+  :global(html[data-theme="day"] .split-resizer:hover),
+  :global(html[data-theme="day"] .split-resizer[data-active]) { background: var(--accent-blue); }
 </style>

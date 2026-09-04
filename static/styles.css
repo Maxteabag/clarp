@@ -3239,3 +3239,210 @@ html.desktop .speaking { bottom: calc(var(--dock-h) + 16px); }
   .contact-card { grid-template-columns: auto minmax(0, 1fr); }
   .contact-card > button { grid-column: 2; justify-self: start; min-width: 74px; }
 }
+
+/* ============================================================
+   Desktop command surface
+   ------------------------------------------------------------
+   The desktop shell is intentionally closer to a terminal multiplexer than
+   a dashboard: one dark plane, quiet seams, compact identity, and a single
+   lavender focus signal. An explicit day theme still wins; OS light mode no
+   longer changes the desktop product out from under the user.
+   ============================================================ */
+html.desktop:not([data-theme="day"]) {
+  --ink:           #1a1b26;
+  --ink-soft:      #1c1d28;
+  --ink-soft-2:    #242532;
+  --ink-edge:      #303142;
+  --ink-edge-hi:   #46485d;
+  --washi:         #c6c8dc;
+  --washi-dim:     #9a9db4;
+  --washi-low:     #62657b;
+  --accent-blue:   #969bb9;
+  --accent-cyan:   #a7abc4;
+  --accent-purple: #aaa2c3;
+  --user-wash:     #222431;
+}
+html.desktop:not([data-theme="day"]) body::before { display: none; }
+html.desktop:not([data-theme="day"]) body { background: #1a1b26; }
+
+html.desktop:not([data-theme="day"]) .history {
+  background: #191a24;
+}
+html.desktop:not([data-theme="day"]) .history::before { display: none; }
+html.desktop:not([data-theme="day"]) .history-head {
+  min-height: 38px;
+  padding: 5px 9px;
+  gap: 7px;
+  background: #1b1c27;
+  border-bottom: 1px solid #292b3a;
+}
+html.desktop:not([data-theme="day"]) .history-agent {
+  gap: 8px;
+  min-width: 0;
+  color: #bfc2d7;
+}
+html.desktop:not([data-theme="day"]) .history-agent-avatar {
+  --avatar-size: 23px;
+  --avatar-radius: 6px;
+  flex-basis: 23px;
+}
+html.desktop:not([data-theme="day"]) .history-agent-copy { gap: 1px; }
+html.desktop:not([data-theme="day"]) .history-agent-name {
+  max-width: none;
+  color: #c5c7da;
+  font: 600 11px/1.1 var(--font-mono);
+  letter-spacing: .015em;
+}
+html.desktop:not([data-theme="day"]) .history-agent-status {
+  max-width: min(34vw, 300px);
+  color: #616479;
+  font: 500 8px/1.1 var(--font-mono);
+  letter-spacing: .07em;
+}
+html.desktop:not([data-theme="day"]) .history-agent-status.running { color: #91a286; }
+html.desktop:not([data-theme="day"]) .conn-dot {
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  background: #55586d;
+}
+html.desktop:not([data-theme="day"]) .conn-dot.live { background: #839c73; }
+
+html.desktop:not([data-theme="day"]) #historyBody {
+  padding: 7px clamp(10px, 2.2vw, 28px) 12px;
+  color: #b9bbcf;
+  font-size: 13px;
+}
+html.desktop:not([data-theme="day"]) .turn {
+  max-width: 78ch;
+  margin: 2px 0;
+  padding: 5px 8px;
+  border-radius: 3px;
+}
+html.desktop:not([data-theme="day"]) .turn.user {
+  margin-block: 7px;
+  border: 0;
+  border-left: 2px solid #51556e;
+  background: #222431;
+}
+html.desktop:not([data-theme="day"]) .turn .body {
+  color: #b9bbcf;
+  font: 400 13px/1.58 var(--font-body);
+}
+html.desktop:not([data-theme="day"]) .turn .body p { margin-block: 3px; }
+html.desktop:not([data-theme="day"]) .turn .body h1,
+html.desktop:not([data-theme="day"]) .turn .body h2,
+html.desktop:not([data-theme="day"]) .turn .body h3,
+html.desktop:not([data-theme="day"]) .turn .body h4,
+html.desktop:not([data-theme="day"]) .turn .body h5,
+html.desktop:not([data-theme="day"]) .turn .body h6 {
+  color: #d0d2e3;
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+}
+html.desktop:not([data-theme="day"]) .turn .meta {
+  margin-bottom: 2px;
+  color: #575a70;
+  font: 500 8px/1.2 var(--font-mono);
+  letter-spacing: .04em;
+}
+html.desktop:not([data-theme="day"]) .turn.activity {
+  margin: 2px 8px;
+  padding: 2px 0;
+  gap: 7px;
+  font: 500 10px/1.25 var(--font-mono);
+}
+html.desktop:not([data-theme="day"]) .agent-banner {
+  min-height: 28px;
+  gap: 7px;
+  margin: 4px 8px 0;
+  padding: 5px 8px;
+  border-radius: 3px;
+  font: 500 10px/1.25 var(--font-mono);
+}
+html.desktop:not([data-theme="day"]) .agent-banner .banner-msg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.desktop:not([data-theme="day"]) .agent-banner .banner-icon {
+  width: 14px;
+  height: 14px;
+  flex-basis: 14px;
+  font: 700 9px/14px var(--font-mono);
+}
+html.desktop:not([data-theme="day"]) .agent-banner .banner-meta { font-size: 8px; }
+html.desktop:not([data-theme="day"]) .activity-log-dot { width: 5px; height: 5px; flex-basis: 5px; }
+html.desktop:not([data-theme="day"]) .activity-log-label { font-size: 8px; }
+html.desktop:not([data-theme="day"]) .turn .body code { color: #c8cada; background: #22232f; }
+html.desktop:not([data-theme="day"]) .turn .body pre { background: #14151d; border: 1px solid #292b39; }
+
+html.desktop:not([data-theme="day"]) .dock {
+  min-height: 43px;
+  padding: 5px 8px;
+  gap: 7px;
+  background: #191a23;
+  border-top-color: #303142;
+}
+html.desktop:not([data-theme="day"]) .dock::before { display: none; }
+html.desktop:not([data-theme="day"]) .chat-bar .chat-row {
+  min-height: 32px;
+  padding-left: 9px;
+  border: 1px solid #303243;
+  border-radius: 4px;
+  background: #1d1e29;
+  box-shadow: none;
+}
+html.desktop:not([data-theme="day"]) .chat-bar .chat-row::before {
+  color: #8589a5;
+  font-size: 11px;
+}
+html.desktop:not([data-theme="day"]) .chat-bar .chat-row:focus-within {
+  border-color: #70748f;
+  box-shadow: inset 0 0 0 1px rgba(154, 158, 187, .08);
+}
+html.desktop:not([data-theme="day"]) .chat-input {
+  min-height: 30px;
+  padding: 5px 4px;
+  color: #c7c9dc;
+  font: 500 12px/1.3 var(--font-mono);
+  caret-color: #c4c7df;
+}
+html.desktop:not([data-theme="day"]) .chat-input::placeholder { color: #55586c; font-style: normal; }
+html.desktop:not([data-theme="day"]) .chat-send { display: none; }
+html.desktop:not([data-theme="day"]) .mute-audio-btn,
+html.desktop:not([data-theme="day"]) .stop-btn,
+html.desktop:not([data-theme="day"]) .mic {
+  width: 29px;
+  height: 29px;
+  color: #6e7188;
+  border: 0;
+  box-shadow: none;
+  border-radius: 4px;
+}
+html.desktop:not([data-theme="day"]) .mute-audio-btn:hover,
+html.desktop:not([data-theme="day"]) .stop-btn:hover,
+html.desktop:not([data-theme="day"]) .mic:hover { color: #b7bacf; background: #242633; }
+html.desktop:not([data-theme="day"]) .mute-audio-btn svg,
+html.desktop:not([data-theme="day"]) .stop-btn svg { width: 15px; height: 15px; }
+html.desktop:not([data-theme="day"]) .mic svg { width: 18px; height: 18px; }
+html.desktop:not([data-theme="day"]) .mic.recording { color: #d7dacd; background: #58654f; }
+
+html.desktop:not([data-theme="day"]) .history-unread-badge {
+  top: -4px;
+  right: -5px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  color: #ece9ed;
+  background: #9b6675;
+  font: 700 8px/14px var(--font-mono);
+  box-shadow: 0 0 0 2px #1b1c27;
+}
+html.desktop:not([data-theme="day"]) .state-inspector-toggle { display: none; }
+
+.switcher-avatar { --avatar-size: 56px; --avatar-radius: 50%; }
+.avatar { --avatar-size: 38px; --avatar-radius: 11px; }
+.agent-card-avatar { --avatar-size: 46px; --avatar-radius: 13px; }
+.contact-avatar { --avatar-size: 38px; --avatar-radius: 11px; }

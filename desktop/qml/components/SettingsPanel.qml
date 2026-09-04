@@ -1,0 +1,216 @@
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Rectangle {
+    id: root
+
+    required property var controller
+    signal openConnection
+    signal openOrchestrator
+    color: "#171923"
+    objectName: "settingsPanel"
+
+    ScrollView {
+        id: settingsScroll
+        anchors.fill: parent
+        clip: true
+        contentWidth: availableWidth
+
+        ColumnLayout {
+            width: Math.min(760, Math.max(420, settingsScroll.availableWidth - 48))
+            x: Math.max(24, (settingsScroll.availableWidth - width) / 2)
+            spacing: 13
+
+            Item { Layout.preferredHeight: 14 }
+            Text {
+                text: "SETTINGS"
+                color: "#c9cde3"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 17
+                font.weight: Font.DemiBold
+                font.letterSpacing: 1.6
+            }
+            Text {
+                text: "Desktop preferences and this Host"
+                color: "#676c84"
+                font.pixelSize: 10
+            }
+
+            SettingsGroup {
+                title: "CHATS"
+                SettingsToggle {
+                    label: "Timestamps"
+                    detail: "Show the date and time under each message"
+                    checked: root.controller.timestampsVisible
+                    onToggled: root.controller.timestampsVisible = checked
+                }
+                SettingsToggle {
+                    label: "Tool details"
+                    detail: "Keep tool calls expanded in the timeline"
+                    checked: root.controller.toolsVisible
+                    onToggled: root.controller.toolsVisible = checked
+                }
+            }
+
+            SettingsGroup {
+                title: "VOICE & AUDIO"
+                SettingsToggle {
+                    label: "Spoken replies"
+                    detail: "Mute or resume agent voice playback"
+                    checked: !root.controller.muted
+                    onToggled: root.controller.muted = !checked
+                }
+            }
+
+            SettingsGroup {
+                title: "HOST"
+                SettingsLink {
+                    label: root.controller.serverName || "Clarp Host"
+                    detail: root.controller.baseUrl + "  ·  " + root.controller.connectionState
+                    onClicked: root.openConnection()
+                }
+                SettingsLink {
+                    label: "Orchestrator"
+                    detail: "Routing policy for hands-free and delegated work"
+                    onClicked: root.openOrchestrator()
+                }
+                SettingsToggle {
+                    label: "Shared filesystem"
+                    detail: "Use direct local paths only when this desktop and Host share files"
+                    checked: root.controller.sharedFilesystem
+                    onToggled: root.controller.sharedFilesystem = checked
+                }
+            }
+
+            SettingsGroup {
+                title: "KEYBOARD"
+                SettingsInfo { label: "Command palette"; value: "Ctrl+K" }
+                SettingsInfo { label: "Move between panes"; value: "Ctrl+Alt+Arrow" }
+                SettingsInfo { label: "Split right / down"; value: "Ctrl+Alt+V / S" }
+                SettingsInfo { label: "Zoom / close / balance"; value: "Ctrl+Alt+Z / X / =" }
+                SettingsInfo { label: "Queue message"; value: "Ctrl+Enter" }
+            }
+
+            SettingsGroup {
+                title: "ABOUT"
+                SettingsInfo { label: "Desktop client"; value: "0.1.0 preview" }
+                SettingsInfo {
+                    label: "Host version"
+                    value: root.controller.serverVersion || "Unknown"
+                }
+            }
+            Item { Layout.preferredHeight: 24 }
+        }
+    }
+
+    component SettingsGroup: Rectangle {
+        id: group
+        required property string title
+        default property alias content: rows.data
+        Layout.fillWidth: true
+        implicitHeight: column.implicitHeight + 20
+        radius: 6
+        color: "#1c1f2b"
+        border.color: "#303448"
+        ColumnLayout {
+            id: column
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: 10
+            spacing: 8
+            Text {
+                text: group.title
+                color: "#858aa5"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 9
+                font.weight: Font.DemiBold
+                font.letterSpacing: 1
+            }
+            ColumnLayout {
+                id: rows
+                Layout.fillWidth: true
+                spacing: 4
+            }
+        }
+    }
+
+    component SettingsToggle: Rectangle {
+        id: toggleRow
+        required property string label
+        required property string detail
+        property bool checked: false
+        signal toggled(bool checked)
+        Layout.fillWidth: true
+        implicitHeight: 48
+        radius: 4
+        color: "#202331"
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 8
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 1
+                Text { text: toggleRow.label; color: "#c2c5d8"; font.pixelSize: 11 }
+                Text { text: toggleRow.detail; color: "#666b82"; font.pixelSize: 9 }
+            }
+            Switch {
+                checked: toggleRow.checked
+                onToggled: toggleRow.toggled(checked)
+            }
+        }
+    }
+
+    component SettingsLink: Rectangle {
+        id: linkRow
+        required property string label
+        required property string detail
+        signal clicked
+        Layout.fillWidth: true
+        implicitHeight: 48
+        radius: 4
+        color: tap.hovered ? "#252839" : "#202331"
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 1
+                Text { text: linkRow.label; color: "#c2c5d8"; font.pixelSize: 11 }
+                Text {
+                    Layout.fillWidth: true
+                    text: linkRow.detail
+                    color: "#666b82"
+                    font.pixelSize: 9
+                    elide: Text.ElideMiddle
+                }
+            }
+            Text { text: "›"; color: "#737991"; font.pixelSize: 15 }
+        }
+        HoverHandler { id: tap }
+        TapHandler { onTapped: linkRow.clicked() }
+    }
+
+    component SettingsInfo: RowLayout {
+        id: infoRow
+        required property string label
+        required property string value
+        Layout.fillWidth: true
+        Layout.leftMargin: 8
+        Layout.rightMargin: 8
+        Layout.preferredHeight: 28
+        Text { text: infoRow.label; color: "#aeb2c8"; font.pixelSize: 10 }
+        Item { Layout.fillWidth: true }
+        Text {
+            text: infoRow.value
+            color: "#6d728a"
+            font.family: "JetBrains Mono"
+            font.pixelSize: 9
+        }
+    }
+}

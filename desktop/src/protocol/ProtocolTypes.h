@@ -23,6 +23,7 @@ struct Agent {
     QString conversationId;
     QString voiceId;
     QJsonArray schedules;
+    QJsonArray mcpServers;
     qint64 latestStateTimestamp = 0;
     qint64 lastActivity = 0;
     qint64 headRevision = 0;
@@ -45,17 +46,27 @@ struct Message {
     QString id;
     QString role;
     QString text;
+    QString displayText;
     QString timestamp;
     QString kind;
     QString toolName;
     QString origin;
     QString senderName;
+    QString senderAgentId;
+    QString senderSession;
+    QString traceId;
+    QString category;
+    QString activityStatus;
+    QString activityMatchKey;
     QJsonArray tools;
     QJsonArray displayCells;
     qint64 revision = 0;
+    int activityCount = 0;
     bool pending = false;
     bool deliveryFailed = false;
     bool activity = false;
+    bool automated = false;
+    bool toolDetailsAvailable = false;
 
     [[nodiscard]] static Message fromJson(const QJsonObject& object);
 };

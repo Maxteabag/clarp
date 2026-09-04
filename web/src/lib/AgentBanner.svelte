@@ -20,7 +20,7 @@
 </script>
 
 {#if banner}
-  <div class="agent-banner {banner.cls}" aria-live="polite">
+  <div class="agent-banner {banner.cls}" aria-live="polite" title={banner.msg}>
     {#if banner.spinner}<span class="banner-spinner"></span>{/if}
     {#if banner.icon}<span class="banner-icon">{banner.icon}</span>{/if}
     <span class="banner-msg">{banner.msg}</span>

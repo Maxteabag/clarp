@@ -5,6 +5,8 @@
 #include <QDir>
 #include <QIcon>
 #include <QImage>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QLockFile>
@@ -14,6 +16,7 @@
 #include <QQuickWindow>
 #include <QStandardPaths>
 #include <QTimer>
+#include <algorithm>
 
 int main(int argc, char* argv[]) {
     // The application owns its Qt Quick style. Host-only QWidget themes such
@@ -21,6 +24,13 @@ int main(int argc, char* argv[]) {
     // make a portable launch noisy or fail plugin discovery.
     qunsetenv("QT_STYLE_OVERRIDE");
     QApplication::setApplicationName(QStringLiteral("Clarp"));
+    // Screenshot runs must never read or mutate the user's persisted pane
+    // tree, drafts, or view preferences. QSettings keys its storage by the
+    // application name, so use an isolated namespace before AppController is
+    // constructed.
+    if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")) {
+        QApplication::setApplicationName(QStringLiteral("ClarpScreenshot"));
+    }
     QApplication::setApplicationDisplayName(QStringLiteral("Clarp"));
     QApplication::setOrganizationName(QStringLiteral("MaxTeaBag"));
     QApplication::setOrganizationDomain(QStringLiteral("maxteabag.com"));
@@ -34,7 +44,10 @@ int main(int argc, char* argv[]) {
     if (runtimeDirectory.isEmpty()) {
         runtimeDirectory = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     }
-    const QString instanceName = QStringLiteral("com.maxteabag.Clarp");
+    // Development/test builds can coexist with the installed client without
+    // changing XDG_RUNTIME_DIR (which would also hide the Wayland socket).
+    const QString instanceName =
+        qEnvironmentVariable("CLARP_INSTANCE_NAME", QStringLiteral("com.maxteabag.Clarp"));
     QLockFile instanceLock(QDir(runtimeDirectory).filePath(instanceName + QStringLiteral(".lock")));
     if (!instanceLock.tryLock()) {
         QLocalSocket existing;
@@ -88,6 +101,7 @@ int main(int argc, char* argv[]) {
     const QString screenshotPath = qEnvironmentVariable("CLARP_SCREENSHOT_PATH");
     const QString screenshotLayout = qEnvironmentVariable("CLARP_SCREENSHOT_LAYOUT");
     const QString screenshotView = qEnvironmentVariable("CLARP_SCREENSHOT_VIEW");
+    const QString screenshotScenario = qEnvironmentVariable("CLARP_SCREENSHOT_SCENARIO");
     if (!screenshotPath.isEmpty() && controller != nullptr && !screenshotLayout.isEmpty()) {
         QTimer::singleShot(1'000, &application, [controller, screenshotLayout] {
             controller->panes()->splitActive(QStringLiteral("vertical"),
@@ -95,18 +109,135 @@ int main(int argc, char* argv[]) {
             if (screenshotLayout == QStringLiteral("nested")) {
                 controller->panes()->splitActive(QStringLiteral("horizontal"),
                                                  controller->selectedSession());
+            } else if (screenshotLayout == QStringLiteral("zoomed")) {
+                const QString paneId = controller->panes()->activePaneId();
+                controller->setPaneDraft(
+                    paneId, controller->selectedSession(),
+                    QStringLiteral("Draft preserved while this pane is zoomed"));
+                controller->requestComposerFocus(paneId);
+                controller->panes()->toggleZoom();
+            } else if (screenshotLayout == QStringLiteral("grid4")) {
+                controller->panes()->splitActive(QStringLiteral("horizontal"),
+                                                 controller->selectedSession());
+                controller->panes()->navigate(QStringLiteral("left"));
+                controller->panes()->splitActive(QStringLiteral("horizontal"),
+                                                 controller->selectedSession());
+                const QVariantList fourPanes = controller->panes()->paneLayout();
+                for (const QVariant& value : fourPanes) {
+                    controller->panes()->focusPane(
+                        value.toMap().value(QStringLiteral("id")).toString());
+                    controller->panes()->splitActive(QStringLiteral("vertical"),
+                                                     controller->selectedSession());
+                }
+                const QVariantList eightPanes = controller->panes()->paneLayout();
+                for (const QVariant& value : eightPanes) {
+                    controller->panes()->focusPane(
+                        value.toMap().value(QStringLiteral("id")).toString());
+                    controller->panes()->splitActive(QStringLiteral("horizontal"),
+                                                     controller->selectedSession());
+                }
             }
         });
     }
     if (!screenshotPath.isEmpty() && rootWindow != nullptr && !screenshotView.isEmpty()) {
-        QTimer::singleShot(1'000, &application, [rootWindow, screenshotView] {
+        QTimer::singleShot(1'000, &application, [rootWindow, controller, screenshotView] {
             if (QObject* view = rootWindow->findChild<QObject*>(screenshotView)) {
+                if (controller != nullptr &&
+                    (screenshotView == QStringLiteral("agentProfilePanel") ||
+                     screenshotView == QStringLiteral("queueDialog"))) {
+                    const QString session = controller->selectedSession();
+                    view->setProperty("session", session);
+                    if (screenshotView == QStringLiteral("agentProfilePanel")) {
+                        controller->loadAgentProfile(session);
+                    } else {
+                        controller->loadTurnQueue(session);
+                    }
+                }
                 view->setProperty("visible", true);
             }
         });
     }
+    if (!screenshotPath.isEmpty() && rootWindow != nullptr) {
+        const QStringList size = qEnvironmentVariable("CLARP_SCREENSHOT_SIZE").split(u'x');
+        if (size.size() == 2) {
+            rootWindow->resize(std::max(760, size.at(0).toInt()),
+                               std::max(520, size.at(1).toInt()));
+        }
+    }
+    if (!screenshotPath.isEmpty() && controller != nullptr && !screenshotScenario.isEmpty()) {
+        QTimer::singleShot(1'900, &application,
+                           [controller, screenshotScenario] {
+            const QString session = controller->selectedSession();
+            clarp::ConversationModel* model = controller->conversationForSession(session);
+            if (session.isEmpty() || model == nullptr) {
+                return;
+            }
+            if (screenshotScenario == QStringLiteral("loading")) {
+                model->applyLog({{QStringLiteral("conversation_id"),
+                                  QStringLiteral("screenshot-loading")},
+                                 {QStringLiteral("turns"), QJsonArray{}},
+                                 {QStringLiteral("latest_revision"), 0}},
+                                clarp::ConversationModel::LoadKind::Tail);
+                model->setLoading(true);
+                return;
+            }
+            QJsonArray turns;
+            if (screenshotScenario == QStringLiteral("streaming")) {
+                turns = {
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("fixture-user")},
+                                {QStringLiteral("role"), QStringLiteral("user")},
+                                {QStringLiteral("text"), QStringLiteral("Explain the release state clearly.")},
+                                {QStringLiteral("revision"), 1}},
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("fixture-live")},
+                                {QStringLiteral("role"), QStringLiteral("assistant")},
+                                {QStringLiteral("kind"), QStringLiteral("live")},
+                                {QStringLiteral("text"), QStringLiteral("I checked the build, tests, and live preview. The current result is <spe")},
+                                {QStringLiteral("revision"), 2}},
+                };
+            } else if (screenshotScenario == QStringLiteral("activity")) {
+                turns = {
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("fixture-answer")},
+                                {QStringLiteral("role"), QStringLiteral("assistant")},
+                                {QStringLiteral("text"), QString{}},
+                                {QStringLiteral("revision"), 3},
+                                {QStringLiteral("activity_count"), 2},
+                                {QStringLiteral("display_cells"),
+                                 QJsonArray{
+                                     QJsonObject{{QStringLiteral("title"), QStringLiteral("Read")},
+                                                 {QStringLiteral("summary"), QStringLiteral("ConversationTimeline.swift")},
+                                                 {QStringLiteral("status"), QStringLiteral("ok")}},
+                                     QJsonObject{{QStringLiteral("title"), QStringLiteral("Test")},
+                                                 {QStringLiteral("summary"), QStringLiteral("Native core and QML lint")},
+                                                 {QStringLiteral("status"), QStringLiteral("ok")}},
+                                 }}},
+                };
+            } else if (screenshotScenario == QStringLiteral("long")) {
+                for (int index = 0; index < 60; ++index) {
+                    turns.append(QJsonObject{
+                        {QStringLiteral("id"), QStringLiteral("fixture-%1").arg(index)},
+                        {QStringLiteral("role"), index % 2 == 0 ? QStringLiteral("user")
+                                                               : QStringLiteral("assistant")},
+                        {QStringLiteral("text"),
+                         QStringLiteral("Message %1 keeps a stable identity while history grows and the composer remains anchored.").arg(index + 1)},
+                        {QStringLiteral("timestamp"), QStringLiteral("2026-09-04T17:%1:00Z").arg(index % 60, 2, 10, QLatin1Char('0'))},
+                        {QStringLiteral("revision"), index + 1},
+                    });
+                }
+            }
+            if (!turns.isEmpty()) {
+                model->applyLog({{QStringLiteral("conversation_id"),
+                                  QStringLiteral("screenshot-fixture")},
+                                 {QStringLiteral("turns"), turns},
+                                 {QStringLiteral("latest_revision"), turns.size()},
+                                 {QStringLiteral("has_more"),
+                                  screenshotScenario == QStringLiteral("long")}},
+                                clarp::ConversationModel::LoadKind::Tail);
+            }
+        });
+    }
     if (!screenshotPath.isEmpty()) {
-        QTimer::singleShot(2'000, &application, [&application, rootWindow, screenshotPath] {
+        const int captureDelay = screenshotScenario.isEmpty() ? 2'000 : 2'200;
+        QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath] {
             if (rootWindow != nullptr) {
                 rootWindow->grabWindow().save(screenshotPath);
             }

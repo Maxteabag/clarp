@@ -41,6 +41,7 @@ class AgentListModel : public QAbstractListModel {
         HeartbeatEnabledRole,
         DreamingEnabledRole,
         SchedulesRole,
+        McpServersRole,
         UnreadRole,
     };
     Q_ENUM(Role)

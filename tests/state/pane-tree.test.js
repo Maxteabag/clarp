@@ -10,6 +10,7 @@ import {
   setSplitRatio,
   equalizeSplits,
   getLeafPanes,
+  paneRects,
 } from '../../static/lib/pane-tree.js';
 
 describe('PaneTree - Split & Navigation Logic', () => {
@@ -75,6 +76,59 @@ describe('PaneTree - Split & Navigation Logic', () => {
     // Navigate right from p1 -> p2
     navTree = navigatePanes(navTree, 'right');
     expect(navTree.activeId).toBe(p2Id);
+  });
+
+  it('moves geometrically through a 4x4 grid and stops at its edges', () => {
+    const leaf = id => ({ kind: 'leaf', id, session: id, hideTools: false });
+    const split = (id, direction, first, second) => ({
+      kind: 'split', id, direction, ratio: 0.5, first, second,
+    });
+    const column = (n) => split(`rows-${n}`, 'horizontal',
+      split(`rows-${n}-top`, 'horizontal', leaf(`p${n}1`), leaf(`p${n}2`)),
+      split(`rows-${n}-bottom`, 'horizontal', leaf(`p${n}3`), leaf(`p${n}4`)));
+    const root = split('cols', 'vertical',
+      split('cols-left', 'vertical', column(1), column(2)),
+      split('cols-right', 'vertical', column(3), column(4)));
+    let grid = { root, activeId: 'p22', zoomedPaneId: null };
+
+    expect(paneRects(root)).toHaveLength(16);
+    grid = navigatePanes(grid, 'right');
+    expect(grid.activeId).toBe('p32');
+    grid = navigatePanes(grid, 'down');
+    expect(grid.activeId).toBe('p33');
+    grid = navigatePanes(grid, 'left');
+    expect(grid.activeId).toBe('p23');
+    grid = navigatePanes({ ...grid, activeId: 'p13' }, 'left');
+    expect(grid.activeId).toBe('p13');
+  });
+
+  it('keeps focus and the visible zoomed pane together while navigating', () => {
+    let tree = createPaneTree('p1');
+    tree = splitPane(tree, tree.activeId, 'vertical', 'p2');
+    tree = toggleZoom(tree);
+    const p1 = tree.root.first.id;
+
+    tree = navigatePanes(tree, 'left');
+    expect(tree.activeId).toBe(p1);
+    expect(tree.zoomedPaneId).toBe(p1);
+  });
+
+  it('does not move sideways from a pane that already spans that workspace edge', () => {
+    const leaf = id => ({ kind: 'leaf', id, session: id, hideTools: false });
+    const top = {
+      kind: 'split', id: 'top', direction: 'vertical', ratio: 0.5,
+      first: leaf('top-left'), second: leaf('top-right'),
+    };
+    const root = {
+      kind: 'split', id: 'root', direction: 'horizontal', ratio: 0.5,
+      first: top, second: leaf('bottom'),
+    };
+    const tree = { root, activeId: 'bottom', zoomedPaneId: null };
+
+    expect(navigatePanes(tree, 'left').activeId).toBe('bottom');
+    expect(navigatePanes(tree, 'right').activeId).toBe('bottom');
+    expect(navigatePanes({ ...tree, activeId: 'top-left' }, 'right').activeId)
+      .toBe('top-right');
   });
 
   it('toggles zoom on the active pane without losing tree hierarchy', () => {

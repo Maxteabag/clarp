@@ -4,6 +4,8 @@ add_executable(clarp-desktop-tests
     ../src/app/CredentialStore.h
     ../src/app/AppController.cpp
     ../src/app/AppController.h
+    ../src/app/TranscriptCache.cpp
+    ../src/app/TranscriptCache.h
     ../src/media/AudioController.cpp
     ../src/media/AudioController.h
     ../src/media/WavEncoder.cpp

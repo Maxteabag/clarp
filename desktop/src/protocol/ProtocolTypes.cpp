@@ -1,7 +1,9 @@
 #include "protocol/ProtocolTypes.h"
 
 #include <QJsonValue>
+#include <QRegularExpression>
 #include <QSet>
+#include <algorithm>
 
 namespace clarp {
 namespace {
@@ -19,6 +21,47 @@ qint64 integerValue(const QJsonObject& object, const char* key) {
 bool boolValue(const QJsonObject& object, const char* key) {
     const QJsonValue value = object.value(QLatin1StringView(key));
     return value.isBool() && value.toBool();
+}
+
+QString cleanedDisplayText(QString text, bool streaming) {
+    static const QRegularExpression voxBlock(QStringLiteral(R"(<vox\b[^>]*>.*?</vox>)"),
+                                             QRegularExpression::CaseInsensitiveOption |
+                                                 QRegularExpression::DotMatchesEverythingOption);
+    static const QRegularExpression speakTag(QStringLiteral(R"(</?speak\b[^>]*>)"),
+                                             QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression audioTag(
+        QStringLiteral(R"(</?(?:break|speed|volume|emotion)\b[^>]*/?>)"),
+        QRegularExpression::CaseInsensitiveOption);
+    text.remove(voxBlock);
+    text.remove(speakTag);
+    text.remove(audioTag);
+    if (streaming) {
+        const qsizetype openVox = text.lastIndexOf(QStringLiteral("<vox"), -1, Qt::CaseInsensitive);
+        const qsizetype closeVox =
+            text.lastIndexOf(QStringLiteral("</vox>"), -1, Qt::CaseInsensitive);
+        if (openVox >= 0 && openVox > closeVox) {
+            text.truncate(openVox);
+        }
+        const qsizetype marker = text.lastIndexOf(u'<');
+        if (marker >= 0) {
+            const QString tail = text.sliced(marker).toLower();
+            static const QStringList prefixes{
+                QStringLiteral("<speak"),   QStringLiteral("</speak"),  QStringLiteral("<vox"),
+                QStringLiteral("</vox"),    QStringLiteral("<break"),   QStringLiteral("</break"),
+                QStringLiteral("<speed"),   QStringLiteral("</speed"),  QStringLiteral("<volume"),
+                QStringLiteral("</volume"), QStringLiteral("<emotion"), QStringLiteral("</emotion"),
+            };
+            const bool incompleteVoiceTag =
+                !tail.contains(u'>') &&
+                std::ranges::any_of(prefixes, [&tail](const QString& prefix) {
+                    return prefix.startsWith(tail) || tail.startsWith(prefix);
+                });
+            if (incompleteVoiceTag) {
+                text.truncate(marker);
+            }
+        }
+    }
+    return text.trimmed();
 }
 
 } // namespace
@@ -41,6 +84,9 @@ Agent Agent::fromJson(const QJsonObject& object) {
     agent.voiceId = stringValue(object, "voice_id");
     if (object.value(QStringLiteral("schedules")).isArray()) {
         agent.schedules = object.value(QStringLiteral("schedules")).toArray();
+    }
+    if (object.value(QStringLiteral("mcp_servers")).isArray()) {
+        agent.mcpServers = object.value(QStringLiteral("mcp_servers")).toArray();
     }
     agent.latestStateTimestamp = integerValue(object, "latest_state_ts");
     agent.lastActivity = integerValue(object, "last_activity");
@@ -66,10 +112,21 @@ Message Message::fromJson(const QJsonObject& object) {
     message.text = stringValue(object, "text");
     message.timestamp = stringValue(object, "timestamp");
     message.kind = stringValue(object, "kind");
+    message.displayText = cleanedDisplayText(message.text, message.kind == QStringLiteral("live"));
     message.toolName = stringValue(object, "tool_name");
     message.origin = stringValue(object, "origin");
     message.senderName = stringValue(object, "sender_name");
+    message.senderAgentId = stringValue(object, "sender_agent_id");
+    message.senderSession = stringValue(object, "sender_session");
+    message.traceId = stringValue(object, "trace_id");
+    message.category = stringValue(object, "category");
+    if (message.category.isEmpty()) {
+        message.category = stringValue(object, "automated_category");
+    }
     message.revision = integerValue(object, "revision");
+    message.activityCount = static_cast<int>(integerValue(object, "activity_count"));
+    message.automated = boolValue(object, "automated") || boolValue(object, "is_automated");
+    message.toolDetailsAvailable = boolValue(object, "tool_details_available");
     if (object.value(QStringLiteral("tools")).isArray()) {
         message.tools = object.value(QStringLiteral("tools")).toArray();
     }

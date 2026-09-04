@@ -9,10 +9,12 @@ Rectangle {
 
     required property var controller
     property bool collapsed: false
+    property string selectedSurface: "chats"
     signal openOverview
+    signal selectSurface(string surface)
 
-    color: "#17151c"
-    border.color: "#292530"
+    color: "#171821"
+    border.color: "#292b3a"
     border.width: 0
 
     ColumnLayout {
@@ -21,35 +23,28 @@ Rectangle {
 
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: 68
+            Layout.preferredHeight: 40
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 18
-                anchors.rightMargin: 12
-                spacing: 10
+                anchors.leftMargin: 11
+                anchors.rightMargin: 7
+                spacing: 8
 
                 Rectangle {
-                    Layout.preferredWidth: 30
-                    Layout.preferredHeight: 30
-                    radius: 9
-                    gradient: Gradient {
-                        GradientStop {
-                            position: 0
-                            color: "#e9ae78"
-                        }
-                        GradientStop {
-                            position: 1
-                            color: "#a875d5"
-                        }
-                    }
+                    Layout.preferredWidth: 18
+                    Layout.preferredHeight: 18
+                    radius: 4
+                    color: "transparent"
+                    border.color: "#3b3d50"
 
                     Text {
                         anchors.centerIn: parent
                         text: "C"
-                        color: "#17121b"
-                        font.pixelSize: 16
-                        font.weight: Font.Bold
+                        color: "#9296b1"
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: 9
+                        font.weight: Font.DemiBold
                     }
                 }
 
@@ -60,15 +55,17 @@ Rectangle {
 
                     Text {
                         text: "CLARP"
-                        color: "#f1ece6"
-                        font.pixelSize: 14
+                        color: "#b9bcd0"
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: 10
                         font.weight: Font.DemiBold
-                        font.letterSpacing: 2
+                        font.letterSpacing: 1.7
                     }
                     Text {
-                        text: root.controller.serverName || "Native desktop"
-                        color: "#756e7c"
-                        font.pixelSize: 10
+                        text: root.controller.serverName || "desktop"
+                        color: "#585b70"
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: 8
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
@@ -77,7 +74,9 @@ Rectangle {
                 ToolButton {
                     visible: !root.collapsed
                     text: "‹"
-                    font.pixelSize: 22
+                    implicitWidth: 22
+                    implicitHeight: 22
+                    font.pixelSize: 16
                     onClicked: root.collapsed = true
                     ToolTip.visible: hovered
                     ToolTip.text: "Collapse conversations"
@@ -119,50 +118,64 @@ Rectangle {
                 required property bool unread
                 required property bool focused
                 required property int queueCount
+                required property string avatarUrl
+                required property string avatarSymbol
 
                 width: ListView.view.width
-                height: 64
-                leftPadding: 12
-                rightPadding: 12
+                height: 42
+                leftPadding: 7
+                rightPadding: 7
                 hoverEnabled: true
                 highlighted: root.controller.selectedSession === session
-                onClicked: root.controller.selectSession(session)
+                onClicked: {
+                    root.selectSurface("chats");
+                    root.controller.requestComposerFocus("");
+                    root.controller.selectSession(session);
+                }
 
                 background: Rectangle {
-                    radius: 11
-                    color: agentDelegate.highlighted ? "#292330" : agentDelegate.hovered ? "#211e27" : "transparent"
-                    border.color: agentDelegate.highlighted ? "#55415f" : "transparent"
+                    radius: 4
+                    color: agentDelegate.highlighted ? "#242634" : agentDelegate.hovered ? "#20212d" : "transparent"
+                    border.color: "transparent"
+
+                    Rectangle {
+                        visible: agentDelegate.highlighted
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 2
+                        height: 20
+                        radius: 1
+                        color: "#999db7"
+                    }
                 }
 
                 contentItem: RowLayout {
-                    spacing: 11
+                    spacing: 8
 
                     Item {
-                        Layout.preferredWidth: 40
-                        Layout.preferredHeight: 40
+                        Layout.preferredWidth: 28
+                        Layout.preferredHeight: 28
 
-                        Rectangle {
+                        AgentAvatar {
                             anchors.fill: parent
-                            radius: 12
-                            color: agentDelegate.highlighted ? "#6f527b" : "#312b39"
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: agentDelegate.name.slice(0, 1).toUpperCase()
-                                color: "#f3ecf5"
-                                font.pixelSize: 15
-                                font.weight: Font.DemiBold
-                            }
+                            controller: root.controller
+                            session: agentDelegate.session
+                            name: agentDelegate.name
+                            symbol: agentDelegate.avatarSymbol
+                            avatarSize: 28
+                            cornerRadius: 7
+                            fallbackColor: agentDelegate.highlighted ? "#555970" : "#3b3e50"
                         }
 
                         Rectangle {
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
-                            width: 10
-                            height: 10
-                            radius: 5
-                            color: agentDelegate.unread ? "#df7676" : agentDelegate.busy ? "#e9aa67" : "#6db895"
-                            border.color: "#17151c"
+                            visible: agentDelegate.unread || agentDelegate.busy
+                            width: 8
+                            height: 8
+                            radius: 4
+                            color: agentDelegate.unread ? "#c27d90" : "#91a67f"
+                            border.color: "#171821"
                             border.width: 2
                         }
                     }
@@ -179,24 +192,28 @@ Rectangle {
                             Text {
                                 Layout.fillWidth: true
                                 text: agentDelegate.name
-                                color: "#eee8e2"
-                                font.pixelSize: 13
+                                color: "#c6c8d9"
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: 11
                                 font.weight: agentDelegate.unread ? Font.Bold : Font.Medium
                                 elide: Text.ElideRight
                             }
                             Text {
                                 visible: agentDelegate.queueCount > 0
                                 text: agentDelegate.queueCount
-                                color: "#e7ae73"
-                                font.pixelSize: 10
+                                color: "#a7a1b8"
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: 9
                             }
                         }
 
                         Text {
                             Layout.fillWidth: true
-                            text: agentDelegate.busy ? (agentDelegate.agentState || "working") : (agentDelegate.lastMessage || agentDelegate.backend)
-                            color: agentDelegate.busy ? "#dba163" : "#77717f"
-                            font.pixelSize: 11
+                            visible: agentDelegate.busy || agentDelegate.unread
+                            text: agentDelegate.busy ? (agentDelegate.agentState || "working") : "new reply"
+                            color: agentDelegate.busy ? "#8fa180" : "#9b8290"
+                            font.family: "JetBrains Mono"
+                            font.pixelSize: 8
                             elide: Text.ElideRight
                             maximumLineCount: 1
                         }
@@ -210,23 +227,154 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 1
-            color: "#27232d"
+            color: "#292b3a"
+        }
+
+        ItemDelegate {
+            id: chatsButton
+            Layout.fillWidth: true
+            Layout.preferredHeight: 32
+            highlighted: root.selectedSurface === "chats"
+            onClicked: root.selectSurface("chats")
+            contentItem: RowLayout {
+                spacing: 8
+                Text {
+                    Layout.preferredWidth: root.collapsed ? 32 : 18
+                    text: "◌"
+                    color: chatsButton.highlighted ? "#afb5dc" : "#696d84"
+                    horizontalAlignment: Text.AlignHCenter
+                    font.pixelSize: 12
+                }
+                Text {
+                    visible: !root.collapsed
+                    Layout.fillWidth: true
+                    text: "Chats"
+                    color: chatsButton.highlighted ? "#c7cadc" : "#74788f"
+                    font.family: "JetBrains Mono"
+                    font.pixelSize: 9
+                }
+            }
+            background: Rectangle {
+                color: chatsButton.highlighted ? "#24283a" : "transparent"
+            }
+        }
+
+        ItemDelegate {
+            id: updatesButton
+            Layout.fillWidth: true
+            Layout.preferredHeight: 32
+            highlighted: root.selectedSurface === "updates"
+            onClicked: root.selectSurface("updates")
+            contentItem: RowLayout {
+                spacing: 8
+                Text {
+                    Layout.preferredWidth: root.collapsed ? 32 : 18
+                    text: "◇"
+                    color: updatesButton.highlighted ? "#afb5dc" : "#696d84"
+                    horizontalAlignment: Text.AlignHCenter
+                    font.pixelSize: 12
+                }
+                Text {
+                    visible: !root.collapsed
+                    Layout.fillWidth: true
+                    text: "Updates"
+                    color: updatesButton.highlighted ? "#c7cadc" : "#74788f"
+                    font.family: "JetBrains Mono"
+                    font.pixelSize: 9
+                }
+                Rectangle {
+                    visible: root.controller.attentionCount > 0
+                    Layout.preferredWidth: 18
+                    Layout.preferredHeight: 16
+                    radius: 8
+                    color: "#aeb4dc"
+                    Text {
+                        anchors.centerIn: parent
+                        text: String(root.controller.attentionCount)
+                        color: "#171923"
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: 8
+                    }
+                }
+            }
+            background: Rectangle {
+                color: updatesButton.highlighted ? "#24283a" : "transparent"
+            }
+        }
+
+        ItemDelegate {
+            id: teamsButton
+            Layout.fillWidth: true
+            Layout.preferredHeight: 32
+            highlighted: root.selectedSurface === "teams"
+            onClicked: root.selectSurface("teams")
+            contentItem: RowLayout {
+                spacing: 8
+                Text {
+                    Layout.preferredWidth: root.collapsed ? 32 : 18
+                    text: "△"
+                    color: teamsButton.highlighted ? "#afb5dc" : "#696d84"
+                    horizontalAlignment: Text.AlignHCenter
+                    font.pixelSize: 12
+                }
+                Text {
+                    visible: !root.collapsed
+                    Layout.fillWidth: true
+                    text: "Teams"
+                    color: teamsButton.highlighted ? "#c7cadc" : "#74788f"
+                    font.family: "JetBrains Mono"
+                    font.pixelSize: 9
+                }
+            }
+            background: Rectangle {
+                color: teamsButton.highlighted ? "#24283a" : "transparent"
+            }
         }
 
         ItemDelegate {
             id: allAgentsButton
             Layout.fillWidth: true
-            Layout.preferredHeight: 54
-            text: root.collapsed ? "◎" : "All agents"
-            leftPadding: root.collapsed ? 0 : 20
+            Layout.preferredHeight: 34
+            text: root.collapsed ? "≡" : "All agents"
+            leftPadding: root.collapsed ? 0 : 11
             onClicked: root.openOverview()
             contentItem: Text {
                 text: allAgentsButton.text
-                color: "#a49dab"
-                font.pixelSize: 12
+                color: "#686b81"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 9
                 font.weight: Font.Medium
                 horizontalAlignment: root.collapsed ? Text.AlignHCenter : Text.AlignLeft
                 verticalAlignment: Text.AlignVCenter
+            }
+        }
+
+        ItemDelegate {
+            id: settingsButton
+            Layout.fillWidth: true
+            Layout.preferredHeight: 32
+            highlighted: root.selectedSurface === "settings"
+            onClicked: root.selectSurface("settings")
+            contentItem: RowLayout {
+                spacing: 8
+                Text {
+                    Layout.preferredWidth: root.collapsed ? 32 : 18
+                    text: "⚙"
+                    color: settingsButton.highlighted ? "#afb5dc" : "#696d84"
+                    horizontalAlignment: Text.AlignHCenter
+                    font.pixelSize: 11
+                }
+                Text {
+                    visible: !root.collapsed
+                    Layout.fillWidth: true
+                    text: "Settings"
+                    color: settingsButton.highlighted ? "#c7cadc" : "#74788f"
+                    font.family: "JetBrains Mono"
+                    font.pixelSize: 9
+                }
+            }
+            background: Rectangle {
+                color: settingsButton.highlighted ? "#24283a" : "transparent"
             }
         }
     }

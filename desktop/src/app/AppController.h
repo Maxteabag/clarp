@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/CredentialStore.h"
+#include "app/TranscriptCache.h"
 #include "media/AudioController.h"
 #include "models/AgentListModel.h"
 #include "models/ContactListModel.h"
@@ -39,7 +40,9 @@ class AppController : public QObject {
         QString orchestratorLastDecision READ orchestratorLastDecision NOTIFY orchestratorChanged)
     Q_PROPERTY(bool orchestratorLoading READ orchestratorLoading NOTIFY orchestratorChanged)
     Q_PROPERTY(QVariantList backendOptions READ backendOptions NOTIFY modelCatalogChanged)
+    Q_PROPERTY(QVariantList availableMcpServers READ availableMcpServers NOTIFY agentRevisionChanged)
     Q_PROPERTY(quint64 agentRevision READ agentRevision NOTIFY agentRevisionChanged)
+    Q_PROPERTY(quint64 avatarRevision READ avatarRevision NOTIFY avatarRevisionChanged)
     Q_PROPERTY(QVariantList pastSessions READ pastSessions NOTIFY pastSessionsChanged)
     Q_PROPERTY(bool pastSessionsLoading READ pastSessionsLoading NOTIFY pastSessionsChanged)
     Q_PROPERTY(QVariantList directorySuggestions READ directorySuggestions NOTIFY pathsChanged)
@@ -57,10 +60,36 @@ class AppController : public QObject {
     Q_PROPERTY(bool sending READ sending NOTIFY sendingChanged)
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
     Q_PROPERTY(bool toolsVisible READ toolsVisible WRITE setToolsVisible NOTIFY toolsVisibleChanged)
+    Q_PROPERTY(bool timestampsVisible READ timestampsVisible WRITE setTimestampsVisible
+                   NOTIFY timestampsVisibleChanged)
+    Q_PROPERTY(bool sharedFilesystem READ sharedFilesystem WRITE setSharedFilesystem
+                   NOTIFY sharedFilesystemChanged)
     Q_PROPERTY(QString connectionState READ connectionState NOTIFY connectionStateChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
     Q_PROPERTY(QString serverName READ serverName NOTIFY serverInfoChanged)
     Q_PROPERTY(QString serverVersion READ serverVersion NOTIFY serverInfoChanged)
+    Q_PROPERTY(QString composerFocusPane READ composerFocusPane NOTIFY composerFocusPaneChanged)
+    Q_PROPERTY(quint64 composerRevision READ composerRevision NOTIFY composerRevisionChanged)
+    Q_PROPERTY(QVariantList attentionItems READ attentionItems NOTIFY updatesChanged)
+    Q_PROPERTY(QVariantList backgroundJobs READ backgroundJobs NOTIFY updatesChanged)
+    Q_PROPERTY(QVariantList updateArtifacts READ updateArtifacts NOTIFY updatesChanged)
+    Q_PROPERTY(bool updatesLoading READ updatesLoading NOTIFY updatesChanged)
+    Q_PROPERTY(QString updatesError READ updatesError NOTIFY updatesChanged)
+    Q_PROPERTY(int attentionCount READ attentionCount NOTIFY updatesChanged)
+    Q_PROPERTY(QVariantList teams READ teams NOTIFY teamsChanged)
+    Q_PROPERTY(QVariantList teamMessages READ teamMessages NOTIFY teamsChanged)
+    Q_PROPERTY(QString selectedTeamId READ selectedTeamId NOTIFY teamsChanged)
+    Q_PROPERTY(bool teamsLoading READ teamsLoading NOTIFY teamsChanged)
+    Q_PROPERTY(QString teamsError READ teamsError NOTIFY teamsChanged)
+    Q_PROPERTY(QVariantList turnQueueItems READ turnQueueItems NOTIFY turnQueueChanged)
+    Q_PROPERTY(QString turnQueueSession READ turnQueueSession NOTIFY turnQueueChanged)
+    Q_PROPERTY(bool turnQueuePaused READ turnQueuePaused NOTIFY turnQueueChanged)
+    Q_PROPERTY(bool turnQueueLoading READ turnQueueLoading NOTIFY turnQueueChanged)
+    Q_PROPERTY(QString turnQueueError READ turnQueueError NOTIFY turnQueueChanged)
+    Q_PROPERTY(QVariantMap profileTaskPlan READ profileTaskPlan NOTIFY profileChanged)
+    Q_PROPERTY(QString profileSession READ profileSession NOTIFY profileChanged)
+    Q_PROPERTY(bool profileLoading READ profileLoading NOTIFY profileChanged)
+    Q_PROPERTY(QString profileError READ profileError NOTIFY profileChanged)
 
   public:
     explicit AppController(QObject* parent = nullptr);
@@ -78,7 +107,9 @@ class AppController : public QObject {
     [[nodiscard]] QString orchestratorLastDecision() const;
     [[nodiscard]] bool orchestratorLoading() const;
     [[nodiscard]] QVariantList backendOptions() const;
+    [[nodiscard]] QVariantList availableMcpServers() const;
     [[nodiscard]] quint64 agentRevision() const;
+    [[nodiscard]] quint64 avatarRevision() const;
     [[nodiscard]] QVariantList pastSessions() const;
     [[nodiscard]] bool pastSessionsLoading() const;
     [[nodiscard]] QVariantList directorySuggestions() const;
@@ -87,6 +118,7 @@ class AppController : public QObject {
     [[nodiscard]] QString lastBackend() const;
     [[nodiscard]] bool hasStoredCredential() const;
     Q_INVOKABLE [[nodiscard]] ConversationModel* conversationForSession(const QString& session);
+    Q_INVOKABLE [[nodiscard]] QUrl avatarSource(const QString& session) const;
     [[nodiscard]] QString baseUrl() const;
     [[nodiscard]] QString selectedSession() const;
     [[nodiscard]] QString selectedName() const;
@@ -97,14 +129,40 @@ class AppController : public QObject {
     [[nodiscard]] bool sending() const;
     [[nodiscard]] bool muted() const;
     [[nodiscard]] bool toolsVisible() const;
+    [[nodiscard]] bool timestampsVisible() const;
+    [[nodiscard]] bool sharedFilesystem() const;
     [[nodiscard]] QString connectionState() const;
     [[nodiscard]] QString errorMessage() const;
     [[nodiscard]] QString serverName() const;
     [[nodiscard]] QString serverVersion() const;
+    [[nodiscard]] QString composerFocusPane() const;
+    [[nodiscard]] quint64 composerRevision() const;
+    [[nodiscard]] QVariantList attentionItems() const;
+    [[nodiscard]] QVariantList backgroundJobs() const;
+    [[nodiscard]] QVariantList updateArtifacts() const;
+    [[nodiscard]] bool updatesLoading() const;
+    [[nodiscard]] QString updatesError() const;
+    [[nodiscard]] int attentionCount() const;
+    [[nodiscard]] QVariantList teams() const;
+    [[nodiscard]] QVariantList teamMessages() const;
+    [[nodiscard]] QString selectedTeamId() const;
+    [[nodiscard]] bool teamsLoading() const;
+    [[nodiscard]] QString teamsError() const;
+    [[nodiscard]] QVariantList turnQueueItems() const;
+    [[nodiscard]] QString turnQueueSession() const;
+    [[nodiscard]] bool turnQueuePaused() const;
+    [[nodiscard]] bool turnQueueLoading() const;
+    [[nodiscard]] QString turnQueueError() const;
+    [[nodiscard]] QVariantMap profileTaskPlan() const;
+    [[nodiscard]] QString profileSession() const;
+    [[nodiscard]] bool profileLoading() const;
+    [[nodiscard]] QString profileError() const;
 
     void setBaseUrl(const QString& value);
     void setMuted(bool muted);
     void setToolsVisible(bool visible);
+    void setTimestampsVisible(bool visible);
+    void setSharedFilesystem(bool shared);
 
     Q_INVOKABLE void connectToServer(const QString& url, const QString& token);
     Q_INVOKABLE void pairDevice(const QString& url, const QString& code);
@@ -122,10 +180,14 @@ class AppController : public QObject {
     Q_INVOKABLE void loadOlderSession(const QString& session);
     Q_INVOKABLE [[nodiscard]] QString agentName(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentState(const QString& session) const;
+    Q_INVOKABLE [[nodiscard]] int agentQueueCount(const QString& session) const;
+    Q_INVOKABLE [[nodiscard]] QVariantMap agentDetails(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentBackend(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentWorkingDirectory(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentModel(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentEffort(const QString& session) const;
+    Q_INVOKABLE [[nodiscard]] QString agentNameById(const QString& agentId) const;
+    Q_INVOKABLE [[nodiscard]] QVariantList teamAgentChoices() const;
     Q_INVOKABLE [[nodiscard]] QVariantList matchingAgents(const QString& query) const;
     Q_INVOKABLE [[nodiscard]] QVariantList modelsForBackend(const QString& backend) const;
     Q_INVOKABLE [[nodiscard]] QVariantList effortsForModel(const QString& backend,
@@ -158,6 +220,44 @@ class AppController : public QObject {
                                       const QString& effort, int timeoutMs);
     Q_INVOKABLE void clearError();
     Q_INVOKABLE [[nodiscard]] QUrl resourceUrl(const QString& path) const;
+    Q_INVOKABLE [[nodiscard]] QString paneDraft(const QString& paneId,
+                                                const QString& session) const;
+    Q_INVOKABLE void setPaneDraft(const QString& paneId, const QString& session,
+                                  const QString& text);
+    Q_INVOKABLE [[nodiscard]] QVariantList composerAttachments(const QString& paneId,
+                                                               const QString& session) const;
+    Q_INVOKABLE [[nodiscard]] bool composerCanSend(const QString& paneId,
+                                                   const QString& session) const;
+    Q_INVOKABLE void attachLocalFile(const QString& paneId, const QString& session,
+                                     const QUrl& fileUrl);
+    Q_INVOKABLE void removeComposerAttachment(const QString& paneId, const QString& session,
+                                              const QString& attachmentId);
+    Q_INVOKABLE bool sendComposerMessage(const QString& paneId, const QString& session,
+                                         const QString& text, bool queueIfBusy = false);
+    Q_INVOKABLE void requestComposerFocus(const QString& paneId);
+    Q_INVOKABLE void loadUpdates();
+    Q_INVOKABLE void resolveDecision(const QString& decisionId, const QString& choice,
+                                     int revision);
+    Q_INVOKABLE void cancelBackgroundJob(const QString& jobId);
+    Q_INVOKABLE void loadTeams();
+    Q_INVOKABLE void selectTeam(const QString& teamId);
+    Q_INVOKABLE void createTeam(const QString& name, const QString& color = {});
+    Q_INVOKABLE void updateTeam(const QString& teamId, const QString& name,
+                                const QString& color, const QString& leaderAgentId);
+    Q_INVOKABLE void addTeamMember(const QString& teamId, const QString& agentId);
+    Q_INVOKABLE void removeTeamMember(const QString& teamId, const QString& agentId);
+    Q_INVOKABLE void deleteTeam(const QString& teamId);
+    Q_INVOKABLE void loadTurnQueue(const QString& session);
+    Q_INVOKABLE void updateQueuedTurn(const QString& queueId, const QString& text);
+    Q_INVOKABLE void deleteQueuedTurn(const QString& queueId);
+    Q_INVOKABLE void sendQueuedTurn(const QString& queueId);
+    Q_INVOKABLE void openAgentFiles(const QString& session);
+    Q_INVOKABLE void openAgentTerminal(const QString& session);
+    Q_INVOKABLE void loadAgentProfile(const QString& session);
+    Q_INVOKABLE void setAgentLlm(const QString& session, const QString& model,
+                                 const QString& effort);
+    Q_INVOKABLE void compactSession(const QString& session);
+    Q_INVOKABLE void setAgentMcp(const QString& session, const QVariantList& servers);
 
   signals:
     void baseUrlChanged();
@@ -168,6 +268,8 @@ class AppController : public QObject {
     void sendingChanged();
     void mutedChanged();
     void toolsVisibleChanged();
+    void timestampsVisibleChanged();
+    void sharedFilesystemChanged();
     void connectionStateChanged();
     void errorMessageChanged();
     void serverInfoChanged();
@@ -178,35 +280,52 @@ class AppController : public QObject {
     void orchestratorChanged();
     void modelCatalogChanged();
     void agentRevisionChanged();
+    void avatarRevisionChanged();
     void pastSessionsChanged();
     void pathsChanged();
     void launchDefaultsChanged();
     void hasStoredCredentialChanged();
+    void composerFocusPaneChanged();
+    void composerRevisionChanged();
+    void draftChanged(const QString& session, const QString& text,
+                      const QString& originPaneId);
+    void updatesChanged();
+    void teamsChanged();
+    void turnQueueChanged();
+    void profileChanged();
 
   private:
     void requestSnapshot();
+    void requestAvatars();
+    void clearAvatarCache();
     void requestRecoverableClips(const QString& session);
-    void requestTail(const QString& session = {});
+    void requestTail(const QString& session = {}, bool replace = false);
     void requestDelta(const QString& session = {});
     [[nodiscard]] bool beginLogRequest(const QString& session, const QString& mode);
     void continuePendingLogRequest(const QString& session);
+    void resetTransientRequestState();
+    void storeComposerAttachments(const QString& session, const QVariantList& attachments);
     void setConnecting(bool connecting);
     void setConnectionState(const QString& state);
     void setErrorMessage(const QString& message);
     void handleJson(const QString& tag, const QJsonObject& object);
+    void handleBytes(const QString& tag, const QByteArray& bytes, const QByteArray& contentType);
     void handleRequestFailure(const QString& tag, const QString& message, int statusCode);
     void handleSseEvent(const QJsonObject& event);
+    void finishUpdateRequest(quint64 generation);
     void refreshSelectedProperties();
     void sendMessageInternal(const QString& targetSession, const QString& text, bool queueIfBusy,
                              const QString& traceId, const QString& transcriptionId,
                              bool handsFree);
     [[nodiscard]] ConversationModel* ensureConversation(const QString& session);
     void connectConversationSignals(ConversationModel* model, const QString& session);
+    void scheduleConversationCache(const QString& session);
     [[nodiscard]] QString defaultToken() const;
 
     ApiClient m_api;
     SseClient m_sse;
     CredentialStore m_credentials;
+    TranscriptCache m_transcriptCache;
     AudioController m_audio;
     AgentListModel m_agents;
     AgentListModel m_archivedAgents;
@@ -230,22 +349,63 @@ class AppController : public QObject {
     QVariantList m_pastSessions;
     QVariantList m_directorySuggestions;
     QVariantList m_favoritePaths;
+    QVariantList m_availableMcpServers;
     QString m_lastWorkingDirectory;
     QString m_lastBackend;
     QString m_orchestratorLastDecision;
+    QString m_composerFocusPane;
+    QString m_sharedFilesystemHostOverride;
     QHash<QString, QTimer*> m_deliveryTimers;
+    QHash<QString, QTimer*> m_cacheTimers;
     QHash<QString, QString> m_deliverySessions;
     QSet<QString> m_logRequestsInFlight;
     QHash<QString, QString> m_pendingLogMode;
+    QHash<QString, QUrl> m_avatarSources;
+    QHash<QString, QString> m_avatarUrls;
+    QHash<QString, QPair<QString, QString>> m_avatarRequests;
+    QHash<QString, QString> m_avatarFailures;
+    QHash<QString, QVariantMap> m_pendingUploads;
+    QVariantList m_attentionItems;
+    QVariantList m_backgroundJobs;
+    QVariantList m_updateArtifacts;
+    QString m_updatesError;
+    QVariantList m_teams;
+    QVariantList m_teamMessages;
+    QString m_selectedTeamId;
+    QString m_teamsError;
+    QVariantList m_turnQueueItems;
+    QString m_turnQueueSession;
+    QString m_turnQueueError;
+    QHash<QString, QString> m_queueActionSessions;
+    QVariantMap m_profileTaskPlan;
+    QString m_profileSession;
+    QString m_profileError;
     bool m_connecting = false;
     bool m_sending = false;
     bool m_muted = false;
     bool m_toolsVisible = false;
+    bool m_timestampsVisible = false;
+    bool m_sharedFilesystem = false;
     bool m_voicesLoading = false;
     bool m_orchestratorLoading = false;
     bool m_pastSessionsLoading = false;
     bool m_hasStoredCredential = false;
     quint64 m_agentRevision = 0;
+    quint64 m_avatarRevision = 0;
+    quint64 m_composerRevision = 0;
+    quint64 m_nextAvatarRequest = 0;
+    int m_updateRequestsPending = 0;
+    quint64 m_updatesGeneration = 0;
+    quint64 m_teamListGeneration = 0;
+    quint64 m_teamMessagesGeneration = 0;
+    quint64 m_turnQueueGeneration = 0;
+    quint64 m_profileGeneration = 0;
+    bool m_teamListLoading = false;
+    bool m_teamMessagesLoading = false;
+    bool m_turnQueuePaused = false;
+    bool m_turnQueueLoading = false;
+    bool m_profileLoading = false;
+    bool m_cacheEnabled = true;
 };
 
 } // namespace clarp

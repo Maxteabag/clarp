@@ -55,6 +55,8 @@ target_sources(clarp-desktop PRIVATE
     src/app/AppController.h
     src/app/CredentialStore.cpp
     src/app/CredentialStore.h
+    src/app/TranscriptCache.cpp
+    src/app/TranscriptCache.h
     src/media/AudioController.cpp
     src/media/AudioController.h
     src/media/WavEncoder.cpp
@@ -90,17 +92,24 @@ qt_add_qml_module(clarp-desktop
         qml/Main.qml
         qml/components/AgentRail.qml
         qml/components/AgentOverview.qml
+        qml/components/AgentAvatar.qml
         qml/components/Composer.qml
         qml/components/ConnectionPage.qml
         qml/components/ConversationPane.qml
+        qml/components/DisplayCellCard.qml
         qml/components/MessageDelegate.qml
         qml/components/OrchestratorDialog.qml
         qml/components/PaneLeaf.qml
+        qml/components/AgentProfilePanel.qml
         qml/components/QuickSwitcher.qml
+        qml/components/QueueDialog.qml
         qml/components/ShortcutBar.qml
+        qml/components/SettingsPanel.qml
         qml/components/StatusPill.qml
         qml/components/StartAgentDialog.qml
         qml/components/ToolCard.qml
+        qml/components/TeamsPanel.qml
+        qml/components/UpdatesPanel.qml
         qml/components/VoiceDialog.qml
         qml/components/Workspace.qml
     RESOURCES

@@ -8,25 +8,30 @@
   import { reload } from '../stores/conversations.svelte.js';
   import { prefs, toggleTools } from '../stores/prefs.svelte.js';
 
-  let { session, showConnDot = false, onTapAgent, onHoldAgent } = $props();
+  let {
+    session, showConnDot = false, showActions = true, quietIdentity = false,
+    onTapAgent, onHoldAgent,
+  } = $props();
 </script>
 
 <section id="history" class="history" aria-label="Conversation">
   <header class="history-head">
-    <AgentIdentity {session} onTap={onTapAgent} onHold={onHoldAgent} />
+    <AgentIdentity {session} quietIdle={quietIdentity} onTap={onTapAgent} onHold={onHoldAgent} />
     {#if showConnDot}<ConnDot />{/if}
-    <div class="history-actions">
-      <button
-        id="historyToolsToggle"
-        class="history-btn"
-        class:active={!prefs.hideTools}
-        aria-label="Toggle tools"
-        title="Show/hide tool calls"
-        onclick={toggleTools}
-      >⚙</button>
-      <button id="historyRefresh" class="history-btn" aria-label="Refresh"
-              onclick={() => reload(session)}>↻</button>
-    </div>
+    {#if showActions}
+      <div class="history-actions">
+        <button
+          id="historyToolsToggle"
+          class="history-btn"
+          class:active={!prefs.hideTools}
+          aria-label="Toggle tools"
+          title="Show/hide tool calls"
+          onclick={toggleTools}
+        >⚙</button>
+        <button id="historyRefresh" class="history-btn" aria-label="Refresh"
+                onclick={() => reload(session)}>↻</button>
+      </div>
+    {/if}
   </header>
   <AgentBanner {session} />
   <Transcript {session} />

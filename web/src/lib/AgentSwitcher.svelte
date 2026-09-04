@@ -2,8 +2,9 @@
   // Quick-switch popup: one tap on the identity block, active agents only.
   import {
     app, isUserNotificationUnread, refreshAgentSnapshot,
-    avatarUrl, setSession, shortActivityPhase, statusFor,
+    setSession, shortActivityPhase, statusFor,
   } from '../stores/app.svelte.js';
+  import AgentAvatar from './AgentAvatar.svelte';
 
   let { open = $bindable() } = $props();
 
@@ -56,12 +57,7 @@
   <div class="agent-switcher" role="menu" aria-label="Quick switch agent">
     {#each items as item, i (item.sid)}
       <button class="switcher-item" style="animation-delay:{i * 35}ms" onclick={() => pick(item.sid)}>
-        <span class="switcher-avatar {item.cls}"
-              style="background-image:url('{avatarUrl(item.name, item.sid)}')">
-          {#if !avatarUrl(item.name, item.sid)}
-            <span class="avatar-letter">{item.name.slice(0, 1)}</span>
-          {/if}
-        </span>
+        <AgentAvatar class="switcher-avatar {item.cls}" name={item.name} session={item.sid} />
         <span class="switcher-name">{item.name}</span>
         <span class="switcher-state {item.cls}">{item.text}</span>
       </button>

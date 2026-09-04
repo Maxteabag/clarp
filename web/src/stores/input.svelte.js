@@ -11,6 +11,9 @@ import { getLeafPanes } from '@core/pane-tree.js';
 import { app, isDesktop, setSession } from './app.svelte.js';
 import { reload } from './conversations.svelte.js';
 import { toggleTools } from './prefs.svelte.js';
+import { silenceNow } from './audio.svelte.js';
+import { micTap } from './mic.svelte.js';
+import { stopAgentTurn } from './send.svelte.js';
 import { composerRef } from './composer.svelte.js';
 import { orderChats } from '../lib/chat-order.js';
 import {
@@ -27,8 +30,8 @@ export const input = $state({
   insert: false,
   // Which dialog is open, '' for none. A dialog takes the keyboard outright.
   overlay: '',
-  // The pane under the pointer. Pane actions prefer it over the focused pane,
-  // so the keys act on what you are looking at.
+  // The pane under the pointer. This is a visual preview only; keyboard
+  // commands remain anchored to the active pane until a click changes focus.
   hoveredPaneId: '',
   // Which region has the keyboard: the pane workspace or the chat rail.
   region: 'panes',
@@ -78,13 +81,10 @@ export function setHoveredPane(paneId) {
   input.hoveredPaneId = paneId || '';
 }
 
-// The pane a pane-scoped action applies to: what the pointer is over, else
-// what has focus.
+// Keyboard commands always act on the visibly active pane. Pointer hover is
+// presentation only; letting a stationary mouse override keyboard focus made
+// repeated directional moves snap back to the same origin.
 export function targetPaneId() {
-  const leaves = getLeafPanes(panesState.tree.root);
-  if (input.hoveredPaneId && leaves.some(l => l.id === input.hoveredPaneId)) {
-    return input.hoveredPaneId;
-  }
   return panesState.tree.activeId;
 }
 
@@ -120,11 +120,11 @@ const ACTIONS = {
 
   'split-vertical': () => splitOn('vertical'),
   'split-horizontal': () => splitOn('horizontal'),
-  'close-pane': () => closeActivePane(targetPaneId()),
-  'toggle-zoom': () => { focusTarget(); toggleZoomActive(); },
+  'close-pane': () => closeActivePane(),
+  'toggle-zoom': () => toggleZoomActive(),
   'equalize': () => equalizePaneSplits(),
-  'shrink': () => { focusTarget(); resizeActiveSplit(-0.05); },
-  'grow': () => { focusTarget(); resizeActiveSplit(0.05); },
+  'shrink': () => resizeActiveSplit(-0.05),
+  'grow': () => resizeActiveSplit(0.05),
 
   'nav-left': () => navigateActivePane('left'),
   'nav-right': () => navigateActivePane('right'),
@@ -132,6 +132,7 @@ const ACTIONS = {
   'nav-down': () => navigateActivePane('down'),
 
   'quick-switch': () => shell.onQuickSwitch?.(),
+  'commands': () => shell.onCommands?.(),
   'focus-sidebar': () => enterSidebar(),
   'leave-sidebar': () => setRegion('panes'),
   'chat-next': () => moveChat(1),
@@ -147,7 +148,17 @@ const ACTIONS = {
   'search': () => shell.onSearch?.(),
   'overview': () => shell.onOverview?.(),
   'help': () => shell.onHelp?.(),
+  'stop-agent': () => stopAgentTurn(),
+  'silence-audio': () => silenceNow(),
+  'toggle-mic': () => micTap(),
 };
+
+export function executeAction(action) {
+  const run = ACTIONS[action];
+  if (!run) return false;
+  run();
+  return true;
+}
 
 for (let n = 1; n <= 9; n++) {
   ACTIONS[`jump-agent-${n}`] = () => {
@@ -156,15 +167,7 @@ for (let n = 1; n <= 9; n++) {
   };
 }
 
-// A pane action on a hovered pane focuses it first, so the layout change and
-// the highlight agree afterwards.
-function focusTarget() {
-  const id = targetPaneId();
-  if (id !== panesState.tree.activeId) focusActivePane(id);
-}
-
 function splitOn(direction) {
-  focusTarget();
   const used = new Set(getLeafPanes(panesState.tree.root).map(l => l.session));
   const next = (app.availableSessions || []).find(s => !used.has(s)) || app.session;
   splitActivePane(direction, next);
@@ -188,10 +191,9 @@ export function handleGlobalKey(e) {
   const hit = resolveAction(normalizeKey(e), keyContext());
   if (!hit) return false;
 
-  const run = ACTIONS[hit.action];
-  if (!run) return false;
+  if (!ACTIONS[hit.action]) return false;
 
   e.preventDefault();
-  run();
+  executeAction(hit.action);
   return true;
 }

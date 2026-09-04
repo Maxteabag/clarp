@@ -2,12 +2,13 @@
   // Phone dock: identity block, connection dot, and a chat button that
   // toggles the composer overlay.
   import {
-    AVATAR_PALETTE, app, avatarUrl, chipLabel, shortActivityText, statusFor,
+    app, chipLabel, shortActivityText, statusFor,
     unreadAgentCount,
   } from '../../stores/app.svelte.js';
   import { activityStatusClass } from '../render.js';
   import ConnDot from '../ConnDot.svelte';
   import DockControls from '../DockControls.svelte';
+  import AgentAvatar from '../AgentAvatar.svelte';
 
   let { chatOpen = $bindable(), onTapAgent, onHoldAgent } = $props();
 
@@ -44,18 +45,11 @@
     onpointercancel={() => { clearTimeout(holdTimer); holdFired = false; }}
     onclick={e => { e.preventDefault(); e.stopPropagation(); }}
   >
-    <span
-      class="avatar"
-      aria-hidden="true"
-      style="background-color:{AVATAR_PALETTE[label] || 'var(--ochre)'};background-image:url('{avatarUrl(label, app.session)}')"
-    >
-      {#if !avatarUrl(label, app.session)}
-        <span class="avatar-letter">{label.slice(0, 1)}</span>
-      {/if}
+    <AgentAvatar class="avatar" name={label} session={app.session}>
       {#if unread > 0}
         <span class="dock-badge" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>
       {/if}
-    </span>
+    </AgentAvatar>
     <span class="agent-text">
       <span class="agent-label">{label}</span>
       <span class="agent-activity-label {activityStatusClass(status.activity_status)}" title={activity}>

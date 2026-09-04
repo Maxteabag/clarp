@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  KEYMAP, resolveAction, resolveContexts, visibleShortcuts, contextLabel,
+  KEYMAP, resolveAction, resolveContexts, visibleShortcuts, commandItems, contextLabel,
   normalizeKey, formatKey,
 } from '@core/keymap.js';
 
@@ -42,6 +42,31 @@ describe('typing never triggers a command', () => {
     expect(resolveAction('enter', desktop({ insert: true }))).toBeNull();
     expect(visibleShortcuts(desktop({ insert: true })).map(s => s.action)).toContain('send');
   });
+
+  it('reserves Option gestures for editing and keeps explicit Ctrl+Alt workspace chords live', () => {
+    const ctx = desktop({ insert: true, paneCount: 4 });
+    expect(resolveAction('alt+left', ctx)).toBeNull();
+    expect(resolveAction('alt+z', ctx)).toBeNull();
+    expect(resolveAction('alt+v', ctx)).toBeNull();
+    expect(resolveAction('ctrl+alt+left', ctx)?.action).toBe('nav-left');
+    expect(resolveAction('ctrl+alt+down', ctx)?.action).toBe('nav-down');
+    expect(resolveAction('ctrl+alt+z', ctx)?.action).toBe('toggle-zoom');
+    expect(resolveAction('ctrl+alt+v', ctx)?.action).toBe('split-vertical');
+    expect(resolveAction('z', ctx)).toBeNull();
+  });
+
+  it('opens commands from the composer on either desktop platform', () => {
+    const ctx = desktop({ insert: true });
+    expect(resolveAction('ctrl+k', ctx)?.action).toBe('commands');
+    expect(resolveAction('meta+k', ctx)?.action).toBe('commands');
+  });
+
+  it('keeps operational chords available while drafting', () => {
+    const ctx = desktop({ insert: true });
+    expect(resolveAction('ctrl+.', ctx)?.action).toBe('stop-agent');
+    expect(resolveAction('ctrl+alt+m', ctx)?.action).toBe('silence-audio');
+    expect(resolveAction('ctrl+shift+space', ctx)?.action).toBe('toggle-mic');
+  });
 });
 
 describe('an open dialog swallows pane and global keys', () => {
@@ -55,6 +80,14 @@ describe('an open dialog swallows pane and global keys', () => {
 });
 
 describe('pane keys require a pane to act on', () => {
+  it('does not expose desktop pane commands to the mobile shell', () => {
+    const mobile = { desktop: false, paneCount: 4, sessionCount: 3 };
+    expect(resolveAction('ctrl+alt+left', mobile)).toBeNull();
+    expect(resolveAction('ctrl+alt+v', mobile)).toBeNull();
+    expect(resolveAction('ctrl+k', mobile)).toBeNull();
+    expect(commandItems(mobile).map(item => item.action)).not.toContain('split-vertical');
+  });
+
   it('does not offer close, zoom, balance or move with a single pane', () => {
     const ctx = desktop({ paneCount: 1 });
     for (const key of ['x', 'z', '=', 'h', 'j', 'k', 'l', 'H']) {
@@ -230,10 +263,30 @@ describe('context label', () => {
   it.each([
     [{ overlay: 'voice' }, 'VOICE'],
     [{ desktop: true, insert: true }, 'INSERT'],
+    [{ desktop: true, insert: true, zoomed: true }, 'INSERT · ZOOM'],
+    [{ desktop: true, zoomed: true }, 'ZOOM'],
     [{ desktop: true }, 'PANE'],
     [{}, 'NORMAL'],
   ])('%o reads as %s', (ctx, label) => {
     expect(contextLabel(ctx)).toBe(label);
+  });
+});
+
+describe('command palette', () => {
+  it('is derived from eligible keymap actions', () => {
+    const items = commandItems(desktop({ paneCount: 2, insert: true }));
+    expect(items.map(item => item.action)).toEqual(expect.arrayContaining([
+      'split-vertical', 'toggle-zoom', 'nav-left', 'quick-switch', 'toggle-tools',
+    ]));
+    expect(new Set(items.map(item => item.action)).size).toBe(items.length);
+    expect(items.find(item => item.action === 'split-vertical')?.key).toBe('v');
+    expect(items.find(item => item.action === 'toggle-zoom')?.key).toBe('z');
+  });
+
+  it('does not offer multi-pane actions before a split exists', () => {
+    const actions = commandItems(desktop({ paneCount: 1 })).map(item => item.action);
+    expect(actions).not.toContain('close-pane');
+    expect(actions).not.toContain('toggle-zoom');
   });
 });
 
@@ -244,6 +297,7 @@ describe('key normalization', () => {
     [{ key: 'v' }, 'v'],
     [{ key: 'H', shiftKey: true }, 'H'],
     [{ key: 'd', ctrlKey: true }, 'ctrl+d'],
+    [{ key: 'ArrowLeft', ctrlKey: true, altKey: true }, 'ctrl+alt+left'],
     [{ key: 'D', ctrlKey: true, shiftKey: true }, 'ctrl+D'],
     [{ key: 'Escape', ctrlKey: true }, 'ctrl+esc'],
   ])('%o -> %s', (event, expected) => {

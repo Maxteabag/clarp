@@ -7,20 +7,25 @@ Rectangle {
 
     required property var controller
     signal openConnectionRequested
-    color: "#121116"
+    signal queueRequested(string session)
+    signal profileRequested(string session)
+    readonly property real paneGap: 8
+    color: "#10121a"
 
     Repeater {
         model: root.controller.panes.paneLayout
 
         PaneLeaf {
             required property var modelData
-            x: Math.round(Number(modelData.x) * root.width)
-            y: Math.round(Number(modelData.y) * root.height)
-            width: Math.round(Number(modelData.width) * root.width)
-            height: Math.round(Number(modelData.height) * root.height)
+            x: Math.round(Number(modelData.x) * root.width) + root.paneGap / 2
+            y: Math.round(Number(modelData.y) * root.height) + root.paneGap / 2
+            width: Math.max(1, Math.round(Number(modelData.width) * root.width) - root.paneGap)
+            height: Math.max(1, Math.round(Number(modelData.height) * root.height) - root.paneGap)
             controller: root.controller
             node: modelData
             onOpenConnectionRequested: root.openConnectionRequested()
+            onQueueRequested: session => root.queueRequested(session)
+            onProfileRequested: session => root.profileRequested(session)
         }
     }
 
@@ -39,9 +44,9 @@ Rectangle {
 
             x: vertical ? splitX + splitWidth * Number(modelData.ratio) - width / 2 : splitX
             y: vertical ? splitY : splitY + splitHeight * Number(modelData.ratio) - height / 2
-            width: vertical ? 7 : splitWidth
-            height: vertical ? splitHeight : 7
-            color: dragHandler.active ? "#b884d8" : hoverHandler.hovered ? "#5d4969" : "#29242f"
+            width: vertical ? root.paneGap : splitWidth
+            height: vertical ? splitHeight : root.paneGap
+            color: dragHandler.active ? "#9ca3d1" : hoverHandler.hovered ? "#555b7c" : "#10121a"
             z: 10
 
             HoverHandler {
@@ -51,10 +56,10 @@ Rectangle {
                 id: dragHandler
                 xAxis.enabled: splitHandle.vertical
                 yAxis.enabled: !splitHandle.vertical
-                xAxis.minimum: splitHandle.splitX + splitHandle.splitWidth * 0.15
-                xAxis.maximum: splitHandle.splitX + splitHandle.splitWidth * 0.85
-                yAxis.minimum: splitHandle.splitY + splitHandle.splitHeight * 0.15
-                yAxis.maximum: splitHandle.splitY + splitHandle.splitHeight * 0.85
+                xAxis.minimum: splitHandle.splitX + splitHandle.splitWidth * 0.15 - splitHandle.width / 2
+                xAxis.maximum: splitHandle.splitX + splitHandle.splitWidth * 0.85 - splitHandle.width / 2
+                yAxis.minimum: splitHandle.splitY + splitHandle.splitHeight * 0.15 - splitHandle.height / 2
+                yAxis.maximum: splitHandle.splitY + splitHandle.splitHeight * 0.85 - splitHandle.height / 2
                 onActiveChanged: {
                     if (active)
                         return;

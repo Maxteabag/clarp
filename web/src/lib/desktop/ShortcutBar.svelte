@@ -15,26 +15,26 @@
   let shortcuts = $derived(visibleShortcuts(ctx));
   let label = $derived(contextLabel(ctx));
   let scope = $derived(ctx.overlay ? 'overlay' : ctx.insert ? 'insert' : 'normal');
+  const ESSENTIAL = new Set([
+    'leave-insert', 'send', 'focus-composer', 'split-vertical', 'toggle-zoom',
+    'nav-left', 'quick-switch', 'commands', 'chat-next', 'chat-open', 'leave-sidebar',
+  ]);
+  let shown = $derived(shortcuts.filter(sc => ESSENTIAL.has(sc.action)).slice(0, 4));
 </script>
 
 <footer class="shortcut-bar" aria-label="Keyboard shortcuts">
-  <div class="mode-badge" data-scope={scope}>
+  <div class="mode-badge" data-scope={scope} title="Current keyboard context">
     <span class="mode-indicator"></span>
     <span class="mode-name">{label}</span>
   </div>
 
-  {#if ctx.hovering && !ctx.insert && !ctx.overlay}
-    <span class="target-hint" title="Pane keys act on the pane under the pointer">
-      → hovered pane
-    </span>
-  {/if}
-
   <div class="shortcut-list">
-    {#each shortcuts as sc, i (sc.action)}
-      {#if i > 0}<span class="sc-divider">·</span>{/if}
-      <span class="sc-item"><kbd>{sc.key}</kbd> {sc.label}</span>
+    {#each shown as sc (sc.action)}
+      <span class="sc-item"><kbd>{sc.key}</kbd><span>{sc.label}</span></span>
     {/each}
   </div>
+
+  <span class="bar-meta">{ctx.paneCount} {ctx.paneCount === 1 ? 'pane' : 'panes'} <i>·</i> <kbd>?</kbd> all keys</span>
 </footer>
 
 <style>
@@ -44,13 +44,14 @@
     flex: none;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 3px 12px;
-    background: #13141c;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    min-height: 25px;
+    gap: 12px;
+    padding: 3px 9px;
+    background: #15161e;
+    border-top: 1px solid #2a2c3b;
     font-family: var(--font-mono, monospace);
     font-size: 11px;
-    color: #a9b1d6;
+    color: #85889f;
     user-select: none;
     overflow-x: auto;
     white-space: nowrap;
@@ -58,66 +59,78 @@
   .mode-badge {
     display: flex;
     align-items: center;
-    gap: 5px;
-    padding: 2px 7px;
-    background: rgba(122, 162, 247, 0.15);
-    border: 1px solid rgba(122, 162, 247, 0.4);
-    border-radius: 3px;
-    color: #7aa2f7;
-    font-weight: 700;
-    letter-spacing: 0.06em;
+    gap: 6px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: #b8bbd0;
+    font-weight: 600;
+    letter-spacing: .09em;
     flex: none;
   }
   .mode-badge[data-scope='insert'] {
-    background: rgba(158, 206, 106, 0.15);
-    border-color: rgba(158, 206, 106, 0.4);
-    color: #9ece6a;
+    background: transparent;
+    color: #a7b99d;
   }
   .mode-badge[data-scope='overlay'] {
-    background: rgba(255, 158, 100, 0.15);
-    border-color: rgba(255, 158, 100, 0.4);
-    color: #ff9e64;
+    background: transparent;
+    color: #b5a68f;
   }
   .mode-indicator {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
     background: currentColor;
-  }
-  .target-hint {
-    flex: none;
-    color: #7aa2f7;
-    font-size: 10px;
-    opacity: 0.85;
   }
   .shortcut-list {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 11px;
-    color: #787c99;
+    gap: 13px;
+    font-size: 10px;
+    color: #73768e;
   }
   .sc-item {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    color: #c0caf5;
+    gap: 5px;
+    color: #777a91;
   }
   .sc-item kbd {
     display: inline-block;
-    padding: 1px 4px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 3px;
-    color: #ff9e64;
-    font-size: 10px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    color: #aeb1c7;
+    font-size: 9px;
     font-weight: 600;
     line-height: 1.1;
   }
   .mode-badge[data-scope='insert'] ~ .shortcut-list .sc-item kbd {
-    color: #9ece6a;
+    color: #a7b99d;
   }
-  .sc-divider {
-    color: rgba(255, 255, 255, 0.15);
+  .bar-meta {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: #5c5f75;
+    font-size: 9px;
   }
+  .bar-meta i { color: #393b4c; font-style: normal; }
+  .bar-meta kbd { color: #8c8fa7; font: inherit; }
+  @media (max-width: 900px) {
+    .shortcut-list .sc-item:nth-child(n+3) { display: none; }
+    .bar-meta { display: none; }
+  }
+  :global(html[data-theme="day"]) .shortcut-bar {
+    color: var(--washi-dim);
+    background: var(--ink-soft);
+    border-color: var(--ink-edge);
+  }
+  :global(html[data-theme="day"]) .mode-badge,
+  :global(html[data-theme="day"]) .sc-item,
+  :global(html[data-theme="day"]) .sc-item kbd { color: var(--washi); }
+  :global(html[data-theme="day"]) .shortcut-list,
+  :global(html[data-theme="day"]) .bar-meta { color: var(--washi-low); }
 </style>

@@ -9,11 +9,19 @@ Rectangle {
 
     required property var controller
     required property string session
+    required property string paneId
     required property var conversationModel
+    required property bool active
     readonly property int agentRevision: controller.agentRevision
     signal openConnection
+    signal queueRequested(string session)
+    signal profileRequested(string session)
 
-    color: "#121116"
+    color: root.active ? "#202438" : "#171923"
+
+    Behavior on color {
+        ColorAnimation { duration: 120 }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -21,35 +29,58 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 66
-            color: "#151319"
+            Layout.preferredHeight: 39
+            color: root.active ? "#292d44" : "#1b1d29"
+
+            Behavior on color {
+                ColorAnimation { duration: 120 }
+            }
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 20
-                anchors.rightMargin: 18
-                spacing: 11
+                anchors.leftMargin: 9
+                anchors.rightMargin: 9
+                spacing: 8
+
+                AgentAvatar {
+                    Layout.preferredWidth: 23
+                    Layout.preferredHeight: 23
+                    controller: root.controller
+                    session: root.session
+                    name: root.controller.agentName(root.session)
+                    avatarSize: 23
+                    cornerRadius: 6
+                    fallbackColor: root.active ? "#555970" : "#3b3e50"
+                }
 
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 1
 
                     Text {
+                        Layout.fillWidth: true
                         text: {
                             root.agentRevision;
                             return root.controller.agentName(root.session) || "No agent selected";
                         }
-                        color: "#f0ebe6"
-                        font.pixelSize: 16
+                        color: root.active ? "#c9cbdc" : "#8b8ea5"
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: 11
                         font.weight: Font.DemiBold
+                        horizontalAlignment: Text.AlignLeft
+                        elide: Text.ElideRight
                     }
                     Text {
                         text: {
                             root.agentRevision;
                             return root.session.length > 0 ? root.controller.agentBackend(root.session) + "  ·  " + root.session : root.controller.baseUrl;
                         }
-                        color: "#77717f"
-                        font.pixelSize: 10
+                        visible: root.width > 360
+                        color: "#5e6177"
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: 8
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
                     }
                 }
 
@@ -61,27 +92,54 @@ Rectangle {
                 }
 
                 ToolButton {
-                    text: "<>"
-                    highlighted: root.controller.toolsVisible
-                    onClicked: root.controller.toolsVisible = !root.controller.toolsVisible
-                    ToolTip.visible: hovered
-                    ToolTip.text: "Show or hide tool calls"
+                    id: paneMenuButton
+                    visible: root.active && root.session.length > 0
+                    text: "···"
+                    implicitWidth: 28
+                    implicitHeight: 26
+                    onClicked: paneMenu.open()
+                    Menu {
+                        id: paneMenu
+                        MenuItem {
+                            text: "Queued messages"
+                            onTriggered: root.queueRequested(root.session)
+                        }
+                        MenuItem {
+                            text: root.controller.timestampsVisible
+                                ? "Hide timestamps" : "Show timestamps"
+                            onTriggered: root.controller.timestampsVisible =
+                                !root.controller.timestampsVisible
+                        }
+                        MenuItem {
+                            text: root.controller.toolsVisible
+                                ? "Collapse tool details" : "Expand tool details"
+                            onTriggered: root.controller.toolsVisible =
+                                !root.controller.toolsVisible
+                        }
+                        MenuSeparator {}
+                        MenuItem {
+                            text: "Open files"
+                            onTriggered: root.controller.openAgentFiles(root.session)
+                        }
+                        MenuItem {
+                            text: "Open terminal"
+                            onTriggered: root.controller.openAgentTerminal(root.session)
+                        }
+                        MenuItem {
+                            text: "Agent profile"
+                            onTriggered: root.profileRequested(root.session)
+                        }
+                    }
                 }
 
-                ToolButton {
-                    text: "↻"
-                    onClicked: root.controller.refreshSession(root.session)
-                    ToolTip.visible: hovered
-                    ToolTip.text: "Refresh conversation (Ctrl+R)"
-                }
             }
         }
 
         Rectangle {
-            visible: root.controller.errorMessage.length > 0
+            visible: root.active && root.controller.errorMessage.length > 0
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 38 : 0
-            color: "#3a2025"
+            color: "#2b2028"
 
             RowLayout {
                 anchors.fill: parent
@@ -91,7 +149,8 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text: root.controller.errorMessage
-                    color: "#efb1b2"
+                    color: "#c9959e"
+                    font.family: "JetBrains Mono"
                     font.pixelSize: 11
                     elide: Text.ElideRight
                 }
@@ -104,33 +163,68 @@ Rectangle {
 
         ListView {
             id: transcript
+            property bool followLatest: true
+            property bool newMessagesBelow: false
+            property bool userInteracting: false
+            property real heightBeforePrepend: -1
+            readonly property real distanceFromBottom: Math.max(
+                0, contentHeight - height - Math.max(0, contentY))
+
+            function scrollToLatest() {
+                followLatest = true;
+                newMessagesBelow = false;
+                Qt.callLater(() => positionViewAtEnd());
+            }
+
             Layout.fillWidth: true
             Layout.fillHeight: true
             model: root.conversationModel
             clip: true
-            spacing: 8
-            leftMargin: 16
-            rightMargin: 16
-            topMargin: 14
-            bottomMargin: 18
+            spacing: 2
+            leftMargin: 11
+            rightMargin: 11
+            topMargin: 6
+            bottomMargin: 8
             reuseItems: true
             boundsBehavior: Flickable.StopAtBounds
+            onMovementStarted: userInteracting = true
+            onContentYChanged: {
+                if (userInteracting && distanceFromBottom > 32)
+                    followLatest = false;
+            }
+            onMovementEnded: {
+                userInteracting = false;
+                if (distanceFromBottom <= 32) {
+                    followLatest = true;
+                    newMessagesBelow = false;
+                }
+            }
+            onContentHeightChanged: {
+                if (followLatest && !userInteracting)
+                    Qt.callLater(() => positionViewAtEnd());
+            }
+            Component.onCompleted: scrollToLatest()
 
             header: Item {
                 width: transcript.width
-                height: root.conversationModel.hasMore ? 42 : 8
+                height: root.conversationModel.hasMore ? 32 : 4
 
                 Button {
                     visible: root.conversationModel.hasMore
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: root.conversationModel.loading ? "Loading…" : "Load earlier messages"
                     enabled: !root.conversationModel.loading
-                    onClicked: root.controller.loadOlderSession(root.session)
+                    onClicked: {
+                        transcript.followLatest = false;
+                        transcript.heightBeforePrepend = transcript.contentHeight;
+                        root.controller.loadOlderSession(root.session);
+                    }
                 }
             }
 
             delegate: MessageDelegate {
                 showTools: root.controller.toolsVisible
+                showTimestamp: root.controller.timestampsVisible
             }
 
             footer: Item {
@@ -150,9 +244,22 @@ Rectangle {
 
             Connections {
                 target: root.conversationModel
-                function onCountChanged() {
-                    if (transcript.count > 0)
-                        Qt.callLater(() => transcript.positionViewAtEnd());
+                function onRowsAppended(fromCurrentUser) {
+                    if (fromCurrentUser || transcript.followLatest
+                        || transcript.distanceFromBottom <= 32) {
+                        transcript.scrollToLatest();
+                    } else {
+                        transcript.newMessagesBelow = true;
+                    }
+                }
+                function onRowsPrepended() {
+                    const previous = transcript.heightBeforePrepend;
+                    transcript.heightBeforePrepend = -1;
+                    if (previous < 0)
+                        return;
+                    Qt.callLater(() => {
+                        transcript.contentY += Math.max(0, transcript.contentHeight - previous);
+                    });
                 }
             }
 
@@ -160,16 +267,41 @@ Rectangle {
                 anchors.centerIn: parent
                 visible: transcript.count === 0 && !root.conversationModel.loading
                 text: root.session.length > 0 ? "No messages yet. Start the conversation below." : "Choose an agent from the sidebar."
-                color: "#6f6976"
-                font.pixelSize: 13
+                color: "#5e6176"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 10
             }
         }
 
         Composer {
             Layout.fillWidth: true
+            Layout.preferredHeight: implicitHeight
             controller: root.controller
             session: root.session
+            paneId: root.paneId
+            active: root.active
             onOpenConnection: root.openConnection()
+        }
+    }
+
+    ToolButton {
+        visible: !transcript.followLatest
+            && (transcript.newMessagesBelow || transcript.distanceFromBottom >= 180)
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 12
+        anchors.bottomMargin: 56
+        width: 34
+        height: 34
+        z: 30
+        text: transcript.newMessagesBelow ? "↓•" : "↓"
+        onClicked: transcript.scrollToLatest()
+        ToolTip.visible: hovered
+        ToolTip.text: transcript.newMessagesBelow ? "Jump to new messages" : "Jump to latest"
+        background: Rectangle {
+            radius: 17
+            color: "#30354f"
+            border.color: "#777fae"
         }
     }
 }
