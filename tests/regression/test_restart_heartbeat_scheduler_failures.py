@@ -9,7 +9,15 @@ from datetime import datetime, timezone
 import threading
 
 from lib import agents as agents_db
-from lib import db, heartbeat, interrupted_turns, message_store, reconcile, scheduler
+from lib import (
+    background_jobs,
+    db,
+    heartbeat,
+    interrupted_turns,
+    message_store,
+    reconcile,
+    scheduler,
+)
 from lib.protocol import AgentState
 
 
@@ -87,6 +95,62 @@ def test_production_boot_order_does_not_erase_interrupted_turn_evidence():
     assert [row["text"] for row in visible][-1] == (
         interrupted_turns.RESTART_MARKER_TEXT
     )
+
+
+def test_restart_recovery_closes_the_orphaned_durable_turn():
+    agent_id = _agent("restart-turn-row")
+    backend_session_id = _live_runtime(agent_id, "restart-turn-row")
+    message_store.record_user_message(
+        agent_id=agent_id,
+        backend_session_id=backend_session_id,
+        client_msg_id="restart-turn-row-message",
+        text="Close the ledger row too",
+        origin="user",
+    )
+    agents_db.open_turn(
+        agent_id=agent_id,
+        source="pwa",
+        trace_id="restart-turn-row-trace",
+        synthesize_audio=True,
+    )
+    agents_db.record_state(
+        agent_id,
+        AgentState.THINKING,
+        {
+            "trace_id": "restart-turn-row-trace",
+            "backend_session_id": backend_session_id,
+            "origin": "user",
+        },
+    )
+
+    assert len(interrupted_turns.recover_after_restart()) == 1
+
+    open_rows = db.conn().execute(
+        "SELECT COUNT(*) AS n FROM turns WHERE agent_id=? AND ended_at IS NULL",
+        (agent_id,),
+    ).fetchone()["n"]
+    assert open_rows == 0
+
+
+def test_one_trace_cannot_create_two_durable_turn_rows():
+    """Server dispatch and Claude's UserPromptSubmit hook both call open_turn."""
+    agent_id = _agent("one-turn")
+    _live_runtime(agent_id, "one-turn")
+
+    agents_db.open_turn(
+        agent_id=agent_id, source="pwa", trace_id="same-trace",
+        synthesize_audio=True,
+    )
+    agents_db.open_turn(
+        agent_id=agent_id, source="pwa", trace_id="same-trace",
+        synthesize_audio=True,
+    )
+
+    rows = db.conn().execute(
+        "SELECT turn_id FROM turns WHERE agent_id=? AND trace_id=?",
+        (agent_id, "same-trace"),
+    ).fetchall()
+    assert len(rows) == 1
 
 
 def test_failed_periodic_heartbeat_is_retryable_without_waiting_a_full_interval(
@@ -203,6 +267,22 @@ def test_deleted_agent_cannot_leave_an_enabled_schedule_behind():
 
     assert scheduler.get_schedule(item["schedule_id"])["enabled"] is False
     assert scheduler.due_schedules(db.now_ms()) == []
+
+
+def test_deleted_agent_cannot_leave_active_background_work_behind():
+    agent_id = _agent("background-deleted")
+    job = background_jobs.upsert(
+        session="background-deleted",
+        job_id="deleted-agent-worker",
+        kind="watcher",
+        title="Watch forever",
+    )
+
+    agents_db.soft_delete(agent_id)
+
+    current = background_jobs.get(job["job_id"], reconcile=False)
+    assert current["status"] == "cancelled"
+    assert not background_jobs.is_active(job["job_id"])
 
 
 def test_leap_day_schedule_searches_far_enough_to_find_its_next_run():
