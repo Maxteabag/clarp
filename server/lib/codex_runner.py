@@ -252,7 +252,10 @@ def build_cmd(session_id: str = "", *, is_new_session: bool = False,
     """
     base = [CODEX_BIN, "exec", "--json"]
     if isolated:
-        base += ["--sandbox", "workspace-write", "--ephemeral"]
+        # Routing runs in the workspace root, which need not be a git repo;
+        # without the check skipped Codex refuses to start at all.
+        base += ["--sandbox", "workspace-write", "--ephemeral",
+                 "--skip-git-repo-check"]
     else:
         base.append("--dangerously-bypass-approvals-and-sandbox")
     if model:
