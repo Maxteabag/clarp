@@ -514,6 +514,19 @@ def test_managed_catalog_includes_supported_platform_providers():
     }
 
 
+def test_async_install_rejects_unsupported_host_before_creating_job(monkeypatch):
+    monkeypatch.setenv("CLARP_PLATFORM_OVERRIDE", "macos")
+
+    with pytest.raises(ValueError, match="not supported on macos"):
+        transcription_models.start_install(
+            "faster-whisper:large-v3-turbo", computer_id="mac")
+
+    assert background_jobs.get(
+        transcription_models.install_job_id("faster-whisper:large-v3-turbo"),
+        reconcile=False,
+    ) is None
+
+
 def test_whisper_cpp_registry_requires_model_and_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(transcription_models, "REGISTRY", tmp_path / "models.json")
     model = tmp_path / "ggml-small.en.bin"

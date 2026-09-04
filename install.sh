@@ -476,7 +476,7 @@ for _t in clarp claude codex agy node ffmpeg uv git; do
     fi
     [[ -n "$_loc" ]] && _path_dirs+=( "$(cd "$(dirname "$_loc")" && pwd)" )
 done
-_path_dirs+=( /usr/local/bin /usr/bin /bin )
+_path_dirs+=( /usr/local/bin /usr/bin /bin /usr/sbin /sbin )
 
 SERVICE_PATH=""
 service_dir_is_safe() {

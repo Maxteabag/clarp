@@ -87,6 +87,12 @@ def capability(session: str, *, media_dir: pathlib.Path | None = None) -> dict:
 
 
 def start(session: str, *, media_dir: pathlib.Path | None = None) -> dict:
+    from .agent_lifecycle import AgentLifecycleService
+    with AgentLifecycleService._lifecycle_gate.read():
+        return _start(session, media_dir=media_dir)
+
+
+def _start(session: str, *, media_dir: pathlib.Path | None = None) -> dict:
     session = (session or "").strip()
     agent = agents.get_by_session(session)
     if not agent:

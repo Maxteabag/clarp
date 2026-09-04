@@ -357,13 +357,21 @@ class AgentScheduleRunner:
         dispatched_count = 0
         for item in due:
             sid = item["schedule_id"]
-            session = item["session"]
-            prompt = item["prompt"]
-            # Mark schedule advanced so it will not double-fire
-            advance_schedule(sid, now)
-            try:
-                self._dispatch_turn(session, prompt)
-                dispatched_count += 1
-            except Exception as exc:
-                log_exception(f"scheduleDispatchFail:{sid}", exc)
+            from .agent_lifecycle import AgentLifecycleService
+            with AgentLifecycleService._lifecycle_gate.read():
+                # The due-list snapshot may predate an agent reset. Resolve the
+                # row again after acquiring the lifecycle lease so a migrated
+                # schedule dispatches to its fresh session instead of silently
+                # advancing the deleted one.
+                current = get_schedule(sid)
+                if (current is None or not current["enabled"]
+                        or current["next_run_at"] is None
+                        or int(current["next_run_at"]) > now):
+                    continue
+                advance_schedule(sid, now)
+                try:
+                    self._dispatch_turn(current["session"], current["prompt"])
+                    dispatched_count += 1
+                except Exception as exc:
+                    log_exception(f"scheduleDispatchFail:{sid}", exc)
         return dispatched_count

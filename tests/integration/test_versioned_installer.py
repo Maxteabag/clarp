@@ -136,6 +136,8 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     service_path = (second_release / "SERVICE_PATH").read_text().strip().split(":")
     assert str(home / ".local/bin") not in service_path
     assert str(external_bin) in service_path
+    assert "/usr/sbin" in service_path
+    assert "/sbin" in service_path
     previous_unit = (home / ".config/systemd/user/clarp.service").read_text()
     assert second_release != first_release
     assert first_release.is_dir(), "same-version reinstall must retain active predecessor"

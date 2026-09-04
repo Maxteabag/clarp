@@ -5,8 +5,11 @@ import os
 from pathlib import Path
 import plistlib
 import json
+import re
+import shlex
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from typing import Callable
@@ -17,6 +20,12 @@ from . import xdg
 
 LAUNCHD_LABEL = "com.maxteabag.clarp.server"
 Runner = Callable[..., subprocess.CompletedProcess]
+_ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_RESERVED_ENVIRONMENT = frozenset({
+    "HOME", "PATH", "PYTHONUNBUFFERED", "CLARP_SHARE_DIR",
+    "CLARP_CONFIG_DIR", "CLARP_CACHE_DIR", "CLAUDE_PWA_CONFIG",
+    "CLAUDE_PWA_DB", "CLAUDE_PWA_LOG_DIR",
+})
 
 
 def platform_kind() -> str:
@@ -38,12 +47,92 @@ def launchd_domain() -> str:
     return f"gui/{os.getuid()}"
 
 
+def configured_environment(
+    config_file: Path, *, home: Path, inherited: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Environment intentionally inherited by the service and agent turns.
+
+    The fixed Clarp runtime variables stay authoritative. `SSH_AUTH_SOCK` is
+    captured from an interactive installer when the user has not configured an
+    explicit value, covering external SSH agents without guessing vendor paths.
+    """
+    try:
+        payload = tomllib.loads(config_file.read_text())
+    except FileNotFoundError:
+        payload = {}
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError(f"cannot read service environment: {exc}") from exc
+    raw = payload.get("env", {})
+    if not isinstance(raw, dict):
+        raise ValueError("[env] must be a TOML table")
+
+    result: dict[str, str] = {}
+    for name, value in raw.items():
+        if not isinstance(name, str) or not _ENVIRONMENT_NAME.fullmatch(name):
+            raise ValueError(f"invalid [env] variable name: {name}")
+        if (name in _RESERVED_ENVIRONMENT
+                or name.startswith("CLARP_")
+                or name.startswith("CLAUDE_PWA_")):
+            raise ValueError(f"[env].{name} is managed by Clarp")
+        if not isinstance(value, str):
+            raise ValueError(f"[env].{name} must be a string")
+        if "\0" in value or "\n" in value or "\r" in value:
+            raise ValueError(f"[env].{name} contains an unsupported line break")
+        result[name] = _expand_home(value, home)
+
+    if "SSH_AUTH_SOCK" not in raw:
+        candidate = str((inherited or {}).get("SSH_AUTH_SOCK") or "").strip()
+        if candidate:
+            result["SSH_AUTH_SOCK"] = _expand_home(candidate, home)
+    return result
+
+
+def _expand_home(value: str, home: Path) -> str:
+    if value == "~":
+        return str(home)
+    if value.startswith("~/"):
+        return str(home / value[2:])
+    return value
+
+
+def _systemd_environment_lines(environment: dict[str, str]) -> str:
+    def escaped(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+
+    return "\n".join(
+        f'Environment="{name}={escaped(value)}"'
+        for name, value in sorted(environment.items())
+    )
+
+
+def _previous_ssh_auth_sock(path: Path) -> str:
+    try:
+        if path.suffix == ".plist":
+            payload = plistlib.loads(path.read_bytes())
+            environment = payload.get("EnvironmentVariables") or {}
+            return str(environment.get("SSH_AUTH_SOCK") or "").strip()
+        for line in path.read_text().splitlines():
+            if not line.startswith("Environment="):
+                continue
+            for assignment in shlex.split(line.removeprefix("Environment=")):
+                if assignment.startswith("SSH_AUTH_SOCK="):
+                    return assignment.split("=", 1)[1].replace("%%", "%").strip()
+    except (OSError, ValueError, plistlib.InvalidFileException):
+        pass
+    return ""
+
+
 def render(
     *, python: Path, share: Path, service_path: str, home: Path | None = None,
+    inherited_environment: dict[str, str] | None = None,
 ) -> bytes:
     home = (home or Path.home()).expanduser()
+    config = Path(os.environ.get("CLARP_CONFIG_DIR", xdg.config_dir(home)))
+    extra_environment = configured_environment(
+        config / "config.toml", home=home,
+        inherited=os.environ if inherited_environment is None else inherited_environment,
+    )
     if platform_kind() == "macos":
-        config = Path(os.environ.get("CLARP_CONFIG_DIR", xdg.config_dir(home)))
         cache = Path(os.environ.get("CLARP_CACHE_DIR", xdg.cache_dir(home)))
         logs = home / "Library/Logs/Clarp"
         logs.mkdir(parents=True, exist_ok=True)
@@ -59,6 +148,7 @@ def render(
             "StandardOutPath": str(logs / "server.stdout.log"),
             "StandardErrorPath": str(logs / "server.stderr.log"),
             "EnvironmentVariables": {
+                **extra_environment,
                 "HOME": str(home),
                 "PATH": service_path,
                 "PYTHONUNBUFFERED": "1",
@@ -71,7 +161,6 @@ def render(
             },
         }
         return plistlib.dumps(payload, fmt=plistlib.FMT_XML, sort_keys=False)
-    config = Path(os.environ.get("CLARP_CONFIG_DIR", xdg.config_dir(home)))
     cache = Path(os.environ.get("CLARP_CACHE_DIR", xdg.cache_dir(home)))
     logs = cache / "logs"
 
@@ -90,19 +179,38 @@ def render(
                 .replace("@@CACHE_ENV@@", environment_value(cache))
                 .replace("@@CONFIG_FILE_ENV@@", environment_value(config / "config.toml"))
                 .replace("@@DATABASE_ENV@@", environment_value(share / "state.sqlite"))
-                .replace("@@LOG_ENV@@", environment_value(logs)))
+                .replace("@@LOG_ENV@@", environment_value(logs))
+                .replace("@@EXTRA_ENVIRONMENT@@",
+                         _systemd_environment_lines(extra_environment)))
     return rendered.encode()
 
 
 def write_definition(
     *, python: Path, share: Path, service_path: str, home: Path | None = None,
+    inherited_environment: dict[str, str] | None = None,
 ) -> Path:
     path = definition_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.next")
-    temporary.write_bytes(render(
-        python=python, share=share, service_path=service_path, home=home))
-    temporary.chmod(0o600 if platform_kind() == "macos" else 0o644)
+    inherited = dict(
+        os.environ if inherited_environment is None else inherited_environment)
+    if not str(inherited.get("SSH_AUTH_SOCK") or "").strip():
+        previous_socket = _previous_ssh_auth_sock(path)
+        if previous_socket:
+            inherited["SSH_AUTH_SOCK"] = previous_socket
+    rendered = render(
+        python=python, share=share, service_path=service_path, home=home,
+        inherited_environment=inherited)
+    # `[env]` can intentionally carry secrets. Create the file private before
+    # writing any bytes; chmod-after-write has a brief disclosure window.
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".next")
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(rendered)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
     temporary.replace(path)
     return path
 

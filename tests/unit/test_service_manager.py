@@ -39,6 +39,7 @@ def test_linux_definition_and_lifecycle(monkeypatch, tmp_path):
     monkeypatch.setenv("CLARP_PLATFORM_OVERRIDE", "linux")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("CLARP_CONFIG_DIR", str(tmp_path / "config/clarp"))
     monkeypatch.setenv("CLARP_CACHE_DIR", str(tmp_path / "cache/clarp"))
     monkeypatch.setenv("CLAUDE_PWA_LOG_DIR", str(tmp_path / "pytest-logs"))
     share = tmp_path / "share"
@@ -52,16 +53,23 @@ def test_linux_definition_and_lifecycle(monkeypatch, tmp_path):
         "Environment=\"CLARP_CACHE_DIR=@@CACHE_ENV@@\"\n"
         "Environment=\"CLAUDE_PWA_CONFIG=@@CONFIG_FILE_ENV@@\"\n"
         "Environment=\"CLAUDE_PWA_DB=@@DATABASE_ENV@@\"\n"
-        "Environment=\"CLAUDE_PWA_LOG_DIR=@@LOG_ENV@@\"\n")
+        "Environment=\"CLAUDE_PWA_LOG_DIR=@@LOG_ENV@@\"\n"
+        "@@EXTRA_ENVIRONMENT@@\n")
+    config = tmp_path / "config/clarp/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text('[env]\nSSH_AUTH_SOCK = "~/.ssh/agent.sock"\n')
     path = service_manager.write_definition(
         python=Path("/runtime/python"), share=share,
-        service_path="/toolchain/bin:/usr/bin", home=tmp_path)
+        service_path="/toolchain/bin:/usr/bin", home=tmp_path,
+        inherited_environment={})
     assert path == tmp_path / "config/systemd/user/clarp.service"
     assert 'ExecStart="/runtime/python"' in path.read_text()
     assert 'Environment="PATH=/toolchain/bin:/usr/bin"' in path.read_text()
     assert f'CLARP_SHARE_DIR={share}' in path.read_text()
     assert f'CLAUDE_PWA_LOG_DIR={tmp_path / "cache/clarp/logs"}' in path.read_text()
+    assert f'Environment="SSH_AUTH_SOCK={tmp_path}/.ssh/agent.sock"' in path.read_text()
     assert "pytest-logs" not in path.read_text()
+    assert path.stat().st_mode & 0o777 == 0o600
     recorder = Recorder()
     service_manager.install_and_restart(runner=recorder)
     assert [call[0][:3] for call in recorder.calls] == [
@@ -78,7 +86,8 @@ def test_macos_launch_agent_is_user_scoped_and_absolute(monkeypatch, tmp_path):
     share = tmp_path / "Application Support/Clarp"
     path = service_manager.write_definition(
         python=tmp_path / "env/bin/python", share=share,
-        service_path=f"{tmp_path}/toolchain/bin:/usr/bin", home=tmp_path)
+        service_path=f"{tmp_path}/toolchain/bin:/usr/bin", home=tmp_path,
+        inherited_environment={"SSH_AUTH_SOCK": "~/.desktop-agent.sock"})
     assert path == tmp_path / (
         "Library/LaunchAgents/com.maxteabag.clarp.server.plist")
     payload = plistlib.loads(path.read_bytes())
@@ -87,7 +96,30 @@ def test_macos_launch_agent_is_user_scoped_and_absolute(monkeypatch, tmp_path):
     assert payload["RunAtLoad"] is True
     assert payload["KeepAlive"] == {"SuccessfulExit": False}
     assert payload["EnvironmentVariables"]["CLARP_SHARE_DIR"] == str(share)
+    assert payload["EnvironmentVariables"]["SSH_AUTH_SOCK"] == str(
+        tmp_path / ".desktop-agent.sock")
     assert path.stat().st_mode & 0o777 == 0o600
+
+    # A managed update may run from a transient service without the original
+    # interactive environment. Regeneration preserves the prior captured socket.
+    path = service_manager.write_definition(
+        python=tmp_path / "env/bin/python", share=share,
+        service_path=f"{tmp_path}/toolchain/bin:/usr/bin", home=tmp_path,
+        inherited_environment={})
+    payload = plistlib.loads(path.read_bytes())
+    assert payload["EnvironmentVariables"]["SSH_AUTH_SOCK"] == str(
+        tmp_path / ".desktop-agent.sock")
+
+
+@pytest.mark.parametrize("name", ["PATH", "CLAUDE_PWA_BIND", "CLARP_DEPLOYMENT_MODE"])
+def test_service_environment_rejects_runtime_override(monkeypatch, tmp_path, name):
+    monkeypatch.setenv("CLARP_PLATFORM_OVERRIDE", "linux")
+    config = tmp_path / "config.toml"
+    config.write_text(f'[env]\n{name} = "/untrusted"\n')
+
+    with pytest.raises(ValueError, match="managed by Clarp"):
+        service_manager.configured_environment(
+            config, home=tmp_path, inherited={})
 
 
 def test_macos_lifecycle_uses_launchctl(monkeypatch):

@@ -23,6 +23,7 @@ import sqlite3
 import sys
 import time
 import threading
+from functools import wraps
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
@@ -82,6 +83,15 @@ from lib.config import load as load_config  # noqa: E402
 _CFG = load_config()
 PORT = int(os.environ.get("CLAUDE_PWA_PORT", str(_CFG.port)))
 BIND_ADDR = os.environ.get("CLAUDE_PWA_BIND", _CFG.bind_addr)
+
+
+def _serialize_agent_lifecycle(method):
+    """Keep identity-linked mutations outside an exclusive agent reset."""
+    @wraps(method)
+    def wrapped(*args, **kwargs):
+        with AgentLifecycleService._lifecycle_gate.read():
+            return method(*args, **kwargs)
+    return wrapped
 
 
 def _truthy_header(value: str | None) -> bool:
@@ -370,6 +380,7 @@ class Handler(BaseHTTPRequestHandler):
         "/select": "_handle_select",
         "/clog": "_handle_clog",
         "/agents": "_handle_create_agent",
+        "/agents/reset": "_handle_reset_agents",
         "/personas": "_handle_create_persona",
         "/personas/update": "_handle_update_persona",
         "/agent-voice": "_handle_agent_voice",
@@ -1648,6 +1659,7 @@ class Handler(BaseHTTPRequestHandler):
         from lib import vocab_store
         self._json_ok({"assignments": vocab_store.assignments()})
 
+    @_serialize_agent_lifecycle
     def _handle_vocab_assign_post(self):
         from lib import vocab_store
         data = self._vocab_body()
@@ -1666,6 +1678,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(404, "no such profile")
         self._json_ok({"ok": True})
 
+    @_serialize_agent_lifecycle
     def _handle_vocab_unassign_post(self):
         from lib import vocab_store
         data = self._vocab_body()
@@ -2282,6 +2295,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_turn_queue_update(path[len("/turn-queue/"):].strip("/"))
         return self._send(404, b"not found")
 
+    @_serialize_agent_lifecycle
     def _handle_focus(self):
         """Client tells us which agent view the user is looking at. Drives the
         herald system's decision of whether to suppress an off-focus agent."""
@@ -2385,6 +2399,7 @@ class Handler(BaseHTTPRequestHandler):
         body = {"teams": team_store.list_teams()}
         return self._send(200, json.dumps(body).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_team_create(self):
         from lib import team_store
         data = self._read_json()
@@ -2401,6 +2416,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, json.dumps({"ok": True, "team": team}).encode(),
                           "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_team_update(self, team_id: str):
         from lib import team_store
         data = self._read_json()
@@ -2445,6 +2461,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, json.dumps({"ok": True, "team": team}).encode(),
                           "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_team_add_member(self, team_id: str):
         from lib import team_store
         data = self._read_json()
@@ -2462,6 +2479,7 @@ class Handler(BaseHTTPRequestHandler):
             "team": team_store.get_team(team_id),
         }).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_team_remove_member(self, team_id: str, agent_id: str):
         from lib import team_store
         if not team_id or not agent_id:
@@ -2473,6 +2491,7 @@ class Handler(BaseHTTPRequestHandler):
             "team": team_store.get_team(team_id),
         }).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_team_delete(self, team_id: str):
         from lib import team_store
         if not team_id:
@@ -2587,6 +2606,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- POST handlers ---------------------------------------------------
 
+    @_serialize_agent_lifecycle
     def _handle_agent_voice(self):
         data = self._read_json()
         if data is None:
@@ -2617,6 +2637,7 @@ class Handler(BaseHTTPRequestHandler):
         save_agents(agents, self.ctx.agents_path)
         return self._send(200, b'{"ok":true}', "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_agent_llm(self):
         """Set a running agent's model and/or reasoning effort. Read fresh on
         the agent's next turn, so this re-tunes a live agent without relaunch.
@@ -2676,6 +2697,7 @@ class Handler(BaseHTTPRequestHandler):
             "valid_efforts": valid,
         }).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_agent_mcp(self):
         """Set which MCP servers an agent loads (user-driven, from the app).
         Body: {"session": "...", "mcp_servers": ["name", ...]}. Names are
@@ -2712,6 +2734,7 @@ class Handler(BaseHTTPRequestHandler):
             "available_mcp_servers": sorted(catalog.keys()),
         }).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_agent_heartbeat(self):
         """Enable/disable autonomous heartbeat for a single live agent."""
         from lib import agents as agents_db
@@ -2756,6 +2779,7 @@ class Handler(BaseHTTPRequestHandler):
         )
         return self._send(200, json.dumps({"schedules": schedules}).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_agent_schedules_post(self):
         from lib import scheduler
         data = self._read_json()
@@ -2774,6 +2798,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
         return self._send(201, json.dumps({"ok": True, "schedule": item}).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_agent_schedules_toggle(self):
         from lib import scheduler
         data = self._read_json()
@@ -2788,6 +2813,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, b'{"error":"schedule not found"}', "application/json")
         return self._send(200, json.dumps({"ok": True, "schedule": item}).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_agent_schedules_delete(self):
         from lib import scheduler
         data = self._read_json()
@@ -2799,6 +2825,7 @@ class Handler(BaseHTTPRequestHandler):
         ok = scheduler.delete_schedule(schedule_id)
         return self._send(200, json.dumps({"ok": ok}).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_schedule_patch(self, schedule_id: str):
         from lib import scheduler
         data = self._read_json()
@@ -2822,6 +2849,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, b'{"error":"schedule not found"}', "application/json")
         return self._send(200, json.dumps({"ok": True, "schedule": item}).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_schedule_delete(self, schedule_id: str):
         from lib import scheduler
         ok = scheduler.delete_schedule(schedule_id)
@@ -2829,6 +2857,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, b'{"error":"schedule not found"}', "application/json")
         return self._send(200, json.dumps({"ok": True}).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_agent_archive(self):
         from lib import agents as agents_db
         data = self._read_json()
@@ -2919,6 +2948,7 @@ class Handler(BaseHTTPRequestHandler):
             "ok": True, "settings": settings.public(),
         }).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_agent_dreaming(self):
         """Enable/disable nightly creative dreaming for a single live agent."""
         from lib import agents as agents_db
@@ -2951,6 +2981,7 @@ class Handler(BaseHTTPRequestHandler):
             "dream_prompt": dreaming.dreaming_prompt_text(),
         }).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_agent_mute(self):
         """Mute/unmute APNs pushes for a single live agent.
 
@@ -3202,6 +3233,7 @@ class Handler(BaseHTTPRequestHandler):
                 "application/json")
         return self._send(200, b'{"ok":true}', "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_oracle_delegation_cancel(self):
         from lib import oracle_delegations
         data = self._read_json()
@@ -3249,6 +3281,7 @@ class Handler(BaseHTTPRequestHandler):
             200, json.dumps({"delegation": row}).encode(),
             "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_stop(self):
         """Terminate any in-flight clarp turn for the given agent. With
         there is no long-lived subprocess to send Escape to; instead the per-turn
@@ -3358,8 +3391,8 @@ class Handler(BaseHTTPRequestHandler):
                 path[len("/transcription-results/"):].strip("/"))
         if path.startswith("/schedules/"):
             return self._handle_schedule_delete(path[len("/schedules/"):].strip("/"))
-        if self.path.startswith("/agents/"):
-            return self._handle_delete_agent(self.path[len("/agents/"):])
+        if path.startswith("/agents/"):
+            return self._handle_delete_agent(path[len("/agents/"):])
         if path.startswith("/personas/"):
             return self._handle_delete_persona(path[len("/personas/"):].strip("/"))
         return self._send(404, b"not found")
@@ -3688,6 +3721,26 @@ class Handler(BaseHTTPRequestHandler):
             "ok": True, "session": result.session, "name": result.persona,
         }).encode(), "application/json")
 
+    def _handle_reset_agents(self):
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        sessions = data.get("sessions")
+        if not isinstance(sessions, list) or any(
+                not isinstance(session, str) for session in sessions):
+            return self._send(
+                400, b'{"error":"sessions must be a list of strings"}',
+                "application/json")
+        try:
+            results = AgentLifecycleService(self.ctx).reset(sessions)
+        except AgentLifecycleError as exc:
+            return self._send(
+                exc.status, json.dumps(exc.response()).encode(), "application/json")
+        return self._send(200, json.dumps({
+            "ok": True,
+            "resets": [result.response() for result in results],
+        }).encode(), "application/json")
+
     def _handle_create_persona(self):
         from lib import personas
         data = self._read_json()
@@ -3751,12 +3804,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
     def _handle_delete_agent(self, session: str):
-        from lib import turn_dispatch
-        agent = agents_db.get_by_session(session.strip("/"))
-        if agent:
-            # Invalidate dispatch state before delete interrupts the backend;
-            # its terminal callback must not drain queued work after deletion.
-            turn_dispatch.clear_for_agent(agent["agent_id"])
+        from urllib.parse import unquote
+        session = unquote(session).strip("/")
         try:
             AgentLifecycleService(self.ctx).delete(session)
         except AgentLifecycleError as e:
@@ -3830,6 +3879,7 @@ class Handler(BaseHTTPRequestHandler):
                 log_exception("clogEmitFail", e)
         self._send(200, b'{"ok":true}', "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_select(self):
         data = self._read_json()
         if data is None:
@@ -3924,8 +3974,8 @@ class Handler(BaseHTTPRequestHandler):
         sender_raw = (data.get("sender") or "").strip()
         sender_agent_id = ""
         if sender_raw:
-            sender = (agents_db.get_by_session(sender_raw)
-                      or agents_db.get_by_agent_id(sender_raw))
+            sender, _sender_session = agents_db.resolve_live_session(sender_raw)
+            sender = sender or agents_db.get_by_agent_id(sender_raw)
             if sender:
                 sender_agent_id = sender["agent_id"]
         origin = (data.get("origin") or "").strip().lower()
@@ -4442,6 +4492,7 @@ class Handler(BaseHTTPRequestHandler):
                 "application/json")
         self._send(200, json.dumps(result).encode(), "application/json")
 
+    @_serialize_agent_lifecycle
     def _handle_agent_portraits_update(self):
         from lib import agent_portraits
         data = self._read_json()

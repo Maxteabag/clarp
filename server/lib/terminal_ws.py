@@ -81,6 +81,57 @@ def _set_winsize(fd: int, cols: int, rows: int) -> None:
         pass
 
 
+def _open_terminal(handler, session: str, key: str):
+    """Resolve, spawn, and register a PTY without racing an agent reset."""
+    from .agent_lifecycle import AgentLifecycleService
+
+    with AgentLifecycleService._lifecycle_gate.read():
+        agent = agents_db.get_by_session(session)
+        if not agent:
+            _send_http_error(handler, 404, "no such agent")
+            return None
+        backend = backends.normalize(agent.get("backend"))
+        agent_id = agent["agent_id"]
+        bsid = agents_db.live_backend_session(agent_id)
+        if bsid:
+            argv = list(_LAUNCH_RESUME[backend]) + [bsid]
+        else:
+            argv = list(_LAUNCH_FRESH[backend])
+        if backend == backends.CLAUDE:
+            from .deployment import plugin_dir
+            plugin = plugin_dir()
+            if plugin is not None:
+                argv += ["--plugin-dir", str(plugin)]
+        if shutil.which(argv[0]) is None:
+            _send_http_error(handler, 500, f"{argv[0]} not on PATH")
+            return None
+        from .launch_paths import existing_workspace_path
+        cwd = str(existing_workspace_path(agent.get("cwd")))
+
+        try:
+            handler.wfile.write(ws.handshake_response(key))
+            handler.wfile.flush()
+            handler.connection.settimeout(None)
+        except OSError as exc:
+            log_exception("terminalHandshakeFail", exc)
+            return None
+
+        pid, fd = pty.fork()
+        if pid == 0:  # child
+            try:
+                os.chdir(cwd)
+            except OSError:
+                pass
+            os.environ["TERM"] = "xterm-256color"
+            os.environ.setdefault("LANG", "en_US.UTF-8")
+            try:
+                os.execvp(argv[0], argv)
+            except OSError:
+                os._exit(127)
+        _mark(agent_id, +1)
+        return agent_id, backend, bsid, pid, fd
+
+
 def serve_terminal(handler, session: str) -> None:
     """Entry point from do_GET. `handler` is the BaseHTTPRequestHandler; the
     socket is hijacked on a successful WS upgrade."""
@@ -91,54 +142,11 @@ def serve_terminal(handler, session: str) -> None:
     if not key:
         return _send_http_error(handler, 400, "missing Sec-WebSocket-Key")
 
-    agent = agents_db.get_by_session(session)
-    if not agent:
-        return _send_http_error(handler, 404, "no such agent")
-    backend = backends.normalize(agent.get("backend"))
-    agent_id = agent["agent_id"]
-    bsid = agents_db.live_backend_session(agent_id)
-    if bsid:
-        argv = list(_LAUNCH_RESUME[backend]) + [bsid]
-    else:
-        argv = list(_LAUNCH_FRESH[backend])
-    if backend == backends.CLAUDE:
-        # Same plugin the -p dispatch path loads, so an interactive terminal
-        # reports state exactly like a dispatched turn.
-        from .deployment import plugin_dir
-        _plugin = plugin_dir()
-        if _plugin is not None:
-            argv += ["--plugin-dir", str(_plugin)]
-    if shutil.which(argv[0]) is None:
-        return _send_http_error(handler, 500, f"{argv[0]} not on PATH")
-    from .launch_paths import existing_workspace_path
-    cwd = str(existing_workspace_path(agent.get("cwd")))
-
-    try:
-        handler.wfile.write(ws.handshake_response(key))
-        handler.wfile.flush()
-        # Upgraded long-lived socket: exempt from the Handler idle timeout
-        # (an idle terminal would otherwise be reaped after 120s of quiet).
-        handler.connection.settimeout(None)
-    except OSError as e:
-        return log_exception("terminalHandshakeFail", e)
-
-    # Spawn the CLI in a PTY. pty.fork() makes the child a session leader with
-    # the slave as its controlling tty, which interactive claude/codex/agy need.
-    pid, fd = pty.fork()
-    if pid == 0:  # child
-        try:
-            os.chdir(cwd)
-        except OSError:
-            pass
-        os.environ["TERM"] = "xterm-256color"
-        os.environ.setdefault("LANG", "en_US.UTF-8")
-        try:
-            os.execvp(argv[0], argv)
-        except OSError:
-            os._exit(127)
-
+    opened = _open_terminal(handler, session, key)
+    if opened is None:
+        return
+    agent_id, backend, bsid, pid, fd = opened
     log("terminalStart", f"session={session} backend={backend} bsid={bsid} pid={pid}")
-    _mark(agent_id, +1)
     _set_winsize(fd, 80, 24)
 
     wlock = threading.Lock()

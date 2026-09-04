@@ -52,6 +52,27 @@ def get_by_session(session: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def resolve_live_session(session: str) -> tuple[dict[str, Any] | None, str]:
+    """Follow reset-only send redirects without resurrecting old history."""
+    current = str(session or "").strip()
+    seen: set[str] = set()
+    for _ in range(10):
+        if not current or current in seen:
+            break
+        seen.add(current)
+        agent = get_by_session(current)
+        if agent:
+            return agent, current
+        row = conn().execute(
+            "SELECT value FROM settings WHERE key=?",
+            (f"session_redirect.{current}",),
+        ).fetchone()
+        if row is None:
+            break
+        current = str(row["value"] or "").strip()
+    return None, str(session or "").strip()
+
+
 def session_exists(session: str) -> bool:
     """True if ANY agent row uses this session — including soft-deleted
     ones. Used when minting a unique session id so a fresh agent never

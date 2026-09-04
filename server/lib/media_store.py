@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import fcntl
 import json
 import mimetypes
 import pathlib
@@ -46,6 +47,34 @@ def publish(
     created_by: str = "agent",
     media_dir: pathlib.Path,
 ) -> dict[str, Any]:
+    media_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = media_dir / ".publish.lock"
+    with lock_path.open("a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            return _publish(
+                session=session,
+                blob=blob,
+                source_name=source_name,
+                content_type=content_type,
+                caption=caption,
+                created_by=created_by,
+                media_dir=media_dir,
+            )
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _publish(
+    *,
+    session: str,
+    blob: bytes,
+    source_name: str,
+    content_type: str,
+    caption: str = "",
+    created_by: str = "agent",
+    media_dir: pathlib.Path,
+) -> dict[str, Any]:
     session = (session or "").strip()
     if not session:
         raise MediaError("session required")
@@ -65,8 +94,10 @@ def publish(
     blob_dir = media_dir / "blobs" / sha[:2]
     blob_dir.mkdir(parents=True, exist_ok=True)
     storage_path = blob_dir / f"{sha}{ext}"
+    created_blob = False
     if not storage_path.exists():
         storage_path.write_bytes(blob)
+        created_blob = True
 
     width, height = _image_size(blob, mime)
     asset_id = "asset_" + secrets.token_urlsafe(18).replace("-", "_")
@@ -87,18 +118,48 @@ def publish(
         "created_at": now,
         "deleted_at": None,
     }
-    db.conn().execute(
-        """INSERT INTO media_assets (
-               asset_id, agent_id, session, source_name, sha256, mime_type,
-               bytes, width, height, storage_path, caption, created_by,
-               created_at, deleted_at
-           ) VALUES (
-               :asset_id, :agent_id, :session, :source_name, :sha256,
-               :mime_type, :bytes, :width, :height, :storage_path, :caption,
-               :created_by, :created_at, :deleted_at
-           )""",
-        row,
-    )
+    connection = db.conn()
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        owner = connection.execute(
+            """SELECT agent_id FROM agents
+                 WHERE session=? AND deleted_at IS NULL""",
+            (session,),
+        ).fetchone()
+        if owner is None or str(owner["agent_id"]) != str(agent["agent_id"]):
+            raise MediaError(
+                f"agent session changed before media publish: {session}",
+                status=409)
+        connection.execute(
+            """INSERT INTO media_assets (
+                   asset_id, agent_id, session, source_name, sha256, mime_type,
+                   bytes, width, height, storage_path, caption, created_by,
+                   created_at, deleted_at
+               ) VALUES (
+                   :asset_id, :agent_id, :session, :source_name, :sha256,
+                   :mime_type, :bytes, :width, :height, :storage_path, :caption,
+                   :created_by, :created_at, :deleted_at
+               )""",
+            row,
+        )
+        connection.execute("COMMIT")
+    except BaseException:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK")
+        if created_blob:
+            try:
+                referenced = connection.execute(
+                    """SELECT 1 FROM media_assets WHERE storage_path=?
+                         UNION ALL
+                       SELECT 1 FROM agent_portraits WHERE storage_path=?
+                         LIMIT 1""",
+                    (str(storage_path), str(storage_path)),
+                ).fetchone()
+                if referenced is None:
+                    storage_path.unlink(missing_ok=True)
+            except Exception:  # best-effort cleanup, preserve root cause
+                pass
+        raise
     return _public_row(row)
 
 

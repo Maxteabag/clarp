@@ -44,10 +44,10 @@ def process_start_token(pid: int) -> str:
     if sys.platform == "darwin":
         try:
             boot = subprocess.check_output(
-                ["sysctl", "-n", "kern.boottime"], text=True,
+                ["/usr/sbin/sysctl", "-n", "kern.boottime"], text=True,
                 stderr=subprocess.DEVNULL).strip()
             started = subprocess.check_output(
-                ["ps", "-p", str(pid), "-o", "lstart="], text=True,
+                ["/bin/ps", "-p", str(pid), "-o", "lstart="], text=True,
                 stderr=subprocess.DEVNULL).strip()
             return hashlib.sha256(
                 f"{boot}\0{pid}\0{started}".encode()).hexdigest()
@@ -192,7 +192,7 @@ def worker_is_alive(pid: int, expected_token: str) -> bool:
     try:
         if sys.platform == "darwin":
             state = subprocess.check_output(
-                ["ps", "-p", str(pid), "-o", "stat="], text=True,
+                ["/bin/ps", "-p", str(pid), "-o", "stat="], text=True,
                 stderr=subprocess.DEVNULL).strip()
         else:
             raw = pathlib.Path(f"/proc/{pid}/stat").read_text()
@@ -296,6 +296,16 @@ def _upsert_owned(
     c = db.conn()
     c.execute("BEGIN IMMEDIATE")
     try:
+        if owner_kind == "agent":
+            current_owner = c.execute(
+                """SELECT agent_id FROM agents
+                     WHERE session=? AND deleted_at IS NULL""",
+                (session,),
+            ).fetchone()
+            if (current_owner is None
+                    or str(current_owner["agent_id"]) != agent_id):
+                raise ValueError(
+                    f"agent session changed before job registration: {session}")
         existing = c.execute(
             "SELECT * FROM background_jobs WHERE job_id=?", (job_id,)
         ).fetchone()

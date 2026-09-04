@@ -45,6 +45,12 @@ def is_compacting(session: str) -> bool:
 
 
 def compact_session(session: str) -> dict[str, Any]:
+    from .agent_lifecycle import AgentLifecycleService
+    with AgentLifecycleService._lifecycle_gate.read():
+        return _compact_session(session)
+
+
+def _compact_session(session: str) -> dict[str, Any]:
     """Kick off compaction for a session in the background. Returns immediately;
     the app polls the snapshot (compacting flag + context_tokens) for progress."""
     agent = agents_db.get_by_session(session)

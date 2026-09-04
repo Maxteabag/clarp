@@ -111,6 +111,12 @@ def _post_with_headers(url, body: dict, headers: dict):
         return r.status, r.read()
 
 
+def _delete(url):
+    req = urllib.request.Request(url, method="DELETE")
+    with urllib.request.urlopen(req, timeout=2) as r:
+        return r.status, r.read()
+
+
 def test_production_startup_requests_restart_heartbeat_recovery(
     fake_ctx, monkeypatch,
 ):
@@ -2522,6 +2528,69 @@ def test_post_preview_synthesizes_via_fake_tts(running_server):
     assert status == 200
     files = sorted(p.name for p in ctx.audio_dir.glob("*.mp3"))
     assert files, "expected one mp3 written by FakeTTSEngine"
+
+
+def test_delete_agent_ignores_query_string_and_unknown_is_404(
+    running_server, monkeypatch,
+):
+    base, _ctx, _srv = running_server
+    from lib import backends
+
+    monkeypatch.setattr(backends, "interrupt_any", lambda _agent_id: 0)
+    status, _ = _delete(base + "/agents/rachel?token=not-part-of-session")
+    assert status == 200
+
+    from lib import agents as agents_db
+    assert agents_db.get_by_session("rachel") is None
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _delete(base + "/agents/rachel")
+    assert error.value.code == 404
+
+
+def test_reset_agents_endpoint_returns_fresh_empty_session(
+    running_server, monkeypatch,
+):
+    base, _ctx, _srv = running_server
+    from lib import agents as agents_db, backends, db
+
+    monkeypatch.setattr(backends, "interrupt_any", lambda _agent_id: 0)
+    old = agents_db.get_by_session("rachel")
+    agents_db.update_agent(
+        old["agent_id"], heartbeat_enabled=True, dreaming_enabled=True,
+        model="gpt-5.6", effort="high")
+    db.conn().execute(
+        """INSERT INTO messages
+               (message_id,agent_id,backend_session_id,seq,role,text,updated_at)
+             VALUES ('reset-old',?,'backend-old',1,'user','hello',1)""",
+        (old["agent_id"],),
+    )
+
+    status, body = _post(base + "/agents/reset", {"sessions": ["rachel"]})
+
+    assert status == 200
+    [result] = json.loads(body)["resets"]
+    assert result["old_session"] == "rachel"
+    assert result["old_agent_id"] == old["agent_id"]
+    assert result["new_session"] != "rachel"
+    assert result["new_agent_id"] != old["agent_id"]
+    fresh = agents_db.get_by_session(result["new_session"])
+    assert fresh["model"] == "gpt-5.6"
+    assert fresh["effort"] == "high"
+    assert fresh["heartbeat_enabled"] == 1
+    assert fresh["dreaming_enabled"] == 1
+    assert db.conn().execute(
+        "SELECT COUNT(*) FROM messages WHERE agent_id=?", (fresh["agent_id"],)
+    ).fetchone()[0] == 0
+    assert agents_db.live_backend_session(fresh["agent_id"]) == ""
+
+
+def test_reset_agents_endpoint_rejects_non_object_json(running_server):
+    base, _ctx, _srv = running_server
+
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + "/agents/reset", ["rachel"])
+
+    assert error.value.code == 400
 
 
 def test_post_agents_opens_runtime_row(running_server):

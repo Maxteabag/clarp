@@ -463,6 +463,27 @@ def interrupt_any(agent_id: str) -> int:
     return total
 
 
+def active_handles_any(agent_id: str) -> list:
+    """Snapshot every live turn handle, including compatibility runners."""
+    handles = []
+    seen_modules: set[str] = set()
+    seen_handles: set[int] = set()
+    for adapter in _ADAPTERS:
+        modules = (adapter.runner_module,) + adapter.extra_interrupt_modules
+        for name in modules:
+            if not name or name in seen_modules:
+                continue
+            seen_modules.add(name)
+            active = getattr(_mod(name), "active_handles", None)
+            if active is None:
+                continue
+            for handle in active(agent_id):
+                if id(handle) not in seen_handles and handle.is_alive():
+                    seen_handles.add(id(handle))
+                    handles.append(handle)
+    return handles
+
+
 def active_handles(backend: str, agent_id: str) -> list:
     adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
     runner = _mod(adapter.runner_module)

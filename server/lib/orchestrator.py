@@ -392,6 +392,38 @@ class OrchestratorService:
             settings, hands_free=hands_free, fallback_request=fallback_request
         ):
             return None
+        from .turn_dispatch import orchestrator_admission
+        with orchestrator_admission(
+            requested_session,
+            default_session=str(getattr(self.ctx, "default_session", "") or ""),
+        ) as active_session:
+            return self._handle_send_registered(
+                text=text,
+                requested_session=active_session,
+                trace_id=trace_id,
+                prompt_admission=prompt_admission,
+                hands_free=hands_free,
+                synthesize_audio=synthesize_audio,
+                unheard_audio_sessions=unheard_audio_sessions,
+                dispatch=dispatch,
+                fallback_request=fallback_request,
+                settings=settings,
+            )
+
+    def _handle_send_registered(
+        self,
+        *,
+        text: str,
+        requested_session: str,
+        trace_id: str,
+        prompt_admission: PromptAdmission | None = None,
+        hands_free: bool,
+        synthesize_audio: bool,
+        unheard_audio_sessions: tuple[str, ...] = (),
+        dispatch: Callable[..., Any],
+        settings: OrchestratorSettings,
+        fallback_request: bool = False,
+    ) -> OrchestratorOutcome | None:
         started = time.time()
         packet = build_context_packet(
             utterance=text,
@@ -745,23 +777,27 @@ class OrchestratorService:
         action = (decision.control_action or "").strip().lower()
         target = decision.target_session or requested_session
         if action in {"switch", "switch_focus"}:
-            agent = agents_db.get_by_session(target)
-            if agent:
-                herald = getattr(self.ctx, "herald", None)
-                with agents_db.focus_guard():
-                    agents_db.set_focus(agent["agent_id"])
-                    if herald is not None:
-                        herald.set_focus(target)
-                self.ctx.stream.broadcast({
-                    "type": SSEType.AGENT_FOCUS,
-                    "session": target,
-                    "agent_id": agent["agent_id"],
-                })
+            from .agent_lifecycle import AgentLifecycleService
+            with AgentLifecycleService._lifecycle_gate.read():
+                agent = agents_db.get_by_session(target)
+                if agent:
+                    herald = getattr(self.ctx, "herald", None)
+                    with agents_db.focus_guard():
+                        agents_db.set_focus(agent["agent_id"])
+                        if herald is not None:
+                            herald.set_focus(target)
+                    self.ctx.stream.broadcast({
+                        "type": SSEType.AGENT_FOCUS,
+                        "session": target,
+                        "agent_id": agent["agent_id"],
+                    })
             return target
         if action in {"stop", "stop_agent", "interrupt"}:
-            agent = agents_db.get_by_session(target)
-            if agent:
-                backends.interrupt_any(agent["agent_id"])
+            from .agent_lifecycle import AgentLifecycleService
+            with AgentLifecycleService._lifecycle_gate.read():
+                agent = agents_db.get_by_session(target)
+                if agent:
+                    backends.interrupt_any(agent["agent_id"])
             return target
         if action in {"relaunch", "restart", "resume", "fork", "create"}:
             return self._lifecycle_action(decision, target)

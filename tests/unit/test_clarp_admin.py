@@ -155,6 +155,34 @@ def test_sessions_returns_platform_independent_agent_inventory(capsys):
     }]
 
 
+def test_sessions_reset_uses_atomic_server_endpoint(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(
+        admin, "api_request",
+        lambda method, path, body: calls.append((method, path, body)) or {
+            "ok": True,
+            "resets": [{
+                "persona": "Rachel",
+                "old_session": "rachel-demo",
+                "new_session": "rachel-a1b2",
+                "old_agent_id": "old",
+                "new_agent_id": "new",
+            }],
+        },
+    )
+    args = admin.parser().parse_args([
+        "sessions", "reset", "rachel-demo", "--json",
+    ])
+
+    assert args.func(args) == 0
+
+    assert calls == [(
+        "POST", "/agents/reset", {"sessions": ["rachel-demo"]},
+    )]
+    assert json.loads(capsys.readouterr().out)["resets"][0]["new_session"] == \
+        "rachel-a1b2"
+
+
 def test_noninteractive_setup_requires_explicit_toolchain_and_transcription():
     import pytest
 

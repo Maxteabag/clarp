@@ -42,6 +42,14 @@ def create(*, session: str, title: str, items: list[dict[str, Any]],
     con = db.conn()
     con.execute("BEGIN IMMEDIATE")
     try:
+        owner = con.execute(
+            """SELECT agent_id FROM agents
+                 WHERE session=? AND deleted_at IS NULL""",
+            (session,),
+        ).fetchone()
+        if owner is None or str(owner["agent_id"]) != str(agent["agent_id"]):
+            raise ValueError(
+                f"agent session changed before task plan creation: {session}")
         old_plans = con.execute(
             "SELECT plan_id FROM task_plans WHERE agent_id=? AND status='active'",
             (agent["agent_id"],)).fetchall()
