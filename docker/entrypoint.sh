@@ -165,4 +165,21 @@ if not list_devices():
         print(f"Notice: could not emit bootstrap pairing QR: {exc}", flush=True)
 PY
 
+if [ "${1:-}" = "python3" ] && [ "${2:-}" = "/opt/clarp/server.py" ]; then
+    python3 /opt/clarp/runtime.py &
+    runtime_pid=$!
+    "$@" &
+    server_pid=$!
+    stop_children() {
+        kill -TERM "$server_pid" "$runtime_pid" 2>/dev/null || true
+    }
+    trap stop_children INT TERM EXIT
+    wait "$server_pid"
+    status=$?
+    stop_children
+    wait "$runtime_pid" 2>/dev/null || true
+    trap - INT TERM EXIT
+    exit "$status"
+fi
+
 exec "$@"

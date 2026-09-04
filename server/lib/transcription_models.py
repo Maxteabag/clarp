@@ -412,8 +412,13 @@ def _job_worker_alive(job: dict) -> bool:
 def start_install(
     model_id: str, *, session: str = "", computer_id: str = "", on_complete=None,
 ) -> dict:
-    if model_by_id(model_id) is None:
+    item = model_by_id(model_id)
+    if item is None:
         raise ValueError(f"unsupported transcription model: {model_id}")
+    from .transcription_catalog import platform_kind
+    host = platform_kind()
+    if host not in item.get("platforms", ["linux", "macos"]):
+        raise ValueError(f"{model_id} is not supported on {host}")
     from . import background_jobs
     session = session.strip()
     computer_id = computer_id.strip()

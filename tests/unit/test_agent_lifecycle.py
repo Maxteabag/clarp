@@ -76,6 +76,25 @@ def test_lifecycle_service_rejects_unknown_mcp_at_creation(tmp_path, monkeypatch
     assert agents_db.get_by_session("rachel") is None
 
 
+def test_lifecycle_delete_releases_processes_in_external_runtime(tmp_path):
+    agent_id = agents_db.create_agent(
+        persona="Rachel", voice_id="voice", cwd=str(tmp_path), session="rachel")
+    calls = []
+    ctx = _ctx(tmp_path)
+
+    def release(value):
+        calls.append(value)
+        agents_db.soft_delete(value)
+        return 1
+
+    ctx.runtime_client = SimpleNamespace(release_agent=release)
+
+    AgentLifecycleService(ctx).delete("rachel")
+
+    assert calls == [agent_id]
+    assert agents_db.get_by_session("rachel") is None
+
+
 def test_lifecycle_service_rejects_mcp_for_non_claude_backend(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "read_global_mcp_servers", lambda: {"files": {}})
     with pytest.raises(AgentLifecycleError) as error:

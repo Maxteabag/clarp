@@ -71,7 +71,6 @@ from lib.personalities import (  # noqa: E402
     update_settings as update_personality_settings,
 )
 from lib.conversation import load_conversation, session_cwd  # noqa: E402
-from lib.resume import resume_missing_sessions  # noqa: E402
 from lib.snapshot import build_agent_snapshot  # noqa: E402
 from lib.stt import (STTBusyError, STTModelLoadingError,
                      STTUnknownModelError)  # noqa: E402
@@ -144,31 +143,8 @@ class ContextHTTPServer(ThreadingHTTPServer):
 
 def resume_persisted_agents(ctx: ServerContext) -> None:
     """Restore persisted backend-session bindings after a server restart."""
-    agents = load_agents(ctx.agents_path)
-    if not agents:
-        return
-    results = resume_missing_sessions(
-        agents, pathlib.Path.home(),
-        backend_sessions_by_session=agents_db.backend_sessions_by_session())
-    for r in results:
-        if r.get("ok"):
-            agent = agents_db.get_by_session(r["sid"])
-            if (agent and r.get("action") == "fresh"
-                    and agents_db.live_backend_session(agent["agent_id"])):
-                # Validation rejected a stale on-disk session. Open a blank
-                # runtime so the next dispatch cannot accidentally resume it.
-                agents_db.start_runtime(agent["agent_id"], r["sid"])
-            if agent and agents_db.current_runtime_id(agent["agent_id"]) is None:
-                agents_db.start_runtime(agent["agent_id"], r["sid"])
-            if agent and r.get("backend_session_id"):
-                try:
-                    agents_db.bind_backend_session(agent["agent_id"], r["backend_session_id"])
-                except agents_db.SessionAlreadyBound as e:
-                    log("startupSessionConflict",
-                        f"{r['sid']} wants {e.backend_session_id} "
-                        f"owned by {e.owner_agent_id}; leaving fresh")
-        if r["action"] != "already-running":
-            log("startupAgentRestore", f"{r['sid']} {r['action']} ok={r['ok']}")
+    from lib.runtime_startup import restore_persisted_agents
+    restore_persisted_agents(ctx)
 
 
 def broadcast_boot_version(ctx: ServerContext) -> None:
@@ -1289,8 +1265,32 @@ class Handler(BaseHTTPRequestHandler):
         # busy state is purely DB-driven now (hooks + clarp_runner write
         # to state_log). The old terminal-scrape fallback is gone.
         busy = bool(agent and agents_db.is_busy(agent["agent_id"]))
+        runtime_payload = {
+            "available": True,
+            "release_id": "embedded",
+            "draining": False,
+            "active_turns": int(busy),
+        }
+        runtime_client = getattr(self.ctx, "runtime_client", None)
+        if runtime_client is not None:
+            try:
+                runtime_status = runtime_client.status()
+                runtime_payload = {
+                    "available": True,
+                    "release_id": str(runtime_status.get("release_id") or ""),
+                    "draining": bool(runtime_status.get("draining")),
+                    "active_turns": len(runtime_status.get("active") or {}),
+                }
+            except Exception:
+                runtime_payload = {
+                    "available": False,
+                    "release_id": "",
+                    "draining": False,
+                    "active_turns": 0,
+                }
         body = json.dumps({
             "session": session, "busy": busy,
+            "runtime": runtime_payload,
             "deployed_version": self.ctx.deployed_version(),
             "release_id": getattr(
                 self.ctx, "deployed_release_id", lambda: "development")(),
@@ -3301,23 +3301,42 @@ class Handler(BaseHTTPRequestHandler):
         dropped = 0
         if agent:
             agent_id = agent["agent_id"]
-            stop_snapshot = turn_dispatch.snapshot_stop_state(agent_id)
-            queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
-            dropped = turn_dispatch.clear_for_agent(
-                agent_id, preserve_queue=True, pause_queue=True)
-            try:
-                n = backends.interrupt(
-                    backends.normalize(agent.get("backend")), agent_id)
-            except Exception as exc:  # barrier still must be released below
-                log_exception("turnStopInterruptFail", exc, detail=agent_id)
-                if strict:
+            runtime_client = getattr(self.ctx, "runtime_client", None)
+            remote_lease = None
+            if runtime_client is not None:
+                try:
+                    remote_lease = runtime_client.begin_stop(
+                        agent_id,
+                        backends.normalize(agent.get("backend")),
+                        strict=strict,
+                        hold=True,
+                    )
+                    n = remote_lease.terminated
+                    dropped = remote_lease.dropped
+                    stop_snapshot = {"trace_id": remote_lease.trace_id}
+                except Exception as exc:
+                    log_exception("turnStopRuntimeFail", exc, detail=agent_id)
+                    if strict:
+                        raise
+                    return 0
+            else:
+                stop_snapshot = turn_dispatch.snapshot_stop_state(agent_id)
+                queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
+                dropped = turn_dispatch.clear_for_agent(
+                    agent_id, preserve_queue=True, pause_queue=True)
+                try:
+                    n = backends.interrupt(
+                        backends.normalize(agent.get("backend")), agent_id)
+                except Exception as exc:  # barrier still must be released below
+                    log_exception("turnStopInterruptFail", exc, detail=agent_id)
+                    if strict:
+                        turn_dispatch.restore_stop_state(agent_id, stop_snapshot)
+                        turn_queue.set_paused(agent_id, queue_was_paused)
+                        raise
+                if strict and stop_snapshot.get("trace_id") and n <= 0:
                     turn_dispatch.restore_stop_state(agent_id, stop_snapshot)
                     turn_queue.set_paused(agent_id, queue_was_paused)
-                    raise
-            if strict and stop_snapshot.get("trace_id") and n <= 0:
-                turn_dispatch.restore_stop_state(agent_id, stop_snapshot)
-                turn_queue.set_paused(agent_id, queue_was_paused)
-                raise RuntimeError("backend did not confirm interruption")
+                    raise RuntimeError("backend did not confirm interruption")
             # A SIGTERM'd turn often dies without firing its terminal callback,
             # so the agent is left stuck on a busy state ("thinking") and the
             # in-flight dispatch slot leaks. Record a terminal INTERRUPTED state
@@ -3349,12 +3368,18 @@ class Handler(BaseHTTPRequestHandler):
                 log_exception("turnStopBookkeepingFail", exc, detail=agent_id)
             if defer_finish:
                 def release(cancelled_trace_ids: set[str]) -> None:
-                    turn_dispatch.prepare_queued_for_finish(
-                        agent_id, stop_snapshot, cancelled_trace_ids)
-                    turn_dispatch.finish_stop(
-                        self.ctx, agent_id, backend_registry=backends)
+                    if remote_lease is not None:
+                        runtime_client.finish_stop(
+                            remote_lease.lease_id, cancelled_trace_ids)
+                    else:
+                        turn_dispatch.prepare_queued_for_finish(
+                            agent_id, stop_snapshot, cancelled_trace_ids)
+                        turn_dispatch.finish_stop(
+                            self.ctx, agent_id, backend_registry=backends)
                 log("turnStop", f"session={session} terminated={n} barrier=held")
                 return n, release
+            elif runtime_client is not None:
+                runtime_client.finish_stop(remote_lease.lease_id, set())
             else:
                 turn_dispatch.finish_stop(
                     self.ctx, agent_id, backend_registry=backends)
@@ -3386,8 +3411,8 @@ class Handler(BaseHTTPRequestHandler):
                 path[len("/transcription-results/"):].strip("/"))
         if path.startswith("/schedules/"):
             return self._handle_schedule_delete(path[len("/schedules/"):].strip("/"))
-        if self.path.startswith("/agents/"):
-            return self._handle_delete_agent(self.path[len("/agents/"):])
+        if path.startswith("/agents/"):
+            return self._handle_delete_agent(path[len("/agents/"):])
         if path.startswith("/personas/"):
             return self._handle_delete_persona(path[len("/personas/"):].strip("/"))
         return self._send(404, b"not found")
@@ -3779,9 +3804,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
     def _handle_delete_agent(self, session: str):
+        from urllib.parse import unquote
         from lib import turn_dispatch
-        agent = agents_db.get_by_session(session.strip("/"))
-        if agent:
+        session = unquote(session).strip("/")
+        agent = agents_db.get_by_session(session)
+        if agent and getattr(self.ctx, "runtime_client", None) is None:
             # Invalidate dispatch state before delete interrupts the backend;
             # its terminal callback must not drain queued work after deletion.
             turn_dispatch.clear_for_agent(agent["agent_id"])
@@ -4587,6 +4614,15 @@ def build_server(ctx: ServerContext, port: int,
                  bind_addr: str | None = None, *,
                  restart_recovery: bool = False) -> ContextHTTPServer:
     """Wire a fully-injected HTTP server. Tests use this with a fake ctx."""
+    # Process ownership queries (busy state, stop, steering, compaction fences)
+    # must reach the same runtime that owns dispatch. Reset this explicitly for
+    # injected/local tests so module state cannot leak between server instances.
+    runtime_client = getattr(ctx, "runtime_client", None)
+    backends.configure_runtime_client(runtime_client)
+    import lib.turn_dispatch as _turn_dispatch_module
+    _turn_dispatch_module.configure_runtime_client(runtime_client)
+    from lib import compaction as _compaction_module
+    _compaction_module.configure_runtime_client(runtime_client)
     # Persona definitions are a startup-owned invariant.  Historically they
     # were materialized lazily by the first persona/snapshot read, which made
     # zero-session definitions depend on endpoint call order.  Initialize them
@@ -4621,6 +4657,11 @@ def build_server(ctx: ServerContext, port: int,
     background_job_watcher = BackgroundJobWatcher(ctx.stream)
     background_job_watcher.start()
     srv.on_close(background_job_watcher.stop)
+    if getattr(ctx, "runtime_client", None) is not None:
+        from lib.runtime_events import RuntimeEventWatcher
+        runtime_event_watcher = RuntimeEventWatcher(ctx.stream)
+        runtime_event_watcher.start()
+        srv.on_close(runtime_event_watcher.stop)
     # TTS worker: drains tts_queue, does the ElevenLabs call from the
     # server process (not from short-lived hook subprocesses). The hooks
     # only write queue rows; this is the executor side.
@@ -4736,8 +4777,10 @@ def build_server(ctx: ServerContext, port: int,
     srv.on_close(schedule_runner.stop)
 
     broadcast_boot_version(ctx)
-    resume_persisted_agents(ctx)
-    if restart_recovery:
+    runtime_client = getattr(ctx, "runtime_client", None)
+    if runtime_client is None:
+        resume_persisted_agents(ctx)
+    if restart_recovery and runtime_client is None:
         # Mark the turns the previous process took down with it before the
         # restart heartbeat asks the agents to carry on (issue #11).
         from lib import interrupted_turns
@@ -4748,7 +4791,14 @@ def build_server(ctx: ServerContext, port: int,
         restart_heartbeats = heartbeat_scheduler.run_restart_recovery_once()
         if restart_heartbeats:
             log("heartbeatRestartRecovery", f"sent={restart_heartbeats}")
-    recovered_queues = TurnDispatchService(ctx).recover_queued()
+    try:
+        recovered_queues = TurnDispatchService(ctx).recover_queued()
+    except Exception as exc:  # runtime may still be starting; its own boot recovers
+        from lib.runtime_bridge import RuntimeUnavailable
+        if not isinstance(exc, RuntimeUnavailable):
+            raise
+        log_exception("runtimeQueueRecoveryDeferred", exc)
+        recovered_queues = 0
     if recovered_queues:
         log("queuedRecovery", f"recovered={recovered_queues}")
     return srv
@@ -4763,10 +4813,11 @@ if __name__ == "__main__":
     # restart) so the app never renders phantom "working" badges and no agent
     # resumes a session that doesn't exist. The same pass runs per agent on
     # every snapshot read.
-    repaired = reconcile.reconcile_all()
-    if repaired:
-        log("bootReconcile", f"repaired {repaired} agent(s)")
     prod_ctx = ServerContext.production()
+    if prod_ctx.runtime_client is None:
+        repaired = reconcile.reconcile_all()
+        if repaired:
+            log("bootReconcile", f"repaired {repaired} agent(s)")
     # Wire the herald manager so off-focus agents raise their hand.
     prod_ctx.herald = HeraldManager(  # type: ignore[attr-defined]
         stream=prod_ctx.stream, tts=prod_ctx.tts,

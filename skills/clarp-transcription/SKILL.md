@@ -1,6 +1,6 @@
 ---
 name: clarp-transcription
-description: Inspect, install, remove, test, or choose Clarp server transcription models. Use for speech-to-text setup and model diagnostics.
+description: Inspect, remove, test, select, or diagnose Clarp server transcription models and custom adapters. Use clarp-transcription-model-installation for managed model recommendations and installation.
 ---
 
 # Clarp Transcription
@@ -9,10 +9,12 @@ Use the supported model manager:
 
 ```bash
 clarp-admin transcription list
-clarp-admin transcription install faster-whisper:small.en
 clarp-admin transcription use faster-whisper:small.en
 clarp-admin transcription test
 ```
+
+For managed model recommendations and downloads, use the
+`clarp-transcription-model-installation` skill.
 
 Only validated local artifacts are advertised as installed. Never download a
 model implicitly during transcription.

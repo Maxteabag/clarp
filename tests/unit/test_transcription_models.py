@@ -16,6 +16,11 @@ from lib.transcription_catalog import CATALOG, public_catalog, recommended_model
 
 @pytest.fixture(autouse=True)
 def _capture_platform_worker_launch(monkeypatch):
+    # Async install mechanics use the Faster-Whisper fixtures unless a test
+    # explicitly selects macOS/whisper.cpp. Keep them deterministic on both CI
+    # operating systems now that production rejects cross-platform installs.
+    monkeypatch.setenv("CLARP_PLATFORM_OVERRIDE", "linux")
+
     def launch(command, **_kwargs):
         result = transcription_models.subprocess.run(
             command, text=True, capture_output=True, check=False)
@@ -512,6 +517,19 @@ def test_managed_catalog_includes_supported_platform_providers():
     assert {item["provider"] for item in CATALOG} == {
         "faster-whisper", "whisper.cpp",
     }
+
+
+def test_async_install_rejects_unsupported_host_before_creating_job(monkeypatch):
+    monkeypatch.setenv("CLARP_PLATFORM_OVERRIDE", "macos")
+
+    with pytest.raises(ValueError, match="not supported on macos"):
+        transcription_models.start_install(
+            "faster-whisper:large-v3-turbo", computer_id="mac")
+
+    assert background_jobs.get(
+        transcription_models.install_job_id("faster-whisper:large-v3-turbo"),
+        reconcile=False,
+    ) is None
 
 
 def test_whisper_cpp_registry_requires_model_and_runtime(tmp_path, monkeypatch):
