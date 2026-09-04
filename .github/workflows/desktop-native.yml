@@ -93,18 +93,23 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check out tagged release source
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.release_tag || github.ref }}
+          path: release-source
 
       - name: Verify release version
         id: version
         env:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_SOURCE: ${{ github.workspace }}/release-source
         shell: bash
         run: |
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           version="${RELEASE_TAG#v}"
-          project_version="$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' pyproject.toml | head -n 1)"
+          project_version="$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' "$RELEASE_SOURCE/pyproject.toml" | head -n 1)"
           test "$version" = "$project_version"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
@@ -122,6 +127,8 @@ jobs:
       - name: Build bundled AppImage
         env:
           CLARP_RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          CLARP_SOURCE_ROOT: ${{ github.workspace }}/release-source
+          CLARP_APPIMAGE_OUTPUT_DIR: ${{ github.workspace }}/dist
           CLARP_APPIMAGE_TOOL_DIR: ${{ runner.temp }}/clarp-appimage-tools
         run: desktop/packaging/appimage/build-in-flatpak.sh
 
@@ -131,8 +138,8 @@ jobs:
         run: |
           flatpak-builder --user --force-clean \
             --repo="$GITHUB_WORKSPACE/dist/flatpak-repo" \
-            desktop/build/flatpak-release \
-            desktop/packaging/flatpak/com.maxteabag.Clarp.yml
+            release-source/desktop/build/flatpak-release \
+            release-source/desktop/packaging/flatpak/com.maxteabag.Clarp.yml
           flatpak build-bundle \
             --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
             "$GITHUB_WORKSPACE/dist/flatpak-repo" \
