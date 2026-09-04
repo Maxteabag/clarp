@@ -37,16 +37,37 @@ _NO_WATCH_WAIT_SEC = 50.0     # fixed wait when we can't watch a transcript (cod
 
 _active: set[str] = set()
 _lock = threading.Lock()
+_runtime_client: Any | None = None
+
+
+def configure_runtime_client(client: Any | None) -> None:
+    global _runtime_client
+    _runtime_client = client
 
 
 def is_compacting(session: str) -> bool:
+    if _runtime_client is not None:
+        try:
+            return session in set(
+                _runtime_client.status().get("compactions") or ())
+        except Exception:
+            agent = agents_db.get_by_session(session)
+            latest = agents_db.latest_state(agent["agent_id"]) if agent else None
+            return bool(latest and latest.get("kind") == "compacting")
     with _lock:
         return session in _active
+
+
+def active_sessions() -> list[str]:
+    with _lock:
+        return sorted(_active)
 
 
 def compact_session(session: str) -> dict[str, Any]:
     """Kick off compaction for a session in the background. Returns immediately;
     the app polls the snapshot (compacting flag + context_tokens) for progress."""
+    if _runtime_client is not None:
+        return _runtime_client.compact(session)
     agent = agents_db.get_by_session(session)
     if not agent:
         return {"ok": False, "error": "no such agent"}

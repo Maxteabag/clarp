@@ -345,11 +345,17 @@ class AgentLifecycleService:
         if not session:
             raise AgentLifecycleError(400, "name required")
         agent = agents_db.get_by_session(session)
-        if agent:
+        if not agent:
+            raise AgentLifecycleError(
+                404, "agent_not_found", message=f"No active agent session: {session}")
+        runtime_client = getattr(self.ctx, "runtime_client", None)
+        if runtime_client is not None:
+            runtime_client.release_agent(agent["agent_id"])
+        else:
             backends.interrupt_any(agent["agent_id"])
             agents_db.soft_delete(agent["agent_id"])
-            if agents_db.get_focus() == agent["agent_id"]:
-                agents_db.set_focus(None)
+        if agents_db.get_focus() == agent["agent_id"]:
+            agents_db.set_focus(None)
         self.ctx.stream.broadcast({
             "type": SSEType.AGENT_ROSTER, "kind": "deleted", "session": session,
         })

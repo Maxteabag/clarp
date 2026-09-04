@@ -5,8 +5,11 @@ import os
 from pathlib import Path
 import plistlib
 import json
+import re
+import shlex
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from typing import Callable
@@ -16,7 +19,14 @@ import urllib.request
 from . import xdg
 
 LAUNCHD_LABEL = "com.maxteabag.clarp.server"
+RUNTIME_LAUNCHD_LABEL = "com.maxteabag.clarp.runtime"
 Runner = Callable[..., subprocess.CompletedProcess]
+_ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_RESERVED_ENVIRONMENT = frozenset({
+    "HOME", "PATH", "PYTHONUNBUFFERED", "CLARP_SHARE_DIR",
+    "CLARP_CONFIG_DIR", "CLARP_CACHE_DIR", "CLAUDE_PWA_CONFIG",
+    "CLAUDE_PWA_DB", "CLAUDE_PWA_LOG_DIR",
+})
 
 
 def platform_kind() -> str:
@@ -34,31 +44,117 @@ def definition_path(home: Path | None = None) -> Path:
     return config_home / "systemd/user/clarp.service"
 
 
+def runtime_definition_path(home: Path | None = None) -> Path:
+    home = (home or Path.home()).expanduser()
+    if platform_kind() == "macos":
+        return home / "Library/LaunchAgents" / f"{RUNTIME_LAUNCHD_LABEL}.plist"
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
+    return config_home / "systemd/user/clarp-runtime.service"
+
+
 def launchd_domain() -> str:
     return f"gui/{os.getuid()}"
 
 
+def configured_environment(
+    config_file: Path, *, home: Path, inherited: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Validated environment shared by the server and runtime services."""
+    try:
+        payload = tomllib.loads(config_file.read_text())
+    except FileNotFoundError:
+        payload = {}
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError(f"cannot read service environment: {exc}") from exc
+    raw = payload.get("env", {})
+    if not isinstance(raw, dict):
+        raise ValueError("[env] must be a TOML table")
+    result: dict[str, str] = {}
+    for name, value in raw.items():
+        if not isinstance(name, str) or not _ENVIRONMENT_NAME.fullmatch(name):
+            raise ValueError(f"invalid [env] variable name: {name}")
+        if (name in _RESERVED_ENVIRONMENT
+                or name.startswith("CLARP_")
+                or name.startswith("CLAUDE_PWA_")):
+            raise ValueError(f"[env].{name} is managed by Clarp")
+        if not isinstance(value, str):
+            raise ValueError(f"[env].{name} must be a string")
+        if any(character in value for character in ("\0", "\n", "\r")):
+            raise ValueError(f"[env].{name} contains an unsupported line break")
+        result[name] = _expand_home(value, home)
+    if "SSH_AUTH_SOCK" not in raw:
+        candidate = str((inherited or {}).get("SSH_AUTH_SOCK") or "").strip()
+        if candidate:
+            result["SSH_AUTH_SOCK"] = _expand_home(candidate, home)
+    return result
+
+
+def _expand_home(value: str, home: Path) -> str:
+    if value == "~":
+        return str(home)
+    if value.startswith("~/"):
+        return str(home / value[2:])
+    return value
+
+
+def _systemd_environment_lines(environment: dict[str, str]) -> str:
+    def escaped(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+    return "\n".join(
+        f'Environment="{name}={escaped(value)}"'
+        for name, value in sorted(environment.items()))
+
+
+def _previous_ssh_auth_sock(path: Path) -> str:
+    try:
+        if path.suffix == ".plist":
+            payload = plistlib.loads(path.read_bytes())
+            environment = payload.get("EnvironmentVariables") or {}
+            return str(environment.get("SSH_AUTH_SOCK") or "").strip()
+        for line in path.read_text().splitlines():
+            if not line.startswith("Environment="):
+                continue
+            for assignment in shlex.split(line.removeprefix("Environment=")):
+                if assignment.startswith("SSH_AUTH_SOCK="):
+                    return assignment.split("=", 1)[1].replace("%%", "%").strip()
+    except (OSError, ValueError, plistlib.InvalidFileException):
+        pass
+    return ""
+
+
 def render(
     *, python: Path, share: Path, service_path: str, home: Path | None = None,
+    runtime: bool = False,
+    inherited_environment: dict[str, str] | None = None,
 ) -> bytes:
     home = (home or Path.home()).expanduser()
+    config = Path(os.environ.get("CLARP_CONFIG_DIR", xdg.config_dir(home)))
+    extra_environment = configured_environment(
+        config / "config.toml", home=home,
+        inherited=os.environ if inherited_environment is None else inherited_environment)
     if platform_kind() == "macos":
-        config = Path(os.environ.get("CLARP_CONFIG_DIR", xdg.config_dir(home)))
         cache = Path(os.environ.get("CLARP_CACHE_DIR", xdg.cache_dir(home)))
         logs = home / "Library/Logs/Clarp"
         logs.mkdir(parents=True, exist_ok=True)
+        label = RUNTIME_LAUNCHD_LABEL if runtime else LAUNCHD_LABEL
+        program = share / "server.py"
         payload = {
-            "Label": LAUNCHD_LABEL,
-            "ProgramArguments": [str(python), str(share / "server.py")],
+            "Label": label,
+            "ProgramArguments": (
+                [str(share / "bin/clarp-runtime-service")]
+                if runtime else [str(python), str(program)]),
             "RunAtLoad": True,
-            "KeepAlive": {"SuccessfulExit": False},
+            "KeepAlive": True if runtime else {"SuccessfulExit": False},
             "ThrottleInterval": 2,
             "ProcessType": "Background",
             "WorkingDirectory": str(home),
             "Umask": 0o077,
-            "StandardOutPath": str(logs / "server.stdout.log"),
-            "StandardErrorPath": str(logs / "server.stderr.log"),
+            "StandardOutPath": str(logs / (
+                "runtime.stdout.log" if runtime else "server.stdout.log")),
+            "StandardErrorPath": str(logs / (
+                "runtime.stderr.log" if runtime else "server.stderr.log")),
             "EnvironmentVariables": {
+                **extra_environment,
                 "HOME": str(home),
                 "PATH": service_path,
                 "PYTHONUNBUFFERED": "1",
@@ -71,7 +167,6 @@ def render(
             },
         }
         return plistlib.dumps(payload, fmt=plistlib.FMT_XML, sort_keys=False)
-    config = Path(os.environ.get("CLARP_CONFIG_DIR", xdg.config_dir(home)))
     cache = Path(os.environ.get("CLARP_CACHE_DIR", xdg.cache_dir(home)))
     logs = cache / "logs"
 
@@ -81,29 +176,63 @@ def render(
     def environment_value(value: str | Path) -> str:
         return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
-    template = (share / "current/systemd/clarp.service").read_text()
+    template_name = "clarp-runtime.service" if runtime else "clarp.service"
+    template = (share / "current/systemd" / template_name).read_text()
     rendered = (template.replace("@@PYTHON@@", argument(python))
                 .replace("@@SERVER@@", argument(share / "server.py"))
+                .replace("@@RUNTIME@@", argument(share / "runtime.py"))
+                .replace("@@RUNTIME_LAUNCHER@@",
+                         argument(share / "bin/clarp-runtime-service"))
                 .replace("@@SERVICE_PATH@@", environment_value(service_path))
                 .replace("@@SHARE_ENV@@", environment_value(share))
                 .replace("@@CONFIG_ENV@@", environment_value(config))
                 .replace("@@CACHE_ENV@@", environment_value(cache))
                 .replace("@@CONFIG_FILE_ENV@@", environment_value(config / "config.toml"))
                 .replace("@@DATABASE_ENV@@", environment_value(share / "state.sqlite"))
-                .replace("@@LOG_ENV@@", environment_value(logs)))
+                .replace("@@LOG_ENV@@", environment_value(logs))
+                .replace("@@EXTRA_ENVIRONMENT@@",
+                         _systemd_environment_lines(extra_environment)))
     return rendered.encode()
 
 
 def write_definition(
     *, python: Path, share: Path, service_path: str, home: Path | None = None,
+    inherited_environment: dict[str, str] | None = None,
 ) -> Path:
     path = definition_path(home)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.next")
-    temporary.write_bytes(render(
-        python=python, share=share, service_path=service_path, home=home))
-    temporary.chmod(0o600 if platform_kind() == "macos" else 0o644)
-    temporary.replace(path)
+    runtime_path = runtime_definition_path(home)
+    runtime_supported = (
+        (share / "current/runtime.py").is_file()
+        and (share / "current/systemd/clarp-runtime.service").is_file()
+    )
+    inherited = dict(
+        os.environ if inherited_environment is None else inherited_environment)
+    if not str(inherited.get("SSH_AUTH_SOCK") or "").strip():
+        for previous in (runtime_path, path):
+            previous_socket = _previous_ssh_auth_sock(previous)
+            if previous_socket:
+                inherited["SSH_AUTH_SOCK"] = previous_socket
+                break
+    targets = [(path, False)]
+    if runtime_supported:
+        targets.append((runtime_path, True))
+    for target, is_runtime in targets:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        rendered = render(
+            python=python, share=share, service_path=service_path, home=home,
+            runtime=is_runtime, inherited_environment=inherited)
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=target.parent, prefix=f".{target.name}.", suffix=".next")
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(rendered)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+        temporary.replace(target)
+    if not runtime_supported:
+        runtime_path.unlink(missing_ok=True)
     return path
 
 
@@ -111,16 +240,73 @@ def _run(*args: str, check: bool = True, runner: Runner = subprocess.run):
     return runner(args, check=check, text=True, capture_output=True)
 
 
+def _legacy_busy_sessions() -> list[str]:
+    """Busy rows owned by a pre-runtime monolith during the one-time split."""
+    try:
+        from . import agents as agents_db
+        return [
+            str(agent["session"]) for agent in agents_db.list_agents()
+            if agents_db.is_busy(str(agent["agent_id"]))
+        ]
+    except Exception as exc:  # uncertainty must never authorize a destructive cutover
+        raise RuntimeError(
+            f"cannot prove the legacy Clarp server is idle: {exc}") from exc
+
+
+def _require_legacy_idle() -> None:
+    busy = _legacy_busy_sessions()
+    if busy:
+        raise RuntimeError(
+            "initial clarp-runtime migration requires idle agents; still busy: "
+            + ", ".join(busy))
+
+
 def install_and_restart(*, runner: Runner = subprocess.run) -> None:
     path = definition_path()
+    runtime_path = runtime_definition_path()
+    runtime_supported = runtime_path.is_file()
     if platform_kind() == "macos":
         domain = launchd_domain()
+        if not runtime_supported:
+            _run("launchctl", "bootout", domain, str(runtime_path),
+                 check=False, runner=runner)
+            _run("launchctl", "bootout", domain, str(path),
+                 check=False, runner=runner)
+            _run("launchctl", "bootstrap", domain, str(path), runner=runner)
+            _run("launchctl", "kickstart", "-k", f"{domain}/{LAUNCHD_LABEL}",
+                 runner=runner)
+            return
+        runtime_target = f"{domain}/{RUNTIME_LAUNCHD_LABEL}"
+        running = _run(
+            "launchctl", "print", runtime_target, check=False, runner=runner)
+        if running.returncode != 0:
+            _require_legacy_idle()
+        # On the one-time migration from the monolith, the old server still
+        # owns provider children. Never start a second process owner beside it.
         _run("launchctl", "bootout", domain, str(path), check=False, runner=runner)
+        if running.returncode != 0:
+            _run("launchctl", "bootstrap", domain,
+                 str(runtime_definition_path()), runner=runner)
         _run("launchctl", "bootstrap", domain, str(path), runner=runner)
         _run("launchctl", "kickstart", "-k", f"{domain}/{LAUNCHD_LABEL}",
              runner=runner)
         return
     _run("systemctl", "--user", "daemon-reload", runner=runner)
+    if not runtime_supported:
+        _run("systemctl", "--user", "disable", "--now",
+             "clarp-runtime.service", check=False, runner=runner)
+        _run("systemctl", "--user", "enable", "clarp.service", runner=runner)
+        _run("systemctl", "--user", "restart", "clarp.service", runner=runner)
+        return
+    runtime_running = _run(
+        "systemctl", "--user", "is-active", "--quiet",
+        "clarp-runtime.service", check=False, runner=runner)
+    if runtime_running.returncode != 0:
+        _require_legacy_idle()
+        _run("systemctl", "--user", "stop", "clarp.service",
+             check=False, runner=runner)
+    _run("systemctl", "--user", "enable", "--now", "clarp-runtime.service",
+         runner=runner)
     _run("systemctl", "--user", "enable", "clarp.service", runner=runner)
     _run("systemctl", "--user", "restart", "clarp.service", runner=runner)
 
@@ -141,7 +327,8 @@ def restart(*, runner: Runner = subprocess.run, check: bool = True) -> None:
 
 
 def restore_after_failed_install(
-    *, had_previous: bool, runner: Runner = subprocess.run,
+    *, had_previous: bool, had_runtime_previous: bool = True,
+    runner: Runner = subprocess.run,
 ) -> None:
     """Make the restored service definition authoritative after rollback."""
     if platform_kind() == "macos":
@@ -153,6 +340,9 @@ def restore_after_failed_install(
                  runner=runner)
             _run("launchctl", "kickstart", "-k", f"{domain}/{LAUNCHD_LABEL}",
                  runner=runner)
+        if not had_runtime_previous:
+            _run("launchctl", "bootout", domain,
+                 str(runtime_definition_path()), check=False, runner=runner)
         return
     _run("systemctl", "--user", "daemon-reload", check=False, runner=runner)
     if had_previous:
@@ -161,14 +351,21 @@ def restore_after_failed_install(
     else:
         _run("systemctl", "--user", "disable", "--now", "clarp.service",
              check=False, runner=runner)
+    if not had_runtime_previous:
+        _run("systemctl", "--user", "disable", "--now",
+             "clarp-runtime.service", check=False, runner=runner)
 
 
 def stop_and_disable(*, runner: Runner = subprocess.run) -> None:
     if platform_kind() == "macos":
         _run("launchctl", "bootout", launchd_domain(), str(definition_path()),
              check=False, runner=runner)
+        _run("launchctl", "bootout", launchd_domain(),
+             str(runtime_definition_path()), check=False, runner=runner)
         return
     _run("systemctl", "--user", "disable", "--now", "clarp.service",
+         check=False, runner=runner)
+    _run("systemctl", "--user", "disable", "--now", "clarp-runtime.service",
          check=False, runner=runner)
     _run("systemctl", "--user", "daemon-reload", check=False, runner=runner)
 
@@ -187,6 +384,18 @@ def is_active(*, runner: Runner = subprocess.run) -> bool:
     else:
         result = _run("systemctl", "--user", "is-active", "--quiet",
                       "clarp.service", check=False, runner=runner)
+    return result.returncode == 0
+
+
+def is_runtime_active(*, runner: Runner = subprocess.run) -> bool:
+    if platform_kind() == "macos":
+        result = _run(
+            "launchctl", "print", f"{launchd_domain()}/{RUNTIME_LAUNCHD_LABEL}",
+            check=False, runner=runner)
+    else:
+        result = _run(
+            "systemctl", "--user", "is-active", "--quiet",
+            "clarp-runtime.service", check=False, runner=runner)
     return result.returncode == 0
 
 

@@ -174,6 +174,221 @@ def test_injected_test_server_does_not_run_restart_recovery(
         srv.server_close()
 
 
+def test_server_restart_does_not_interrupt_healthy_external_runtime(
+    fake_ctx, monkeypatch,
+):
+    """A server-only restart must leave runtime-owned work completely alone."""
+    from lib import heartbeat, interrupted_turns
+
+    calls: list[str] = []
+    fake_ctx.runtime_client = SimpleNamespace(
+        ping=lambda: True,
+        recover_queued=lambda: 0,
+    )
+    monkeypatch.setattr(
+        server_module, "resume_persisted_agents",
+        lambda _ctx: calls.append("resume"))
+    monkeypatch.setattr(
+        interrupted_turns, "recover_after_restart",
+        lambda stream=None: calls.append("mark") or [])
+    monkeypatch.setattr(
+        heartbeat.HeartbeatScheduler, "run_restart_recovery_once",
+        lambda _scheduler: calls.append("heartbeat") or 0)
+
+    srv = build_server(
+        fake_ctx, _free_port(), bind_addr="127.0.0.1",
+        restart_recovery=True)
+    try:
+        assert calls == []
+    finally:
+        srv.server_close()
+
+
+def test_status_reports_external_runtime_health(fake_ctx):
+    fake_ctx.runtime_client = SimpleNamespace(
+        ping=lambda: True,
+        recover_queued=lambda: 0,
+        status=lambda: {
+            "protocol_version": 1,
+            "release_id": "runtime-42",
+            "draining": False,
+            "active": {"agent-1": "trace-1"},
+        },
+    )
+    port = _free_port()
+    srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body = _get(f"http://127.0.0.1:{port}/status")
+        assert status == 200
+        runtime = json.loads(body)["runtime"]
+        assert runtime == {
+            "available": True,
+            "release_id": "runtime-42",
+            "draining": False,
+            "active_turns": 1,
+        }
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_http_server_can_be_replaced_while_runtime_keeps_active_turn(
+    fake_ctx, tmp_path,
+):
+    from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+    from lib.turn_dispatch import DispatchResult
+
+    active = {}
+
+    class PersistentDispatch:
+        def dispatch(self, **kwargs):
+            agent = __import__("lib.agents", fromlist=["get_by_session"]).get_by_session(
+                kwargs["forced_session"])
+            active[agent["agent_id"]] = kwargs["trace_id"]
+            return DispatchResult(
+                session=kwargs["forced_session"], backend=agent["backend"])
+
+        def recover_queued(self):
+            return 0
+
+        def dispatch_queued(self, queue_id):
+            return DispatchResult(session=queue_id, backend="claude")
+
+    runtime_socket = tmp_path / "runtime.sock"
+    runtime = RuntimeRPCServer(
+        runtime_socket,
+        dispatch_service=PersistentDispatch(),
+        status_provider=lambda: {
+            "active": dict(active), "spawning": [], "terminals": [],
+            "queued": {},
+        },
+    )
+    runtime_thread = threading.Thread(target=runtime.serve_forever, daemon=True)
+    runtime_thread.start()
+    fake_ctx.runtime_client = RuntimeClient(runtime_socket)
+
+    def start_http_server():
+        port = _free_port()
+        server = build_server(fake_ctx, port, bind_addr="127.0.0.1")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, f"http://127.0.0.1:{port}"
+
+    first, first_url = start_http_server()
+    try:
+        status, body = _post(first_url + "/send", {
+            "session": "claude",
+            "text": "keep working through the update",
+            "force_session": True,
+            "hands_free": False,
+            "synthesize_audio": False,
+        })
+        assert status == 200
+        assert json.loads(body)["session"] == "claude"
+    finally:
+        first.shutdown()
+        first.server_close()
+
+    agent_id, trace_id = next(iter(active.items()))
+    assert fake_ctx.runtime_client.status()["active"] == {agent_id: trace_id}
+
+    replacement, replacement_url = start_http_server()
+    try:
+        status, _body = _get(replacement_url + "/agents/snapshot")
+        assert status == 200
+        assert fake_ctx.runtime_client.status()["active"] == {
+            agent_id: trace_id}
+    finally:
+        replacement.shutdown()
+        replacement.server_close()
+        runtime.shutdown()
+        runtime.server_close()
+
+
+def test_runtime_owned_turn_completes_after_http_server_is_gone(
+    fake_ctx, tmp_path,
+):
+    from lib import agents as agents_db
+    from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+    from lib.runtime_events import RuntimeEventStream
+    from lib.turn_dispatch import TurnDispatchService, clear_for_agent
+
+    class RuntimeBackends:
+        CLAUDE = "claude"
+
+        def __init__(self):
+            self.spawn = None
+
+        def normalize(self, backend):
+            return backend or "claude"
+
+        def active_handles(self, _backend, _agent_id):
+            return [SimpleNamespace(is_alive=lambda: self.spawn is not None)] \
+                if self.spawn is not None else []
+
+        def interrupt(self, _backend, _agent_id):
+            return 0
+
+        def steer_turn(self, *_args, **_kwargs):
+            return False
+
+        def spawn_turn(self, _backend, **kwargs):
+            self.spawn = kwargs
+
+    runtime_backends = RuntimeBackends()
+    runtime_ctx = SimpleNamespace(
+        default_session="claude",
+        agents_path=fake_ctx.agents_path,
+        stream=RuntimeEventStream(),
+        runtime_client=None,
+    )
+    runtime_dispatch = TurnDispatchService(
+        runtime_ctx, backend_registry=runtime_backends, home=tmp_path,
+        uuid_factory=lambda: "runtime-conversation",
+    )
+    runtime_socket = tmp_path / "turn-runtime.sock"
+    runtime = RuntimeRPCServer(
+        runtime_socket, dispatch_service=runtime_dispatch)
+    runtime_thread = threading.Thread(target=runtime.serve_forever, daemon=True)
+    runtime_thread.start()
+    fake_ctx.runtime_client = RuntimeClient(runtime_socket)
+
+    port = _free_port()
+    first = build_server(fake_ctx, port, bind_addr="127.0.0.1")
+    first_thread = threading.Thread(target=first.serve_forever, daemon=True)
+    first_thread.start()
+    try:
+        status, _body = _post(f"http://127.0.0.1:{port}/send", {
+            "session": "claude", "text": "finish after deployment",
+            "force_session": True, "hands_free": False,
+            "synthesize_audio": False,
+        })
+        assert status == 200
+        assert runtime_backends.spawn is not None
+    finally:
+        first.shutdown()
+        first.server_close()
+
+    agent = agents_db.get_by_session("claude")
+    before = fake_ctx.runtime_client.status()["active"]
+    assert before.get(agent["agent_id"])
+
+    # The provider callback is owned by the runtime and still commits the
+    # terminal result after every HTTP server thread has stopped.
+    runtime_backends.spawn["on_result"]({
+        "duration_ms": 25,
+        "last_agent_message": "finished without interruption",
+    })
+
+    assert agents_db.latest_state(agent["agent_id"])["kind"] == "done"
+    assert fake_ctx.runtime_client.status()["active"] == {}
+    clear_for_agent(agent["agent_id"])
+    runtime.shutdown()
+    runtime.server_close()
+
+
 def test_artifact_http_round_trip_and_pagination(running_server):
     base, _ctx, _srv = running_server
     status, body = _post(base + "/artifacts", {
@@ -2539,6 +2754,23 @@ def test_post_preview_synthesizes_via_fake_tts(running_server):
     assert files, "expected one mp3 written by FakeTTSEngine"
 
 
+def test_delete_agent_ignores_query_string_and_unknown_is_404(
+    running_server, monkeypatch,
+):
+    base, _ctx, _srv = running_server
+    from lib import backends
+
+    monkeypatch.setattr(backends, "interrupt_any", lambda _agent_id: 0)
+    status, _ = _delete(base + "/agents/rachel?token=not-part-of-session")
+    assert status == 200
+
+    from lib import agents as agents_db
+    assert agents_db.get_by_session("rachel") is None
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _delete(base + "/agents/rachel")
+    assert error.value.code == 404
+
+
 def test_post_agents_opens_runtime_row(running_server):
     base, ctx, _srv = running_server
     status, body = _post(base + "/agents", {
@@ -2675,6 +2907,60 @@ def test_turn_queue_can_be_listed_edited_deleted_and_paused_by_stop(running_serv
     status, _ = _delete(base + "/turn-queue/queue-http")
     assert status == 200
     assert turn_queue.get("queue-http") is None
+
+
+def test_stop_barrier_is_executed_by_external_runtime(fake_ctx):
+    from lib import agents as agents_db, turn_queue
+    from lib.runtime_bridge import StopLease
+
+    calls = []
+
+    class RuntimeOwner:
+        def ping(self):
+            return True
+
+        def recover_queued(self):
+            return 0
+
+        def status(self):
+            return {"active": {}, "spawning": [], "terminals": []}
+
+        def begin_stop(self, agent_id, backend, *, strict, hold):
+            calls.append(("begin", agent_id, backend, strict, hold))
+            turn_queue.set_paused(agent_id, True)
+            return StopLease(
+                lease_id="stop-lease", trace_id="trace-runtime", terminated=1,
+                dropped=0)
+
+        def finish_stop(self, lease_id, cancelled_trace_ids=None):
+            calls.append(("finish", lease_id, cancelled_trace_ids))
+
+    fake_ctx.runtime_client = RuntimeOwner()
+    agent = agents_db.get_by_session("claude")
+    turn_queue.enqueue(
+        queue_id="queue-runtime-stop", agent_id=agent["agent_id"],
+        session="claude", text="later", trace_id="queue-trace",
+        client_msg_id="queue-client", synthesize_audio=False,
+        origin="user", sender_agent_id="")
+    port = _free_port()
+    srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body = _post(
+            f"http://127.0.0.1:{port}/stop", {"session": "claude"})
+        assert status == 200
+        assert json.loads(body)["terminated"] == 1
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+    assert calls == [
+        ("begin", agent["agent_id"], agent["backend"], False, True),
+        ("finish", "stop-lease", set()),
+    ]
+    assert turn_queue.get("queue-runtime-stop") is not None
+    assert turn_queue.is_paused(agent["agent_id"])
 
 
 def test_turn_queue_manual_send_endpoint(running_server, monkeypatch):

@@ -52,6 +52,7 @@ RUN python -m pip install --no-cache-dir -r requirements-docker.txt \
     && python -m pip install --no-cache-dir uv==0.9.18
 
 COPY server/server.py ./server.py
+COPY server/runtime.py ./runtime.py
 COPY server/lib ./lib
 COPY --from=frontend /build/static ./static
 COPY plugin ./plugin

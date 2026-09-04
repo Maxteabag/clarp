@@ -147,13 +147,11 @@ target still runs the normal `make deploy`, so it copies the generated server
 and static files into `~/.local/share/clarp/` and restarts
 `clarp.service`; it only changes how the deploy process is launched.
 
-Before restart, `make deploy-detached` snapshots agents whose latest SQLite
-state is `thinking`, `tool`, or `compacting`, and also maps any live child CLI
-processes back to their agent sessions by backend session id. After the service
-comes back, it posts a forced-session `continue` to each snapshot session
-through `/send`, so sticky focus or orchestrator routing cannot steal the
-resume prompt and deploy can restart the server without permanently cutting off
-active work.
+`make deploy-detached` only detaches the updater. Agent turns run in the
+separate `clarp-runtime` service, so restarting `clarp.service` does not stop,
+resume, or inject another prompt into them. Runtime-affecting releases are
+adopted automatically at the next idle boundary; existing turns finish on the
+runtime version that started them.
 
 If you only changed static assets and don't want to bounce the
 service, you can sync just the static dir:
@@ -186,7 +184,7 @@ make js           # vitest only
 make e2e          # Playwright against a throwaway Docker node
 make docker-test  # build the image; exercise install, restart, backup
 make deploy       # sync the locked environment and install a new release
-make deploy-detached        # detached deploy; resumes active agents after restart
+make deploy-detached        # detached deploy; active agent turns continue
 make deploy-status
 ```
 
@@ -194,7 +192,7 @@ Typical loop after editing server or static code:
 
 ```bash
 make test                                      # confirm nothing broke
-make deploy-detached                           # detached deploy + restart/resume
+make deploy-detached                           # detached server deploy; runtime continues
 make deploy-status                             # confirm the detached unit exited cleanly
 ```
 
@@ -229,14 +227,7 @@ Once you have the session ID, you can resume it using one of the following metho
 2. Choose **Resume** from the dialog options.
 3. Select the target session ID from the list and confirm.
 
-#### Method B: Via CLI Helper
-You can resume active sessions by calling:
-```bash
-./scripts/deploy_detached.sh resume
-```
-*(This reads from `~/.cache/clarp/deploy-resume-agents.txt` and sends a "continue" POST request to the server).*
-
-#### Method C: Via Direct HTTP cURL Request
+#### Method B: Via Direct HTTP cURL Request
 You can POST a resume payload directly to the server's `/send` endpoint:
 ```bash
 curl -X POST -H "Content-Type: application/json" \

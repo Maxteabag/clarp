@@ -23,6 +23,21 @@ AGY = AgentBackend.AGY
 GROK = AgentBackend.GROK
 OPENCODE = AgentBackend.OPENCODE
 DEFAULT = CLAUDE
+_RUNTIME_CLIENT: Any | None = None
+
+
+def configure_runtime_client(client: Any | None) -> None:
+    """Route process ownership calls to the external runtime when configured."""
+    global _RUNTIME_CLIENT
+    _RUNTIME_CLIENT = client
+
+
+@dataclass(frozen=True)
+class _RemoteHandle:
+    trace_id: str
+
+    def is_alive(self) -> bool:
+        return True
 
 
 @dataclass(frozen=True)
@@ -445,12 +460,16 @@ def _stream_kwargs(kwargs: dict[str, Any], *, owner_gate: bool = False) -> dict[
 
 
 def interrupt(backend: str, agent_id: str) -> int:
+    if _RUNTIME_CLIENT is not None:
+        return int(_RUNTIME_CLIENT.interrupt(normalize(backend), agent_id))
     adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
     runner = _mod(adapter.runner_module)
     return int(runner.interrupt(agent_id) or 0)
 
 
 def interrupt_any(agent_id: str) -> int:
+    if _RUNTIME_CLIENT is not None:
+        return int(_RUNTIME_CLIENT.interrupt_any(agent_id))
     total = 0
     seen: set[str] = set()
     for adapter in _ADAPTERS:
@@ -464,6 +483,25 @@ def interrupt_any(agent_id: str) -> int:
 
 
 def active_handles(backend: str, agent_id: str) -> list:
+    if _RUNTIME_CLIENT is not None:
+        try:
+            status = _RUNTIME_CLIENT.status()
+        except Exception as exc:
+            # During the runtime's short idle rollover, persisted busy state is
+            # safer than claiming the process vanished and double-spawning.
+            from . import agents as agents_db
+            from .log import log_exception
+            log_exception("runtimeStatusUnavailable", exc, detail=agent_id)
+            return ([_RemoteHandle("runtime-status-unknown")]
+                    if agents_db.is_busy(agent_id) else [])
+        active = status.get("active") or {}
+        if agent_id in active:
+            return [_RemoteHandle(str(active[agent_id]))]
+        if agent_id in set(status.get("spawning") or ()):
+            return [_RemoteHandle("spawning")]
+        if agent_id in set(status.get("terminals") or ()):
+            return [_RemoteHandle("terminal")]
+        return []
     adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
     runner = _mod(adapter.runner_module)
     return list(runner.active_handles(agent_id) or [])
@@ -471,6 +509,12 @@ def active_handles(backend: str, agent_id: str) -> list:
 
 def steer_turn(backend: str, agent_id: str, text: str, *,
                client_msg_id: str = "", synthesize_audio: bool = False) -> bool:
+    if _RUNTIME_CLIENT is not None:
+        return bool(_RUNTIME_CLIENT.steer(
+            normalize(backend), agent_id, text,
+            client_msg_id=client_msg_id,
+            synthesize_audio=synthesize_audio,
+        ))
     adapter = get(normalize(backend))
     if adapter is None or not adapter.supports_steer:
         if normalize(backend) != CODEX:

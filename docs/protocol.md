@@ -30,6 +30,12 @@ they drift.
 | **clip** | One synthesized voice reply, identified by `clip_id`. |
 | **focus** | The server-wide "current agent" used for hands-free voice routing. Shared by every client of one server. |
 
+The HTTP service and agent runtime have separate lifetimes. A planned HTTP
+restart closes client connections, but the active backend turn continues in
+`clarp-runtime`; clients reconnect SSE and resume reading the durable message
+cursor. Interruption markers are reserved for a runtime or host failure that
+actually terminated work.
+
 ## Authentication
 
 The server reads `auth_token` from `config.toml`. When it is empty, every

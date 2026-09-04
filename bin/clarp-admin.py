@@ -869,6 +869,10 @@ def cmd_doctor(_args) -> int:
         ok = service_manager.is_active()
         failures += not ok
         print(f"{'OK' if ok else 'FAIL':<5} service: {'active' if ok else 'inactive'}")
+        runtime_ok = service_manager.is_runtime_active()
+        failures += not runtime_ok
+        print(f"{'OK' if runtime_ok else 'FAIL':<5} "
+              f"agent runtime: {'active' if runtime_ok else 'inactive'}")
     try:
         from lib import config as config_module
 
@@ -928,8 +932,10 @@ def cmd_doctor(_args) -> int:
 
 def cmd_paths(_args) -> int:
     from lib.deployment import DeploymentLayout
+    from lib.paths import RuntimePaths
 
     layout = DeploymentLayout.from_environment()
+    runtime_paths = RuntimePaths.from_home(HOME)
     print(json.dumps({
         "platform": service_manager.platform_kind(),
         "share": str(layout.share),
@@ -941,6 +947,8 @@ def cmd_paths(_args) -> int:
             if service_manager.platform_kind() == "macos"
             else layout.cache_dir / "logs"),
         "service": str(service_manager.definition_path(HOME)),
+        "runtime_service": str(service_manager.runtime_definition_path(HOME)),
+        "runtime_socket": str(runtime_paths.runtime_socket),
         "toolchain": str((layout.share / "toolchain").resolve(strict=False)),
     }, indent=2))
     return 0

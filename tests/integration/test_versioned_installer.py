@@ -89,6 +89,9 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     current = share / "current"
     assert current.is_symlink()
     assert (current / "server.py").is_file()
+    assert (current / "runtime.py").is_file()
+    assert (current / "RUNTIME_RELEASE_ID").read_text().strip()
+    assert (current / "RUNTIME_READY").read_text().strip() == "ready"
     assert (current / "SOURCE_REMOTE").read_text().strip()
     assert (current / "skills/manifest.json").is_file()
     assert (current / "scripts/agent_tasks.py").is_file()
@@ -108,9 +111,12 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     assert (home / ".claude/skills/clarp-issue-reporting").is_symlink()
     assert (home / ".codex/skills/clarp-issue-reporting").is_symlink()
     assert (share / "server.py").resolve() == (current / "server.py").resolve()
+    assert (share / "runtime.py").resolve() == (current / "runtime.py").resolve()
+    assert (home / ".config/systemd/user/clarp-runtime.service").is_file()
     for name in (
         "clarp-admin", "clarp-tui", "clarp-agent-tasks", "clarp-agent-artifacts",
         "clarp-media-publish", "clarp-agent-bg",
+        "clarp-runtime-service",
     ):
         wrapper = home / ".local/bin" / name
         assert wrapper.is_file()
@@ -119,6 +125,7 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
         assert f"fallback={current.resolve()}" in wrapper.read_text()
 
     first_release = current.resolve()
+    first_runtime_release = (first_release / "RUNTIME_RELEASE_ID").read_text()
     stale_toolchain = share / "toolchains/stale"
     (stale_toolchain / "bin").mkdir(parents=True)
     stale_codex = stale_toolchain / "bin/codex"
@@ -134,11 +141,14 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     env["PATH"] = f"{home / '.local/bin'}:{external_bin}:{env['PATH']}"
     subprocess.run([str(ROOT / "install.sh")], cwd=ROOT, env=env, check=True)
     second_release = current.resolve()
+    assert (second_release / "RUNTIME_RELEASE_ID").read_text() != first_runtime_release
     assert (second_release / "TOOLCHAIN_MODE").read_text().strip() == "none"
     assert not (share / "toolchain").exists()
     service_path = (second_release / "SERVICE_PATH").read_text().strip().split(":")
     assert str(home / ".local/bin") not in service_path
     assert str(external_bin) in service_path
+    assert "/usr/sbin" in service_path
+    assert "/sbin" in service_path
     previous_unit = (home / ".config/systemd/user/clarp.service").read_text()
     assert second_release != first_release
     assert first_release.is_dir(), "same-version reinstall must retain active predecessor"

@@ -138,6 +138,8 @@ def test_paths_reports_platform_runtime_locations(tmp_path, monkeypatch, capsys)
     assert value["share"] == str(tmp_path / "share")
     assert value["config"] == str(tmp_path / "config/config.toml")
     assert value["toolchain"] == str(tmp_path / "share/toolchain")
+    assert value["runtime_socket"] == str(tmp_path / "cache/runtime.sock")
+    assert value["runtime_service"].endswith("clarp-runtime.service")
 
 
 def test_sessions_returns_platform_independent_agent_inventory(capsys):
@@ -766,10 +768,13 @@ def test_doctor_uses_recorded_locked_python(tmp_path, monkeypatch, capsys):
     config_module.reset_cache()
     monkeypatch.setattr(admin, "installed_command", lambda _name: "/tool")
     monkeypatch.setattr(admin.service_manager, "is_active", lambda: True)
+    monkeypatch.setattr(admin.service_manager, "is_runtime_active", lambda: True)
     monkeypatch.setattr(admin.shutil, "which", lambda _name: None)
 
     assert admin.cmd_doctor(None) == 0
-    assert "locked python" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "locked python" in output
+    assert "agent runtime: active" in output
 
 
 def test_doctor_fails_for_missing_configured_apns_key(tmp_path, monkeypatch, capsys):
@@ -793,6 +798,7 @@ def test_doctor_fails_for_missing_configured_apns_key(tmp_path, monkeypatch, cap
     config_module.reset_cache()
     monkeypatch.setattr(admin, "installed_command", lambda _name: "/tool")
     monkeypatch.setattr(admin.service_manager, "is_active", lambda: True)
+    monkeypatch.setattr(admin.service_manager, "is_runtime_active", lambda: True)
 
     assert admin.cmd_doctor(None) == 1
     assert "FAIL  APNs signing key" in capsys.readouterr().out

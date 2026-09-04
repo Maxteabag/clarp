@@ -1,5 +1,7 @@
 [Unit]
 Description=Clarp server (agent dispatch, voice, audio relay)
+Wants=clarp-runtime.service
+After=clarp-runtime.service
 
 [Service]
 # @@SHARE@@ is filled in by install.sh from the resolved data dir, so a
@@ -16,6 +18,7 @@ Environment="CLARP_CACHE_DIR=@@CACHE_ENV@@"
 Environment="CLAUDE_PWA_CONFIG=@@CONFIG_FILE_ENV@@"
 Environment="CLAUDE_PWA_DB=@@DATABASE_ENV@@"
 Environment="CLAUDE_PWA_LOG_DIR=@@LOG_ENV@@"
+@@EXTRA_ENVIRONMENT@@
 UMask=0077
 ExecStart=@@PYTHON@@ @@SERVER@@
 Restart=on-failure

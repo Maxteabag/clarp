@@ -28,6 +28,7 @@ if [[ "$PLATFORM" == "Darwin" ]]; then
     SHARE="${CLARP_SHARE_DIR:-$HOME/Library/Application Support/Clarp}"
     CACHE_DIR="${CLARP_CACHE_DIR:-$HOME/Library/Caches/Clarp}"
     SERVICE_FILE="$HOME/Library/LaunchAgents/com.maxteabag.clarp.server.plist"
+    RUNTIME_SERVICE_FILE="$HOME/Library/LaunchAgents/com.maxteabag.clarp.runtime.plist"
 else
     XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
     XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -36,6 +37,7 @@ else
     SHARE="${CLARP_SHARE_DIR:-$XDG_DATA_HOME/clarp}"
     CACHE_DIR="${CLARP_CACHE_DIR:-$XDG_CACHE_HOME/clarp}"
     SERVICE_FILE="$XDG_CONFIG_HOME/systemd/user/clarp.service"
+    RUNTIME_SERVICE_FILE="$XDG_CONFIG_HOME/systemd/user/clarp-runtime.service"
 fi
 RELEASES="$SHARE/releases"
 BIN="$HOME/.local/bin"
@@ -103,6 +105,7 @@ echo ">> staging versioned Clarp release"
 STAGE="$(mktemp -d "$RELEASES/.install.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 cp "$REPO_DIR/server/server.py" "$STAGE/server.py"
+cp "$REPO_DIR/server/runtime.py" "$STAGE/runtime.py"
 cp -r "$REPO_DIR/server/lib" "$STAGE/lib"
 cp -r "$REPO_DIR/static" "$STAGE/static"
 mkdir -p "$STAGE/scripts" "$STAGE/bin"
@@ -168,6 +171,27 @@ fi
 printf '%s\n' "$DEPLOYED_VERSION" > "$STAGE/DEPLOYED_VERSION"
 RELEASE_ID="${DEPLOYED_VERSION}-$(date +%Y%m%d%H%M%S)-$$"
 printf '%s\n' "$RELEASE_ID" > "$STAGE/DEPLOYED_RELEASE_ID"
+"$PYTHON" - "$STAGE" <<'PY' > "$STAGE/RUNTIME_RELEASE_ID"
+import hashlib
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256()
+paths = [root / "runtime.py", root / "requirements.txt", root / "uv.lock"]
+paths.extend(sorted((root / "lib").rglob("*.py")))
+paths.extend(sorted((root / "toolchain").glob("*")))
+for path in paths:
+    if not path.is_file():
+        continue
+    relative = path.relative_to(root).as_posix().encode()
+    digest.update(len(relative).to_bytes(4, "big"))
+    digest.update(relative)
+    contents = path.read_bytes()
+    digest.update(len(contents).to_bytes(8, "big"))
+    digest.update(contents)
+print(digest.hexdigest()[:24])
+PY
 RELEASE="$RELEASES/$RELEASE_ID"
 mv "$STAGE" "$RELEASE"
 trap - EXIT
@@ -227,6 +251,8 @@ fi
 ACTIVATED=0
 UNIT_BACKUP="$SHARE/.clarp.service.previous"
 UNIT_HAD_PREVIOUS=0
+RUNTIME_UNIT_BACKUP="$SHARE/.clarp-runtime.service.previous"
+RUNTIME_UNIT_HAD_PREVIOUS=0
 EXTERNAL_BACKUP="$SHARE/.external-backup.$$"
 EXTERNAL_MANIFEST="$EXTERNAL_BACKUP/manifest"
 mkdir -p "$EXTERNAL_BACKUP"
@@ -276,12 +302,17 @@ backup_external "$BIN/clarp-media-publish"
 backup_external "$BIN/clarp-agent-bg"
 backup_external "$BIN/clarp-github-workflow-artifact"
 backup_external "$BIN/clarp-message-watch"
+backup_external "$BIN/clarp-runtime-service"
 backup_external "$HOME/.claude/settings.json"
 backup_external "$CFG_DIR/user-values.md"
-rm -f "$UNIT_BACKUP"
+rm -f "$UNIT_BACKUP" "$RUNTIME_UNIT_BACKUP"
 if [[ -f "$SERVICE_FILE" ]]; then
     cp "$SERVICE_FILE" "$UNIT_BACKUP"
     UNIT_HAD_PREVIOUS=1
+fi
+if [[ -f "$RUNTIME_SERVICE_FILE" ]]; then
+    cp "$RUNTIME_SERVICE_FILE" "$RUNTIME_UNIT_BACKUP"
+    RUNTIME_UNIT_HAD_PREVIOUS=1
 fi
 rollback_failed_activation() {
     _rc=$?
@@ -296,9 +327,10 @@ rollback_failed_activation() {
                 "$SHARE/.current.rollback" "$SHARE/current"
         else
             rm -f "$SHARE/current"
-            for _name in server.py lib static scripts skills plugin systemd \
+            for _name in server.py runtime.py lib static scripts skills plugin systemd \
                          docs requirements.txt pyproject.toml uv.lock toolchain \
-                         DEPLOYED_VERSION DEPLOYED_RELEASE_ID SOURCE_REMOTE; do
+                         DEPLOYED_VERSION DEPLOYED_RELEASE_ID RUNTIME_RELEASE_ID \
+                         SOURCE_REMOTE; do
                 rm -rf "$SHARE/$_name"
             done
         fi
@@ -315,9 +347,14 @@ rollback_failed_activation() {
         else
             rm -f "$SERVICE_FILE"
         fi
+        if [[ $RUNTIME_UNIT_HAD_PREVIOUS -eq 1 && -f "$RUNTIME_UNIT_BACKUP" ]]; then
+            cp "$RUNTIME_UNIT_BACKUP" "$RUNTIME_SERVICE_FILE"
+        else
+            rm -f "$RUNTIME_SERVICE_FILE"
+        fi
         PYTHONPATH="$RELEASE" "$PYTHON" -c \
-            'import sys; from lib import service_manager; service_manager.restore_after_failed_install(had_previous=bool(int(sys.argv[1])))' \
-            "$UNIT_HAD_PREVIOUS" >/dev/null 2>&1 || true
+            'import sys; from lib import service_manager; service_manager.restore_after_failed_install(had_previous=bool(int(sys.argv[1])), had_runtime_previous=bool(int(sys.argv[2])))' \
+            "$UNIT_HAD_PREVIOUS" "$RUNTIME_UNIT_HAD_PREVIOUS" >/dev/null 2>&1 || true
         restore_external
     fi
     exit $_rc
@@ -331,9 +368,10 @@ ln -s "$RELEASE" "$SHARE/.current.next"
 "$PYTHON" -c 'import os,sys; os.replace(sys.argv[1],sys.argv[2])' \
     "$SHARE/.current.next" "$SHARE/current"
 ACTIVATED=1
-for _name in server.py lib static scripts skills plugin systemd docs \
+for _name in server.py runtime.py lib static scripts skills plugin systemd docs \
              requirements.txt pyproject.toml uv.lock toolchain \
-             DEPLOYED_VERSION DEPLOYED_RELEASE_ID SOURCE_REMOTE; do
+             DEPLOYED_VERSION DEPLOYED_RELEASE_ID RUNTIME_RELEASE_ID \
+             SOURCE_REMOTE; do
     _target="$SHARE/current/$_name"
     [[ -e "$_target" ]] || continue
     ln -sfn "$_target" "$SHARE/$_name"
@@ -391,10 +429,11 @@ write_python_wrapper clarp-media-publish scripts/clarp-media-publish.py
 write_python_wrapper clarp-agent-bg scripts/agent_bg.py
 write_python_wrapper clarp-github-workflow-artifact scripts/github_workflow_artifact.py
 write_python_wrapper clarp-message-watch skills/clarp-message-watch/scripts/watch_messages.py
+write_python_wrapper clarp-runtime-service runtime.py
 mkdir -p "$SHARE/bin"
 for _helper in clarp-admin clarp-tui clarp-agent-tasks clarp-agent-artifacts \
         clarp-media-publish clarp-agent-bg clarp-github-workflow-artifact \
-        clarp-message-watch; do
+        clarp-message-watch clarp-runtime-service; do
     cp "$BIN/$_helper" "$SHARE/bin/$_helper"
 done
 chmod 700 "$SHARE/bin" "$SHARE/bin"/*
@@ -476,7 +515,7 @@ for _t in clarp claude codex agy node ffmpeg uv git; do
     fi
     [[ -n "$_loc" ]] && _path_dirs+=( "$(cd "$(dirname "$_loc")" && pwd)" )
 done
-_path_dirs+=( /usr/local/bin /usr/bin /bin )
+_path_dirs+=( /usr/local/bin /usr/bin /bin /usr/sbin /sbin )
 
 SERVICE_PATH=""
 service_dir_is_safe() {
@@ -514,6 +553,38 @@ if [[ "$TOOLCHAIN_MODE" == "managed" ]]; then
 elif [[ -L "$SHARE/toolchain" ]]; then
     rm -f "$SHARE/toolchain"
 fi
+
+# The running runtime watches this identity to roll onto runtime-affecting
+# releases only after its active turns drain. Publish RUNTIME_READY last: the
+# current symlink already points here, so observing an incomplete release must
+# never make the old runtime exit early.
+"$PYTHON" - "$RELEASE" "$PYTHON" "$SERVICE_PATH" "$CFG_DIR/config.toml" <<'PY'
+import hashlib
+import json
+import os
+import pathlib
+import sys
+import tomllib
+
+root = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256((root / "RUNTIME_RELEASE_ID").read_bytes())
+for value in (sys.argv[2], sys.argv[3]):
+    encoded = value.encode()
+    digest.update(len(encoded).to_bytes(4, "big"))
+    digest.update(encoded)
+try:
+    configured = tomllib.loads(pathlib.Path(sys.argv[4]).read_text()).get("env", {})
+except (OSError, tomllib.TOMLDecodeError):
+    configured = {}
+encoded = json.dumps(configured, sort_keys=True, separators=(",", ":")).encode()
+digest.update(encoded)
+ambient_socket = os.environ.get("SSH_AUTH_SOCK", "").encode()
+digest.update(ambient_socket)
+temporary = root / ".RUNTIME_RELEASE_ID.next"
+temporary.write_text(digest.hexdigest()[:24] + "\n")
+os.replace(temporary, root / "RUNTIME_RELEASE_ID")
+(root / "RUNTIME_READY").write_text("ready\n")
+PY
 
 # ---- per-user service ----------------------------------------------------
 echo ">> installing $( [[ "$PLATFORM" == "Darwin" ]] && echo launchd || echo systemd ) service (python=$PYTHON)"
@@ -568,7 +639,7 @@ SRV_BIND=$(awk '
 echo "Done. Clarp is running at http://${SRV_BIND:-127.0.0.1}:${SRV_PORT:-7682}/"
 printf '%s\n' "ok" > "$RELEASE/INSTALL_OK"
 ACTIVATED=0
-rm -f "$UNIT_BACKUP"
+rm -f "$UNIT_BACKUP" "$RUNTIME_UNIT_BACKUP"
 rm -rf "$EXTERNAL_BACKUP"
 trap - EXIT
 echo
