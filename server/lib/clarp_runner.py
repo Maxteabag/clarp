@@ -266,7 +266,7 @@ def spawn_turn(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        bufsize=1,
+        bufsize=1, start_new_session=(os.name == "posix"),
         env=env,
     )
     attach_stderr_drain(proc)
@@ -280,7 +280,9 @@ def spawn_turn(
             proc.stdin.close()
     except (BrokenPipeError, OSError) as e:
         log_exception("clarpStdinWriteFail", e, detail=trace_id)
-    handle = TurnHandle(proc=proc, drain_thread=None)   # type: ignore[arg-type]
+    handle = TurnHandle(
+        proc=proc, drain_thread=None,
+        process_group=proc.pid if os.name == "posix" else None)   # type: ignore[arg-type]
     if agent_id and not isolated:
         _register(agent_id, handle)
     drain = threading.Thread(
@@ -352,7 +354,7 @@ def _drain_stdout(
                             accepted = on_session_init(sid)
                             if accepted is False:
                                 if proc.poll() is None:
-                                    proc.terminate()
+                                    handle.terminate() if handle else proc.terminate()
                                 if on_error is not None:
                                     on_error("backend session binding rejected")
                                 return

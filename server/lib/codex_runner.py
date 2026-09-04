@@ -346,11 +346,13 @@ def spawn_turn(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        bufsize=1,
+        bufsize=1, start_new_session=(os.name == "posix"),
         env={**os.environ, "CLAUDE_PWA_SESSION": session},
     )
     attach_stderr_drain(proc)
-    handle = TurnHandle(proc=proc, drain_thread=None)   # type: ignore[arg-type]
+    handle = TurnHandle(
+        proc=proc, drain_thread=None,
+        process_group=proc.pid if os.name == "posix" else None)   # type: ignore[arg-type]
     runtime_agent_id = "" if isolated else agent_id
     if runtime_agent_id:
         _register(runtime_agent_id, handle)
