@@ -1,0 +1,42 @@
+app-id: com.maxteabag.Clarp
+runtime: org.kde.Platform
+runtime-version: '6.11'
+sdk: org.kde.Sdk
+command: clarp-desktop
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  - --talk-name=org.freedesktop.secrets
+  - --own-name=org.mpris.MediaPlayer2.Clarp
+
+cleanup:
+  - /include
+  - /lib/cmake
+  - /lib/pkgconfig
+  - /share/doc
+  - /share/man
+  - '*.a'
+  - '*.la'
+
+modules:
+  - name: clarp-native-desktop
+    buildsystem: cmake-ninja
+    subdir: desktop
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_TESTING=OFF
+      - -DCLARP_WARNINGS_AS_ERRORS=ON
+    sources:
+      - type: dir
+        path: ../../..
+        skip:
+          - .git
+          - .venv
+          - node_modules
+          - desktop/build
+          - src-tauri/target
