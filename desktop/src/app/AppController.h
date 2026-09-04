@@ -103,6 +103,7 @@ class AppController : public QObject {
 
   public:
     explicit AppController(QObject* parent = nullptr);
+    ~AppController() override;
 
     [[nodiscard]] AgentListModel* agents();
     [[nodiscard]] AgentListModel* archivedAgents();

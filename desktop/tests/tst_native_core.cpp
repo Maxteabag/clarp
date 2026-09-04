@@ -604,6 +604,7 @@ class NativeCoreTest final : public QObject {
     void transcriptCacheRestoresDurableRowsWithoutStaleRegression();
     void credentialStoreRoundTrip();
     void appControllerCompletesCoreProtocolFlow();
+    void connectedControllerShutsDownWithoutLateSseCallbacks();
     void contactsExcludeActivePersonas();
     void microphoneCanCaptureNativePcm();
     void backgroundTranscriptionsKeepTheirChatOwnership();
@@ -1848,6 +1849,20 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
         qunsetenv("CLARP_SHARED_FILESYSTEM_HOST");
     else
         qputenv("CLARP_SHARED_FILESYSTEM_HOST", previousSharedFilesystem);
+}
+
+void NativeCoreTest::connectedControllerShutsDownWithoutLateSseCallbacks() {
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
+    qputenv("CLARP_TOKEN", "test-token");
+    auto controller = std::make_unique<AppController>();
+    QTRY_VERIFY_WITH_TIMEOUT(controller->connected(), 3'000);
+    QTRY_COMPARE_WITH_TIMEOUT(controller->agents()->rowCount(), 1, 3'000);
+    controller.reset();
+    qunsetenv("CLARP_BASE_URL");
+    qunsetenv("CLARP_TOKEN");
+    QVERIFY(true);
 }
 
 void NativeCoreTest::contactsExcludeActivePersonas() {

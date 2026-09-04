@@ -203,6 +203,14 @@ AppController::AppController(QObject* parent)
     });
 }
 
+AppController::~AppController() {
+    // SseClient::stop() emits connectedChanged. Stop and detach it while all
+    // model members are still alive; waiting for member destruction would run
+    // the constructor lambda after those models have already been destroyed.
+    disconnect(&m_sse, nullptr, this, nullptr);
+    m_sse.stop();
+}
+
 AgentListModel* AppController::agents() { return &m_agents; }
 
 AgentListModel* AppController::archivedAgents() { return &m_archivedAgents; }
