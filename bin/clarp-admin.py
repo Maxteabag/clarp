@@ -870,6 +870,27 @@ def cmd_doctor(_args) -> int:
         failures += not ok
         print(f"{'OK' if ok else 'FAIL':<5} service: {'active' if ok else 'inactive'}")
     try:
+        from lib import config as config_module
+
+        config_module.reset_cache()
+        cfg = config_module.load(CONFIG_FILE)
+        raw_key = cfg.apns_key_path or os.environ.get("APNS_KEY_PATH", "")
+        credential_parts = (raw_key, cfg.apns_key_id, cfg.apns_team_id)
+        if not any(credential_parts):
+            print("OK    APNs push: not configured (optional)")
+        elif not all(credential_parts):
+            failures += 1
+            print("FAIL  APNs push: incomplete key path, key id, or team id")
+        else:
+            key_file = Path(cfg.apns_key_file())
+            ok = cfg.apns_enabled()
+            failures += not ok
+            suffix = "" if ok else " (missing or unreadable)"
+            print(f"{'OK' if ok else 'FAIL':<5} APNs signing key: {key_file}{suffix}")
+    except Exception as exc:  # noqa: BLE001 - doctor reports rather than crashes
+        failures += 1
+        print(f"FAIL  APNs push: {exc}")
+    try:
         server_root = SHARE if (SHARE / "lib").is_dir() else REPO / "server"
         sys.path.insert(0, str(server_root))
         from lib.tts_providers import status as tts_status

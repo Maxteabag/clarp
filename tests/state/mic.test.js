@@ -22,6 +22,7 @@ vi.mock('../../web/src/stores/audio.svelte.js', () => ({
   scheduler: { flushOlderThan() {} },
   tick() {},
   unlockAudio,
+  addConditionSource() {},
 }));
 vi.mock('../../web/src/stores/send.svelte.js', () => ({
   send: { captureTarget: '', pendingHandsFree: false },
