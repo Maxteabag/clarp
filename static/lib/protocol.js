@@ -76,7 +76,8 @@ export const ClientAction = Object.freeze({
   RECORD: 'record',
   RECORD_TOGGLE: 'record-toggle',
   STOP_AGENT: 'stop-agent',
-  VALID: new Set(['record', 'record-toggle', 'stop-agent']),
+  CONTROLLER_EVENT: 'controller-event',
+  VALID: new Set(['record', 'record-toggle', 'stop-agent', 'controller-event']),
 });
 
 export const ClipStatus = Object.freeze({

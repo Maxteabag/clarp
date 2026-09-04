@@ -33,6 +33,10 @@ from lib.agent_store import (  # noqa: E402
 )
 from lib.agent_lifecycle import AgentLifecycleError, AgentLifecycleService  # noqa: E402
 from lib.config import persona_personality  # noqa: E402
+from lib.controller_events import (  # noqa: E402
+    ControllerEventError,
+    build_controller_event,
+)
 from lib.context import ServerContext  # noqa: E402
 from lib import db  # noqa: E402
 from lib import eventlog  # noqa: E402
@@ -710,6 +714,7 @@ class Handler(BaseHTTPRequestHandler):
     _LIMITED_DEVICE_POST_EXACT = frozenset({
         "/send", "/transcribe", "/upload", "/select", "/focus",
         "/clips/ack", "/clog", "/location", "/calendar/response",
+        "/remote-action",
     })
 
     def _device_forbidden(self, path: str, method: str) -> bool:
@@ -847,10 +852,14 @@ class Handler(BaseHTTPRequestHandler):
         from urllib.parse import parse_qs, urlparse
         qs = parse_qs(urlparse(self.path).query)
         action = (qs.get("action", [""])[0] or "").strip().lower()
-        if action not in ClientAction.valid():
+        if (action not in ClientAction.valid()
+                or action == ClientAction.CONTROLLER_EVENT):
             return self._send(400, b'{"error":"unknown action"}', "application/json")
-        self.ctx.stream.broadcast({"type": SSEType.REMOTE_ACTION, "action": action,
-                          "ts": int(time.time() * 1000)})
+        self.ctx.stream.broadcast_ephemeral({
+            "type": SSEType.REMOTE_ACTION,
+            "action": action,
+            "ts": int(time.time() * 1000),
+        })
         log("remoteAction", f"GET {action}")
         # Tiny no-cache HTML so Safari shows something blank instead of raw JSON.
         body = b"<!doctype html><meta charset=utf-8><title>ok</title>"
@@ -2576,14 +2585,33 @@ class Handler(BaseHTTPRequestHandler):
         """Receive a fire-and-forget remote action (typically from an iOS
         Shortcut driving the Action Button). Broadcasts it over SSE so the
         already-running PWA can act without a page reload."""
-        data = self._read_json() or {}
+        data = self._read_json()
+        if data is None:
+            return self._send(400, b'{"error":"bad json"}', "application/json")
         action = (data.get("action") or "").strip().lower()
         if action not in ClientAction.valid():
             return self._send(400, b'{"error":"unknown action"}', "application/json")
-        self.ctx.stream.broadcast({"type": SSEType.REMOTE_ACTION, "action": action,
-                          "ts": int(time.time() * 1000)})
+        if action == ClientAction.CONTROLLER_EVENT:
+            try:
+                event = build_controller_event(data)
+            except ControllerEventError as exc:
+                return self._send(
+                    400,
+                    json.dumps({"error": str(exc)}).encode(),
+                    "application/json",
+                )
+        else:
+            event = {
+                "type": SSEType.REMOTE_ACTION,
+                "action": action,
+                "ts": int(time.time() * 1000),
+            }
+        self.ctx.stream.broadcast_ephemeral(event)
         log("remoteAction", action)
-        return self._send(200, b'{"ok":true}', "application/json")
+        body = {"ok": True}
+        if action == ClientAction.CONTROLLER_EVENT:
+            body["controller_event_id"] = event["controller_event_id"]
+        return self._send(200, json.dumps(body).encode(), "application/json")
 
     # --- POST handlers ---------------------------------------------------
 
