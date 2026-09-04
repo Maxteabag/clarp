@@ -26,11 +26,19 @@ fi
 cmake -E remove_directory "$BUILD_DIR/cmake"
 cmake -E remove_directory "$APP_DIR"
 
-cmake -S "$DESKTOP_DIR" -B "$BUILD_DIR/cmake" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX=/usr \
-  -DBUILD_TESTING=OFF \
+cmake_args=(
+  -S "$DESKTOP_DIR"
+  -B "$BUILD_DIR/cmake"
+  -G Ninja
+  -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_INSTALL_PREFIX=/usr
+  -DBUILD_TESTING=OFF
   -DCLARP_WARNINGS_AS_ERRORS=ON
+)
+if [[ -n "${CLARP_RELEASE_VERSION:-}" ]]; then
+  cmake_args+=("-DCLARP_DESKTOP_VERSION=$CLARP_RELEASE_VERSION")
+fi
+cmake "${cmake_args[@]}"
 cmake --build "$BUILD_DIR/cmake" --parallel
 DESTDIR="$APP_DIR" cmake --install "$BUILD_DIR/cmake"
 
@@ -46,7 +54,11 @@ for QT_LICENSE in \
 done
 
 export QML_SOURCES_PATHS="$DESKTOP_DIR/qml"
-export LDAI_OUTPUT="${CLARP_APPIMAGE_OUTPUT:-Clarp-native-x86_64.AppImage}"
+APPIMAGE_OUTPUT="${CLARP_APPIMAGE_OUTPUT:-Clarp-native-x86_64.AppImage}"
+export LDAI_OUTPUT="$APPIMAGE_OUTPUT"
+if [[ -n "${CLARP_RELEASE_VERSION:-}" ]]; then
+  export LINUXDEPLOY_OUTPUT_VERSION="$CLARP_RELEASE_VERSION"
+fi
 # AppStream metadata is validated by the quality gate and CI. Keeping the
 # packager offline makes release builds reproducible and avoids a DNS failure
 # being mistaken for invalid local metadata.
@@ -67,3 +79,10 @@ linuxdeploy \
   --icon-file "$APP_DIR/usr/share/icons/hicolor/scalable/apps/com.maxteabag.Clarp.svg" \
   --plugin qt \
   --output appimage
+
+# appimagetool writes zsync metadata in its working directory even when the
+# AppImage output is absolute. Keep both release files beside each other.
+GENERATED_ZSYNC="$PWD/$(basename "$APPIMAGE_OUTPUT").zsync"
+if [[ -f "$GENERATED_ZSYNC" && ! -f "$APPIMAGE_OUTPUT.zsync" ]]; then
+  mv "$GENERATED_ZSYNC" "$APPIMAGE_OUTPUT.zsync"
+fi

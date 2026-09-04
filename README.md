@@ -25,6 +25,15 @@ backends run on the host you install the server on. Designed for use over
 each other without exposing anything to the public internet, but nothing
 about it is Tailscale-specific.
 
+Linux users can download the native Qt desktop client as a self-contained
+AppImage from the [latest GitHub release](https://github.com/Maxteabag/clarp/releases/latest).
+It does not require Qt development packages:
+
+```bash
+chmod +x Clarp-*-x86_64.AppImage
+./Clarp-*-x86_64.AppImage
+```
+
 ## Quick start
 
 Requirements:

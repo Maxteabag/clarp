@@ -1,6 +1,24 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(ClarpDesktop VERSION 0.1.0 LANGUAGES CXX)
+set(CLARP_DESKTOP_VERSION "" CACHE STRING "Clarp release version")
+if(CLARP_DESKTOP_VERSION STREQUAL "")
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../pyproject.toml"
+        clarp_project_version_line
+        REGEX "^version = \"[0-9]+\\.[0-9]+\\.[0-9]+\"$"
+        LIMIT_COUNT 1
+    )
+    string(REGEX REPLACE
+        "^version = \"([0-9]+\\.[0-9]+\\.[0-9]+)\"$"
+        "\\1"
+        CLARP_DESKTOP_VERSION
+        "${clarp_project_version_line}"
+    )
+endif()
+if(NOT CLARP_DESKTOP_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "CLARP_DESKTOP_VERSION must be a semantic version")
+endif()
+
+project(ClarpDesktop VERSION ${CLARP_DESKTOP_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -90,6 +108,9 @@ qt_add_qml_module(clarp-desktop
 )
 
 target_include_directories(clarp-desktop PRIVATE src src/app)
+target_compile_definitions(clarp-desktop PRIVATE
+    CLARP_DESKTOP_VERSION="${PROJECT_VERSION}"
+)
 
 target_link_libraries(clarp-desktop PRIVATE
     Qt6::Core

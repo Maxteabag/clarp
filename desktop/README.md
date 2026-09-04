@@ -10,7 +10,25 @@ microphone transcription, authenticated audio playback, system notifications,
 tray controls, MPRIS media-key integration, a single-instance guard, and
 native Secret Service credential storage.
 
-## Requirements
+## Install a bundled release
+
+Download `Clarp-<version>-x86_64.AppImage` from the
+[latest GitHub release](https://github.com/Maxteabag/clarp/releases/latest),
+make it executable, and run it:
+
+```bash
+chmod +x Clarp-*-x86_64.AppImage
+./Clarp-*-x86_64.AppImage
+```
+
+The AppImage includes Qt, QML, and multimedia libraries. If FUSE is not
+available, run it with `APPIMAGE_EXTRACT_AND_RUN=1`. A `.flatpak` bundle is
+also attached to tagged releases and can be installed with
+`flatpak install ./Clarp-*-x86_64.flatpak`.
+
+## Building from source
+
+Requirements:
 
 - CMake 3.22+
 - Ninja
@@ -77,6 +95,12 @@ backend is a useful low-memory fallback when GPU throughput matters less.
 
 ## Distribution
 
+Every `v*` tag whose version matches `pyproject.toml` runs the native quality
+gates and publishes a versioned AppImage, `.zsync`, SHA-256 checksum, and
+sideloadable Flatpak to the corresponding GitHub Release. The release builder
+uses `packaging/appimage/build-in-flatpak.sh`, pinned packaging tools, and the
+KDE 6.11 SDK.
+
 - Flatpak is the primary sandboxed channel:
 
   ```bash
@@ -90,8 +114,9 @@ backend is a useful low-memory fallback when GPU throughput matters less.
   not against an accidentally partial rolling-distribution upgrade. Set
   `CLARP_APPIMAGE_RUNTIME_FILE=/path/to/runtime-x86_64` for a fully offline
   build; otherwise `appimagetool` downloads its runtime.
-- `packaging/aur/PKGBUILD` and `.SRCINFO` are ready for AUR publication once a
-  matching `v0.1.0` source tag exists. Replace `SKIP` with the release archive
+- `packaging/aur/PKGBUILD` and `.SRCINFO` follow Clarp's repository version and
+  are ready for AUR publication once the matching source tag exists. Replace
+  `SKIP` with the release archive
   checksum before publishing.
 
 AppImage releases must include a checksum and the dependency-license inventory

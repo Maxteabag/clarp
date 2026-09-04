@@ -8,6 +8,7 @@ on:
       - ".github/workflows/desktop-native.yml"
   push:
     branches: [main]
+    tags: ["v*"]
     paths:
       - "desktop/**"
       - "contract/**"
@@ -73,3 +74,79 @@ jobs:
           name: clarp-native-linux-unpackaged
           path: desktop/build/release/clarp-desktop
           if-no-files-found: error
+
+  release-bundles:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: linux
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify release version
+        id: version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          project_version="$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' pyproject.toml | head -n 1)"
+          test "$version" = "$project_version"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install Flatpak tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes flatpak flatpak-builder zsync
+
+      - name: Build bundled AppImage
+        env:
+          CLARP_RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          CLARP_APPIMAGE_TOOL_DIR: ${{ runner.temp }}/clarp-appimage-tools
+        run: desktop/packaging/appimage/build-in-flatpak.sh
+
+      - name: Build sideloadable Flatpak
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          flatpak-builder --user --force-clean \
+            --repo="$GITHUB_WORKSPACE/dist/flatpak-repo" \
+            desktop/build/flatpak-release \
+            desktop/packaging/flatpak/com.maxteabag.Clarp.yml
+          flatpak build-bundle \
+            --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            "$GITHUB_WORKSPACE/dist/flatpak-repo" \
+            "$GITHUB_WORKSPACE/dist/Clarp-$VERSION-x86_64.flatpak" \
+            com.maxteabag.Clarp
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: clarp-desktop-${{ steps.version.outputs.version }}-x86_64
+          path: |
+            dist/*.AppImage
+            dist/*.AppImage.zsync
+            dist/*.AppImage.sha256
+            dist/*.flatpak
+          if-no-files-found: error
+
+      - name: Publish GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          assets=(
+            "dist/Clarp-$VERSION-x86_64.AppImage"
+            "dist/Clarp-$VERSION-x86_64.AppImage.zsync"
+            "dist/Clarp-$VERSION-x86_64.AppImage.sha256"
+            "dist/Clarp-$VERSION-x86_64.flatpak"
+          )
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --verify-tag \
+              --generate-notes \
+              --latest \
+              --title "Clarp $GITHUB_REF_NAME"
+          fi
