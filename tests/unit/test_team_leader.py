@@ -148,6 +148,30 @@ def test_scheduler_run_once_delivers_ticks(tmp_path):
     assert "[Automated team check]" in sent[0][1]
 
 
+def test_one_leader_gets_one_consolidated_tick_for_multiple_teams(tmp_path):
+    leader = agents_db.create_agent(
+        persona="Lena", voice_id="V", cwd=str(tmp_path), session="lena")
+    for index in range(2):
+        worker = agents_db.create_agent(
+            persona=f"Worker {index}", voice_id="V", cwd=str(tmp_path),
+            session=f"worker-{index}")
+        team = team_store.create_team(f"Team {index}")
+        team_store.add_member(team["team_id"], leader)
+        team_store.add_member(team["team_id"], worker)
+        team_store.set_leader(team["team_id"], leader)
+        agents_db.record_state(worker, AgentState.INTERRUPTED)
+    sent = []
+    sched = team_leader.TeamLeaderScheduler(
+        send_tick=lambda session, text: sent.append((session, text)))
+
+    delivered = sched.run_once()
+
+    assert delivered == 1
+    assert [session for session, _text in sent] == ["lena"]
+
+
+
+
 def test_leader_noop_is_suppressed_from_live_and_durable_messages(tmp_path):
     _team, leader, _worker = _team_with_leader(tmp_path)
     bsid = "leader-session"
