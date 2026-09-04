@@ -1117,13 +1117,13 @@ class TurnDispatchService:
             self._schedule_retry(spec, attempt, state, msg)
             return
         if category in error_classify.NOTIFY:
+            self._mark_interrupted(spec, category, msg, attempts=attempt)
             if spec.origin == "heartbeat":
                 try:
                     from . import heartbeat
-                    heartbeat.record_heartbeat_noop(spec.agent_id)
+                    heartbeat.record_heartbeat_noop(spec.agent_id, is_interrupted=True)
                 except Exception as exc:  # noqa: BLE001
                     log_exception("heartbeatFailureNoopFail", exc, detail=spec.agent_id)
-            self._mark_interrupted(spec, category, msg, attempts=attempt)
             return
         # Unrecognised failure: keep the old behaviour — flip to IDLE so the
         # UI doesn't hang on THINKING, and log the turn as failed.
