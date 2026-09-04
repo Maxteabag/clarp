@@ -2,7 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+ROOT_DIR="${CLARP_SOURCE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+ROOT_DIR="$(cd "$ROOT_DIR" && pwd)"
 OUTPUT_DIR="${CLARP_APPIMAGE_OUTPUT_DIR:-$ROOT_DIR/dist}"
 TOOL_DIR="${CLARP_APPIMAGE_TOOL_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/clarp/appimage-tools}"
 VERSION="${CLARP_RELEASE_VERSION:-}"
@@ -39,7 +40,7 @@ fetch_pinned() {
      [[ "$(sha256sum "$destination" | cut -d' ' -f1)" == "$expected" ]]; then
     return
   fi
-  curl --fail --location --retry 3 --output "$temporary" "$url"
+  curl --fail --location --retry 3 --retry-all-errors --output "$temporary" "$url"
   if [[ "$(sha256sum "$temporary" | cut -d' ' -f1)" != "$expected" ]]; then
     rm -f "$temporary"
     printf 'checksum mismatch for %s\n' "$name" >&2
@@ -73,17 +74,20 @@ UPDATE_REPOSITORY="${CLARP_UPDATE_REPOSITORY:-clarp}"
 flatpak run --user \
   --filesystem="$ROOT_DIR" \
   --filesystem="$OUTPUT_DIR" \
+  --filesystem="$SCRIPT_DIR" \
   --filesystem="$TOOL_DIR" \
   --env=APPIMAGE_EXTRACT_AND_RUN=1 \
   --env=CLARP_APPIMAGE_OUTPUT="$OUTPUT_DIR/$IMAGE_NAME" \
   --env=CLARP_APPIMAGE_RUNTIME_FILE="$TOOL_DIR/runtime-x86_64" \
+  --env=CLARP_APPIMAGE_BUILDER="$SCRIPT_DIR/build-appimage.sh" \
+  --env=CLARP_DESKTOP_SOURCE_DIR="$ROOT_DIR/desktop" \
   --env=CLARP_RELEASE_VERSION="$VERSION" \
   --env=CLARP_SOURCE_ROOT="$ROOT_DIR" \
   --env=CLARP_TOOLS_DIR="$TOOL_DIR" \
   --env=LDAI_UPDATE_INFORMATION="gh-releases-zsync|$UPDATE_OWNER|$UPDATE_REPOSITORY|latest|Clarp-*-x86_64.AppImage.zsync" \
   --command=bash \
   org.kde.Sdk//6.11 \
-  -lc 'export PATH="$CLARP_TOOLS_DIR:$PATH"; cd "$CLARP_SOURCE_ROOT/desktop"; exec packaging/appimage/build-appimage.sh'
+  -lc 'export PATH="$CLARP_TOOLS_DIR:$PATH"; cd "$CLARP_SOURCE_ROOT/desktop"; exec "$CLARP_APPIMAGE_BUILDER"'
 
 if [[ ! -x "$OUTPUT_DIR/$IMAGE_NAME" ]]; then
   printf 'AppImage output is missing\n' >&2

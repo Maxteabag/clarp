@@ -2,7 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DESKTOP_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+DESKTOP_DIR="${CLARP_DESKTOP_SOURCE_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+DESKTOP_DIR="$(cd "$DESKTOP_DIR" && pwd)"
 BUILD_DIR="${CLARP_APPIMAGE_BUILD_DIR:-$DESKTOP_DIR/build/appimage}"
 APP_DIR="$BUILD_DIR/AppDir"
 
