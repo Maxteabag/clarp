@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -22,7 +23,16 @@ class TurnHandle:
         return self.proc.pid
 
     def wait(self, timeout: float | None = None) -> int:
-        return self.proc.wait(timeout=timeout)
+        started = time.monotonic()
+        return_code = self.proc.wait(timeout=timeout)
+        drain = self.drain_thread
+        if drain is not None and drain is not threading.current_thread():
+            remaining = (None if timeout is None else
+                         max(0.0, timeout - (time.monotonic() - started)))
+            drain.join(timeout=remaining)
+            if drain.is_alive():
+                raise subprocess.TimeoutExpired(self.proc.args, timeout)
+        return return_code
 
     def is_alive(self) -> bool:
         return self.proc.poll() is None
