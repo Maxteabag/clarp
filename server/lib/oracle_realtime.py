@@ -124,6 +124,7 @@ def _validated_agent_result(
 def _safe_client_event(
     raw: str, *, model: str, voice: str, principal: str = "",
     injected: dict[str, str] | None = None,
+    transcription_model: str = "",
 ) -> str | None:
     """Allow only Oracle events and replace configurable billable contracts."""
     try:
@@ -164,6 +165,8 @@ def _safe_client_event(
                 "tool_choice": "auto",
             },
         }
+        if transcription_model:
+            safe["session"]["audio"]["input"]["transcription"] = {"model": transcription_model}
     elif kind == "input_audio_buffer.append":
         audio = event.get("audio")
         if not isinstance(audio, str) or not audio or len(audio) > 1_500_000:
@@ -269,6 +272,13 @@ def serve(handler) -> None:
         log_exception("oracleRealtimeHandshakeFail", exc)
         return
 
+    journal = None
+    if getattr(cfg, "oracle_diagnostics", False):
+        from .oracle_diagnostics import OracleJournal
+        journal = OracleJournal()
+        journal.record("session.open", {"model": model, "voice": voice})
+    transcription_model = (getattr(cfg, "openai_realtime_transcription_model", "")
+                           if journal else "")
     write_lock = threading.Lock()
     stop = threading.Event()
     injected_delegations: dict[str, str] = {}
@@ -294,6 +304,8 @@ def serve(handler) -> None:
                         incoming = incoming.decode("utf-8")
                     except UnicodeDecodeError:
                         continue
+                if journal:
+                    journal.event("server", str(incoming))
                 if not write_downstream(ws.text_frame(str(incoming))):
                     break
         except Exception as exc:  # noqa: BLE001
@@ -335,13 +347,15 @@ def serve(handler) -> None:
                 continue
             safe = _safe_client_event(
                 raw, model=model, voice=voice, principal=principal,
-                injected=injected_delegations)
+                injected=injected_delegations, transcription_model=transcription_model)
             if safe is None:
                 write_downstream(ws.text_frame(json.dumps({
                     "type": "error",
                     "error": {"message": "Invalid Oracle event"},
                 })))
                 continue
+            if journal:
+                journal.event("client", safe)
             upstream.send(safe)
     except (BrokenPipeError, ConnectionResetError):
         pass
@@ -359,6 +373,8 @@ def serve(handler) -> None:
         except Exception:
             pass
         _release(principal)
+        if journal:
+            journal.close()
         log("oracleRealtimeClose", f"model={model}")
 
 
