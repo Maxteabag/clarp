@@ -19,7 +19,6 @@ from . import viz_archetypes, xdg
 
 IDENTIFIER = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._+:/@ -]{0,239}$')
 EXE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$')
-SHAPES = {'circle', 'box', 'diamond', 'hexagon', 'ring'}
 _LAST_GOOD: dict[str, dict] = {}
 
 
@@ -48,7 +47,7 @@ def seed() -> dict:
 def load() -> dict:
     p = path()
     try:
-        if p.stat().st_size > 4_000_000:
+        if p.stat().st_size > 16_000_000:
             raise ValueError('library too large')
         data = json.loads(p.read_text())
         if not all(isinstance(data.get(k), dict) for k in
@@ -93,11 +92,9 @@ def validate_design(design: dict, library: dict) -> None:
         raise ValueError('invalid entity identity')
     if entity['id'].startswith('repo:') and entity['id'].split(':', 1)[1] in {'null', 'None', 'undefined'}:
         raise ValueError('invented repository')
-    if entity.get('shape', 'circle') not in SHAPES:
-        raise ValueError('unknown drawing primitive; use logic for a custom shape')
     icon = entity.get('icon', 'glyph:?')
-    if not isinstance(icon, str) or not icon.startswith('glyph:') or len(icon) > 30:
-        raise ValueError('icon must be a short glyph; service marks are supplied by the client')
+    if not isinstance(icon, str):
+        raise ValueError('icon must be text')
     if not isinstance(rule.get('exe'), str) or not EXE.fullmatch(rule['exe']):
         raise ValueError('invalid executable')
     if not _identifier(rule.get('verb')):
@@ -120,8 +117,8 @@ def validate_design(design: dict, library: dict) -> None:
     if not isinstance(spec.get('persist'), bool):
         raise ValueError('persist must be boolean')
     logic = entity.get('logic')
-    if logic is not None and (not isinstance(logic, list) or len(logic) > 64):
-        raise ValueError('logic must contain at most 64 drawing commands')
+    if logic is not None and not isinstance(logic, (list, str, dict)):
+        raise ValueError('logic must be serializable source or data')
     merges = design.get('merge', [])
     if not isinstance(merges, list) or any(x not in library['entities'] or x == entity['id'] for x in merges):
         raise ValueError('merge sources must be existing distinct entities')
@@ -139,7 +136,7 @@ def apply(design: dict, expected_revision: int, supersede: str | None = None) ->
         updated = copy.deepcopy(current)
         rule = dict(design['rule'])
         key = rule['exe'] + (':' + rule['sub'] if rule.get('sub') else '')
-        prior = next((d for d in reversed(current['decisions']) if key in d['keys']), None)
+        prior = next((d for d in reversed(current['decisions']) if key in d.get('keys',[])), None)
         if key in current['rules'] and not prior and supersede != 'seed:' + key:
             raise ValueError('seed decision is stable; explicitly supersede seed:' + key)
         if prior and supersede != prior['id']:
@@ -179,7 +176,7 @@ def apply(design: dict, expected_revision: int, supersede: str | None = None) ->
                                      'supersedes': supersede, 'notes': str(design.get('notes', ''))[:1000],
                                      'design': design})
         blob = json.dumps(updated, indent=2, allow_nan=False)
-        if len(blob.encode()) > 4_000_000:
+        if len(blob.encode()) > 16_000_000:
             raise ValueError('library capacity reached')
         fd, tmp = tempfile.mkstemp(dir=p.parent, prefix='.viz-library-')
         try:
@@ -192,4 +189,52 @@ def apply(design: dict, expected_revision: int, supersede: str | None = None) ->
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)
+        return updated
+
+
+def apply_program(program: dict, expected_revision: int, reason: str,
+                  coverage_keys=(), tools=()) -> dict:
+    """Publish actual source modules atomically. No artistic vocabulary gate."""
+    import hashlib
+    import subprocess
+    if not isinstance(program,dict) or not isinstance(program.get('files'),dict):
+        raise ValueError('program.files must be a source-file map')
+    files=program['files']
+    if program.get('entry') not in files: raise ValueError('missing entry source')
+    for name,source in files.items():
+        p=pathlib.PurePosixPath(name)
+        if p.is_absolute() or '..' in p.parts or not name or '\\' in name:
+            raise ValueError('source path escapes the program directory')
+        if not isinstance(source,str): raise ValueError('source must be text')
+    # A syntax check does not execute source. Runtime fault containment belongs
+    # to the opaque-origin worker, including infinite-loop termination.
+    check="const vm=require('node:vm');let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{for(const [n,v] of Object.entries(JSON.parse(s)))if(n.endsWith('.js'))new vm.Script('(function(module,exports,require){'+v+'\\n})',{filename:n});});"
+    out=subprocess.run(['node','-e',check],input=json.dumps(files),text=True,capture_output=True,timeout=10)
+    if out.returncode: raise ValueError('source syntax check failed: '+out.stderr[-1000:])
+    target=path();target.parent.mkdir(parents=True,exist_ok=True)
+    with target.with_suffix('.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        current=load()
+        if current['revision']!=expected_revision: raise ValueError('library changed during source development')
+        updated=copy.deepcopy(current);updated['revision']+=1
+        program=copy.deepcopy(program)
+        program['digest']=hashlib.sha256(json.dumps(files,sort_keys=True).encode()).hexdigest()
+        updated['previous_program']=current.get('program')
+        updated['program']=program
+        updated['scene_coverage']=sorted(set(current.get('scene_coverage',[]))|set(coverage_keys))
+        updated['authored_tools']=sorted(set(current.get('authored_tools',[]))|set(tools))
+        updated['decisions'].append({'id':f"decision:{updated['revision']}",'keys':['world'],
+            'supersedes':f"revision:{expected_revision}",'notes':reason,
+            'source_digest':program['digest'],'source_files':list(files)})
+        # Keep real, inspectable source revisions alongside the active manifest.
+        root=target.parent/'viz-programs'/program['digest']
+        for name,source in files.items():
+            dest=root/name;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_text(source)
+        fd,tmp=tempfile.mkstemp(dir=target.parent,prefix='.viz-program-')
+        try:
+            with os.fdopen(fd,'w') as f:
+                json.dump(updated,f,indent=2,allow_nan=False);f.flush();os.fsync(f.fileno())
+            os.replace(tmp,target);_LAST_GOOD[str(target)]=copy.deepcopy(updated)
+        finally:
+            if os.path.exists(tmp):os.unlink(tmp)
         return updated

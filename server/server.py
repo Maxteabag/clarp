@@ -1173,11 +1173,19 @@ class Handler(BaseHTTPRequestHandler):
         clusters = payload.pop("_unknown_clusters", [])
         payload["learning"] = viz_learning.status()
         self._send(200, json.dumps(payload).encode(), "application/json")
-        viz_learning.offer(clusters)
+        if payload.get("world"):
+            viz_learning.offer_scene(payload["world"])
+        else:
+            viz_learning.offer(clusters)
 
     def _handle_viz_supersede(self):
         from lib import viz_learning
         data = self._read_json()
+        if isinstance(data, dict) and data.get("world"):
+            import time
+            world = viz_normalize.build_fleet_map(int(time.time()*1000)-3600000)["world"]
+            result = viz_learning.offer_scene(world, force=True, reason=str(data.get("reason", "Reinvent this world")) + " Selected entity: " + str(data.get("entity_id", "whole world")))
+            return self._send(202, json.dumps(result).encode(), "application/json")
         if (not isinstance(data, dict) or not isinstance(data.get("entity_id"), str)
                 or not isinstance(data.get("revision"), int)):
             return self._send(400, b'{"error":"entity_id and revision required"}', "application/json")

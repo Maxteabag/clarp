@@ -29,6 +29,7 @@ def main():
         return con
     db.conn = connection
     viz_learning.offer = lambda clusters: {'designing': '', 'queued': []}
+    viz_learning.offer_scene = lambda *a, **k: {'designing':'','queued':[]}
     if a.library:
         viz_library.path = lambda: a.library
     else:

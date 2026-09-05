@@ -1,0 +1,11 @@
+{
+  "title": "The Lantern Works",
+  "entry": "world.js",
+  "files": [
+    "model.js",
+    "world.js"
+  ],
+  "source_digest": "d7878f36b7c86c3804945084161c2120ac6f373a521538002fe52a73fb3a3e4a",
+  "authored_by": "gpt-6-astra",
+  "notes": "A maritime workshop world: repositories contain paper manuscripts and open workbenches, GitHub occupies a separate harbor connected by observed origin routes, and agents travel as lantern sailboats. Missing addresses power a compact engine quay with distinct scanning, pressing, assembly, shredding and transport mechanisms. Exact GitHub repository, PR and run identifiers are recovered only from complete command tokens. Suspicious path fragments remain inspectable in a separate cabinet; commands never imply successful outcomes. Playback controls activity, ambient time animates machinery, and reduced motion preserves static action meanings."
+}
