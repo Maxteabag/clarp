@@ -13,6 +13,7 @@ is to *append rules* (see `unmatched_clusters`), never to classify an event.
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -114,9 +115,23 @@ _REPO_RE = re.compile(r"/home/[^/]+/(?:GIT|git|dev|src)/([A-Za-z0-9._-]+)")
 CODEX_TOOL_CLAMP = 80
 
 
+@functools.lru_cache(maxsize=2048)
+def _is_checkout(path: str) -> bool:
+    return os.path.isdir(path)
+
+
 def repo_of(text: str) -> str | None:
-    m = _REPO_RE.search(text or "")
-    return f"repo:{m.group(1)}" if m else None
+    """Repo node for a path, only if that checkout actually exists.
+
+    Without the existence check any path-shaped text mints a node: live data
+    produced `repo:null` from a stray path and `repo:dotfiles-video-` from a
+    name the 80-char clamp cut in half. A node that never existed is worse
+    than a generic bucket, because it looks like somewhere real.
+    """
+    for m in _REPO_RE.finditer(text or ""):
+        if _is_checkout(m.group(0)):
+            return f"repo:{m.group(1)}"
+    return None
 
 
 def first_known_executable(cmd: str) -> tuple[str, str]:

@@ -2,7 +2,16 @@
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
 
+import pytest  # noqa: E402
+
 from lib import viz_archetypes, viz_normalize  # noqa: E402
+
+
+@pytest.fixture()
+def any_checkout_exists(monkeypatch):
+    """Repo naming consults the filesystem; keep unit tests hermetic."""
+    monkeypatch.setattr(viz_normalize, "_is_checkout", lambda path: True)
+    yield
 
 
 def test_every_emitted_verb_has_an_archetype():
@@ -21,7 +30,7 @@ def test_every_archetype_has_a_render_spec():
         assert {"travel", "decay", "persist", "weight", "trail"} <= set(spec)
 
 
-def test_scans_past_shell_keywords_to_the_real_command():
+def test_scans_past_shell_keywords_to_the_real_command(any_checkout_exists):
     """Leading-segment parsing scored 33% on live data; token scan reaches 96%."""
     assert viz_normalize.classify(
         "Bash", {"command": "if [ -f X ]; then cat /home/p/GIT/clarp/a.py; fi"}
@@ -68,8 +77,16 @@ def test_normalize_dedupes_duplicate_dispatch_rows():
     assert events[0]["verb"] == "push"
 
 
-def test_codex_lowercase_tool_names_classify():
+def test_codex_lowercase_tool_names_classify(any_checkout_exists):
     """Codex spells some native tools lowercase; they were being dropped."""
     assert viz_normalize.classify("read", {"file_path": "/home/p/GIT/clarp/a.py"}) == (
         "read", "repo:clarp")
     assert viz_normalize.classify("edit", {"file_path": "/tmp/x"})[0] == "write"
+
+
+def test_repo_node_requires_the_checkout_to_exist(monkeypatch):
+    """Live data minted `repo:null` and a half-truncated name from stray text."""
+    monkeypatch.setattr(viz_normalize, "_is_checkout", lambda path: False)
+    assert viz_normalize.repo_of("/home/p/GIT/null") is None
+    monkeypatch.setattr(viz_normalize, "_is_checkout", lambda path: True)
+    assert viz_normalize.repo_of("/home/p/GIT/clarp/x.py") == "repo:clarp"

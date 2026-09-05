@@ -21,7 +21,9 @@
   button { background:#1a1f2b; color:#e6e9ef; border:1px solid #2b3242;
            border-radius:6px; padding:5px 11px; font:inherit; cursor:pointer; }
   button[aria-pressed=true] { background:#2b3a5c; border-color:#4a6ba8; }
-  #legend { position:fixed; right:12px; top:10px; text-align:right;
+  #legend { position:fixed; right:8px; top:8px; text-align:right;
+            background:rgba(11,13,18,.72); padding:6px 8px 7px;
+            border-radius:8px;
             line-height:1.7; pointer-events:none; }
   #legend i { display:inline-block; width:8px; height:8px; border-radius:2px;
               margin-left:6px; vertical-align:middle; }
@@ -63,6 +65,18 @@ let pulses = [];             // in-flight particles
 let view = {x:0, y:0, k:1};  // pan/zoom
 let events = [], cursor = 0, live = true, windowMs = 3600e3, tMin=0, tMax=0;
 let SPEC = {};   // archetype -> {travel,decay,persist,weight,trail}
+let LABEL = new Map();   // node id -> display label
+
+function relabel(){
+  const leaf = id => id.split(':').pop();
+  const seen = new Map();
+  for(const id of nodes.keys())
+    seen.set(leaf(id), (seen.get(leaf(id))||0)+1);
+  LABEL.clear();
+  for(const id of nodes.keys())
+    LABEL.set(id, seen.get(leaf(id))>1 ? id.replace(':','\u2009·\u2009')
+                                       : leaf(id));
+}
 
 function ensure(id, isAgent, weight){
   let n = nodes.get(id);
@@ -90,16 +104,22 @@ function step(){
       if(m===n) continue;
       let dx=n.x-m.x, dy=n.y-m.y, d2=dx*dx+dy*dy;
       if(d2<1) { dx=Math.random()-.5; dy=Math.random()-.5; d2=1; }
-      if(d2<90000){ const f=1400/d2; n.vx+=dx*f; n.vy+=dy*f; }
+      if(d2<40000){ const f=650/d2; n.vx+=dx*f; n.vy+=dy*f; }
     }
     // gravity to origin keeps the graph on screen
-    n.vx -= n.x*0.0016; n.vy -= n.y*0.0016;
+    n.vx -= n.x*0.0075; n.vy -= n.y*0.0075;
+    // soft walls: the legend and the scrubber own the screen edges
+    const halfW=(W/2-90)/view.k, halfH=(H/2-70)/view.k;
+    if(n.x> halfW) n.vx -= (n.x-halfW)*0.06;
+    if(n.x<-halfW) n.vx -= (n.x+halfW)*0.06;
+    if(n.y> halfH) n.vy -= (n.y-halfH)*0.06;
+    if(n.y<-halfH) n.vy -= (n.y+halfH)*0.06;
   }
   for(const [k,s] of links){
     const [a,b]=k.split('|'); const A=nodes.get(a), B=nodes.get(b);
     if(!A||!B) continue;
     const dx=B.x-A.x, dy=B.y-A.y, d=Math.hypot(dx,dy)||1;
-    const rest=150, f=(d-rest)*0.0022*Math.min(s,12)/12;
+    const rest=105, f=(d-rest)*0.010*Math.min(s,10)/10;
     A.vx+=dx/d*f; A.vy+=dy/d*f; B.vx-=dx/d*f; B.vy-=dy/d*f;
   }
   for(const n of arr){ n.vx*=0.86; n.vy*=0.86; n.x+=n.vx; n.y+=n.vy;
@@ -113,11 +133,11 @@ function draw(){
   cx.clearRect(0,0,W,H);
   cx.save(); cx.translate(W/2+view.x, H/2+view.y); cx.scale(view.k, view.k);
 
-  cx.lineWidth=1;
   for(const [k] of links){
     const [a,b]=k.split('|'); const A=nodes.get(a), B=nodes.get(b);
     if(!A||!B) continue;
-    cx.strokeStyle='rgba(120,140,180,0.10)';
+    const w=Math.min(links.get(k)||1,10);
+    cx.strokeStyle=`rgba(130,155,200,${0.05+0.035*w})`;
     cx.beginPath(); cx.moveTo(A.x,A.y); cx.lineTo(B.x,B.y); cx.stroke();
   }
   for(const p of pulses){
@@ -143,13 +163,15 @@ function draw(){
                  : n.id.includes(':') ? '#3d5a8a' : '#242a36';
     cx.strokeStyle = n.agent ? '#8fa9d8' : '#4a5568';
     cx.beginPath(); cx.arc(n.x,n.y,r,0,7); cx.fill();
-    if(n.agent || n.id.includes(':')){
-      cx.fillStyle = n.agent ? '#0b0d12' : '#cfe0ff';
-      cx.font = n.agent ? '600 10px ui-sans-serif' : '9px ui-sans-serif';
-      cx.textAlign='center'; cx.textBaseline='middle';
-      const label = n.agent ? n.id : n.id.split(':').pop();
-      if(n.agent) cx.fillText(label.slice(0,7), n.x, n.y);
-      else cx.fillText(label.slice(0,14), n.x, n.y+r+9);
+    cx.textAlign='center'; cx.textBaseline='middle';
+    if(n.agent){
+      cx.fillStyle='#0b0d12'; cx.font='600 10px ui-sans-serif';
+      cx.fillText(n.id.slice(0,7), n.x, n.y);
+    } else {
+      const specific=n.id.includes(':');
+      cx.fillStyle = specific ? '#cfe0ff' : '#7b8595';
+      cx.font = specific ? '9px ui-sans-serif' : '8px ui-sans-serif';
+      cx.fillText((LABEL.get(n.id)||n.id).slice(0,20), n.x, n.y+r+8);
     }
   }
   cx.restore();
@@ -161,11 +183,28 @@ function emit(ev){
   // (verb -> archetype) assignment changes the picture with no client change.
   const sp = SPEC[ev.archetype] || SPEC.pulse ||
              {travel:0.035, decay:0.94, weight:1, trail:0};
+  const had=nodes.has(ev.target);
   const A=ensure(ev.agent,true,1), B=ensure(ev.target,false,sp.weight);
+  if(!had) relabel();                 // a new node may create an ambiguity
   link(ev.agent, ev.target);
   A.hot=1; B.hot=Math.max(B.hot, 0.8*sp.weight);
   pulses.push({a:ev.agent, b:ev.target, c:col(ev.verb), t:0,
                v:sp.travel, trail:sp.trail||0, decay:sp.decay});
+}
+// Build topology without animating: nodes, links and weights, no pulses.
+// Thousands of queued particles would swamp the canvas and tell you nothing.
+function prime(uptoTs){
+  for(const ev of events){
+    if(ev.ts>uptoTs) break;
+    const A=ensure(ev.agent,true,1);
+    const sp=SPEC[ev.archetype]||{weight:1};
+    ensure(ev.target,false,sp.weight||1);
+    link(ev.agent, ev.target);
+    cursor++;
+  }
+  relabel();
+  for(let i=0;i<220;i++) step();      // settle the layout before first paint
+  clock.textContent = new Date(uptoTs).toLocaleTimeString();
 }
 function advanceTo(ts){
   while(cursor<events.length && events[cursor].ts<=ts) emit(events[cursor++]);
@@ -175,7 +214,7 @@ function advanceTo(ts){
 let last=performance.now();
 function frame(now){
   const dt=Math.min(now-last,50); last=now;
-  if(live && tMax){ tMax += dt; advanceTo(tMax); slider.value=1000; }
+  if(live && tMax){ tMax = Date.now(); advanceTo(tMax); slider.value=1000; }
   else if(tMax){ advanceTo(tMin + (tMax-tMin)*(slider.value/1000)); }
   for(const p of pulses) p.t += p.v;
   pulses = pulses.filter(p=>p.t<1);
@@ -194,7 +233,9 @@ async function load(){
   events = d.events; cursor = 0;
   nodes.clear(); links.clear(); pulses=[];
   tMin = events.length ? events[0].ts : Date.now();
-  tMax = tMin;
+  const newest = events.length ? events[events.length-1].ts : Date.now();
+  prime(newest);                     // whole window visible immediately
+  tMax = Math.max(newest, Date.now());
   stat.textContent =
     `${d.coverage.events} events · ${d.actors.length} agents · ` +
     `${d.nodes.length} nodes · ${d.coverage.specific_pct}% located`;
@@ -203,8 +244,11 @@ load(); setInterval(()=>{ if(live) load(); }, 30000);
 
 liveBtn.onclick = ()=>{ live=!live; liveBtn.ariaPressed=String(live);
   if(live){ cursor=0; nodes.clear(); links.clear(); load(); } };
-slider.oninput = ()=>{ if(live){ live=false; liveBtn.ariaPressed='false'; }
-  cursor=0; nodes.clear(); links.clear(); pulses=[]; };
+slider.oninput = ()=>{
+  if(live){ live=false; liveBtn.ariaPressed='false'; }
+  cursor=0; nodes.clear(); links.clear(); pulses=[];
+  if(events.length) prime(tMin + (tMax-tMin)*(slider.value/1000));
+};
 
 // pan + zoom
 let drag=null;
