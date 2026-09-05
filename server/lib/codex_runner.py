@@ -68,17 +68,22 @@ _SPEAK_RE = re.compile(r"<speak>(.*?)</speak>", re.DOTALL | re.IGNORECASE)
 _VOICE_PREAMBLE_HEAD = "[voice-mode]"
 _VOICE_PREAMBLE_SPLIT = "\n\n--- user message ---\n"
 
-# Always-on for app-dispatched turns (every codex/agy turn is one): the
-# PWA/iOS client renders plain text but CANNOT show interactive prompts, so
-# the agent must ask in prose rather than via a question/choice tool.
+# Always-on for app-dispatched turns: CLI question UIs are unavailable,
+# while supporting Hosts can publish durable questions to the native inbox.
 _NO_INTERACTIVE_QUESTIONS = (
-    "You are connected through a phone/voice app. It shows your text replies "
-    "but CANNOT display interactive prompts — no question tools, no "
-    "multiple-choice pickers, no approval dialogs. If you need to ask the "
-    "user something or offer choices, just write it as plain text and wait "
-    "for their next message. Never call a tool whose purpose is to ask the "
-    "user a question or request a choice; it won't render and they can't "
-    "answer it."
+    "You are connected through a phone/voice app. It cannot display CLI "
+    "interactive prompts, question tools, multiple-choice pickers, or approval "
+    "dialogs. Never call AskUserQuestion, request_user_input, or similar CLI "
+    "popup tools; they will not render. For a material clarification, use the "
+    "clarp-decisions skill's documented clarp-agent-artifacts question helper "
+    "when the Host supports native questions. These durable Clarp artifacts "
+    "are answered in Updates or the conversation, not in a CLI popup. For "
+    "explicit authorization, use the skill's decision helper and wait for "
+    "approval. If native questions are unavailable, ask in ordinary text and "
+    "wait for the user's reply. Make routine implementation choices yourself "
+    "and continue independent work while awaiting a necessary answer. Never "
+    "self-resolve a question or approval; a preference or custom answer is "
+    "not blanket authorization."
 )
 
 # Added only for spoken turns: how the <speak> voice gating works.
@@ -195,9 +200,9 @@ def apply_voice_preamble(text: str, *, voice: bool = True,
                          persona: str = "", session: str = "") -> str:
     """Prepend the app-turn instruction block to a prompt.
 
-    The no-interactive-questions rule is always included (the app can't show
-    question UIs); the <speak> voice guidance is added only when `voice` is
-    True (a spoken turn). `voice` defaults True so existing callers keep the
+    The CLI-question restriction is always included (native question artifacts
+    remain available on supporting Hosts); the <speak> voice guidance is added
+    only when `voice` is True (a spoken turn). `voice` defaults True so existing callers keep the
     full block."""
     identity = persona_identity_instruction(persona, session)
     if identity:

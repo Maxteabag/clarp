@@ -2303,11 +2303,20 @@ class Handler(BaseHTTPRequestHandler):
             if rest.endswith("/members"):
                 return self._handle_team_add_member(rest[:-len("/members")].strip("/"))
             return self._handle_team_update(rest)
-        if path.startswith("/decisions/") and path.endswith("/resolve"):
-            decision_id = path[len("/decisions/"):-len("/resolve")].strip("/")
-            return self._handle_decision_resolve(decision_id)
+        if path.startswith("/decisions/"):
+            from urllib.parse import unquote
+            for action in ("resolve", "dismiss"):
+                suffix = "/" + action
+                if path.endswith(suffix):
+                    decision_id = unquote(path[len("/decisions/"):-len(suffix)].strip("/"))
+                    return getattr(self, "_handle_decision_" + action)(decision_id)
         if path.startswith("/artifacts/"):
             from urllib.parse import unquote
+            for action in ("archive", "discard"):
+                suffix = "/" + action
+                if path.endswith(suffix):
+                    artifact_id = unquote(path[len("/artifacts/"):-len(suffix)].strip("/"))
+                    return getattr(self, "_handle_artifact_" + action)(artifact_id)
             return self._handle_artifact_update(unquote(path[len("/artifacts/"):].strip("/")))
         return self._send(404, b"not found")
 
@@ -3490,7 +3499,7 @@ class Handler(BaseHTTPRequestHandler):
         from lib import artifacts
         self.ctx.stream.broadcast({
             "type": SSEType.ATTENTION_UPDATED,
-            "attention_count": len(artifacts.attention()),
+            "attention_count": len(artifacts.attention(include_questions=True)),
         })
 
     def _handle_artifacts_list(self):
@@ -3526,7 +3535,7 @@ class Handler(BaseHTTPRequestHandler):
         from lib import artifacts
         data = self._read_json()
         if not isinstance(data, dict): return self._send(400, b'{"error":"json object required"}', "application/json")
-        if str(data.get("type") or "").strip().lower() in {"decision", "plan"}:
+        if str(data.get("type") or "").strip().lower() in {"decision", "question", "plan"}:
             return self._send(409, b'{"error":"reserved artifact type"}', "application/json")
         try:
             row = artifacts.create(
@@ -3560,7 +3569,15 @@ class Handler(BaseHTTPRequestHandler):
                 question=str(data.get("question") or ""), context=str(data.get("context") or ""),
                 yes_label=str(data.get("yes_label") or "Yes"), no_label=str(data.get("no_label") or "No"),
                 payload=data.get("payload"), reference_id=str(data.get("reference_id") or ""),
-                expires_at=data.get("expires_at"))
+                expires_at=data.get("expires_at"),
+                response_type=data.get("response_type", "approval"),
+                options=data.get("options"), allow_custom_text=data.get("allow_custom_text"),
+                recommended_option_id=data.get("recommended_option_id"),
+                blocks_progress=data.get("blocks_progress", False),
+                priority_reason=data.get("priority_reason", ""),
+                urgency=data.get("urgency", "normal"),
+                response_effort=data.get("response_effort", "review"),
+                deadline_at=data.get("deadline_at"))
         except (ValueError, sqlite3.IntegrityError) as exc:
             return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
         self._broadcast_artifact(row)
@@ -3574,10 +3591,15 @@ class Handler(BaseHTTPRequestHandler):
         # await it rather than self-resolve.
         data = self._read_json()
         if not isinstance(data, dict): return self._send(400, b'{"error":"json object required"}', "application/json")
-        choice = str(data.get("choice") or "")
-        choice = choice.strip().lower()
-        if choice not in {"accepted", "rejected"}:
-            return self._send(400, b'{"error":"invalid decision choice"}', "application/json")
+        choice = data.get("choice")
+        answer = data.get("answer")
+        if (choice is None) == (answer is None):
+            return self._send(400, b'{"error":"exactly one of choice or answer is required"}',
+                              "application/json")
+        if choice is not None:
+            if not isinstance(choice, str) or choice.strip().lower() not in {"accepted", "rejected"}:
+                return self._send(400, b'{"error":"invalid decision choice"}', "application/json")
+            choice = choice.strip().lower()
         raw_revision = data.get("expected_revision")
         if isinstance(raw_revision, bool) or not isinstance(raw_revision, int):
             return self._send(400, b'{"error":"expected_revision must be an integer"}',
@@ -3585,7 +3607,7 @@ class Handler(BaseHTTPRequestHandler):
         revision = raw_revision
         try:
             row, changed = artifacts.resolve(
-                decision_id, choice=choice, expected_revision=revision)
+                decision_id, choice=choice, answer=answer, expected_revision=revision)
         except ValueError as exc:
             return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
         self._broadcast_artifact(row)
@@ -3599,17 +3621,7 @@ class Handler(BaseHTTPRequestHandler):
         delivered: set[str] = set()
         for pending in artifacts.pending_deliveries():
             decision_id = pending["decision_id"]
-            outcome = ("The decision expired without approval. Do not perform the protected action."
-                       if pending["choice"] == "expired"
-                       else f"the user chose: {pending['choice']}. Continue accordingly and revalidate the action before acting.")
-            text = ("[Clarp decision resolved]\n"
-                    f"Decision ID: {decision_id}\n"
-                    f"Artifact ID: {pending['artifact_id']}\n"
-                    f"Question: {pending['question']}\n"
-                    f"Context: {pending['context']}\n"
-                    f"Reference: {pending['reference_id']}\n"
-                    f"Payload: {pending['payload_json']}\n"
-                    f"{outcome}")
+            text = artifacts.format_delivery_prompt(pending)
             try:
                 TurnDispatchService(self.ctx).dispatch(
                     text=text, requested_session=pending["session"], trace_id=_trace.new_id(),
@@ -3622,12 +3634,68 @@ class Handler(BaseHTTPRequestHandler):
                 log_exception("decisionWakeFail", exc, detail=decision_id)
         return delivered
 
-    def _handle_attention(self):
+    def _handle_decision_dismiss(self, decision_id: str):
         from lib import artifacts
-        items = artifacts.attention()
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"json object required"}', "application/json")
+        revision = data.get("expected_revision")
+        if isinstance(revision, bool) or not isinstance(revision, int):
+            return self._send(400, b'{"error":"expected_revision must be an integer"}',
+                              "application/json")
+        try:
+            row, changed = artifacts.dismiss(decision_id, expected_revision=revision)
+        except ValueError as exc:
+            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+        self._broadcast_artifact(row)
         self._deliver_pending_decisions()
-        return self._send(200, json.dumps({"items": items, "count": len(items)}).encode(),
+        return self._send(200, json.dumps({
+            "artifact": row, "changed": changed,
+            "delivery_pending": artifacts.delivery_pending(decision_id),
+        }).encode(), "application/json")
+
+    def _handle_artifact_archive(self, artifact_id: str):
+        return self._handle_artifact_inbox_action(artifact_id, discard=False)
+
+    def _handle_artifact_discard(self, artifact_id: str):
+        return self._handle_artifact_inbox_action(artifact_id, discard=True)
+
+    def _handle_artifact_inbox_action(self, artifact_id: str, *, discard: bool):
+        from lib import artifacts
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"json object required"}', "application/json")
+        updated_at = data.get("expected_updated_at")
+        if isinstance(updated_at, bool) or not isinstance(updated_at, int):
+            return self._send(400, b'{"error":"expected_updated_at must be an integer"}',
+                              "application/json")
+        if not discard and not isinstance(data.get("archived"), bool):
+            return self._send(400, b'{"error":"archived must be a boolean"}', "application/json")
+        try:
+            if discard:
+                row, changed = artifacts.discard(artifact_id, expected_updated_at=updated_at)
+            else:
+                row, changed = artifacts.archive(
+                    artifact_id, archived=data["archived"], expected_updated_at=updated_at)
+        except ValueError as exc:
+            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+        self._broadcast_artifact(row)
+        return self._send(200, json.dumps({"artifact": row, "changed": changed}).encode(),
                           "application/json")
+
+    def _handle_attention(self):
+        from urllib.parse import parse_qs, urlparse
+        from lib import artifacts
+        query = parse_qs(urlparse(self.path).query)
+        items = artifacts.attention(
+            include_questions=query.get("decision_format", [""])[0] == "2",
+            include_archived=query.get("include_archived", [""])[0] == "1")
+        self._deliver_pending_decisions()
+        # An explicit format advertisement lets helpers reject older Hosts
+        # which otherwise silently interpret question creation as approval.
+        return self._send(200, json.dumps({
+            "items": items, "count": len(items), "decision_format": 2,
+        }).encode(), "application/json")
 
     def _handle_turn_queue(self):
         from urllib.parse import parse_qs, urlparse
@@ -4642,13 +4710,7 @@ def _deliver_decision_rows(ctx: ServerContext) -> None:
     from lib import artifacts
     for pending in artifacts.pending_deliveries():
         decision_id = pending["decision_id"]
-        outcome = ("The decision expired without approval. Do not perform the protected action."
-                   if pending["choice"] == "expired"
-                   else f"the user chose: {pending['choice']}. Continue accordingly and revalidate the action before acting.")
-        text = ("[Clarp decision resolved]\n"
-                f"Decision ID: {decision_id}\nArtifact ID: {pending['artifact_id']}\n"
-                f"Question: {pending['question']}\nContext: {pending['context']}\n"
-                f"Reference: {pending['reference_id']}\nPayload: {pending['payload_json']}\n{outcome}")
+        text = artifacts.format_delivery_prompt(pending)
         try:
             TurnDispatchService(ctx).dispatch(
                 text=text, requested_session=pending["session"],

@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 66
+_SCHEMA_VERSION = 67
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -977,7 +977,8 @@ CREATE TABLE artifacts (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     completed_at INTEGER,
-    deleted_at INTEGER
+    deleted_at INTEGER,
+    archived_at INTEGER
 );
 CREATE INDEX idx_artifacts_agent_updated ON artifacts(agent_id, updated_at DESC);
 CREATE INDEX idx_artifacts_session_updated ON artifacts(session, updated_at DESC);
@@ -995,7 +996,17 @@ CREATE TABLE artifact_decisions (
     resolved_at INTEGER,
     resolved_by TEXT NOT NULL DEFAULT '',
     revision INTEGER NOT NULL DEFAULT 1,
-    expires_at INTEGER
+    expires_at INTEGER,
+    response_type TEXT NOT NULL DEFAULT 'approval',
+    options_json TEXT NOT NULL DEFAULT '[]',
+    allow_custom_text INTEGER NOT NULL DEFAULT 0,
+    recommended_option_id TEXT,
+    blocks_progress INTEGER NOT NULL DEFAULT 0,
+    priority_reason TEXT NOT NULL DEFAULT '',
+    urgency TEXT NOT NULL DEFAULT 'normal',
+    response_effort TEXT NOT NULL DEFAULT 'review',
+    deadline_at INTEGER,
+    answer_json TEXT
 );
 CREATE INDEX idx_artifact_decisions_status ON artifact_decisions(status, decision_id);
 
@@ -1010,7 +1021,9 @@ CREATE TABLE decision_deliveries (
     choice TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at INTEGER NOT NULL,
-    delivered_at INTEGER
+    delivered_at INTEGER,
+    response_type TEXT NOT NULL DEFAULT 'approval',
+    answer_json TEXT
 );
 CREATE INDEX idx_decision_deliveries_pending ON decision_deliveries(status, created_at);
 
@@ -1328,6 +1341,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v65(con)
             if version < 66:
                 _migrate_to_v66(con)
+            if version < 67:
+                _migrate_to_v67(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1465,6 +1480,34 @@ def _migrate_to_v66(con: sqlite3.Connection) -> None:
         """CREATE INDEX IF NOT EXISTS idx_agent_schedules_next
              ON agent_schedules(enabled, next_run_at)"""
     )
+
+
+def _migrate_to_v67(con: sqlite3.Connection) -> None:
+    """Native clarification answers, attention metadata and independent archival.
+
+    Existing approval rows and queued deliveries keep their binary semantics.
+    The nullable answer snapshot records the exact response for durable retry.
+    """
+    con.execute("ALTER TABLE artifacts ADD COLUMN archived_at INTEGER")
+    for definition in (
+        "response_type TEXT NOT NULL DEFAULT 'approval'",
+        "options_json TEXT NOT NULL DEFAULT '[]'",
+        "allow_custom_text INTEGER NOT NULL DEFAULT 0",
+        "recommended_option_id TEXT",
+        "blocks_progress INTEGER NOT NULL DEFAULT 0",
+        "priority_reason TEXT NOT NULL DEFAULT ''",
+        "urgency TEXT NOT NULL DEFAULT 'normal'",
+        "response_effort TEXT NOT NULL DEFAULT 'review'",
+        "deadline_at INTEGER",
+        "answer_json TEXT",
+    ):
+        con.execute(f"ALTER TABLE artifact_decisions ADD COLUMN {definition}")
+    con.execute("ALTER TABLE decision_deliveries ADD COLUMN response_type TEXT NOT NULL DEFAULT 'approval'")
+    con.execute("ALTER TABLE decision_deliveries ADD COLUMN answer_json TEXT")
+    con.execute("""UPDATE artifact_decisions SET answer_json=json_object('choice',resolved_choice)
+                    WHERE status IN ('accepted','rejected')""")
+    con.execute("""UPDATE decision_deliveries SET answer_json=json_object('choice',choice)
+                    WHERE choice IN ('accepted','rejected')""")
 
 
 
