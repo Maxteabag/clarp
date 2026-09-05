@@ -107,8 +107,10 @@ approvals use their dedicated dismissal endpoint. These operations are
 revision/timestamp guarded and idempotent for an already matching state.
 
 Resolution stores the full answer in the durable delivery snapshot and delivers
-it to the owning session using the existing stable message ID. The foreground
-and background delivery paths share one formatter. An answer being saved does
+it to the owning session using the existing stable message ID. Question answers,
+discard notices, and expiry notices queue behind any work already running;
+cleanup must not interrupt a non-steerable agent. The foreground and background
+delivery paths share one formatter and dispatch policy. An answer being saved does
 not prove that the agent has resumed; `delivery_pending` remains authoritative.
 
 ## iPhone behavior

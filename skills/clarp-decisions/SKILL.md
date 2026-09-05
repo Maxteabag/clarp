@@ -95,3 +95,6 @@ Do not substitute a multiple-choice preference for required explicit approval.
   to avoid duplicate questions. Do not create duplicates merely to test a helper.
 - A saved answer can still have `delivery_pending: true`. It is durable but does
   not prove that the originating agent has resumed; the Host retries delivery.
+- Question answers, discard notices, and expiry notices queue behind busy work.
+  Successful delivery can mean durable admission to that queue, not execution;
+  do not stop another active turn merely to process the notification.
