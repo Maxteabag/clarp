@@ -134,6 +134,7 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] QVariantList mediaForSession(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QUrl mediaSource(const QString& assetId) const;
     Q_INVOKABLE [[nodiscard]] QString resolveMediaMarkdown(const QString& markdown) const;
+    Q_INVOKABLE [[nodiscard]] QStringList markdownDisplayBlocks(const QString& markdown) const;
     Q_INVOKABLE [[nodiscard]] QVariantList artifactsForSession(const QString& session) const;
     [[nodiscard]] QString baseUrl() const;
     [[nodiscard]] QString selectedSession() const;

@@ -211,6 +211,28 @@ int main(int argc, char* argv[]) {
                                                  {QStringLiteral("status"), QStringLiteral("ok")}},
                                  }}},
                 };
+            } else if (screenshotScenario == QStringLiteral("markdown")) {
+                turns = {
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("fixture-user")},
+                                {QStringLiteral("role"), QStringLiteral("user")},
+                                {QStringLiteral("text"),
+                                 QStringLiteral("Why are the paragraphs hard to scan?")},
+                                {QStringLiteral("revision"), 1}},
+                    QJsonObject{
+                        {QStringLiteral("id"), QStringLiteral("fixture-markdown")},
+                        {QStringLiteral("role"), QStringLiteral("assistant")},
+                        {QStringLiteral("text"),
+                         QStringLiteral(
+                             "The first paragraph should read as one complete thought. It can "
+                             "wrap naturally when the pane is narrow.\n\n"
+                             "The second paragraph is a new thought, so the blank Markdown line "
+                             "must create visible breathing room.\n\n"
+                             "A third paragraph makes the rhythm obvious. **Emphasis** and "
+                             "`inline code` should still render correctly.\n\n"
+                             "1. Lists remain structurally intact\n\n"
+                             "2. Their numbering must not restart")},
+                        {QStringLiteral("revision"), 2}},
+                };
             } else if (screenshotScenario == QStringLiteral("long")) {
                 for (int index = 0; index < 60; ++index) {
                     turns.append(QJsonObject{

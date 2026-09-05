@@ -185,4 +185,80 @@ QString voiceDeliverySession(const QString& captureSession, const QString& curre
     return captureSession.isEmpty() ? currentSession : captureSession;
 }
 
+QStringList markdownDisplayBlocks(const QString& markdown) {
+    QString normalized = markdown;
+    normalized.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    normalized.replace(u'\r', u'\n');
+    if (normalized.trimmed().isEmpty()) {
+        return {};
+    }
+
+    const QStringList lines = normalized.split(u'\n');
+    QStringList blocks;
+    QStringList current;
+    QString fence;
+
+    const auto listKind = [](const QString& line) -> int {
+        static const QRegularExpression bullet(QStringLiteral(R"(^\s*[-+*]\s+\S)"));
+        static const QRegularExpression ordered(QStringLiteral(R"(^\s*\d+[.)]\s+\S)"));
+        if (bullet.match(line).hasMatch()) {
+            return 1;
+        }
+        return ordered.match(line).hasMatch() ? 2 : 0;
+    };
+    const auto flush = [&blocks, &current] {
+        while (!current.isEmpty() && current.constLast().trimmed().isEmpty()) {
+            current.removeLast();
+        }
+        if (!current.isEmpty()) {
+            blocks.append(current.join(u'\n'));
+            current.clear();
+        }
+    };
+
+    for (qsizetype index = 0; index < lines.size(); ++index) {
+        const QString& line = lines.at(index);
+        const QString trimmed = line.trimmed();
+        if (!fence.isEmpty()) {
+            current.append(line);
+            if (trimmed.startsWith(fence)) {
+                fence.clear();
+            }
+            continue;
+        }
+        if (trimmed.startsWith(QStringLiteral("```")) ||
+            trimmed.startsWith(QStringLiteral("~~~"))) {
+            fence = trimmed.first(3);
+            current.append(line);
+            continue;
+        }
+        if (!trimmed.isEmpty()) {
+            current.append(line);
+            continue;
+        }
+
+        qsizetype nextIndex = index + 1;
+        while (nextIndex < lines.size() && lines.at(nextIndex).trimmed().isEmpty()) {
+            ++nextIndex;
+        }
+        int previousKind = 0;
+        for (auto previous = current.crbegin(); previous != current.crend(); ++previous) {
+            if (!previous->trimmed().isEmpty()) {
+                previousKind = listKind(*previous);
+                break;
+            }
+        }
+        const int nextKind = nextIndex < lines.size() ? listKind(lines.at(nextIndex)) : 0;
+        if (previousKind != 0 && previousKind == nextKind) {
+            if (!current.constLast().isEmpty()) {
+                current.append(QString{});
+            }
+        } else {
+            flush();
+        }
+    }
+    flush();
+    return blocks;
+}
+
 } // namespace clarp

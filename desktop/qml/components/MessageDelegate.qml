@@ -41,6 +41,9 @@ Item {
         mediaRevision;
         return controller.resolveMediaMarkdown(body);
     }
+    readonly property var renderedBlocks: root.messageKind === "live"
+        ? [root.renderedBody]
+        : root.controller.markdownDisplayBlocks(root.renderedBody)
 
     width: ListView.view ? ListView.view.width : 600
     visible: activity || body.length > 0 || displayCells.length > 0
@@ -125,7 +128,7 @@ Item {
                 visible: !root.activity && root.body.length > 0
                 width: Math.min(parent.width, 840)
                 x: 0
-                implicitHeight: messageText.implicitHeight + (root.userAuthored ? 16 : 10)
+                implicitHeight: messageBlocks.implicitHeight + (root.userAuthored ? 16 : 10)
                 radius: 2
                 color: root.userAuthored ? "#222431" : "transparent"
                 border.width: root.deliveryFailed ? 1 : 0
@@ -141,26 +144,35 @@ Item {
                     color: root.deliveryFailed ? "#a45e6d" : "#555a73"
                 }
 
-                TextEdit {
-                    id: messageText
-                    anchors.fill: parent
-                    anchors.leftMargin: root.userAuthored ? 10 : 2
-                    anchors.rightMargin: 8
-                    anchors.topMargin: root.userAuthored ? 8 : 5
-                    anchors.bottomMargin: root.userAuthored ? 8 : 5
-                    text: root.renderedBody
-                    readOnly: true
-                    selectByMouse: true
-                    persistentSelection: true
-                    // Qt's Markdown parser is not incremental-safe when a
-                    // stream ends halfway through a fence/list/tag. Present
-                    // growing text plainly; the finalized row upgrades to
-                    // Markdown without changing model identity.
-                    textFormat: root.messageKind === "live" ? Text.PlainText : Text.MarkdownText
-                    wrapMode: Text.Wrap
-                    color: "#b9bbcf"
-                    font.pixelSize: 12
-                    onLinkActivated: link => Qt.openUrlExternally(link)
+                Column {
+                    id: messageBlocks
+                    x: root.userAuthored ? 10 : 2
+                    y: root.userAuthored ? 8 : 5
+                    width: parent.width - x - 8
+                    spacing: 8
+
+                    Repeater {
+                        model: root.renderedBlocks
+
+                        TextEdit {
+                            required property string modelData
+                            width: messageBlocks.width
+                            text: modelData
+                            readOnly: true
+                            selectByMouse: true
+                            persistentSelection: true
+                            // Qt's Markdown parser is not incremental-safe when a
+                            // stream ends halfway through a fence/list/tag. Present
+                            // growing text plainly; the finalized row upgrades to
+                            // Markdown without changing model identity.
+                            textFormat: root.messageKind === "live"
+                                ? Text.PlainText : Text.MarkdownText
+                            wrapMode: Text.Wrap
+                            color: "#b9bbcf"
+                            font.pixelSize: 12
+                            onLinkActivated: link => Qt.openUrlExternally(link)
+                        }
+                    }
                 }
             }
         }

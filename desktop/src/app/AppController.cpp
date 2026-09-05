@@ -323,6 +323,10 @@ QString AppController::resolveMediaMarkdown(const QString& markdown) const {
     return rendered;
 }
 
+QStringList AppController::markdownDisplayBlocks(const QString& markdown) const {
+    return clarp::markdownDisplayBlocks(markdown);
+}
+
 QVariantList AppController::artifactsForSession(const QString& session) const {
     QVariantList result;
     for (const QVariant& value : m_updateArtifacts) {

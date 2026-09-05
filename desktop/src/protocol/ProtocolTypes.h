@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 
 namespace clarp {
 
@@ -93,5 +94,6 @@ struct AudioClip {
 [[nodiscard]] QString displayName(const Agent& agent);
 [[nodiscard]] QString voiceDeliverySession(const QString& captureSession,
                                            const QString& currentSession);
+[[nodiscard]] QStringList markdownDisplayBlocks(const QString& markdown);
 
 } // namespace clarp

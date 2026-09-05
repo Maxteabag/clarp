@@ -608,6 +608,7 @@ class NativeCoreTest final : public QObject {
     void contactsExcludeActivePersonas();
     void microphoneCanCaptureNativePcm();
     void backgroundTranscriptionsKeepTheirChatOwnership();
+    void markdownParagraphsBecomeVisibleDisplayBlocks();
 };
 
 void NativeCoreTest::sseParserHandlesChunksCommentsAndReplayIds() {
@@ -618,6 +619,22 @@ void NativeCoreTest::sseParserHandlesChunksCommentsAndReplayIds() {
     QCOMPARE(messages.first().id, QStringLiteral("41"));
     QCOMPARE(messages.first().data.value(QStringLiteral("type")).toString(),
              QStringLiteral("agent-roster"));
+}
+
+void NativeCoreTest::markdownParagraphsBecomeVisibleDisplayBlocks() {
+    QCOMPARE(markdownDisplayBlocks(QStringLiteral("First paragraph.\n\nSecond paragraph.")),
+             QStringList({QStringLiteral("First paragraph."),
+                          QStringLiteral("Second paragraph.")}));
+    QCOMPARE(markdownDisplayBlocks(QStringLiteral("One visual line\nsoft continuation")),
+             QStringList({QStringLiteral("One visual line\nsoft continuation")}));
+    QCOMPARE(markdownDisplayBlocks(QStringLiteral("1. First item\n\n\n2. Second item")),
+             QStringList({QStringLiteral("1. First item\n\n2. Second item")}));
+    QCOMPARE(markdownDisplayBlocks(QStringLiteral("- First item\r\n\r\n- Second item")),
+             QStringList({QStringLiteral("- First item\n\n- Second item")}));
+    QCOMPARE(markdownDisplayBlocks(
+                 QStringLiteral("```text\nfirst line\n\nsecond line\n```\n\nAfter code.")),
+             QStringList({QStringLiteral("```text\nfirst line\n\nsecond line\n```"),
+                          QStringLiteral("After code.")}));
 }
 
 void NativeCoreTest::sseCursorIsScopedToOneHost() {
