@@ -100,18 +100,23 @@ setting, and UI zoom keeps keyboard focus in Settings.
 Enable **Settings → Experiments → Plain-English tool activity**, or search for
 **plain-English** in `Ctrl+K`. It is **off by default**. When enabled, visible
 activity is explained in blue by a local background worker running
-`codex exec --model gpt-6-astra` with low reasoning effort. This uses the desktop's
+`codex exec --model gpt-5.3-codex-spark` with low reasoning effort. This uses the desktop's
 Codex login and consumes additional Codex usage; no Host deployment is required.
 
 The worker sends bounded tool-command snippets, not the chat transcript or command
-results. Common inline credentials are redacted on a best-effort basis; do not
+results. For a shared-filesystem Host it also reads bounded excerpts of directly
+referenced local scripts so explanations describe their purpose, not just their
+filename or programming language. It does not execute scripts, follow imports,
+or read hidden paths, symlinks, binaries, or files larger than 64 KiB. Missing
+source is treated as missing evidence, not permission to guess. Common inline credentials are redacted on a best-effort basis; do not
 enable it for tool inputs that must not be sent to OpenAI. Explanations describe
 operations, not guaranteed intent or success. The original status stays visible;
 expand the row (hover for live activity) to read the original details.
 
 Requests are batched, deduplicated, and cached in memory (512 entries). Only one
-Codex process runs at a time. Original rows remain available while waiting or if
-translation fails. Failures pause new requests until you toggle off/on; disabling
+Codex process runs at a time. Raw commands stay hidden while waiting: rows show
+“Explaining activity…” until ready, or “Explanation unavailable” on failure.
+Failures pause new requests until you toggle off/on; disabling
 cancels the worker and restores the normal view immediately. Switching Hosts
 clears the cache. Translations are not written into the conversation transcript.
 
@@ -123,6 +128,15 @@ and [configuration reference](https://learn.chatgpt.com/docs/config-file/config-
 
 `clarp-tool-narrator-tests --live-smoke` is a separate, opt-in real-model check.
 The regular test suite uses a fake subprocess and never consumes model usage.
+
+The translator status shows elapsed seconds and queued activity count. Metadata-only
+timings are recorded in `diagnostics/tool-narrator.jsonl` under the desktop's local
+application-data directory, capped at 256 KiB. Events distinguish queue wait,
+process startup, Codex thread/turn events, process completion, cancellation and
+failure; no command, script, prompt, or generated explanation is logged. This
+measures latency; it does not remove the current serial-batch/full-response delay.
+Use `clarp-tool-narrator-tests --live-script-smoke` for an explicit real-model
+script-purpose check without executing the fixture script.
 
 ## Quality gates
 

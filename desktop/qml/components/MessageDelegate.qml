@@ -32,6 +32,11 @@ Item {
     property bool activityExpanded: false
     readonly property var narrator: controller.toolNarrator || null
     readonly property bool narrationEnabled: narrator !== null && narrator.enabled
+    readonly property bool localFilesAllowed: Boolean(controller.sharedFilesystem)
+    readonly property string workingDirectory: {
+        controller.agentRevision;
+        return narrationEnabled && localFilesAllowed ? controller.agentWorkingDirectory(session) : "";
+    }
     readonly property int presentedActivityCount: Math.max(
         root.activityCount, root.displayCells.length + root.tools.length)
     readonly property bool showActivityCards: root.showTools
@@ -58,6 +63,8 @@ Item {
         narrator: root.narrator
         active: root.visible && root.activity && root.toolName.length > 0
         activity: ({name: root.toolName, summary: root.body})
+        workingDirectory: root.workingDirectory
+        localFilesAllowed: root.localFilesAllowed
     }
 
     ColumnLayout {
@@ -82,14 +89,14 @@ Item {
         Item {
             visible: root.activity || root.body.length > 0
             Layout.fillWidth: true
-            implicitHeight: root.activity ? 24 : messageBubble.visible ? messageBubble.implicitHeight : 0
+            implicitHeight: root.activity ? activityCard.implicitHeight : messageBubble.visible ? messageBubble.implicitHeight : 0
 
             Rectangle {
                 id: activityCard
                 visible: root.activity
                 x: 0
                 width: parent.width
-                implicitHeight: 24
+                implicitHeight: Math.max(24, activityRow.implicitHeight + 4)
                 radius: 2
                 color: "transparent"
                 border.width: 0
@@ -122,7 +129,9 @@ Item {
                         }
                     }
                     Text {
-                        visible: liveExplanation.text.length === 0
+                        visible: !liveExplanation.enabled
+                        Layout.maximumWidth: activityRow.width * 0.3
+                        elide: Text.ElideRight
                         text: root.toolName || root.messageKind || "Working"
                         color: "#868a9f"
                         font.family: "JetBrains Mono"
@@ -131,12 +140,13 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: liveExplanation.text || root.body
+                        text: liveExplanation.enabled ? liveExplanation.displayText : root.body
                         textFormat: Text.PlainText
-                        color: liveExplanation.text.length > 0 ? "#82aaff" : "#969bb5"
+                        color: liveExplanation.enabled ? "#82aaff" : "#969bb5"
                         font.family: "JetBrains Mono"
                         font.pixelSize: 12
-                        elide: Text.ElideRight
+                        wrapMode: liveExplanation.enabled ? Text.Wrap : Text.NoWrap
+                        elide: liveExplanation.enabled ? Text.ElideNone : Text.ElideRight
                     }
                 }
             }
@@ -241,6 +251,8 @@ Item {
                     Layout.fillWidth: true
                     cell: modelData
                     narrator: root.narrator
+                    workingDirectory: root.workingDirectory
+                    localFilesAllowed: root.localFilesAllowed
                 }
             }
 
@@ -256,6 +268,8 @@ Item {
                     Layout.fillWidth: true
                     tool: modelData
                     narrator: root.narrator
+                    workingDirectory: root.workingDirectory
+                    localFilesAllowed: root.localFilesAllowed
                 }
             }
         }

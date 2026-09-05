@@ -138,13 +138,13 @@ Rectangle {
                     id: narrationRow
                     objectName: "setting-tool-narration"
                     label: "Plain-English tool activity"
-                    detail: "Blue explanations · Codex Astra, low · extra Codex usage"
+                    detail: "Blue explanations · Codex Spark, low · extra Codex usage"
                     checked: root.controller.toolNarrator.enabled
                     onToggled: value => root.controller.toolNarrator.enabled = value
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: "Sends tool command snippets to Codex using your account. Explanations may be imperfect; expand a row for the original."
+                    text: "Sends command snippets and referenced local script excerpts to Codex. Explanations may be imperfect; expand a row for the original."
                     color: "#858aa5"
                     font.pixelSize: 12
                     wrapMode: Text.Wrap

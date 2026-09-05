@@ -13,6 +13,7 @@ TestCase {
     QtObject {
         id: stubController
         property int mediaRevision: 0
+        property var toolNarrator: null
         function resolveMediaMarkdown(text) { return text; }
         function markdownDisplayBlocks(text) { return text.split("\n\n"); }
     }
@@ -118,9 +119,11 @@ TestCase {
         property bool enabled: true
         property int revision: 0
         property bool ready: false
+        property bool unavailable: false
+        property string responseText: "Build the desktop preview."
         signal changed()
         function request(activity) {}
-        function explanation(activity) { return ready ? "Build the desktop preview." : ""; }
+        function explanation(activity) { return ready ? responseText : ""; }
     }
 
     function test_translationIsBlueOptionalAndKeepsRawDetails() {
@@ -130,7 +133,8 @@ TestCase {
         waitForRendering(card);
         const explanation = findChild(card, "activityExplanationText");
         verify(explanation !== null);
-        compare(explanation.visible, false); // Original tool stays visible while waiting.
+        compare(explanation.visible, true);
+        compare(explanation.text, "Explaining activity…");
         narratorStub.ready = true;
         narratorStub.revision++;
         tryCompare(explanation, "visible", true);
@@ -138,7 +142,44 @@ TestCase {
         compare(explanation.color, "#82aaff");
         card.expanded = true;
         verify(card.detail.includes("cmake --build"));
+        narratorStub.ready = false;
+        narratorStub.unavailable = true;
+        narratorStub.revision++;
+        tryCompare(explanation, "text", "Explanation unavailable");
+        verify(!visibleText(card).includes("cmake --build"));
         narratorStub.enabled = false;
         tryCompare(explanation, "visible", false);
+    }
+
+    function visibleText(item) {
+        if (!item.visible) return "";
+        let result = item.text !== undefined ? String(item.text) : "";
+        for (const child of item.children || []) result += " " + visibleText(child);
+        return result;
+    }
+
+    function cleanup() {
+        stubController.toolNarrator = null;
+        narratorStub.responseText = "Build the desktop preview.";
+        narratorStub.unavailable = false;
+    }
+
+    function test_liveActivityNeverLeaksRawCommandsWhileWaiting() {
+        narratorStub.enabled = true;
+        narratorStub.ready = false;
+        stubController.toolNarrator = narratorStub;
+        const message = createTemporaryObject(toolOnlyMessage, testCase, {
+            activity: true, activityStatus: "running", toolName: "node private_script.js",
+            body: "Using node private_script.js --raw-detail", displayCells: [], activityCount: 0
+        });
+        waitForRendering(message);
+        verify(!visibleText(message).includes("private_script.js"));
+        verify(visibleText(message).includes("Explaining activity…"));
+        message.width = 170;
+        narratorStub.responseText = "Search the grocery catalogue for meat and compare prices per kilogram, sorted from cheapest to most expensive.";
+        narratorStub.ready = true;
+        narratorStub.revision++;
+        tryVerify(() => message.implicitHeight > 40,
+            1000, "Long human explanations must grow the live row instead of overlapping the next item");
     }
 }

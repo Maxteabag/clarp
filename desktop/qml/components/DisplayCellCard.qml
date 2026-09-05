@@ -9,6 +9,8 @@ Rectangle {
 
     required property var cell
     property var narrator: null
+    property string workingDirectory: ""
+    property bool localFilesAllowed: false
     property bool expanded: false
     readonly property string title: String(cell.title || "Activity")
     readonly property string summary: String(cell.summary || "")
@@ -29,6 +31,8 @@ Rectangle {
         narrator: root.narrator
         activity: root.cell
         active: root.visible
+        workingDirectory: root.workingDirectory
+        localFilesAllowed: root.localFilesAllowed
     }
 
     ColumnLayout {
@@ -52,7 +56,7 @@ Rectangle {
                 color: root.statusColor
             }
             Text {
-                visible: explanation.text.length === 0
+                visible: !explanation.enabled
                 text: root.title
                 color: "#9ea4c7"
                 font.family: "JetBrains Mono"
@@ -60,7 +64,7 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
             Text {
-                visible: explanation.text.length === 0
+                visible: !explanation.enabled
                 Layout.fillWidth: true
                 text: root.summary
                 color: "#969bb5"
@@ -69,16 +73,16 @@ Rectangle {
             }
             Text {
                 objectName: "activityExplanationText"
-                visible: explanation.text.length > 0
+                visible: explanation.enabled
                 Layout.fillWidth: true
-                text: explanation.text
+                text: explanation.displayText
                 textFormat: Text.PlainText
                 color: "#82aaff"
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
             }
             Text {
-                visible: explanation.text.length > 0 || root.lines.length > 0 || root.detailCount > 0
+                visible: explanation.text.length > 0 || (!explanation.enabled && (root.lines.length > 0 || root.detailCount > 0))
                 text: root.expanded ? "−" : "+"
                 color: "#858aa7"
                 font.pixelSize: 13
@@ -86,7 +90,7 @@ Rectangle {
         }
 
         ColumnLayout {
-            visible: root.expanded
+            visible: root.expanded && (!explanation.enabled || explanation.text.length > 0)
             Layout.fillWidth: true
             Layout.leftMargin: 15
             spacing: 0
@@ -153,7 +157,7 @@ Rectangle {
     }
 
     TapHandler {
-        enabled: explanation.text.length > 0 || root.lines.length > 0 || root.detailCount > 0
+        enabled: explanation.text.length > 0 || (!explanation.enabled && (root.lines.length > 0 || root.detailCount > 0))
         onTapped: root.expanded = !root.expanded
     }
 }

@@ -9,6 +9,8 @@ Rectangle {
 
     required property var tool
     property var narrator: null
+    property string workingDirectory: ""
+    property bool localFilesAllowed: false
     property bool expanded: false
     readonly property string toolName: String(tool.name || tool.action || "Tool")
     readonly property string summary: String(tool.summary || tool.description || tool.file_path || "")
@@ -36,6 +38,8 @@ Rectangle {
         narrator: root.narrator
         activity: root.tool
         active: root.visible
+        workingDirectory: root.workingDirectory
+        localFilesAllowed: root.localFilesAllowed
     }
 
     ColumnLayout {
@@ -59,7 +63,7 @@ Rectangle {
                 color: root.statusColor
             }
             Text {
-                visible: explanation.text.length === 0
+                visible: !explanation.enabled
                 text: root.toolName
                 color: "#9ea4c7"
                 font.family: "JetBrains Mono"
@@ -67,7 +71,7 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
             Text {
-                visible: explanation.text.length === 0
+                visible: !explanation.enabled
                 Layout.fillWidth: true
                 text: root.summary
                 color: "#969bb5"
@@ -76,16 +80,16 @@ Rectangle {
             }
             Text {
                 objectName: "activityExplanationText"
-                visible: explanation.text.length > 0
+                visible: explanation.enabled
                 Layout.fillWidth: true
-                text: explanation.text
+                text: explanation.displayText
                 textFormat: Text.PlainText
                 color: "#82aaff"
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
             }
             Text {
-                visible: root.detail.length > 0 || explanation.text.length > 0
+                visible: (!explanation.enabled && root.detail.length > 0) || explanation.text.length > 0
                 text: root.expanded ? "−" : "+"
                 color: "#858aa7"
                 font.pixelSize: 13
@@ -93,7 +97,8 @@ Rectangle {
         }
 
         Rectangle {
-            visible: root.expanded && (root.detail.length > 0 || explanation.text.length > 0)
+            visible: root.expanded && (!explanation.enabled || explanation.text.length > 0)
+                && (root.detail.length > 0 || explanation.text.length > 0)
             Layout.fillWidth: true
             Layout.leftMargin: 15
             implicitHeight: detailText.implicitHeight + 6
@@ -117,7 +122,7 @@ Rectangle {
     }
 
     TapHandler {
-        enabled: root.detail.length > 0 || explanation.text.length > 0
+        enabled: (!explanation.enabled && root.detail.length > 0) || explanation.text.length > 0
         onTapped: root.expanded = !root.expanded
     }
 }

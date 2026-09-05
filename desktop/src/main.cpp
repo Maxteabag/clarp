@@ -479,7 +479,11 @@ int main(int argc, char* argv[]) {
                         QQuickItem* item = remaining.takeLast();
                         remaining.append(item->childItems());
                         if (item->objectName() == QStringLiteral("activityExplanationText") &&
-                            item->isVisible() && !item->property("text").toString().isEmpty()) ++translatedRows;
+                            item->isVisible()) {
+                            const QString text = item->property("text").toString();
+                            if (!text.isEmpty() && text != QStringLiteral("Explaining activity…")
+                                && text != QStringLiteral("Explanation unavailable")) ++translatedRows;
+                        }
                     }
                     if (translatedRows < 4) {
                         qCritical("Expected four real translated activity rows before capture");
