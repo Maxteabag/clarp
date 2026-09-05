@@ -41,6 +41,8 @@ export const app = $state({
   version: '',
   /** Bumped on every snapshot patch so time-dependent views re-derive. */
   tick: 0,
+  /** Computer preference: wear the portrait drawn for the model, when bundled. */
+  modelAvatars: false,
 });
 
 export const isDesktop = document.documentElement.classList.contains('desktop');
@@ -78,6 +80,7 @@ export function syncStatus() {
   const next = agentSnapshot.asStatusMap();
   app.status = { ...next };
   app.agentsBySession = { ...next };
+  app.modelAvatars = agentSnapshot.modelAvatars;
   app.tick++;
 }
 
@@ -86,7 +89,8 @@ export function chipLabel(sid) {
 }
 
 export function avatarUrl(name, sid = '') {
-  return resolveAvatarUrl(app.agentsBySession, name, sid);
+  return resolveAvatarUrl(app.agentsBySession, name, sid,
+                          { preferModel: app.modelAvatars });
 }
 
 export function statusFor(sid) {

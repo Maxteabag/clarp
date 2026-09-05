@@ -75,6 +75,7 @@ event arrives.
       "agent_id": "…", "session": "rachel", "persona": "Rachel",
       "backend": "claude", "cwd": "/home/me/proj", "model": "", "effort": "",
       "voice_id": "…", "avatar_symbol": "", "avatar_url": "/avatars/<agent_id>?v=<hash>",
+      "model_avatar_url": "/static/avatars/models/rachel.opus.png?v=<hash>",
       "mcp_servers": [], "heartbeat_enabled": false, "dreaming_enabled": false,
       "muted": false, "archived_at": null,
 
@@ -93,7 +94,8 @@ event arrives.
   "focus": "<agent_id or null>",
   "roster": ["Rachel", "Mike", "…"],
   "personas": [ { "…": "saved contact definitions" } ],
-  "available_mcp_servers": ["…"]
+  "available_mcp_servers": ["…"],
+  "model_avatars": false
 }
 ```
 
@@ -108,6 +110,12 @@ Rules:
 - The snapshot is read-only: calling it never changes server state, so it is
   safe to call as often as needed (the server reconciles stale state on the
   way out).
+- `model_avatar_url` is the bundled portrait drawn for the model this agent
+  runs on, empty when none is bundled for that persona and family. It is
+  offered whether or not the user wants it; `model_avatars` is the Computer's
+  preference, so a client can honour a toggle without refetching. The server
+  leaves it empty for an agent with a portrait the user chose, so preferring
+  it can never replace an uploaded or generated picture.
 - There is no `/sessions` in this layer. The list of chats is
   `agents[].session` filtered by `archived_at == null`.
 
@@ -399,7 +407,7 @@ any subset. Payload shapes are documented in the handler docstrings in
 | Provider sign-in and usage | `/backend-auth`, `/backend-auth/login`, `/backend-auth/login-code`, `/backend-auth/logout`, `/backend-usage` | `backend_auth.py`, `backend_usage.py` |
 | Files and media | `POST /upload` (headers `X-Session`, `X-File-Name`, `X-Upload-ID`), `/media`, `/agent-files`, `/agent-file` | `upload_results.py`, `media_store.py`, `agent_files.py` |
 | Artifacts and decisions | `/artifacts`, `/artifacts/<id>`, `/decisions`, `/decisions/<id>/resolve`, `/task-plan` | `artifacts.py`, `task_plans.py` |
-| Portraits and personas | `/agent-portraits`, `/agent-portrait-generation`, `/personas`, `/personas/update`, `/personalities/settings` | `agent_portraits.py`, `portrait_generation.py`, `personas.py` |
+| Portraits and personas | `/agent-portraits`, `/agent-portrait-generation`, `/personas`, `/personas/update`, `/personalities/settings`, `/avatar-settings` | `agent_portraits.py`, `portrait_generation.py`, `personas.py`, `model_avatars.py` |
 | Teams | `/teams`, `/teams/<id>`, `/teams/<id>/members`, `/teams/<id>/messages`, `/team-nudging` | `team_store.py`, `team_leader.py` |
 | Autonomy | `/heartbeat/settings`, `/agent-heartbeat/status`, `/dreaming/settings`, `/dreaming/runs`, `/automation-settings`, `/herald/settings`, `/orchestrator/settings`, `/orchestrator/route-delegation` | `heartbeat.py`, `dreaming.py`, `herald.py`, `orchestrator.py` |
 | Transcription | `/transcription-capabilities`, `/transcription-guidance`, `/transcription-models/install`, `/transcription-models/remove` | `transcription_models.py`, `vocab.py` |

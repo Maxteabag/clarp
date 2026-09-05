@@ -295,6 +295,7 @@ class Handler(BaseHTTPRequestHandler):
         "/herald/settings": "_handle_herald_settings_get",
         "/personalities/settings": "_handle_personalities_settings_get",
         "/automation-settings": "_handle_automation_settings_get",
+        "/avatar-settings": "_handle_avatar_settings_get",
         "/agent-model-options": "_handle_agent_model_options",
         "/favorite-paths": "_handle_favorite_paths",
         "/orchestrator/decisions": "_handle_orchestrator_decisions",
@@ -369,6 +370,7 @@ class Handler(BaseHTTPRequestHandler):
         "/herald/settings": "_handle_herald_settings_post",
         "/personalities/settings": "_handle_personalities_settings_post",
         "/automation-settings": "_handle_automation_settings_post",
+        "/avatar-settings": "_handle_avatar_settings_post",
         "/preview": "_handle_preview",
         "/stop": "_handle_stop",
         "/remote-action": "_handle_remote_action",
@@ -686,7 +688,8 @@ class Handler(BaseHTTPRequestHandler):
     _DEVICE_FULL_ONLY_PREFIXES = (
         "/backend-auth", "/server-update", "/managed-skills",
         "/orchestrator/", "/herald/", "/personalities/",
-        "/automation-settings", "/paired-devices", "/tts/providers",
+        "/automation-settings", "/avatar-settings", "/paired-devices",
+        "/tts/providers",
         "/oracle/", "/agent-file",
     )
     _LIMITED_DEVICE_POST_EXACT = frozenset({
@@ -1104,6 +1107,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, b'{"error":"special_treatment required"}',
                               "application/json")
         self._send(200, json.dumps(update(data["special_treatment"])).encode(),
+                   "application/json")
+
+    def _handle_avatar_settings_get(self):
+        from lib.avatar_settings import get
+        self._send(200, json.dumps(get()).encode(), "application/json")
+
+    def _handle_avatar_settings_post(self):
+        from lib.avatar_settings import update
+        data = self._read_json()
+        if data is None or not isinstance(data.get("model_avatars"), bool):
+            return self._send(400, b'{"error":"model_avatars required"}',
+                              "application/json")
+        self._send(200, json.dumps(update(data["model_avatars"])).encode(),
                    "application/json")
 
     def _handle_favorite_paths(self):

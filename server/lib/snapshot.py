@@ -5,8 +5,9 @@ from typing import Any
 
 import json
 
-from . import (agents as agents_db, backends, compaction, config,
-               message_store, team_store, turn_queue, scheduler)
+from . import (agents as agents_db, avatar_settings, backends, compaction,
+               config, message_store, model_avatars, team_store,
+               turn_queue, scheduler)
 from . import reconcile
 from . import personas as persona_store
 from .avatar_urls import versioned_avatar_url
@@ -28,6 +29,14 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     schedules: dict[str, list] = {}
     for schedule in scheduler.list_schedules():
         schedules.setdefault(schedule['agent_id'], []).append(schedule)
+    # Model portraits are projected whether or not the preference is on, so
+    # toggling it in an app is instant instead of waiting for a snapshot.
+    cfg = config.load()
+    # Without a server context there is no bundled art to point at, so the
+    # projection simply offers no model portraits.
+    static_root = getattr(ctx, "static", None)
+    model_avatar_root = (static_root / "avatars" / "models") if static_root else None
+    default_models: dict[str, str] = {}
     for a in agents_db.list_agents():
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
@@ -84,6 +93,19 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             if j is not None:
                 context_tokens = context_tokens_from_jsonl(j)
         mcp_servers = _agent_mcp_list(a.get("mcp_servers"))
+        # Only an Agent still wearing its bundled persona portrait can wear a
+        # model variant of it; an uploaded or generated portrait is the
+        # user's own choice and is never swapped out from under them.
+        model_avatar_url = ""
+        if model_avatar_root is not None and not str(a.get("avatar_path") or ""):
+            resolved_backend = backends.normalize(backend)
+            if resolved_backend not in default_models:
+                default_models[resolved_backend] = backends.default_model_effort(
+                    resolved_backend, cfg)[0]
+            model_avatar_url = model_avatars.url_for(
+                a["persona"], backend, a.get("model") or "",
+                root=model_avatar_root,
+                default_model=default_models[resolved_backend])
         rows.append({
             "agent_id":       agent_id,
             "persona":        a["persona"],
@@ -91,6 +113,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "avatar_symbol":  a.get("avatar_symbol") or "",
             "avatar_url": versioned_avatar_url(
                 "/avatars", agent_id, str(a.get("avatar_path") or "")),
+            "model_avatar_url": model_avatar_url,
             "cwd":            a["cwd"],
             "session":        a["session"],
             "backend":        backend,
@@ -160,6 +183,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         "focus": focus,
         "roster": roster,
         "personas": [persona_store.public(row) for row in persona_rows],
+        # Whether clients should prefer the model portrait where one exists.
+        "model_avatars": avatar_settings.get()["model_avatars"],
         # The menu of MCP servers an agent can be granted (from ~/.claude.json).
         "available_mcp_servers": sorted(config.read_global_mcp_servers().keys()),
     }
