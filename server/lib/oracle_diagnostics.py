@@ -56,7 +56,7 @@ class OracleJournal:
             fields["contract_sha256"] = hashlib.sha256(
                 json.dumps(contract, sort_keys=True).encode()).hexdigest()
             fields["contract"] = contract  # Already sanitized by the Host proxy.
-        if kind == "error":
+        if isinstance(value.get("error"), dict):
             error = value.get("error", {})
             if isinstance(error, dict):
                 fields["error"] = {k: error[k] for k in ("type", "code", "message", "event_id") if k in error}
