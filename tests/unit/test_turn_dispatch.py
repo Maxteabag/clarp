@@ -1053,3 +1053,198 @@ def test_unknown_error_keeps_legacy_idle_flip(tmp_path):
     assert len(backends.spawned) == 1  # not retried
     # Legacy behaviour: idle flip, not the interrupted badge.
     assert agents_db.latest_state(agent_id)["kind"] == AgentState.IDLE
+
+
+def _enable_account_failover(monkeypatch, *, available=True):
+    from dataclasses import replace
+    from lib.claude_failover import ClaudeFailover
+    from unittest.mock import Mock
+    cfg = replace(_td.config.load(), claude_account_switch_command=("selector",))
+    monkeypatch.setattr(_td.config, "load", lambda *args, **kwargs: cfg)
+    scheduled = []
+    coordinator = ClaudeFailover(
+        _td._TURN_LOCK, switch=Mock(return_value=available),
+        schedule=lambda delay, callback: scheduled.append((delay, callback)),
+        now=lambda: 100)
+    monkeypatch.setattr(_td, "_CLAUDE_FAILOVER", coordinator)
+    return coordinator, scheduled
+
+
+def test_account_failover_resumes_all_claude_turns_preserving_history_and_queue(tmp_path, monkeypatch):
+    import uuid
+    from lib import turn_queue
+    coordinator, scheduled = _enable_account_failover(monkeypatch)
+    service, backend, agent_id = _make_service(tmp_path)
+    service.uuid_factory = lambda: str(uuid.uuid4())
+    monkeypatch.setattr(_td, "find_latest_jsonl", lambda *args, **kwargs: tmp_path / "native.jsonl")
+    for session, provider in (("bella", "claude"), ("codex-agent", "codex")):
+        new_id = agents_db.create_agent(persona=session, voice_id="V", cwd=str(tmp_path),
+                                        session=session, backend=provider)
+        agents_db.start_runtime(new_id, session)
+    service.dispatch(text="finish the feature", requested_session="mike", trace_id="a",
+                     client_msg_id="original", synthesize_audio=False)
+    service.dispatch(text="other Claude task", requested_session="bella", trace_id="b")
+    service.dispatch(text="Codex task", requested_session="codex-agent", trace_id="c")
+    first, second, codex = [call for _, call in backend.spawned]
+    first["on_session_init"](first["backend_session_id"])
+    second["on_session_init"](second["backend_session_id"])
+    service.dispatch(text="then run checks", requested_session="mike", forced_session="mike", trace_id="queued",
+                     client_msg_id="queued", queue_if_busy=True)
+    first["on_result"]({"is_error": True, "result": "You've hit your session limit"})
+    second["on_error"]("You've hit your session limit")
+    assert len(scheduled) == 1
+    assert len(backend.spawned) == 3
+    scheduled.pop()[1]()
+    assert len(backend.spawned) == 5
+    resumed = {call["session"]: call for _, call in backend.spawned[3:]}
+    for previous in (first, second):
+        current = resumed[previous["session"]]
+        assert current["backend_session_id"] == previous["backend_session_id"]
+        assert current["trace_id"] == previous["trace_id"]
+        assert current["model"] == previous["model"]
+        assert current["effort"] == previous["effort"]
+        assert current["is_new_session"] is False
+        assert "Continue the unfinished request" in current["text"]
+    assert "codex-agent" not in resumed
+    # Late callbacks from terminated attempts cannot complete the new attempt.
+    first["on_result"]({"result": "old completion"})
+    first["on_error"]("SIGTERM")
+    assert agents_db.latest_state(agent_id)["kind"] == AgentState.THINKING
+    assert turn_queue.status("queued") == "queued"
+    assert resumed["mike"]["on_session_init"](first["backend_session_id"]) is True
+    messages = agents_db.list_messages(agent_id=agent_id,
+                                      backend_session_id=first["backend_session_id"])
+    assert [m["text"] for m in messages if m["role"] == "user"] == ["finish the feature"]
+    assert not coordinator.attempts[agent_id].state.get("account_recovery")
+    assert not coordinator.attempts[agent_id].state.get("outcome_seen")
+    assert _td._INFLIGHT.get(agent_id) == "a"
+    assert agents_db.get_trace(agent_id) == "a"
+    resumed["mike"]["on_result"]({"result": "feature finished"})
+    assert backend.spawned[-1][1]["text"] == "then run checks"
+    assert turn_queue.status("queued") == "started"
+    assert len(backend.spawned) == 6
+
+
+def test_stop_during_account_recovery_prevents_continuation(tmp_path, monkeypatch):
+    coordinator, scheduled = _enable_account_failover(monkeypatch)
+    service, backend, agent_id = _make_service(tmp_path)
+    service.dispatch(text="work", requested_session="mike", trace_id="stop-me")
+    backend.spawned[0][1]["on_error"]("usage limit reached")
+    clear_for_agent(agent_id)
+    scheduled.pop()[1]()
+    assert len(backend.spawned) == 1
+    coordinator.switch.assert_not_called()
+    assert not coordinator.recovering
+
+
+def test_unavailable_accounts_hold_new_messages_behind_unfinished_work(tmp_path, monkeypatch):
+    coordinator, scheduled = _enable_account_failover(monkeypatch, available=False)
+    service, backend, agent_id = _make_service(tmp_path)
+    service.dispatch(text="work", requested_session="mike", trace_id="pending")
+    backend.spawned[0][1]["on_error"]("usage limit reached")
+    scheduled.pop()[1]()
+    backend.live = False
+    result = service.dispatch(text="follow up", requested_session="mike", trace_id="next",
+                              queue_if_busy=True)
+    assert result.queued
+    assert len(backend.spawned) == 1
+    assert _td._INFLIGHT[agent_id] == "pending"
+    assert agent_id in _td._CLAIMED_AT
+    assert coordinator.status()["waiting"] == [agent_id]
+
+
+def test_temporary_429_does_not_switch_accounts(tmp_path, monkeypatch):
+    coordinator, scheduled = _enable_account_failover(monkeypatch)
+    service, backend, agent_id = _make_service(tmp_path)
+    service.dispatch(text="work", requested_session="mike", trace_id="temporary")
+    backend.spawned[0][1]["on_error"]("429 too many requests")
+    assert not scheduled
+    coordinator.switch.assert_not_called()
+    assert agents_db.latest_state(agent_id)["detail"]["reason"] == "transient"
+
+
+def test_account_recovery_before_native_session_exists_keeps_original_request(tmp_path, monkeypatch):
+    coordinator, scheduled = _enable_account_failover(monkeypatch)
+    service, backend, _ = _make_service(tmp_path)
+    service.dispatch(text="not yet delivered", requested_session="mike", trace_id="fresh")
+    first = backend.spawned[0][1]
+    first["on_error"]("usage limit reached")
+    scheduled.pop()[1]()
+    resumed = backend.spawned[-1][1]
+    assert resumed["is_new_session"] is True
+    assert resumed["backend_session_id"] == first["backend_session_id"]
+    assert resumed["text"] == "not yet delivered"
+
+
+def test_account_recovery_invalidates_an_already_scheduled_connection_retry(tmp_path, monkeypatch):
+    import uuid
+    coordinator, recovery = _enable_account_failover(monkeypatch)
+    retries = []
+    service, backend, _ = _make_service(
+        tmp_path, retry_scheduler=lambda delay, callback: retries.append(callback))
+    service.uuid_factory = lambda: str(uuid.uuid4())
+    other = agents_db.create_agent(persona="Bella", voice_id="V", cwd=str(tmp_path),
+                                   session="bella", backend="claude")
+    agents_db.start_runtime(other, "bella")
+    service.dispatch(text="work", requested_session="mike", forced_session="mike", trace_id="a")
+    service.dispatch(text="work", requested_session="bella", forced_session="bella", trace_id="b")
+    first, second = [call for _, call in backend.spawned]
+    first["on_error"]("connection reset")
+    assert len(retries) == 1
+    second["on_error"]("usage limit reached")
+    recovery.pop()[1]()
+    assert len(backend.spawned) == 4
+    retries.pop()()
+    assert len(backend.spawned) == 4
+
+
+def test_new_user_turn_parked_on_an_existing_session_keeps_native_user_boundary(tmp_path, monkeypatch):
+    coordinator, recovery = _enable_account_failover(monkeypatch)
+    service, backend, _ = _make_service(tmp_path)
+    monkeypatch.setattr(_td, "find_latest_jsonl", lambda *args, **kwargs: tmp_path / "native.jsonl")
+    other = agents_db.create_agent(persona="Bella", voice_id="V", cwd=str(tmp_path),
+                                   session="bella", backend="claude")
+    agents_db.start_runtime(other, "bella")
+    agents_db.bind_backend_session(other, "older-conversation")
+    service.dispatch(text="working", requested_session="mike", forced_session="mike", trace_id="a")
+    backend.spawned[0][1]["on_error"]("usage limit reached")
+    service.dispatch(text="a new user request", requested_session="bella", forced_session="bella", trace_id="new")
+    assert len(backend.spawned) == 1
+    recovery.pop()[1]()
+    delivered = [call for _, call in backend.spawned if call["session"] == "bella"]
+    assert len(delivered) == 1
+    assert delivered[0]["text"] == "a new user request"
+    assert delivered[0]["backend_session_id"] == "older-conversation"
+    assert delivered[0]["is_new_session"] is False
+
+
+def test_strict_runtime_cancellation_accepts_reaped_recovery_work(tmp_path, monkeypatch):
+    from lib import backends as registry
+    from lib.runtime_bridge import RuntimeRPCServer
+    coordinator, recovery = _enable_account_failover(monkeypatch, available=False)
+    service, backend, agent_id = _make_service(tmp_path)
+    service.dispatch(text="delegated work", requested_session="mike", trace_id="oracle-work",
+                     origin="oracle")
+    monkeypatch.setattr(registry, "interrupt", lambda *_: 0)
+    runtime = RuntimeRPCServer(tmp_path / "runtime.sock", dispatch_service=service)
+    try:
+        params = {"agent_id": agent_id, "backend": "claude", "strict": True, "hold": True}
+        # Ordinary in-flight work still requires confirmed interruption.
+        denied = runtime.dispatch_request("begin_stop", params)
+        assert denied["status"] == 502
+        assert _td._INFLIGHT[agent_id] == "oracle-work"
+        backend.spawned[0][1]["on_error"]("usage limit reached")
+        recovery.pop()[1]()
+        assert coordinator.parked(agent_id, "oracle-work")
+        accepted = runtime.dispatch_request("begin_stop", params)
+        assert accepted["ok"] is True
+        assert accepted["result"]["terminated"] == 0
+        runtime.dispatch_request("finish_stop", {
+            "lease_id": accepted["result"]["lease_id"],
+            "cancelled_trace_ids": ["oracle-work"],
+        })
+        recovery.pop()[1]()
+        assert len(backend.spawned) == 1
+        assert not coordinator.recovering
+    finally:
+        runtime.server_close()

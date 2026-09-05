@@ -24,7 +24,7 @@ from .log import log_exception
 # (stripped) text.
 _INJECTED_USER_NOISE_RE = re.compile(
     r"^<(?:task-notification|system-reminder|local-command-stdout|"
-    r"command-name|command-message|command-args)\b",
+    r"command-name|command-message|command-args|clarp-account-recovery)\b",
     re.IGNORECASE,
 )
 

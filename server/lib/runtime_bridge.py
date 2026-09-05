@@ -364,7 +364,7 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 turn_queue.set_paused(agent_id, queue_was_paused)
                 return {"ok": False, "status": 502, "error": str(exc)}
             if (bool(params.get("strict")) and snapshot.get("trace_id")
-                    and terminated <= 0):
+                    and terminated <= 0 and not snapshot.get("account_recovery_parked")):
                 turn_dispatch.restore_stop_state(agent_id, snapshot)
                 turn_queue.set_paused(agent_id, queue_was_paused)
                 return {"ok": False, "status": 502,
