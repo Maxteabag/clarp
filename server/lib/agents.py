@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from . import origins
+from . import voice_verbosity as voice_verbosity_lib
 from .db import conn, now_ms
 from .protocol import AgentBackend, AgentState, ClipStatus, TurnSource
 
@@ -31,7 +32,8 @@ def list_agents() -> list[dict[str, Any]]:
         SELECT agent_id, persona, voice_id, cwd, session, backend, created_at,
                model, effort, mcp_servers, heartbeat_enabled,
                dreaming_enabled, dreaming_last_local_date, muted,
-               custom_status, avatar_symbol, avatar_path, personality, archived_at
+               custom_status, avatar_symbol, avatar_path, personality,
+               voice_verbosity, archived_at
           FROM agents
          WHERE deleted_at IS NULL
          ORDER BY created_at
@@ -45,7 +47,8 @@ def get_by_session(session: str) -> dict[str, Any] | None:
         SELECT agent_id, persona, voice_id, cwd, session, backend, created_at,
                model, effort, mcp_servers, heartbeat_enabled,
                dreaming_enabled, dreaming_last_local_date, muted,
-               custom_status, avatar_symbol, avatar_path, personality, archived_at
+               custom_status, avatar_symbol, avatar_path, personality,
+               voice_verbosity, archived_at
           FROM agents
          WHERE session = ? AND deleted_at IS NULL
     """, (session,)).fetchone()
@@ -72,7 +75,8 @@ def get_by_backend_session(backend_session_id: str) -> dict[str, Any] | None:
                a.backend, a.created_at, a.model, a.effort, a.mcp_servers,
                a.heartbeat_enabled, a.dreaming_enabled,
                a.dreaming_last_local_date, a.muted, a.custom_status,
-               a.avatar_symbol, a.avatar_path, a.personality, a.archived_at
+               a.avatar_symbol, a.avatar_path, a.personality,
+               a.voice_verbosity, a.archived_at
           FROM agents a
           JOIN runtimes r ON r.agent_id = a.agent_id
          WHERE r.backend_session_id = ?
@@ -109,7 +113,8 @@ def get_by_agent_id(agent_id: str) -> dict[str, Any] | None:
         SELECT agent_id, persona, voice_id, cwd, session, backend, created_at,
                model, effort, mcp_servers, heartbeat_enabled,
                dreaming_enabled, dreaming_last_local_date, muted,
-               custom_status, avatar_symbol, avatar_path, personality, archived_at
+               custom_status, avatar_symbol, avatar_path, personality,
+               voice_verbosity, archived_at
           FROM agents
          WHERE agent_id = ? AND deleted_at IS NULL
     """, (agent_id,)).fetchone()
@@ -206,6 +211,7 @@ def update_agent(agent_id: str, *, persona: str | None = None,
                  muted: bool | int | None = None,
                  avatar_symbol: str | None = None,
                  personality: str | None = None,
+                 voice_verbosity: int | None = None,
                  avatar_path: str | None = None,
                  dreaming_last_local_date: str | None = None) -> None:
     """Update mutable agent metadata without changing its stable agent_id.
@@ -251,6 +257,9 @@ def update_agent(agent_id: str, *, persona: str | None = None,
     if personality is not None:
         fields.append("personality = ?")
         values.append(personality)
+    if voice_verbosity is not None:
+        fields.append("voice_verbosity = ?")
+        values.append(voice_verbosity_lib.clamp(voice_verbosity))
     if avatar_path is not None:
         fields.append("avatar_path = ?")
         values.append(avatar_path)

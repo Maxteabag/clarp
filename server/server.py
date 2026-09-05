@@ -382,6 +382,7 @@ class Handler(BaseHTTPRequestHandler):
         "/diagnostics/settings": "_handle_diagnostics_settings_post",
         "/agent-dreaming": "_handle_agent_dreaming",
         "/agent-mute": "_handle_agent_mute",
+        "/agent-voice-verbosity": "_handle_agent_voice_verbosity",
         "/team-nudging": "_handle_team_nudging",
         "/compact": "_handle_compact",
         "/orchestrator/settings": "_handle_orchestrator_settings_post",
@@ -2950,6 +2951,45 @@ class Handler(BaseHTTPRequestHandler):
             "dream_min_directions": settings.min_directions,
             "dream_settings": settings.as_dict(),
             "dream_prompt": dreaming.dreaming_prompt_text(),
+        }).encode(), "application/json")
+
+    def _handle_agent_voice_verbosity(self):
+        """Set how much one agent narrates aloud while it is still working.
+
+        Read fresh on the next turn dispatch, so moving the slider re-tunes a
+        running agent without a relaunch.
+        """
+        from lib import agents as agents_db
+        from lib import voice_verbosity
+        data = self._read_json()
+        if data is None:
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        session = (data.get("session") or "").strip()
+        if not session:
+            return self._send(400, b'{"error":"session required"}', "application/json")
+        if "voice_verbosity" not in data:
+            return self._send(400, b'{"error":"voice_verbosity required"}',
+                              "application/json")
+        raw = data.get("voice_verbosity")
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            return self._send(400, b'{"error":"voice_verbosity must be an integer"}',
+                              "application/json")
+        if not voice_verbosity.MIN_LEVEL <= raw <= voice_verbosity.MAX_LEVEL:
+            return self._send(400, json.dumps({
+                "error": "voice_verbosity out of range",
+                "min": voice_verbosity.MIN_LEVEL,
+                "max": voice_verbosity.MAX_LEVEL,
+            }).encode(), "application/json")
+        agent = agents_db.get_by_session(session)
+        if not agent:
+            return self._send(404, b'{"error":"no such agent"}', "application/json")
+        agents_db.update_agent(agent["agent_id"], voice_verbosity=raw)
+        fresh = agents_db.get_by_session(session) or {}
+        return self._send(200, json.dumps({
+            "ok": True,
+            "session": session,
+            "voice_verbosity": int(fresh.get("voice_verbosity") or 0),
+            "options": voice_verbosity.options(),
         }).encode(), "application/json")
 
     def _handle_agent_mute(self):
