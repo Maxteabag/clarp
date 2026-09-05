@@ -335,6 +335,7 @@ class Handler(BaseHTTPRequestHandler):
         "/vocab/terms/delete": "_handle_vocab_terms_delete",
         "/vocab/profiles": "_handle_vocab_profiles_post",
         "/vocab/profiles/delete": "_handle_vocab_profiles_delete",
+        "/vocab/profiles/workspace": "_handle_vocab_profile_workspace",
         "/vocab/profiles/packs": "_handle_vocab_profile_packs_post",
         "/vocab/profiles/packs/remove": "_handle_vocab_profile_packs_remove",
         "/vocab/assign": "_handle_vocab_assign_post",
@@ -1630,6 +1631,30 @@ class Handler(BaseHTTPRequestHandler):
         for position, pack_id in enumerate(data.get("pack_ids") or []):
             vocab_store.add_pack_to_profile(profile_id, str(pack_id), position)
         self._json_ok({"ok": True, "profile_id": profile_id})
+
+    def _handle_vocab_profile_workspace(self):
+        """Turn workspace harvesting on or off for one profile.
+
+        Off is the default and the safe answer: reading an agent's folders is
+        a choice, and the absence of one is what let a package tree write most
+        of a biasing payload.
+        """
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        profile_id = str(data.get("profile_id") or "").strip()
+        if not profile_id:
+            return self._json_error(400, "profile_id is required")
+        if not isinstance(data.get("enabled"), bool):
+            return self._json_error(400, "enabled must be a boolean")
+        if vocab_store.profile_detail(profile_id) is None:
+            return self._json_error(404, "no such profile")
+        vocab_store.set_profile_harvests_workspace(profile_id, data["enabled"])
+        self._json_ok({
+            "ok": True, "profile_id": profile_id,
+            "harvests_workspace": vocab_store.profile_harvests_workspace(profile_id),
+        })
 
     def _handle_vocab_profiles_delete(self):
         from lib import vocab_store
