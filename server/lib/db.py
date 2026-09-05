@@ -7,6 +7,17 @@ Schema is created on first open. user_version drives migrations: to change the
 schema, edit _SCHEMA_SQL, bump _SCHEMA_VERSION, and add a `_migrate_to_vN`
 that upgrades an existing database (see `_migrate`).
 
+Two things that are easy to get wrong:
+
+* `tests/unit/test_db_migrations.py` builds an old database by *undoing* the
+  current schema (`_shape_as_v61`). A new column therefore needs a matching
+  `DROP COLUMN` there, or every migration test fails on a duplicate column.
+* If two branches bump to the same version, both define `_migrate_to_vN` and
+  Python keeps only the last one — the other migration silently becomes dead
+  code and never runs. Merge the two bodies into one function rather than
+  renumbering, and guard each `ALTER` with a `PRAGMA table_info` check so a
+  re-run is a no-op instead of a crash.
+
 The hooks and the server both use this module — they share the file via
 WAL mode + a short busy_timeout. Concurrent writes serialise without
 losing rows.
@@ -796,6 +807,7 @@ CREATE TABLE dream_runs (
     seed_strategy TEXT NOT NULL DEFAULT 'control',
     context_dose TEXT NOT NULL DEFAULT 'full',
     seed_material TEXT NOT NULL DEFAULT '',
+    artifact_branch TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 CREATE INDEX idx_dream_runs_agent_status ON dream_runs(agent_id, status, started_at DESC);
@@ -1528,7 +1540,7 @@ def _migrate_to_v65(con: sqlite3.Connection) -> None:
 
 
 def _migrate_to_v68(con: sqlite3.Connection) -> None:
-    """Each agent decides how much it narrates aloud while still working.
+    """Per-agent narration level, and a durable home for dream-built code.
 
     The spoken contract was one acknowledgment, silence, then a summary. That
     is right when driving and wrong when following along, so the level moves
@@ -1543,6 +1555,18 @@ def _migrate_to_v68(con: sqlite3.Connection) -> None:
         con.execute(
             "ALTER TABLE agents ADD COLUMN voice_verbosity INTEGER NOT NULL"
             " DEFAULT 0")
+    # Same version, second concern: a dream's built code survives its
+    # worktree. Whatever a run builds at `worktree` altitude used to live in
+    # an untracked scratch directory that nothing referenced and nothing
+    # cleaned up; recording the branch it was committed to makes the highest
+    # value output of a night durable instead of prose in a digest.
+    dream_columns = {row[1] for row in con.execute(
+        "PRAGMA table_info(dream_runs)")}
+    if "artifact_branch" not in dream_columns:
+        con.execute(
+            "ALTER TABLE dream_runs ADD COLUMN artifact_branch TEXT NOT NULL"
+            " DEFAULT ''")
+
 
 
 def _migrate_to_v67(con: sqlite3.Connection) -> None:

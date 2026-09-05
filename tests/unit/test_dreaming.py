@@ -919,3 +919,113 @@ def test_digest_delivery_is_idempotent():
     published = [a for a in artifacts.list_artifacts(session="dozy2")
                  if a.get("reference_id") == run_id]
     assert len(published) == 1
+
+
+# --- worktree harvest ------------------------------------------------------
+
+def _git_repo(tmp_path):
+    """A throwaway repo with one commit, usable as a worktree source."""
+    import subprocess
+    root = tmp_path / "src"
+    root.mkdir()
+    def run(*args):
+        subprocess.run(["git", "-C", str(root), *args], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run("init", "-q", "-b", "main")
+    run("config", "user.email", "t@t.invalid")
+    run("config", "user.name", "T")
+    (root / "seed.txt").write_text("seed\n")
+    run("add", "-A")
+    run("commit", "-qm", "init")
+    return root
+
+
+def test_harvest_commits_dream_work_to_a_branch_then_removes_the_worktree(
+        tmp_path, monkeypatch):
+    """The built code has to outlive the disposable directory it was built in."""
+    import subprocess
+    root = _git_repo(tmp_path)
+    aid = _agent("dharvest")
+    run = dreaming.create_dream_run(
+        agents_db.get_by_session("dharvest"),
+        local_date="2026-09-06", timezone_name="UTC", timezone_source="test",
+        seed_strategy="foreign")
+    run_id = run["run_id"]
+    agents_db.update_agent(aid, cwd=str(root))
+
+    worktrees = tmp_path / "wt"
+    worktrees.mkdir()
+    target = worktrees / run_id
+    subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach",
+                    str(target), "HEAD"], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    (target / "invention.py").write_text("# what the dream built\n")
+    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda rid: target)
+
+    branch = dreaming.harvest_worktree(run_id)
+
+    assert branch.startswith("dream/2026-09-06-foreign-")
+    assert dreaming.get_run(run_id)["artifact_branch"] == branch
+    # The work is on a real branch in the source repo...
+    listed = subprocess.run(
+        ["git", "-C", str(root), "show", f"{branch}:invention.py"],
+        capture_output=True, text=True)
+    assert listed.returncode == 0
+    assert "what the dream built" in listed.stdout
+    # ...and the disposable directory is gone.
+    assert not target.exists()
+
+
+def test_harvest_of_a_clean_worktree_records_no_branch(tmp_path, monkeypatch):
+    import subprocess
+    root = _git_repo(tmp_path)
+    _agent("dclean")
+    run = dreaming.create_dream_run(
+        agents_db.get_by_session("dclean"),
+        local_date="2026-09-06", timezone_name="UTC", timezone_source="test")
+    run_id = run["run_id"]
+    agents_db.update_agent(agents_db.get_by_session("dclean")["agent_id"],
+                           cwd=str(root))
+    worktrees = tmp_path / "wt"
+    worktrees.mkdir()
+    target = worktrees / run_id
+    subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach",
+                    str(target), "HEAD"], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda rid: target)
+
+    assert dreaming.harvest_worktree(run_id) == ""
+    assert dreaming.get_run(run_id)["artifact_branch"] == ""
+    assert not target.exists()
+
+
+def test_harvest_keeps_the_worktree_when_committing_fails(tmp_path, monkeypatch):
+    """Losing disk is a smaller problem than losing the only copy of the work."""
+    import subprocess
+    root = _git_repo(tmp_path)
+    _agent("dfail")
+    run = dreaming.create_dream_run(
+        agents_db.get_by_session("dfail"),
+        local_date="2026-09-06", timezone_name="UTC", timezone_source="test")
+    run_id = run["run_id"]
+    worktrees = tmp_path / "wt"
+    worktrees.mkdir()
+    target = worktrees / run_id
+    subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach",
+                    str(target), "HEAD"], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    (target / "precious.py").write_text("# unreviewed but real\n")
+    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda rid: target)
+
+    real_run = subprocess.run
+
+    def explode(args, **kwargs):
+        if "commit" in args:
+            raise subprocess.SubprocessError("commit refused")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(dreaming.subprocess, "run", explode)
+    dreaming.harvest_worktree(run_id)
+
+    assert target.exists(), "a failed harvest must not delete the work"
+    assert (target / "precious.py").exists()

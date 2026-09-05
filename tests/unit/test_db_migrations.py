@@ -67,6 +67,7 @@ def _shape_as_v61(con: sqlite3.Connection) -> None:
     con.executescript("""
         DROP INDEX idx_messages_trace;
         ALTER TABLE messages DROP COLUMN trace_id;
+        ALTER TABLE dream_runs DROP COLUMN artifact_branch;
         ALTER TABLE dream_runs DROP COLUMN seed_strategy;
         ALTER TABLE dream_runs DROP COLUMN context_dose;
         ALTER TABLE dream_runs DROP COLUMN seed_material;
