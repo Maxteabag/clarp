@@ -12,6 +12,8 @@ Rectangle {
     property bool restoreComposer: false
     property bool sidebarVisible: true
     property bool contactsOnly: false
+    readonly property bool narrationEnabled: controller.toolNarrator !== undefined
+        && controller.toolNarrator !== null && controller.toolNarrator.enabled
     signal commandRequested(string action)
     signal agentRequested(string session)
     signal contactRequested(string name)
@@ -19,6 +21,7 @@ Rectangle {
         { kind: "command", label: "New agent", action: "new", key: "Ctrl+N", group: "agent" },
         { kind: "command", label: "Start an idle contact", action: "new-contact", key: "Ctrl+Alt+N", group: "agent" },
         { kind: "command", label: "Open agent in terminal", action: "agent-terminal", key: "Ctrl+Alt+T", group: "agent" },
+        { kind: "command", label: root.narrationEnabled ? "Disable plain-English tools" : "Enable plain-English tools (Astra · extra usage)", action: "tool-narration", key: "", group: "experiment" },
         { kind: "command", label: "Split right", action: "split-right", key: "Ctrl+Alt+V", group: "layout" },
         { kind: "command", label: "Split down", action: "split-down", key: "Ctrl+Alt+S", group: "layout" },
         { kind: "command", label: "Close pane", action: "close-pane", key: "Ctrl+Alt+X", group: "layout" },

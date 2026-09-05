@@ -65,6 +65,30 @@ Rectangle {
             }
 
             SettingsGroup {
+                title: "EXPERIMENTS"
+                SettingsToggle {
+                    label: "Plain-English tool activity"
+                    detail: "Blue explanations · Codex Astra, low · extra Codex usage"
+                    checked: root.controller.toolNarrator.enabled
+                    onToggled: root.controller.toolNarrator.enabled = checked
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: "Sends tool command snippets to Codex using your account. Explanations may be imperfect; expand a row for the original."
+                    color: "#858aa5"
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: root.controller.toolNarrator.status
+                    color: "#82aaff"
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                }
+            }
+
+            SettingsGroup {
                 title: "VOICE & AUDIO"
                 SettingsToggle {
                     label: "Spoken replies"

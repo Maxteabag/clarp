@@ -99,4 +99,46 @@ TestCase {
         tryVerify(() => card.implicitHeight > collapsedHeight,
                   1000, "Qt list properties must render the same details as JavaScript arrays");
     }
+
+    function test_userMessagesHaveBackgroundInsteadOfAnAccentLine() {
+        const message = createTemporaryObject(toolOnlyMessage, testCase, {
+            authorRole: "user", body: "Keep my messages easy to distinguish.",
+            displayCells: [], activityCount: 0
+        });
+        waitForRendering(message);
+        const background = findChild(message, "userMessageBackground");
+        verify(background !== null);
+        compare(background.color, "#282b3b");
+        for (const child of background.children)
+            verify(!(child.visible && child.width === 2), "User messages must not retain the left accent line");
+    }
+
+    QtObject {
+        id: narratorStub
+        property bool enabled: true
+        property int revision: 0
+        property bool ready: false
+        signal changed()
+        function request(activity) {}
+        function explanation(activity) { return ready ? "Build the desktop preview." : ""; }
+    }
+
+    function test_translationIsBlueOptionalAndKeepsRawDetails() {
+        narratorStub.enabled = true;
+        narratorStub.ready = false;
+        const card = createTemporaryObject(toolCard, testCase, {narrator: narratorStub});
+        waitForRendering(card);
+        const explanation = findChild(card, "activityExplanationText");
+        verify(explanation !== null);
+        compare(explanation.visible, false); // Original tool stays visible while waiting.
+        narratorStub.ready = true;
+        narratorStub.revision++;
+        tryCompare(explanation, "visible", true);
+        compare(explanation.text, "Build the desktop preview.");
+        compare(explanation.color, "#82aaff");
+        card.expanded = true;
+        verify(card.detail.includes("cmake --build"));
+        narratorStub.enabled = false;
+        tryCompare(explanation, "visible", false);
+    }
 }

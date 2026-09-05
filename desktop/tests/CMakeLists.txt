@@ -7,6 +7,8 @@ add_executable(clarp-desktop-tests
     ../src/app/AppController.h
     ../src/app/TranscriptCache.cpp
     ../src/app/TranscriptCache.h
+    ../src/app/ToolNarrator.cpp
+    ../src/app/ToolNarrator.h
     ../src/media/AudioController.cpp
     ../src/media/AudioController.h
     ../src/media/WavEncoder.cpp
@@ -44,6 +46,14 @@ target_link_libraries(clarp-desktop-tests PRIVATE
     Qt6::Test
 )
 clarp_apply_quality_settings(clarp-desktop-tests)
+
+add_executable(clarp-tool-narrator-tests tst_tool_narrator.cpp
+    ../src/app/ToolNarrator.cpp ../src/app/ToolNarrator.h)
+target_include_directories(clarp-tool-narrator-tests PRIVATE ../src)
+target_link_libraries(clarp-tool-narrator-tests PRIVATE Qt6::Core Qt6::Test Qt6::Qml)
+clarp_apply_quality_settings(clarp-tool-narrator-tests)
+add_test(NAME clarp-desktop-tool-narrator COMMAND clarp-tool-narrator-tests)
+set_tests_properties(clarp-desktop-tool-narrator PROPERTIES TIMEOUT 20)
 
 add_test(NAME clarp-desktop-core COMMAND clarp-desktop-tests)
 set_tests_properties(clarp-desktop-core PROPERTIES

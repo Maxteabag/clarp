@@ -2,6 +2,7 @@
 
 #include "app/CredentialStore.h"
 #include "app/TranscriptCache.h"
+#include "app/ToolNarrator.h"
 #include "media/AudioController.h"
 #include "models/AgentListModel.h"
 #include "models/ContactListModel.h"
@@ -29,6 +30,7 @@ class AppController : public QObject {
     Q_PROPERTY(clarp::AgentListModel* agents READ agents CONSTANT)
     Q_PROPERTY(clarp::AgentListModel* archivedAgents READ archivedAgents CONSTANT)
     Q_PROPERTY(clarp::AudioController* audio READ audio CONSTANT)
+    Q_PROPERTY(clarp::ToolNarrator* toolNarrator READ toolNarrator CONSTANT)
     Q_PROPERTY(clarp::ConversationModel* conversation READ conversation NOTIFY conversationChanged)
     Q_PROPERTY(clarp::ContactListModel* contacts READ contacts CONSTANT)
     Q_PROPERTY(clarp::PaneTreeModel* panes READ panes CONSTANT)
@@ -110,6 +112,7 @@ class AppController : public QObject {
     [[nodiscard]] AgentListModel* agents();
     [[nodiscard]] AgentListModel* archivedAgents();
     [[nodiscard]] AudioController* audio();
+    [[nodiscard]] ToolNarrator* toolNarrator();
     [[nodiscard]] ConversationModel* conversation();
     [[nodiscard]] ContactListModel* contacts();
     [[nodiscard]] PaneTreeModel* panes();
@@ -377,6 +380,7 @@ class AppController : public QObject {
     TranscriptCache m_transcriptCache;
     QTemporaryDir m_mediaDirectory;
     AudioController m_audio;
+    ToolNarrator m_toolNarrator;
     AgentListModel m_agents;
     AgentListModel m_archivedAgents;
     ContactListModel m_contacts;

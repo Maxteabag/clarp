@@ -332,6 +332,9 @@ int main(int argc, char* argv[]) {
                                  {QStringLiteral("has_more"),
                                   screenshotScenario == QStringLiteral("long")}},
                                 clarp::ConversationModel::LoadKind::Tail);
+                // Explicit opt-in only: normal screenshot/tests never call a model.
+                if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_TOOL_NARRATION"))
+                    controller->toolNarrator()->setEnabled(true);
             }
         });
     }
@@ -383,9 +386,26 @@ int main(int argc, char* argv[]) {
                 }
             });
         }
-        const int captureDelay = screenshotScenario.isEmpty() ? 2'000 : 2'400;
+        const int requestedDelay = qEnvironmentVariableIntValue("CLARP_SCREENSHOT_DELAY_MS");
+        const int captureDelay = requestedDelay > 0 ? std::clamp(requestedDelay, 2'400, 60'000)
+            : screenshotScenario.isEmpty() ? 2'000 : 2'400;
         QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath, sidebarToggles, sidebarWidth] {
             if (rootWindow != nullptr) {
+                if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_TOOL_NARRATION")) {
+                    QList<QQuickItem*> remaining{rootWindow->contentItem()};
+                    int translatedRows = 0;
+                    while (!remaining.isEmpty()) {
+                        QQuickItem* item = remaining.takeLast();
+                        remaining.append(item->childItems());
+                        if (item->objectName() == QStringLiteral("activityExplanationText") &&
+                            item->isVisible() && !item->property("text").toString().isEmpty()) ++translatedRows;
+                    }
+                    if (translatedRows < 4) {
+                        qCritical("Expected four real translated activity rows before capture");
+                        application.exit(EXIT_FAILURE);
+                        return;
+                    }
+                }
                 if (sidebarToggles > 0) {
                     const auto* rail = rootWindow->findChild<QQuickItem*>(QStringLiteral("sidebarRail"));
                     const auto* surface = rootWindow->findChild<QQuickItem*>(QStringLiteral("workspaceSurface"));

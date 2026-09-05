@@ -85,6 +85,37 @@ press `Ctrl+K`, type their name, and select **Start
 contacts view does the same one-step fresh launch; use `Ctrl+N` to change launch
 options. The new chat receives typing focus after creation.
 
+Your own chat messages use a lighter background instead of a left accent line.
+
+### Experimental plain-English tools
+
+Enable **Settings → Experiments → Plain-English tool activity**, or search for
+**plain-English** in `Ctrl+K`. It is **off by default**. When enabled, visible
+activity is explained in blue by a local background worker running
+`codex exec --model gpt-6-astra` with low reasoning effort. This uses the desktop's
+Codex login and consumes additional Codex usage; no Host deployment is required.
+
+The worker sends bounded tool-command snippets, not the chat transcript or command
+results. Common inline credentials are redacted on a best-effort basis; do not
+enable it for tool inputs that must not be sent to OpenAI. Explanations describe
+operations, not guaranteed intent or success. The original status stays visible;
+expand the row (hover for live activity) to read the original details.
+
+Requests are batched, deduplicated, and cached in memory (512 entries). Only one
+Codex process runs at a time. Original rows remain available while waiting or if
+translation fails. Failures pause new requests until you toggle off/on; disabling
+cancels the worker and restores the normal view immediately. Switching Hosts
+clears the cache. Translations are not written into the conversation transcript.
+
+The invocation uses a private temporary working directory, read-only sandbox,
+disabled shell/browser/plugin integrations, no personal hooks or project
+instructions, an ephemeral session, and structured output. See the official
+[non-interactive Codex documentation](https://learn.chatgpt.com/docs/non-interactive-mode)
+and [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+`clarp-tool-narrator-tests --live-smoke` is a separate, opt-in real-model check.
+The regular test suite uses a fake subprocess and never consumes model usage.
+
 ## Quality gates
 
 ```bash

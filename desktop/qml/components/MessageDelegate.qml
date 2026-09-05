@@ -30,10 +30,12 @@ Item {
     required property bool showTools
     required property bool showTimestamp
     property bool activityExpanded: false
+    readonly property var narrator: controller.toolNarrator || null
+    readonly property bool narrationEnabled: narrator !== null && narrator.enabled
     readonly property int presentedActivityCount: Math.max(
         root.activityCount, root.displayCells.length + root.tools.length)
     readonly property bool showActivityCards: root.showTools
-        || root.activityExpanded || root.presentedActivityCount === 1
+        || root.activityExpanded || root.presentedActivityCount === 1 || root.narrationEnabled
     readonly property bool userAuthored: root.authorRole === "user"
         && root.origin !== "agent" && root.origin !== "automation"
     readonly property int mediaRevision: controller.mediaRevision
@@ -50,6 +52,13 @@ Item {
     visible: activity || body.length > 0 || displayCells.length > 0
         || presentedActivityCount > 0 || (showTools && tools.length > 0)
     implicitHeight: visible ? content.implicitHeight + (activity || body.length === 0 ? 2 : 6) : 0
+
+    ActivityExplanation {
+        id: liveExplanation
+        narrator: root.narrator
+        active: root.visible && root.activity && root.toolName.length > 0
+        activity: ({name: root.toolName, summary: root.body})
+    }
 
     ColumnLayout {
         id: content
@@ -85,6 +94,11 @@ Item {
                 color: "transparent"
                 border.width: 0
 
+                HoverHandler { id: liveActivityHover }
+                ToolTip.visible: liveActivityHover.hovered && liveExplanation.text.length > 0
+                ToolTip.text: root.toolName + " · " + root.body
+                ToolTip.delay: 400
+
                 RowLayout {
                     id: activityRow
                     anchors.fill: parent
@@ -108,6 +122,7 @@ Item {
                         }
                     }
                     Text {
+                        visible: liveExplanation.text.length === 0
                         text: root.toolName || root.messageKind || "Working"
                         color: "#868a9f"
                         font.family: "JetBrains Mono"
@@ -116,8 +131,9 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: root.body
-                        color: "#969bb5"
+                        text: liveExplanation.text || root.body
+                        textFormat: Text.PlainText
+                        color: liveExplanation.text.length > 0 ? "#82aaff" : "#969bb5"
                         font.family: "JetBrains Mono"
                         font.pixelSize: 12
                         elide: Text.ElideRight
@@ -127,24 +143,16 @@ Item {
 
             Rectangle {
                 id: messageBubble
+                objectName: "userMessageBackground"
                 visible: !root.activity && root.body.length > 0
                 width: Math.min(parent.width, 840)
                 x: 0
                 implicitHeight: messageBlocks.implicitHeight + (root.userAuthored ? 18 : 12)
                 radius: 3
-                color: "transparent"
+                color: root.userAuthored ? "#282b3b" : "transparent"
                 border.width: root.deliveryFailed ? 1 : 0
                 border.color: "#8d5763"
                 opacity: root.pending ? 0.68 : 1
-
-                Rectangle {
-                    visible: root.userAuthored
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    width: 2
-                    color: root.deliveryFailed ? "#a45e6d" : "#555a73"
-                }
 
                 Column {
                     id: messageBlocks
@@ -181,6 +189,7 @@ Item {
 
         Rectangle {
             visible: !root.activity && root.presentedActivityCount > 1 && !root.showTools
+                && !root.narrationEnabled
             Layout.fillWidth: true
             implicitHeight: visible ? 24 : 0
             radius: 3
@@ -231,6 +240,7 @@ Item {
                     required property var modelData
                     Layout.fillWidth: true
                     cell: modelData
+                    narrator: root.narrator
                 }
             }
 
@@ -245,6 +255,7 @@ Item {
                     Layout.preferredHeight: visible ? implicitHeight : 0
                     Layout.fillWidth: true
                     tool: modelData
+                    narrator: root.narrator
                 }
             }
         }

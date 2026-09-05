@@ -58,6 +58,8 @@ ApplicationWindow {
             overview.visible = true;
         } else if (action === "agent-terminal") {
             app.openAgentTerminal(app.selectedSession);
+        } else if (action === "tool-narration") {
+            app.toolNarrator.enabled = !app.toolNarrator.enabled;
         } else if (action === "connection") {
             connection.visible = true;
         } else if (action === "chats" || action === "updates"

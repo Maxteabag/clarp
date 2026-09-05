@@ -82,7 +82,7 @@ QString sharedFilesystemSettingsKey(const QString& baseUrl) {
 } // namespace
 
 AppController::AppController(QObject* parent)
-    : QObject(parent), m_credentials(this), m_audio(this), m_agents(this),
+    : QObject(parent), m_credentials(this), m_audio(this), m_toolNarrator(this), m_agents(this),
       m_archivedAgents(true, this), m_contacts(this), m_panes(this), m_voices(this),
       m_emptyConversation(this), m_conversation(&m_emptyConversation),
       m_composerFocusPane(m_panes.activePaneId()),
@@ -95,6 +95,11 @@ AppController::AppController(QObject* parent)
                                                    .toString()));
     m_muted = settings.value(QStringLiteral("audio/muted"), false).toBool();
     m_toolsVisible = settings.value(QStringLiteral("conversation/toolsVisible"), false).toBool();
+    m_toolNarrator.setEnabled(!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")
+        && settings.value(QStringLiteral("experiments/toolNarration"), false).toBool());
+    connect(&m_toolNarrator, &ToolNarrator::enabledChanged, this, [this] {
+        QSettings().setValue(QStringLiteral("experiments/toolNarration"), m_toolNarrator.enabled());
+    });
     m_timestampsVisible =
         settings.value(QStringLiteral("conversation/timestampsVisible"), false).toBool();
     const QString sharedFilesystemHost =
@@ -224,6 +229,7 @@ AgentListModel* AppController::agents() { return &m_agents; }
 AgentListModel* AppController::archivedAgents() { return &m_archivedAgents; }
 
 AudioController* AppController::audio() { return &m_audio; }
+ToolNarrator* AppController::toolNarrator() { return &m_toolNarrator; }
 
 ConversationModel* AppController::conversation() { return m_conversation; }
 
@@ -501,6 +507,7 @@ void AppController::setBaseUrl(const QString& value) {
     if (m_baseUrl == normalized) {
         return;
     }
+    m_toolNarrator.reset();
     resetTransientRequestState();
     m_sse.stop();
     m_audio.silence();

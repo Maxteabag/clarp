@@ -59,6 +59,8 @@ target_sources(clarp-desktop PRIVATE
     src/app/CredentialStore.h
     src/app/TranscriptCache.cpp
     src/app/TranscriptCache.h
+    src/app/ToolNarrator.cpp
+    src/app/ToolNarrator.h
     src/media/AudioController.cpp
     src/media/AudioController.h
     src/media/WavEncoder.cpp
@@ -111,6 +113,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/StatusPill.qml
         qml/components/StartAgentDialog.qml
         qml/components/ToolCard.qml
+        qml/components/ActivityExplanation.qml
         qml/components/TeamsPanel.qml
         qml/components/UpdatesPanel.qml
         qml/components/VoiceDialog.qml

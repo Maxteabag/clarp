@@ -8,6 +8,7 @@ Rectangle {
     objectName: "toolCard"
 
     required property var tool
+    property var narrator: null
     property bool expanded: false
     readonly property string toolName: String(tool.name || tool.action || "Tool")
     readonly property string summary: String(tool.summary || tool.description || tool.file_path || "")
@@ -30,6 +31,13 @@ Rectangle {
     border.width: 0
     HoverHandler { id: hover }
 
+    ActivityExplanation {
+        id: explanation
+        narrator: root.narrator
+        activity: root.tool
+        active: root.visible
+    }
+
     ColumnLayout {
         id: toolColumn
         anchors.left: parent.left
@@ -51,6 +59,7 @@ Rectangle {
                 color: root.statusColor
             }
             Text {
+                visible: explanation.text.length === 0
                 text: root.toolName
                 color: "#9ea4c7"
                 font.family: "JetBrains Mono"
@@ -58,6 +67,7 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
             Text {
+                visible: explanation.text.length === 0
                 Layout.fillWidth: true
                 text: root.summary
                 color: "#969bb5"
@@ -65,7 +75,17 @@ Rectangle {
                 elide: Text.ElideRight
             }
             Text {
-                visible: root.detail.length > 0
+                objectName: "activityExplanationText"
+                visible: explanation.text.length > 0
+                Layout.fillWidth: true
+                text: explanation.text
+                textFormat: Text.PlainText
+                color: "#82aaff"
+                font.pixelSize: 13
+                wrapMode: Text.Wrap
+            }
+            Text {
+                visible: root.detail.length > 0 || explanation.text.length > 0
                 text: root.expanded ? "−" : "+"
                 color: "#858aa7"
                 font.pixelSize: 13
@@ -73,7 +93,7 @@ Rectangle {
         }
 
         Rectangle {
-            visible: root.expanded && root.detail.length > 0
+            visible: root.expanded && (root.detail.length > 0 || explanation.text.length > 0)
             Layout.fillWidth: true
             Layout.leftMargin: 15
             implicitHeight: detailText.implicitHeight + 6
@@ -83,7 +103,7 @@ Rectangle {
                 id: detailText
                 anchors.fill: parent
                 anchors.margins: 3
-                text: root.detail
+                text: (explanation.text.length > 0 ? root.toolName + " · " + root.summary + "\n\n" : "") + root.detail
                 textFormat: TextEdit.PlainText
                 readOnly: true
                 selectByMouse: true
@@ -97,7 +117,7 @@ Rectangle {
     }
 
     TapHandler {
-        enabled: root.detail.length > 0
+        enabled: root.detail.length > 0 || explanation.text.length > 0
         onTapped: root.expanded = !root.expanded
     }
 }

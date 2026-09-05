@@ -8,6 +8,7 @@ Rectangle {
     objectName: "displayCellCard"
 
     required property var cell
+    property var narrator: null
     property bool expanded: false
     readonly property string title: String(cell.title || "Activity")
     readonly property string summary: String(cell.summary || "")
@@ -22,6 +23,13 @@ Rectangle {
     color: hover.hovered ? "#222638" : "transparent"
     border.width: 0
     HoverHandler { id: hover }
+
+    ActivityExplanation {
+        id: explanation
+        narrator: root.narrator
+        activity: root.cell
+        active: root.visible
+    }
 
     ColumnLayout {
         id: cardColumn
@@ -44,6 +52,7 @@ Rectangle {
                 color: root.statusColor
             }
             Text {
+                visible: explanation.text.length === 0
                 text: root.title
                 color: "#9ea4c7"
                 font.family: "JetBrains Mono"
@@ -51,6 +60,7 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
             Text {
+                visible: explanation.text.length === 0
                 Layout.fillWidth: true
                 text: root.summary
                 color: "#969bb5"
@@ -58,7 +68,17 @@ Rectangle {
                 elide: Text.ElideMiddle
             }
             Text {
-                visible: root.lines.length > 0 || root.detailCount > 0
+                objectName: "activityExplanationText"
+                visible: explanation.text.length > 0
+                Layout.fillWidth: true
+                text: explanation.text
+                textFormat: Text.PlainText
+                color: "#82aaff"
+                font.pixelSize: 13
+                wrapMode: Text.Wrap
+            }
+            Text {
+                visible: explanation.text.length > 0 || root.lines.length > 0 || root.detailCount > 0
                 text: root.expanded ? "−" : "+"
                 color: "#858aa7"
                 font.pixelSize: 13
@@ -70,6 +90,19 @@ Rectangle {
             Layout.fillWidth: true
             Layout.leftMargin: 15
             spacing: 0
+
+            TextEdit {
+                visible: explanation.text.length > 0
+                Layout.fillWidth: true
+                text: root.title + " · " + root.summary
+                textFormat: TextEdit.PlainText
+                readOnly: true
+                selectByMouse: true
+                wrapMode: TextEdit.Wrap
+                color: "#aeb2ca"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 12
+            }
 
             Repeater {
                 model: root.lines
@@ -120,7 +153,7 @@ Rectangle {
     }
 
     TapHandler {
-        enabled: root.lines.length > 0 || root.detailCount > 0
+        enabled: explanation.text.length > 0 || root.lines.length > 0 || root.detailCount > 0
         onTapped: root.expanded = !root.expanded
     }
 }
