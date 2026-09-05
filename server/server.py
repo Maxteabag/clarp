@@ -3351,7 +3351,8 @@ class Handler(BaseHTTPRequestHandler):
                         turn_dispatch.restore_stop_state(agent_id, stop_snapshot)
                         turn_queue.set_paused(agent_id, queue_was_paused)
                         raise
-                if strict and stop_snapshot.get("trace_id") and n <= 0:
+                if (strict and stop_snapshot.get("trace_id") and n <= 0
+                        and not stop_snapshot.get("account_recovery_parked")):
                     turn_dispatch.restore_stop_state(agent_id, stop_snapshot)
                     turn_queue.set_paused(agent_id, queue_was_paused)
                     raise RuntimeError("backend did not confirm interruption")

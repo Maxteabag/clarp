@@ -15,6 +15,7 @@ from . import message_store, team_store, tts_queue, turn_queue
 from .log import log, log_exception
 from .protocol import AgentState, SSEType
 from .prompt_admissions import PromptAdmission
+from .claude_failover import Attempt as ClaudeAttempt, ClaudeFailover
 from . import prompt_admissions
 from .transcript_log import find_latest_jsonl
 from .send_service import (
@@ -40,6 +41,7 @@ BACKOFF_BASE_SEC = 1.0
 #   _INFLIGHT: agent_id -> trace_id of the turn currently running
 #   _QUEUED:   agent_id -> list of _TurnSpec waiting to run, in order
 _TURN_LOCK = threading.RLock()
+_CLAUDE_FAILOVER = ClaudeFailover(_TURN_LOCK)
 _INFLIGHT: dict[str, str] = {}
 _QUEUED: dict[str, list] = {}
 _CLAIMED_AT: dict[str, float] = {}
@@ -79,6 +81,7 @@ def runtime_status() -> dict[str, Any]:
                 if items
             },
             "compactions": compaction.active_sessions(),
+            "claude_account_recovery": _CLAUDE_FAILOVER.status(),
         }
 
 
@@ -199,6 +202,9 @@ class _TurnSpec:
     prompt_admission_id: str = ""
     queue_id: str = ""
     unheard_audio: bool = False
+    # Provider-only continuation; the admitted user message keeps its original
+    # text and client ID across an account change.
+    recovery_text: str = ""
 
 
 class DispatchError(RuntimeError):
@@ -780,6 +786,7 @@ class TurnDispatchService:
         with _TURN_LOCK:
             if _INFLIGHT.get(agent_id) != spec.trace_id:
                 return  # not the current turn — already drained / superseded
+            _CLAUDE_FAILOVER.discard(agent_id, spec.trace_id)
             queue = _QUEUED.get(agent_id)
             next_spec = queue.pop(0) if queue else None
             if next_spec is None:
@@ -845,6 +852,10 @@ class TurnDispatchService:
 
     def _mark_spawned(self, spec: _TurnSpec) -> None:
         with _TURN_LOCK:
+            recovering = _CLAUDE_FAILOVER.attempts.get(spec.agent_id)
+            if (recovering and recovering.trace_id == spec.trace_id
+                    and recovering.state.get("account_recovery")):
+                return
             if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
                 _CLAIMED_AT.pop(spec.agent_id, None)
         turn_queue.mark_started(spec.queue_id)
@@ -978,6 +989,34 @@ class TurnDispatchService:
         self._spawn_attempt_claimed(spec, attempt=attempt)
         return True
 
+    def _resume_after_account_switch(self, spec, attempt, state):
+        if (_INFLIGHT.get(spec.agent_id) != spec.trace_id
+                or self._superseded(spec)):
+            return
+        bsid = state.get("backend_session_id") or spec.backend_session_id
+        transcript = find_latest_jsonl(
+            bsid, projects_root=self.home / ".claude" / "projects") if bsid else None
+        interrupted = (state.get("spawn_started") or attempt > 1
+                       or bool(spec.recovery_text))
+        resume_spec = replace(
+            spec, backend_session_id=bsid,
+            is_new_session=spec.is_new_session and transcript is None,
+            recovery_text=(
+                "Clarp recovered from a Claude account usage limit. Continue "
+                "the unfinished request from the existing conversation. Check "
+                "the results of interrupted operations before retrying them; "
+                "do not repeat work or external actions already completed. "
+                "If the request is already complete, report that and stop.\n\n"
+                f"Original request:\n{spec.text}"
+            ) if interrupted and transcript is not None else "",
+        )
+        try:
+            if self._spawn_attempt(resume_spec, attempt=attempt):
+                self._mark_spawned(resume_spec)
+        except DispatchError as exc:
+            self._mark_interrupted(resume_spec, error_classify.RUNNER_EXIT,
+                                   str(exc), attempts=attempt)
+
     def _spawn_attempt_claimed(self, spec: _TurnSpec, *, attempt: int) -> None:
         """Spawn one attempt of a turn. Attempt 1 surfaces spawn failures as
         a DispatchError (so /send returns 500); later attempts run from a
@@ -994,6 +1033,26 @@ class TurnDispatchService:
         # Mutable across this attempt's callbacks: did system.init land?
         # A retry of a never-initialised new session must keep --session-id.
         state = {"saw_init": False, "backend_session_id": spec.backend_session_id}
+        account_attempt = None
+        if (spec.backend == self.backends.CLAUDE
+                and (config.load().claude_account_switch_command
+                     or _CLAUDE_FAILOVER.recovering)):
+            def pause():
+                _CLAIMED_AT[spec.agent_id] = time.monotonic()
+                agents_db.record_state(
+                    spec.agent_id, AgentState.THINKING,
+                    {"dispatch": spec.backend, "trace_id": spec.trace_id,
+                     "account_recovery": "waiting",
+                     "message": "Waiting for a Claude account with available usage"})
+
+            account_attempt = ClaudeAttempt(
+                agent_id=spec.agent_id, trace_id=spec.trace_id, model=spec.model,
+                state=state, owned=lambda: (
+                    _INFLIGHT.get(spec.agent_id) == spec.trace_id
+                    and not self._superseded(spec)), pause=pause,
+                resume=lambda: self._resume_after_account_switch(spec, attempt, state))
+            if _CLAUDE_FAILOVER.register(account_attempt):
+                return
         on_init, on_result, on_error = self._attempt_callbacks(spec, attempt, state)
         def run_if_owned(action) -> bool:
             with _TURN_LOCK:
@@ -1002,13 +1061,18 @@ class TurnDispatchService:
                 action()
                 return True
         try:
-            self.backends.spawn_turn(
+            prompt = _with_team_context(
+                _with_delivery_context(
+                    spec.recovery_text or spec.text, unheard_audio=spec.unheard_audio),
+                digest=spec.team_digest, protocol=spec.team_protocol)
+            if spec.recovery_text:
+                # The outer envelope is filtered by the native transcript
+                # importer, including when team/delivery context is present.
+                prompt = f"<clarp-account-recovery>\n{prompt}\n</clarp-account-recovery>"
+            state["spawn_started"] = True
+            handle = self.backends.spawn_turn(
                 spec.backend,
-                text=_with_team_context(
-                    _with_delivery_context(
-                        spec.text, unheard_audio=spec.unheard_audio),
-                    digest=spec.team_digest,
-                    protocol=spec.team_protocol),
+                text=prompt,
                 cwd=spec.cwd,
                 backend_session_id=spec.backend_session_id,
                 is_new_session=spec.is_new_session,
@@ -1025,6 +1089,8 @@ class TurnDispatchService:
                 effort=spec.effort,
                 run_if_owned=run_if_owned,
             )
+            if account_attempt is not None:
+                account_attempt.handle = handle
         except FileNotFoundError as e:
             if attempt == 1:
                 log("backendMissing", str(e))
@@ -1040,12 +1106,18 @@ class TurnDispatchService:
             self._mark_interrupted(spec, error_classify.CONNECTION, str(e),
                                    attempts=attempt)
 
+        finally:
+            if account_attempt is not None:
+                account_attempt.spawned.set()
+
     def _attempt_callbacks(self, spec: _TurnSpec, attempt: int, state: dict):
         agent_id = spec.agent_id
         trace_id = spec.trace_id
         context = spec.context
 
         def on_init(backend_session_id: str) -> bool:
+            if state.get("account_recovery") or self._superseded(spec):
+                return False
             bound = False
             try:
                 agents_db.bind_backend_session(agent_id, backend_session_id)
@@ -1077,8 +1149,10 @@ class TurnDispatchService:
             return True
 
         def on_result(event: dict) -> None:
-            if self._superseded(spec):
+            if (self._superseded(spec) or state.get("account_recovery")
+                    or state.get("outcome_seen")):
                 return
+            state["outcome_seen"] = True
             try:
                 if state.get("bind_error"):
                     self._handle_failure(
@@ -1138,8 +1212,10 @@ class TurnDispatchService:
                 self._finish_turn(spec)
 
         def on_error(message: str) -> None:
-            if self._superseded(spec):
+            if (self._superseded(spec) or state.get("account_recovery")
+                    or state.get("outcome_seen")):
                 return
+            state["outcome_seen"] = True
             try:
                 category = (error_classify.RUNNER_EXIT if state.get("bind_error")
                             else error_classify.classify_error(message))
@@ -1149,6 +1225,13 @@ class TurnDispatchService:
             except Exception as e:
                 log_exception("clarpOnErrorFail", e, detail=trace_id)
 
+        if spec.backend == self.backends.CLAUDE:
+            def guarded(callback):
+                def invoke(*args):
+                    with _TURN_LOCK:
+                        return callback(*args)
+                return invoke
+            return guarded(on_init), guarded(on_result), guarded(on_error)
         return on_init, on_result, on_error
 
     def _handle_failure(self, spec: _TurnSpec, attempt: int, state: dict,
@@ -1167,6 +1250,14 @@ class TurnDispatchService:
                 f"superseded by a newer turn; ignoring its outcome")
             return
         msg = (message or "")[:300]
+        if (category == error_classify.USAGE_LIMIT
+                and spec.backend == self.backends.CLAUDE
+                and _CLAUDE_FAILOVER.request(
+                    spec.agent_id, spec.trace_id,
+                    config.load().claude_account_switch_command)):
+            eventlog.emit("server", "claudeAccountRecovery", context=spec.context,
+                          detail={"reason": "usage_limit"})
+            return
         if category == error_classify.CONNECTION and attempt < MAX_ATTEMPTS:
             self._schedule_retry(spec, attempt, state, msg)
             return
@@ -1239,12 +1330,14 @@ class TurnDispatchService:
             # If a newer send preempted this turn during the backoff, abandon the
             # retry — the new turn owns the slot now.
             with _TURN_LOCK:
+                if state.get("account_recovery"):
+                    return  # account recovery already owns this continuation
                 if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
                     log("retryAbandoned",
                         f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
                         f"preempted during backoff")
                     return
-            self._spawn_attempt(next_spec, attempt=next_attempt)
+                self._spawn_attempt(next_spec, attempt=next_attempt)
 
         self.retry_scheduler(delay, _retry_spawn)
 
@@ -1477,6 +1570,7 @@ def snapshot_stop_state(agent_id: str) -> dict:
             "trace_id": value if value not in {None, _STOPPING_SENTINEL} else "",
             "claimed_at": _CLAIMED_AT.get(agent_id),
             "queued": list(_QUEUED.get(agent_id) or []),
+            "account_recovery_parked": _CLAUDE_FAILOVER.parked(agent_id, value),
         }
 
 
@@ -1488,6 +1582,7 @@ def begin_stop(agent_id: str) -> tuple[dict, int, bool]:
             "trace_id": value if value not in {None, _STOPPING_SENTINEL} else "",
             "claimed_at": _CLAIMED_AT.get(agent_id),
             "queued": list(_QUEUED.get(agent_id) or []),
+            "account_recovery_parked": _CLAUDE_FAILOVER.parked(agent_id, value),
         }
         queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
         turn_queue.set_paused(agent_id, True)
