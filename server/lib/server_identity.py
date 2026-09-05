@@ -42,6 +42,7 @@ FEATURES: tuple[str, ...] = (
     "backend_auth",
     "transcription",
     "tts",
+    "message_audio_replay",
     "pairing",
     "diagnostics",
     "tool_explanations",
