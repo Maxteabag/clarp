@@ -27,7 +27,7 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: 18
         radius: 8
-        color: "#171821"
+        color: "#20212e"
         border.color: "#343648"
 
         ColumnLayout {

@@ -9,7 +9,7 @@ Rectangle {
 
     required property var controller
     signal openChat(string session)
-    color: "#171923"
+    color: "#1a1b26"
     objectName: "updatesPanel"
 
     function isActiveJob(job) {

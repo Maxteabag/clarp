@@ -19,7 +19,7 @@ Rectangle {
     readonly property bool searchOwnsFocus: search.activeFocus
     function clearSearch() { search.clear(); }
 
-    color: "#17151c"
+    color: "#20212e"
 
     AgentFilterModel {
         id: roster
@@ -79,11 +79,11 @@ Rectangle {
 
                     background: Rectangle {
                         radius: width / 2
-                        color: newAgentButton.pressed ? "#a273c3" : newAgentButton.hovered ? "#c193dd" : "#b884d8"
+                        color: newAgentButton.pressed ? "#a273c3" : newAgentButton.hovered ? "#c193dd" : "#bb9af7"
                     }
                     contentItem: Text {
                         text: newAgentButton.text
-                        color: "#17121b"
+                        color: "#1a1b26"
                         font.pixelSize: 20
                         font.weight: Font.DemiBold
                         horizontalAlignment: Text.AlignHCenter
@@ -116,7 +116,7 @@ Rectangle {
 
                     Text {
                         text: "⌕"
-                        color: "#8a8391"
+                        color: "#8d93b0"
                         font.pixelSize: 15
                     }
 
@@ -126,7 +126,7 @@ Rectangle {
 
                         Layout.fillWidth: true
                         placeholderText: "Search agents"
-                        color: "#e9e4df"
+                        color: "#c0caf5"
                         font.pixelSize: 12
                         background: null
                         leftPadding: 0
@@ -180,7 +180,7 @@ Rectangle {
 
                     background: Rectangle {
                         radius: height / 2
-                        color: chip.selected ? "#b884d8" : "#211e27"
+                        color: chip.selected ? "#bb9af7" : "#211e27"
                         border.color: chip.selected ? "transparent" : "#302b37"
                         border.width: 1
                     }
@@ -188,7 +188,7 @@ Rectangle {
                         id: chipLabel
 
                         text: String(chip.modelData.label)
-                        color: chip.selected ? "#17121b" : "#9c95a4"
+                        color: chip.selected ? "#1a1b26" : "#9c95a4"
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
                         horizontalAlignment: Text.AlignHCenter
@@ -226,7 +226,7 @@ Rectangle {
 
                 Text {
                     text: root.showingArchive ? "‹" : "▤"
-                    color: "#8a8391"
+                    color: "#8d93b0"
                     font.pixelSize: 14
                 }
                 Text {

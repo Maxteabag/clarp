@@ -114,6 +114,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/MessageDelegate.qml
         qml/components/MediaGallery.qml
         qml/components/OrchestratorDialog.qml
+        qml/components/ThemedComboBox.qml
         qml/components/PaneLeaf.qml
         qml/components/AgentProfilePanel.qml
         qml/components/QuickSwitcher.qml

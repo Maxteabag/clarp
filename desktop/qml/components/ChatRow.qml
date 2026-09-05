@@ -42,7 +42,7 @@ ItemDelegate {
     }
 
     background: Rectangle {
-        color: row.current ? "#292330" : row.hovered ? "#211e27" : "transparent"
+        color: row.current ? "#292b3a" : row.hovered ? "#211e27" : "transparent"
 
         Rectangle {
             anchors.left: parent.left
@@ -74,8 +74,8 @@ ItemDelegate {
                 width: 12
                 height: 12
                 radius: width / 2
-                color: "#b884d8"
-                border.color: "#17151c"
+                color: "#bb9af7"
+                border.color: "#20212e"
                 border.width: 2
             }
         }
@@ -139,14 +139,14 @@ ItemDelegate {
                     implicitWidth: Math.max(18, unreadLabel.implicitWidth + 10)
                     implicitHeight: 18
                     radius: height / 2
-                    color: "#b884d8"
+                    color: "#bb9af7"
 
                     Text {
                         id: unreadLabel
 
                         anchors.centerIn: parent
                         text: row.unreadCount > 0 ? row.unreadCount : ""
-                        color: "#17121b"
+                        color: "#1a1b26"
                         font.pixelSize: 10
                         font.weight: Font.Bold
                     }
@@ -157,7 +157,7 @@ ItemDelegate {
                 visible: !row.archived && row.activityLine.length > 0
                 Layout.fillWidth: true
                 text: row.activityLine
-                color: row.busy ? "#dba163" : "#8a8391"
+                color: row.busy ? "#dba163" : "#8d93b0"
                 font.pixelSize: 10
                 elide: Text.ElideRight
             }

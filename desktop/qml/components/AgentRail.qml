@@ -10,7 +10,7 @@ Rectangle {
     signal openSwitcher
     signal startAgent
     signal selectSurface(string surface)
-    color: "#17151c"
+    color: "#20212e"
     readonly property bool searchOwnsFocus: chatList.searchOwnsFocus
     function clearSearch() { chatList.clearSearch(); }
     RowLayout {

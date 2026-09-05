@@ -36,13 +36,13 @@ Rectangle {
 
         background: Rectangle {
             radius: 12
-            color: railButton.selected ? "#292330" : railButton.hovered ? "#1d1a23" : "transparent"
+            color: railButton.selected ? "#292b3a" : railButton.hovered ? "#1d1a23" : "transparent"
         }
         contentItem: Item {
             Text {
                 anchors.centerIn: parent
                 text: railButton.text
-                color: railButton.selected ? "#dcc7ea" : "#8a8391"
+                color: railButton.selected ? "#dcc7ea" : "#8d93b0"
                 font.pixelSize: 17
             }
 
@@ -55,7 +55,7 @@ Rectangle {
                 implicitWidth: Math.max(15, badgeLabel.implicitWidth + 8)
                 implicitHeight: 15
                 radius: height / 2
-                color: "#b884d8"
+                color: "#bb9af7"
                 border.color: "#101015"
                 border.width: 1.5
 
@@ -64,7 +64,7 @@ Rectangle {
 
                     anchors.centerIn: parent
                     text: railButton.badge
-                    color: "#17121b"
+                    color: "#1a1b26"
                     font.pixelSize: 9
                     font.weight: Font.Bold
                 }

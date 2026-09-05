@@ -7,7 +7,7 @@ Rectangle {
 
     required property var controller
     signal closeRequested
-    color: "#e6121116"
+    color: "#e61a1b26"
 
     property bool loaded: false
 
@@ -38,8 +38,8 @@ Rectangle {
         implicitHeight: contentColumn.implicitHeight + 56
         anchors.centerIn: parent
         radius: 20
-        color: "#1b1820"
-        border.color: "#403648"
+        color: "#20212e"
+        border.color: "#41445a"
 
         ColumnLayout {
             id: contentColumn
@@ -54,7 +54,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text: "Orchestrator"
-                    color: "#f1ebe6"
+                    color: "#c0caf5"
                     font.pixelSize: 21
                     font.weight: Font.DemiBold
                 }
@@ -73,7 +73,7 @@ Rectangle {
             Text {
                 Layout.fillWidth: true
                 text: "Name matching runs first. The routing model resolves delegations that do not clearly select one agent."
-                color: "#928a98"
+                color: "#8d93b0"
                 wrapMode: Text.Wrap
                 font.pixelSize: 12
             }
@@ -89,7 +89,7 @@ Rectangle {
 
             Label {
                 text: "Automatic routing confidence  " + confidenceSlider.value.toFixed(2)
-                color: "#aaa2ae"
+                color: "#a9b1d6"
             }
             Slider {
                 id: confidenceSlider
@@ -107,10 +107,11 @@ Rectangle {
                     Layout.fillWidth: true
                     Label {
                         text: "Provider"
-                        color: "#aaa2ae"
+                        color: "#a9b1d6"
                     }
-                    ComboBox {
+                    ThemedComboBox {
                         id: providerBox
+                        objectName: "orchestratorProvider"
                         Layout.fillWidth: true
                         model: ["openai", "claude", "codex", "agy"]
                     }
@@ -119,9 +120,9 @@ Rectangle {
                     Layout.fillWidth: true
                     Label {
                         text: "Effort"
-                        color: "#aaa2ae"
+                        color: "#a9b1d6"
                     }
-                    ComboBox {
+                    ThemedComboBox {
                         id: effortBox
                         Layout.fillWidth: true
                         model: ["", "minimal", "low", "medium", "high", "xhigh"]
@@ -131,7 +132,7 @@ Rectangle {
 
             Label {
                 text: "Model override"
-                color: "#aaa2ae"
+                color: "#a9b1d6"
             }
             TextField {
                 id: modelField
@@ -141,7 +142,7 @@ Rectangle {
 
             Label {
                 text: "Timeout (milliseconds)"
-                color: "#aaa2ae"
+                color: "#a9b1d6"
             }
             SpinBox {
                 id: timeoutField
@@ -157,7 +158,7 @@ Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: lastDecision.implicitHeight + 18
                 radius: 9
-                color: "#151319"
+                color: "#1a1b26"
                 Text {
                     id: lastDecision
                     anchors.fill: parent

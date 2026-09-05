@@ -277,7 +277,7 @@ Rectangle {
                         RowLayout {
                             Layout.fillWidth: true
                             Label { text: "Model"; color: "#9297af"; font.pixelSize: 12 }
-                            ComboBox {
+                            ThemedComboBox {
                                 id: modelBox
                                 Layout.fillWidth: true
                                 model: llmCard.modelRows
@@ -300,7 +300,7 @@ Rectangle {
                         RowLayout {
                             Layout.fillWidth: true
                             Label { text: "Effort"; color: "#9297af"; font.pixelSize: 12 }
-                            ComboBox {
+                            ThemedComboBox {
                                 id: effortBox
                                 Layout.fillWidth: true
                                 model: llmCard.effortRows
