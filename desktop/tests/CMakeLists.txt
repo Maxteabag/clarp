@@ -67,6 +67,8 @@ foreach(sidebar_toggles IN ITEMS 1 2)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=${sidebar_test};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_SIDEBAR_TOGGLES=${sidebar_toggles};CLARP_SCREENSHOT_REQUIRE_COMPOSER_FOCUS=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/capture.png"
     )
 endforeach()
+set_property(TEST clarp-desktop-sidebar-2 APPEND PROPERTY ENVIRONMENT
+    "CLARP_SCREENSHOT_SIDEBAR_WIDTH=310")
 
 find_program(CLARP_QML_TEST_RUNNER qmltestrunner HINTS "${QT6_INSTALL_PREFIX}/lib/qt6/bin" REQUIRED)
 add_test(NAME clarp-desktop-activity-layout

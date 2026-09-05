@@ -330,6 +330,12 @@ int main(int argc, char* argv[]) {
         });
     }
     if (!screenshotPath.isEmpty()) {
+        const int sidebarWidth = qEnvironmentVariableIntValue("CLARP_SCREENSHOT_SIDEBAR_WIDTH");
+        if (sidebarWidth > 0 && rootWindow != nullptr) {
+            QTimer::singleShot(1'950, &application, [rootWindow, sidebarWidth] {
+                rootWindow->setProperty("sidebarExpandedWidth", sidebarWidth);
+            });
+        }
         const int sidebarToggles = qEnvironmentVariableIntValue("CLARP_SCREENSHOT_SIDEBAR_TOGGLES");
         if (sidebarToggles > 0 && rootWindow != nullptr) {
             QTimer::singleShot(2'000, &application, [rootWindow, sidebarToggles] {
@@ -372,7 +378,7 @@ int main(int argc, char* argv[]) {
             });
         }
         const int captureDelay = screenshotScenario.isEmpty() ? 2'000 : 2'400;
-        QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath, sidebarToggles] {
+        QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath, sidebarToggles, sidebarWidth] {
             if (rootWindow != nullptr) {
                 if (sidebarToggles > 0) {
                     const auto* rail = rootWindow->findChild<QQuickItem*>(QStringLiteral("sidebarRail"));
@@ -380,6 +386,7 @@ int main(int argc, char* argv[]) {
                     const bool shown = sidebarToggles % 2 == 0;
                     if (rail == nullptr || surface == nullptr || rail->isVisible() != shown ||
                         (shown && rail->width() < 208) ||
+                        (shown && sidebarWidth > 0 && qAbs(rail->width() - sidebarWidth) > 1) ||
                         (!shown && (surface->x() != 0 ||
                                     qAbs(surface->width() - surface->parentItem()->width()) > 1))) {
                         qCritical("Sidebar toggle did not restore visibility and workspace geometry");

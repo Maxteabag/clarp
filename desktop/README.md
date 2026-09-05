@@ -70,6 +70,8 @@ CLARP_BASE_URL=https://computer.example.ts.net CLARP_TOKEN=cld_… \
 `Ctrl+B` switches between the full sidebar with agent names and no sidebar.
 This preference is remembered between launches. The header hide button and
 the command palette's **Hide sidebar** / **Show sidebar** use the same toggle.
+The expanded sidebar starts at 232 logical pixels; dragging its divider saves
+your preferred width across hiding and relaunching.
 
 ## Quality gates
 

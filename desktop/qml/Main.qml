@@ -14,6 +14,7 @@ ApplicationWindow {
     property string selectedSurface: "chats"
     property real uiScale: 1.15
     property bool sidebarVisible: true
+    property real sidebarExpandedWidth: 232
 
     width: 1360
     height: 900
@@ -118,6 +119,7 @@ ApplicationWindow {
         category: "appearance"
         property alias uiScale: root.uiScale
         property alias sidebarVisible: root.sidebarVisible
+        property alias sidebarExpandedWidth: root.sidebarExpandedWidth
     }
 
     onActiveChanged: {
@@ -346,16 +348,21 @@ ApplicationWindow {
         spacing: 0
 
         SplitView {
+            id: mainSplit
             Layout.fillWidth: true
             Layout.fillHeight: true
             orientation: Qt.Horizontal
+            onResizingChanged: {
+                if (!resizing && root.sidebarVisible && rail.width >= 208)
+                    root.sidebarExpandedWidth = rail.width;
+            }
 
             AgentRail {
                 id: rail
                 objectName: "sidebarRail"
                 visible: root.sidebarVisible
 
-                SplitView.preferredWidth: 264
+                SplitView.preferredWidth: root.sidebarExpandedWidth
                 SplitView.minimumWidth: 208
                 SplitView.maximumWidth: 360
                 controller: app

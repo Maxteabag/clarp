@@ -1779,12 +1779,16 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
     QTRY_COMPARE_WITH_TIMEOUT(controller.mediaForSession(QStringLiteral("rachel")).size(), 1,
                               3'000);
     QTRY_VERIFY_WITH_TIMEOUT(!controller.mediaSource(QStringLiteral("asset-1")).isEmpty(), 3'000);
-    QVERIFY(controller.mediaSource(QStringLiteral("asset-1"))
-                .toString()
-                .startsWith(QStringLiteral("data:image/png;base64,")));
+    const QUrl inlineSource = controller.mediaSource(QStringLiteral("asset-1"));
+    QVERIFY(inlineSource.isLocalFile());
+    QFile inlineImage(inlineSource.toLocalFile());
+    QVERIFY(inlineImage.open(QIODevice::ReadOnly));
+    QVERIFY(inlineImage.readAll().startsWith(QByteArray("\x89PNG\r\n", 6)));
+    QVERIFY(!(inlineImage.permissions() & (QFileDevice::ReadGroup | QFileDevice::ReadOther)));
     const QString renderedMedia = controller.resolveMediaMarkdown(
         QStringLiteral("![Rendered result](clarp-media://asset/asset-1)"));
-    QVERIFY(renderedMedia.startsWith(QStringLiteral("![Rendered result](data:image/png;base64,")));
+    QVERIFY(renderedMedia.startsWith(QStringLiteral("![Rendered result](file:")));
+    QVERIFY(renderedMedia.size() < 512);
     QVERIFY(renderedMedia.endsWith(u')'));
     controller.loadPromptHistory(QStringLiteral("rachel"));
     QTRY_COMPARE_WITH_TIMEOUT(controller.profilePrompts().size(), 1, 3'000);

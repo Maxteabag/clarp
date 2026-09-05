@@ -12,6 +12,7 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QSaveFile>
 #include <QUrlQuery>
 #include <QUuid>
 #include <algorithm>
@@ -2413,10 +2414,27 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
             bytes.size() > MaxInlineMediaBytes || !mime.startsWith("image/")) {
             return;
         }
-        m_mediaSources.insert(
-            assetId,
-            QUrl(QStringLiteral("data:%1;base64,%2")
-                     .arg(QString::fromLatin1(mime), QString::fromLatin1(bytes.toBase64()))));
+        if (!m_mediaDirectory.isValid()) {
+            setErrorMessage(QStringLiteral("Unable to cache chat images locally"));
+            return;
+        }
+        // Keep image bytes out of Markdown/QML strings. A data URL duplicates
+        // multi-megabyte payloads each time a transcript delegate is rebuilt.
+        const QByteArray identity = (m_baseUrl + QChar::Null + assetId).toUtf8();
+        const QString fileName = QString::fromLatin1(
+            QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex());
+        const QString path = QDir(m_mediaDirectory.path()).filePath(fileName);
+        QSaveFile imageFile(path);
+        if (!imageFile.open(QIODevice::WriteOnly)) {
+            setErrorMessage(QStringLiteral("Unable to cache chat image"));
+            return;
+        }
+        imageFile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        if (imageFile.write(bytes) != bytes.size() || !imageFile.commit()) {
+            setErrorMessage(QStringLiteral("Unable to cache chat image"));
+            return;
+        }
+        m_mediaSources.insert(assetId, QUrl::fromLocalFile(path));
         ++m_mediaRevision;
         emit mediaChanged();
         return;

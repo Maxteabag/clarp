@@ -14,6 +14,7 @@
 #include <QHash>
 #include <QObject>
 #include <QSet>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantMap>
@@ -368,6 +369,7 @@ class AppController : public QObject {
     SseClient m_sse;
     CredentialStore m_credentials;
     TranscriptCache m_transcriptCache;
+    QTemporaryDir m_mediaDirectory;
     AudioController m_audio;
     AgentListModel m_agents;
     AgentListModel m_archivedAgents;
