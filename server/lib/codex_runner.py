@@ -167,23 +167,42 @@ def persona_identity_instruction(persona: str, session: str = "") -> str:
     return identity
 
 
-def _preamble(*, voice: bool, identity: str = "") -> str:
-    body = app_turn_instructions(voice=voice)
+def _preamble(*, voice: bool, identity: str = "", session: str = "") -> str:
+    body = app_turn_instructions(voice=voice, session=session)
     if identity:
         body = f"{body}\n\n{identity}"
     return f"{_VOICE_PREAMBLE_HEAD} {body}{_VOICE_PREAMBLE_SPLIT}"
 
 
-def app_turn_instructions(*, voice: bool) -> str:
+def app_turn_instructions(*, voice: bool, session: str = "") -> str:
     """Application constraints for a turn, without user-message wrappers.
 
     Persistent transports place this in app-server ``additionalContext`` so it
     stays model-visible without polluting the user's transcript message.
+
+    `session` selects that agent's own narration level; omitting it keeps the
+    quiet default, so a caller with no session in hand is unchanged.
     """
     body = _NO_INTERACTIVE_QUESTIONS
     if voice:
         body = f"{body}\n\n{_VOICE_INSTRUCTION}\n\n{_NATURAL_SPEECH}"
+        narration = _narration_clause(session)
+        if narration:
+            body = f"{body}\n\n{narration}"
     return body
+
+
+def _narration_clause(session: str) -> str:
+    """The agent's own how-much-to-narrate instruction, or "" when quiet."""
+    if not session:
+        return ""
+    try:
+        from . import agents as agents_db, voice_verbosity
+
+        level = (agents_db.get_by_session(session) or {}).get("voice_verbosity")
+        return voice_verbosity.narration_clause(level)
+    except Exception:  # noqa: BLE001 - a prompt tweak must never fail a turn
+        return ""
 
 
 def apply_voice_preamble(text: str, *, voice: bool = True,
@@ -196,8 +215,8 @@ def apply_voice_preamble(text: str, *, voice: bool = True,
     full block."""
     identity = persona_identity_instruction(persona, session)
     if identity:
-        return _preamble(voice=voice, identity=identity) + text
-    return _preamble(voice=voice) + text
+        return _preamble(voice=voice, identity=identity, session=session) + text
+    return _preamble(voice=voice, session=session) + text
 
 
 def strip_voice_preamble(text: str) -> str:
