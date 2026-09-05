@@ -65,6 +65,7 @@ Item {
     }
 
     ActivityExplanation {
+        session: root.session
         id: liveExplanation
         narrator: root.narrator
         active: root.visible && root.activity && root.toolName.length > 0
@@ -256,6 +257,7 @@ Item {
                 model: root.displayCells
 
                 DisplayCellCard {
+                    session: root.session
                     required property var modelData
                     Layout.fillWidth: true
                     cell: modelData
@@ -269,6 +271,7 @@ Item {
                 model: root.tools
 
                 ToolCard {
+                    session: root.session
                     required property var modelData
                     visible: root.displayCells.length === 0
                         || ["Edit", "MultiEdit", "Write"].includes(

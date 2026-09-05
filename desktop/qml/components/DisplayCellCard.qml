@@ -10,6 +10,7 @@ Rectangle {
     required property var cell
     property var narrator: null
     property string workingDirectory: ""
+    property string session: ""
     property bool localFilesAllowed: false
     property bool expanded: false
     readonly property string title: String(cell.title || "Activity")
@@ -27,6 +28,7 @@ Rectangle {
     HoverHandler { id: hover }
 
     ActivityExplanation {
+        session: root.session
         id: explanation
         narrator: root.narrator
         activity: root.cell

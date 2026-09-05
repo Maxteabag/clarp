@@ -127,6 +127,7 @@ class ServerContext:
     # runtime. Tests and the runtime process itself leave this unset and run the
     # injected/local dispatch implementation.
     runtime_client: Any | None = None
+    tool_explanations: Any | None = None
 
     def __post_init__(self):
         if self.clip_broker is None:

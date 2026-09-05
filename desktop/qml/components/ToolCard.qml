@@ -10,6 +10,7 @@ Rectangle {
     required property var tool
     property var narrator: null
     property string workingDirectory: ""
+    property string session: ""
     property bool localFilesAllowed: false
     property bool expanded: false
     readonly property string toolName: String(tool.name || tool.action || "Tool")
@@ -34,6 +35,7 @@ Rectangle {
     HoverHandler { id: hover }
 
     ActivityExplanation {
+        session: root.session
         id: explanation
         narrator: root.narrator
         activity: root.tool

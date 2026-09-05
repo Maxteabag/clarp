@@ -219,7 +219,7 @@ Rectangle {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: "Translated levels use Spark low and send command/script excerpts to Codex. Explanations may be imperfect; expand a row for the original."
+                    text: "Your Host uses Spark low to explain tool metadata and bounded script excerpts. Results are shared across clients; this detail choice stays on this device. Secret filtering is best-effort."
                     color: "#858aa5"
                     font.pixelSize: 12
                     wrapMode: Text.Wrap

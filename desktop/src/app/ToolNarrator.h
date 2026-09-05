@@ -3,6 +3,7 @@
 #include <QHash>
 #include <QElapsedTimer>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QObject>
 #include <QProcess>
 #include <QQueue>
@@ -13,6 +14,7 @@
 #include <QtQmlIntegration/qqmlintegration.h>
 
 namespace clarp {
+class ApiClient;
 
 // Presentation-only: never changes transcripts or dispatches an agent command.
 class ToolNarrator : public QObject {
@@ -42,6 +44,7 @@ class ToolNarrator : public QObject {
     [[nodiscard]] QString levelDescription() const;
     void setDetailLevel(int level);
     void reset();
+    void setApiClient(ApiClient* api);
     Q_INVOKABLE void request(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false);
     Q_INVOKABLE [[nodiscard]] QString explanation(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false) const;
 
@@ -55,6 +58,8 @@ class ToolNarrator : public QObject {
     static QByteArray payload(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false);
     static QString key(const QByteArray& payload);
     void startBatch();
+    void startRemoteBatch();
+    void pollRemote();
     void finishBatch(int exitCode, QProcess::ExitStatus exitStatus);
     void fail(const QString& message);
     void stopProcess();
@@ -63,6 +68,12 @@ class ToolNarrator : public QObject {
     void readEvents();
 
     QString m_program;
+    ApiClient* m_api = nullptr;
+    QTimer m_remotePoll;
+    QJsonArray m_remoteItems;
+    QString m_remoteSession;
+    QString m_remoteTag;
+    quint64 m_remoteGeneration = 0;
     QStringList m_prefixArguments;
     int m_timeoutMs;
     QTemporaryDir m_directory;

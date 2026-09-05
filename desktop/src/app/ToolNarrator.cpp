@@ -1,4 +1,5 @@
 #include "app/ToolNarrator.h"
+#include "network/ApiClient.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -135,6 +136,88 @@ ToolNarrator::~ToolNarrator() {
     stopProcess();
 }
 
+void ToolNarrator::setApiClient(ApiClient* api) {
+    reset();
+    if (m_api) disconnect(m_api, nullptr, this, nullptr);
+    m_api = api;
+    m_remotePoll.setSingleShot(true);
+    m_remotePoll.setInterval(600);
+    connect(&m_remotePoll, &QTimer::timeout, this, &ToolNarrator::pollRemote, Qt::UniqueConnection);
+    connect(api, &ApiClient::requestFailed, this, [this](const QString& tag, const QString&, int status) {
+        if (tag != m_remoteTag || tag.isEmpty()) return;
+        fail(status == 404 ? QStringLiteral("Update this Host to enable shared explanations.")
+                           : QStringLiteral("Host explanation request failed. Toggle off/on to retry."));
+    });
+    connect(api, &ApiClient::jsonReceived, this, [this](const QString& tag, const QJsonObject& result) {
+        if (tag != m_remoteTag || tag.isEmpty() || !m_enabled) return;
+        QJsonArray pending;
+        const auto rows = result.value(QStringLiteral("items")).toArray();
+        if (rows.size() != m_remoteItems.size()) { fail(QStringLiteral("Invalid Host explanation response.")); return; }
+        for (const auto& item : m_remoteItems) {
+            const auto id = item.toObject().value(QStringLiteral("id")).toString();
+            const auto row = std::find_if(rows.begin(), rows.end(), [&id](const QJsonValue& v) {
+                return v.toObject().value(QStringLiteral("id")).toString() == id;
+            });
+            if (row == rows.end()) { fail(QStringLiteral("Invalid Host explanation response.")); return; }
+            const auto value = (*row).toObject();
+            const auto state = value.value(QStringLiteral("status")).toString();
+            if (state == QStringLiteral("ready")) {
+                const auto text = value.value(QStringLiteral("text")).toString().trimmed();
+                if (text.isEmpty() || text.size() > 240) { fail(QStringLiteral("Invalid Host explanation text.")); return; }
+                m_cache.insert(id, text);
+                m_cacheOrder.enqueue(id);
+            } else if (state == QStringLiteral("pending") || state == QStringLiteral("busy")) {
+                pending.append(item);
+            } else {
+                // Fail this row only; one unavailable explanation must not hide every other row.
+                m_cache.insert(id, QStringLiteral("Explanation unavailable"));
+                m_cacheOrder.enqueue(id);
+            }
+            while (m_cacheOrder.size() > MaxCacheEntries) {
+                const auto evicted = m_cacheOrder.dequeue();
+                m_cache.remove(evicted);
+                m_requested.remove(evicted);
+            }
+        }
+        m_remoteItems = pending;
+        if (pending.isEmpty()) {
+            m_timeout.stop();
+            m_remoteTag.clear();
+            if (!m_queue.isEmpty()) m_debounce.start();
+        } else {
+            m_remotePoll.start();
+        }
+        notify();
+    });
+}
+
+void ToolNarrator::pollRemote() {
+    if (!m_api || !m_enabled || m_remoteItems.isEmpty()) return;
+    m_api->postJson(m_remoteTag, QStringLiteral("/tool-explanations"), {
+        {QStringLiteral("session"), m_remoteSession}, {QStringLiteral("detail_level"), m_detailLevel},
+        {QStringLiteral("items"), m_remoteItems}});
+}
+
+void ToolNarrator::startRemoteBatch() {
+    if (!m_remoteItems.isEmpty()) return;
+    m_remoteSession = QJsonDocument::fromJson(m_queue.head()).object().value(QStringLiteral("_session")).toString();
+    if (m_remoteSession.isEmpty()) { fail(QStringLiteral("Select an agent for explanations.")); return; }
+    for (qsizetype count = 0, remaining = m_queue.size(); count < remaining && m_remoteItems.size() < BatchSize; ++count) {
+        const auto bytes = m_queue.dequeue();
+        auto activity = QJsonDocument::fromJson(bytes).object();
+        if (activity.value(QStringLiteral("_session")).toString() != m_remoteSession) {
+            m_queue.enqueue(bytes);
+            continue;
+        }
+        activity.remove(QStringLiteral("_session"));
+        m_enqueuedAt.remove(key(bytes));
+        m_remoteItems.append(QJsonObject{{QStringLiteral("id"), key(bytes)}, {QStringLiteral("activity"), activity}});
+    }
+    m_remoteTag = QStringLiteral("tool-explanations:%1").arg(++m_remoteGeneration);
+    m_timeout.start(65'000);
+    pollRemote();
+}
+
 bool ToolNarrator::enabled() const { return m_enabled; }
 int ToolNarrator::detailLevel() const { return m_detailLevel; }
 QStringList ToolNarrator::detailLevels() const {
@@ -154,14 +237,15 @@ quint64 ToolNarrator::revision() const { return m_revision; }
 QString ToolNarrator::status() const {
     if (!m_enabled) return QStringLiteral("Off — no background requests");
     if (!m_error.isEmpty()) return m_error;
+    if (!m_remoteItems.isEmpty()) return QStringLiteral("Host translating · %1 activities").arg(m_remoteItems.size());
     if (m_process != nullptr) return QStringLiteral("Translating %1 activities · %2s · %3 queued")
         .arg(m_batchKeys.size()).arg(m_runClock.isValid() ? m_runClock.elapsed() / 1'000 : 0).arg(m_queue.size());
     if (!m_queue.isEmpty()) return QStringLiteral("Translating activity · %1 queued").arg(m_queue.size());
-    return QStringLiteral("Ready · Codex Spark · low");
+    return m_api ? QStringLiteral("Shared Host · Codex Spark · low") : QStringLiteral("Ready · Codex Spark · low");
 }
 bool ToolNarrator::unavailable() const { return !m_error.isEmpty(); }
 
-QString ToolNarrator::diagnosticsPath() const { return m_diagnosticsPath; }
+QString ToolNarrator::diagnosticsPath() const { return m_api ? QStringLiteral("Host event log: toolExplanationsBatch") : m_diagnosticsPath; }
 
 void ToolNarrator::notify() { ++m_revision; emit changed(); emit statusChanged(); }
 
@@ -243,6 +327,7 @@ void ToolNarrator::reset() {
 
 QByteArray ToolNarrator::payload(const QVariantMap& activity, const QString& workingDirectory, bool localFilesAllowed) {
     QJsonObject object;
+    if (activity.contains(QStringLiteral("_session"))) object.insert(QStringLiteral("_session"), activity.value(QStringLiteral("_session")).toString());
     // Status/result/output are deliberately excluded: a streaming result must
     // not trigger another model request or change the meaning of a command.
     for (const auto& field : {"kind", "name", "summary", "description", "command", "file_path"}) {
@@ -292,12 +377,12 @@ QString ToolNarrator::key(const QByteArray& bytes) {
 }
 
 QString ToolNarrator::explanation(const QVariantMap& activity, const QString& workingDirectory, bool localFilesAllowed) const {
-    return m_enabled ? m_cache.value(key(payload(activity, workingDirectory, localFilesAllowed))) : QString{};
+    return m_enabled ? m_cache.value(key(payload(activity, workingDirectory, localFilesAllowed && !m_api))) : QString{};
 }
 
 void ToolNarrator::request(const QVariantMap& activity, const QString& workingDirectory, bool localFilesAllowed) {
     if (!m_enabled || !m_error.isEmpty()) return;
-    const QByteArray bytes = payload(activity, workingDirectory, localFilesAllowed);
+    const QByteArray bytes = payload(activity, workingDirectory, localFilesAllowed && !m_api);
     if (bytes.isEmpty()) return;
     const QString id = key(bytes);
     if (m_requested.contains(id)) return;
@@ -311,6 +396,7 @@ void ToolNarrator::request(const QVariantMap& activity, const QString& workingDi
 
 void ToolNarrator::startBatch() {
     if (!m_enabled || m_process != nullptr || m_queue.isEmpty() || !m_error.isEmpty()) return;
+    if (m_api) { startRemoteBatch(); return; }
     if (!m_directory.isValid()) { fail(QStringLiteral("Cannot create a private translator workspace.")); return; }
     QJsonArray requests;
     ++m_batchNumber;
@@ -411,6 +497,10 @@ void ToolNarrator::startBatch() {
 }
 
 void ToolNarrator::stopProcess() {
+    m_remotePoll.stop();
+    m_remoteItems = {};
+    m_remoteTag.clear();
+    ++m_remoteGeneration;
     m_timeout.stop();
     m_statusTick.stop();
     if (m_process == nullptr) return;

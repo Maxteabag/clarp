@@ -4,6 +4,8 @@ QtObject {
     id: root
     property var narrator: null
     property var activity: ({})
+    property string session: ""
+    readonly property var requestActivity: Object.assign({}, activity, {_session: session})
     property bool active: true
     property string workingDirectory: ""
     property bool localFilesAllowed: false
@@ -11,14 +13,15 @@ QtObject {
     readonly property string text: {
         if (!enabled) return "";
         narrator.revision;
-        return narrator.explanation(activity, workingDirectory, localFilesAllowed);
+        return narrator.explanation(requestActivity, workingDirectory, localFilesAllowed);
     }
     readonly property string displayText: !enabled ? "" : text ||
         (narrator.unavailable ? "Explanation unavailable" : "Explaining activity…")
     function request() {
-        if (enabled && active) narrator.request(activity, workingDirectory, localFilesAllowed);
+        if (enabled && active) narrator.request(requestActivity, workingDirectory, localFilesAllowed);
     }
     onActivityChanged: Qt.callLater(request)
+    onSessionChanged: Qt.callLater(request)
     onEnabledChanged: Qt.callLater(request)
     onActiveChanged: Qt.callLater(request)
     onWorkingDirectoryChanged: Qt.callLater(request)

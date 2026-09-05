@@ -53,9 +53,10 @@ target_link_libraries(clarp-desktop-tests PRIVATE
 clarp_apply_quality_settings(clarp-desktop-tests)
 
 add_executable(clarp-tool-narrator-tests tst_tool_narrator.cpp
+    ../src/network/ApiClient.cpp ../src/network/ApiClient.h
     ../src/app/ToolNarrator.cpp ../src/app/ToolNarrator.h)
 target_include_directories(clarp-tool-narrator-tests PRIVATE ../src)
-target_link_libraries(clarp-tool-narrator-tests PRIVATE Qt6::Core Qt6::Test Qt6::Qml)
+target_link_libraries(clarp-tool-narrator-tests PRIVATE Qt6::Core Qt6::Test Qt6::Qml Qt6::Network)
 clarp_apply_quality_settings(clarp-tool-narrator-tests)
 add_test(NAME clarp-desktop-tool-narrator COMMAND clarp-tool-narrator-tests)
 set_tests_properties(clarp-desktop-tool-narrator PROPERTIES TIMEOUT 20)

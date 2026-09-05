@@ -127,6 +127,7 @@ AppController::AppController(QObject* parent)
     m_bearerToken = qEnvironmentVariable("CLARP_TOKEN", defaultToken());
 
     connect(&m_api, &ApiClient::jsonReceived, this, &AppController::handleJson);
+    m_toolNarrator.setApiClient(&m_api);
     connect(&m_api, &ApiClient::bytesReceived, this, &AppController::handleBytes);
     connect(&m_api, &ApiClient::requestFailed, this, &AppController::handleRequestFailure);
     connect(&m_credentials, &CredentialStore::lookupFinished, this,

@@ -1,4 +1,7 @@
 #include "app/ToolNarrator.h"
+#include "network/ApiClient.h"
+#include <QTcpServer>
+#include <QTcpSocket>
 
 #include <QCoreApplication>
 #include <QFile>
@@ -60,6 +63,7 @@ int fakeCodex(const QStringList& args) {
 class ToolNarratorTest : public QObject {
     Q_OBJECT
   private slots:
+    void sharedHostPollsWithoutStartingLocalCodex();
     void optInDeduplicatesBatchesAndPreservesCache();
     void disableCancelsAndRejectsLateReplies();
     void failureFallsBackWithoutRetryStorm_data();
@@ -67,6 +71,54 @@ class ToolNarratorTest : public QObject {
     void scriptContextIsOptInBoundedAndInvalidatesCache();
     void detailLevelsChangeInstructionsAndDiscardPreviousTranslations();
 };
+
+void ToolNarratorTest::sharedHostPollsWithoutStartingLocalCodex() {
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    int calls = 0;
+    connect(&server, &QTcpServer::newConnection, this, [&] {
+        auto* socket = server.nextPendingConnection();
+        connect(socket, &QTcpSocket::readyRead, socket, [&, socket, buffer = QByteArray{}]() mutable {
+            buffer += socket->readAll();
+            const auto split = buffer.indexOf("\r\n\r\n");
+            if (split < 0) return;
+            const auto body = QJsonDocument::fromJson(buffer.mid(split + 4)).object();
+            if (body.isEmpty()) return;
+            QVERIFY(buffer.startsWith("POST /tool-explanations "));
+            QVERIFY(buffer.contains("Bearer test-token"));
+            QCOMPARE(body.value(QStringLiteral("session")).toString(), QStringLiteral("felix-a2e1"));
+            QCOMPARE(body.value(QStringLiteral("detail_level")).toInt(), 3);
+            const auto item = body.value(QStringLiteral("items")).toArray().first().toObject();
+            QVERIFY(!item.value(QStringLiteral("activity")).toObject().contains(QStringLiteral("script_refs")));
+            ++calls;
+            const auto answer = QJsonDocument(QJsonObject{{QStringLiteral("items"), QJsonArray{
+                QJsonObject{{QStringLiteral("id"), item.value(QStringLiteral("id"))},
+                    {QStringLiteral("status"), calls == 1 ? QStringLiteral("pending") : QStringLiteral("ready")},
+                    {QStringLiteral("text"), QStringLiteral("Build the desktop preview.")}}}}}).toJson(QJsonDocument::Compact);
+            socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: " + QByteArray::number(answer.size()) + "\r\n\r\n" + answer);
+            socket->disconnectFromHost();
+            buffer.clear();
+        });
+    });
+    clarp::ApiClient api;
+    api.setEndpoint(QUrl(QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort())), QStringLiteral("test-token"));
+    ToolNarrator narrator(nullptr, QStringLiteral("must-not-run-local-codex"));
+    narrator.setApiClient(&api);
+    auto activity = Command;
+    activity.insert(QStringLiteral("_session"), QStringLiteral("felix-a2e1"));
+    narrator.request(activity);
+    QTest::qWait(200);
+    QCOMPARE(calls, 0);
+    narrator.setDetailLevel(3);
+    narrator.request(activity);
+    QTRY_COMPARE_WITH_TIMEOUT(narrator.explanation(activity), QStringLiteral("Build the desktop preview."), 3000);
+    QCOMPARE(calls, 2);
+    narrator.request(activity);
+    QTest::qWait(200);
+    QCOMPARE(calls, 2);
+    narrator.reset();
+    QVERIFY(narrator.explanation(activity).isEmpty());
+}
 
 void ToolNarratorTest::optInDeduplicatesBatchesAndPreservesCache() {
     QTemporaryDir directory;
