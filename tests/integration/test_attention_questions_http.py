@@ -123,7 +123,7 @@ def test_question_answer_retry_conflict_and_delivery(host, answer, expected):
     assert status == 409 and len(host.deliveries) == 1
     sent = host.deliveries[0]
     assert sent["forced_session"] == "theo" and sent["origin"] == "automation"
-    assert sent["queue_if_busy"] is False and sent["synthesize_audio"] is False
+    assert sent["queue_if_busy"] is True and sent["synthesize_audio"] is False
     assert sent["client_msg_id"] == "decision-" + decision_id
     assert next(iter(expected.values())) in sent["text"]
 
@@ -218,3 +218,113 @@ def test_revision_and_timestamp_fences_auth_and_reserved_type(host):
     assert _request(host, "/artifacts", {"session": "theo", "type": "question", "title": "Bypass"})[0] == 409
     assert artifacts.get(artifact_id)["decision"]["status"] == "pending"
     assert host.deliveries == []
+
+
+@pytest.mark.parametrize("response_type,choice,queued", [
+    (None, "accepted", False), (None, "rejected", False),
+    ("approval", "accepted", False), ("approval", "rejected", False),
+    ("approval", "dismissed", True), ("approval", "expired", True),
+    ("single_choice", "answered", True), ("single_choice", "dismissed", True),
+    ("single_choice", "expired", True),
+])
+def test_delivery_admission_policy_matches_foreground_and_background(
+        host, monkeypatch, response_type, choice, queued):
+    pending = {"decision_id": "decision-policy", "artifact_id": "artifact-policy",
+               "session": "theo", "question": "Choose?", "context": "",
+               "reference_id": "", "payload_json": "{}", "choice": choice,
+               "answer": {"text": "Use the compact layout"}}
+    if response_type is not None:
+        pending["response_type"] = response_type
+    monkeypatch.setattr(artifacts, "pending_deliveries", lambda: [pending])
+    delivered = []
+    monkeypatch.setattr(artifacts, "mark_delivered", delivered.append)
+    handler = object.__new__(server_module.Handler)
+    handler.server = SimpleNamespace(ctx=host.ctx)
+    handler._deliver_pending_decisions()
+    server_module._deliver_decision_rows(host.ctx)
+    assert delivered == ["decision-policy", "decision-policy"]
+    assert len(host.deliveries) == 2
+    for sent in host.deliveries:
+        assert sent["queue_if_busy"] is queued
+        assert sent["client_msg_id"] == "decision-decision-policy"
+        assert sent["origin"] == "automation"
+
+
+@pytest.mark.parametrize("notification", ["question", "dismissal", "expiry"])
+@pytest.mark.parametrize("delivery_path", ["foreground", "background"])
+def test_notifications_preserve_active_nonsteerable_turn_and_queue_durably(
+        host, tmp_path, monkeypatch, notification, delivery_path):
+    from lib import turn_dispatch, turn_queue
+
+    class NonsteerableBackend:
+        CLAUDE = "claude"
+
+        def __init__(self):
+            self.spawned = []
+            self.interrupted = []
+
+        def normalize(self, backend):
+            return backend or "claude"
+
+        def active_handles(self, backend, agent_id):
+            return ["active-handle"]
+
+        def spawn_turn(self, backend, **kwargs):
+            self.spawned.append(kwargs)
+
+        def interrupt(self, backend, agent_id):
+            self.interrupted.append(agent_id)
+
+    agent_id = agents.get_by_session("theo")["agent_id"]
+    agents.start_runtime(agent_id, "theo")
+    host.ctx.default_session = "theo"
+    host.ctx.agents_path = tmp_path / "unused.json"
+    backend = NonsteerableBackend()
+    service = turn_dispatch.TurnDispatchService(
+        host.ctx, backend_registry=backend, home=tmp_path,
+        uuid_factory=lambda: "isolated-session")
+    monkeypatch.setattr(server_module, "TurnDispatchService", lambda ctx: service)
+    service.dispatch(text="Continue independent work", requested_session="theo",
+                     trace_id="existing-turn", synthesize_audio=False)
+    assert len(backend.spawned) == 1
+    assert turn_dispatch._INFLIGHT[agent_id] == "existing-turn"
+
+    if notification == "question":
+        artifact = _question(host)
+    else:
+        artifact = artifacts.create_decision(session="theo", title="Approval",
+            question="Publish the reviewed draft?", expires_at=1 if notification == "expiry" else None)
+    decision_id = artifact["decision"]["decision_id"]
+    if delivery_path == "foreground":
+        if notification == "question":
+            status, _ = _request(host, f"/decisions/{decision_id}/resolve",
+                {"expected_revision": 1, "answer": {"text": "Use compact spacing"}})
+        elif notification == "dismissal":
+            status, _ = _request(host, f"/decisions/{decision_id}/dismiss", {"expected_revision": 1})
+        else:
+            status, _ = _request(host, "/attention")
+        assert status == 200
+    else:
+        if notification == "question":
+            artifacts.resolve(decision_id, expected_revision=1, answer={"text": "Use compact spacing"})
+        elif notification == "dismissal":
+            artifacts.dismiss(decision_id, expected_revision=1)
+        else:
+            artifacts.attention()
+        server_module._deliver_decision_rows(host.ctx)
+
+    assert backend.interrupted == []
+    assert len(backend.spawned) == 1
+    assert turn_dispatch._INFLIGHT[agent_id] == "existing-turn"
+    queued = turn_queue.get("decision-" + decision_id)
+    assert queued is not None and queued["status"] == "queued"
+    assert queued["origin"] == "automation" and queued["session"] == "theo"
+    assert artifacts.delivery_pending(decision_id) is False
+
+    # Completing the original turn admits the queued notice exactly once.
+    backend.spawned[0]["on_result"]({"duration_ms": 5})
+    assert len(backend.spawned) == 2 and backend.interrupted == []
+    assert decision_id in backend.spawned[1]["text"]
+    assert turn_queue.status("decision-" + decision_id) == "started"
+    backend.spawned[1]["on_result"]({"duration_ms": 3})
+    assert agent_id not in turn_dispatch._INFLIGHT

@@ -3627,7 +3627,7 @@ class Handler(BaseHTTPRequestHandler):
                     text=text, requested_session=pending["session"], trace_id=_trace.new_id(),
                     forced_session=pending["session"],
                     client_msg_id=f"decision-{decision_id}", synthesize_audio=False,
-                    origin="automation", queue_if_busy=False)
+                    origin="automation", queue_if_busy=_decision_delivery_queues_if_busy(pending))
                 artifacts.mark_delivered(decision_id)
                 delivered.add(decision_id)
             except Exception as exc:
@@ -4706,6 +4706,18 @@ def _safe_upload_name(raw: str, content_type: str = "") -> str:
     return cleaned[:128]
 
 
+def _decision_delivery_queues_if_busy(pending: dict) -> bool:
+    """Administrative notices and question answers must preserve ongoing work.
+
+    Legacy accepted/rejected approval replies retain their existing admission
+    behavior. All question replies and non-answer notices enter the durable
+    queue when the originating agent is busy; dismissing an inbox item must
+    never interrupt an unrelated in-flight turn.
+    """
+    return (pending.get("response_type") == "single_choice"
+            or pending.get("choice") not in {"accepted", "rejected"})
+
+
 def _deliver_decision_rows(ctx: ServerContext) -> None:
     from lib import artifacts
     for pending in artifacts.pending_deliveries():
@@ -4716,7 +4728,7 @@ def _deliver_decision_rows(ctx: ServerContext) -> None:
                 text=text, requested_session=pending["session"],
                 forced_session=pending["session"], trace_id=_trace.new_id(),
                 client_msg_id=f"decision-{decision_id}", synthesize_audio=False,
-                origin="automation", queue_if_busy=False)
+                origin="automation", queue_if_busy=_decision_delivery_queues_if_busy(pending))
             artifacts.mark_delivered(decision_id)
         except Exception as exc:
             log_exception("decisionWakeFail", exc, detail=decision_id)
