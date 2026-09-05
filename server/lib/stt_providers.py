@@ -24,6 +24,14 @@ from .vocab_compile import budget_for
 
 ENGINE_KEY = "transcription.engine"
 TURN_TAKING_KEY = "transcription.turn_taking"
+# Optional escalation: recordings at or over the threshold go to a stronger
+# model than the one that would otherwise run. Empty model id disables it.
+LONG_FORM_MODEL_KEY = "transcription.long_form_model"
+LONG_FORM_THRESHOLD_KEY = "transcription.long_form_threshold_sec"
+
+DEFAULT_LONG_FORM_THRESHOLD_SEC = 30
+MIN_LONG_FORM_THRESHOLD_SEC = 1
+MAX_LONG_FORM_THRESHOLD_SEC = 3600
 
 LOCAL_ENGINE = "local"
 TURN_NATIVE = "native"
@@ -106,6 +114,31 @@ def selected_turn_taking() -> str:
     return value if value in VALID_TURN_TAKING else TURN_NATIVE
 
 
+def long_form_model() -> str:
+    return (settings_store.get_text(LONG_FORM_MODEL_KEY, default="") or "").strip()
+
+
+def long_form_threshold_sec() -> int:
+    return settings_store.get_int(
+        LONG_FORM_THRESHOLD_KEY,
+        default=DEFAULT_LONG_FORM_THRESHOLD_SEC,
+        minimum=MIN_LONG_FORM_THRESHOLD_SEC,
+        maximum=MAX_LONG_FORM_THRESHOLD_SEC,
+    )
+
+
+def long_form_model_for(duration_seconds: float) -> str:
+    """The escalation model for a clip of `duration_seconds`, else "".
+
+    A duration of 0 means the probe could not tell, so nothing is escalated —
+    guessing would silently send short clips to a paid provider.
+    """
+    model = long_form_model()
+    if not model or duration_seconds <= 0:
+        return ""
+    return model if duration_seconds >= long_form_threshold_sec() else ""
+
+
 def cloud_models(*, available_only: bool = False) -> list[dict]:
     """Catalogue rows in the shape `capabilities()["models"]` uses."""
     from .config import load
@@ -141,6 +174,12 @@ def status() -> dict:
         "engine": engine,
         "turn_taking": strategy,
         "retain_audio": retain_audio(),
+        "long_form_model": long_form_model(),
+        "long_form_threshold_sec": long_form_threshold_sec(),
+        "long_form_threshold_range": {
+            "min": MIN_LONG_FORM_THRESHOLD_SEC,
+            "max": MAX_LONG_FORM_THRESHOLD_SEC,
+        },
         "stream_path": "/stt/stream",
         "provider_turn_taking_available": bool(
             selected_row and selected_row["turn_detection"] == "own"
@@ -184,7 +223,31 @@ def update_settings(data: dict) -> dict:
     retain = data.get("retain_audio")
     if retain is not None and not isinstance(retain, bool):
         raise ValueError("retain_audio must be boolean")
+    long_model = data.get("long_form_model")
+    if long_model is not None:
+        if not isinstance(long_model, str):
+            raise ValueError("long_form_model must be a string")
+        long_model = long_model.strip()
+        # Same rule as `engine`: unknown cloud ids are rejected, local ids are
+        # governed by the installed-model registry. "" turns escalation off.
+        if long_model and _model_row(long_model) is None:
+            if is_cloud_model(long_model) or ":" not in long_model:
+                raise ValueError(f"unknown transcription engine: {long_model}")
+    threshold = data.get("long_form_threshold_sec")
+    if threshold is not None:
+        if isinstance(threshold, bool) or not isinstance(threshold, int):
+            raise ValueError("long_form_threshold_sec must be an integer")
+        if not (MIN_LONG_FORM_THRESHOLD_SEC <= threshold
+                <= MAX_LONG_FORM_THRESHOLD_SEC):
+            raise ValueError(
+                "long_form_threshold_sec must be between "
+                f"{MIN_LONG_FORM_THRESHOLD_SEC} and "
+                f"{MAX_LONG_FORM_THRESHOLD_SEC}")
     settings_store.set_text(ENGINE_KEY, engine)
+    if long_model is not None:
+        settings_store.set_text(LONG_FORM_MODEL_KEY, long_model)
+    if threshold is not None:
+        settings_store.set_int(LONG_FORM_THRESHOLD_KEY, threshold)
     settings_store.set_text(TURN_TAKING_KEY, strategy)
     if retain is not None:
         from .heard_audio import set_enabled
