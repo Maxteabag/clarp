@@ -319,7 +319,19 @@ def test_spawn_turn_appends_delta_partials(fake_clarp, tmp_path):
     assert [m["text"] for m in visible] == ["hello"]
 
 
-def test_spawn_turn_handles_claude_stream_event_text_deltas(fake_clarp, tmp_path):
+def test_spawn_turn_handles_claude_stream_event_text_deltas(fake_clarp, tmp_path, monkeypatch):
+    import threading
+
+    entered_write = threading.Event()
+    release_write = threading.Event()
+    original_write = agents_db.upsert_live_assistant_message
+
+    def gated_write(**kwargs):
+        entered_write.set()
+        assert release_write.wait(timeout=5.0), "test did not release the drainer"
+        return original_write(**kwargs)
+
+    monkeypatch.setattr(agents_db, "upsert_live_assistant_message", gated_write)
     agent_id = agents_db.create_agent(
         persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel"
     )
@@ -350,7 +362,16 @@ def test_spawn_turn_handles_claude_stream_event_text_deltas(fake_clarp, tmp_path
         agent_id=agent_id,
         trace_id="trace-stream-event",
     )
-    handle.wait(timeout=5.0)
+    try:
+        handle.proc.wait(timeout=5.0)
+        assert entered_write.wait(timeout=5.0)
+        # Deliberately prove process exit precedes completed message storage.
+        assert handle.drain_thread.is_alive()
+    finally:
+        release_write.set()
+        # The current TurnHandle contract includes draining, unlike proc.wait.
+        handle.wait(timeout=5.0)
+    assert not handle.drain_thread.is_alive()
 
     visible = agents_db.list_messages(
         agent_id=agent_id, backend_session_id="sid-stream-event")
