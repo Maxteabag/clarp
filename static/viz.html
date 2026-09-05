@@ -33,7 +33,7 @@
   #inspector { position:fixed; right:16px; bottom:65px; width:280px; padding:20px;
     background:#141b26f5; border:1px solid #34455d; border-radius:10px; }
   #inspector b { display:block; margin:5px 25px 10px 0; overflow-wrap:anywhere; }
-  #inspector p { color:#a9b9ce; }
+  #inspector p { color:#a9b9ce; white-space:pre-wrap; overflow-wrap:anywhere; }
   #close-inspector { float:right; }
   #redesign { width:100%; }
   #small-screen { display:none; }
@@ -49,12 +49,13 @@
 </style>
 <section id="small-screen"><h1>A larger window for the fleet</h1><p>Open the map in a desktop window at least 900 × 600. Pan and zoom to explore the workspace.</p><a href="/">← Back to Clarp</a></section>
 <canvas id="c" aria-label="Live fleet activity map"></canvas>
-<div id="hud"><a href="/" aria-label="Back to Clarp">← Clarp</a><b>Fleet map</b><span id="stat">loading…</span><span id="learning"></span></div>
-<div id="legend"></div><aside id="inspector" hidden><button id="close-inspector" aria-label="Close details">×</button><b id="node-title"></b><p id="node-detail"></p><button id="redesign">Rethink this representation</button><p id="design-result" role="status"></p></aside>
+<div id="hud"><a href="/" aria-label="Back to Clarp">← Clarp</a><b>Living atlas</b><span id="stat">loading…</span><span id="learning"></span></div>
+<div id="legend">A living world of work<br><small>scroll to enter · drag to travel</small></div><aside id="inspector" hidden><button id="close-inspector" aria-label="Close details">×</button><b id="node-title"></b><p id="node-detail"></p><button id="redesign">Let Astra reinvent this</button><p id="design-result" role="status"></p></aside>
 <div id="bar">
   <button id="live" aria-pressed="true">live</button>
-  <button id="fit">Fit</button>
+  <button id="fit">Fit world</button>
+  <button id="play">Replay ×120</button>
   <input id="t" aria-label="Replay time" type="range" min="0" max="1000" value="1000">
   <span id="clock"></span>
 </div>
-<script type="module" src="/static/viz.js"></script>
+<script type="module" src="/static/viz-world-host.js"></script>

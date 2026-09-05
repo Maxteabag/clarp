@@ -177,58 +177,86 @@ Both cap target resolution at ~19%; neither is fixable retroactively.
   `clarp` — passed its HTTP test and returned 200 with no console errors.
   A green suite is not evidence that a picture is right.
 
-## 10. Implemented contract and verification
+## 10. Creative source authorship — current implementation
 
-The map is a **desktop, pannable world**. Its minimum viewport is **900 × 600**;
-smaller windows show an explanatory message. Off-screen nodes are valid.
-Panning, pointer-centered zoom and Fit change the camera, never clamp node
-positions to the viewport. This supersedes any phone-fit interpretation.
+The owner's clarification supersedes the earlier recipe-only interpretation:
+**the application writes its visual software, not just its icons.** Astra is
+encouraged to improvise, invent systems, rewrite hierarchy and layout, develop
+animations and change the premises of the whole world. A territory, machine,
+organism or transport system is an artistic choice. There is no closed shape,
+kind, archetype or animation vocabulary for the source author.
 
-- `viz_corpus.tool_rows` uses bounded keyset pages and a high-water mark.
-  Both the author CLI and HTTP map use it; the map retains only a bounded
-  projection of the newest events. Raw corpus rows are never fetched together.
-- `viz_library.json` lives under `xdg.data_dir()`. Atomic replacement, a writer
-  lock, revision checks and explicit decision IDs protect stable decisions.
-  No schema migration is introduced. Seed rules also require supersession.
-- Spark points at a current library entity or returns `NOVEL`. Astra can add
-  semantic verbs, kinds and archetypes, choose shapes, author bounded drawing
-  logic, redirect merged identities and supersede prior rule selectors.
-- HTTP sends provisional events before offering work to one bounded cold
-  worker. Failed tools have a retry cooldown; successful decisions become
-  dictionary lookups. CLI calls are isolated, process-group owned and timed.
-- Generated logic is a pure JSON drawing language interpreted inside a worker:
-  64 commands, 512 expression operations, depth 8, a 4 ms evaluation deadline,
-  and a 1 s worker startup/completion fuse. It has no eval, loops, property
-  access, filesystem, DOM or network capability. Failures retain a placeholder.
-- Known service marks are vendored and cached; long-tail glyphs and shapes
-  persist with the entity decision. The renderer preserves positions across
-  refresh and alias adoption. New live events animate without replaying old
-  history. Repository/file roles use explicit paths and Git worktree metadata.
-- Desktop sidebar and Agents overview link to `/viz`. Clicking an authored or
-  seeded registry node exposes “Rethink this representation”, which submits an
-  explicit supersession. This applies automatically, with no review queue.
+The operative creative brief is `server/lib/viz_creative_brief.md`. It is loaded
+into real Astra requests with the current complete source and observed facts.
+Spark identifies whether that software can meaningfully represent new evidence;
+Astra develops a new source revision when it cannot. Explicit reinvention also
+bypasses novelty triage. Both apply automatically, without a review queue.
 
-Repeatable checks (from this checkout):
+### What the author actually writes
+
+`program.files` contains executable CommonJS source modules. The entry exports
+`render({ctx, scene, time, width, height, camera, playhead, interaction,
+reducedMotion})`. It has the full Canvas API, ordinary JavaScript algorithms,
+module state and imports of other supplied modules. It draws the entire world.
+The server's `scene.entities` and `relations` are evidence helpers, not a required
+visual schema: authored source can derive a different model from the raw events.
+
+`static/viz-world/` contains **The Lantern Works**, produced by a real
+`gpt-6-astra` development call: two source modules replace the initial renderer
+with local repository workshops, file manuscripts, a GitHub harbor, origin
+routes, action machinery and agents traveling as lantern sailboats. Its manifest
+records the source digest and the author's explanation. This is the initial
+software, not a permanent style restriction.
+
+### Evidence and honest uncertainty
+
+`viz_world.py` retains explicit paths, recorded cwd, command text and actions;
+reads Git metadata for real checkout/remote relationships; and derives file
+purpose from type or source headers. It never substitutes mutable `agents.cwd`
+for historical context. The old recording clamp still means many events omit
+their target. Astra's first world represents those as an action machinery quay
+and a fragment cabinet rather than fabricating a file, database or repository.
+The preview and replay use real recorded fleet activity. Actions indicate
+observed commands, not an inferred successful result.
+
+### Mechanical containment
+
+Source is syntax-checked without executing it, materialized into versioned
+`viz-programs/<digest>/` directories, and atomically published through the JSON
+library with a revision check. No schema migration is introduced. Compiler
+feedback can trigger automatic repair. New source explicitly supersedes the
+previous version; novelty is recorded so normal polling does not regenerate it.
+
+The browser runs source in a worker inside an opaque-origin sandboxed iframe.
+It has no host storage, DOM, filesystem or network. The host receives pixels and
+inert inspection metadata. Startup and frame execution have deadlines; a throw
+or overrun restores the prior world. There is no model call in a frame, and the
+old restricted JSON drawing interpreter has been removed.
+
+The desktop shell supplies pan, pointer-centered zoom, Fit, inspection and a
+labeled 120x history replay. Minimum viewport: 900 × 600. Camera movement never
+clamps world geometry to the viewport; off-screen content is normal.
+
+### Repeatable proof
 
 ```bash
 uv sync --frozen --group dev
 .venv/bin/python scripts/viz_author.py --db ~/.local/share/clarp/state.sqlite
-# Optional real-model run, with an isolated JSON store:
-.venv/bin/python scripts/viz_author.py --db ~/.local/share/clarp/state.sqlite \
-  --learn --limit 1 --library /var/tmp/fleet-map-smoke/library.json
-# Foreground, read-only preview; no runtime startup or automatic model calls:
-.venv/bin/python scripts/viz_preview.py --db ~/.local/share/clarp/state.sqlite --port 7699
-# In another shell after npm ci and installing Playwright Chromium:
-node scripts/viz_screenshot.mjs http://127.0.0.1:7699/viz /var/tmp/fleet-map-check
+# A real source-writing call, isolated from the live library:
+.venv/bin/python scripts/viz_evolve.py --db ~/.local/share/clarp/state.sqlite \
+  --library /var/tmp/fleet-world/library.json \
+  --reason 'Invent and implement a new visual system for this evidence'
+# Read-only preview of that exact generated source, no automatic model calls:
+.venv/bin/python scripts/viz_preview.py --db ~/.local/share/clarp/state.sqlite \
+  --library /var/tmp/fleet-world/library.json --port 7700
+# In another shell, with Playwright Chromium installed:
+node scripts/viz_world_check.mjs http://127.0.0.1:7700/viz /var/tmp/fleet-world-proof
 make py
 make js
 npm run build
 ```
 
-Open the resulting screenshots; assertions are not a substitute for looking.
-The browser harness covers replay, distinct labels, camera navigation, the
-minimum-size gate, provisional identity adoption and a throwing generation
-while animation frames continue. Unit tests also cover worker timeout,
-subcommand-only model rules, aliasing, explicit supersession, corrupted JSON,
-and canonical Git worktree identity. The clamp and runtime-cwd limitations in
-§7 remain upstream instrumentation work.
+Inspect the screenshots and the recorded video. The verifier checks real
+hierarchy/remotes, source execution, agent movement through recorded playback,
+throws, infinite loops, opaque origin and blocked host storage. A successful
+model call alone is not proof that the authored software works.

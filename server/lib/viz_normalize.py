@@ -296,7 +296,10 @@ def iter_normalize(rows: Iterable[Any], names: dict[str, str], library: dict | N
         rule = library["rules"].get(exe + ":" + sub, library["rules"].get(exe, {}))
         archetype = (rule.get("archetype") if rule.get("verb") == verb else None)
         archetype = archetype or viz_archetypes.archetype_for(verb)
+        from .viz_world import evidence
+        fact = evidence(tool, inp, path, target, verb)
         yield {
+            "evidence": fact,
             "id": row["state_id"] if "state_id" in row.keys() else f"{agent_id}:{ts}:{tool}",
             "ts": ts,
             "agent": names.get(agent_id, agent_id[:8]),
@@ -411,7 +414,11 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
         if not ev["clamped"]:
             c["example"] = sample
     specific = sum(1 for e in events if e["specific"])
+    from . import viz_world
     return {
+        "world": viz_world.build(events),
+        "program": library.get("program"),
+        "previous_program": library.get("previous_program"),
         "archetypes": library["archetypes"],
         "library_revision": library["revision"],
         "_unknown_clusters": list(clusters.values()),
