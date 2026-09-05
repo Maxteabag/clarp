@@ -16,6 +16,7 @@ from . import clip_store
 import json
 import pathlib
 import queue
+import sqlite3
 import threading
 import time
 
@@ -70,6 +71,8 @@ class AudioStream:
     RECENT_WINDOW_SEC = SERVER_TIMING.audio_recent_window_sec
     AUDIO_RETAIN_SEC  = SERVER_TIMING.audio_retain_sec
     JANITOR_INTERVAL_SEC = SERVER_TIMING.audio_janitor_interval_sec
+    REPLAY_RETAIN_SEC = 7 * 24 * 60 * 60
+    REPLAY_RETAIN_MAX_BYTES = 256 * 1024 * 1024
 
     def __init__(self, audio_dir: pathlib.Path, *,
                  transcript_event_min_interval_sec: float = 0.25,
@@ -244,17 +247,26 @@ class AudioStream:
 
     def _janitor(self) -> None:
         while not self._stop.wait(self.JANITOR_INTERVAL_SEC):
-            cutoff = time.time() - self.AUDIO_RETAIN_SEC
-            try:
-                for p in self.audio_dir.glob("*.mp3"):
-                    try:
-                        if p.stat().st_mtime < cutoff:
-                            p.unlink()
-                            # Take the sidecar with it.
-                            side = p.with_suffix(p.suffix + ".json")
-                            try: side.unlink()
-                            except FileNotFoundError: pass
-                    except OSError as e:
-                        log_exception("audioJanitorUnlinkFail", e, detail=p.name)
-            except FileNotFoundError as e:
-                log_exception("audioJanitorMissingDir", e, detail=str(self.audio_dir))
+            self._prune_audio()
+
+    def _prune_audio(self) -> None:
+        from .message_audio import retained_mp3_paths
+        try:
+            protected = retained_mp3_paths(audio_dir=self.audio_dir,
+                max_age_ms=self.REPLAY_RETAIN_SEC * 1000, max_bytes=self.REPLAY_RETAIN_MAX_BYTES)
+        except (sqlite3.Error, OSError) as error:
+            log_exception("audioReplayRetentionLookupFail", error)
+            return  # A transient metadata failure must not erase the replay cache.
+        cutoff = time.time() - self.AUDIO_RETAIN_SEC
+        try:
+            for p in self.audio_dir.glob("*.mp3"):
+                try:
+                    if p.stat().st_mtime < cutoff and str(p.resolve()) not in protected:
+                        p.unlink()
+                        side = p.with_suffix(p.suffix + ".json")
+                        try: side.unlink()
+                        except FileNotFoundError: pass
+                except OSError as error:
+                    log_exception("audioJanitorUnlinkFail", error, detail=p.name)
+        except FileNotFoundError as error:
+            log_exception("audioJanitorMissingDir", error, detail=str(self.audio_dir))

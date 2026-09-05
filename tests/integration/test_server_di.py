@@ -3080,3 +3080,31 @@ def test_404_for_unknown_path(running_server):
     with pytest.raises(urllib.error.HTTPError) as excinfo:
         urllib.request.urlopen(req, timeout=2).read()
     assert excinfo.value.code == 404
+
+
+def test_message_audio_lookup_is_authenticated_and_does_not_synthesize(running_server):
+    base, ctx, _srv = running_server
+    from lib import agents, clip_store, tts_queue
+    from lib.db import conn, now_ms
+    agent = agents.get_by_session('rachel')
+    conn().execute("INSERT INTO messages(message_id,agent_id,seq,role,text,updated_at) VALUES(?,?,1,'assistant',?,?)",
+                   ('replay-message', agent['agent_id'], '<speak>The saved answer.</speak>Details.', now_ms()))
+    path = ctx.audio_dir / 'retained.mp3'
+    path.write_bytes(b'retained')
+    clip = clip_store.record_clip(agent_id=agent['agent_id'], path=str(path), runtime_id=lambda _: None)
+    queue = tts_queue.enqueue(agent_id=agent['agent_id'], session='rachel', voice_id='V_RACHEL',
+                              text='Rachel here. The saved answer.', source='pwa', trace_id='original-turn')
+    tts_queue.mark_done(queue, clip_id=clip)
+    ctx.auth_token = 'replay-test-token'
+    url = base + '/clips/message?session=rachel&message_id=replay-message'
+    with pytest.raises(urllib.error.HTTPError) as denied:
+        _get(url)
+    assert denied.value.code == 401
+    status, body = _get(url, headers={'Authorization': 'Bearer replay-test-token'})
+    assert status == 200
+    assert [event['clip_id'] for event in json.loads(body)['events']] == [clip]
+    assert tts_queue.pending_count() == 0
+    with pytest.raises(urllib.error.HTTPError) as wrong_agent:
+        _get(base + '/clips/message?session=claude&message_id=replay-message',
+             headers={'Authorization': 'Bearer replay-test-token'})
+    assert wrong_agent.value.code == 404
