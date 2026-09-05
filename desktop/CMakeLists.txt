@@ -51,10 +51,22 @@ add_executable(clarp-desktop)
 
 target_sources(clarp-desktop PRIVATE
     src/main.cpp
+    src/terminal/TerminalLaunch.cpp
+    src/terminal/TerminalLaunch.h
     src/app/AppController.cpp
     src/app/AppController.h
     src/app/CredentialStore.cpp
     src/app/CredentialStore.h
+    src/app/TranscriptCache.cpp
+    src/app/TranscriptCache.h
+    src/app/ToolNarrator.cpp
+    src/app/ToolNarrator.h
+    src/app/TimeFormat.cpp
+    src/app/TimeFormat.h
+    src/models/AgentFilterModel.cpp
+    src/models/AgentFilterModel.h
+    src/media/PortraitImage.cpp
+    src/media/PortraitImage.h
     src/media/AudioController.cpp
     src/media/AudioController.h
     src/media/WavEncoder.cpp
@@ -89,25 +101,38 @@ qt_add_qml_module(clarp-desktop
     QML_FILES
         qml/Main.qml
         qml/components/AgentRail.qml
+        qml/components/NavRail.qml
+        qml/components/ChatList.qml
+        qml/components/ChatRow.qml
         qml/components/AgentOverview.qml
+        qml/components/AgentAvatar.qml
         qml/components/Composer.qml
         qml/components/ConnectionPage.qml
         qml/components/ConversationPane.qml
+        qml/components/TranscriptList.qml
+        qml/components/DisplayCellCard.qml
         qml/components/MessageDelegate.qml
+        qml/components/MediaGallery.qml
         qml/components/OrchestratorDialog.qml
         qml/components/PaneLeaf.qml
+        qml/components/AgentProfilePanel.qml
         qml/components/QuickSwitcher.qml
+        qml/components/QueueDialog.qml
         qml/components/ShortcutBar.qml
+        qml/components/SettingsPanel.qml
         qml/components/StatusPill.qml
         qml/components/StartAgentDialog.qml
         qml/components/ToolCard.qml
+        qml/components/ActivityExplanation.qml
+        qml/components/TeamsPanel.qml
+        qml/components/UpdatesPanel.qml
         qml/components/VoiceDialog.qml
         qml/components/Workspace.qml
     RESOURCES
         resources/clarp.svg
 )
 
-target_include_directories(clarp-desktop PRIVATE src src/app)
+target_include_directories(clarp-desktop PRIVATE src src/app src/models)
 target_compile_definitions(clarp-desktop PRIVATE
     CLARP_DESKTOP_VERSION="${PROJECT_VERSION}"
 )
