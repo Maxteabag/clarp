@@ -6,10 +6,21 @@
 #include <QNetworkRequest>
 
 namespace clarp {
+namespace {
+
+int effectivePort(const QUrl& url) {
+    if (url.port() >= 0) {
+        return url.port();
+    }
+    return url.scheme().compare(QStringLiteral("https"), Qt::CaseInsensitive) == 0 ? 443 : 80;
+}
+
+} // namespace
 
 ApiClient::ApiClient(QObject* parent) : QObject(parent) {}
 
 void ApiClient::setEndpoint(QUrl baseUrl, QString bearerToken) {
+    ++m_endpointGeneration;
     QString path = baseUrl.path();
     if (!path.endsWith('/')) {
         path.append('/');
@@ -35,10 +46,36 @@ void ApiClient::get(const QString& tag, const QString& path, const QUrlQuery& qu
     watchJson(tag, m_network.get(requestFor(url)));
 }
 
+void ApiClient::getBytes(const QString& tag, const QString& path) {
+    const QUrl url = resolve(path);
+    const bool sameOrigin = url.isValid() && url.userInfo().isEmpty() &&
+                            url.scheme().compare(m_baseUrl.scheme(), Qt::CaseInsensitive) == 0 &&
+                            url.host().compare(m_baseUrl.host(), Qt::CaseInsensitive) == 0 &&
+                            effectivePort(url) == effectivePort(m_baseUrl);
+    if (!sameOrigin) {
+        emit requestFailed(tag, QStringLiteral("Refusing cross-origin authenticated media"), 0);
+        return;
+    }
+    QNetworkRequest request = requestFor(url);
+    // Unlike ordinary API calls, this request carries a credential into a
+    // renderer-owned media path. Never let Qt retain that header across an
+    // otherwise "safe" HTTPS redirect to another origin.
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                         QNetworkRequest::SameOriginRedirectPolicy);
+    request.setRawHeader("Accept", "image/png,image/jpeg,image/webp,image/gif,image/*");
+    watchBytes(tag, m_network.get(request));
+}
+
 void ApiClient::postJson(const QString& tag, const QString& path, const QJsonObject& body) {
     QNetworkRequest request = requestFor(resolve(path));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     watchJson(tag, m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact)));
+}
+
+void ApiClient::putJson(const QString& tag, const QString& path, const QJsonObject& body) {
+    QNetworkRequest request = requestFor(resolve(path));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    watchJson(tag, m_network.put(request, QJsonDocument(body).toJson(QJsonDocument::Compact)));
 }
 
 void ApiClient::deleteResource(const QString& tag, const QString& path) {
@@ -69,7 +106,12 @@ QNetworkRequest ApiClient::requestFor(const QUrl& url) const {
 }
 
 void ApiClient::watchJson(const QString& tag, QNetworkReply* reply) {
-    connect(reply, &QNetworkReply::finished, this, [this, tag, reply] {
+    const quint64 generation = m_endpointGeneration;
+    connect(reply, &QNetworkReply::finished, this, [this, tag, reply, generation] {
+        if (generation != m_endpointGeneration) {
+            reply->deleteLater();
+            return;
+        }
         const QByteArray body = reply->readAll();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300) {
@@ -102,7 +144,12 @@ void ApiClient::watchJson(const QString& tag, QNetworkReply* reply) {
 }
 
 void ApiClient::watchBytes(const QString& tag, QNetworkReply* reply) {
-    connect(reply, &QNetworkReply::finished, this, [this, tag, reply] {
+    const quint64 generation = m_endpointGeneration;
+    connect(reply, &QNetworkReply::finished, this, [this, tag, reply, generation] {
+        if (generation != m_endpointGeneration) {
+            reply->deleteLater();
+            return;
+        }
         const QByteArray body = reply->readAll();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300) {

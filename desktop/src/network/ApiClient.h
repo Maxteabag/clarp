@@ -20,7 +20,9 @@ class ApiClient final : public QObject {
     [[nodiscard]] QUrl resolve(const QString& path) const;
 
     void get(const QString& tag, const QString& path, const QUrlQuery& query = {});
+    void getBytes(const QString& tag, const QString& path);
     void postJson(const QString& tag, const QString& path, const QJsonObject& body);
+    void putJson(const QString& tag, const QString& path, const QJsonObject& body);
     void deleteResource(const QString& tag, const QString& path);
     void postBytes(const QString& tag, const QString& path, const QByteArray& body,
                    const QByteArray& contentType,
@@ -39,6 +41,7 @@ class ApiClient final : public QObject {
     QNetworkAccessManager m_network;
     QUrl m_baseUrl;
     QString m_bearerToken;
+    quint64 m_endpointGeneration = 0;
 };
 
 } // namespace clarp

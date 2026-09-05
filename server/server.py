@@ -319,6 +319,7 @@ class Handler(BaseHTTPRequestHandler):
     }
     _ROOT_STATIC = {"/manifest.json", "/styles.css", "/icon.png"}
     _POST_ROUTES = {
+        "/tool-explanations": "_handle_tool_explanations",
         "/send": "_handle_send",
         "/orchestrator/route-delegation": "_handle_orchestrator_route_delegation",
         "/transcribe": "_handle_transcribe",
@@ -1891,6 +1892,20 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_server_info(self):
         from lib.server_identity import get_server_info
         self._send(200, json.dumps(get_server_info()).encode(), "application/json")
+
+    def _handle_tool_explanations(self):
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"object required"}', "application/json")
+        session = data.get("session")
+        if not isinstance(session, str) or not (agent := agents_db.get_by_session(session)):
+            return self._send(404, b'{"error":"agent not found"}', "application/json")
+        try:
+            result = self.ctx.tool_explanations.request(
+                data.get("detail_level"), data.get("items"), cwd=agent.get("cwd"))
+        except ValueError as error:
+            return self._send(400, json.dumps({"error": str(error)}).encode(), "application/json")
+        self._send(200, json.dumps(result).encode(), "application/json")
 
     def _handle_pairing_exchange(self):
         from lib.device_pairing import PairingError, exchange
@@ -4672,6 +4687,10 @@ def build_server(ctx: ServerContext, port: int,
     herald = getattr(ctx, "herald", None)
     ctx.stream.start()
     srv = ContextHTTPServer((listener_addr, port), Handler, ctx)
+    if ctx.tool_explanations is None:
+        from lib.tool_explanations import ToolExplanations
+        ctx.tool_explanations = ToolExplanations()
+    srv.on_close(ctx.tool_explanations.close)
     srv.on_close(ctx.stream.stop)
     if getattr(_CFG, "network_advertise_lan", False):
         from lib.bonjour import BonjourAdvertiser
