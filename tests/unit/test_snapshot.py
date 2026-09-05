@@ -180,3 +180,66 @@ def test_snapshot_head_revision_is_zero_without_bound_session(tmp_path):
     snap = build_agent_snapshot(ctx)
     row = next(a for a in snap["agents"] if a["session"] == "diego")
     assert row.get("head_revision") == 0
+
+
+def _model_avatar_ctx(tmp_path, static_root):
+    return ServerContext(
+        root=tmp_path, static=static_root, audio_dir=tmp_path / "audio",
+        agents_path=tmp_path / "agents.json",
+        default_session="rachel", tts=FakeTTSEngine(tmp_path / "audio"),
+        stream=AudioStream(tmp_path / "audio"), stt=StubSTT(),
+        roster_names=("Rachel",),
+    )
+
+
+def _bundle_model_avatar(static_root, name):
+    folder = static_root / "avatars" / "models"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / name).write_bytes(b"\x89PNG\r\n\x1a\nvariant")
+
+
+def test_snapshot_offers_the_portrait_drawn_for_the_agent_model(tmp_path):
+    static_root = tmp_path / "static"
+    _bundle_model_avatar(static_root, "rachel.opus.png")
+    agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel",
+        backend="claude", model="claude-opus-5")
+
+    snap = build_agent_snapshot(_model_avatar_ctx(tmp_path, static_root))
+
+    row = snap["agents"][0]
+    assert row["model_avatar_url"].startswith(
+        "/static/avatars/models/rachel.opus.png?v=")
+    # The ordinary portrait is still served; the preference decides which wins.
+    assert row["avatar_url"] == ""
+    assert snap["model_avatars"] is False
+
+
+def test_snapshot_never_swaps_out_a_portrait_the_user_chose(tmp_path):
+    static_root = tmp_path / "static"
+    _bundle_model_avatar(static_root, "rachel.opus.png")
+    portrait = tmp_path / "chosen.png"
+    portrait.write_bytes(b"\x89PNG\r\n\x1a\nchosen")
+    agent_id = agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel",
+        backend="claude", model="claude-opus-5")
+    db.conn().execute("UPDATE agents SET avatar_path=? WHERE agent_id=?",
+                      (str(portrait), agent_id))
+
+    snap = build_agent_snapshot(_model_avatar_ctx(tmp_path, static_root))
+
+    assert snap["agents"][0]["model_avatar_url"] == ""
+    assert snap["agents"][0]["avatar_url"].startswith("/avatars/")
+
+
+def test_snapshot_carries_the_computer_preference(tmp_path):
+    from lib import avatar_settings
+
+    agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
+    avatar_settings.update(True)
+
+    snap = build_agent_snapshot(_model_avatar_ctx(tmp_path, tmp_path / "static"))
+
+    assert snap["model_avatars"] is True
+    assert snap["agents"][0]["model_avatar_url"] == ""
