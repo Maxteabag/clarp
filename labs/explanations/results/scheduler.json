@@ -1,0 +1,16 @@
+[
+  {
+    "priority_prototype": false,
+    "live_batch_number": 9,
+    "synthetic_live_wait_ms": 343.05,
+    "cache_ms": 0.015,
+    "note": "Fake model takes 20ms; live batch position is the deterministic result."
+  },
+  {
+    "priority_prototype": true,
+    "live_batch_number": 2,
+    "synthetic_live_wait_ms": 61.19,
+    "cache_ms": 0.01,
+    "note": "Fake model takes 20ms; live batch position is the deterministic result."
+  }
+]

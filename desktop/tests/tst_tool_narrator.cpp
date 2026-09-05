@@ -66,6 +66,7 @@ int fakeCodex(const QStringList& args) {
 class ToolNarratorTest : public QObject {
     Q_OBJECT
   private slots:
+    void labTransientHostFailureStopsNewExplanationsUntilReset();
     void sharedHostPollsWithoutStartingLocalCodex();
     void optInDeduplicatesBatchesAndPreservesCache();
     void disableCancelsAndRejectsLateReplies();
@@ -74,6 +75,54 @@ class ToolNarratorTest : public QObject {
     void scriptContextIsOptInBoundedAndInvalidatesCache();
     void detailLevelsChangeInstructionsAndDiscardPreviousTranslations();
 };
+
+void ToolNarratorTest::labTransientHostFailureStopsNewExplanationsUntilReset() {
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    int calls = 0;
+    connect(&server, &QTcpServer::newConnection, this, [&] {
+        auto* socket = server.nextPendingConnection();
+        connect(socket, &QTcpSocket::readyRead, socket, [&, socket, buffer = QByteArray{}]() mutable {
+            buffer += socket->readAll();
+            const auto split = buffer.indexOf("\r\n\r\n");
+            if (split < 0) return;
+            const auto body = QJsonDocument::fromJson(buffer.mid(split + 4)).object();
+            if (body.isEmpty()) return;
+            ++calls;
+            if (calls == 1) {
+                socket->write("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
+            } else {
+                const auto item = body.value(QStringLiteral("items")).toArray().first().toObject();
+                const auto answer = QJsonDocument(QJsonObject{{QStringLiteral("items"), QJsonArray{
+                    QJsonObject{{QStringLiteral("id"), item.value(QStringLiteral("id"))},
+                        {QStringLiteral("status"), QStringLiteral("ready")},
+                        {QStringLiteral("text"), QStringLiteral("Read the requested file.")}}}}}).toJson(QJsonDocument::Compact);
+                socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: " + QByteArray::number(answer.size()) + "\r\n\r\n" + answer);
+            }
+            socket->disconnectFromHost();
+            buffer.clear();
+        });
+    });
+    clarp::ApiClient api;
+    api.setEndpoint(QUrl(QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort())), {});
+    ToolNarrator narrator(nullptr, QStringLiteral("no-local-model-in-lab"));
+    narrator.setApiClient(&api);
+    narrator.setDetailLevel(3);
+    auto activity = command();
+    activity.insert(QStringLiteral("_session"), QStringLiteral("lab-only"));
+    narrator.request(activity);
+    QTRY_VERIFY_WITH_TIMEOUT(narrator.unavailable(), 1500);
+    activity.insert(QStringLiteral("command"), QStringLiteral("read another file"));
+    narrator.request(activity);
+    QTest::qWait(350);
+    QCOMPARE(calls, 1); // Reproduces the current narrator-wide latch, not desired behavior.
+    QVERIFY(narrator.explanation(activity).isEmpty());
+    narrator.reset();
+    narrator.request(activity);
+    QTRY_COMPARE_WITH_TIMEOUT(narrator.explanation(activity), QStringLiteral("Read the requested file."), 1500);
+    QCOMPARE(calls, 2);
+    qInfo("LAB: one HTTP 503 blocked new activity; explicit reset restored requests");
+}
 
 void ToolNarratorTest::sharedHostPollsWithoutStartingLocalCodex() {
     QTcpServer server;
