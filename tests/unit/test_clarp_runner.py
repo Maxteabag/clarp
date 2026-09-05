@@ -427,7 +427,7 @@ def test_spawn_turn_zero_exit_without_result_calls_on_error(fake_clarp, tmp_path
     due to an upstream rate-limit) must surface to the dispatcher. A pure
     log-only path leaves the UI on silence / Connected."""
     fake_clarp([
-        {"type": "rate_limit_event", "rate_limit_info": {"status": "blocked"}},
+        {"type": "system", "subtype": "status", "status": "starting"},
     ])
     sids: list[str] = []
     errs: list[str] = []
@@ -440,6 +440,20 @@ def test_spawn_turn_zero_exit_without_result_calls_on_error(fake_clarp, tmp_path
     assert sids == [], "no system.init was emitted → callback must stay silent"
     assert _wait_for(lambda: len(errs) == 1)
     assert "without stream-json result" in errs[0]
+
+
+@pytest.mark.parametrize("status", ["blocked", "rejected", "allowed_warning", "allowed"])
+def test_structured_usage_limit_events_are_classified(fake_clarp, tmp_path, status):
+    fake_clarp([
+        {"type": "rate_limit_event", "rate_limit_info": {"status": status}},
+        {"type": "rate_limit_event", "rate_limit_info": {"status": status}},
+        {"type": "result", "subtype": "success", "result": "done"},
+    ])
+    errors = []
+    handle = clarp_runner.spawn_turn(text="hi", cwd=tmp_path, on_error=errors.append)
+    handle.wait(timeout=5)
+    assert errors == (["Claude usage limit reached"]
+                      if status in {"blocked", "rejected"} else [])
 
 
 def test_spawn_turn_zero_exit_usage_limit_stderr_calls_on_error(fake_clarp, tmp_path):
