@@ -26,7 +26,10 @@ def test_each_known_provider_has_its_documented_budget():
     assert budget_for("faster-whisper").unit == Unit.TOKENS
     assert budget_for("elevenlabs").max_term_chars == 49
     assert budget_for("elevenlabs").capacity == 100
-    assert budget_for("cartesia").capacity == 0
+    # Two Cartesia models, two capabilities: Ink-2 biases over the socket,
+    # Ink-Whisper's batch endpoint takes nothing.
+    assert budget_for("cartesia", "ink-2").capacity == 100
+    assert budget_for("cartesia", "ink-whisper").capacity == 0
     assert budget_for("assemblyai").unit == Unit.WORDS
 
 
