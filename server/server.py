@@ -273,6 +273,7 @@ class Handler(BaseHTTPRequestHandler):
         "/vocab/run": "_handle_vocab_run_get",
         "/transcription-audio": "_handle_transcription_audio_get",
         "/clips/recoverable": "_handle_recoverable_clips",
+        "/clips/message": "_handle_message_clips",
         "/server-info": "_handle_server_info",
         "/paired-devices": "_handle_paired_devices",
         "/server-update": "_handle_server_update_status",
@@ -4170,6 +4171,19 @@ class Handler(BaseHTTPRequestHandler):
                               "updated": ok, "error": error})
         self._send(200, json.dumps({"ok": True, "updated": ok}).encode(),
                    "application/json")
+
+    def _handle_message_clips(self):
+        from urllib.parse import parse_qs, urlparse
+        from lib.message_audio import retained_events
+        query = parse_qs(urlparse(self.path).query)
+        session = str(query.get("session", [""])[0]).strip()
+        message_id = str(query.get("message_id", [""])[0]).strip()
+        if not session or not message_id or len(session) > 256 or len(message_id) > 1024:
+            return self._send(400, b'{"error":"session and message_id required"}', "application/json")
+        events = retained_events(session=session, message_id=message_id, audio_dir=self.ctx.audio_dir)
+        if not events:
+            return self._send(404, b'{"error":"Retained audio is unavailable for this message"}', "application/json")
+        self._send(200, json.dumps({"events": events}).encode(), "application/json")
 
     def _handle_recoverable_clips(self):
         from urllib.parse import parse_qs, urlparse
