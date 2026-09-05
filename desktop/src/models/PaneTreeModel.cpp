@@ -6,6 +6,9 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <utility>
 
 namespace clarp {
 namespace {
@@ -134,30 +137,134 @@ void PaneTreeModel::closePane(const QString& paneId) {
 
 void PaneTreeModel::focusPane(const QString& paneId) {
     const Node* pane = find(m_root.get(), paneId);
-    if (pane == nullptr || pane->kind != Node::Kind::Leaf || m_activePaneId == paneId) {
+    if (pane == nullptr || pane->kind != Node::Kind::Leaf) {
+        return;
+    }
+    const bool activeChanged = m_activePaneId != paneId;
+    const bool zoomChanged = !m_zoomedPaneId.isEmpty() && m_zoomedPaneId != paneId;
+    if (!activeChanged && !zoomChanged) {
         return;
     }
     m_activePaneId = paneId;
-    emit activePaneChanged();
+    if (zoomChanged) {
+        m_zoomedPaneId = paneId;
+        emit treeChanged();
+    }
+    if (activeChanged) {
+        emit activePaneChanged();
+    }
 }
 
 void PaneTreeModel::navigate(const QString& direction) {
-    std::vector<Node*> leaves;
-    collectLeaves(m_root.get(), leaves);
-    if (leaves.size() <= 1) {
+    QVariantList panes;
+    QVariantList splits;
+    appendLayout(m_root.get(), 0.0, 0.0, 1.0, 1.0, panes, splits);
+    if (panes.size() <= 1) {
         return;
     }
-    const auto current = std::ranges::find_if(
-        leaves, [this](const Node* node) { return node->id == m_activePaneId; });
-    if (current == leaves.end()) {
+
+    const auto currentIt =
+        std::ranges::find_if(std::as_const(panes), [this](const QVariant& value) {
+            return value.toMap().value(QStringLiteral("id")).toString() == m_activePaneId;
+        });
+    if (currentIt == panes.end()) {
         return;
     }
-    const qsizetype index = static_cast<qsizetype>(std::distance(leaves.begin(), current));
-    const bool backwards = direction == QStringLiteral("left") ||
-                           direction == QStringLiteral("up") || direction == QStringLiteral("prev");
-    const qsizetype count = static_cast<qsizetype>(leaves.size());
-    const qsizetype next = backwards ? (index - 1 + count) % count : (index + 1) % count;
-    m_activePaneId = leaves.at(static_cast<std::size_t>(next))->id;
+
+    if (direction == QStringLiteral("prev") || direction == QStringLiteral("next")) {
+        const qsizetype index = std::distance(panes.cbegin(), currentIt);
+        const qsizetype delta = direction == QStringLiteral("prev") ? -1 : 1;
+        const qsizetype next = (index + delta + panes.size()) % panes.size();
+        const QString target = panes.at(next).toMap().value(QStringLiteral("id")).toString();
+        m_activePaneId = target;
+        if (!m_zoomedPaneId.isEmpty()) {
+            m_zoomedPaneId = target;
+            emit treeChanged();
+        }
+        emit activePaneChanged();
+        return;
+    }
+
+    const bool horizontal =
+        direction == QStringLiteral("left") || direction == QStringLiteral("right");
+    const bool vertical = direction == QStringLiteral("up") || direction == QStringLiteral("down");
+    if (!horizontal && !vertical) {
+        return;
+    }
+    const bool negative = direction == QStringLiteral("left") || direction == QStringLiteral("up");
+    const QVariantMap current = currentIt->toMap();
+    const double currentX = current.value(QStringLiteral("x")).toDouble();
+    const double currentY = current.value(QStringLiteral("y")).toDouble();
+    const double currentWidth = current.value(QStringLiteral("width")).toDouble();
+    const double currentHeight = current.value(QStringLiteral("height")).toDouble();
+    const double currentCenterX = currentX + currentWidth / 2.0;
+    const double currentCenterY = currentY + currentHeight / 2.0;
+
+    QString bestId;
+    std::array<double, 5> bestScore{};
+    bool hasBest = false;
+    for (const QVariant& value : std::as_const(panes)) {
+        const QVariantMap candidate = value.toMap();
+        const QString candidateId = candidate.value(QStringLiteral("id")).toString();
+        if (candidateId == m_activePaneId) {
+            continue;
+        }
+        const double x = candidate.value(QStringLiteral("x")).toDouble();
+        const double y = candidate.value(QStringLiteral("y")).toDouble();
+        const double width = candidate.value(QStringLiteral("width")).toDouble();
+        const double height = candidate.value(QStringLiteral("height")).toDouble();
+        const double centerX = x + width / 2.0;
+        const double centerY = y + height / 2.0;
+        const double primaryDelta =
+            horizontal ? centerX - currentCenterX : centerY - currentCenterY;
+        if ((negative && primaryDelta >= -1e-9) || (!negative && primaryDelta <= 1e-9)) {
+            continue;
+        }
+        const bool extendsPastEdge =
+            direction == QStringLiteral("left")    ? x < currentX - 1e-9
+            : direction == QStringLiteral("right") ? x + width > currentX + currentWidth + 1e-9
+            : direction == QStringLiteral("up")    ? y < currentY - 1e-9
+                                                   : y + height > currentY + currentHeight + 1e-9;
+        if (!extendsPastEdge) {
+            continue;
+        }
+
+        const auto intervalGap = [](double firstStart, double firstEnd, double secondStart,
+                                    double secondEnd) {
+            if (firstEnd < secondStart) {
+                return secondStart - firstEnd;
+            }
+            return secondEnd < firstStart ? firstStart - secondEnd : 0.0;
+        };
+        const double orthogonalGap =
+            horizontal ? intervalGap(currentY, currentY + currentHeight, y, y + height)
+                       : intervalGap(currentX, currentX + currentWidth, x, x + width);
+        const double primaryGap = horizontal
+                                      ? (negative ? std::max(0.0, currentX - (x + width))
+                                                  : std::max(0.0, x - (currentX + currentWidth)))
+                                      : (negative ? std::max(0.0, currentY - (y + height))
+                                                  : std::max(0.0, y - (currentY + currentHeight)));
+        const double orthogonalCenter =
+            horizontal ? std::abs(centerY - currentCenterY) : std::abs(centerX - currentCenterX);
+        const std::array score{orthogonalGap > 1e-9 ? 1.0 : 0.0, primaryGap, orthogonalGap,
+                               orthogonalCenter, std::abs(primaryDelta)};
+        if (!hasBest || score < bestScore) {
+            bestId = candidateId;
+            bestScore = score;
+            hasBest = true;
+        }
+    }
+
+    // Spatial movement stops at an outer edge instead of wrapping to an
+    // unrelated pane on the opposite side of the workspace.
+    if (!hasBest) {
+        return;
+    }
+    m_activePaneId = bestId;
+    if (!m_zoomedPaneId.isEmpty()) {
+        m_zoomedPaneId = bestId;
+        emit treeChanged();
+    }
     emit activePaneChanged();
 }
 

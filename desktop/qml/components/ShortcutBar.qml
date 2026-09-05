@@ -6,36 +6,49 @@ Rectangle {
 
     required property var controller
 
-    implicitHeight: 29
-    color: "#101015"
-    border.color: "#29242f"
+    implicitHeight: 22
+    color: "#11131a"
+    border.color: "#262938"
     border.width: 1
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
-        spacing: 12
+        anchors.leftMargin: 10
+        anchors.rightMargin: 10
+        spacing: 7
 
-        Text {
-            text: root.controller.connected ? "LIVE" : root.controller.connectionState.toUpperCase()
-            color: root.controller.connected ? "#70bc98" : "#b9996f"
-            font.pixelSize: 9
-            font.weight: Font.Bold
-            font.letterSpacing: 1
+        Rectangle {
+            implicitWidth: 6
+            implicitHeight: 6
+            radius: 3
+            color: root.controller.connected ? "#8aaa7a" : "#8b7868"
         }
 
         Text {
-            Layout.fillWidth: true
-            text: "Ctrl+K  Switch   ·   Ctrl+N  New   ·   Ctrl+Shift+V/H  Split   ·   Ctrl+Alt+Arrows  Move   ·   Ctrl+Shift+Z  Zoom"
-            color: "#716a78"
+            text: root.controller.panes.activeSession || "ready"
+            color: "#8e92aa"
+            font.family: "JetBrains Mono"
             font.pixelSize: 9
+            font.weight: Font.DemiBold
             elide: Text.ElideRight
         }
 
+        Item {
+            Layout.fillWidth: true
+        }
+
         Text {
-            text: "Qt 6 · native"
-            color: "#56515b"
+            text: root.controller.panes.zoomedPaneId.length > 0
+                ? "ZOOM" : root.controller.panes.paneCount + "P"
+            color: "#6e7289"
+            font.family: "JetBrains Mono"
+            font.pixelSize: 9
+        }
+
+        Text {
+            text: "⌃K"
+            color: "#575b70"
+            font.family: "JetBrains Mono"
             font.pixelSize: 9
         }
 

@@ -6,11 +6,24 @@
   import { unlockAudio } from '../../stores/audio.svelte.js';
   import { composerRef } from '../../stores/composer.svelte.js';
   import { send, sendText } from '../../stores/send.svelte.js';
+  import { panesState } from '../../stores/panes.svelte.js';
 
   import { setInsert } from '../../stores/input.svelte.js';
 
+  // A draft belongs to both the pane and its current recipient. Moving pane
+  // focus swaps the visible draft instead of carrying text to another agent.
+  let drafts = $state({});
   let value = $state('');
+  let shownKey = $state('');
   let inputEl = $state(null);
+  let draftKey = $derived(`${panesState.tree.activeId}\u0000${app.session}`);
+
+  $effect(() => {
+    const key = draftKey;
+    if (key === shownKey) return;
+    shownKey = key;
+    value = drafts[key] || '';
+  });
 
   // Registered rather than bound, because the click-anywhere-refocuses
   // handler lives on the window in App and has no reference to this tree.
@@ -27,13 +40,21 @@
   });
 
   function submit() {
-    const text = value.trim();
+    const key = draftKey;
+    const text = String(drafts[key] || (key === shownKey ? value : '')).trim();
     if (!text) return;
     // Counts as a user gesture, which is the moment to prime audio.
     unlockAudio();
-    value = '';
-    send.captureTarget = app.session;
+    const target = app.session;
+    drafts[key] = '';
+    if (key === shownKey) value = '';
+    send.captureTarget = target;
     sendText(text);
+  }
+
+  function onInput(e) {
+    value = e.currentTarget.value;
+    drafts[shownKey || draftKey] = value;
   }
 
   function keydown(e) {
@@ -64,7 +85,8 @@
       type="text"
       autocomplete="off"
       bind:this={inputEl}
-      bind:value
+      value={value}
+      oninput={onInput}
       onkeydown={keydown}
       onfocus={onFocus}
       onblur={onBlur}

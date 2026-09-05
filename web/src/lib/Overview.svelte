@@ -2,13 +2,14 @@
   // Responsive mission control for live Chats and saved Contacts. The server's
   // session identity remains authoritative; display names are presentation.
   import {
-    AVATAR_PALETTE, agentSnapshot, app, avatarUrl, DEFAULT_ROSTER, flash, isDesktop,
+    agentSnapshot, app, avatarUrl, DEFAULT_ROSTER, flash, isDesktop,
     isUserNotificationUnread, refreshSessions, setSession,
   } from '../stores/app.svelte.js';
   import {
     buildAgentOverview, formatRelativeActivity,
   } from '@core/agent-overview.js';
   import { labelFor, loadBackendCatalogue } from '../stores/backends.svelte.js';
+  import AgentAvatar from './AgentAvatar.svelte';
 
   let {
     open = $bindable(), onStart, onRelaunch, onVoice, onOrchestrator,
@@ -59,10 +60,6 @@
 
   function rowAvatar(row) {
     return row.avatar_url || avatarUrl(row.name, row.session || '');
-  }
-
-  function avatarColor(name) {
-    return AVATAR_PALETTE[name] || 'var(--ochre)';
   }
 
   // Labels come from the Host catalogue so a backend this build has never
@@ -253,10 +250,9 @@
                 <article class="agent-card" class:current={row.isCurrent} class:busy={row.busy} class:expanded={expandedSession === row.session}
                          data-name={row.name} data-session={row.session}>
                   <button class="agent-card-open" onclick={() => pickRow(row)}>
-                    <span class="agent-card-avatar" style="background-color:{avatarColor(row.name)};background-image:url('{rowAvatar(row)}')">
-                      {#if !rowAvatar(row)}<span class="avatar-letter">{row.name.slice(0, 1)}</span>{/if}
+                    <AgentAvatar class="agent-card-avatar" name={row.name} session={row.session} url={rowAvatar(row)}>
                       <span class="agent-presence" class:busy={row.busy} class:unread={row.isUnread}></span>
-                    </span>
+                    </AgentAvatar>
                     <span class="agent-card-copy">
                       <span class="agent-card-heading"><strong>{row.name}</strong><span>{formatRelativeActivity(row.lastActivity)}</span></span>
                       <span class="agent-card-preview">{row.preview}</span>
@@ -358,9 +354,7 @@
             <div class="contact-stack">
               {#each overview.contacts as contact (contact.key)}
                 <article class="contact-card" data-name={contact.name}>
-                  <span class="contact-avatar" style="background-color:{avatarColor(contact.name)};background-image:url('{rowAvatar(contact)}')">
-                    {#if !rowAvatar(contact)}<span class="avatar-letter">{contact.name.slice(0, 1)}</span>{/if}
-                  </span>
+                  <AgentAvatar class="contact-avatar" name={contact.name} url={rowAvatar(contact)} />
                   <span class="contact-copy">
                     <span><strong>{contact.name}</strong><small>{contact.builtin ? 'Built-in' : 'Saved'}</small></span>
                     <p>{contact.personality || 'Ready for a new workspace and conversation.'}</p>
@@ -380,9 +374,7 @@
             <div class="archive-list">
               {#each overview.archived as row (row.key)}
                 <article>
-                  <span class="contact-avatar" style="background-color:{avatarColor(row.name)};background-image:url('{rowAvatar(row)}')">
-                    {#if !rowAvatar(row)}<span class="avatar-letter">{row.name.slice(0, 1)}</span>{/if}
-                  </span>
+                  <AgentAvatar class="contact-avatar" name={row.name} session={row.session} url={rowAvatar(row)} />
                   <span><strong>{row.name}</strong><small>{row.preview} · {formatRelativeActivity(row.lastActivity)}</small></span>
                   <button disabled={!!mutationKey} onclick={() => postAgentSetting(row, '/agent-archive', { archived: false }, `${row.name} restored`)}>Restore</button>
                 </article>

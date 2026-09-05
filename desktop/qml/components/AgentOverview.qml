@@ -11,11 +11,12 @@ Rectangle {
     property string confirmRelease: ""
     signal closeRequested
     signal startRequested(string name)
+    signal quickStartRequested(string name)
     signal relaunchRequested(string session, string name)
     signal voiceRequested(string session, string name)
     signal orchestratorRequested
 
-    color: "#f0121116"
+    color: "#d908090f"
 
     MouseArea {
         anchors.fill: parent
@@ -24,15 +25,15 @@ Rectangle {
 
     Rectangle {
         anchors.fill: parent
-        anchors.margins: 28
-        radius: 20
-        color: "#17151c"
-        border.color: "#37303f"
+        anchors.margins: 18
+        radius: 8
+        color: "#171821"
+        border.color: "#343648"
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 24
-            spacing: 16
+            anchors.margins: 16
+            spacing: 10
 
             RowLayout {
                 Layout.fillWidth: true
@@ -41,33 +42,31 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: 2
                     Text {
-                        text: "AGENT OVERVIEW"
-                        color: "#f1ebe6"
-                        font.pixelSize: 22
+                        text: "AGENTS"
+                        color: "#c8cadc"
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: 19
                         font.weight: Font.DemiBold
-                        font.letterSpacing: 1.2
+                        font.letterSpacing: 1.5
                     }
                     Text {
                         text: root.controller.agents.count + " active conversations"
-                        color: "#77717f"
+                        color: "#62657a"
+                        font.family: "JetBrains Mono"
                         font.pixelSize: 11
                     }
                 }
 
                 Button {
-                    text: "New agent"
+                    text: "+ New"
+                    implicitWidth: 70
+                    implicitHeight: 28
                     onClicked: root.startRequested("")
-                }
-                Button {
-                    text: "Orchestrator"
-                    onClicked: root.orchestratorRequested()
-                }
-                ToolButton {
-                    text: "↻"
-                    onClicked: root.controller.refreshAgents()
                 }
                 ToolButton {
                     text: "×"
+                    implicitWidth: 28
+                    implicitHeight: 28
                     onClicked: root.closeRequested()
                 }
             }
@@ -77,7 +76,7 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                spacing: 10
+                spacing: 6
                 model: root.controller.agents
                 reuseItems: true
 
@@ -101,37 +100,36 @@ Rectangle {
                     required property real contextTokens
                     required property real contextWindow
                     required property var schedules
+                    required property string avatarSymbol
 
                     width: ListView.view.width
-                    implicitHeight: cardColumn.implicitHeight + 24
-                    radius: 15
-                    color: root.controller.selectedSession === session ? "#26212c" : "#1d1a22"
-                    border.color: root.controller.selectedSession === session ? "#594465" : "#2d2933"
+                    implicitHeight: cardColumn.implicitHeight + 18
+                    radius: 4
+                    color: root.controller.selectedSession === session ? "#242634" : "#1c1d28"
+                    border.width: 0
 
                     ColumnLayout {
                         id: cardColumn
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
-                        anchors.margins: 12
-                        spacing: 10
+                        anchors.margins: 9
+                        spacing: 7
 
                         RowLayout {
                             Layout.fillWidth: true
-                            spacing: 12
+                            spacing: 9
 
-                            Rectangle {
-                                Layout.preferredWidth: 42
-                                Layout.preferredHeight: 42
-                                radius: 12
-                                color: card.busy ? "#684d35" : "#3b3044"
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: card.name.slice(0, 1).toUpperCase()
-                                    color: "#f1e9f4"
-                                    font.pixelSize: 15
-                                    font.weight: Font.DemiBold
-                                }
+                            AgentAvatar {
+                                Layout.preferredWidth: 34
+                                Layout.preferredHeight: 34
+                                controller: root.controller
+                                session: card.session
+                                name: card.name
+                                symbol: card.avatarSymbol
+                                avatarSize: 34
+                                cornerRadius: 8
+                                fallbackColor: card.busy ? "#5c5149" : "#414458"
                             }
 
                             ColumnLayout {
@@ -139,15 +137,16 @@ Rectangle {
                                 spacing: 2
                                 Text {
                                     text: card.name
-                                    color: "#eee8e2"
-                                    font.pixelSize: 15
+                                    color: "#c8cadc"
+                                    font.family: "JetBrains Mono"
+                                    font.pixelSize: 13
                                     font.weight: Font.DemiBold
                                 }
                                 Text {
                                     Layout.fillWidth: true
                                     text: card.lastMessage || card.statusText || card.agentState
-                                    color: "#837b89"
-                                    font.pixelSize: 11
+                                    color: "#686b80"
+                                    font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
                             }
@@ -163,35 +162,54 @@ Rectangle {
 
                             Label {
                                 text: card.backend
-                                color: "#a698ad"
-                                font.pixelSize: 10
+                                color: "#8e91aa"
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: 11
                             }
                             Label {
                                 text: card.modelName || "provider default"
-                                color: "#77717f"
-                                font.pixelSize: 10
+                                color: "#5f6277"
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: 11
                             }
                             Label {
                                 Layout.fillWidth: true
                                 text: card.workingDirectory
-                                color: "#77717f"
-                                font.pixelSize: 10
+                                color: "#5f6277"
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: 11
                                 elide: Text.ElideMiddle
                             }
                             Label {
                                 visible: card.queueCount > 0
                                 text: card.queueCount + " queued"
-                                color: "#dba162"
-                                font.pixelSize: 10
+                                color: "#9d91a7"
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: 11
                             }
                         }
 
                         ProgressBar {
+                            id: contextProgress
                             visible: card.contextWindow > 0
                             Layout.fillWidth: true
+                            Layout.preferredHeight: visible ? 3 : 0
                             from: 0
                             to: Math.max(1, card.contextWindow)
                             value: card.contextTokens
+                            background: Rectangle {
+                                color: "#292b39"
+                                radius: 1.5
+                            }
+                            contentItem: Item {
+                                implicitHeight: 3
+                                Rectangle {
+                                    width: contextProgress.visualPosition * parent.width
+                                    height: parent.height
+                                    radius: 1.5
+                                    color: "#666a83"
+                                }
+                            }
                         }
 
                         ColumnLayout {
@@ -202,7 +220,7 @@ Rectangle {
                             Label {
                                 text: "SCHEDULED TASKS"
                                 color: "#8d8492"
-                                font.pixelSize: 9
+                                font.pixelSize: 11
                                 font.weight: Font.DemiBold
                                 font.letterSpacing: 1
                             }
@@ -232,7 +250,7 @@ Rectangle {
                                                 Layout.fillWidth: true
                                                 text: String(scheduleRow.modelData.name || "Scheduled task") + "  ·  " + String(scheduleRow.modelData.cron_expression || "")
                                                 color: "#cfc6d2"
-                                                font.pixelSize: 10
+                                                font.pixelSize: 12
                                                 font.weight: Font.Medium
                                                 elide: Text.ElideRight
                                             }
@@ -240,7 +258,7 @@ Rectangle {
                                                 Layout.fillWidth: true
                                                 text: String(scheduleRow.modelData.prompt || "")
                                                 color: "#716a77"
-                                                font.pixelSize: 9
+                                                font.pixelSize: 11
                                                 elide: Text.ElideRight
                                             }
                                         }
@@ -257,51 +275,59 @@ Rectangle {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            spacing: 7
+                            spacing: 5
 
                             Button {
                                 text: "Open"
+                                implicitWidth: 66
+                                implicitHeight: 28
                                 onClicked: {
                                     root.controller.selectSession(card.session);
                                     root.closeRequested();
                                 }
                             }
-                            Button {
-                                text: "Relaunch"
-                                onClicked: root.relaunchRequested(card.session, card.name)
-                            }
-                            Button {
-                                text: "Voice"
-                                onClicked: root.voiceRequested(card.session, card.name)
-                            }
-                            Button {
-                                text: card.heartbeatEnabled ? "Heartbeat on" : "Heartbeat off"
-                                onClicked: root.controller.setAgentHeartbeat(card.session, !card.heartbeatEnabled)
-                            }
-                            Button {
-                                text: card.dreamingEnabled ? "Dreaming on" : "Dreaming off"
-                                onClicked: root.controller.setAgentDreaming(card.session, !card.dreamingEnabled)
-                            }
-                            Button {
-                                text: card.muted ? "Push muted" : "Push on"
-                                onClicked: root.controller.setAgentPushMuted(card.session, !card.muted)
-                            }
                             Item {
                                 Layout.fillWidth: true
                             }
-                            Button {
-                                text: "Archive"
-                                onClicked: root.controller.setAgentArchived(card.session, true)
-                            }
-                            Button {
-                                text: root.confirmRelease === card.session ? "Confirm release" : "Release"
-                                visible: card.name !== "Mike"
-                                onClicked: {
-                                    if (root.confirmRelease === card.session) {
-                                        root.controller.releaseAgent(card.session);
-                                        root.confirmRelease = "";
-                                    } else {
-                                        root.confirmRelease = card.session;
+                            ToolButton {
+                                text: "···"
+                                implicitWidth: 28
+                                implicitHeight: 28
+                                onClicked: agentMenu.open()
+
+                                Menu {
+                                    id: agentMenu
+                                    MenuItem { text: "Relaunch"; onTriggered: root.relaunchRequested(card.session, card.name) }
+                                    MenuItem { text: "Voice"; onTriggered: root.voiceRequested(card.session, card.name) }
+                                    MenuSeparator {}
+                                    MenuItem {
+                                        text: card.heartbeatEnabled ? "Disable heartbeat" : "Enable heartbeat"
+                                        onTriggered: root.controller.setAgentHeartbeat(card.session, !card.heartbeatEnabled)
+                                    }
+                                    MenuItem {
+                                        text: card.dreamingEnabled ? "Disable dreaming" : "Enable dreaming"
+                                        onTriggered: root.controller.setAgentDreaming(card.session, !card.dreamingEnabled)
+                                    }
+                                    MenuItem {
+                                        text: card.muted ? "Enable push alerts" : "Mute push alerts"
+                                        onTriggered: root.controller.setAgentPushMuted(card.session, !card.muted)
+                                    }
+                                    MenuSeparator {}
+                                    MenuItem {
+                                        text: "Archive"
+                                        onTriggered: root.controller.setAgentArchived(card.session, true)
+                                    }
+                                    MenuItem {
+                                        visible: card.name !== "Mike"
+                                        text: root.confirmRelease === card.session ? "Confirm release" : "Release…"
+                                        onTriggered: {
+                                            if (root.confirmRelease === card.session) {
+                                                root.controller.releaseAgent(card.session);
+                                                root.confirmRelease = "";
+                                            } else {
+                                                root.confirmRelease = card.session;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -323,7 +349,7 @@ Rectangle {
                 Text {
                     text: "ARCHIVED"
                     color: "#8d8492"
-                    font.pixelSize: 10
+                    font.pixelSize: 12
                     font.weight: Font.DemiBold
                     font.letterSpacing: 1.2
                 }
@@ -343,9 +369,9 @@ Rectangle {
                         required property string lastMessage
                         width: 250
                         height: ListView.view.height
-                        radius: 10
-                        color: "#1b191f"
-                        border.color: "#2d2933"
+                    radius: 4
+                    color: "#1c1d28"
+                    border.color: "#303142"
 
                         RowLayout {
                             anchors.fill: parent
@@ -357,19 +383,21 @@ Rectangle {
                                 Text {
                                     text: archivedCard.name
                                     color: "#c9c1cb"
-                                    font.pixelSize: 11
+                                    font.pixelSize: 13
                                     font.weight: Font.Medium
                                 }
                                 Text {
                                     Layout.fillWidth: true
                                     text: archivedCard.lastMessage || archivedCard.session
                                     color: "#6f6874"
-                                    font.pixelSize: 9
+                                    font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
                             }
                             Button {
                                 text: "Restore"
+                                implicitWidth: 68
+                                implicitHeight: 28
                                 onClicked: root.controller.setAgentArchived(archivedCard.session, false)
                             }
                         }
@@ -388,7 +416,7 @@ Rectangle {
                 Text {
                     text: "READY CONTACTS"
                     color: "#8d8492"
-                    font.pixelSize: 10
+                    font.pixelSize: 12
                     font.weight: Font.DemiBold
                     font.letterSpacing: 1.2
                 }
@@ -406,11 +434,11 @@ Rectangle {
                         required property string name
                         required property string description
                         required property string avatarSymbol
-                        width: 210
+                        width: 280
                         height: ListView.view.height
-                        radius: 11
-                        color: "#201c25"
-                        border.color: "#312b38"
+                        radius: 4
+                        color: "#1c1d28"
+                        border.color: "#303142"
 
                         RowLayout {
                             anchors.fill: parent
@@ -420,8 +448,8 @@ Rectangle {
                             Rectangle {
                                 Layout.preferredWidth: 36
                                 Layout.preferredHeight: 36
-                                radius: 11
-                                color: "#3b3045"
+                                radius: 7
+                                color: "#414458"
                                 Text {
                                     anchors.centerIn: parent
                                     text: contactCard.avatarSymbol || contactCard.name.slice(0, 1).toUpperCase()
@@ -435,20 +463,23 @@ Rectangle {
                                 Text {
                                     text: contactCard.name
                                     color: "#e7dfe9"
-                                    font.pixelSize: 12
+                                    font.pixelSize: 14
                                     font.weight: Font.Medium
                                 }
                                 Text {
                                     Layout.fillWidth: true
-                                    text: contactCard.description || "Ready to start"
+                                    text: root.controller.quickStartBackend() + " · " + root.controller.lastWorkingDirectory
                                     color: "#746d7a"
-                                    font.pixelSize: 9
+                                    font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
                             }
                             Button {
-                                text: "Start"
-                                onClicked: root.startRequested(contactCard.name)
+                                text: root.controller.startingContact === contactCard.name ? "Starting…" : "Start"
+                                enabled: root.controller.startingContact.length === 0
+                                implicitWidth: 62
+                                implicitHeight: 28
+                                onClicked: root.quickStartRequested(contactCard.name)
                             }
                         }
                     }

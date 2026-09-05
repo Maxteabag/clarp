@@ -91,6 +91,8 @@ export function resolveContexts(ctx = {}) {
 export const GUARDS = {
   hasPanes: ctx => (ctx.paneCount || 0) > 0,
   hasMultiplePanes: ctx => (ctx.paneCount || 0) > 1,
+  isDesktop: ctx => !!ctx.desktop,
+  hasMultipleDesktopPanes: ctx => !!ctx.desktop && (ctx.paneCount || 0) > 1,
   hasSessions: ctx => (ctx.sessionCount || 0) > 0,
   isZoomed: ctx => !!ctx.zoomed,
 };
@@ -113,15 +115,37 @@ export const KEYMAP = [
   { key: 'a', action: 'focus-composer', context: 'global', hidden: true },
   { key: 'enter', action: 'focus-composer', context: 'global', hidden: true },
 
+  // Universal workspace chords. Option/Alt alone remains convenient in pane
+  // mode, but is never claimed from a text field (Option+Arrow is word-wise
+  // caret movement on macOS). Ctrl+Alt is the explicit composer-safe chord.
+  { key: 'alt+left', action: 'nav-left', context: 'global', label: 'Move pane', displayKey: '⌥←↓↑→', group: 'nav', when: 'hasMultipleDesktopPanes' },
+  { key: 'alt+down', action: 'nav-down', context: 'global', hidden: true, when: 'hasMultipleDesktopPanes' },
+  { key: 'alt+up', action: 'nav-up', context: 'global', hidden: true, when: 'hasMultipleDesktopPanes' },
+  { key: 'alt+right', action: 'nav-right', context: 'global', hidden: true, when: 'hasMultipleDesktopPanes' },
+  { key: 'ctrl+alt+left', action: 'nav-left', context: 'global', label: 'Move pane', displayKey: '^⌥←↓↑→', group: 'nav', when: 'hasMultipleDesktopPanes', allowInInsert: true },
+  { key: 'ctrl+alt+down', action: 'nav-down', context: 'global', hidden: true, when: 'hasMultipleDesktopPanes', allowInInsert: true },
+  { key: 'ctrl+alt+up', action: 'nav-up', context: 'global', hidden: true, when: 'hasMultipleDesktopPanes', allowInInsert: true },
+  { key: 'ctrl+alt+right', action: 'nav-right', context: 'global', hidden: true, when: 'hasMultipleDesktopPanes', allowInInsert: true },
+  { key: 'alt+v', action: 'split-vertical', context: 'global', label: 'Split right', group: 'layout', hidden: true, when: 'isDesktop' },
+  { key: 'alt+s', action: 'split-horizontal', context: 'global', label: 'Split down', group: 'layout', hidden: true, when: 'isDesktop' },
+  { key: 'alt+x', action: 'close-pane', context: 'global', label: 'Close pane', group: 'layout', hidden: true, when: 'hasMultipleDesktopPanes' },
+  { key: 'alt+z', action: 'toggle-zoom', context: 'global', label: 'Zoom pane', group: 'layout', when: 'hasMultipleDesktopPanes' },
+  { key: 'alt+=', action: 'equalize', context: 'global', label: 'Balance panes', group: 'layout', hidden: true, when: 'hasMultipleDesktopPanes' },
+  { key: 'ctrl+alt+v', action: 'split-vertical', context: 'global', label: 'Split right', group: 'layout', hidden: true, when: 'isDesktop', allowInInsert: true },
+  { key: 'ctrl+alt+s', action: 'split-horizontal', context: 'global', label: 'Split down', group: 'layout', hidden: true, when: 'isDesktop', allowInInsert: true },
+  { key: 'ctrl+alt+x', action: 'close-pane', context: 'global', label: 'Close pane', group: 'layout', hidden: true, when: 'hasMultipleDesktopPanes', allowInInsert: true },
+  { key: 'ctrl+alt+z', action: 'toggle-zoom', context: 'global', label: 'Zoom pane', displayKey: '^⌥z', group: 'layout', when: 'hasMultipleDesktopPanes', allowInInsert: true },
+  { key: 'ctrl+alt+=', action: 'equalize', context: 'global', label: 'Balance panes', group: 'layout', hidden: true, when: 'hasMultipleDesktopPanes', allowInInsert: true },
+
   // pane layout
-  { key: 'v', action: 'split-vertical', context: 'pane', label: 'Split │', group: 'layout' },
+  { key: 'v', action: 'split-vertical', context: 'pane', label: 'Split right', group: 'layout' },
   { key: '|', action: 'split-vertical', context: 'pane', hidden: true },
-  { key: 's', action: 'split-horizontal', context: 'pane', label: 'Split ─', group: 'layout' },
+  { key: 's', action: 'split-horizontal', context: 'pane', label: 'Split down', group: 'layout' },
   { key: '-', action: 'split-horizontal', context: 'pane', hidden: true },
-  { key: 'x', action: 'close-pane', context: 'pane.multi', label: 'Close', group: 'layout', when: 'hasMultiplePanes' },
+  { key: 'x', action: 'close-pane', context: 'pane.multi', label: 'Close pane', group: 'layout', when: 'hasMultiplePanes' },
   { key: 'q', action: 'close-pane', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
-  { key: 'z', action: 'toggle-zoom', context: 'pane.multi', label: 'Zoom', group: 'layout', when: 'hasMultiplePanes' },
-  { key: '=', action: 'equalize', context: 'pane.multi', label: 'Balance', group: 'layout', when: 'hasMultiplePanes' },
+  { key: 'z', action: 'toggle-zoom', context: 'pane.multi', label: 'Zoom pane', group: 'layout', when: 'hasMultiplePanes' },
+  { key: '=', action: 'equalize', context: 'pane.multi', label: 'Balance panes', group: 'layout', when: 'hasMultiplePanes' },
 
   // pane navigation
   { key: 'h', action: 'nav-left', context: 'pane.multi', label: 'Move', displayKey: 'hjkl / ←↓↑→', group: 'nav', when: 'hasMultiplePanes' },
@@ -132,11 +156,13 @@ export const KEYMAP = [
   { key: 'down', action: 'nav-down', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
   { key: 'up', action: 'nav-up', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
   { key: 'right', action: 'nav-right', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
-  { key: 'H', action: 'shrink', context: 'pane.multi', label: 'Resize', group: 'nav', when: 'hasMultiplePanes' },
-  { key: 'L', action: 'grow', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
+  { key: 'H', action: 'shrink', context: 'pane.multi', label: 'Shrink pane', group: 'nav', when: 'hasMultiplePanes' },
+  { key: 'L', action: 'grow', context: 'pane.multi', label: 'Grow pane', hidden: true, group: 'nav', when: 'hasMultiplePanes' },
 
   // quick switch
   { key: 'space', action: 'quick-switch', context: 'global', label: 'Go to', group: 'nav' },
+  { key: 'ctrl+k', action: 'commands', context: 'global', label: 'Commands', group: 'mode', when: 'isDesktop', allowInInsert: true },
+  { key: 'meta+k', action: 'commands', context: 'global', hidden: true, when: 'isDesktop', allowInInsert: true },
 
   // chat rail
   { key: 'c', action: 'focus-sidebar', context: 'pane', label: 'Chats', group: 'nav' },
@@ -153,10 +179,15 @@ export const KEYMAP = [
 
   // global
   { key: 't', action: 'toggle-tools', context: 'global', label: 'Tools', group: 'view' },
+  { key: 'alt+t', action: 'toggle-tools', context: 'global', hidden: true },
   { key: 'r', action: 'refresh', context: 'global', label: 'Reload', group: 'view' },
+  { key: 'alt+r', action: 'refresh', context: 'global', hidden: true },
   { key: '/', action: 'search', context: 'global', label: 'Search', group: 'view' },
   { key: 'f', action: 'search', context: 'global', hidden: true },
   { key: 'o', action: 'overview', context: 'global', label: 'Overview', group: 'view' },
+  { key: 'ctrl+.', action: 'stop-agent', context: 'global', label: 'Stop agent', group: 'view', allowInInsert: true },
+  { key: 'ctrl+alt+m', action: 'silence-audio', context: 'global', label: 'Silence audio', group: 'view', allowInInsert: true },
+  { key: 'ctrl+shift+space', action: 'toggle-mic', context: 'global', label: 'Talk', group: 'view', allowInInsert: true },
   { key: '?', action: 'help', context: 'global', label: 'Keys', group: 'view' },
   { key: 'esc', action: 'blur', context: 'global', hidden: true, allowInInsert: true },
 ];
@@ -226,12 +257,42 @@ export function visibleShortcuts(ctx = {}, keymap = KEYMAP) {
   return out.sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group));
 }
 
+// Searchable command-palette entries. Derive these from the same keymap as
+// dispatch and the status line, but evaluate pane mode even if the palette
+// opened while a text field had focus. Unavailable actions (for example close
+// with one pane) remain absent.
+export function commandItems(ctx = {}, keymap = KEYMAP) {
+  const base = { ...ctx, overlay: '', insert: false, region: 'panes' };
+  const contexts = resolveContexts(base);
+  const byAction = new Map();
+  for (const def of keymap) {
+    if (!def.label || def.passive || def.action === 'commands') continue;
+    if (!eligible(def, base, contexts)) continue;
+    // Prefer the concise pane-mode key over a global compatibility chord,
+    // and a visible teaching binding over a hidden alias.
+    const priority = (def.hidden ? 10 : 0) + (def.context === 'global' ? 2 : 0);
+    const existing = byAction.get(def.action);
+    if (existing && existing.priority <= priority) continue;
+    byAction.set(def.action, {
+      action: def.action,
+      label: def.label,
+      key: def.displayKey || formatKey(def.key),
+      group: def.group || 'view',
+      priority,
+    });
+  }
+  const out = [...byAction.values()];
+  return out.sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group)
+    || a.label.localeCompare(b.label));
+}
+
 // The label shown in the footer's badge: what the keyboard is currently
 // talking to, so a dead pane focus is visible instead of mysterious.
 export function contextLabel(ctx = {}) {
   if (ctx.overlay) return ctx.overlay.toUpperCase();
-  if (ctx.insert) return 'INSERT';
+  if (ctx.insert) return ctx.zoomed ? 'INSERT · ZOOM' : 'INSERT';
   if (ctx.desktop && ctx.region === 'sidebar') return 'CHATS';
+  if (ctx.desktop && ctx.zoomed) return 'ZOOM';
   if (ctx.desktop) return 'PANE';
   return 'NORMAL';
 }

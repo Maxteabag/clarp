@@ -26,15 +26,25 @@ const AUTH_KEY = 'claude-pwa.auth-token';
 export function bootstrapAuth() {
   try {
     const url = new URL(window.location.href);
-    const t = url.searchParams.get('token');
-    if (!t) return;
-    try { localStorage.setItem(AUTH_KEY, t); } catch (_) {}
-    try {
-      document.cookie = 'claude_pwa_token=' + encodeURIComponent(t) +
-        '; Path=/; SameSite=Lax';
-    } catch (_) {}
-    url.searchParams.delete('token');
-    history.replaceState(null, '', url.pathname + url.search + url.hash);
+    const supplied = url.searchParams.get('token');
+    const t = supplied || getAuthToken();
+    if (supplied) {
+      try { localStorage.setItem(AUTH_KEY, supplied); } catch (_) {}
+    }
+    // WebViews may discard session cookies between launches while retaining
+    // localStorage. Restore the same-origin cookie on every boot so <img>,
+    // EventSource and audio requests can authenticate without putting the
+    // credential in their URLs.
+    if (t) {
+      try {
+        document.cookie = 'claude_pwa_token=' + encodeURIComponent(t) +
+          '; Path=/; SameSite=Lax' + (window.location.protocol === 'https:' ? '; Secure' : '');
+      } catch (_) {}
+    }
+    if (supplied) {
+      url.searchParams.delete('token');
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+    }
   } catch (_) {}
 }
 

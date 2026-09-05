@@ -19,7 +19,7 @@
   // group, so these are converted against the measured group width and
   // re-applied whenever it changes: the rail keeps its pixel bounds rather
   // than a share of the screen.
-  const RAIL = { collapsed: 60, min: 200, initial: 264, max: 420 };
+  const RAIL = { collapsed: 44, min: 176, initial: 224, max: 320 };
   // Below this window width there is no room for an expanded rail. It becomes
   // an icon strip whatever the stored preference says.
   const NARROW = '(max-width: 1080px)';
@@ -153,7 +153,13 @@
   /* These land on PaneForge components, so Svelte cannot scope them; :global
      keeps them next to the layout they describe instead of in styles.css. */
   :global(.shell-group) { flex: 1 1 auto; min-width: 0; min-height: 0; }
-  :global(.workspace) { position: relative; display: flex; min-width: 0; }
+  :global(.workspace) {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    padding: 4px;
+    background: #10121a;
+  }
 
   /* PaneForge marks the rail collapsing/expanding for as long as a flex-grow
      transition runs, so the toggle animates while a drag stays 1:1. Both
@@ -171,6 +177,9 @@
     transition: background var(--t-snap) var(--ease);
   }
   :global(.rail-resizer:hover),
-  :global(.rail-resizer[data-active]) { background: var(--accent-blue); }
+  :global(.rail-resizer[data-active]) { background: #777b96; }
   :global(.rail-resizer[data-enabled="false"]) { pointer-events: none; }
+  :global(html[data-theme="day"] .rail-resizer:hover),
+  :global(html[data-theme="day"] .rail-resizer[data-active]) { background: var(--accent-blue); }
+  :global(html[data-theme="day"] .workspace) { background: var(--ink-edge); }
 </style>

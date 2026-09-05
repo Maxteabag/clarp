@@ -8,10 +8,11 @@
   import { quickSwitchRows, resolveChoice, clampIndex } from '@core/quick-switch.js';
   import { getLeafPanes } from '@core/pane-tree.js';
   import {
-    agentSnapshot, app, avatarUrl, AVATAR_PALETTE, DEFAULT_ROSTER,
+    agentSnapshot, app, DEFAULT_ROSTER,
     isUserNotificationUnread,
   } from '../stores/app.svelte.js';
   import { panesState } from '../stores/panes.svelte.js';
+  import AgentAvatar from './AgentAvatar.svelte';
 
   let { open = $bindable(), onChoose } = $props();
 
@@ -91,10 +92,7 @@
               onmouseenter={() => (index = i)}
               onclick={() => choose(row)}
             >
-              <span
-                class="quick-avatar"
-                style="background-color:{AVATAR_PALETTE[row.name] || 'var(--ochre)'};background-image:url('{avatarUrl(row.name, row.session)}')"
-              ></span>
+              <AgentAvatar class="quick-avatar" name={row.name} session={row.session} />
               <span class="quick-name">{row.name}</span>
               <span class="quick-detail" class:new={row.kind === 'contact'}>{row.detail}</span>
             </button>
@@ -115,26 +113,27 @@
     display: flex;
     justify-content: center;
     align-items: flex-start;
-    padding-top: 12vh;
-    background: rgba(0, 0, 0, 0.45);
+    padding-top: min(18vh, 150px);
+    background: rgba(8, 9, 15, .66);
+    backdrop-filter: blur(3px);
   }
   .quick {
     width: min(520px, 92vw);
-    background: var(--ink-soft, #1a1b26);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 10px;
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+    background: #1a1b26;
+    border: 1px solid #3c3f58;
+    border-radius: 6px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .58);
     overflow: hidden;
   }
   .quick-input {
     width: 100%;
     box-sizing: border-box;
-    padding: 12px 14px;
+    padding: 13px 14px;
     border: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid #303246;
     background: transparent;
-    color: var(--washi, #c0caf5);
-    font: 500 15px/1.4 var(--font-mono, monospace);
+    color: #d4d6e8;
+    font: 500 14px/1.4 var(--font-mono, monospace);
     outline: none;
   }
   .quick-list {
@@ -151,23 +150,25 @@
     width: 100%;
     padding: 7px 10px;
     border: 0;
-    border-radius: 6px;
+    border-radius: 3px;
     background: transparent;
-    color: var(--washi, #c0caf5);
-    font: 400 13px/1.4 var(--font-ui, sans-serif);
+    color: #aeb1ca;
+    font: 500 12px/1.4 var(--font-ui, sans-serif);
     text-align: left;
     cursor: pointer;
   }
   .quick-row.selected {
-    background: color-mix(in srgb, var(--accent-blue, #7aa2f7) 18%, transparent);
+    color: #e0e1ef;
+    background: #2a2c3c;
+    box-shadow: inset 2px 0 #9da1bd;
   }
-  .quick-avatar {
+  :global(.quick-avatar) {
+    --avatar-size: 22px;
+    --avatar-radius: 6px;
     flex: none;
     width: 22px;
     height: 22px;
-    border-radius: 50%;
-    background-size: cover;
-    background-position: center;
+    border-radius: 6px;
   }
   .quick-name { flex: none; font-weight: 600; }
   .quick-detail {
@@ -182,5 +183,16 @@
     color: #787c99;
     font-size: 13px;
     text-align: center;
+  }
+  :global(html[data-theme="day"]) .quick {
+    color: var(--washi);
+    background: var(--ink-soft);
+    border-color: var(--ink-edge-hi);
+  }
+  :global(html[data-theme="day"]) .quick-input { color: var(--washi); border-color: var(--ink-edge); }
+  :global(html[data-theme="day"]) .quick-row { color: var(--washi-dim); }
+  :global(html[data-theme="day"]) .quick-row.selected {
+    color: var(--washi);
+    background: color-mix(in srgb, var(--accent-blue) 14%, transparent);
   }
 </style>

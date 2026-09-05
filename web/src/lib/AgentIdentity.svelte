@@ -4,17 +4,20 @@
   // full overview — the same gesture the dock's session button carries, kept
   // on both so desktop still has it after the dock drops its identity block.
   import {
-    AVATAR_PALETTE, app, avatarUrl, chipLabel, shortActivityText, statusFor,
+    app, chipLabel, shortActivityText, statusFor,
     unreadAgentCount,
   } from '../stores/app.svelte.js';
   import { activityStatusClass } from './render.js';
+  import AgentAvatar from './AgentAvatar.svelte';
 
-  let { session = app.session, onTap, onHold } = $props();
+  let { session = app.session, quietIdle = false, onTap, onHold } = $props();
 
   let label = $derived(chipLabel(session));
   let status = $derived(statusFor(session));
   let activity = $derived(
     shortActivityText(status) || (status.busy ? 'Working' : 'Idle'));
+  let showActivity = $derived(
+    !quietIdle || status.busy || !['', 'idle', 'done'].includes(activity.trim().toLowerCase()));
   let unread = $derived((app.tick, unreadAgentCount()));
 
   let holdTimer = null;
@@ -46,23 +49,18 @@
   onpointercancel={pointercancel}
   onclick={e => { e.preventDefault(); e.stopPropagation(); }}
 >
-  <span
-    class="history-agent-avatar"
-    aria-hidden="true"
-    style="background-color:{AVATAR_PALETTE[label] || 'var(--ochre)'};background-image:url('{avatarUrl(label, session)}')"
-  >
-    {#if !avatarUrl(label, session)}
-      <span class="avatar-letter">{label.slice(0, 1)}</span>
-    {/if}
+  <AgentAvatar class="history-agent-avatar" name={label} {session}>
     {#if unread > 0}
       <span class="history-unread-badge">{unread > 9 ? '9+' : unread}</span>
     {/if}
-  </span>
+  </AgentAvatar>
   <span class="history-agent-copy">
     <span class="history-agent-name">{label}</span>
-    <span
-      class="history-agent-status {activityStatusClass(status.activity_status)}"
-      title={activity}
-    >{activity}</span>
+    {#if showActivity}
+      <span
+        class="history-agent-status {activityStatusClass(status.activity_status)}"
+        title={activity}
+      >{activity}</span>
+    {/if}
   </span>
 </button>
