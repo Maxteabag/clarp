@@ -44,6 +44,18 @@ Keep backups private. Release rollback does not automatically undo a database
 migration. Prefer the supported `clarp-admin update --ref FULL_SHA` once the
 candidate is verified; do not hand-edit generated releases.
 
+For an authorized update that must survive the HTTP connection restarting, run
+`scripts/update_with_job.sh SESSION FULL_SHA PRIVATE_STATE_DIR` in an owned
+`systemd-run --user` unit with a private append log and the normal CLI PATH.
+Use `--dry-run` first to inspect its target without starting a job. Keep the
+script in a permanent location outside the generated release being switched.
+It heartbeats a process-fenced job and records `installer-exit`; job completion
+means the installer finished, not that phone/runtime verification is complete.
+Once installation starts, the installer owns rollback; cancelling the tracking
+job is not an emergency stop for the installer. Verify the deployed SHA, schema,
+runtime availability, and `clarp-admin doctor` afterwards. The split runtime
+drains to a new release when idle; do not restart it manually while turns run.
+
 ## Docker Container Administration
 
 When diagnosing or managing Clarp inside a Docker container:
