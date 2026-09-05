@@ -65,6 +65,19 @@ def test_pre_release_databases_are_refused(tmp_path):
 def _shape_as_v61(con: sqlite3.Connection) -> None:
     """Rebuild the pre-v62 shape on top of a current database."""
     con.executescript("""
+        ALTER TABLE artifacts DROP COLUMN archived_at;
+        ALTER TABLE artifact_decisions DROP COLUMN response_type;
+        ALTER TABLE artifact_decisions DROP COLUMN options_json;
+        ALTER TABLE artifact_decisions DROP COLUMN allow_custom_text;
+        ALTER TABLE artifact_decisions DROP COLUMN recommended_option_id;
+        ALTER TABLE artifact_decisions DROP COLUMN blocks_progress;
+        ALTER TABLE artifact_decisions DROP COLUMN priority_reason;
+        ALTER TABLE artifact_decisions DROP COLUMN urgency;
+        ALTER TABLE artifact_decisions DROP COLUMN response_effort;
+        ALTER TABLE artifact_decisions DROP COLUMN deadline_at;
+        ALTER TABLE artifact_decisions DROP COLUMN answer_json;
+        ALTER TABLE decision_deliveries DROP COLUMN response_type;
+        ALTER TABLE decision_deliveries DROP COLUMN answer_json;
         DROP INDEX idx_messages_trace;
         ALTER TABLE messages DROP COLUMN trace_id;
         DROP TABLE vocab_runs;
