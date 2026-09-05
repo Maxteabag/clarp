@@ -17,7 +17,7 @@ Rectangle {
     signal queueRequested(string session)
     signal profileRequested(string session)
 
-    color: root.active ? "#151319" : "#121116"
+    color: root.active ? "#1a1b26" : "#1a1b26"
 
     Behavior on color {
         ColorAnimation { duration: 120 }
@@ -30,7 +30,7 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 58
-            color: "#151319"
+            color: "#1a1b26"
 
             HoverHandler { id: headerHover }
 
@@ -195,7 +195,7 @@ Rectangle {
                 Text {
                     anchors.centerIn: parent
                     text: parent.section
-                    color: "#8a8391"
+                    color: "#8d93b0"
                     font.pixelSize: 11
                 }
             }

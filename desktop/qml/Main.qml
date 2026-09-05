@@ -24,7 +24,33 @@ ApplicationWindow {
     minimumHeight: 520
     visible: true
     title: app.selectedName.length > 0 ? app.selectedName + " — Clarp" : "Clarp"
-    color: "#121116"
+    color: "#1a1b26"
+    // Basic supplies control-specific defaults that can override the system
+    // palette. Explicit window roles also propagate into popups and menus.
+    palette.window: "#1a1b26"
+    palette.base: "#1a1b26"
+    palette.alternateBase: "#20212e"
+    palette.button: "#292b3a"
+    palette.toolTipBase: "#292b3a"
+    palette.windowText: "#c0caf5"
+    palette.text: "#c0caf5"
+    palette.buttonText: "#c0caf5"
+    palette.toolTipText: "#c0caf5"
+    palette.brightText: "#1a1b26"
+    palette.placeholderText: "#8d93b0"
+    palette.highlight: "#bb9af7"
+    palette.accent: "#bb9af7"
+    palette.highlightedText: "#1a1b26"
+    palette.link: "#7aa2f7"
+    palette.linkVisited: "#bb9af7"
+    palette.light: "#565b76"
+    palette.midlight: "#41445a"
+    palette.mid: "#41445a"
+    palette.dark: "#bb9af7"
+    palette.shadow: "#14151d"
+    palette.disabled.text: "#8d93b0"
+    palette.disabled.windowText: "#8d93b0"
+    palette.disabled.buttonText: "#8d93b0"
 
     function composerOwnsFocus() {
         return root.activeFocusItem && root.activeFocusItem.objectName === "paneComposerEditor";
@@ -154,19 +180,6 @@ ApplicationWindow {
             redesignedSidebarSized = true;
         }
         Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId));
-    }
-
-    palette {
-        window: "#121116"
-        windowText: "#e9e4df"
-        base: "#17151c"
-        alternateBase: "#1d1a22"
-        text: "#e9e4df"
-        button: "#211e28"
-        buttonText: "#e9e4df"
-        highlight: "#b884d8"
-        highlightedText: "#171821"
-        placeholderText: "#5f6278"
     }
 
     Shortcut {

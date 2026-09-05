@@ -15,7 +15,7 @@ Rectangle {
     property int focusedIndex: 0
     readonly property var actions: [timestampsRow, toolsRow, narrationRow, spokenRow,
         connectionRow, orchestratorRow, filesystemRow, routingRow]
-    color: "#171923"
+    color: "#1a1b26"
     objectName: "settingsPanel"
 
     function availableRows() { return root.actions.filter(row => row.visible && row.enabled); }
@@ -495,7 +495,7 @@ Rectangle {
         ColumnLayout {
             width: 360
             Label { text: "Primary provider" }
-            ComboBox {
+            ThemedComboBox {
                 id: primaryProvider
                 objectName: "settingsPrimaryProvider"
                 Layout.fillWidth: true
@@ -503,7 +503,7 @@ Rectangle {
                 valueRole: "id"
             }
             Label { text: "Fallback" }
-            ComboBox {
+            ThemedComboBox {
                 id: fallbackProvider
                 Layout.fillWidth: true
                 textRole: "label"

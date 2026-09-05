@@ -1,3 +1,9 @@
+add_executable(clarp-palette-tests tst_palette.cpp)
+target_include_directories(clarp-palette-tests PRIVATE ../src)
+target_link_libraries(clarp-palette-tests PRIVATE Qt6::Gui Qt6::Test)
+clarp_apply_quality_settings(clarp-palette-tests)
+add_test(NAME clarp-desktop-palette COMMAND clarp-palette-tests)
+
 add_executable(clarp-desktop-tests
     tst_native_core.cpp
     ../src/terminal/TerminalLaunch.cpp
@@ -88,6 +94,13 @@ set_property(TEST clarp-desktop-sidebar-2 APPEND PROPERTY ENVIRONMENT
     "CLARP_SCREENSHOT_SIDEBAR_WIDTH=310")
 
 find_program(CLARP_QML_TEST_RUNNER qmltestrunner HINTS "${QT6_INSTALL_PREFIX}/lib/qt6/bin" REQUIRED)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/palette-popup/config")
+string(MD5 clarp_palette_instance "${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME clarp-desktop-palette-popup COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-palette-popup PROPERTIES
+    TIMEOUT 15
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=palette-${clarp_palette_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/palette-popup/config;CLARP_SCREENSHOT_SCENARIO=tool-spacing;CLARP_SCREENSHOT_VIEW=orchestrator;CLARP_SCREENSHOT_OPEN_POPUP=orchestratorProvider;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/palette-popup/capture.png"
+)
 add_test(NAME clarp-desktop-activity-layout
     COMMAND ${CLARP_QML_TEST_RUNNER} -input "${CMAKE_CURRENT_SOURCE_DIR}/qml")
 set_tests_properties(clarp-desktop-activity-layout PROPERTIES

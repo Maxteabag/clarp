@@ -9,7 +9,7 @@ Rectangle {
 
     required property var controller
     signal openChat(string session)
-    color: "#171923"
+    color: "#1a1b26"
     objectName: "teamsPanel"
 
     function selectedTeam() {
@@ -167,7 +167,7 @@ Rectangle {
                                     Text {
                                         anchors.centerIn: parent
                                         text: String(teamRow.modelData.unread_count || 0)
-                                        color: "#171923"
+                                        color: "#1a1b26"
                                         font.pixelSize: 11
                                     }
                                 }
@@ -487,7 +487,7 @@ Rectangle {
                 placeholderText: "#596083"
             }
             Label { text: "Leader" }
-            ComboBox {
+            ThemedComboBox {
                 id: editLeader
                 Layout.fillWidth: true
                 model: root.teamLeaderChoices()
@@ -512,7 +512,7 @@ Rectangle {
         ColumnLayout {
             width: 320
             Label { text: "Agent" }
-            ComboBox {
+            ThemedComboBox {
                 id: memberChoice
                 Layout.fillWidth: true
                 model: root.controller.teamAgentChoices()

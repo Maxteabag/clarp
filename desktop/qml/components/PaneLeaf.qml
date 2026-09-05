@@ -13,8 +13,8 @@ Rectangle {
     readonly property string session: String(node.session || "")
     focus: true
 
-    color: active ? "#292330" : "#17151c"
-    border.color: active ? "#b884d8" : "#302b37"
+    color: active ? "#292b3a" : "#20212e"
+    border.color: active ? "#bb9af7" : "#302b37"
     border.width: active ? 2 : 1
     radius: 2
     clip: true

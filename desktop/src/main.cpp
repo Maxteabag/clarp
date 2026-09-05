@@ -1,4 +1,5 @@
 #include "app/AppController.h"
+#include "app/DesktopPalette.h"
 #include "platform/DesktopIntegration.h"
 
 #include <QApplication>
@@ -19,6 +20,7 @@
 #include <QQuickWindow>
 #include <QSignalBlocker>
 #include <QStandardPaths>
+#include <QStyleHints>
 #include <QTimer>
 #include <algorithm>
 
@@ -42,6 +44,8 @@ int main(int argc, char* argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QApplication application(argc, argv);
+    application.styleHints()->setColorScheme(Qt::ColorScheme::Dark);
+    QApplication::setPalette(clarp::desktopPalette(application.palette()));
     application.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/Clarp/Desktop/resources/clarp.svg")));
 
     QString runtimeDirectory = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
@@ -114,6 +118,7 @@ int main(int argc, char* argv[]) {
     const QString screenshotLayout = qEnvironmentVariable("CLARP_SCREENSHOT_LAYOUT");
     const QString screenshotView = qEnvironmentVariable("CLARP_SCREENSHOT_VIEW");
     const QString screenshotScenario = qEnvironmentVariable("CLARP_SCREENSHOT_SCENARIO");
+    const QString screenshotPopup = qEnvironmentVariable("CLARP_SCREENSHOT_OPEN_POPUP");
     if (!screenshotPath.isEmpty() && controller != nullptr && !screenshotLayout.isEmpty()) {
         QTimer::singleShot(1'000, &application, [controller, screenshotLayout] {
             controller->panes()->splitActive(QStringLiteral("vertical"),
@@ -148,6 +153,25 @@ int main(int argc, char* argv[]) {
                     controller->panes()->splitActive(QStringLiteral("horizontal"),
                                                      controller->selectedSession());
                 }
+            }
+        });
+    }
+    if (!screenshotPath.isEmpty() && rootWindow != nullptr && !screenshotPopup.isEmpty()) {
+        QTimer::singleShot(1'500, &application, [rootWindow, screenshotPopup] {
+            auto* control = rootWindow->findChild<QObject*>(screenshotPopup);
+            auto* popup = control != nullptr ? control->property("popup").value<QObject*>() : nullptr;
+            if (popup == nullptr || !QMetaObject::invokeMethod(popup, "open")) {
+                qCritical("Requested screenshot popup could not be opened");
+                QCoreApplication::exit(EXIT_FAILURE);
+                return;
+            }
+            auto* palette = control->property("palette").value<QObject*>();
+            auto* background = popup->property("background").value<QObject*>();
+            if (palette == nullptr || background == nullptr ||
+                palette->property("midlight").value<QColor>() != QColor(QStringLiteral("#41445a")) ||
+                background->property("color").value<QColor>().lightnessF() >= 0.25) {
+                qCritical("Light system colors leaked into the control or popup palette");
+                QCoreApplication::exit(EXIT_FAILURE);
             }
         });
     }
