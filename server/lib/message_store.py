@@ -415,12 +415,18 @@ def record_dream_digest(*, agent_id: str, backend_session_id: str,
             "SELECT 1 FROM messages WHERE message_id = ?", (msg_id,)).fetchone():
         return None
     row = database.execute(
-        """SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
+        """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
              FROM messages
             WHERE agent_id = ? AND backend_session_id = ?""",
         (agent_id, backend_session_id),
     ).fetchone()
-    seq = int(row["next_seq"])
+    # Below the transcript's numbering, like the interruption marker. seq is
+    # unique per (agent, session) and the rebuild assigns its own values from
+    # the transcript, so a server-authored row sitting inside that range
+    # collides the moment the agent takes its next turn. Display order is
+    # timestamp first, so a negative seq costs nothing: the digest still lands
+    # at the end of the conversation by its own clock.
+    seq = min(int(row["next_seq"]), -1)
     timestamp_ms = now_ms()
     timestamp = _iso_from_ms(timestamp_ms)
     revision = _next_revision(database)
@@ -848,9 +854,15 @@ def _restore_assistant_state_txn(database, *, agent_id: str,
                 database.execute(
                     f"DELETE FROM team_messages WHERE team_message_id IN ({team_marks})",
                     doomed_team_ids)
+        # Server-authored assistant rows are exempt. The transcript is the
+        # source of truth for anything the CLI said, so the rebuild clears and
+        # re-derives it — but a dream digest was written by an isolated
+        # backend session that appears in no transcript, so deleting it here
+        # would erase it permanently on the agent's very next turn.
         database.execute(
             "DELETE FROM messages WHERE agent_id=? AND backend_session_id=? "
-            "AND role='assistant'", (agent_id, backend_session_id))
+            "AND role='assistant' AND source_file NOT LIKE 'dream:%'",
+            (agent_id, backend_session_id))
         message_columns = (
             "message_id", "agent_id", "backend_session_id", "source_file", "seq",
             "role", "timestamp", "text", "kind", "tool_name", "tools_json",

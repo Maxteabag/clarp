@@ -1067,3 +1067,43 @@ def test_disabling_dreaming_mid_run_ends_it_instead_of_stranding_it(monkeypatch)
     # No round is left claiming to be in flight.
     rounds = dreaming.list_dream_runs(session="dquit")[0]["rounds"]
     assert not [r for r in rounds if r["status"] in {"queued", "sent"}]
+
+
+def test_digest_survives_a_transcript_rebuild():
+    """The digest exists only in the database — a rebuild must not erase it.
+
+    Transcript import clears an agent's assistant rows and re-derives them
+    from the transcript file. A dream runs in an isolated backend session that
+    appears in no transcript, so without an exemption the digest is deleted on
+    the agent's very next turn and can never be restored.
+    """
+    from lib import message_store
+
+    aid = _agent("drebuild")
+    bsid = "backend-rebuild"
+    agents_db.bind_backend_session(aid, bsid)
+    run = dreaming.create_dream_run(
+        agents_db.get_by_session("drebuild"),
+        local_date="2026-09-06", timezone_name="UTC", timezone_source="test")
+    digest = "Dream Digest\n\nSomething worth keeping."
+    message_store.record_dream_digest(
+        agent_id=aid, backend_session_id=bsid, run_id=run["run_id"],
+        text=digest)
+
+    def dream_rows():
+        return [m for m in message_store.list_messages(
+            agent_id=aid, backend_session_id=bsid, limit=50)
+            if m.get("origin") == "dreaming"]
+
+    assert len(dream_rows()) == 1
+
+    # The agent takes an ordinary turn; the transcript knows nothing of the dream.
+    message_store.store_transcript_turns(
+        agent_id=aid, backend_session_id=bsid,
+        source_file="/tmp/transcript.jsonl",
+        turns=[{"role": "user", "text": "morning", "timestamp": "1"},
+               {"role": "assistant", "text": "morning to you", "timestamp": "2"}])
+
+    surviving = dream_rows()
+    assert len(surviving) == 1, "the rebuild deleted a row it cannot re-derive"
+    assert digest in surviving[0]["text"]
