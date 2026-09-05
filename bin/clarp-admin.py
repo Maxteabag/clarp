@@ -1705,7 +1705,9 @@ def cmd_uninstall(args) -> int:
         print(f"warning: {exc}; continuing forced uninstall", file=sys.stderr)
     service_manager.stop_and_disable()
     for skill_id in selected_skills(): unlink_skill(skill_id)
-    # Clarp installs exactly one thing outside its own directories.
+    from lib.agy_hooks import configure_hooks
+    configure_hooks(SHARE, HOME, remove=True)
+    # Remove only Clarp-owned wrappers and links.
     for root, names in ((HOME / ".local/bin", [
             "clarp-admin", "clarp-tui", "clarp-agent-tasks", "clarp-agent-artifacts",
             "clarp-media-publish", "clarp-agent-bg", "clarp-message-watch",

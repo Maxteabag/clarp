@@ -187,7 +187,8 @@ def spawn_turn(
         process.append(subprocess.Popen(
             cmd, cwd=str(cwd), stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
-            env={**os.environ, "CLAUDE_PWA_SESSION": session},
+            env={**os.environ, "CLAUDE_PWA_SESSION": session,
+                 "CLARP_AGY_MANAGED_TURN": "1"},
         ))
     try:
         admitted = owner_gate(admit_spawn)

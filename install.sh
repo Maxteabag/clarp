@@ -552,6 +552,16 @@ fi
 # per-turn accounting (lib.turn_usage), so there is no settings.json to merge
 # and nothing to symlink into ~/.claude/hooks.
 
+# AGY has no per-launch plugin flag. A named global lifecycle hook observes
+# terminal turns for already-registered conversations; stream-json runs opt out.
+PYTHONPATH="$SHARE/current" "$PYTHON" - "$SHARE" "$HOME" <<'PY'
+from pathlib import Path
+import sys
+from lib.agy_hooks import configure_hooks
+if not configure_hooks(Path(sys.argv[1]), Path(sys.argv[2])):
+    print("   WARNING: Antigravity hook configuration left untouched")
+PY
+
 echo
 SRV_PORT=$(awk '
     /^\[server\]/ { in_srv=1; next }
