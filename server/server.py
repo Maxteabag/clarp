@@ -320,6 +320,7 @@ class Handler(BaseHTTPRequestHandler):
     _ROOT_STATIC = {"/manifest.json", "/styles.css", "/icon.png"}
     _POST_ROUTES = {
         "/send": "_handle_send",
+        "/dreaming/run": "_handle_dreaming_run_post",
         "/orchestrator/route-delegation": "_handle_orchestrator_route_delegation",
         "/transcribe": "_handle_transcribe",
         "/transcription-models/install": "_handle_transcription_model_install",
@@ -364,6 +365,7 @@ class Handler(BaseHTTPRequestHandler):
         "/diagnostics/settings": "_handle_diagnostics_settings_post",
         "/agent-dreaming": "_handle_agent_dreaming",
         "/agent-mute": "_handle_agent_mute",
+        "/agent-voice-verbosity": "_handle_agent_voice_verbosity",
         "/team-nudging": "_handle_team_nudging",
         "/compact": "_handle_compact",
         "/orchestrator/settings": "_handle_orchestrator_settings_post",
@@ -2997,6 +2999,45 @@ class Handler(BaseHTTPRequestHandler):
             "dream_prompt": dreaming.dreaming_prompt_text(),
         }).encode(), "application/json")
 
+    def _handle_agent_voice_verbosity(self):
+        """Set how much one agent narrates aloud while it is still working.
+
+        Read fresh on the next turn dispatch, so moving the slider re-tunes a
+        running agent without a relaunch.
+        """
+        from lib import agents as agents_db
+        from lib import voice_verbosity
+        data = self._read_json()
+        if data is None:
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        session = (data.get("session") or "").strip()
+        if not session:
+            return self._send(400, b'{"error":"session required"}', "application/json")
+        if "voice_verbosity" not in data:
+            return self._send(400, b'{"error":"voice_verbosity required"}',
+                              "application/json")
+        raw = data.get("voice_verbosity")
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            return self._send(400, b'{"error":"voice_verbosity must be an integer"}',
+                              "application/json")
+        if not voice_verbosity.MIN_LEVEL <= raw <= voice_verbosity.MAX_LEVEL:
+            return self._send(400, json.dumps({
+                "error": "voice_verbosity out of range",
+                "min": voice_verbosity.MIN_LEVEL,
+                "max": voice_verbosity.MAX_LEVEL,
+            }).encode(), "application/json")
+        agent = agents_db.get_by_session(session)
+        if not agent:
+            return self._send(404, b'{"error":"no such agent"}', "application/json")
+        agents_db.update_agent(agent["agent_id"], voice_verbosity=raw)
+        fresh = agents_db.get_by_session(session) or {}
+        return self._send(200, json.dumps({
+            "ok": True,
+            "session": session,
+            "voice_verbosity": int(fresh.get("voice_verbosity") or 0),
+            "options": voice_verbosity.options(),
+        }).encode(), "application/json")
+
     def _handle_agent_mute(self):
         """Mute/unmute APNs pushes for a single live agent.
 
@@ -3043,8 +3084,85 @@ class Handler(BaseHTTPRequestHandler):
             "contract": settings.as_dict(),
         }).encode(), "application/json")
 
-    def _handle_dreaming_settings_get(self):
+    def _dreaming_backend_options(self):
+        """Backends the dreaming picker may offer, with their effort levels.
+
+        Model lists are deliberately not duplicated here — a client already
+        fetches `/agent-model-options` for the full catalogue and can filter it
+        by the chosen backend id.
+        """
+        from lib import backends, provider_capabilities
+        # Model ids come from the same catalogue the agent picker uses, so the
+        # dreaming picker can never drift from what the CLIs actually accept.
+        # A probe failure degrades to backends-only rather than failing the
+        # settings read.
+        models: dict[str, list[dict[str, str]]] = {}
+        try:
+            catalog = provider_capabilities.capability_catalog()
+            providers = catalog.get("providers") or {}
+            rows = (providers.values() if isinstance(providers, dict)
+                    else providers)
+            for row in rows:
+                provider_id = str(row.get("id") or "")
+                if not provider_id:
+                    continue
+                models[provider_id] = [
+                    {
+                        "id": str(m.get("id") or m.get("slug") or ""),
+                        "label": str(m.get("label") or m.get("display_name")
+                                     or m.get("id") or m.get("slug") or ""),
+                    }
+                    for m in (row.get("models") or [])
+                    if (m.get("id") or m.get("slug"))
+                ]
+        except Exception as e:  # noqa: BLE001
+            log_exception("dreamingBackendOptionsModelsFail", e)
+        options = [{
+            "id": "",
+            "label": "Same as the agent",
+            "efforts": [],
+            "models": [],
+        }]
+        for backend_id in backends.ids():
+            fields = backends.catalogue_fields(backend_id)
+            options.append({
+                "id": backend_id,
+                "label": fields.get("label") or backend_id,
+                "efforts": list(backends.valid_efforts(backend_id)),
+                "models": models.get(backend_id, []),
+            })
+        return options
+
+    def _handle_dreaming_run_post(self):
+        """Start one dream immediately, with an optional pinned recipe."""
         from lib import dreaming
+        data = self._read_json()
+        if data is None:
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        session = str(data.get("session") or "").strip()
+        if not session:
+            return self._send(400, b'{"error":"session required"}',
+                              "application/json")
+        try:
+            run = dreaming.start_manual_run(
+                session,
+                seed_strategy=str(data.get("seed_strategy") or "").strip(),
+                context_dose=str(data.get("context_dose") or "").strip(),
+            )
+        except ValueError as e:
+            return self._send(
+                409, json.dumps({"error": str(e)}).encode(), "application/json")
+        return self._send(200, json.dumps({
+            "ok": True,
+            "run_id": run.get("run_id"),
+            "session": run.get("session"),
+            "seed_strategy": run.get("seed_strategy"),
+            "context_dose": run.get("context_dose"),
+            "seed_material": run.get("seed_material"),
+        }).encode(), "application/json")
+
+    def _handle_dreaming_settings_get(self):
+        from lib import dream_seeds, dreaming
         return self._send(200, json.dumps({
             "ok": True,
             "settings": dreaming.get_settings().as_dict(),
@@ -3062,9 +3180,17 @@ class Handler(BaseHTTPRequestHandler):
                     dreaming.DREAM_TOKEN_BUDGET_MAX,
                 ],
             },
+            # Everything a client needs to draw the dreaming backend/model/
+            # effort pickers without shipping its own catalogue. An empty
+            # choice means "inherit the agent's own backend".
+            "options": {
+                "backends": self._dreaming_backend_options(),
+                "seed_strategies": list(dream_seeds.STRATEGIES),
+                "context_doses": list(dream_seeds.CONTEXT_DOSES),
+            },
         }).encode(), "application/json")
 
-    def _handle_dreaming_settings_put(self):
+    def _handle_dreaming_settings_put(self):  # noqa: D401
         from lib import dreaming
         data = self._read_json()
         if data is None:

@@ -67,6 +67,13 @@ def _shape_as_v61(con: sqlite3.Connection) -> None:
     con.executescript("""
         DROP INDEX idx_messages_trace;
         ALTER TABLE messages DROP COLUMN trace_id;
+        ALTER TABLE dream_runs DROP COLUMN artifact_branch;
+        ALTER TABLE dream_runs DROP COLUMN seed_strategy;
+        ALTER TABLE dream_runs DROP COLUMN context_dose;
+        ALTER TABLE dream_runs DROP COLUMN seed_material;
+        ALTER TABLE agents DROP COLUMN voice_verbosity;
+        ALTER TABLE dream_threads DROP COLUMN killed_reason;
+        ALTER TABLE dream_threads DROP COLUMN origin_note;
         DROP TABLE vocab_runs;
         DROP TABLE vocab_assignments;
         DROP TABLE vocab_profile_packs;
@@ -163,3 +170,30 @@ def test_upgraded_database_matches_fresh_schema(tmp_path):
         assert _names(upgraded, kind) == _names(fresh, kind), kind
     for table in _names(fresh, "table"):
         assert _columns(upgraded, table) == _columns(fresh, table), table
+
+
+def test_v69_repairs_a_v68_stamped_by_only_one_of_the_colliding_branches(tmp_path):
+    """Two branches both bumped to 68; a database stamped by one lacks the other.
+
+    `_migrate` skips a version it has already reached, so merging the two v68
+    bodies does not help a database that is already at 68 — the merged
+    function never runs. v69 repeats the guarded adds where every 68 database
+    can still be reached.
+    """
+    path = tmp_path / "split-v68.sqlite"
+    con = _fresh(path)
+    # The shape a database has when the narration branch stamped 68 first.
+    con.executescript("""
+        ALTER TABLE dream_runs DROP COLUMN artifact_branch;
+        PRAGMA user_version = 68;
+    """)
+    con.close()
+
+    upgraded = _connect(path)
+    db._migrate(upgraded)
+
+    assert "artifact_branch" in _columns(upgraded, "dream_runs")
+    assert "voice_verbosity" in _columns(upgraded, "agents")
+    assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+    # Idempotent: a second pass over an already-repaired database is a no-op.
+    db._migrate(upgraded)

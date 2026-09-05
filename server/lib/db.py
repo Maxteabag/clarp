@@ -7,6 +7,20 @@ Schema is created on first open. user_version drives migrations: to change the
 schema, edit _SCHEMA_SQL, bump _SCHEMA_VERSION, and add a `_migrate_to_vN`
 that upgrades an existing database (see `_migrate`).
 
+Two things that are easy to get wrong:
+
+* `tests/unit/test_db_migrations.py` builds an old database by *undoing* the
+  current schema (`_shape_as_v61`). A new column therefore needs a matching
+  `DROP COLUMN` there, or every migration test fails on a duplicate column.
+* If two branches bump to the same version, both define `_migrate_to_vN` and
+  Python keeps only the last one — the other migration silently becomes dead
+  code and never runs. Merge the two bodies into one function rather than
+  renumbering, and guard each `ALTER` with a `PRAGMA table_info` check so a
+  re-run is a no-op instead of a crash. Merging is not enough on its own: any
+  database already stamped with the colliding version skips the merged
+  function entirely, so the guarded adds have to be repeated one version
+  later to reach it (see `_migrate_to_v69`).
+
 The hooks and the server both use this module — they share the file via
 WAL mode + a short busy_timeout. Concurrent writes serialise without
 losing rows.
@@ -34,7 +48,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 66
+_SCHEMA_VERSION = 69
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -317,7 +331,8 @@ CREATE TABLE agents (
     avatar_symbol TEXT NOT NULL DEFAULT '',
     personality TEXT NOT NULL DEFAULT '',
     avatar_path TEXT NOT NULL DEFAULT '',
-    archived_at INTEGER
+    archived_at INTEGER,
+    voice_verbosity INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE runtimes (
@@ -792,6 +807,10 @@ CREATE TABLE dream_runs (
     updated_at INTEGER NOT NULL,
     finished_at INTEGER,
     last_error TEXT,
+    seed_strategy TEXT NOT NULL DEFAULT 'control',
+    context_dose TEXT NOT NULL DEFAULT 'full',
+    seed_material TEXT NOT NULL DEFAULT '',
+    artifact_branch TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 CREATE INDEX idx_dream_runs_agent_status ON dream_runs(agent_id, status, started_at DESC);
@@ -813,6 +832,8 @@ CREATE TABLE dream_threads (
     artifact_ref TEXT NOT NULL DEFAULT '',
     evidence_summary TEXT NOT NULL DEFAULT '',
     guardrail_refusals TEXT NOT NULL DEFAULT '[]',
+    killed_reason TEXT NOT NULL DEFAULT '',
+    origin_note TEXT NOT NULL DEFAULT '',
     UNIQUE(run_id, thread_index),
     FOREIGN KEY (run_id) REFERENCES dream_runs(run_id)
 );
@@ -1328,6 +1349,12 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v65(con)
             if version < 66:
                 _migrate_to_v66(con)
+            if version < 67:
+                _migrate_to_v67(con)
+            if version < 68:
+                _migrate_to_v68(con)
+            if version < 69:
+                _migrate_to_v69(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1518,6 +1545,84 @@ def _migrate_to_v65(con: sqlite3.Connection) -> None:
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_trace ON messages(trace_id)"
         " WHERE trace_id IS NOT NULL")
+
+
+def _migrate_to_v69(con: sqlite3.Connection) -> None:
+    """Repair a v68 that only carries half of what v68 came to mean.
+
+    Two branches independently bumped to 68 — one adding `voice_verbosity`,
+    one adding `artifact_branch` — so a database stamped 68 by whichever
+    landed first is missing the other's column and can never be upgraded by
+    the merged v68, because `_migrate` skips a version it has already reached.
+    This runs the same guarded adds one version later, where every 68 database
+    is reachable regardless of which branch stamped it.
+    """
+    columns = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if "voice_verbosity" not in columns:
+        con.execute(
+            "ALTER TABLE agents ADD COLUMN voice_verbosity INTEGER NOT NULL"
+            " DEFAULT 0")
+    dream_columns = {row[1] for row in con.execute(
+        "PRAGMA table_info(dream_runs)")}
+    if "artifact_branch" not in dream_columns:
+        con.execute(
+            "ALTER TABLE dream_runs ADD COLUMN artifact_branch TEXT NOT NULL"
+            " DEFAULT ''")
+
+
+def _migrate_to_v68(con: sqlite3.Connection) -> None:
+    """Per-agent narration level, and a durable home for dream-built code.
+
+    The spoken contract was one acknowledgment, silence, then a summary. That
+    is right when driving and wrong when following along, so the level moves
+    per agent. 0 is the previous behaviour, so nothing changes until the
+    slider does.
+    """
+    # Guarded because an older release running against the same file resets
+    # user_version to its own, lower number without dropping columns a newer
+    # build already added. Re-running must then be a no-op, not a crash.
+    columns = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if "voice_verbosity" not in columns:
+        con.execute(
+            "ALTER TABLE agents ADD COLUMN voice_verbosity INTEGER NOT NULL"
+            " DEFAULT 0")
+    # Same version, second concern: a dream's built code survives its
+    # worktree. Whatever a run builds at `worktree` altitude used to live in
+    # an untracked scratch directory that nothing referenced and nothing
+    # cleaned up; recording the branch it was committed to makes the highest
+    # value output of a night durable instead of prose in a digest.
+    dream_columns = {row[1] for row in con.execute(
+        "PRAGMA table_info(dream_runs)")}
+    if "artifact_branch" not in dream_columns:
+        con.execute(
+            "ALTER TABLE dream_runs ADD COLUMN artifact_branch TEXT NOT NULL"
+            " DEFAULT ''")
+
+
+
+def _migrate_to_v67(con: sqlite3.Connection) -> None:
+    """Dreaming records its recipe, and a thread records why it died.
+
+    A run is now an experiment: which seeding strategy produced its ideas and
+    how much of the live session was in context are recorded per run, so two
+    nights can be compared instead of merely read. `killed_reason` closes the
+    other half - the ledger used to show only what survived.
+    """
+    con.execute(
+        "ALTER TABLE dream_runs ADD COLUMN seed_strategy TEXT NOT NULL"
+        " DEFAULT 'control'")
+    con.execute(
+        "ALTER TABLE dream_runs ADD COLUMN context_dose TEXT NOT NULL"
+        " DEFAULT 'full'")
+    con.execute(
+        "ALTER TABLE dream_runs ADD COLUMN seed_material TEXT NOT NULL"
+        " DEFAULT ''")
+    con.execute(
+        "ALTER TABLE dream_threads ADD COLUMN killed_reason TEXT NOT NULL"
+        " DEFAULT ''")
+    con.execute(
+        "ALTER TABLE dream_threads ADD COLUMN origin_note TEXT NOT NULL"
+        " DEFAULT ''")
 
 
 _V64_SQL = """
