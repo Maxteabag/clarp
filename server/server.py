@@ -12,6 +12,7 @@ Endpoints (see Handler.do_GET / do_POST for the dispatch tables):
 from __future__ import annotations
 
 from lib import clip_store
+from lib import viz_normalize
 
 import gzip
 import json
@@ -255,6 +256,8 @@ class Handler(BaseHTTPRequestHandler):
         "/log": "_handle_log",
         "/message-tool-details": "_handle_message_tool_details",
         "/status": "_handle_status",
+        "/viz/events": "_handle_viz_events",
+        "/viz": "_send_viz_page",
         "/diagnostics/health": "_handle_diagnostics_health",
         "/backend-usage": "_handle_backend_usage",
         "/backend-auth": "_handle_backend_auth",
@@ -1147,6 +1150,29 @@ class Handler(BaseHTTPRequestHandler):
             json.dumps({"decisions": recent_orchestrator_decisions(limit)}).encode(),
             "application/json",
         )
+
+    def _handle_viz_events(self):
+        """Normalized fleet activity for the map, over a time window."""
+        from urllib.parse import parse_qs, urlparse
+        qs = parse_qs(urlparse(self.path).query)
+
+        def _int(name, default):
+            try:
+                return int((qs.get(name, [""])[0] or "").strip() or default)
+            except ValueError:
+                return default
+
+        import time
+        window_s = max(60, min(_int("window", 3600), 90 * 86400))
+        until = _int("until", 0) or None
+        anchor = until if until else int(time.time() * 1000)
+        payload = viz_normalize.build_fleet_map(
+            anchor - window_s * 1000, until, limit=_int("limit", 4000))
+        self._send(200, json.dumps(payload).encode(), "application/json")
+
+    def _send_viz_page(self):
+        """The fleet map itself; a static page that reads /viz/events."""
+        return self._send_file(self.ctx.static / "viz.html")
 
     def _handle_snapshot(self):
         """Unified per-agent read model for the dashboard."""
