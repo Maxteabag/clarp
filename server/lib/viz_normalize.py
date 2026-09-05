@@ -18,6 +18,7 @@ import os
 import re
 from typing import Any, Iterable
 
+from . import viz_archetypes
 from .protocol import AgentState
 
 # --- rules ----------------------------------------------------------------
@@ -85,6 +86,9 @@ NATIVE_RULES: dict[str, tuple[str, str]] = {
     "Skill": ("skill", "toolchain"), "mcp_tool_call": ("skill", "toolchain"),
     "TodoWrite": ("plan", "self"), "Monitor": ("ops", "host"),
     "LSP": ("read", "file"),
+    # codex spells several of these lowercase
+    "read": ("read", "file"), "edit": ("write", "file"),
+    "write": ("write", "file"), "find_by_name": ("search", "path"),
 }
 
 # Shell words that are never the command being run. `set -euo pipefail`
@@ -199,6 +203,7 @@ def normalize(rows: Iterable[Any], names: dict[str, str]) -> list[dict]:
             "agent": names.get(agent_id, agent_id[:8]),
             "agent_id": agent_id,
             "verb": verb,
+            "archetype": viz_archetypes.archetype_for(verb),
             "target": target,
             "specific": ":" in target,
             "clamped": bool(data.get("dispatch")) and len(tool) >= CODEX_TOOL_CLAMP,
@@ -291,6 +296,7 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
 
     specific = sum(1 for e in events if e["specific"])
     return {
+        "archetypes": viz_archetypes.specs(),
         "since": since_ms,
         "until": until if until < (1 << 61) else None,
         "events": events,
