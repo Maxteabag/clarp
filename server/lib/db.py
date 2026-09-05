@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 67
+_SCHEMA_VERSION = 70
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1341,8 +1341,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v65(con)
             if version < 66:
                 _migrate_to_v66(con)
-            if version < 67:
-                _migrate_to_v67(con)
+            if version < 70:
+                _migrate_to_v70(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1482,32 +1482,44 @@ def _migrate_to_v66(con: sqlite3.Connection) -> None:
     )
 
 
-def _migrate_to_v67(con: sqlite3.Connection) -> None:
-    """Native clarification answers, attention metadata and independent archival.
+def _migrate_to_v70(con: sqlite3.Connection) -> None:
+    """Reconcile attention columns across the historical v67-v69 schema overlap.
 
-    Existing approval rows and queued deliveries keep their binary semantics.
-    The nullable answer snapshot records the exact response for durable retry.
+    Some Hosts reached v69 through unrelated experimental migrations before
+    attention shipped as v67. Reconcile the actual columns rather than assuming
+    any of those version stamps proves attention exists. All changes are
+    additive; unrelated columns, tables and existing answer snapshots stay put.
     """
-    con.execute("ALTER TABLE artifacts ADD COLUMN archived_at INTEGER")
-    for definition in (
-        "response_type TEXT NOT NULL DEFAULT 'approval'",
-        "options_json TEXT NOT NULL DEFAULT '[]'",
-        "allow_custom_text INTEGER NOT NULL DEFAULT 0",
-        "recommended_option_id TEXT",
-        "blocks_progress INTEGER NOT NULL DEFAULT 0",
-        "priority_reason TEXT NOT NULL DEFAULT ''",
-        "urgency TEXT NOT NULL DEFAULT 'normal'",
-        "response_effort TEXT NOT NULL DEFAULT 'review'",
-        "deadline_at INTEGER",
-        "answer_json TEXT",
-    ):
-        con.execute(f"ALTER TABLE artifact_decisions ADD COLUMN {definition}")
-    con.execute("ALTER TABLE decision_deliveries ADD COLUMN response_type TEXT NOT NULL DEFAULT 'approval'")
-    con.execute("ALTER TABLE decision_deliveries ADD COLUMN answer_json TEXT")
+    additions = {
+        "artifacts": ("archived_at INTEGER",),
+        "artifact_decisions": (
+            "response_type TEXT NOT NULL DEFAULT 'approval'",
+            "options_json TEXT NOT NULL DEFAULT '[]'",
+            "allow_custom_text INTEGER NOT NULL DEFAULT 0",
+            "recommended_option_id TEXT",
+            "blocks_progress INTEGER NOT NULL DEFAULT 0",
+            "priority_reason TEXT NOT NULL DEFAULT ''",
+            "urgency TEXT NOT NULL DEFAULT 'normal'",
+            "response_effort TEXT NOT NULL DEFAULT 'review'",
+            "deadline_at INTEGER",
+            "answer_json TEXT",
+        ),
+        "decision_deliveries": (
+            "response_type TEXT NOT NULL DEFAULT 'approval'",
+            "answer_json TEXT",
+        ),
+    }
+    for table, definitions in additions.items():
+        columns = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+        for definition in definitions:
+            if definition.split()[0] not in columns:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
     con.execute("""UPDATE artifact_decisions SET answer_json=json_object('choice',resolved_choice)
-                    WHERE status IN ('accepted','rejected')""")
+                    WHERE response_type='approval' AND answer_json IS NULL
+                      AND status IN ('accepted','rejected')""")
     con.execute("""UPDATE decision_deliveries SET answer_json=json_object('choice',choice)
-                    WHERE choice IN ('accepted','rejected')""")
+                    WHERE response_type='approval' AND answer_json IS NULL
+                      AND choice IN ('accepted','rejected')""")
 
 
 
