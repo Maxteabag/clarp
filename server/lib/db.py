@@ -16,7 +16,10 @@ Two things that are easy to get wrong:
   Python keeps only the last one — the other migration silently becomes dead
   code and never runs. Merge the two bodies into one function rather than
   renumbering, and guard each `ALTER` with a `PRAGMA table_info` check so a
-  re-run is a no-op instead of a crash.
+  re-run is a no-op instead of a crash. Merging is not enough on its own: any
+  database already stamped with the colliding version skips the merged
+  function entirely, so the guarded adds have to be repeated one version
+  later to reach it (see `_migrate_to_v69`).
 
 The hooks and the server both use this module — they share the file via
 WAL mode + a short busy_timeout. Concurrent writes serialise without
@@ -45,7 +48,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 68
+_SCHEMA_VERSION = 69
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1350,6 +1353,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v67(con)
             if version < 68:
                 _migrate_to_v68(con)
+            if version < 69:
+                _migrate_to_v69(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1537,6 +1542,29 @@ def _migrate_to_v65(con: sqlite3.Connection) -> None:
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_trace ON messages(trace_id)"
         " WHERE trace_id IS NOT NULL")
+
+
+def _migrate_to_v69(con: sqlite3.Connection) -> None:
+    """Repair a v68 that only carries half of what v68 came to mean.
+
+    Two branches independently bumped to 68 — one adding `voice_verbosity`,
+    one adding `artifact_branch` — so a database stamped 68 by whichever
+    landed first is missing the other's column and can never be upgraded by
+    the merged v68, because `_migrate` skips a version it has already reached.
+    This runs the same guarded adds one version later, where every 68 database
+    is reachable regardless of which branch stamped it.
+    """
+    columns = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if "voice_verbosity" not in columns:
+        con.execute(
+            "ALTER TABLE agents ADD COLUMN voice_verbosity INTEGER NOT NULL"
+            " DEFAULT 0")
+    dream_columns = {row[1] for row in con.execute(
+        "PRAGMA table_info(dream_runs)")}
+    if "artifact_branch" not in dream_columns:
+        con.execute(
+            "ALTER TABLE dream_runs ADD COLUMN artifact_branch TEXT NOT NULL"
+            " DEFAULT ''")
 
 
 def _migrate_to_v68(con: sqlite3.Connection) -> None:
