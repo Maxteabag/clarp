@@ -193,6 +193,12 @@ def is_routing_provider(raw: str | None) -> bool:
     return adapter is not None and adapter.supports_routing
 
 
+def addressing_status() -> dict:
+    """Current mode plus the catalogue, so the app can draw the picker."""
+    from . import addressing
+    return {"mode": addressing.mode(), "modes": list(addressing.MODES)}
+
+
 def get_settings() -> OrchestratorSettings:
     cfg = config.load()
     provider_default = DEFAULT_PROVIDER
@@ -1268,7 +1274,12 @@ def _model_prompt(packet: dict[str, Any]) -> str:
         "addressing from referring. Account for STT mistakes, for example Mark "
         "may mean Mike only if the context supports it. Wrong-agent routing is "
         "worse than asking a short clarification. Bias toward the sticky focus "
-        "only when context is compatible. In active hands-free dictation, if the "
+        "only when context is compatible. Where two agents remain genuinely "
+        "indistinguishable after weighing the content - and only then, as a "
+        "last resort rather than a shortcut - lean slightly toward the one "
+        "most recently spoken to. This is a tiebreak, not a preference: it "
+        "must never outweigh what the utterance is actually about. "
+        "In active hands-free dictation, if the "
         "utterance is complete nonsense, accidental background speech, an "
         "unrelated fragment, or language/content that has no plausible relation "
         "to any active agent, return ignored instead of routing or clarifying.\n"

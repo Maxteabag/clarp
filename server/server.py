@@ -369,6 +369,7 @@ class Handler(BaseHTTPRequestHandler):
         "/team-nudging": "_handle_team_nudging",
         "/compact": "_handle_compact",
         "/orchestrator/settings": "_handle_orchestrator_settings_post",
+        "/orchestrator/addressing": "_handle_orchestrator_addressing",
         "/herald/settings": "_handle_herald_settings_post",
         "/personalities/settings": "_handle_personalities_settings_post",
         "/automation-settings": "_handle_automation_settings_post",
@@ -3140,6 +3141,27 @@ class Handler(BaseHTTPRequestHandler):
         result = compaction.compact_session(session)
         status = 200 if result.get("ok") else 409
         return self._send(status, json.dumps(result).encode(), "application/json")
+
+    def _handle_orchestrator_addressing(self):
+        """Choose how an unaddressed spoken turn picks its agent.
+
+        `ai` is the default and the only mode that ever calls the model, so
+        the others are also the cheap ones.
+        """
+        from lib import addressing
+        data = self._read_json()
+        if data is None:
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        try:
+            chosen = addressing.set_mode(str(data.get("mode") or ""))
+        except ValueError:
+            return self._send(400, json.dumps({
+                "error": "unknown addressing mode",
+                "modes": list(addressing.MODES),
+            }).encode(), "application/json")
+        return self._send(200, json.dumps({
+            "ok": True, "mode": chosen, "modes": list(addressing.MODES),
+        }).encode(), "application/json")
 
     def _handle_orchestrator_settings_post(self):
         data = self._read_json()
