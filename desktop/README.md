@@ -87,6 +87,14 @@ options. The new chat receives typing focus after creation.
 
 Your own chat messages use a lighter background instead of a left accent line.
 
+Settings is keyboard-first: `Ctrl+,` opens it and focuses the last-used setting.
+Use `↑`/`↓`, `J`/`K`, or `Tab`/`Shift+Tab` to move through actionable rows;
+`Home`/`End` jump to the first/last. `Space`/`Enter` toggles a value or opens a
+link; `←`/`→` explicitly turns a toggle off/on. The focused row is highlighted
+and automatically scrolled into view. `Esc` closes a settings dialog first,
+then returns to the chat input. Closing the command palette restores the same
+setting, and UI zoom keeps keyboard focus in Settings.
+
 ### Experimental plain-English tools
 
 Enable **Settings → Experiments → Plain-English tool activity**, or search for

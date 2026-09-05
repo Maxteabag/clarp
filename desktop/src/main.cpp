@@ -7,6 +7,7 @@
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QKeyEvent>
 #include <QJSValue>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -53,6 +54,10 @@ int main(int argc, char* argv[]) {
         qEnvironmentVariable("CLARP_INSTANCE_NAME", QStringLiteral("com.maxteabag.Clarp"));
     QLockFile instanceLock(QDir(runtimeDirectory).filePath(instanceName + QStringLiteral(".lock")));
     if (!instanceLock.tryLock()) {
+        if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")) {
+            qCritical("The isolated screenshot instance is already in use");
+            return EXIT_FAILURE;
+        }
         QLocalSocket existing;
         existing.connectToServer(instanceName);
         if (existing.waitForConnected(500)) {
@@ -339,6 +344,75 @@ int main(int argc, char* argv[]) {
         });
     }
     if (!screenshotPath.isEmpty()) {
+        if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SETTINGS_KEYBOARD") && rootWindow != nullptr) {
+            // Deliver keys only to this isolated offscreen Qt window, never the desktop.
+            if (QGuiApplication::platformName() != QStringLiteral("offscreen")) return EXIT_FAILURE;
+            auto* keyboardCheck = new QTimer(&application);
+            keyboardCheck->setInterval(80);
+            QObject::connect(keyboardCheck, &QTimer::timeout, &application,
+                [&application, rootWindow, keyboardCheck, step = 0]() mutable {
+                const auto press = [rootWindow](Qt::Key key, Qt::KeyboardModifiers modifiers = {}) {
+                    QKeyEvent down(QEvent::KeyPress, key, modifiers);
+                    QKeyEvent up(QEvent::KeyRelease, key, modifiers);
+                    QCoreApplication::sendEvent(rootWindow, &down);
+                    QCoreApplication::sendEvent(rootWindow, &up);
+                };
+                const auto focused = [rootWindow](const QString& name) {
+                    return rootWindow->activeFocusItem() != nullptr && rootWindow->activeFocusItem()->objectName() == name;
+                };
+                const auto require = [&application, step](bool condition) {
+                    if (!condition) {
+                        qCritical("Settings keyboard focus failed at step %d", step);
+                        application.exit(EXIT_FAILURE);
+                    }
+                    return condition;
+                };
+                QObject* settings = rootWindow->findChild<QObject*>(QStringLiteral("settingsPanel"));
+                if (!require(settings != nullptr)) return;
+                switch (step++) {
+                case 0:
+                    press(Qt::Key_Comma, Qt::ControlModifier);
+                    break;
+                case 1:
+                    if (!require(focused(QStringLiteral("setting-timestamps")))) return;
+                    press(Qt::Key_End);
+                    press(Qt::Key_Return);
+                    break;
+                case 2:
+                    if (!require(settings->property("dialogOpen").toBool() && focused(QStringLiteral("settingsPrimaryProvider")))) return;
+                    press(Qt::Key_Escape);
+                    break;
+                case 3:
+                    if (!require(!settings->property("dialogOpen").toBool() && focused(QStringLiteral("setting-voice-routing")))) return;
+                    press(Qt::Key_K, Qt::ControlModifier);
+                    break;
+                case 4: {
+                    QObject* picker = rootWindow->findChild<QObject*>(QStringLiteral("quickSwitcher"));
+                    if (!require(picker != nullptr && picker->property("visible").toBool())) return;
+                    press(Qt::Key_Escape);
+                    break;
+                }
+                case 5:
+                    if (!require(focused(QStringLiteral("setting-voice-routing")))) return;
+                    press(Qt::Key_Escape);
+                    break;
+                case 6:
+                    if (!require(rootWindow->property("selectedSurface").toString() == QStringLiteral("chats")
+                                 && focused(QStringLiteral("paneComposerEditor")))) return;
+                    press(Qt::Key_Comma, Qt::ControlModifier);
+                    break;
+                case 7:
+                    if (!require(focused(QStringLiteral("setting-voice-routing")))) return;
+                    press(Qt::Key_Home);
+                    break;
+                default:
+                    if (!require(focused(QStringLiteral("setting-timestamps")))) return;
+                    rootWindow->setProperty("settingsKeyboardVerified", true);
+                    keyboardCheck->stop();
+                }
+            });
+            QTimer::singleShot(2'050, keyboardCheck, [keyboardCheck] { keyboardCheck->start(); });
+        }
         const int sidebarWidth = qEnvironmentVariableIntValue("CLARP_SCREENSHOT_SIDEBAR_WIDTH");
         if (sidebarWidth > 0 && rootWindow != nullptr) {
             QTimer::singleShot(1'950, &application, [rootWindow, sidebarWidth] {
@@ -388,9 +462,16 @@ int main(int argc, char* argv[]) {
         }
         const int requestedDelay = qEnvironmentVariableIntValue("CLARP_SCREENSHOT_DELAY_MS");
         const int captureDelay = requestedDelay > 0 ? std::clamp(requestedDelay, 2'400, 60'000)
+            : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SETTINGS_KEYBOARD") ? 3'300
             : screenshotScenario.isEmpty() ? 2'000 : 2'400;
         QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath, sidebarToggles, sidebarWidth] {
             if (rootWindow != nullptr) {
+                if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SETTINGS_KEYBOARD") &&
+                    !rootWindow->property("settingsKeyboardVerified").toBool()) {
+                    qCritical("Settings keyboard verification did not complete");
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
                 if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_TOOL_NARRATION")) {
                     QList<QQuickItem*> remaining{rootWindow->contentItem()};
                     int translatedRows = 0;

@@ -15,6 +15,7 @@ ApplicationWindow {
     property real uiScale: 1.15
     property bool sidebarVisible: true
     property real sidebarExpandedWidth: 232
+    readonly property bool settingsOverlayVisible: root.selectedSurface === "settings" && root.overlayVisible()
 
     width: 1360
     height: 900
@@ -31,7 +32,7 @@ ApplicationWindow {
     function overlayVisible() {
         return quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
             || startAgent.visible || overview.visible || connection.visible
-            || queueDialog.visible || profilePanel.visible;
+            || queueDialog.visible || profilePanel.visible || settingsPanel.dialogOpen;
     }
 
     function workspaceAvailable() {
@@ -45,7 +46,19 @@ ApplicationWindow {
 
     function setUiScale(value) {
         root.uiScale = Math.max(1.0, Math.min(1.4, Math.round(value * 20) / 20));
-        Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId));
+        Qt.callLater(root.restoreSurfaceFocus);
+    }
+
+    function restoreSurfaceFocus() {
+        if (root.overlayVisible()) return;
+        if (root.selectedSurface === "settings") settingsPanel.focusCurrent();
+        else if (root.selectedSurface === "chats") app.requestComposerFocus(app.panes.activePaneId);
+    }
+
+    onSelectedSurfaceChanged: Qt.callLater(root.restoreSurfaceFocus)
+    onSettingsOverlayVisibleChanged: {
+        if (!settingsOverlayVisible && selectedSurface === "settings")
+            Qt.callLater(root.restoreSurfaceFocus);
     }
 
     function runCommand(action) {
@@ -71,6 +84,8 @@ ApplicationWindow {
                 app.loadTeams();
             else if (action === "chats")
                 Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId));
+            else if (action === "settings")
+                Qt.callLater(settingsPanel.focusCurrent);
         } else if (action === "orchestrator") {
             orchestrator.visible = true;
             app.loadOrchestrator();
@@ -127,8 +142,8 @@ ApplicationWindow {
     }
 
     onActiveChanged: {
-        if (active && root.workspaceAvailable())
-            Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId));
+        if (active && !root.overlayVisible())
+            Qt.callLater(root.restoreSurfaceFocus);
     }
 
     Component.onCompleted: Qt.callLater(
@@ -197,6 +212,8 @@ ApplicationWindow {
     Shortcut {
         sequence: "Escape"
         context: Qt.ApplicationShortcut
+        // Let the settings dialog (and its ComboBox popup) consume Escape first.
+        enabled: !settingsPanel.dialogOpen
         onActivated: {
             if (quickSwitcher.visible)
                 quickSwitcher.close();
@@ -215,7 +232,7 @@ ApplicationWindow {
             else if (profilePanel.visible)
                 profilePanel.visible = false;
             else if (root.selectedSurface !== "chats")
-                root.selectedSurface = "chats";
+                root.runCommand("chats");
             else {
                 app.requestComposerFocus("");
                 workspace.forceActiveFocus();
@@ -315,7 +332,7 @@ ApplicationWindow {
         sequence: "Ctrl+,"
         context: Qt.ApplicationShortcut
         enabled: !root.overlayVisible()
-        onActivated: root.selectedSurface = "settings"
+        onActivated: root.runCommand("settings")
     }
 
     Shortcut { sequence: "Ctrl+1"; context: Qt.ApplicationShortcut; enabled: !root.overlayVisible(); onActivated: root.runCommand("chats") }
@@ -429,9 +446,11 @@ ApplicationWindow {
                 }
 
                 SettingsPanel {
+                    id: settingsPanel
                     anchors.fill: parent
                     visible: root.selectedSurface === "settings"
                     controller: app
+                    onCloseRequested: root.runCommand("chats")
                     onOpenConnection: connection.visible = true
                     onOpenOrchestrator: {
                         orchestrator.visible = true;

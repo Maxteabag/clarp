@@ -94,3 +94,11 @@ set_tests_properties(clarp-desktop-tool-presentation PROPERTIES
     TIMEOUT 15
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=clarp-desktop-tool-presentation;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/config;CLARP_SCREENSHOT_SCENARIO=tool-spacing;CLARP_SCREENSHOT_EXPAND_TOOLS=1;CLARP_SCREENSHOT_REQUIRE_COMPOSER_FOCUS=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/capture.png"
 )
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/settings-keyboard/config")
+string(MD5 clarp_settings_keyboard_instance "${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME clarp-desktop-settings-keyboard COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-settings-keyboard PROPERTIES
+    TIMEOUT 15
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=settings-keyboard-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/settings-keyboard/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_SETTINGS_KEYBOARD=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/settings-keyboard/capture.png"
+)
