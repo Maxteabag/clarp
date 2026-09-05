@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 67
+_SCHEMA_VERSION = 68
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -317,7 +317,8 @@ CREATE TABLE agents (
     avatar_symbol TEXT NOT NULL DEFAULT '',
     personality TEXT NOT NULL DEFAULT '',
     avatar_path TEXT NOT NULL DEFAULT '',
-    archived_at INTEGER
+    archived_at INTEGER,
+    voice_verbosity INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE runtimes (
@@ -1335,6 +1336,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v66(con)
             if version < 67:
                 _migrate_to_v67(con)
+            if version < 68:
+                _migrate_to_v68(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1522,6 +1525,24 @@ def _migrate_to_v65(con: sqlite3.Connection) -> None:
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_trace ON messages(trace_id)"
         " WHERE trace_id IS NOT NULL")
+
+
+def _migrate_to_v68(con: sqlite3.Connection) -> None:
+    """Each agent decides how much it narrates aloud while still working.
+
+    The spoken contract was one acknowledgment, silence, then a summary. That
+    is right when driving and wrong when following along, so the level moves
+    per agent. 0 is the previous behaviour, so nothing changes until the
+    slider does.
+    """
+    # Guarded because an older release running against the same file resets
+    # user_version to its own, lower number without dropping columns a newer
+    # build already added. Re-running must then be a no-op, not a crash.
+    columns = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if "voice_verbosity" not in columns:
+        con.execute(
+            "ALTER TABLE agents ADD COLUMN voice_verbosity INTEGER NOT NULL"
+            " DEFAULT 0")
 
 
 def _migrate_to_v67(con: sqlite3.Connection) -> None:

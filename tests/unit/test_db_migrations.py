@@ -70,6 +70,7 @@ def _shape_as_v61(con: sqlite3.Connection) -> None:
         ALTER TABLE dream_runs DROP COLUMN seed_strategy;
         ALTER TABLE dream_runs DROP COLUMN context_dose;
         ALTER TABLE dream_runs DROP COLUMN seed_material;
+        ALTER TABLE agents DROP COLUMN voice_verbosity;
         ALTER TABLE dream_threads DROP COLUMN killed_reason;
         ALTER TABLE dream_threads DROP COLUMN origin_note;
         DROP TABLE vocab_runs;
