@@ -487,11 +487,6 @@ ApplicationWindow {
 
         }
 
-        ShortcutBar {
-            Layout.fillWidth: true
-            controller: app
-        }
-
     }
 
     ConnectionPage {
