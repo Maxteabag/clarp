@@ -177,6 +177,11 @@ def state_activity_event(
         action = action or "done"
         summary = summary or "Done"
         status = ActivityStatus.OK
+    elif kind == AgentState.INTERRUPTED:
+        phase = "interrupted"
+        action = action or "interrupted"
+        summary = summary or truncate(detail.get("message"), 140) or "Turn interrupted"
+        status = ActivityStatus.ERROR
     elif kind == AgentState.IDLE:
         phase = "idle"
         action = action or "idle"

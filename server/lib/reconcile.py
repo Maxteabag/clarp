@@ -48,6 +48,10 @@ def has_live_work(agent_id: str, backend: str) -> bool:
     except Exception as e:  # noqa: BLE001
         log_exception("reconcileHandlesFail", e, detail=agent_id)
         return True  # can't tell → don't repair
+    if backend == backends.AGY:
+        from . import agy_hooks
+        if agy_hooks.has_live_work(agent_id):
+            return True
     try:
         from . import terminal_ws
         if terminal_ws.has_live_terminal(agent_id):
