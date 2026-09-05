@@ -281,6 +281,9 @@ def test_spawn_turn_streams_assistant_partials_to_message_store(fake_clarp, tmp_
         stream=stream,
     )
     handle.wait(timeout=5.0)
+    # Process exit does not imply the stdout drainer has committed its rows.
+    handle.drain_thread.join(timeout=5.0)
+    assert not handle.drain_thread.is_alive()
 
     visible = agents_db.list_messages(
         agent_id=agent_id, backend_session_id="sid-live")

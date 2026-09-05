@@ -208,6 +208,8 @@ def test_agent_message_updates_stream_through_one_throttled_live_row(
         trace_id="trace-live-1",
     )
     handle.wait(timeout=5.0)
+    handle.drain_thread.join(timeout=5.0)
+    assert not handle.drain_thread.is_alive()
 
     assert _wait_for(lambda: calls and calls[-1] == "Hello world")
     assert calls == ["Hel", "Hello world"]

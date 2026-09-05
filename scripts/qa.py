@@ -38,7 +38,8 @@ def main():
     commands = [
         ['uv', 'run', '--frozen', '--group', 'dev', 'python', '-m', 'pytest', '-n', '2',
          f'--junitxml={out / "python.xml"}'],
-        ['npm', 'test', '--', '--reporter=default', '--reporter=junit', f'--outputFile={out / "javascript.xml"}'],
+        ['uv', 'run', '--frozen', '--group', 'dev', 'npm', 'test', '--',
+         '--reporter=default', '--reporter=junit', f'--outputFile={out / "javascript.xml"}'],
         ['uv', 'run', '--frozen', 'python', 'scripts/benchmark_server_hotpaths.py', '--synthetic-snapshot'],
     ]
     if args.full:

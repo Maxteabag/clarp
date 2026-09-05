@@ -65,6 +65,7 @@ def test_invalid_options_fail_before_tempfile(monkeypatch):
         raise AssertionError("tempfile must not be created")
 
     monkeypatch.setattr(agy_runner.tempfile, "mkstemp", forbidden)
+    monkeypatch.setattr(agy_runner.shutil, "which", lambda _name: sys.executable)
     with pytest.raises(ValueError, match="unavailable AGY model"):
         agy_runner.spawn_turn(text="hi", cwd=pathlib.Path("/tmp"),
                               model="4.8")
