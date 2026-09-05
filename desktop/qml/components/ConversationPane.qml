@@ -174,20 +174,8 @@ Rectangle {
             }
         }
 
-        ListView {
+        TranscriptList {
             id: transcript
-            property bool followLatest: true
-            property bool newMessagesBelow: false
-            property bool userInteracting: false
-            property real heightBeforePrepend: -1
-            readonly property real distanceFromBottom: Math.max(
-                0, contentHeight - height - Math.max(0, contentY))
-
-            function scrollToLatest() {
-                followLatest = true;
-                newMessagesBelow = false;
-                Qt.callLater(() => positionViewAtEnd());
-            }
 
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -212,23 +200,6 @@ Rectangle {
                 }
             }
             boundsBehavior: Flickable.StopAtBounds
-            onMovementStarted: userInteracting = true
-            onContentYChanged: {
-                if (userInteracting && distanceFromBottom > 32)
-                    followLatest = false;
-            }
-            onMovementEnded: {
-                userInteracting = false;
-                if (distanceFromBottom <= 32) {
-                    followLatest = true;
-                    newMessagesBelow = false;
-                }
-            }
-            onContentHeightChanged: {
-                if (followLatest && !userInteracting)
-                    Qt.callLater(() => positionViewAtEnd());
-            }
-            Component.onCompleted: scrollToLatest()
 
             header: Item {
                 width: transcript.width
@@ -240,8 +211,7 @@ Rectangle {
                     text: root.conversationModel.loading ? "Loading…" : "Load earlier messages"
                     enabled: !root.conversationModel.loading
                     onClicked: {
-                        transcript.followLatest = false;
-                        transcript.heightBeforePrepend = transcript.contentHeight;
+                        transcript.pauseFollowing();
                         root.controller.loadOlderSession(root.session);
                     }
                 }
@@ -267,26 +237,14 @@ Rectangle {
                 }
             }
 
-            ScrollBar.vertical: ScrollBar {}
-
             Connections {
                 target: root.conversationModel
                 function onRowsAppended(fromCurrentUser) {
-                    if (fromCurrentUser || transcript.followLatest
-                        || transcript.distanceFromBottom <= 32) {
+                    if (fromCurrentUser || (transcript.followLatest && !transcript.userInteracting)) {
                         transcript.scrollToLatest();
                     } else {
                         transcript.newMessagesBelow = true;
                     }
-                }
-                function onRowsPrepended() {
-                    const previous = transcript.heightBeforePrepend;
-                    transcript.heightBeforePrepend = -1;
-                    if (previous < 0)
-                        return;
-                    Qt.callLater(() => {
-                        transcript.contentY += Math.max(0, transcript.contentHeight - previous);
-                    });
                 }
             }
 

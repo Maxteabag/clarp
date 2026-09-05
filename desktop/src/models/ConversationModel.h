@@ -60,6 +60,7 @@ class ConversationModel : public QAbstractListModel {
     [[nodiscard]] bool hasMore() const;
     [[nodiscard]] bool loading() const;
     [[nodiscard]] QString error() const;
+    Q_INVOKABLE [[nodiscard]] int indexOfMessage(const QString& id) const { return m_byId.value(id, -1); }
 
     void openSession(const QString& session);
     void applyLog(const QJsonObject& response, LoadKind kind);

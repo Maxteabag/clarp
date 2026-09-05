@@ -51,7 +51,9 @@ Rectangle {
 
     TapHandler {
         acceptedButtons: Qt.LeftButton
-        gesturePolicy: TapHandler.WithinBounds
+        // Stay passive until a click is recognized. Dragging the scroll thumb
+        // or selecting message text must not grab the pointer/focus the composer.
+        gesturePolicy: TapHandler.DragThreshold
         onTapped: eventPoint => {
             // The composer handles its own taps. Everywhere else, selecting a
             // pane means it is immediately ready to receive text.

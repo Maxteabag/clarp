@@ -109,6 +109,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/Composer.qml
         qml/components/ConnectionPage.qml
         qml/components/ConversationPane.qml
+        qml/components/TranscriptList.qml
         qml/components/DisplayCellCard.qml
         qml/components/MessageDelegate.qml
         qml/components/MediaGallery.qml
