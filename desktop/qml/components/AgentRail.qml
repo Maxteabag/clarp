@@ -8,9 +8,9 @@ Rectangle {
     id: root
 
     required property var controller
-    property bool collapsed: false
     property string selectedSurface: "chats"
     signal openOverview
+    signal hideRequested
     signal selectSurface(string surface)
 
     color: "#171821"
@@ -49,7 +49,6 @@ Rectangle {
                 }
 
                 ColumnLayout {
-                    visible: !root.collapsed
                     Layout.fillWidth: true
                     spacing: 0
 
@@ -72,21 +71,17 @@ Rectangle {
                 }
 
                 ToolButton {
-                    visible: !root.collapsed
+                    objectName: "sidebarHideButton"
                     text: "‹"
                     implicitWidth: 22
                     implicitHeight: 22
                     font.pixelSize: 16
-                    onClicked: root.collapsed = true
+                    onClicked: root.hideRequested()
                     ToolTip.visible: hovered
-                    ToolTip.text: "Collapse conversations"
+                    ToolTip.text: "Hide sidebar · Ctrl+B"
                 }
             }
 
-            TapHandler {
-                enabled: root.collapsed
-                onTapped: root.collapsed = false
-            }
         }
 
         Rectangle {
@@ -182,7 +177,6 @@ Rectangle {
                     }
 
                     ColumnLayout {
-                        visible: !root.collapsed
                         Layout.fillWidth: true
                         spacing: 2
 
@@ -240,14 +234,13 @@ Rectangle {
             contentItem: RowLayout {
                 spacing: 8
                 Text {
-                    Layout.preferredWidth: root.collapsed ? 32 : 18
+                    Layout.preferredWidth: 18
                     text: "◌"
                     color: chatsButton.highlighted ? "#afb5dc" : "#696d84"
                     horizontalAlignment: Text.AlignHCenter
                     font.pixelSize: 13
                 }
                 Text {
-                    visible: !root.collapsed
                     Layout.fillWidth: true
                     text: "Chats"
                     color: chatsButton.highlighted ? "#c7cadc" : "#74788f"
@@ -269,14 +262,13 @@ Rectangle {
             contentItem: RowLayout {
                 spacing: 8
                 Text {
-                    Layout.preferredWidth: root.collapsed ? 32 : 18
+                    Layout.preferredWidth: 18
                     text: "◇"
                     color: updatesButton.highlighted ? "#afb5dc" : "#696d84"
                     horizontalAlignment: Text.AlignHCenter
                     font.pixelSize: 13
                 }
                 Text {
-                    visible: !root.collapsed
                     Layout.fillWidth: true
                     text: "Updates"
                     color: updatesButton.highlighted ? "#c7cadc" : "#74788f"
@@ -312,14 +304,13 @@ Rectangle {
             contentItem: RowLayout {
                 spacing: 8
                 Text {
-                    Layout.preferredWidth: root.collapsed ? 32 : 18
+                    Layout.preferredWidth: 18
                     text: "△"
                     color: teamsButton.highlighted ? "#afb5dc" : "#696d84"
                     horizontalAlignment: Text.AlignHCenter
                     font.pixelSize: 13
                 }
                 Text {
-                    visible: !root.collapsed
                     Layout.fillWidth: true
                     text: "Teams"
                     color: teamsButton.highlighted ? "#c7cadc" : "#74788f"
@@ -336,8 +327,8 @@ Rectangle {
             id: allAgentsButton
             Layout.fillWidth: true
             Layout.preferredHeight: 34
-            text: root.collapsed ? "≡" : "All agents"
-            leftPadding: root.collapsed ? 0 : 11
+            text: "All agents"
+            leftPadding: 11
             onClicked: root.openOverview()
             contentItem: Text {
                 text: allAgentsButton.text
@@ -345,7 +336,7 @@ Rectangle {
                 font.family: "JetBrains Mono"
                 font.pixelSize: 10
                 font.weight: Font.Medium
-                horizontalAlignment: root.collapsed ? Text.AlignHCenter : Text.AlignLeft
+                horizontalAlignment: Text.AlignLeft
                 verticalAlignment: Text.AlignVCenter
             }
         }
@@ -359,14 +350,13 @@ Rectangle {
             contentItem: RowLayout {
                 spacing: 8
                 Text {
-                    Layout.preferredWidth: root.collapsed ? 32 : 18
+                    Layout.preferredWidth: 18
                     text: "⚙"
                     color: settingsButton.highlighted ? "#afb5dc" : "#696d84"
                     horizontalAlignment: Text.AlignHCenter
                     font.pixelSize: 12
                 }
                 Text {
-                    visible: !root.collapsed
                     Layout.fillWidth: true
                     text: "Settings"
                     color: settingsButton.highlighted ? "#c7cadc" : "#74788f"

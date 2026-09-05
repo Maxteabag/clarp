@@ -99,9 +99,6 @@ ApplicationWindow {
                 if (root.workspaceAvailable())
                     app.requestComposerFocus(app.panes.activePaneId);
             });
-        } else if (action === "sidebar-compact") {
-            rail.collapsed = !rail.collapsed;
-            root.sidebarVisible = true;
         } else if (action === "ui-larger") {
             root.setUiScale(root.uiScale + 0.05);
         } else if (action === "ui-smaller") {
@@ -358,9 +355,9 @@ ApplicationWindow {
                 objectName: "sidebarRail"
                 visible: root.sidebarVisible
 
-                SplitView.preferredWidth: collapsed ? 60 : 264
-                SplitView.minimumWidth: collapsed ? 60 : 208
-                SplitView.maximumWidth: collapsed ? 60 : 360
+                SplitView.preferredWidth: 264
+                SplitView.minimumWidth: 208
+                SplitView.maximumWidth: 360
                 controller: app
                 selectedSurface: root.selectedSurface
                 onSelectSurface: surface => {
@@ -371,6 +368,7 @@ ApplicationWindow {
                         app.loadTeams();
                 }
                 onOpenOverview: overview.visible = true
+                onHideRequested: root.runCommand("sidebar")
             }
 
             Item {

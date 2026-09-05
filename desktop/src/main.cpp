@@ -335,6 +335,16 @@ int main(int argc, char* argv[]) {
             QTimer::singleShot(2'000, &application, [rootWindow, sidebarToggles] {
                 rootWindow->setProperty("sidebarVisible", true);
                 for (int index = 0; index < sidebarToggles; ++index) {
+                    if (sidebarToggles == 2 && index == 0) {
+                        // Hide from the header, then restore with the same
+                        // command used by Ctrl+B. Both must share one state.
+                        QObject* button = rootWindow->findChild<QObject*>(
+                            QStringLiteral("sidebarHideButton"));
+                        if (button != nullptr) {
+                            QMetaObject::invokeMethod(button, "clicked");
+                        }
+                        continue;
+                    }
                     QMetaObject::invokeMethod(rootWindow, "runCommand",
                                               Q_ARG(QVariant, QStringLiteral("sidebar")));
                 }
@@ -369,6 +379,7 @@ int main(int argc, char* argv[]) {
                     const auto* surface = rootWindow->findChild<QQuickItem*>(QStringLiteral("workspaceSurface"));
                     const bool shown = sidebarToggles % 2 == 0;
                     if (rail == nullptr || surface == nullptr || rail->isVisible() != shown ||
+                        (shown && rail->width() < 208) ||
                         (!shown && (surface->x() != 0 ||
                                     qAbs(surface->width() - surface->parentItem()->width()) > 1))) {
                         qCritical("Sidebar toggle did not restore visibility and workspace geometry");
