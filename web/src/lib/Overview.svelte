@@ -194,6 +194,9 @@
         </div>
         <div class="overview-hero-actions">
           <span class="version-badge" title="Server / client version">{app.version || 'v…'}</span>
+          {#if isDesktop}<a href="/viz" class="overview-icon-btn" aria-label="Fleet map" title="Fleet map">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 7 12 3-7 8Z"/><circle cx="6" cy="7" r="3"/><circle cx="18" cy="10" r="3"/><circle cx="11" cy="18" r="3"/></svg>
+          </a>{/if}
           <button id="overviewOrchestrator" class="overview-icon-btn" aria-label="Automation settings"
                   title="Automation settings" onclick={onOrchestrator}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1m-8.6 8.6-2.1 2.1"/><circle cx="12" cy="12" r="3.5"/></svg>

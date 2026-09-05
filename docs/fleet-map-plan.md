@@ -176,3 +176,59 @@ Both cap target resolution at ~19%; neither is fixable retroactively.
   an empty canvas, invented `repo:null` nodes, two nodes both labelled
   `clarp` — passed its HTTP test and returned 200 with no console errors.
   A green suite is not evidence that a picture is right.
+
+## 10. Implemented contract and verification
+
+The map is a **desktop, pannable world**. Its minimum viewport is **900 × 600**;
+smaller windows show an explanatory message. Off-screen nodes are valid.
+Panning, pointer-centered zoom and Fit change the camera, never clamp node
+positions to the viewport. This supersedes any phone-fit interpretation.
+
+- `viz_corpus.tool_rows` uses bounded keyset pages and a high-water mark.
+  Both the author CLI and HTTP map use it; the map retains only a bounded
+  projection of the newest events. Raw corpus rows are never fetched together.
+- `viz_library.json` lives under `xdg.data_dir()`. Atomic replacement, a writer
+  lock, revision checks and explicit decision IDs protect stable decisions.
+  No schema migration is introduced. Seed rules also require supersession.
+- Spark points at a current library entity or returns `NOVEL`. Astra can add
+  semantic verbs, kinds and archetypes, choose shapes, author bounded drawing
+  logic, redirect merged identities and supersede prior rule selectors.
+- HTTP sends provisional events before offering work to one bounded cold
+  worker. Failed tools have a retry cooldown; successful decisions become
+  dictionary lookups. CLI calls are isolated, process-group owned and timed.
+- Generated logic is a pure JSON drawing language interpreted inside a worker:
+  64 commands, 512 expression operations, depth 8, a 4 ms evaluation deadline,
+  and a 1 s worker startup/completion fuse. It has no eval, loops, property
+  access, filesystem, DOM or network capability. Failures retain a placeholder.
+- Known service marks are vendored and cached; long-tail glyphs and shapes
+  persist with the entity decision. The renderer preserves positions across
+  refresh and alias adoption. New live events animate without replaying old
+  history. Repository/file roles use explicit paths and Git worktree metadata.
+- Desktop sidebar and Agents overview link to `/viz`. Clicking an authored or
+  seeded registry node exposes “Rethink this representation”, which submits an
+  explicit supersession. This applies automatically, with no review queue.
+
+Repeatable checks (from this checkout):
+
+```bash
+uv sync --frozen --group dev
+.venv/bin/python scripts/viz_author.py --db ~/.local/share/clarp/state.sqlite
+# Optional real-model run, with an isolated JSON store:
+.venv/bin/python scripts/viz_author.py --db ~/.local/share/clarp/state.sqlite \
+  --learn --limit 1 --library /var/tmp/fleet-map-smoke/library.json
+# Foreground, read-only preview; no runtime startup or automatic model calls:
+.venv/bin/python scripts/viz_preview.py --db ~/.local/share/clarp/state.sqlite --port 7699
+# In another shell after npm ci and installing Playwright Chromium:
+node scripts/viz_screenshot.mjs http://127.0.0.1:7699/viz /var/tmp/fleet-map-check
+make py
+make js
+npm run build
+```
+
+Open the resulting screenshots; assertions are not a substitute for looking.
+The browser harness covers replay, distinct labels, camera navigation, the
+minimum-size gate, provisional identity adoption and a throwing generation
+while animation frames continue. Unit tests also cover worker timeout,
+subcommand-only model rules, aliasing, explicit supersession, corrupted JSON,
+and canonical Git worktree identity. The clamp and runtime-cwd limitations in
+§7 remain upstream instrumentation work.

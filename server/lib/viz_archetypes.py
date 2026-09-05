@@ -69,9 +69,9 @@ def specs() -> dict[str, dict[str, Any]]:
 def validate_assignment(verb: str, archetype: str) -> tuple[bool, str]:
     """Gate for an authored (verb -> archetype) proposal.
 
-    An authoring model may only choose from the existing library. That is the
-    whole safety property: its output cannot introduce behaviour the renderer
-    has not already been tested against.
+    Compatibility gate for callers using the built-in library. Autonomous
+    tier-two designs use viz_library.validate_design instead, which permits
+    new semantic archetypes with bounded specs and sandboxed drawing logic.
     """
     if not verb or not verb.replace("_", "").isalnum():
         return False, f"verb {verb!r} is not a plain identifier"
