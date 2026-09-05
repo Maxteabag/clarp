@@ -43,6 +43,7 @@ def test_status_lists_every_provider_and_marks_availability_by_credential(keys):
     assert models["deepgram:nova-3"]["budget"] == {
         "unit": "terms", "capacity": 50, "max_term_chars": None}
     assert models["cartesia:ink-whisper"]["budget"]["capacity"] == 0
+    assert models["cartesia:ink-2"]["budget"]["capacity"] == 100
     assert models["elevenlabs:scribe_v2"]["turn_detection"] == "native"
 
 
