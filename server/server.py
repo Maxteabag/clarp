@@ -3005,11 +3005,37 @@ class Handler(BaseHTTPRequestHandler):
         fetches `/agent-model-options` for the full catalogue and can filter it
         by the chosen backend id.
         """
-        from lib import backends
+        from lib import backends, provider_capabilities
+        # Model ids come from the same catalogue the agent picker uses, so the
+        # dreaming picker can never drift from what the CLIs actually accept.
+        # A probe failure degrades to backends-only rather than failing the
+        # settings read.
+        models: dict[str, list[dict[str, str]]] = {}
+        try:
+            catalog = provider_capabilities.capability_catalog()
+            providers = catalog.get("providers") or {}
+            rows = (providers.values() if isinstance(providers, dict)
+                    else providers)
+            for row in rows:
+                provider_id = str(row.get("id") or "")
+                if not provider_id:
+                    continue
+                models[provider_id] = [
+                    {
+                        "id": str(m.get("id") or m.get("slug") or ""),
+                        "label": str(m.get("label") or m.get("display_name")
+                                     or m.get("id") or m.get("slug") or ""),
+                    }
+                    for m in (row.get("models") or [])
+                    if (m.get("id") or m.get("slug"))
+                ]
+        except Exception as e:  # noqa: BLE001
+            log_exception("dreamingBackendOptionsModelsFail", e)
         options = [{
             "id": "",
             "label": "Same as the agent",
             "efforts": [],
+            "models": [],
         }]
         for backend_id in backends.ids():
             fields = backends.catalogue_fields(backend_id)
@@ -3017,6 +3043,7 @@ class Handler(BaseHTTPRequestHandler):
                 "id": backend_id,
                 "label": fields.get("label") or backend_id,
                 "efforts": list(backends.valid_efforts(backend_id)),
+                "models": models.get(backend_id, []),
             })
         return options
 
