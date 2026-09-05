@@ -148,6 +148,12 @@ int main(int argc, char* argv[]) {
     }
     if (!screenshotPath.isEmpty() && rootWindow != nullptr && !screenshotView.isEmpty()) {
         QTimer::singleShot(1'000, &application, [rootWindow, controller, screenshotView] {
+            if (screenshotView == QStringLiteral("idleContacts")) {
+                if (QObject* picker = rootWindow->findChild<QObject*>(QStringLiteral("quickSwitcher"))) {
+                    QMetaObject::invokeMethod(picker, "openContacts", Q_ARG(QVariant, false));
+                }
+                return;
+            }
             if (QObject* view = rootWindow->findChild<QObject*>(screenshotView)) {
                 if (controller != nullptr &&
                     (screenshotView == QStringLiteral("agentProfilePanel") ||

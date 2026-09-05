@@ -1,5 +1,6 @@
 add_executable(clarp-desktop-tests
     tst_native_core.cpp
+    ../src/terminal/TerminalLaunch.cpp
     ../src/app/CredentialStore.cpp
     ../src/app/CredentialStore.h
     ../src/app/AppController.cpp

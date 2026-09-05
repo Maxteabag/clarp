@@ -56,6 +56,8 @@ ApplicationWindow {
             startAgent.visible = true;
         } else if (action === "overview") {
             overview.visible = true;
+        } else if (action === "agent-terminal") {
+            app.openAgentTerminal(app.selectedSession);
         } else if (action === "connection") {
             connection.visible = true;
         } else if (action === "chats" || action === "updates"
@@ -331,6 +333,8 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Alt+V"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("split-right") }
     Shortcut { sequence: "Ctrl+Alt+S"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("split-down") }
     Shortcut { sequence: "Ctrl+Alt+X"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("close-pane") }
+    Shortcut { sequence: "Ctrl+Alt+T"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("agent-terminal") }
+    Shortcut { sequence: "Ctrl+Alt+N"; context: Qt.ApplicationShortcut; enabled: !root.overlayVisible(); onActivated: quickSwitcher.openContacts(root.composerOwnsFocus()) }
     Shortcut { sequence: "Ctrl+Alt+Z"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("zoom") }
     Shortcut { sequence: "Ctrl+Alt+="; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("balance") }
     Shortcut { sequence: "Ctrl+."; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("stop-agent") }
@@ -479,6 +483,12 @@ ApplicationWindow {
             root.relaunchName = name;
             startAgent.visible = true;
         }
+        onQuickStartRequested: name => {
+            if (app.quickStartContact(name)) {
+                overview.visible = false;
+                root.selectedSurface = "chats";
+            }
+        }
         onRelaunchRequested: (session, name) => {
             root.relaunchSession = session;
             root.relaunchName = name;
@@ -543,6 +553,10 @@ ApplicationWindow {
         visible: false
         z: 110
         onCommandRequested: action => root.runCommand(action)
+        onContactRequested: name => {
+            root.selectedSurface = "chats";
+            app.quickStartContact(name);
+        }
         onAgentRequested: session => {
             app.selectSession(session);
             root.selectedSurface = "chats";

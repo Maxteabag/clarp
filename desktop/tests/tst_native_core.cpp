@@ -24,6 +24,7 @@
 #include <QTemporaryDir>
 #include <QUrl>
 #include <QUuid>
+#include <QScopeGuard>
 #include <cmath>
 
 using namespace clarp;
@@ -76,6 +77,14 @@ class FakeClarpServer final : public QTcpServer {
 
     [[nodiscard]] bool receivedRequest(const QString& method, const QString& path) const {
         return m_requests.contains(method + u' ' + path);
+    }
+    [[nodiscard]] qsizetype requestCount(const QString& method, const QString& path) const {
+        return m_requests.count(method + u' ' + path);
+    }
+
+    void setJsonResponse(const QString& method, const QString& path, int status,
+                         const QJsonObject& body) {
+        m_jsonResponses.insert(method + u' ' + path, {status, body});
     }
 
     [[nodiscard]] QJsonObject requestJson(const QString& method, const QString& path) const {
@@ -157,6 +166,12 @@ class FakeClarpServer final : public QTcpServer {
         m_sawAuthorization = m_sawAuthorization ||
                              request.contains("Authorization: Bearer test-token") ||
                              request.contains("authorization: Bearer test-token");
+
+        if (const auto response = m_jsonResponses.constFind(requestKey);
+            response != m_jsonResponses.cend()) {
+            respond(socket, response->first, response->second);
+            return;
+        }
 
         if (path.startsWith("/events")) {
             socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
@@ -534,6 +549,7 @@ class FakeClarpServer final : public QTcpServer {
     bool m_scheduleEnabled = true;
     QStringList m_requests;
     QHash<QString, QByteArray> m_requestBodies;
+    QHash<QString, QPair<int, QJsonObject>> m_jsonResponses;
     QPointer<QTcpSocket> m_heldLogSocket;
     QPointer<QTcpSocket> m_heldUploadSocket;
     bool m_holdLogs = false;
@@ -583,6 +599,8 @@ class NativeCoreTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void idleContactStartsFreshWithSavedDefaults();
+    void agentTerminalLaunchesNativeCliThroughDefaultTerminal();
     void sseParserHandlesChunksCommentsAndReplayIds();
     void sseCursorIsScopedToOneHost();
     void snapshotFiltersArchivedAgentsAndPatchesEvents();
@@ -620,6 +638,136 @@ void NativeCoreTest::sseParserHandlesChunksCommentsAndReplayIds() {
     QCOMPARE(messages.first().id, QStringLiteral("41"));
     QCOMPARE(messages.first().data.value(QStringLiteral("type")).toString(),
              QStringLiteral("agent-roster"));
+}
+
+void NativeCoreTest::idleContactStartsFreshWithSavedDefaults() {
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    const auto oldBase = qgetenv("CLARP_BASE_URL"), oldToken = qgetenv("CLARP_TOKEN");
+    QSettings settings;
+    const QVariant oldBackend = settings.value(QStringLiteral("launch/backend"));
+    const QVariant oldFolder = settings.value(QStringLiteral("launch/workingDirectory"));
+    const auto restore = qScopeGuard([&] {
+        qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken);
+        settings.setValue(QStringLiteral("launch/backend"), oldBackend);
+        settings.setValue(QStringLiteral("launch/workingDirectory"), oldFolder);
+    });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
+    qputenv("CLARP_TOKEN", "test-token");
+    settings.setValue(QStringLiteral("launch/backend"), QStringLiteral("codex"));
+    settings.setValue(QStringLiteral("launch/workingDirectory"), QStringLiteral("/tmp/contact-workspace"));
+    AppController controller;
+    QTRY_VERIFY_WITH_TIMEOUT(controller.connected(), 3000);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.agents()->rowCount(), 1, 3000);
+    const QString freshSession = QStringLiteral("bella-server-generated-id");
+    server.setJsonResponse(QStringLiteral("POST"), QStringLiteral("/agents"), 201,
+        {{QStringLiteral("session"), freshSession}});
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agents/snapshot"), 200,
+        {{QStringLiteral("agents"), QJsonArray{
+            QJsonObject{{QStringLiteral("session"), QStringLiteral("rachel")},
+                        {QStringLiteral("persona"), QStringLiteral("Rachel")},
+                        {QStringLiteral("backend"), QStringLiteral("codex")}},
+            QJsonObject{{QStringLiteral("session"), freshSession},
+                        {QStringLiteral("persona"), QStringLiteral("Bella")},
+                        {QStringLiteral("backend"), QStringLiteral("codex")}}
+        }}});
+    QSignalSpy focusRequested(&controller, &AppController::composerFocusPaneChanged);
+    controller.contacts()->applySnapshot({{QStringLiteral("personas"), QJsonArray{
+        QJsonObject{{QStringLiteral("name"), QStringLiteral("Bella")}},
+        QJsonObject{{QStringLiteral("name"), QStringLiteral("Rachel")}},
+    }}}, QSet<QString>{QStringLiteral("rachel")});
+    QCOMPARE(controller.matchingContacts(QStringLiteral("bell")).size(), 1);
+    QVERIFY(!controller.quickStartContact(QStringLiteral("Rachel")));
+    QVERIFY(controller.quickStartContact(QStringLiteral("bella")));
+    QCOMPARE(controller.startingContact(), QStringLiteral("Bella"));
+    QVERIFY(!controller.quickStartContact(QStringLiteral("Bella")));
+    QTRY_VERIFY_WITH_TIMEOUT(server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/agents")), 3000);
+    const QJsonObject request = server.requestJson(QStringLiteral("POST"), QStringLiteral("/agents"));
+    QCOMPARE(request.value(QStringLiteral("name")).toString(), QStringLiteral("Bella"));
+    QCOMPARE(request.value(QStringLiteral("cwd")).toString(), QStringLiteral("/tmp/contact-workspace"));
+    QCOMPARE(request.value(QStringLiteral("backend")).toString(), QStringLiteral("codex"));
+    QVERIFY(!request.contains(QStringLiteral("session")));
+    QVERIFY(!request.contains(QStringLiteral("replace_sid")));
+    QVERIFY(!request.contains(QStringLiteral("resume_session_id")));
+    QVERIFY(!request.contains(QStringLiteral("fork_session_id")));
+    QCOMPARE(server.requestCount(QStringLiteral("POST"), QStringLiteral("/agents")), 1);
+    QTRY_VERIFY_WITH_TIMEOUT(controller.startingContact().isEmpty(), 3000);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.agents()->rowCount(), 2, 3000);
+    QCOMPARE(controller.selectedSession(), freshSession);
+    QCOMPARE(controller.panes()->activeSession(), freshSession);
+    QCOMPARE(controller.composerFocusPane(), controller.panes()->activePaneId());
+    QVERIFY(!focusRequested.isEmpty());
+
+    // A contact can become occupied after the picker opens on another client.
+    controller.contacts()->applySnapshot({{QStringLiteral("personas"), QJsonArray{
+        QJsonObject{{QStringLiteral("name"), QStringLiteral("Theo")}}
+    }}}, {});
+    server.setJsonResponse(QStringLiteral("POST"), QStringLiteral("/agents"), 409,
+        {{QStringLiteral("error"), QStringLiteral("contact_occupied")},
+         {QStringLiteral("message"), QStringLiteral("Theo already has an active session")}});
+    QVERIFY(controller.quickStartContact(QStringLiteral("Theo")));
+    QTRY_VERIFY_WITH_TIMEOUT(controller.startingContact().isEmpty(), 3000);
+    QVERIFY(!controller.errorMessage().isEmpty());
+    QCOMPARE(controller.selectedSession(), freshSession);
+}
+
+void NativeCoreTest::agentTerminalLaunchesNativeCliThroughDefaultTerminal() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString workspace = directory.filePath(QStringLiteral("project with spaces"));
+    QVERIFY(QDir().mkpath(workspace));
+    const QString capture = directory.filePath(QStringLiteral("arguments"));
+    const auto executable = [&directory](const QString& name, const QByteArray& contents) {
+        QFile file(directory.filePath(name));
+        if (!file.open(QIODevice::WriteOnly) || file.write(contents) != contents.size()) return false;
+        return file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    };
+    QVERIFY(executable(QStringLiteral("xdg-terminal-exec"),
+        "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$@\" > \"$CLARP_TEST_TERMINAL_CAPTURE\"\n"));
+    for (const auto& name : {QStringLiteral("claude"), QStringLiteral("codex"),
+                             QStringLiteral("agy"), QStringLiteral("grok")}) {
+        QVERIFY(executable(name, "#!/bin/sh\nexit 0\n"));
+    }
+    const auto oldPath = qgetenv("PATH"), oldCapture = qgetenv("CLARP_TEST_TERMINAL_CAPTURE");
+    const auto oldBase = qgetenv("CLARP_BASE_URL"), oldToken = qgetenv("CLARP_TOKEN");
+    const auto restore = qScopeGuard([&] {
+        qputenv("PATH", oldPath); qputenv("CLARP_TEST_TERMINAL_CAPTURE", oldCapture);
+        qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken);
+    });
+    qputenv("PATH", directory.path().toUtf8());
+    qputenv("CLARP_TEST_TERMINAL_CAPTURE", capture.toUtf8());
+    qputenv("CLARP_BASE_URL", "http://127.0.0.1:1");
+    qputenv("CLARP_TOKEN", "terminal-fixture");
+    AppController controller;
+    controller.setSharedFilesystem(true);
+    for (const auto& backend : {QStringLiteral("claude"), QStringLiteral("codex"),
+                                QStringLiteral("agy"), QStringLiteral("grok")}) {
+        QFile::remove(capture);
+        controller.agents()->applySnapshot({{QStringLiteral("agents"), QJsonArray{QJsonObject{
+            {QStringLiteral("agent_id"), QStringLiteral("agent-terminal")},
+            {QStringLiteral("session"), QStringLiteral("agent")},
+            {QStringLiteral("persona"), QStringLiteral("Agent")},
+            {QStringLiteral("backend"), backend},
+            {QStringLiteral("cwd"), workspace},
+            {QStringLiteral("conversation_id"), QStringLiteral("native-session;literal")},
+        }}}});
+        controller.openAgentTerminal(QStringLiteral("agent"));
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(capture).size() > 0, 3000);
+        QFile file(capture);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto arguments = QString::fromUtf8(file.readAll()).split(u'\n', Qt::SkipEmptyParts);
+        QCOMPARE(arguments, QStringList({workspace, QStringLiteral("--dir=") + workspace,
+            QStringLiteral("--title=Agent — ") + backend, QStringLiteral("--"),
+            QStringLiteral("env"), QStringLiteral("-u"), QStringLiteral("CLARP_TOKEN"),
+            QStringLiteral("CLAUDE_PWA_SESSION=agent"),
+            directory.filePath(backend), backend == QStringLiteral("codex") ? QStringLiteral("resume")
+                : backend == QStringLiteral("agy") ? QStringLiteral("--conversation") : QStringLiteral("--resume"),
+            QStringLiteral("native-session;literal")}));
+    }
+    QFile::remove(capture);
+    controller.setSharedFilesystem(false);
+    controller.openAgentTerminal(QStringLiteral("agent"));
+    QVERIFY(!QFileInfo::exists(capture));
 }
 
 void NativeCoreTest::markdownParagraphsBecomeVisibleDisplayBlocks() {

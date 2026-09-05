@@ -126,7 +126,7 @@ Rectangle {
                             onTriggered: root.controller.openAgentFiles(root.session)
                         }
                         MenuItem {
-                            text: "Open terminal"
+                            text: "Open agent in terminal"
                             onTriggered: root.controller.openAgentTerminal(root.session)
                         }
                         MenuItem {

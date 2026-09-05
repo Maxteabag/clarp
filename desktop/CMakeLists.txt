@@ -51,6 +51,8 @@ add_executable(clarp-desktop)
 
 target_sources(clarp-desktop PRIVATE
     src/main.cpp
+    src/terminal/TerminalLaunch.cpp
+    src/terminal/TerminalLaunch.h
     src/app/AppController.cpp
     src/app/AppController.h
     src/app/CredentialStore.cpp

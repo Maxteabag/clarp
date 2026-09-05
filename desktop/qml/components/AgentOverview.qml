@@ -11,6 +11,7 @@ Rectangle {
     property string confirmRelease: ""
     signal closeRequested
     signal startRequested(string name)
+    signal quickStartRequested(string name)
     signal relaunchRequested(string session, string name)
     signal voiceRequested(string session, string name)
     signal orchestratorRequested
@@ -433,7 +434,7 @@ Rectangle {
                         required property string name
                         required property string description
                         required property string avatarSymbol
-                        width: 210
+                        width: 280
                         height: ListView.view.height
                         radius: 4
                         color: "#1c1d28"
@@ -467,17 +468,18 @@ Rectangle {
                                 }
                                 Text {
                                     Layout.fillWidth: true
-                                    text: contactCard.description || "Ready to start"
+                                    text: root.controller.quickStartBackend() + " · " + root.controller.lastWorkingDirectory
                                     color: "#746d7a"
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
                             }
                             Button {
-                                text: "Start"
+                                text: root.controller.startingContact === contactCard.name ? "Starting…" : "Start"
+                                enabled: root.controller.startingContact.length === 0
                                 implicitWidth: 62
                                 implicitHeight: 28
-                                onClicked: root.startRequested(contactCard.name)
+                                onClicked: root.quickStartRequested(contactCard.name)
                             }
                         }
                     }

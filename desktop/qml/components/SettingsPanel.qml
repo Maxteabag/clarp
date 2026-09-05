@@ -145,6 +145,8 @@ Rectangle {
             SettingsGroup {
                 title: "KEYBOARD"
                 SettingsInfo { label: "Command palette"; value: "Ctrl+K" }
+                SettingsInfo { label: "Open native CLI"; value: "Ctrl+Alt+T" }
+                SettingsInfo { label: "Start idle contact"; value: "Ctrl+Alt+N" }
                 SettingsInfo { label: "Show / hide sidebar"; value: "Ctrl+B" }
                 SettingsInfo { label: "Move between panes"; value: "Ctrl+Alt+Arrow" }
                 SettingsInfo { label: "Split right / down"; value: "Ctrl+Alt+V / S" }

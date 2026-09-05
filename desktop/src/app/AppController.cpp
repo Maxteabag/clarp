@@ -1,4 +1,5 @@
 #include "app/AppController.h"
+#include "terminal/TerminalLaunch.h"
 
 #include <QDir>
 #include <QFile>
@@ -13,6 +14,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSaveFile>
+#include <QStandardPaths>
 #include <QUrlQuery>
 #include <QUuid>
 #include <algorithm>
@@ -295,6 +297,54 @@ QVariantList AppController::favoritePaths() const { return m_favoritePaths; }
 QString AppController::lastWorkingDirectory() const { return m_lastWorkingDirectory; }
 
 QString AppController::lastBackend() const { return m_lastBackend; }
+QString AppController::startingContact() const { return m_startingContact; }
+QString AppController::quickStartBackend() const {
+    return !m_lastBackend.isEmpty() ? m_lastBackend
+        : !selectedBackend().isEmpty() ? selectedBackend() : QStringLiteral("claude");
+}
+
+QVariantList AppController::matchingContacts(const QString& query) const {
+    QVariantList result;
+    const QString needle = query.trimmed();
+    for (int row = 0; row < m_contacts.rowCount(); ++row) {
+        const QModelIndex index = m_contacts.index(row, 0);
+        const QString name = m_contacts.data(index, ContactListModel::NameRole).toString();
+        if (!name.contains(needle, Qt::CaseInsensitive)) continue;
+        result.append(QVariantMap{{QStringLiteral("name"), name},
+            {QStringLiteral("description"), m_contacts.data(index, ContactListModel::DescriptionRole)},
+            {QStringLiteral("symbol"), m_contacts.data(index, ContactListModel::AvatarSymbolRole)}});
+    }
+    return result;
+}
+
+bool AppController::quickStartContact(const QString& name) {
+    if (!m_startingContact.isEmpty()) return false;
+    if (!connected()) {
+        setErrorMessage(QStringLiteral("Connect to the Host before starting a contact"));
+        return false;
+    }
+    QString contactName;
+    for (const QVariant& value : matchingContacts(name)) {
+        const QString candidate = value.toMap().value(QStringLiteral("name")).toString();
+        if (candidate.compare(name.trimmed(), Qt::CaseInsensitive) == 0) {
+            contactName = candidate;
+            break;
+        }
+    }
+    if (contactName.isEmpty()) {
+        setErrorMessage(QStringLiteral("This contact is no longer idle; choose its existing chat"));
+        return false;
+    }
+    setErrorMessage({});
+    m_startingContact = contactName;
+    emit contactLaunchChanged();
+    m_api.postJson(QStringLiteral("contact-create"), QStringLiteral("/agents"),
+        {{QStringLiteral("name"), contactName},
+         {QStringLiteral("cwd"), m_lastWorkingDirectory.isEmpty() ? QStringLiteral("~") : m_lastWorkingDirectory},
+         {QStringLiteral("backend"), quickStartBackend()},
+         {QStringLiteral("synthesize_audio"), !m_muted}});
+    return true;
+}
 
 bool AppController::hasStoredCredential() const { return m_hasStoredCredential; }
 
@@ -625,6 +675,8 @@ void AppController::reconnect() {
 }
 
 void AppController::resetTransientRequestState() {
+    m_startingContact.clear();
+    emit contactLaunchChanged();
     for (const QString& session : std::as_const(m_logRequestsInFlight)) {
         if (ConversationModel* model = m_conversations.value(session, nullptr)) {
             model->setLoading(false);
@@ -1632,6 +1684,22 @@ void AppController::openAgentFiles(const QString& session) {
 }
 
 void AppController::openAgentTerminal(const QString& session) {
+    if (!m_sharedFilesystem) {
+        setErrorMessage(QStringLiteral("The native CLI requires this desktop and Host to share the local filesystem"));
+        return;
+    }
+    const Agent* agent = m_agents.find(session);
+    if (agent == nullptr) return;
+    const TerminalLaunch launch = nativeTerminalLaunch(*agent);
+    if (!launch.error.isEmpty()) {
+        setErrorMessage(launch.error);
+        return;
+    }
+    const QString program = QStandardPaths::findExecutable(launch.program);
+    if (program.isEmpty()) {
+        setErrorMessage(QStringLiteral("%1 is not installed on this desktop").arg(launch.program));
+        return;
+    }
     const QString path = agentWorkingDirectory(session);
     const QFileInfo info(path);
     if (path.isEmpty() || !info.exists() || !info.isDir()) {
@@ -1639,9 +1707,22 @@ void AppController::openAgentTerminal(const QString& session) {
         return;
     }
     const QString directory = info.canonicalFilePath();
-    if (!QProcess::startDetached(QStringLiteral("xdg-terminal-exec"), {}, directory) &&
-        !QProcess::startDetached(QStringLiteral("x-terminal-emulator"), {}, directory)) {
-        setErrorMessage(QStringLiteral("No desktop terminal launcher was found"));
+    QStringList command{QStringLiteral("env"), QStringLiteral("-u"), QStringLiteral("CLARP_TOKEN"),
+                        QStringLiteral("CLAUDE_PWA_SESSION=") + session, program};
+    command.append(launch.arguments);
+    QStringList arguments{QStringLiteral("--dir=") + directory,
+                          QStringLiteral("--title=") + displayName(*agent) + QStringLiteral(" — ") + launch.program,
+                          QStringLiteral("--")};
+    arguments.append(command);
+    if (!QStandardPaths::findExecutable(QStringLiteral("xdg-terminal-exec")).isEmpty()) {
+        if (!QProcess::startDetached(QStringLiteral("xdg-terminal-exec"), arguments, directory)) {
+            setErrorMessage(QStringLiteral("Could not start the default terminal"));
+        }
+        return;
+    }
+    command.prepend(QStringLiteral("-e"));
+    if (!QProcess::startDetached(QStringLiteral("x-terminal-emulator"), command, directory)) {
+        setErrorMessage(QStringLiteral("No default terminal launcher was found"));
     }
 }
 
@@ -2337,11 +2418,16 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         requestDelta(m_deliverySessions.value(tag.sliced(5), m_selectedSession));
         return;
     }
-    if (tag.startsWith(QStringLiteral("agent-create:"))) {
+    if (tag.startsWith(QStringLiteral("agent-create:")) || tag == QStringLiteral("contact-create")) {
+        if (tag == QStringLiteral("contact-create")) {
+            m_startingContact.clear();
+            emit contactLaunchChanged();
+        }
         const QString session = object.value(QStringLiteral("session")).toString();
         requestSnapshot();
         if (!session.isEmpty()) {
             selectSession(session);
+            requestComposerFocus(m_panes.activePaneId());
         }
         emit agentMutationSucceeded(session);
         return;
@@ -2467,6 +2553,10 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
 
 void AppController::handleRequestFailure(const QString& tag, const QString& message,
                                          int statusCode) {
+    if (tag == QStringLiteral("contact-create")) {
+        m_startingContact.clear();
+        emit contactLaunchChanged();
+    }
     if (tag == QStringLiteral("settings-action:tts")) {
         m_settingsStatusPending = std::max(0, m_settingsStatusPending - 1);
         emit settingsStatusChanged();

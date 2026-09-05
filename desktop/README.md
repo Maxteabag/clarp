@@ -73,6 +73,18 @@ the command palette's **Hide sidebar** / **Show sidebar** use the same toggle.
 The expanded sidebar starts at 232 logical pixels; dragging its divider saves
 your preferred width across hiding and relaunching.
 
+`Ctrl+Alt+T` opens the active agent in the OS's default terminal window, using
+its working directory and exact native conversation ID. Claude, Codex, AGY,
+and Grok run their own interactive interfaces. This requires a local/shared
+filesystem Host and the corresponding CLI installed on the desktop. Chat
+continues independently; reopening the terminal picks up later chat changes.
+
+To start an idle contact, press `Ctrl+Alt+N` for the idle-contact picker, or
+press `Ctrl+K`, type their name, and select **Start
+<name>**. The row shows the saved backend and folder. **Start** in the ready
+contacts view does the same one-step fresh launch; use `Ctrl+N` to change launch
+options. The new chat receives typing focus after creation.
+
 ## Quality gates
 
 ```bash

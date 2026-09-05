@@ -11,10 +11,14 @@ Rectangle {
     property string query: ""
     property bool restoreComposer: false
     property bool sidebarVisible: true
+    property bool contactsOnly: false
     signal commandRequested(string action)
     signal agentRequested(string session)
+    signal contactRequested(string name)
     readonly property var commands: [
         { kind: "command", label: "New agent", action: "new", key: "Ctrl+N", group: "agent" },
+        { kind: "command", label: "Start an idle contact", action: "new-contact", key: "Ctrl+Alt+N", group: "agent" },
+        { kind: "command", label: "Open agent in terminal", action: "agent-terminal", key: "Ctrl+Alt+T", group: "agent" },
         { kind: "command", label: "Split right", action: "split-right", key: "Ctrl+Alt+V", group: "layout" },
         { kind: "command", label: "Split down", action: "split-down", key: "Ctrl+Alt+S", group: "layout" },
         { kind: "command", label: "Close pane", action: "close-pane", key: "Ctrl+Alt+X", group: "layout" },
@@ -39,6 +43,9 @@ Rectangle {
     ]
     readonly property var results: {
         controller.agentRevision;
+        controller.contacts.count;
+        controller.lastBackend;
+        controller.selectedSession;
         const needle = query.trim().toLowerCase();
         const commandRows = root.commands.filter(command => needle.length === 0
             || (command.label + " " + command.group + " " + command.key).toLowerCase().includes(needle));
@@ -51,15 +58,29 @@ Rectangle {
             busy: Boolean(agent.busy),
             unread: Boolean(agent.unread)
         }));
-        return commandRows.concat(agentRows);
+        const contactRows = controller.matchingContacts(query).map(contact => ({
+            kind: "contact", name: String(contact.name),
+            backend: controller.quickStartBackend(),
+            directory: controller.lastWorkingDirectory || "~"
+        }));
+        if (root.contactsOnly) return contactRows;
+        return needle.length > 0 ? agentRows.concat(contactRows, commandRows)
+            : commandRows.concat(agentRows, contactRows);
     }
     color: "#aa08090f"
 
     function open(returnToComposer) {
+        contactsOnly = false;
         restoreComposer = Boolean(returnToComposer);
         query = "";
         visible = true;
         search.forceActiveFocus();
+    }
+
+    function openContacts(returnToComposer) {
+        open(returnToComposer);
+        contactsOnly = true;
+        resultList.currentIndex = root.results.length > 0 ? 0 : -1;
     }
 
     function close(restoreFocus) {
@@ -76,9 +97,16 @@ Rectangle {
         const item = results[index];
         let shouldRestore = root.restoreComposer;
         if (String(item.kind) === "command") {
+            if (String(item.action) === "new-contact") {
+                root.openContacts(root.restoreComposer);
+                return;
+            }
             root.commandRequested(String(item.action));
             if (["new", "overview", "connection", "orchestrator", "updates", "teams", "settings"].includes(String(item.action)))
                 shouldRestore = false;
+        } else if (String(item.kind) === "contact") {
+            root.contactRequested(String(item.name));
+            shouldRestore = true;
         } else {
             root.agentRequested(String(item.session));
         }
@@ -115,7 +143,7 @@ Rectangle {
                 Layout.fillWidth: true
                 text: root.query
                 Layout.preferredHeight: 43
-                placeholderText: "Agent or command"
+                placeholderText: root.contactsOnly ? "Start an idle contact" : "Agent, contact or command"
                 font.family: "JetBrains Mono"
                 font.pixelSize: 14
                 leftPadding: 12
@@ -199,9 +227,9 @@ Rectangle {
                                 fallbackColor: "#414458"
                             }
                             Text {
-                                visible: String(resultRow.modelData.kind) === "command"
+                                visible: String(resultRow.modelData.kind) !== "agent"
                                 anchors.centerIn: parent
-                                text: "›"
+                                text: String(resultRow.modelData.kind) === "contact" ? "+" : "›"
                                 color: "#8589a5"
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 15
@@ -212,15 +240,21 @@ Rectangle {
                             spacing: 1
                             Text {
                                 text: String(resultRow.modelData.kind) === "command"
-                                    ? String(resultRow.modelData.label) : String(resultRow.modelData.name)
+                                    ? String(resultRow.modelData.label)
+                                    : (String(resultRow.modelData.kind) === "contact" ? "Start " : "")
+                                        + String(resultRow.modelData.name)
                                 color: "#c6c8dc"
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 12
                                 font.weight: Font.Medium
                             }
                             Text {
-                                visible: String(resultRow.modelData.kind) === "agent"
-                                text: String(resultRow.modelData.backend) + "  ·  " + String(resultRow.modelData.session)
+                                visible: String(resultRow.modelData.kind) !== "command"
+                                text: String(resultRow.modelData.kind) === "contact"
+                                    ? "New session · " + String(resultRow.modelData.backend) + " · " + String(resultRow.modelData.directory)
+                                    : String(resultRow.modelData.backend) + " · " + String(resultRow.modelData.session)
+                                Layout.fillWidth: true
+                                elide: Text.ElideMiddle
                                 color: "#62657b"
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 11
@@ -262,7 +296,7 @@ Rectangle {
             Text {
                 visible: root.results.length === 0
                 Layout.alignment: Qt.AlignHCenter
-                text: "No matching agent"
+                text: root.contactsOnly ? "No idle contacts" : "No matching agent or contact"
                 color: "#62657b"
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12

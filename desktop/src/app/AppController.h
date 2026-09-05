@@ -51,6 +51,7 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList favoritePaths READ favoritePaths NOTIFY pathsChanged)
     Q_PROPERTY(QString lastWorkingDirectory READ lastWorkingDirectory NOTIFY launchDefaultsChanged)
     Q_PROPERTY(QString lastBackend READ lastBackend NOTIFY launchDefaultsChanged)
+    Q_PROPERTY(QString startingContact READ startingContact NOTIFY contactLaunchChanged)
     Q_PROPERTY(bool hasStoredCredential READ hasStoredCredential NOTIFY hasStoredCredentialChanged)
     Q_PROPERTY(QString baseUrl READ baseUrl WRITE setBaseUrl NOTIFY baseUrlChanged)
     Q_PROPERTY(QString selectedSession READ selectedSession NOTIFY selectedSessionChanged)
@@ -218,6 +219,10 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] QString teamNameById(const QString& teamId) const;
     Q_INVOKABLE [[nodiscard]] QVariantList teamAgentChoices() const;
     Q_INVOKABLE [[nodiscard]] QVariantList matchingAgents(const QString& query) const;
+    Q_INVOKABLE [[nodiscard]] QVariantList matchingContacts(const QString& query) const;
+    Q_INVOKABLE [[nodiscard]] QString quickStartBackend() const;
+    Q_INVOKABLE bool quickStartContact(const QString& name);
+    [[nodiscard]] QString startingContact() const;
     Q_INVOKABLE [[nodiscard]] QVariantList modelsForBackend(const QString& backend) const;
     Q_INVOKABLE [[nodiscard]] QVariantList effortsForModel(const QString& backend,
                                                            const QString& model) const;
@@ -326,6 +331,7 @@ class AppController : public QObject {
     void pastSessionsChanged();
     void pathsChanged();
     void launchDefaultsChanged();
+    void contactLaunchChanged();
     void hasStoredCredentialChanged();
     void composerFocusPaneChanged();
     void composerRevisionChanged();
@@ -396,6 +402,7 @@ class AppController : public QObject {
     QVariantList m_availableMcpServers;
     QString m_lastWorkingDirectory;
     QString m_lastBackend;
+    QString m_startingContact;
     QString m_orchestratorLastDecision;
     QString m_composerFocusPane;
     QString m_sharedFilesystemHostOverride;

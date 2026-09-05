@@ -38,6 +38,7 @@ Rectangle {
 
     implicitHeight: 54 + (transcriptionCount > 0 ? 25 : 0)
         + (queueCount > 0 ? 25 : 0) + (attachments.length > 0 ? 31 : 0)
+        + (root.active && root.controller.startingContact.length > 0 ? 25 : 0)
     color: root.active ? "#14161f" : "#12141b"
     border.color: root.active ? "#454b6c" : "#272a39"
     border.width: 0
@@ -86,6 +87,15 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: 7
         spacing: 7
+
+        Text {
+            visible: root.active && root.controller.startingContact.length > 0
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? 19 : 0
+            text: "Starting " + root.controller.startingContact + "…"
+            color: "#b9bfdf"
+            font.pixelSize: 12
+        }
 
         RowLayout {
             visible: root.transcriptionCount > 0
@@ -236,6 +246,7 @@ Rectangle {
                     ? "Type to " + root.controller.agentName(root.session) + "…"
                     : "Choose an agent"
                 enabled: root.active && root.session.length > 0
+                    && root.controller.startingContact.length === 0
                 opacity: root.active ? 1 : 0.58
                 wrapMode: TextArea.Wrap
                 color: "#c7c9dc"
