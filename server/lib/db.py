@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 70
+_SCHEMA_VERSION = 71
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -612,7 +612,10 @@ CREATE TABLE teams (
     updated_at INTEGER NOT NULL,
     archived_at INTEGER,
     nudge_enabled INTEGER NOT NULL DEFAULT 1,
-    leader_agent_id TEXT
+    leader_agent_id TEXT,
+    parent_team_id TEXT,
+    leader_enabled INTEGER NOT NULL DEFAULT 0,
+    communication_enabled INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_teams_active ON teams(archived_at, updated_at DESC);
 
@@ -1343,6 +1346,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v66(con)
             if version < 70:
                 _migrate_to_v70(con)
+            if version < 71:
+                _migrate_to_v71(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1664,3 +1669,16 @@ CREATE INDEX vocab_runs_recent ON vocab_runs(created_at DESC);
 CREATE INDEX vocab_runs_trace ON vocab_runs(trace_id)
     WHERE trace_id <> '';
 """
+
+
+def _migrate_to_v71(con: sqlite3.Connection) -> None:
+    """Preserve existing coordination; newly created teams are passive groups."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(teams)")}
+    for definition in ("parent_team_id TEXT", "leader_enabled INTEGER NOT NULL DEFAULT 0",
+                       "communication_enabled INTEGER NOT NULL DEFAULT 0"):
+        if definition.split()[0] not in columns:
+            con.execute(f"ALTER TABLE teams ADD COLUMN {definition}")
+    if "communication_enabled" not in columns:
+        con.execute("UPDATE teams SET communication_enabled = 1")
+    if "leader_enabled" not in columns:
+        con.execute("UPDATE teams SET leader_enabled = CASE WHEN COALESCE(leader_agent_id, '') != '' THEN 1 ELSE 0 END")

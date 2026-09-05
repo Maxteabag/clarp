@@ -419,7 +419,7 @@ def test_team_action_wakes_dormant_heartbeat(monkeypatch):
     _heartbeat_test_env(monkeypatch, dormant_after=3)
     aid = _agent("domi")
     teammate = _agent("lena")
-    team = team_store.create_team("iOS Development")
+    team = team_store.create_team("iOS Development", communication_enabled=True)
     assert team_store.add_member(team["team_id"], aid)
     assert team_store.add_member(team["team_id"], teammate)
     sent: list[tuple[str, str]] = []
@@ -445,7 +445,7 @@ def test_peer_tool_chatter_does_not_wake_dormant_heartbeat(monkeypatch):
     aid = _agent("domi")
     teammate = _agent("lena")
     teammate_backend = f"bs-{teammate}"
-    team = team_store.create_team("iOS Development")
+    team = team_store.create_team("iOS Development", communication_enabled=True)
     assert team_store.add_member(team["team_id"], aid)
     assert team_store.add_member(team["team_id"], teammate)
     sent: list[tuple[str, str]] = []

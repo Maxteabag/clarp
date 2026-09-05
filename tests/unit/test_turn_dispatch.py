@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ from lib import tts_queue
 from lib.protocol import AgentState
 from lib.turn_dispatch import (
     MAX_ATTEMPTS,
+    DispatchError,
     TurnDispatchService,
     _spoken_failure_text,
     clear_for_agent,
@@ -331,6 +333,10 @@ def test_session_bind_conflict_does_not_propagate_or_retry(tmp_path):
 
 def test_automation_prompts_append_tagged_user_rows(tmp_path):
     service, _backends, agent_id = _make_service(tmp_path)
+    team = team_store.create_team("Ops")
+    team_store.add_member(team["team_id"], agent_id)
+    team_store.set_leader(team["team_id"], agent_id)
+    team_store.set_nudge_enabled(team["team_id"], True)
 
     service.dispatch(
         text=heartbeat.HEARTBEAT_PROMPT, requested_session="mike",
@@ -358,7 +364,7 @@ def test_leader_heartbeat_dispatch_uses_lean_team_protocol(tmp_path):
         persona="Omar", voice_id="V", cwd=str(tmp_path),
         session="omar", backend="claude",
     )
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], leader_id)
     team_store.add_member(team["team_id"], worker_id)
     team_store.set_leader(team["team_id"], leader_id)
@@ -386,7 +392,7 @@ def test_dispatch_injects_pending_team_digest_without_showing_it(tmp_path):
         persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel"
     )
     agents_db.start_runtime(rachel_id, "rachel")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], mike_id)
     team_store.add_member(team["team_id"], rachel_id)
     team_store.capture_assistant_message(
@@ -1248,3 +1254,27 @@ def test_strict_runtime_cancellation_accepts_reaped_recovery_work(tmp_path, monk
         assert not coordinator.recovering
     finally:
         runtime.server_close()
+
+
+def test_disabled_leader_tick_is_rejected_before_spawn(tmp_path):
+    service, backend, agent_id = _make_service(tmp_path)
+    with pytest.raises(DispatchError, match="disabled"):
+        service.dispatch(text=team_leader.TICK_PROMPT, requested_session="mike",
+                         trace_id="disabled", synthesize_audio=False, origin="leader_tick")
+    assert backend.spawned == []
+
+
+def test_retry_refreshes_team_context_after_communication_disabled(tmp_path):
+    scheduled = []
+    service, backend, agent_id = _make_service(tmp_path, retry_scheduler=lambda _, fn: scheduled.append(fn))
+    team = team_store.create_team("Ops", communication_enabled=True)
+    team_store.add_member(team["team_id"], agent_id)
+    service.dispatch(text="hello", requested_session="mike", trace_id="retry-team", synthesize_audio=False)
+    _, first = backend.spawned[0]
+    assert "Team feed" in first["text"]
+    team_store.update_team(team["team_id"], communication_enabled=False)
+    first["on_error"]("read ECONNRESET")
+    assert scheduled
+    scheduled.pop(0)()
+    assert len(backend.spawned) == 2
+    assert backend.spawned[1][1]["text"] == "hello"
