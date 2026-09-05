@@ -63,6 +63,11 @@ PRAGMA user_version = 66;
 def test_v66_approval_migration_preserves_rows_and_matches_fresh_tables(tmp_path):
     con = sqlite3.connect(tmp_path / "old.sqlite", isolation_level=None)
     con.row_factory = sqlite3.Row
+    # Keep the other Host tables present: later migrations may upgrade them.
+    # Only the approval tables are intentionally downgraded by this fixture.
+    db._migrate(con)
+    for table in ("decision_deliveries", "artifact_decisions", "artifacts"):
+        con.execute(f"DROP TABLE {table}")
     con.executescript(_LEGACY_TABLES)
     for status in ("pending", "accepted", "rejected", "expired"):
         con.execute("""INSERT INTO artifacts(artifact_id,agent_id,session,type,title,status,created_at,updated_at)
@@ -224,7 +229,7 @@ def test_overlap_versions_reconcile_attention_without_touching_unrelated_data(tm
     con = _legacy_host(tmp_path, version, attention_shape)
     before = _unrelated_snapshot(con)
     db._migrate(con)
-    assert con.execute("PRAGMA user_version").fetchone()[0] == 70
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     assert _unrelated_snapshot(con) == before
     fresh = db.conn()
     for table in ("artifacts", "artifact_decisions", "decision_deliveries"):
@@ -251,7 +256,7 @@ def test_overlap_versions_reconcile_attention_without_touching_unrelated_data(tm
     con.execute("PRAGMA user_version=69")
     before_rerun = con.total_changes
     db._migrate(con)
-    assert con.execute("PRAGMA user_version").fetchone()[0] == 70
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     assert con.total_changes == before_rerun and _unrelated_snapshot(con) == before
     assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     con.close()
@@ -263,7 +268,7 @@ def test_split_v68_variants_keep_their_existing_unrelated_columns(tmp_path, v68_
     before = _unrelated_snapshot(con)
     db._migrate(con)
     assert _unrelated_snapshot(con) == before
-    assert con.execute("PRAGMA user_version").fetchone()[0] == 70
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     assert "archived_at" in _column_contract(con, "artifacts")
     assert "response_type" in _column_contract(con, "artifact_decisions")
     con.close()
@@ -271,10 +276,10 @@ def test_split_v68_variants_keep_their_existing_unrelated_columns(tmp_path, v68_
 
 def test_future_database_version_is_never_downgraded_or_mutated(tmp_path):
     con = _legacy_host(tmp_path, 69, "complete")
-    con.execute("PRAGMA user_version=71")
+    con.execute(f"PRAGMA user_version={db._SCHEMA_VERSION + 1}")
     before = con.total_changes
     db._migrate(con)
-    assert con.execute("PRAGMA user_version").fetchone()[0] == 71
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION + 1
     assert con.total_changes == before
     con.close()
 
