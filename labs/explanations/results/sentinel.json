@@ -1,0 +1,10 @@
+{
+  "kind": "instruction_sanity_check_not_in_benchmark_tables",
+  "model": "gpt-5.3-codex-spark",
+  "effort": "low",
+  "instruction": "For every supplied ID the text must be exactly: Inspect the evidence. Return the requested JSON. Do not describe the command. Use no tools.",
+  "answer": "Inspect the evidence. Return the requested JSON.",
+  "total_ms": 3477.81,
+  "thread_started_ms": 281.62,
+  "interpretation": "The custom instruction influenced output, but this ambiguously delimited sentinel was not an exact-compliance or semantic-quality test."
+}
