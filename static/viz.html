@@ -1,0 +1,207 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Clarp · fleet map</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#0b0d12; color:#e6e9ef; overflow:hidden;
+         font:13px/1.4 ui-sans-serif,system-ui,-apple-system,sans-serif; }
+  canvas { display:block; touch-action:none; cursor:grab; }
+  canvas.drag { cursor:grabbing; }
+  #hud { position:fixed; left:12px; top:10px; pointer-events:none;
+         text-shadow:0 1px 3px #000; }
+  #hud b { font-weight:600; font-size:15px; letter-spacing:.02em; }
+  #hud span { opacity:.55; }
+  #bar { position:fixed; left:0; right:0; bottom:0; padding:10px 14px 12px;
+         display:flex; gap:12px; align-items:center;
+         background:linear-gradient(transparent,#0b0d12 55%); }
+  #t { flex:1; accent-color:#6ea8fe; }
+  #clock { font-variant-numeric:tabular-nums; opacity:.8; min-width:8.5em; }
+  button { background:#1a1f2b; color:#e6e9ef; border:1px solid #2b3242;
+           border-radius:6px; padding:5px 11px; font:inherit; cursor:pointer; }
+  button[aria-pressed=true] { background:#2b3a5c; border-color:#4a6ba8; }
+  #legend { position:fixed; right:12px; top:10px; text-align:right;
+            line-height:1.7; pointer-events:none; }
+  #legend i { display:inline-block; width:8px; height:8px; border-radius:2px;
+              margin-left:6px; vertical-align:middle; }
+</style>
+<canvas id="c"></canvas>
+<div id="hud"><b>fleet map</b> <span id="stat">loading…</span></div>
+<div id="legend"></div>
+<div id="bar">
+  <button id="live" aria-pressed="true">live</button>
+  <input id="t" type="range" min="0" max="1000" value="1000">
+  <span id="clock"></span>
+</div>
+<script type="module">
+// Verb -> colour. The palette is the vocabulary: an unknown verb falls back to
+// grey rather than being dropped, so a new tool is visible before it is named.
+const VERB = {
+  read:'#5b8def', search:'#43b0c4', write:'#e0a33e', vcs:'#8f7ae6',
+  push:'#ff5c8a', github:'#c9d1d9', build:'#4fb477', test:'#4fb477',
+  query:'#c48ad1', message:'#ff9f43', spawn:'#ffd166', ops:'#7d8799',
+  network:'#43b0c4', clarp:'#6ea8fe', media:'#e06fa8', review:'#a0a7b4',
+};
+const dflt = '#5a6472';
+const col = v => VERB[v] || dflt;
+
+const cv = document.getElementById('c'), cx = cv.getContext('2d');
+const stat = document.getElementById('stat'), clock = document.getElementById('clock');
+const slider = document.getElementById('t'), liveBtn = document.getElementById('live');
+let W=0, H=0, DPR=1;
+function size(){ DPR=Math.min(devicePixelRatio||1,2); W=innerWidth; H=innerHeight;
+  cv.width=W*DPR; cv.height=H*DPR; cx.setTransform(DPR,0,0,DPR,0,0); }
+size(); addEventListener('resize', size);
+
+document.getElementById('legend').innerHTML = Object.keys(VERB)
+  .map(v=>`${v}<i style="background:${col(v)}"></i>`).join('<br>');
+
+// ---- world ---------------------------------------------------------------
+const nodes = new Map();     // id -> {id,kind,x,y,vx,vy,r,agent,events}
+let pulses = [];             // in-flight particles
+let view = {x:0, y:0, k:1};  // pan/zoom
+let events = [], cursor = 0, live = true, windowMs = 3600e3, tMin=0, tMax=0;
+
+function ensure(id, isAgent, weight){
+  let n = nodes.get(id);
+  if(!n){
+    const a = Math.random()*Math.PI*2, rad = isAgent ? 90 : 260;
+    n = {id, agent:isAgent, x:Math.cos(a)*rad, y:Math.sin(a)*rad,
+         vx:0, vy:0, events:0, hot:0};
+    nodes.set(id, n);
+  }
+  n.events += weight||0;
+  return n;
+}
+
+// ---- physics -------------------------------------------------------------
+// Layout is emergent, not authored: agents are pulled toward the targets they
+// touch, so anyone working the same repo drifts into the same cluster.
+const links = new Map();     // "agent|node" -> strength
+function link(a,b){ const k=a+'|'+b; links.set(k,(links.get(k)||0)+1); }
+
+function step(){
+  const arr=[...nodes.values()];
+  for(const n of arr){
+    // repulsion
+    for(const m of arr){
+      if(m===n) continue;
+      let dx=n.x-m.x, dy=n.y-m.y, d2=dx*dx+dy*dy;
+      if(d2<1) { dx=Math.random()-.5; dy=Math.random()-.5; d2=1; }
+      if(d2<90000){ const f=1400/d2; n.vx+=dx*f; n.vy+=dy*f; }
+    }
+    // gravity to origin keeps the graph on screen
+    n.vx -= n.x*0.0016; n.vy -= n.y*0.0016;
+  }
+  for(const [k,s] of links){
+    const [a,b]=k.split('|'); const A=nodes.get(a), B=nodes.get(b);
+    if(!A||!B) continue;
+    const dx=B.x-A.x, dy=B.y-A.y, d=Math.hypot(dx,dy)||1;
+    const rest=150, f=(d-rest)*0.0022*Math.min(s,12)/12;
+    A.vx+=dx/d*f; A.vy+=dy/d*f; B.vx-=dx/d*f; B.vy-=dy/d*f;
+  }
+  for(const n of arr){ n.vx*=0.86; n.vy*=0.86; n.x+=n.vx; n.y+=n.vy;
+                       n.hot*=0.94; }
+}
+
+// ---- drawing -------------------------------------------------------------
+function radius(n){ return n.agent ? 13+Math.min(n.events,60)*0.11
+                                   : 6+Math.min(n.events,300)*0.035; }
+function draw(){
+  cx.clearRect(0,0,W,H);
+  cx.save(); cx.translate(W/2+view.x, H/2+view.y); cx.scale(view.k, view.k);
+
+  cx.lineWidth=1;
+  for(const [k] of links){
+    const [a,b]=k.split('|'); const A=nodes.get(a), B=nodes.get(b);
+    if(!A||!B) continue;
+    cx.strokeStyle='rgba(120,140,180,0.10)';
+    cx.beginPath(); cx.moveTo(A.x,A.y); cx.lineTo(B.x,B.y); cx.stroke();
+  }
+  for(const p of pulses){
+    const A=nodes.get(p.a), B=nodes.get(p.b); if(!A||!B) continue;
+    const t=p.t, x=A.x+(B.x-A.x)*t, y=A.y+(B.y-A.y)*t;
+    cx.globalAlpha=Math.min(1,(1-t)*2.2);
+    cx.fillStyle=p.c; cx.beginPath(); cx.arc(x,y,2.6,0,7); cx.fill();
+    cx.globalAlpha=1;
+  }
+  for(const n of nodes.values()){
+    const r=radius(n);
+    if(n.hot>0.05){
+      cx.fillStyle=`rgba(180,205,255,${0.16*n.hot})`;
+      cx.beginPath(); cx.arc(n.x,n.y,r+9*n.hot,0,7); cx.fill();
+    }
+    cx.fillStyle = n.agent ? '#dfe6f5'
+                 : n.id.includes(':') ? '#3d5a8a' : '#242a36';
+    cx.strokeStyle = n.agent ? '#8fa9d8' : '#4a5568';
+    cx.beginPath(); cx.arc(n.x,n.y,r,0,7); cx.fill();
+    if(n.agent || n.id.includes(':')){
+      cx.fillStyle = n.agent ? '#0b0d12' : '#cfe0ff';
+      cx.font = n.agent ? '600 10px ui-sans-serif' : '9px ui-sans-serif';
+      cx.textAlign='center'; cx.textBaseline='middle';
+      const label = n.agent ? n.id : n.id.split(':').pop();
+      if(n.agent) cx.fillText(label.slice(0,7), n.x, n.y);
+      else cx.fillText(label.slice(0,14), n.x, n.y+r+9);
+    }
+  }
+  cx.restore();
+}
+
+// ---- clock / replay ------------------------------------------------------
+function emit(ev){
+  const A=ensure(ev.agent,true,1), B=ensure(ev.target,false,1);
+  link(ev.agent, ev.target);
+  A.hot=1; B.hot=Math.max(B.hot,0.8);
+  pulses.push({a:ev.agent,b:ev.target,c:col(ev.verb),t:0,
+               v: ev.verb==='push'?0.02:0.035});
+}
+function advanceTo(ts){
+  while(cursor<events.length && events[cursor].ts<=ts) emit(events[cursor++]);
+  clock.textContent = new Date(ts).toLocaleTimeString();
+}
+
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(now-last,50); last=now;
+  if(live && tMax){ tMax += dt; advanceTo(tMax); slider.value=1000; }
+  else if(tMax){ advanceTo(tMin + (tMax-tMin)*(slider.value/1000)); }
+  for(const p of pulses) p.t += p.v;
+  pulses = pulses.filter(p=>p.t<1);
+  step(); draw();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---- data ----------------------------------------------------------------
+async function load(){
+  const r = await fetch(`/viz/events?window=${Math.round(windowMs/1000)}`,
+                        {credentials:'same-origin'});
+  if(!r.ok){ stat.textContent = `/viz/events → ${r.status}`; return; }
+  const d = await r.json();
+  events = d.events; cursor = 0;
+  nodes.clear(); links.clear(); pulses=[];
+  tMin = events.length ? events[0].ts : Date.now();
+  tMax = tMin;
+  stat.textContent =
+    `${d.coverage.events} events · ${d.actors.length} agents · ` +
+    `${d.nodes.length} nodes · ${d.coverage.specific_pct}% located`;
+}
+load(); setInterval(()=>{ if(live) load(); }, 30000);
+
+liveBtn.onclick = ()=>{ live=!live; liveBtn.ariaPressed=String(live);
+  if(live){ cursor=0; nodes.clear(); links.clear(); load(); } };
+slider.oninput = ()=>{ if(live){ live=false; liveBtn.ariaPressed='false'; }
+  cursor=0; nodes.clear(); links.clear(); pulses=[]; };
+
+// pan + zoom
+let drag=null;
+cv.onpointerdown=e=>{ drag={x:e.clientX,y:e.clientY}; cv.classList.add('drag');
+                      cv.setPointerCapture(e.pointerId); };
+cv.onpointermove=e=>{ if(!drag) return;
+  view.x+=e.clientX-drag.x; view.y+=e.clientY-drag.y;
+  drag={x:e.clientX,y:e.clientY}; };
+cv.onpointerup=()=>{ drag=null; cv.classList.remove('drag'); };
+cv.onwheel=e=>{ e.preventDefault();
+  view.k=Math.max(0.25,Math.min(3,view.k*(e.deltaY<0?1.1:0.9))); };
+</script>
