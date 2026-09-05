@@ -94,6 +94,11 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     assert (current / "RUNTIME_READY").read_text().strip() == "ready"
     assert (current / "SOURCE_REMOTE").read_text().strip()
     assert (current / "skills/manifest.json").is_file()
+    assert (current / "plugin/hooks/agy_state.py").is_file()
+    agy_hooks = json.loads((home / ".gemini/config/hooks.json").read_text())
+    assert set(agy_hooks["clarp-status"]) == {"PreInvocation", "Stop"}
+    assert str(current) in (
+        agy_hooks["clarp-status"]["PreInvocation"][0]["command"])
     assert (current / "scripts/agent_tasks.py").is_file()
     assert (current / "scripts/agent_artifacts.py").is_file()
     assert (current / "scripts/github_workflow_artifact.py").is_file()
