@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -22,7 +23,24 @@ class TurnHandle:
         return self.proc.pid
 
     def wait(self, timeout: float | None = None) -> int:
-        return self.proc.wait(timeout=timeout)
+        """Wait for the turn, including the transcript the turn writes.
+
+        The subprocess exiting is not the end of a turn: the drainer thread
+        parses its output and persists the conversation, and it is still
+        finishing when the pipe closes. A caller waiting on a turn means "it
+        is recorded", so join that too — otherwise a read straight after this
+        can catch a half-written transcript.
+
+        `timeout` bounds the whole wait, not each half of it.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        returncode = self.proc.wait(timeout=timeout)
+        if self.drain_thread is not None:
+            remaining = (
+                None if deadline is None
+                else max(0.0, deadline - time.monotonic()))
+            self.drain_thread.join(timeout=remaining)
+        return returncode
 
     def is_alive(self) -> bool:
         return self.proc.poll() is None
