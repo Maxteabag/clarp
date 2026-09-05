@@ -87,3 +87,39 @@ def test_stopping_runner_terminates_descendants_only(tmp_path, monkeypatch, back
         other.wait(timeout=5)
         if handle is not None and handle.drain_thread:
             handle.drain_thread.join(timeout=5)
+
+
+def test_account_recovery_kills_detached_output_descendant(tmp_path):
+    from lib.claude_failover import finish_owned_group
+    from lib.process_registry import TurnHandle
+    import threading
+    child_code = ("import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                  "print('ready',flush=True); time.sleep(60)")
+    child_pid_file = tmp_path / "survivor.pid"
+    parent_code = (
+        "import subprocess,sys,time,pathlib; "
+        f"child=subprocess.Popen([sys.executable,'-c',{child_code!r}],stdout=subprocess.PIPE); "
+        "child.stdout.readline(); "
+        f"pathlib.Path({str(child_pid_file)!r}).write_text(str(child.pid)); "
+        "time.sleep(60)")
+    proc = subprocess.Popen([sys.executable, "-c", parent_code],
+                            stdout=subprocess.PIPE, start_new_session=True)
+    drain = threading.Thread(target=lambda: proc.stdout.read(), daemon=True)
+    handle = TurnHandle(proc, drain, process_group=proc.pid)
+    drain.start()
+    child_pid = 0
+    try:
+        deadline = time.monotonic() + 5
+        while not child_pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        child_pid = int(child_pid_file.read_text())
+        handle.terminate()
+        handle.wait(timeout=2)
+        assert not drain.is_alive()
+        assert _alive(child_pid), "fixture must reproduce a surviving tool"
+        finish_owned_group(handle)
+        assert not _alive(child_pid)
+    finally:
+        handle.kill()
+        handle.wait(timeout=5)
+        proc.stdout.close()

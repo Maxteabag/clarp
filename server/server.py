@@ -295,6 +295,7 @@ class Handler(BaseHTTPRequestHandler):
         "/herald/settings": "_handle_herald_settings_get",
         "/personalities/settings": "_handle_personalities_settings_get",
         "/automation-settings": "_handle_automation_settings_get",
+        "/avatar-settings": "_handle_avatar_settings_get",
         "/agent-model-options": "_handle_agent_model_options",
         "/favorite-paths": "_handle_favorite_paths",
         "/orchestrator/decisions": "_handle_orchestrator_decisions",
@@ -369,6 +370,7 @@ class Handler(BaseHTTPRequestHandler):
         "/herald/settings": "_handle_herald_settings_post",
         "/personalities/settings": "_handle_personalities_settings_post",
         "/automation-settings": "_handle_automation_settings_post",
+        "/avatar-settings": "_handle_avatar_settings_post",
         "/preview": "_handle_preview",
         "/stop": "_handle_stop",
         "/remote-action": "_handle_remote_action",
@@ -686,7 +688,8 @@ class Handler(BaseHTTPRequestHandler):
     _DEVICE_FULL_ONLY_PREFIXES = (
         "/backend-auth", "/server-update", "/managed-skills",
         "/orchestrator/", "/herald/", "/personalities/",
-        "/automation-settings", "/paired-devices", "/tts/providers",
+        "/automation-settings", "/avatar-settings", "/paired-devices",
+        "/tts/providers",
         "/oracle/", "/agent-file",
     )
     _LIMITED_DEVICE_POST_EXACT = frozenset({
@@ -1104,6 +1107,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, b'{"error":"special_treatment required"}',
                               "application/json")
         self._send(200, json.dumps(update(data["special_treatment"])).encode(),
+                   "application/json")
+
+    def _handle_avatar_settings_get(self):
+        from lib.avatar_settings import get
+        self._send(200, json.dumps(get()).encode(), "application/json")
+
+    def _handle_avatar_settings_post(self):
+        from lib.avatar_settings import update
+        data = self._read_json()
+        if data is None or not isinstance(data.get("model_avatars"), bool):
+            return self._send(400, b'{"error":"model_avatars required"}',
+                              "application/json")
+        self._send(200, json.dumps(update(data["model_avatars"])).encode(),
                    "application/json")
 
     def _handle_favorite_paths(self):
@@ -3335,7 +3351,8 @@ class Handler(BaseHTTPRequestHandler):
                         turn_dispatch.restore_stop_state(agent_id, stop_snapshot)
                         turn_queue.set_paused(agent_id, queue_was_paused)
                         raise
-                if strict and stop_snapshot.get("trace_id") and n <= 0:
+                if (strict and stop_snapshot.get("trace_id") and n <= 0
+                        and not stop_snapshot.get("account_recovery_parked")):
                     turn_dispatch.restore_stop_state(agent_id, stop_snapshot)
                     turn_queue.set_paused(agent_id, queue_was_paused)
                     raise RuntimeError("backend did not confirm interruption")
@@ -4204,6 +4221,22 @@ class Handler(BaseHTTPRequestHandler):
                     requested_model = engine
             except Exception as e:  # noqa: BLE001
                 log_exception("sttEngineSettingFail", e)
+        # Long recordings escalate to the stronger model configured for them.
+        # This deliberately overrides a client-pinned model too: the pin says
+        # which model handles an ordinary clip, and escalation is the whole
+        # point of the setting. An unreadable duration escalates nothing.
+        try:
+            from lib import audio_duration, stt_providers
+            clip_seconds = audio_duration.seconds(audio_bytes)
+            long_model = stt_providers.long_form_model_for(clip_seconds)
+            if long_model and long_model != requested_model:
+                log("sttLongFormRoute",
+                    f"{clip_seconds:.1f}s >= "
+                    f"{stt_providers.long_form_threshold_sec()}s → {long_model}"
+                    f" (was {requested_model or 'server-default'})")
+                requested_model = long_model
+        except Exception as e:  # noqa: BLE001 - escalation never blocks STT
+            log_exception("sttLongFormRouteFail", e)
         if not requested_model and not self.ctx.stt.ready.is_set():
             return self._send(503, b'{"error":"whisper model loading"}',
                               "application/json")

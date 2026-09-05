@@ -243,6 +243,10 @@ class Config:
     # the clarp wrapper ("clarp"). Override via [agents] claude_cli or
     # CLAUDE_PWA_CLAUDE_CLI.
     claude_cli: str = "claude"
+    # Empty disables account failover. The trusted local command reads a JSON
+    # model list on stdin and returns {"available": true} only after activation
+    # and successful quota verification. Credentials never enter Host state.
+    claude_account_switch_command: tuple[str, ...] = ()
     claude_model: str = ""
     claude_effort: str = ""              # "" | low | medium | high | xhigh | max
     codex_model: str = ""
@@ -452,6 +456,11 @@ def load(path: pathlib.Path | None = None) -> Config:
         claude_cli      = str(os.environ.get("CLAUDE_PWA_CLAUDE_CLI")
                               or agents.get("claude_cli", "claude")),
         claude_model    = str(agents.get("claude_model", "")),
+        claude_account_switch_command = tuple(
+            agents.get("claude_account_switch_command", ()))
+            if isinstance(agents.get("claude_account_switch_command", ()), (list, tuple))
+            and all(isinstance(arg, str) and arg for arg in
+                    agents.get("claude_account_switch_command", ())) else (),
         claude_effort   = str(agents.get("claude_effort", "")),
         codex_model     = str(agents.get("codex_model", "")),
         codex_reasoning_effort = str(agents.get("codex_reasoning_effort", "")),

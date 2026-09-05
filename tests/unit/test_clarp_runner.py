@@ -319,7 +319,19 @@ def test_spawn_turn_appends_delta_partials(fake_clarp, tmp_path):
     assert [m["text"] for m in visible] == ["hello"]
 
 
-def test_spawn_turn_handles_claude_stream_event_text_deltas(fake_clarp, tmp_path):
+def test_spawn_turn_handles_claude_stream_event_text_deltas(fake_clarp, tmp_path, monkeypatch):
+    import threading
+
+    entered_write = threading.Event()
+    release_write = threading.Event()
+    original_write = agents_db.upsert_live_assistant_message
+
+    def gated_write(**kwargs):
+        entered_write.set()
+        assert release_write.wait(timeout=5.0), "test did not release the drainer"
+        return original_write(**kwargs)
+
+    monkeypatch.setattr(agents_db, "upsert_live_assistant_message", gated_write)
     agent_id = agents_db.create_agent(
         persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel"
     )
@@ -350,7 +362,16 @@ def test_spawn_turn_handles_claude_stream_event_text_deltas(fake_clarp, tmp_path
         agent_id=agent_id,
         trace_id="trace-stream-event",
     )
-    handle.wait(timeout=5.0)
+    try:
+        handle.proc.wait(timeout=5.0)
+        assert entered_write.wait(timeout=5.0)
+        # Deliberately prove process exit precedes completed message storage.
+        assert handle.drain_thread.is_alive()
+    finally:
+        release_write.set()
+        # The current TurnHandle contract includes draining, unlike proc.wait.
+        handle.wait(timeout=5.0)
+    assert not handle.drain_thread.is_alive()
 
     visible = agents_db.list_messages(
         agent_id=agent_id, backend_session_id="sid-stream-event")
@@ -406,7 +427,7 @@ def test_spawn_turn_zero_exit_without_result_calls_on_error(fake_clarp, tmp_path
     due to an upstream rate-limit) must surface to the dispatcher. A pure
     log-only path leaves the UI on silence / Connected."""
     fake_clarp([
-        {"type": "rate_limit_event", "rate_limit_info": {"status": "blocked"}},
+        {"type": "system", "subtype": "status", "status": "starting"},
     ])
     sids: list[str] = []
     errs: list[str] = []
@@ -419,6 +440,20 @@ def test_spawn_turn_zero_exit_without_result_calls_on_error(fake_clarp, tmp_path
     assert sids == [], "no system.init was emitted → callback must stay silent"
     assert _wait_for(lambda: len(errs) == 1)
     assert "without stream-json result" in errs[0]
+
+
+@pytest.mark.parametrize("status", ["blocked", "rejected", "allowed_warning", "allowed"])
+def test_structured_usage_limit_events_are_classified(fake_clarp, tmp_path, status):
+    fake_clarp([
+        {"type": "rate_limit_event", "rate_limit_info": {"status": status}},
+        {"type": "rate_limit_event", "rate_limit_info": {"status": status}},
+        {"type": "result", "subtype": "success", "result": "done"},
+    ])
+    errors = []
+    handle = clarp_runner.spawn_turn(text="hi", cwd=tmp_path, on_error=errors.append)
+    handle.wait(timeout=5)
+    assert errors == (["Claude usage limit reached"]
+                      if status in {"blocked", "rejected"} else [])
 
 
 def test_spawn_turn_zero_exit_usage_limit_stderr_calls_on_error(fake_clarp, tmp_path):
