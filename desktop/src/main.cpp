@@ -15,6 +15,7 @@
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QTimer>
 #include <algorithm>
@@ -172,7 +173,25 @@ int main(int argc, char* argv[]) {
     if (!screenshotPath.isEmpty() && controller != nullptr && !screenshotScenario.isEmpty()) {
         QTimer::singleShot(1'900, &application,
                            [controller, screenshotScenario] {
-            const QString session = controller->selectedSession();
+            QString session = controller->selectedSession();
+            if (session.isEmpty() && screenshotScenario == QStringLiteral("markdown")) {
+                session = QStringLiteral("markdown-fixture");
+                controller->agents()->applySnapshot(
+                    {{QStringLiteral("agents"),
+                      QJsonArray{QJsonObject{
+                          {QStringLiteral("agent_id"), QStringLiteral("fixture-agent")},
+                          {QStringLiteral("session"), session},
+                          {QStringLiteral("persona"), QStringLiteral("OPUS")},
+                          {QStringLiteral("backend"), QStringLiteral("local")},
+                          {QStringLiteral("latest_state"), QStringLiteral("idle")},
+                      }}}});
+                {
+                    const QSignalBlocker blockPaneSelection(controller->panes());
+                    controller->panes()->setActiveSession(session);
+                }
+                emit controller->panes()->treeChanged();
+                controller->requestComposerFocus(controller->panes()->activePaneId());
+            }
             clarp::ConversationModel* model = controller->conversationForSession(session);
             if (session.isEmpty() || model == nullptr) {
                 return;
