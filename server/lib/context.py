@@ -200,7 +200,7 @@ class ServerContext:
         from . import agents as agents_db
         from . import vocab_store
         from .vocab_compile import Sources, compile_and_record
-        from .workspace_vocab import sources_for
+        from .workspace_vocab import WorkspaceSources, sources_for
 
         provider, model = self._transcription_provider_model(requested_model)
         agent: dict = {}
@@ -223,7 +223,14 @@ class ServerContext:
         except Exception as e:  # noqa: BLE001
             log_exception("vocabCorrectionsFail", e)
             known = ()
-        workspace = sources_for(agent.get("cwd"))
+        # Reading an agent's folders is a choice its profile makes. Without
+        # one, the workspace contributes nothing: this call used to be
+        # unconditional, which is how an agent rooted at /home fed hundreds of
+        # package-tree library names into the payload ahead of the glossary.
+        workspace = (
+            sources_for(agent.get("cwd"))
+            if vocab_store.agent_harvests_workspace(agent_id)
+            else WorkspaceSources())
         include_names = delegated and delegation_agent_names_enabled()
 
         result = compile_and_record(
@@ -255,7 +262,7 @@ class ServerContext:
         from . import agents as agents_db
         from . import vocab_store
         from .vocab_compile import Sources, compile_for
-        from .workspace_vocab import sources_for
+        from .workspace_vocab import WorkspaceSources, sources_for
 
         provider, model = self._transcription_provider_model(requested_model)
         agent: dict = {}
@@ -267,7 +274,10 @@ class ServerContext:
         agent_id = str(agent.get("agent_id") or "")
         static, profile_id = self._vocab_static_packs(
             delegated=delegated, agent_id=agent_id)
-        workspace = sources_for(agent.get("cwd"))
+        workspace = (
+            sources_for(agent.get("cwd"))
+            if vocab_store.agent_harvests_workspace(agent_id)
+            else WorkspaceSources())
         include_names = delegated and delegation_agent_names_enabled()
         result = compile_for(
             provider=provider, model=model, static_packs=static,

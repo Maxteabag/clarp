@@ -1,5 +1,30 @@
 # Clarp
 
+## Why this exists
+
+Clarp exists to give people back their dignity — to free them from the desk,
+from the screen, from the office, and to close the distance between new
+information and the source of their own creativity.
+
+A human body should not be a meat proxy between an idea and the world. We
+should not spend our lives doing repetitive manual work with our thumbs and
+our hands just to make a machine understand us. Clarp is an attempt to
+decouple our limbs from the part of human existence that actually matters:
+information, creativity, joy, excitement, emotion — the interface through
+which we express our intentions and reach for what we want.
+
+Nobody should need their eyes and their fingers to make a computer do
+something. Intention should become action with as little friction as is
+physically possible, and the goal is to close that distance as far as a
+machine will allow.
+
+That means removing the need for a desk. For a keyboard. For a mouse. It also
+means removing the repetitive junk we are forced to filter out by hand — the
+noise we have to look at and listen to before we reach anything real. We
+should be exposed to as much novel information as possible and as little
+repetition as we can manage, so that our intentions are fulfilled with the
+least friction there is.
+
 Clarp is source-available under the [PolyForm Shield License
 1.0.0](LICENSE.md). It may not be used to provide a competing agent-control
 product or service. Separate [commercial licensing](COMMERCIAL_LICENSE.md) is
