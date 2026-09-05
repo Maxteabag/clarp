@@ -196,7 +196,7 @@ def _is_team_leader(agent_id: str) -> bool:
         from . import team_store
 
         return any(
-            (team.get("leader_agent_id") or "") == agent_id
+            team.get("leader_enabled") and (team.get("leader_agent_id") or "") == agent_id
             for team in team_store.teams_for_agent(agent_id)
         )
     except Exception as exc:  # pragma: no cover - defensive around notification path

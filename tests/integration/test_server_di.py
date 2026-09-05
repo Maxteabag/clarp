@@ -3108,3 +3108,32 @@ def test_message_audio_lookup_is_authenticated_and_does_not_synthesize(running_s
         _get(base + '/clips/message?session=claude&message_id=replay-message',
              headers={'Authorization': 'Bearer replay-test-token'})
     assert wrong_agent.value.code == 404
+
+
+def test_recursive_team_api_defaults_settings_and_atomic_cycle_rejection(running_server):
+    base, _ctx, _srv = running_server
+    status, body = _post(base + '/teams', {'name': 'Clarp'})
+    assert status == 200
+    parent = json.loads(body)['team']
+    assert parent['leader_enabled'] is False
+    assert parent['communication_enabled'] is False
+    status, body = _post(base + '/teams', {'name': 'Development', 'parent_team_id': parent['team_id']})
+    assert status == 200
+    child = json.loads(body)['team']
+    assert child['parent_team_id'] == parent['team_id']
+    status, body = _post(base + '/teams/' + child['team_id'], {'communication_enabled': True, 'leader_enabled': True})
+    assert status == 200
+    assert json.loads(body)['team']['communication_enabled'] is True
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + '/teams/' + parent['team_id'], {'name': 'Wrong', 'parent_team_id': child['team_id']})
+    assert error.value.code == 400
+    status, body = _get(base + '/teams')
+    saved = {t['team_id']: t for t in json.loads(body)['teams']}
+    assert saved[parent['team_id']]['name'] == 'Clarp'
+    assert saved[parent['team_id']]['communication_enabled'] is False
+    status, body = _post(base + '/teams/' + child['team_id'], {'parent_team_id': '', 'leader_enabled': False, 'communication_enabled': False})
+    assert status == 200
+    assert json.loads(body)['team']['parent_team_id'] is None
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + '/teams', {'name': 'Bad', 'parent_team_id': ['wrong type']})
+    assert error.value.code == 400

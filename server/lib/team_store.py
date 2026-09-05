@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import re
 import secrets
+from contextlib import contextmanager
 from typing import Any
 
 from . import origins
@@ -68,66 +69,119 @@ def extract_team_blocks(text: str | None) -> list[str]:
     return _blocks_from(_TEAM_BLOCK_RE, text)
 
 
-def create_team(name: str, *, color: str = "") -> dict[str, Any]:
+@contextmanager
+def _team_write():
+    # Acquire the writer lock before validating the hierarchy. A deferred read
+    # followed by a write can race a simultaneous move on another connection.
+    c = conn()
+    nested = c.in_transaction
+    c.execute("SAVEPOINT team_write" if nested else "BEGIN IMMEDIATE")
+    try:
+        yield c
+        c.execute("RELEASE team_write" if nested else "COMMIT")
+    except BaseException:
+        if nested:
+            c.execute("ROLLBACK TO team_write")
+            c.execute("RELEASE team_write")
+        else:
+            c.execute("ROLLBACK")
+        raise
+
+
+def _validate_parent(team_id: str, parent: str | None) -> None:
+    if parent is not None and not isinstance(parent, str):
+        raise ValueError("parent_team_id must be a string or null")
+    seen = {team_id}
+    while parent:
+        if parent in seen:
+            raise ValueError("a team cannot contain itself or an ancestor")
+        seen.add(parent)
+        row = conn().execute(
+            "SELECT parent_team_id, archived_at FROM teams WHERE team_id = ?", (parent,)
+        ).fetchone()
+        if row is None or row["archived_at"] is not None:
+            raise ValueError("parent team must exist and be active")
+        parent = row["parent_team_id"]
+
+
+def create_team(name: str, *, color: str = "", parent_team_id: str | None = None,
+                communication_enabled: bool = False) -> dict[str, Any]:
     name = " ".join(str(name or "").split())
     if not name:
         raise ValueError("team name is required")
     team_id = _new_team_id()
     ts = now_ms()
-    conn().execute(
-        """INSERT INTO teams (team_id, name, color, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?)""",
-        (team_id, name, color or "", ts, ts),
-    )
-    return get_team(team_id) or {
-        "team_id": team_id, "name": name, "color": color or "",
-        "created_at": ts, "updated_at": ts, "archived_at": None,
-        "leader_agent_id": "", "nudge_enabled": True,
-        "member_agent_ids": [], "latest_message": None, "unread_count": 0,
-    }
+    with _team_write() as c:
+        _validate_parent(team_id, parent_team_id)
+        # Explicit defaults also apply to upgraded databases with old defaults.
+        c.execute(
+            """INSERT INTO teams (team_id, name, color, created_at, updated_at,
+                   parent_team_id, communication_enabled, leader_enabled, nudge_enabled)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)""",
+            (team_id, name, color or "", ts, ts, parent_team_id or None,
+             int(communication_enabled)),
+        )
+    return get_team(team_id)
+
+
+_UNSET = object()
 
 
 def update_team(team_id: str, *, name: str | None = None,
-                color: str | None = None, archived: bool | None = None
+                color: str | None = None, archived: bool | None = None,
+                parent_team_id=_UNSET, leader_enabled: bool | None = None,
+                communication_enabled: bool | None = None, leader=_UNSET
                 ) -> dict[str, Any] | None:
-    fields: list[str] = ["updated_at = ?"]
-    values: list[Any] = [now_ms()]
-    if name is not None:
-        clean_name = " ".join(str(name).split())
-        if not clean_name:
-            raise ValueError("team name is required")
-        fields.append("name = ?")
-        values.append(clean_name)
-    if color is not None:
-        fields.append("color = ?")
-        values.append(str(color or ""))
-    if archived is not None:
-        fields.append("archived_at = ?")
-        values.append(now_ms() if archived else None)
-    values.append(team_id)
-    conn().execute(
-        f"UPDATE teams SET {', '.join(fields)} WHERE team_id = ?",
-        tuple(values),
-    )
+    with _team_write() as c:
+        if not c.execute("SELECT 1 FROM teams WHERE team_id = ?", (team_id,)).fetchone():
+            return None
+        fields = ["updated_at = ?"]
+        values = [now_ms()]
+        if name is not None:
+            clean = " ".join(str(name).split())
+            if not clean:
+                raise ValueError("team name is required")
+            fields.append("name = ?")
+            values.append(clean)
+        if color is not None:
+            fields.append("color = ?")
+            values.append(str(color or ""))
+        if parent_team_id is not _UNSET:
+            _validate_parent(team_id, parent_team_id)
+            fields.append("parent_team_id = ?")
+            values.append(parent_team_id or None)
+        if archived is not None:
+            fields.append("archived_at = ?")
+            values.append(now_ms() if archived else None)
+            if archived:
+                # Keep child groups accessible, without deleting their work.
+                c.execute("UPDATE teams SET parent_team_id = NULL WHERE parent_team_id = ?", (team_id,))
+        if leader is not _UNSET:
+            leader = (leader or "").strip() or None
+            if leader and not c.execute(
+                "SELECT 1 FROM team_members WHERE team_id = ? AND agent_id = ?",
+                (team_id, leader),
+            ).fetchone():
+                raise ValueError("leader must be a member of the team")
+            fields.append("leader_agent_id = ?")
+            values.append(leader)
+            if leader_enabled is None:
+                leader_enabled = bool(leader)
+        for key, value in (("leader_enabled", leader_enabled),
+                           ("communication_enabled", communication_enabled)):
+            if value is not None:
+                if not isinstance(value, bool):
+                    raise ValueError(f"{key} must be a boolean")
+                fields.append(f"{key} = ?")
+                values.append(int(value))
+        c.execute(f"UPDATE teams SET {', '.join(fields)} WHERE team_id = ?",
+                  (*values, team_id))
     return get_team(team_id)
 
 
 def set_leader(team_id: str, agent_id: str | None) -> dict[str, Any] | None:
-    """Designate (or clear, with falsy agent_id) a team's leader. The leader
-    must be a member. A role, not a separate agent type."""
-    agent_id = (agent_id or "").strip() or None
-    if agent_id is not None:
-        is_member = conn().execute(
-            "SELECT 1 FROM team_members WHERE team_id = ? AND agent_id = ?",
-            (team_id, agent_id),
-        ).fetchone()
-        if not is_member:
-            raise ValueError("leader must be a member of the team")
-    conn().execute(
-        "UPDATE teams SET leader_agent_id = ?, updated_at = ? WHERE team_id = ?",
-        (agent_id, now_ms(), team_id),
-    )
-    return get_team(team_id)
+    """Explicitly assigning a direct member enables the optional leader role."""
+    return update_team(team_id, leader=agent_id)
 
 
 def set_nudge_enabled(team_id: str, enabled: bool) -> dict[str, Any] | None:
@@ -143,7 +197,7 @@ def set_nudge_enabled(team_id: str, enabled: bool) -> dict[str, Any] | None:
 
 def get_leader(team_id: str) -> str:
     row = conn().execute(
-        "SELECT leader_agent_id FROM teams WHERE team_id = ?", (team_id,),
+        "SELECT leader_agent_id FROM teams WHERE team_id = ? AND leader_enabled = 1 AND archived_at IS NULL", (team_id,),
     ).fetchone()
     return (row and row["leader_agent_id"]) or ""
 
@@ -158,6 +212,7 @@ def list_teams(*, include_archived: bool = False) -> list[dict[str, Any]]:
     rows = conn().execute(f"""
         SELECT t.team_id, t.name, t.color, t.created_at, t.updated_at,
                t.archived_at, t.leader_agent_id, t.nudge_enabled,
+               t.parent_team_id, t.leader_enabled, t.communication_enabled,
                (
                  SELECT json_group_array(tm.agent_id)
                    FROM team_members tm
@@ -209,6 +264,9 @@ def _team_payload(row) -> dict[str, Any]:
         "archived_at": row["archived_at"],
         "leader_agent_id": row["leader_agent_id"] or "",
         "nudge_enabled": bool(row["nudge_enabled"]),
+        "parent_team_id": row["parent_team_id"],
+        "leader_enabled": bool(row["leader_enabled"]),
+        "communication_enabled": bool(row["communication_enabled"]),
         "member_agent_ids": [str(m) for m in members if m],
         "latest_message": row["latest_message"] or "",
         "latest_message_at": row["latest_message_at"],
@@ -233,52 +291,56 @@ def add_member(team_id: str, agent_id: str) -> bool:
 
 
 def remove_member(team_id: str, agent_id: str) -> None:
-    c = conn()
-    c.execute(
-        "DELETE FROM team_members WHERE team_id = ? AND agent_id = ?",
-        (team_id, agent_id),
-    )
-    # Clear this agent's inbox for the team. Leaving (or being removed) must
-    # stop further digest injection, and a later re-add must not resurface the
-    # old unread backlog — that was the "still getting team context after I was
-    # removed" bug.
-    c.execute(
-        """DELETE FROM team_inbox
-            WHERE agent_id = ?
-              AND team_message_id IN (
-                  SELECT team_message_id FROM team_messages WHERE team_id = ?
-              )""",
-        (agent_id, team_id),
-    )
+    with _team_write() as c:
+        c.execute(
+            "DELETE FROM team_members WHERE team_id = ? AND agent_id = ?",
+            (team_id, agent_id),
+        )
+        c.execute("""UPDATE teams SET leader_agent_id = NULL, leader_enabled = 0
+                     WHERE team_id = ? AND leader_agent_id = ?""", (team_id, agent_id))
+        # Clear this agent's inbox for the team. Leaving (or being removed) must
+        # stop further digest injection, and a later re-add must not resurface the
+        # old unread backlog — that was the "still getting team context after I was
+        # removed" bug.
+        c.execute(
+            """DELETE FROM team_inbox
+                WHERE agent_id = ?
+                  AND team_message_id IN (
+                      SELECT team_message_id FROM team_messages WHERE team_id = ?
+                  )""",
+            (agent_id, team_id),
+        )
 
 
 def delete_team(team_id: str) -> bool:
     """Hard-delete a team and everything attached to it: inbox rows, messages,
     memberships, then the team row. Works on archived teams too. Returns False
     if the team didn't exist."""
-    c = conn()
-    exists = c.execute(
-        "SELECT 1 FROM teams WHERE team_id = ?", (team_id,),
-    ).fetchone()
-    if exists is None:
-        return False
-    c.execute(
-        """DELETE FROM team_inbox
-            WHERE team_message_id IN (
-                SELECT team_message_id FROM team_messages WHERE team_id = ?
-            )""",
-        (team_id,),
-    )
-    c.execute("DELETE FROM team_messages WHERE team_id = ?", (team_id,))
-    c.execute("DELETE FROM team_members WHERE team_id = ?", (team_id,))
-    c.execute("DELETE FROM teams WHERE team_id = ?", (team_id,))
-    return True
+    with _team_write() as c:
+        exists = c.execute(
+            "SELECT 1 FROM teams WHERE team_id = ?", (team_id,),
+        ).fetchone()
+        if exists is None:
+            return False
+        c.execute(
+            """DELETE FROM team_inbox
+                WHERE team_message_id IN (
+                    SELECT team_message_id FROM team_messages WHERE team_id = ?
+                )""",
+            (team_id,),
+        )
+        c.execute("DELETE FROM team_messages WHERE team_id = ?", (team_id,))
+        c.execute("DELETE FROM team_members WHERE team_id = ?", (team_id,))
+        c.execute("UPDATE teams SET parent_team_id = NULL WHERE parent_team_id = ?", (team_id,))
+        c.execute("DELETE FROM teams WHERE team_id = ?", (team_id,))
+        return True
 
 
 def teams_for_agent(agent_id: str) -> list[dict[str, Any]]:
     rows = conn().execute("""
         SELECT t.team_id, t.name, t.color, t.created_at, t.updated_at,
-               t.archived_at, t.leader_agent_id
+               t.archived_at, t.leader_agent_id, t.parent_team_id,
+               t.leader_enabled, t.communication_enabled
           FROM teams t
           JOIN team_members tm ON tm.team_id = t.team_id
          WHERE tm.agent_id = ? AND t.archived_at IS NULL
@@ -295,26 +357,26 @@ def team_protocol_instruction(agent_id: str, *, turn_origin: str = "") -> str:
     teams = teams_for_agent(agent_id)
     if not teams:
         return ""
-    names = ", ".join(t["name"] for t in teams)
-    led = [t for t in teams if (t.get("leader_agent_id") or "") == agent_id]
+    communicating = [t for t in teams if t["communication_enabled"]]
+    led = [t for t in teams if t["leader_enabled"] and t.get("leader_agent_id") == agent_id]
     if led and turn_origin in AUTOMATION_LEADER_ORIGINS:
         return _lean_leader_section(agent_id, led, turn_origin=turn_origin)
-    brief = (
-        f"Team feed: you are on {names}. Teammates share private updates here, "
-        "separate from the user's conversation.\n"
-        "- Post useful coordination as <team>short first-person update</team>; "
-        "it is not spoken, and teammates never see <speak>.\n"
-        "- Broadcast starts, finishes, blockers, handoffs, and decisions that "
-        "affect others. Keep it short; skip routine noise.\n"
-        "- Recent team updates are injected below when present. Read them and "
-        "coordinate; do not fetch them yourself."
-    )
-    direct_report = _direct_report_section(agent_id, teams)
-    if direct_report:
-        brief = brief + "\n" + direct_report
+    parts = []
+    if communicating:
+        names = ", ".join(t["name"] for t in communicating)
+        parts.append(
+            f"Team feed: you are on {names}. Share useful coordination as "
+            "<team>short first-person update</team>; it is not spoken. "
+            "Broadcast starts, finishes, blockers, handoffs, and decisions that "
+            "affect others. Keep it short; skip routine noise. Recent team "
+            "updates are injected below when present."
+        )
+        direct_report = _direct_report_section(agent_id, communicating)
+        if direct_report:
+            parts.append(direct_report)
     if led:
-        brief = brief + "\n\n" + _leader_section(agent_id, led)
-    return brief
+        parts.append(_leader_section(agent_id, led))
+    return "\n\n".join(parts)
 
 
 def _direct_report_section(agent_id: str, teams: list[dict[str, Any]]) -> str:
@@ -322,7 +384,7 @@ def _direct_report_section(agent_id: str, teams: list[dict[str, Any]]) -> str:
     from . import agents as agents_db
 
     team = next(
-        (t for t in teams if (t.get("leader_agent_id") or "")
+        (t for t in teams if t.get("leader_enabled") and (t.get("leader_agent_id") or "")
          and (t.get("leader_agent_id") or "") != agent_id),
         None,
     )
@@ -423,49 +485,52 @@ def capture_assistant_message(*, agent_id: str, source_message_id: str,
     blocks = extract_team_blocks(text)
     if not blocks:
         return 0
-    teams = teams_for_agent(agent_id)
-    if not teams:
-        return 0
-    inserted = 0
-    ts = now_ms()
-    c = conn()
-    for team in teams:
-        team_id = team["team_id"]
-        members = [
-            row["agent_id"] for row in c.execute(
-                "SELECT agent_id FROM team_members WHERE team_id = ?",
-                (team_id,),
-            ).fetchall()
-        ]
-        for block in blocks:
-            team_message_id = _new_team_message_id(
-                team_id, source_message_id, block
-            )
-            cur = c.execute(
-                """INSERT INTO team_messages (
-                       team_message_id, team_id, source_agent_id,
-                       source_message_id, trace_id, text, created_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(team_id, source_message_id, text) DO NOTHING""",
-                (
-                    team_message_id, team_id, agent_id, source_message_id,
-                    trace_id or "", block, ts,
-                ),
-            )
-            if cur.rowcount <= 0:
+    with _team_write():
+        teams = teams_for_agent(agent_id)
+        if not teams:
+            return 0
+        inserted = 0
+        ts = now_ms()
+        c = conn()
+        for team in teams:
+            if not team["communication_enabled"]:
                 continue
-            inserted += 1
-            for member_id in members:
-                if member_id == agent_id:
-                    continue
-                c.execute(
-                    """INSERT INTO team_inbox (
-                           team_message_id, agent_id, status
-                       ) VALUES (?, ?, 'unread')
-                       ON CONFLICT(team_message_id, agent_id) DO NOTHING""",
-                    (team_message_id, member_id),
+            team_id = team["team_id"]
+            members = [
+                row["agent_id"] for row in c.execute(
+                    "SELECT agent_id FROM team_members WHERE team_id = ?",
+                    (team_id,),
+                ).fetchall()
+            ]
+            for block in blocks:
+                team_message_id = _new_team_message_id(
+                    team_id, source_message_id, block
                 )
-    return inserted
+                cur = c.execute(
+                    """INSERT INTO team_messages (
+                           team_message_id, team_id, source_agent_id,
+                           source_message_id, trace_id, text, created_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(team_id, source_message_id, text) DO NOTHING""",
+                    (
+                        team_message_id, team_id, agent_id, source_message_id,
+                        trace_id or "", block, ts,
+                    ),
+                )
+                if cur.rowcount <= 0:
+                    continue
+                inserted += 1
+                for member_id in members:
+                    if member_id == agent_id:
+                        continue
+                    c.execute(
+                        """INSERT INTO team_inbox (
+                               team_message_id, agent_id, status
+                           ) VALUES (?, ?, 'unread')
+                           ON CONFLICT(team_message_id, agent_id) DO NOTHING""",
+                        (team_message_id, member_id),
+                    )
+        return inserted
 
 
 def list_team_messages(team_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
@@ -519,7 +584,7 @@ def pending_digest(agent_id: str, *, limit: int = 5) -> tuple[str, list[str]]:
               JOIN teams t ON t.team_id = msg.team_id
              WHERE inbox.agent_id = ?
                AND inbox.status = 'unread'
-               AND t.archived_at IS NULL
+               AND t.archived_at IS NULL AND t.communication_enabled = 1
         """, (agent_id,)).fetchall()
     ]
     if not all_ids:
@@ -534,7 +599,7 @@ def pending_digest(agent_id: str, *, limit: int = 5) -> tuple[str, list[str]]:
           LEFT JOIN agents a ON a.agent_id = msg.source_agent_id
          WHERE inbox.agent_id = ?
            AND inbox.status = 'unread'
-           AND t.archived_at IS NULL
+           AND t.archived_at IS NULL AND t.communication_enabled = 1
          ORDER BY msg.created_at DESC, msg.rowid DESC
          LIMIT ?
     """, (agent_id, limit)).fetchall()))
@@ -589,7 +654,7 @@ def latest_activity_for_agent(agent_id: str) -> int:
                   JOIN teams t ON t.team_id = mine.team_id
                   JOIN team_messages msg ON msg.team_id = mine.team_id
                  WHERE mine.agent_id = ?
-                   AND t.archived_at IS NULL
+                   AND t.archived_at IS NULL AND t.communication_enabled = 1
                 UNION ALL
                 SELECT MAX(COALESCE(inbox.read_at, inbox.injected_at, msg.created_at)) AS ts
                   FROM team_inbox inbox
@@ -597,7 +662,7 @@ def latest_activity_for_agent(agent_id: str) -> int:
                     ON msg.team_message_id = inbox.team_message_id
                   JOIN teams t ON t.team_id = msg.team_id
                  WHERE inbox.agent_id = ?
-                   AND t.archived_at IS NULL
+                   AND t.archived_at IS NULL AND t.communication_enabled = 1
                 UNION ALL
                 SELECT MAX(st.ts) AS ts
                   FROM team_members mine
@@ -609,7 +674,7 @@ def latest_activity_for_agent(agent_id: str) -> int:
                    AND st.kind IN ({state_placeholders})
                    AND COALESCE(json_extract(st.detail, '$.origin'), '')
                        NOT IN ({routine_placeholders})
-                   AND t.archived_at IS NULL
+                   AND t.archived_at IS NULL AND t.communication_enabled = 1
           )
         """,
         (

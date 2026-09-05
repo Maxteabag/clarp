@@ -406,6 +406,12 @@ class TurnDispatchService:
         if not agent:
             raise DispatchError(404, "unknown agent")
         agent_id = agent["agent_id"]
+        if origin == "leader_tick" and not any(
+            t.get("leader_enabled") and t.get("nudge_enabled")
+            and t.get("leader_agent_id") == agent_id
+            for t in team_store.list_teams()
+        ):
+            raise DispatchError(409, "team leader nudging is disabled")
         # Sticky focus: addressing an agent by name makes them the new default,
         # so subsequent un-named messages keep going to them (hands-free, you
         # don't want to re-say the name every turn).
@@ -747,6 +753,9 @@ class TurnDispatchService:
         if steer is None:
             return False
         try:
+            digest, inbox_ids = team_store.pending_digest(spec.agent_id)
+            spec = replace(spec, team_digest=digest, team_inbox_ids=tuple(inbox_ids),
+                           team_protocol=team_store.team_protocol_instruction(spec.agent_id, turn_origin=spec.origin))
             steer_text = _with_team_context(
                 _with_delivery_context(
                     spec.text, unheard_audio=spec.unheard_audio),
@@ -896,7 +905,6 @@ class TurnDispatchService:
                     "queue_started": bool(spec.queue_id),
                     "queue_remaining": turn_queue.pending_count(spec.agent_id),
                 })
-            team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
         except Exception as e:
             log_exception("spawnStateFail", e, detail=spec.session)
 
@@ -1021,6 +1029,15 @@ class TurnDispatchService:
         """Spawn one attempt of a turn. Attempt 1 surfaces spawn failures as
         a DispatchError (so /send returns 500); later attempts run from a
         timer thread and just mark the agent INTERRUPTED on failure."""
+        if spec.origin == "leader_tick" and not any(
+            t.get("leader_enabled") and t.get("nudge_enabled")
+            and t.get("leader_agent_id") == spec.agent_id
+            for t in team_store.list_teams()
+        ):
+            raise DispatchError(409, "team leader nudging is disabled")
+        digest, inbox_ids = team_store.pending_digest(spec.agent_id)
+        spec = replace(spec, team_digest=digest, team_inbox_ids=tuple(inbox_ids),
+                       team_protocol=team_store.team_protocol_instruction(spec.agent_id, turn_origin=spec.origin))
         # Re-arm the Claude pwa-voice source marker for THIS attempt, with a
         # fresh timestamp. The marker is single-use (the UserPromptSubmit hook
         # consumes it), so without re-writing here a retry — or a redispatch
@@ -1089,6 +1106,7 @@ class TurnDispatchService:
                 effort=spec.effort,
                 run_if_owned=run_if_owned,
             )
+            team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
             if account_attempt is not None:
                 account_attempt.handle = handle
         except FileNotFoundError as e:

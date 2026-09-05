@@ -2472,6 +2472,7 @@ class Handler(BaseHTTPRequestHandler):
             team = team_store.create_team(
                 str(data.get("name") or ""),
                 color=str(data.get("color") or ""),
+                parent_team_id=data.get("parent_team_id"),
             )
         except ValueError as e:
             return self._send(400, json.dumps({"error": str(e)}).encode(),
@@ -2485,17 +2486,12 @@ class Handler(BaseHTTPRequestHandler):
         if data is None:
             return self._send(400, b'{"error":"bad json"}', "application/json")
         try:
-            if "leader" in data:
-                team_store.set_leader(team_id, (data.get("leader") or "") or None)
-            if any(k in data for k in ("name", "color", "archived")):
-                team = team_store.update_team(
-                    team_id,
-                    name=data.get("name") if "name" in data else None,
-                    color=data.get("color") if "color" in data else None,
-                    archived=data.get("archived") if "archived" in data else None,
-                )
-            else:
-                team = team_store.get_team(team_id)
+            team = team_store.update_team(team_id, **{
+                key: data[key] for key in (
+                    "name", "color", "archived", "parent_team_id", "leader",
+                    "leader_enabled", "communication_enabled"
+                ) if key in data
+            })
         except ValueError as e:
             return self._send(400, json.dumps({"error": str(e)}).encode(),
                               "application/json")
