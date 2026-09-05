@@ -4204,6 +4204,22 @@ class Handler(BaseHTTPRequestHandler):
                     requested_model = engine
             except Exception as e:  # noqa: BLE001
                 log_exception("sttEngineSettingFail", e)
+        # Long recordings escalate to the stronger model configured for them.
+        # This deliberately overrides a client-pinned model too: the pin says
+        # which model handles an ordinary clip, and escalation is the whole
+        # point of the setting. An unreadable duration escalates nothing.
+        try:
+            from lib import audio_duration, stt_providers
+            clip_seconds = audio_duration.seconds(audio_bytes)
+            long_model = stt_providers.long_form_model_for(clip_seconds)
+            if long_model and long_model != requested_model:
+                log("sttLongFormRoute",
+                    f"{clip_seconds:.1f}s >= "
+                    f"{stt_providers.long_form_threshold_sec()}s → {long_model}"
+                    f" (was {requested_model or 'server-default'})")
+                requested_model = long_model
+        except Exception as e:  # noqa: BLE001 - escalation never blocks STT
+            log_exception("sttLongFormRouteFail", e)
         if not requested_model and not self.ctx.stt.ready.is_set():
             return self._send(503, b'{"error":"whisper model loading"}',
                               "application/json")
