@@ -27,6 +27,7 @@ class ConversationModel : public QAbstractListModel {
         AuthorRole,
         BodyRole,
         TimestampRole,
+        DayLabelRole,
         RevisionRole,
         KindRole,
         ToolNameRole,

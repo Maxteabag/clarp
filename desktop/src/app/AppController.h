@@ -136,6 +136,7 @@ class AppController : public QObject {
     [[nodiscard]] bool hasStoredCredential() const;
     Q_INVOKABLE [[nodiscard]] ConversationModel* conversationForSession(const QString& session);
     Q_INVOKABLE [[nodiscard]] QUrl avatarSource(const QString& session) const;
+    Q_INVOKABLE [[nodiscard]] QString chatStamp(qint64 time) const;
     Q_INVOKABLE [[nodiscard]] QVariantList mediaForSession(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QUrl mediaSource(const QString& assetId) const;
     Q_INVOKABLE [[nodiscard]] QString resolveMediaMarkdown(const QString& markdown) const;

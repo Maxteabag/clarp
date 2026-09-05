@@ -45,6 +45,8 @@ QVariant AgentListModel::data(const QModelIndex& index, int role) const {
         return m_transportAvailable ? agent.latestState : QStringLiteral("offline");
     case StatusTextRole:
         return m_transportAvailable ? agent.statusText : QString{};
+    case LastActivityRole:
+        return agent.lastActivity;
     case LastMessageRole:
         return agent.lastMessage;
     case ConversationIdRole:
@@ -94,6 +96,7 @@ QHash<int, QByteArray> AgentListModel::roleNames() const {
         {StateRole, "agentState"},
         {StatusTextRole, "statusText"},
         {LastMessageRole, "lastMessage"},
+        {LastActivityRole, "lastActivity"},
         {ConversationIdRole, "conversationId"},
         {HeadRevisionRole, "headRevision"},
         {ContextTokensRole, "contextTokens"},

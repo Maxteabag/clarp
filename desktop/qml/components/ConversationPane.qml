@@ -17,7 +17,7 @@ Rectangle {
     signal queueRequested(string session)
     signal profileRequested(string session)
 
-    color: root.active ? "#1d2132" : "#151720"
+    color: root.active ? "#151319" : "#121116"
 
     Behavior on color {
         ColorAnimation { duration: 120 }
@@ -29,8 +29,8 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 48
-            color: "transparent"
+            Layout.preferredHeight: 58
+            color: "#151319"
 
             HoverHandler { id: headerHover }
 
@@ -45,19 +45,19 @@ Rectangle {
                 spacing: 9
 
                 AgentAvatar {
-                    Layout.preferredWidth: 34
-                    Layout.preferredHeight: 34
+                    Layout.preferredWidth: 38
+                    Layout.preferredHeight: 38
                     controller: root.controller
                     session: root.session
                     name: root.controller.agentName(root.session)
-                    avatarSize: 34
-                    cornerRadius: 2
+                    avatarSize: 38
+                    cornerRadius: 19
                     fallbackColor: root.active ? "#555970" : "#3b3e50"
                 }
 
-                RowLayout {
+                ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: 10
+                    spacing: 1
 
                     Text {
                         Layout.fillWidth: true
@@ -65,8 +65,7 @@ Rectangle {
                             root.agentRevision;
                             return root.controller.agentName(root.session) || "No agent selected";
                         }
-                        color: root.active ? "#c9cbdc" : "#8b8ea5"
-                        font.family: "JetBrains Mono"
+                        color: root.active ? "#f0ebe6" : "#8b8491"
                         font.pixelSize: 16
                         font.weight: Font.DemiBold
                         horizontalAlignment: Text.AlignLeft
@@ -80,7 +79,7 @@ Rectangle {
                                 : root.controller.baseUrl;
                         }
                         visible: root.active && root.width > 520
-                        color: "#5e6177"
+                        color: "#82788e"
                         font.family: "JetBrains Mono"
                         font.pixelSize: 12
                         elide: Text.ElideRight
@@ -200,6 +199,18 @@ Rectangle {
             topMargin: 10
             bottomMargin: 10
             reuseItems: true
+            section.property: "dayLabel"
+            section.delegate: Item {
+                required property string section
+                width: transcript.width
+                height: section.length > 0 ? 32 : 0
+                Text {
+                    anchors.centerIn: parent
+                    text: parent.section
+                    color: "#8a8391"
+                    font.pixelSize: 11
+                }
+            }
             boundsBehavior: Flickable.StopAtBounds
             onMovementStarted: userInteracting = true
             onContentYChanged: {

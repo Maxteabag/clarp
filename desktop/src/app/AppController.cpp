@@ -1,5 +1,7 @@
 #include "app/AppController.h"
 #include "terminal/TerminalLaunch.h"
+#include "app/TimeFormat.h"
+#include "media/PortraitImage.h"
 
 #include <QDir>
 #include <QFile>
@@ -369,6 +371,7 @@ ConversationModel* AppController::conversationForSession(const QString& session)
 QUrl AppController::avatarSource(const QString& session) const {
     return m_avatarSources.value(session);
 }
+QString AppController::chatStamp(qint64 time) const { return clarp::chatStamp(time); }
 
 QVariantList AppController::mediaForSession(const QString& session) const {
     return m_mediaAssets.value(session);
@@ -2557,9 +2560,11 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
         m_avatarFailures.insert(session, url);
         return;
     }
+    const QByteArray portrait = roundedPortrait(bytes);
     const QString dataUrl =
         QStringLiteral("data:%1;base64,%2")
-            .arg(QString::fromLatin1(mime), QString::fromLatin1(bytes.toBase64()));
+            .arg(portrait.isEmpty() ? QString::fromLatin1(mime) : QStringLiteral("image/png"),
+                 QString::fromLatin1((portrait.isEmpty() ? bytes : portrait).toBase64()));
     m_avatarSources.insert(session, QUrl(dataUrl));
     m_avatarFailures.remove(session);
     ++m_avatarRevision;

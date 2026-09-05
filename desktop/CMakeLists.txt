@@ -61,6 +61,12 @@ target_sources(clarp-desktop PRIVATE
     src/app/TranscriptCache.h
     src/app/ToolNarrator.cpp
     src/app/ToolNarrator.h
+    src/app/TimeFormat.cpp
+    src/app/TimeFormat.h
+    src/models/AgentFilterModel.cpp
+    src/models/AgentFilterModel.h
+    src/media/PortraitImage.cpp
+    src/media/PortraitImage.h
     src/media/AudioController.cpp
     src/media/AudioController.h
     src/media/WavEncoder.cpp
@@ -95,6 +101,9 @@ qt_add_qml_module(clarp-desktop
     QML_FILES
         qml/Main.qml
         qml/components/AgentRail.qml
+        qml/components/NavRail.qml
+        qml/components/ChatList.qml
+        qml/components/ChatRow.qml
         qml/components/AgentOverview.qml
         qml/components/AgentAvatar.qml
         qml/components/Composer.qml
@@ -122,7 +131,7 @@ qt_add_qml_module(clarp-desktop
         resources/clarp.svg
 )
 
-target_include_directories(clarp-desktop PRIVATE src src/app)
+target_include_directories(clarp-desktop PRIVATE src src/app src/models)
 target_compile_definitions(clarp-desktop PRIVATE
     CLARP_DESKTOP_VERSION="${PROJECT_VERSION}"
 )

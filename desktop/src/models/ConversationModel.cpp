@@ -1,4 +1,5 @@
 #include "models/ConversationModel.h"
+#include "app/TimeFormat.h"
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -58,6 +59,8 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const {
         return message.displayText;
     case TimestampRole:
         return message.timestamp;
+    case DayLabelRole:
+        return clarp::daySeparator(message.timestamp, {});
     case RevisionRole:
         return message.revision;
     case KindRole:
@@ -99,6 +102,7 @@ QHash<int, QByteArray> ConversationModel::roleNames() const {
         {AuthorRole, "authorRole"},
         {BodyRole, "body"},
         {TimestampRole, "timestamp"},
+        {DayLabelRole, "dayLabel"},
         {RevisionRole, "revision"},
         {KindRole, "messageKind"},
         {ToolNameRole, "toolName"},

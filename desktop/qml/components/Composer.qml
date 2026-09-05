@@ -39,7 +39,7 @@ Rectangle {
     implicitHeight: 54 + (transcriptionCount > 0 ? 25 : 0)
         + (queueCount > 0 ? 25 : 0) + (attachments.length > 0 ? 31 : 0)
         + (root.active && root.controller.startingContact.length > 0 ? 25 : 0)
-    color: root.active ? "#14161f" : "#12141b"
+    color: root.active ? "#151319" : "#121116"
     border.color: root.active ? "#454b6c" : "#272a39"
     border.width: 0
 
@@ -221,8 +221,10 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: "transparent"
-            border.width: 0
+            color: "#1d1a22"
+            radius: Math.min(22, height / 2)
+            border.width: 1
+            border.color: editor.activeFocus ? "#6f527b" : "#2b2733"
 
             Text {
                 anchors.left: parent.left

@@ -1,6 +1,11 @@
 #include "app/AppController.h"
 #include "app/CredentialStore.h"
 #include "app/TranscriptCache.h"
+#include "app/TimeFormat.h"
+#include "media/PortraitImage.h"
+#include "models/AgentFilterModel.h"
+#include <QBuffer>
+#include <QImage>
 #include "media/WavEncoder.h"
 #include "models/AgentListModel.h"
 #include "models/ContactListModel.h"
@@ -600,6 +605,8 @@ class NativeCoreTest final : public QObject {
 
   private slots:
     void idleContactStartsFreshWithSavedDefaults();
+    void redesignedRosterFiltersWithoutMutatingSource();
+    void circularPortraitsAreBoundedAndAntialiased();
     void agentTerminalLaunchesNativeCliThroughDefaultTerminal();
     void sseParserHandlesChunksCommentsAndReplayIds();
     void sseCursorIsScopedToOneHost();
@@ -638,6 +645,52 @@ void NativeCoreTest::sseParserHandlesChunksCommentsAndReplayIds() {
     QCOMPARE(messages.first().id, QStringLiteral("41"));
     QCOMPARE(messages.first().data.value(QStringLiteral("type")).toString(),
              QStringLiteral("agent-roster"));
+}
+
+void NativeCoreTest::redesignedRosterFiltersWithoutMutatingSource() {
+    AgentListModel source;
+    source.applySnapshot({{QStringLiteral("agents"), QJsonArray{
+        QJsonObject{{QStringLiteral("session"), QStringLiteral("alpha")}, {QStringLiteral("persona"), QStringLiteral("Alpha")},
+            {QStringLiteral("backend"), QStringLiteral("codex")}, {QStringLiteral("cwd"), QStringLiteral("/work/one")},
+            {QStringLiteral("last_activity"), 1'788'000'000'000.0}},
+        QJsonObject{{QStringLiteral("session"), QStringLiteral("beta")}, {QStringLiteral("persona"), QStringLiteral("Beta")},
+            {QStringLiteral("backend"), QStringLiteral("claude")}, {QStringLiteral("cwd"), QStringLiteral("/work/two")}}
+    }}});
+    AgentFilterModel filtered;
+    filtered.setSourceModel(&source);
+    QCOMPARE(filtered.rowCount(), 2);
+    filtered.setQuery(QStringLiteral("WORK/TWO"));
+    QCOMPARE(filtered.rowCount(), 1);
+    QCOMPARE(filtered.index(0, 0).data(AgentListModel::SessionRole).toString(), QStringLiteral("beta"));
+    QCOMPARE(source.rowCount(), 2);
+    filtered.setQuery({});
+    filtered.setUnreadOnly(true);
+    QCOMPARE(filtered.rowCount(), 0);
+    source.applyNotificationEvent({{QStringLiteral("session"), QStringLiteral("alpha")}});
+    QCOMPARE(filtered.rowCount(), 1);
+    source.clearUnread(QStringLiteral("alpha"));
+    QCOMPARE(filtered.rowCount(), 0);
+    QVERIFY(!clarp::chatStamp(1'788'000'000'000).isEmpty());
+}
+
+void NativeCoreTest::circularPortraitsAreBoundedAndAntialiased() {
+    QImage original(400, 240, QImage::Format_ARGB32);
+    original.fill(Qt::red);
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    QVERIFY(buffer.open(QIODevice::WriteOnly));
+    QVERIFY(original.save(&buffer, "PNG"));
+    const QImage portrait = QImage::fromData(roundedPortrait(bytes));
+    QCOMPARE(portrait.size(), QSize(192, 192));
+    QCOMPARE(portrait.pixelColor(0, 0).alpha(), 0);
+    QCOMPARE(portrait.pixelColor(96, 96), QColor(Qt::red));
+    bool antialiased = false;
+    for (int x = 0; x < 192; ++x) {
+        const int alpha = portrait.pixelColor(x, 20).alpha();
+        if (alpha > 0 && alpha < 255) antialiased = true;
+    }
+    QVERIFY(antialiased);
+    QVERIFY(roundedPortrait(QByteArray("not an image")).isEmpty());
 }
 
 void NativeCoreTest::idleContactStartsFreshWithSavedDefaults() {

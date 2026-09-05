@@ -109,7 +109,8 @@ TestCase {
         waitForRendering(message);
         const background = findChild(message, "userMessageBackground");
         verify(background !== null);
-        compare(background.color, "#282b3b");
+        compare(background.color, "#493651");
+        verify(background.x > 0, "Outgoing bubbles align right in the combined redesign");
         for (const child of background.children)
             verify(!(child.visible && child.width === 2), "User messages must not retain the left accent line");
     }

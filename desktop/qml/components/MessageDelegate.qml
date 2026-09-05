@@ -58,6 +58,12 @@ Item {
         || presentedActivityCount > 0 || (showTools && tools.length > 0)
     implicitHeight: visible ? content.implicitHeight + (activity || body.length === 0 ? 2 : 6) : 0
 
+    TextMetrics {
+        id: bubbleMetrics
+        font.pixelSize: 15
+        text: root.body
+    }
+
     ActivityExplanation {
         id: liveExplanation
         narrator: root.narrator
@@ -155,20 +161,21 @@ Item {
                 id: messageBubble
                 objectName: "userMessageBackground"
                 visible: !root.activity && root.body.length > 0
-                width: Math.min(parent.width, 840)
-                x: 0
-                implicitHeight: messageBlocks.implicitHeight + (root.userAuthored ? 18 : 12)
-                radius: 3
-                color: root.userAuthored ? "#282b3b" : "transparent"
+                width: Math.min(parent.width * (root.userAuthored ? 0.78 : 0.95), 840,
+                    Math.max(140, bubbleMetrics.advanceWidth + 28))
+                x: root.userAuthored ? parent.width - width : 0
+                implicitHeight: messageBlocks.implicitHeight + 24
+                radius: 14
+                color: root.userAuthored ? "#493651" : "#1b191f"
                 border.width: root.deliveryFailed ? 1 : 0
                 border.color: "#8d5763"
                 opacity: root.pending ? 0.68 : 1
 
                 Column {
                     id: messageBlocks
-                    x: root.userAuthored ? 10 : 2
-                    y: root.userAuthored ? 9 : 6
-                    width: parent.width - x - 8
+                    x: 12
+                    y: 12
+                    width: parent.width - 24
                     spacing: 8
 
                     Repeater {
@@ -188,7 +195,9 @@ Item {
                             textFormat: root.messageKind === "live"
                                 ? Text.PlainText : Text.MarkdownText
                             wrapMode: Text.Wrap
-                            color: "#b9bbcf"
+                            color: "#e7e1dc"
+                            selectedTextColor: "#fff8ff"
+                            selectionColor: "#6f527b"
                             font.pixelSize: 15
                             onLinkActivated: link => Qt.openUrlExternally(link)
                         }
@@ -277,7 +286,9 @@ Item {
         Text {
             visible: root.showTimestamp && root.timestamp.length > 0
                 && !root.activity
-            Layout.leftMargin: root.userAuthored ? 10 : 2
+            Layout.alignment: root.userAuthored ? Qt.AlignRight : Qt.AlignLeft
+            Layout.leftMargin: 12
+            Layout.rightMargin: 12
             text: Qt.formatDateTime(new Date(root.timestamp), "MMM d  HH:mm")
             color: "#555a70"
             font.family: "JetBrains Mono"

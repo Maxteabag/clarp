@@ -14,16 +14,17 @@ ApplicationWindow {
     property string selectedSurface: "chats"
     property real uiScale: 1.15
     property bool sidebarVisible: true
-    property real sidebarExpandedWidth: 232
+    property real sidebarExpandedWidth: 354
+    property bool redesignedSidebarSized: false
     readonly property bool settingsOverlayVisible: root.selectedSurface === "settings" && root.overlayVisible()
 
     width: 1360
     height: 900
-    minimumWidth: 760
+    minimumWidth: Math.max(760, sidebarVisible ? Math.ceil(624 * uiScale) : 760)
     minimumHeight: 520
     visible: true
     title: app.selectedName.length > 0 ? app.selectedName + " — Clarp" : "Clarp"
-    color: "#1a1b26"
+    color: "#121116"
 
     function composerOwnsFocus() {
         return root.activeFocusItem && root.activeFocusItem.objectName === "paneComposerEditor";
@@ -139,6 +140,7 @@ ApplicationWindow {
         property alias uiScale: root.uiScale
         property alias sidebarVisible: root.sidebarVisible
         property alias sidebarExpandedWidth: root.sidebarExpandedWidth
+        property alias redesignedSidebarSized: root.redesignedSidebarSized
     }
 
     onActiveChanged: {
@@ -146,18 +148,23 @@ ApplicationWindow {
             Qt.callLater(root.restoreSurfaceFocus);
     }
 
-    Component.onCompleted: Qt.callLater(
-        () => app.requestComposerFocus(app.panes.activePaneId))
+    Component.onCompleted: {
+        if (!redesignedSidebarSized) {
+            sidebarExpandedWidth = sidebarExpandedWidth === 232 ? 354 : Math.max(298, sidebarExpandedWidth);
+            redesignedSidebarSized = true;
+        }
+        Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId));
+    }
 
     palette {
-        window: "#1a1b26"
-        windowText: "#c6c8dc"
-        base: "#1c1d28"
-        alternateBase: "#242532"
-        text: "#c6c8dc"
-        button: "#20212d"
-        buttonText: "#b6b9cf"
-        highlight: "#8f93ae"
+        window: "#121116"
+        windowText: "#e9e4df"
+        base: "#17151c"
+        alternateBase: "#1d1a22"
+        text: "#e9e4df"
+        button: "#211e28"
+        buttonText: "#e9e4df"
+        highlight: "#b884d8"
         highlightedText: "#171821"
         placeholderText: "#5f6278"
     }
@@ -231,6 +238,10 @@ ApplicationWindow {
                 queueDialog.visible = false;
             else if (profilePanel.visible)
                 profilePanel.visible = false;
+            else if (rail.searchOwnsFocus) {
+                rail.clearSearch();
+                root.runCommand("chats");
+            }
             else if (root.selectedSurface !== "chats")
                 root.runCommand("chats");
             else {
@@ -386,8 +397,8 @@ ApplicationWindow {
                 visible: root.sidebarVisible
 
                 SplitView.preferredWidth: root.sidebarExpandedWidth
-                SplitView.minimumWidth: 208
-                SplitView.maximumWidth: 360
+                SplitView.minimumWidth: 298
+                SplitView.maximumWidth: 494
                 controller: app
                 selectedSurface: root.selectedSurface
                 onSelectSurface: surface => {
@@ -398,6 +409,8 @@ ApplicationWindow {
                         app.loadTeams();
                 }
                 onOpenOverview: overview.visible = true
+                onOpenSwitcher: quickSwitcher.open(root.composerOwnsFocus())
+                onStartAgent: root.runCommand("new")
                 onHideRequested: root.runCommand("sidebar")
             }
 

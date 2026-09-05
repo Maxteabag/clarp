@@ -70,8 +70,18 @@ CLARP_BASE_URL=https://computer.example.ts.net CLARP_TOKEN=cld_… \
 `Ctrl+B` switches between the full sidebar with agent names and no sidebar.
 This preference is remembered between launches. The header hide button and
 the command palette's **Hide sidebar** / **Show sidebar** use the same toggle.
-The expanded sidebar starts at 232 logical pixels; dragging its divider saves
-your preferred width across hiding and relaunching.
+The expanded sidebar starts at 354 logical pixels, including the narrow navigation
+strip and searchable conversation list. Dragging its divider saves your preferred
+width; Ctrl+B hides/restores both parts together. Older default-width preferences
+migrate once, while custom widths remain subject to the new 298-pixel minimum.
+
+The messenger-style redesign is integrated on top of the keyboard workspace:
+search and All/Unread filtering, archive access, conversation previews and dates,
+round antialiased portraits, right-aligned user bubbles, and a softer composer.
+It retains the native streaming/Markdown renderer, semantic tool cells, Spark
+explanations and audience dial, pane drafts, Settings, and the existing shortcuts.
+Portrait rounding uses bounded native image processing, including under the
+software renderer, rather than depending on a GPU-only mask.
 
 `Ctrl+Alt+T` opens the active agent in the OS's default terminal window, using
 its working directory and exact native conversation ID. Claude, Codex, AGY,
