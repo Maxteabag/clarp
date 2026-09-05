@@ -66,6 +66,17 @@ let view = {x:0, y:0, k:1};  // pan/zoom
 let events = [], cursor = 0, live = true, windowMs = 3600e3, tMin=0, tMax=0;
 let SPEC = {};   // archetype -> {travel,decay,persist,weight,trail}
 let LABEL = new Map();   // node id -> display label
+let hudTotals = {events:0, pct:0};
+
+// Report what is actually drawn: during a scrub the window totals describe a
+// different moment than the one on screen.
+function hud(){
+  let agents=0, places=0;
+  for(const n of nodes.values()) n.agent ? agents++ : places++;
+  stat.textContent =
+    `${agents} agents · ${places} nodes · ${cursor}/${hudTotals.events} events` +
+    ` · ${hudTotals.pct}% located` + (live ? '' : ' · replay');
+}
 
 function relabel(){
   const leaf = id => id.split(':').pop();
@@ -186,6 +197,7 @@ function emit(ev){
   const had=nodes.has(ev.target);
   const A=ensure(ev.agent,true,1), B=ensure(ev.target,false,sp.weight);
   if(!had) relabel();                 // a new node may create an ambiguity
+  hud();
   link(ev.agent, ev.target);
   A.hot=1; B.hot=Math.max(B.hot, 0.8*sp.weight);
   pulses.push({a:ev.agent, b:ev.target, c:col(ev.verb), t:0,
@@ -202,7 +214,7 @@ function prime(uptoTs){
     link(ev.agent, ev.target);
     cursor++;
   }
-  relabel();
+  relabel(); hud();
   for(let i=0;i<220;i++) step();      // settle the layout before first paint
   clock.textContent = new Date(uptoTs).toLocaleTimeString();
 }
@@ -236,13 +248,12 @@ async function load(){
   const newest = events.length ? events[events.length-1].ts : Date.now();
   prime(newest);                     // whole window visible immediately
   tMax = Math.max(newest, Date.now());
-  stat.textContent =
-    `${d.coverage.events} events · ${d.actors.length} agents · ` +
-    `${d.nodes.length} nodes · ${d.coverage.specific_pct}% located`;
+  hudTotals = {events: d.coverage.events, pct: d.coverage.specific_pct};
+  hud();
 }
 load(); setInterval(()=>{ if(live) load(); }, 30000);
 
-liveBtn.onclick = ()=>{ live=!live; liveBtn.ariaPressed=String(live);
+liveBtn.onclick = ()=>{ live=!live; liveBtn.ariaPressed=String(live); hud();
   if(live){ cursor=0; nodes.clear(); links.clear(); load(); } };
 slider.oninput = ()=>{
   if(live){ live=false; liveBtn.ariaPressed='false'; }
