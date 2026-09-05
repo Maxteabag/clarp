@@ -854,6 +854,41 @@ def _deliver_digest(*, run_id: str, agent_id: str, digest: str) -> None:
         log_exception("dreamingDigestMessageFail", e, detail=run_id)
 
 
+def abandon_run(run_id: str) -> None:
+    """End a run whose agent is no longer opted in, keeping what it built.
+
+    Called when dreaming is switched off while a run is in flight. The run is
+    closed rather than left active, and its worktree goes through the ordinary
+    harvest so anything already written survives as a branch instead of
+    leaking a directory nobody owns.
+    """
+    run = get_run(run_id)
+    if not run or run.get("status") != "active":
+        return
+    now = db.now_ms()
+    db.conn().execute(
+        """UPDATE dream_runs
+              SET status = 'abandoned', stage = 'abandoned',
+                  finished_at = ?, updated_at = ?,
+                  last_error = COALESCE(NULLIF(last_error, ''),
+                                        'dreaming disabled while in flight')
+            WHERE run_id = ?""",
+        (now, now, run_id),
+    )
+    db.conn().execute(
+        """UPDATE dream_rounds SET status = 'abandoned', updated_at = ?
+            WHERE run_id = ? AND status IN ('queued', 'sent')""",
+        (now, run_id),
+    )
+    log("dreamingAbandoned",
+        f"run={run_id} session={run.get('session')} "
+        f"rounds={run.get('completed_rounds')}")
+    try:
+        harvest_worktree(run_id)
+    except Exception as e:  # noqa: BLE001
+        log_exception("dreamAbandonHarvestFail", e, detail=run_id)
+
+
 def mark_active_noop(agent_id: str) -> None:
     run = active_run_for_agent(agent_id)
     if not run:
@@ -2177,6 +2212,12 @@ class DreamingScheduler:
     def _advance_run(self, run: dict[str, Any]) -> int:
         agent = agents_db.get_by_agent_id(run["agent_id"])
         if not agent or not dreaming_enabled(agent):
+            # Turning dreaming off used to strand whatever was in flight: the
+            # run could no longer advance, and because recovery lived below
+            # this check it could not be reaped either, so it sat active
+            # forever holding an untracked worktree. Opting out ends the run
+            # instead of abandoning it.
+            abandon_run(run["run_id"])
             return 0
         _recover_stale_sent_round(run["run_id"])
         reason = _skip_busy_reason(agent)

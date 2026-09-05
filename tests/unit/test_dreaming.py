@@ -1029,3 +1029,41 @@ def test_harvest_keeps_the_worktree_when_committing_fails(tmp_path, monkeypatch)
 
     assert target.exists(), "a failed harvest must not delete the work"
     assert (target / "precious.py").exists()
+
+
+def test_disabling_dreaming_mid_run_ends_it_instead_of_stranding_it(monkeypatch):
+    """Opting out must not leave a run that can neither advance nor be reaped.
+
+    `_advance_run` checks `dreaming_enabled` before recovery, so a run whose
+    agent was switched off mid-flight used to sit active forever holding an
+    untracked worktree — no advance, no recovery, no harvest.
+    """
+    aid = _agent("dquit")
+    location.set_location("dquit", 0, 0, ts=1)
+    now = _ts(2026, 6, 24, 3, 5)
+    sent: list[tuple[str, str]] = []
+    scheduler = dreaming.DreamingScheduler(
+        send_dream=lambda session, text: sent.append((session, text)),
+        now=lambda: now,
+        recipe_chooser=lambda: ("control", "full"),
+    )
+    assert scheduler.run_once() == 1
+    run = dreaming.list_dream_runs(session="dquit")[0]
+    assert run["status"] == "active"
+
+    harvested: list[str] = []
+    monkeypatch.setattr(dreaming, "harvest_worktree",
+                        lambda rid: harvested.append(rid) or "")
+
+    agents_db.update_agent(aid, dreaming_enabled=False)
+    assert scheduler.run_once() == 0
+
+    closed = dreaming.get_run(run["run_id"])
+    assert closed["status"] == "abandoned"
+    assert closed["finished_at"]
+    assert "disabled" in (closed["last_error"] or "")
+    # Whatever it had already built still goes through the harvest.
+    assert harvested == [run["run_id"]]
+    # No round is left claiming to be in flight.
+    rounds = dreaming.list_dream_runs(session="dquit")[0]["rounds"]
+    assert not [r for r in rounds if r["status"] in {"queued", "sent"}]
