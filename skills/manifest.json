@@ -2,7 +2,7 @@
   "version": 1,
   "skills": [
     {"id": "clarp-media", "pack": "core", "description": "Publish files into Clarp chat"},
-    {"id": "clarp-sessions", "pack": "core", "description": "Resolve Clarp agents and sessions"},
+    {"id": "clarp-sessions", "pack": "core", "description": "Resolve agents and resume existing conversations in Clarp"},
     {"id": "clarp-self-prompt", "pack": "core", "description": "Prompt an agent now or later"},
     {"id": "clarp-background-jobs", "pack": "core", "description": "Register and cancel background jobs"},
     {"id": "clarp-artifacts", "pack": "core", "description": "Shared secure artifact transport used by enabled artifact skills"},
