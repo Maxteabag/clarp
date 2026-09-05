@@ -322,6 +322,7 @@ class Handler(BaseHTTPRequestHandler):
     }
     _ROOT_STATIC = {"/manifest.json", "/styles.css", "/icon.png"}
     _POST_ROUTES = {
+        "/viz/supersede": "_handle_viz_supersede",
         "/send": "_handle_send",
         "/orchestrator/route-delegation": "_handle_orchestrator_route_delegation",
         "/transcribe": "_handle_transcribe",
@@ -1168,7 +1169,24 @@ class Handler(BaseHTTPRequestHandler):
         anchor = until if until else int(time.time() * 1000)
         payload = viz_normalize.build_fleet_map(
             anchor - window_s * 1000, until, limit=_int("limit", 4000))
+        from lib import viz_learning
+        clusters = payload.pop("_unknown_clusters", [])
+        payload["learning"] = viz_learning.status()
         self._send(200, json.dumps(payload).encode(), "application/json")
+        viz_learning.offer(clusters)
+
+    def _handle_viz_supersede(self):
+        from lib import viz_learning
+        data = self._read_json()
+        if (not isinstance(data, dict) or not isinstance(data.get("entity_id"), str)
+                or not isinstance(data.get("revision"), int)):
+            return self._send(400, b'{"error":"entity_id and revision required"}', "application/json")
+        try:
+            result = viz_learning.supersede(data["entity_id"], data["revision"],
+                                             str(data.get("reason", "Rethink this representation")))
+        except ValueError as error:
+            return self._send(409, json.dumps({"error": str(error)}).encode(), "application/json")
+        self._send(202, json.dumps(result).encode(), "application/json")
 
     def _send_viz_page(self):
         """The fleet map itself; a static page that reads /viz/events."""

@@ -94,6 +94,7 @@
   </nav>
 
   <footer class="sidebar-foot">
+    <a href="/viz" class="sidebar-all" title="Fleet map">◌ {#if !collapsed}<span>Fleet map</span>{/if}</a>
     <button class="sidebar-all" onclick={onOpenOverview}
             title="All agents — start, stop, relaunch">
       <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">

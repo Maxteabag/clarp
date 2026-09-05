@@ -17,10 +17,11 @@ import functools
 import json
 import os
 import re
+import shlex
+import pathlib
 from typing import Any, Iterable
 
-from . import viz_archetypes
-from .protocol import AgentState
+from . import viz_archetypes, viz_corpus
 
 # --- rules ----------------------------------------------------------------
 # (verb, fallback target kind) keyed on executable basename.
@@ -117,7 +118,7 @@ CODEX_TOOL_CLAMP = 80
 
 @functools.lru_cache(maxsize=2048)
 def _is_checkout(path: str) -> bool:
-    return os.path.isdir(path)
+    return os.path.exists(os.path.join(path, ".git"))
 
 
 def repo_of(text: str) -> str | None:
@@ -129,12 +130,53 @@ def repo_of(text: str) -> str | None:
     than a generic bucket, because it looks like somewhere real.
     """
     for m in _REPO_RE.finditer(text or ""):
-        if _is_checkout(m.group(0)):
-            return f"repo:{m.group(1)}"
+        root=m.group(0)
+        suffix=re.match(r"(?:/[A-Za-z0-9._+-]+)*", text[m.end():]).group(0)
+        candidates=[root]
+        for part in suffix.split("/")[1:]:
+            candidates.append(candidates[-1]+"/"+part)
+        for candidate in candidates[:8]:
+            if _is_checkout(candidate):
+                return "repo:" + _checkout_name(candidate)
     return None
 
 
-def first_known_executable(cmd: str) -> tuple[str, str]:
+@functools.lru_cache(maxsize=2048)
+def _checkout_name(path: str) -> str:
+    marker=pathlib.Path(path) / '.git'
+    # Linked worktrees belong to their real repository, not the worktrees
+    # directory. Resolve Git's own pointer; never infer this from agents.cwd.
+    try:
+        if marker.is_file() and marker.stat().st_size < 4096:
+            pointer=marker.read_text().strip().removeprefix('gitdir: ')
+            gitdir=(marker.parent / pointer).resolve()
+            if gitdir.parent.name == 'worktrees' and gitdir.parent.parent.name == '.git':
+                return gitdir.parent.parent.parent.name
+    except OSError:
+        pass
+    return pathlib.Path(path).name
+
+
+def _unknown_executable(cmd: str, depth: int = 0) -> str:
+    if depth > 3:
+        return ""
+    try:
+        words=shlex.split(cmd)
+    except ValueError:
+        return ""  # truncated shell syntax is evidence loss, not a new tool
+    while words and ('=' in words[0] or words[0] in {'env', 'sudo', 'command', 'exec'}):
+        words.pop(0)
+    if not words:
+        return ""
+    base=os.path.basename(words[0])
+    if base in {'bash','sh','zsh','dash'}:
+        return _unknown_executable(words[-1], depth+1) if len(words)>2 else ""
+    if base in _NOISE or not re.fullmatch(r'[A-Za-z][A-Za-z0-9._+-]{1,63}',base):
+        return ""
+    return base
+
+
+def first_known_executable(cmd: str, rules: dict | None = None) -> tuple[str, str]:
     """First token that names a known executable, plus its subcommand.
 
     Scanning every token beats parsing the leading pipeline segment: real
@@ -142,28 +184,31 @@ def first_known_executable(cmd: str) -> tuple[str, str]:
     git push`, where the leading token is a shell keyword. Measured against
     57k live events, segment-walking classified 33% and this reaches 96%.
     """
+    rules = EXE_RULES if rules is None else rules
+    known = {key.split(":", 1)[0] for key in rules}
     toks = _TOKEN.findall(cmd or "")
+    preamble = ("", "")
     for i, tok in enumerate(toks):
         base = os.path.basename(tok)
-        if base in EXE_RULES:
+        if base not in known and re.fullmatch(r"python3(?:\.\d+)+", base):
+            base = "python3"
+        if base in known:
             sub = next((t for t in toks[i + 1:]
                         if not t.startswith("-") and t not in _NOISE), "")
             # Check the immediately following token, not `sub`: the preamble
             # marker itself lives in _NOISE, so `sub` skips past it.
             nxt = os.path.basename(toks[i + 1]) if i + 1 < len(toks) else ""
             if (base, nxt) in _PREAMBLE:
+                preamble = (base, nxt)
                 continue                  # environment setup, keep looking
             return base, sub
-    for tok in toks:
-        base = os.path.basename(tok)
-        if (len(base) > 2 and base not in _NOISE and not base.startswith("-")
-                and "=" not in base and not base[0].isdigit()
-                and not base.endswith((".md", ".json", ".txt", ".env", ".log"))):
-            return base, ""
-    return "", ""
+    unknown = _unknown_executable(cmd)
+    # When the command tail was lost, the observed environment setup is still
+    # a real known activity. Never pretend it identifies the missing script.
+    return (unknown, "") if unknown else preamble
 
 
-def classify(tool: str, inp: Any, file_path: str = "") -> tuple[str, str] | None:
+def classify(tool: str, inp: Any, file_path: str = "", library: dict | None = None) -> tuple[str, str] | None:
     """-> (verb, target) or None when no rule matched."""
     if tool in NATIVE_RULES:
         verb, kind = NATIVE_RULES[tool]
@@ -177,9 +222,19 @@ def classify(tool: str, inp: Any, file_path: str = "") -> tuple[str, str] | None
     if tool == "Bash" or tool.startswith(("/usr/bin/", "/bin/", "bash ", "sh ")):
         cmd = inp.get("command", "") if isinstance(inp, dict) else ""
         cmd = cmd or tool
-        exe, sub = first_known_executable(cmd)
+        exe, sub = first_known_executable(cmd, library["rules"] if library else None)
         if not exe:
             return None
+        if library:
+            rule = library["rules"].get(exe + ":" + sub)
+            if not rule:
+                candidate = library["rules"].get(exe, {})
+                if exe not in {"git", "gh"} or candidate.get("authored"):
+                    rule = candidate
+            if rule:
+                from .viz_library import resolve
+                target = resolve(rule["target"], library)
+                return rule["verb"], target if rule.get("authored") else (repo_of(cmd) or target)
         if exe == "git":
             verb = "push" if sub == "push" else "vcs"
             kind = "service:github" if sub in _GIT_REMOTE else "repo"
@@ -189,13 +244,18 @@ def classify(tool: str, inp: Any, file_path: str = "") -> tuple[str, str] | None
         if exe in EXE_RULES:
             verb, kind = EXE_RULES[exe]
             return verb, repo_of(cmd) or kind
+    if library and tool in library['rules']:
+        from .viz_library import resolve
+        rule = library['rules'][tool]
+        return rule['verb'], resolve(rule['target'], library)
     return None
 
 
-def normalize(rows: Iterable[Any], names: dict[str, str]) -> list[dict]:
+def iter_normalize(rows: Iterable[Any], names: dict[str, str], library: dict | None = None):
     """Project `state_log` tool rows into drawable events, in time order."""
+    from . import viz_library
+    library = library if library is not None else viz_library.seed()
     seen: set[tuple] = set()
-    out: list[dict] = []
     for row in rows:
         agent_id, ts, detail = row["agent_id"], row["ts"], row["detail"]
         try:
@@ -209,21 +269,50 @@ def normalize(rows: Iterable[Any], names: dict[str, str]) -> list[dict]:
         if key in seen:
             continue                      # codex emits duplicate rows
         seen.add(key)
-        hit = classify(tool, data.get("input") or {}, data.get("file_path") or "")
+        inp = data.get("input") or {}
+        hit = classify(tool, inp, data.get("file_path") or "", library)
+        provisional = False
         if not hit:
-            continue
-        verb, target = hit
-        out.append({
+            raw = inp.get("command", "") if isinstance(inp, dict) else ""
+            hint, _ = first_known_executable(raw or tool, library["rules"])
+            if not hint:
+                continue
+            verb, target = "unknown", "unknown:" + hint
+            provisional = True
+        else:
+            verb, target = hit
+        # Split file activity only where an explicit, anchored path is present.
+        # No agents.cwd lookup: historical agents move between checkouts.
+        path = data.get("file_path") or (inp.get("file_path", "") if isinstance(inp, dict) else "")
+        if path and target.startswith("repo:"):
+            parts = path.lower().split("/")
+            role = ("tests" if any(p in {"tests", "test", "__tests__"} for p in parts)
+                    else "docs" if any(p in {"docs", "doc"} for p in parts) or path.endswith(".md")
+                    else "config" if path.endswith((".toml", ".yaml", ".yml", ".json"))
+                    else "source")
+            target = "file:" + target[5:] + "/" + role
+        raw_command = (inp.get("command", "") if isinstance(inp, dict) else "") or tool
+        exe, sub = first_known_executable(raw_command, library["rules"])
+        rule = library["rules"].get(exe + ":" + sub, library["rules"].get(exe, {}))
+        archetype = (rule.get("archetype") if rule.get("verb") == verb else None)
+        archetype = archetype or viz_archetypes.archetype_for(verb)
+        yield {
+            "id": row["state_id"] if "state_id" in row.keys() else f"{agent_id}:{ts}:{tool}",
             "ts": ts,
             "agent": names.get(agent_id, agent_id[:8]),
             "agent_id": agent_id,
             "verb": verb,
-            "archetype": viz_archetypes.archetype_for(verb),
+            "archetype": archetype,
+            "provisional": provisional,
+            "sample": ((inp.get("command", "") if isinstance(inp, dict) else "") or tool)[:160] if provisional else "",
             "target": target,
-            "specific": ":" in target,
+            "specific": target.startswith(("repo:", "file:", "service:")),
             "clamped": bool(data.get("dispatch")) and len(tool) >= CODEX_TOOL_CLAMP,
-        })
-    return out
+        }
+
+
+def normalize(rows: Iterable[Any], names: dict[str, str], library: dict | None = None) -> list[dict]:
+    return list(iter_normalize(rows, names, library))
 
 
 def unmatched_clusters(rows: Iterable[Any], limit: int = 40) -> list[dict]:
@@ -279,22 +368,19 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
         for r in con.execute(
             "SELECT agent_id, persona, session FROM agents")
     }
-    rows = con.execute(
-        "SELECT agent_id, ts, detail FROM state_log "
-        "WHERE kind=? AND json_valid(detail) AND ts >= ? AND ts <= ? "
-        "ORDER BY ts",
-        (AgentState.TOOL, since_ms, until),
-    ).fetchall()
-
-    events = normalize(rows, names)
-    if len(events) > limit:                       # keep the newest slice
-        events = events[-limit:]
+    from . import viz_library
+    library = viz_library.load()
+    rows = viz_corpus.tool_rows(con, since_ms, until)
+    import heapq
+    limit = max(1, min(limit, 10000))
+    events = sorted(heapq.nlargest(limit, iter_normalize(rows, names, library),
+                                  key=lambda ev: ev["ts"]), key=lambda ev: ev["ts"])
 
     actors: dict[str, dict] = {}
     nodes: dict[str, dict] = {}
     for ev in events:
         a = actors.setdefault(
-            ev["agent"], {"id": ev["agent"], "kind": "agent", "events": 0})
+            ev["agent_id"], {"id": ev["agent_id"], "label": ev["agent"], "kind": "agent", "events": 0})
         a["events"] += 1
         n = nodes.setdefault(ev["target"], {
             "id": ev["target"],
@@ -307,11 +393,30 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
         n["events"] += 1
         n["agents"].add(ev["agent"])
     for n in nodes.values():
+        n.update({k: v for k, v in library["entities"].get(n["id"], {}).items()
+                  if k in {"shape", "icon", "archetype", "logic"}})
+        n["provisional"] = n["id"].startswith("unknown:")
+        n["redesignable"] = n["id"] in library["entities"]
         n["agents"] = sorted(n["agents"])         # JSON-serializable
 
+    clusters = {}
+    for ev in events:
+        sample = ev.pop("sample", "")
+        if not ev["provisional"]:
+            continue
+        hint = ev["target"].split(":", 1)[1]
+        c = clusters.setdefault(hint, {"hint": hint, "count": 0, "clamped": 0, "example": sample})
+        c["count"] += 1
+        c["clamped"] += ev["clamped"]
+        if not ev["clamped"]:
+            c["example"] = sample
     specific = sum(1 for e in events if e["specific"])
     return {
-        "archetypes": viz_archetypes.specs(),
+        "archetypes": library["archetypes"],
+        "library_revision": library["revision"],
+        "_unknown_clusters": list(clusters.values()),
+        "resolved": {"unknown:" + rule["exe"]: viz_library.resolve(rule["target"], library)
+                     for rule in library["rules"].values()},
         "since": since_ms,
         "until": until if until < (1 << 61) else None,
         "events": events,
