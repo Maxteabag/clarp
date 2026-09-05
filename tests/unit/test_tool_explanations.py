@@ -75,6 +75,9 @@ def test_script_evidence_is_bounded_and_rejects_symlinks(tmp_path):
     script = tmp_path / "search.py"
     script.write_text("print('search catalogue')")
     assert script_evidence({"command": "python search.py"}, str(tmp_path))[0]["source_excerpt"] == script.read_text()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    assert script_evidence({"command": f"python {script}"}, str(workspace))[0]["file"] == "search.py"
     link = tmp_path / "link.py"
     link.symlink_to(script)
     assert script_evidence({"command": "python link.py"}, str(tmp_path)) == []

@@ -27,8 +27,9 @@ are not permanent records; raw payloads and script excerpts are not persisted.
 
 Only selected bounded metadata and labeled operations are accepted; tool output,
 diffs, arbitrary nested payloads, history and client-provided script excerpts are
-excluded. For a known agent, directly referenced regular scripts **within its
-workspace** can contribute at most two 6,000-character excerpts from files no
+excluded. For a known agent, directly referenced regular scripts on the Host
+(relative paths resolve from its workspace) can contribute at most two
+6,000-character excerpts from files no
 larger than 64KiB. Hidden files, symlinks and nonregular files are excluded. Script
 content participates in cache identity. Common credentials are redacted best-effort;
 this is not a general secret scanner. This data is sent to the signed-in Codex

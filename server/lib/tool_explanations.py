@@ -68,7 +68,7 @@ def normalize_activity(activity):
 
 
 def script_evidence(activity, cwd):
-    """Read only directly named regular scripts in the agent's known workspace.
+    """Read only directly named regular scripts, relative to the known workspace.
 
     No caller-selected directory, imports, hidden files or symlink traversal.
     O_NOFOLLOW plus fstat checks protect against replacement during the read.
@@ -93,7 +93,7 @@ def script_evidence(activity, cwd):
             path = root / path
         try:
             canonical = path.resolve(strict=True)
-            if canonical != path or not canonical.is_relative_to(root) or any(p.startswith(".") for p in canonical.parts) or canonical in seen:
+            if canonical != path or canonical.parts[1:2] in [("proc",), ("sys",), ("dev",), ("run",)] or any(p.startswith(".") for p in canonical.parts) or canonical in seen:
                 continue
             descriptor = os.open(canonical, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
             with os.fdopen(descriptor, "rb") as source:
