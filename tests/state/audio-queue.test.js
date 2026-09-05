@@ -290,14 +290,20 @@ describe('audio queue scheduler', () => {
     const s = createScheduler({
       machine, player: player2, currentSession: () => 'claude',
     });
-    s.ingest({ url: '/audio/a.mp3', session: 'claude', ts: Date.now() - 60_000 });
-    await new Promise(r => setTimeout(r, 0));
-    s.ingest({ url: '/audio/b.mp3', session: 'claude', ts: Date.now() - 60_000 });
-    s.ingest({ url: '/audio/c.mp3', session: 'claude', ts: Date.now() });
-    expect(s.queueLength).toBe(2);
-    const dropped = s.flushOlderThan(30_000);
-    expect(dropped).toBe(1);   // only b is dropped; a is already playing, c is fresh
-    release();
+    // Distinct ordered timestamps keep the replay guard from rejecting b when
+    // two Date.now() calls happen within the same millisecond on a fast runner.
+    const now = Date.now();
+    try {
+      expect(s.ingest({ url: '/audio/a.mp3', session: 'claude', ts: now - 60_001 }).accepted).toBe(true);
+      await new Promise(r => setTimeout(r, 0));
+      expect(s.ingest({ url: '/audio/b.mp3', session: 'claude', ts: now - 60_000 }).accepted).toBe(true);
+      expect(s.ingest({ url: '/audio/c.mp3', session: 'claude', ts: now }).accepted).toBe(true);
+      expect(s.queueLength).toBe(2);
+      const dropped = s.flushOlderThan(30_000);
+      expect(dropped).toBe(1);   // only b is dropped; a is already playing, c is fresh
+    } finally {
+      release();
+    }
     for (let i = 0; i < 5; i++) await new Promise(r => setTimeout(r, 0));
     // a finishes, then c plays (b was dropped).
     expect(player2.played.map(p => p.url)).toEqual(['/audio/a.mp3', '/audio/c.mp3']);
