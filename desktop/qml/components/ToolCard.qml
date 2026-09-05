@@ -5,8 +5,13 @@ import QtQuick.Layouts
 
 Rectangle {
     id: root
+    objectName: "toolCard"
 
     required property var tool
+    property var narrator: null
+    property string workingDirectory: ""
+    property string session: ""
+    property bool localFilesAllowed: false
     property bool expanded: false
     readonly property string toolName: String(tool.name || tool.action || "Tool")
     readonly property string summary: String(tool.summary || tool.description || tool.file_path || "")
@@ -23,18 +28,31 @@ Rectangle {
     }
     readonly property color statusColor: status === "error" ? "#df7777" : status === "running" ? "#e7aa68" : "#6fbd98"
 
-    implicitHeight: toolColumn.implicitHeight + 20
-    radius: 11
-    color: "#19171d"
-    border.color: expanded ? "#4b3d55" : "#2b2731"
+    implicitHeight: toolColumn.implicitHeight + 6
+    radius: 2
+    color: hover.hovered ? "#222638" : "transparent"
+    border.width: 0
+    HoverHandler { id: hover }
+
+    ActivityExplanation {
+        session: root.session
+        id: explanation
+        narrator: root.narrator
+        activity: root.tool
+        active: root.visible
+        workingDirectory: root.workingDirectory
+        localFilesAllowed: root.localFilesAllowed
+    }
 
     ColumnLayout {
         id: toolColumn
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: 10
-        spacing: 6
+        anchors.leftMargin: 3
+        anchors.rightMargin: 3
+        anchors.topMargin: 3
+        spacing: 3
 
         RowLayout {
             Layout.fillWidth: true
@@ -47,52 +65,66 @@ Rectangle {
                 color: root.statusColor
             }
             Text {
+                visible: !explanation.enabled
                 text: root.toolName
-                color: "#c9c1cc"
-                font.pixelSize: 11
+                color: "#9ea4c7"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 12
                 font.weight: Font.DemiBold
             }
             Text {
+                visible: !explanation.enabled
                 Layout.fillWidth: true
                 text: root.summary
-                color: "#756f7c"
-                font.pixelSize: 11
+                color: "#969bb5"
+                font.pixelSize: 12
                 elide: Text.ElideRight
             }
             Text {
-                visible: root.detail.length > 0
+                objectName: "activityExplanationText"
+                visible: explanation.enabled
+                Layout.fillWidth: true
+                text: explanation.displayText
+                textFormat: Text.PlainText
+                color: "#82aaff"
+                font.pixelSize: 13
+                wrapMode: Text.Wrap
+            }
+            Text {
+                visible: (!explanation.enabled && root.detail.length > 0) || explanation.text.length > 0
                 text: root.expanded ? "−" : "+"
-                color: "#8d8295"
-                font.pixelSize: 15
+                color: "#858aa7"
+                font.pixelSize: 13
             }
         }
 
         Rectangle {
-            visible: root.expanded && root.detail.length > 0
+            visible: root.expanded && (!explanation.enabled || explanation.text.length > 0)
+                && (root.detail.length > 0 || explanation.text.length > 0)
             Layout.fillWidth: true
-            implicitHeight: detailText.implicitHeight + 16
-            radius: 7
-            color: "#111015"
+            Layout.leftMargin: 15
+            implicitHeight: detailText.implicitHeight + 6
+            color: "transparent"
 
             TextEdit {
                 id: detailText
                 anchors.fill: parent
-                anchors.margins: 8
-                text: root.detail
+                anchors.margins: 3
+                text: (explanation.text.length > 0 ? root.toolName + " · " + root.summary + "\n\n" : "") + root.detail
                 textFormat: TextEdit.PlainText
                 readOnly: true
                 selectByMouse: true
                 wrapMode: TextEdit.WrapAnywhere
-                color: "#aaa3af"
-                selectionColor: "#674c74"
-                font.family: "monospace"
-                font.pixelSize: 11
+                color: "#aeb2ca"
+                selectionColor: "#565d82"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 12
             }
         }
     }
 
     TapHandler {
-        enabled: root.detail.length > 0
+        enabled: (!explanation.enabled && root.detail.length > 0) || explanation.text.length > 0
         onTapped: root.expanded = !root.expanded
     }
 }

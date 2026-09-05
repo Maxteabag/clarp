@@ -35,11 +35,14 @@ class TurnHandle:
         """
         deadline = None if timeout is None else time.monotonic() + timeout
         returncode = self.proc.wait(timeout=timeout)
-        if self.drain_thread is not None:
+        drain = self.drain_thread
+        if drain is not None and drain is not threading.current_thread():
             remaining = (
                 None if deadline is None
                 else max(0.0, deadline - time.monotonic()))
-            self.drain_thread.join(timeout=remaining)
+            drain.join(timeout=remaining)
+            if drain.is_alive():
+                raise subprocess.TimeoutExpired(self.proc.args, timeout)
         return returncode
 
     def is_alive(self) -> bool:

@@ -7,11 +7,13 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
 
 from lib import agents
+from lib.process_registry import TurnHandle
 
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="liveness probe uses /proc")
@@ -22,6 +24,24 @@ def _alive(pid):
         return Path(f"/proc/{pid}/stat").read_text().split()[2] != "Z"
     except (OSError, IndexError):
         return False
+
+
+def test_wait_includes_stdout_drain_completion():
+    process = subprocess.Popen([sys.executable, "-c", "pass"])
+    committed = threading.Event()
+
+    def drain_after_exit():
+        process.wait(timeout=2)
+        time.sleep(0.1)
+        committed.set()
+
+    drain_thread = threading.Thread(target=drain_after_exit)
+    handle = TurnHandle(proc=process, drain_thread=drain_thread)
+    drain_thread.start()
+
+    handle.wait(timeout=2)
+
+    assert committed.is_set()
 
 
 @pytest.mark.parametrize("backend", ["clarp", "codex", "agy", "grok", "opencode"])

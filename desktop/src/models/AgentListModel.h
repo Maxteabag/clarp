@@ -29,6 +29,7 @@ class AgentListModel : public QAbstractListModel {
         StateRole,
         StatusTextRole,
         LastMessageRole,
+        LastActivityRole,
         ConversationIdRole,
         HeadRevisionRole,
         ContextTokensRole,
@@ -41,6 +42,7 @@ class AgentListModel : public QAbstractListModel {
         HeartbeatEnabledRole,
         DreamingEnabledRole,
         SchedulesRole,
+        McpServersRole,
         UnreadRole,
     };
     Q_ENUM(Role)
@@ -58,11 +60,14 @@ class AgentListModel : public QAbstractListModel {
     void applyQueueEvent(const QJsonObject& event);
     void applyNotificationEvent(const QJsonObject& event);
     void clearUnread(const QString& session);
+    void markTransportUnavailable();
+    bool recordOutgoingActivity(const QString& session);
 
     [[nodiscard]] const Agent* find(const QString& session) const;
     [[nodiscard]] QString firstSession() const;
     [[nodiscard]] QStringList sessions() const;
     Q_INVOKABLE [[nodiscard]] int indexOfSession(const QString& session) const;
+    [[nodiscard]] QString displayState(const QString& session) const;
 
   signals:
     void countChanged();
@@ -73,7 +78,11 @@ class AgentListModel : public QAbstractListModel {
 
     QVector<Agent> m_agents;
     QHash<QString, int> m_bySession;
+    QHash<QString, QJsonObject> m_pendingQueueEvents;
+    QHash<QString, QPair<quint64, qint64>> m_outgoingRanks;
+    quint64 m_outgoingCounter = 0;
     bool m_archivedOnly = false;
+    bool m_transportAvailable = false;
 };
 
 } // namespace clarp
