@@ -6,7 +6,7 @@
     {"id": "clarp-self-prompt", "pack": "core", "description": "Prompt an agent now or later"},
     {"id": "clarp-background-jobs", "pack": "core", "description": "Register and cancel background jobs"},
     {"id": "clarp-artifacts", "pack": "core", "description": "Shared secure artifact transport used by enabled artifact skills"},
-    {"id": "clarp-decisions", "pack": "artifacts", "description": "Request explicit yes or no approval"},
+    {"id": "clarp-decisions", "pack": "artifacts", "description": "Ask a native question or request explicit approval, with attention priority"},
     {"id": "clarp-documents", "pack": "artifacts", "description": "Publish durable formatted documents"},
     {"id": "clarp-research", "pack": "artifacts", "description": "Publish sourced research briefs"},
     {"id": "clarp-code-changes", "pack": "artifacts", "description": "Publish repository changes and reviews", "default_enabled": false},

@@ -12,7 +12,7 @@ from typing import Any
 from . import agents, db, media_store
 from .voice_markup import strip_hidden_blocks
 
-TYPES = {"decision", "plan", "document", "research", "code_change", "data",
+TYPES = {"decision", "question", "plan", "document", "research", "code_change", "data",
          "audio", "video", "file", "release", "directory", "workflow_run"}
 STATUSES = {"draft", "active", "ready", "failed", "completed", "cancelled", "expired"}
 _VALID_ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
@@ -89,7 +89,7 @@ def _payload(value: Any) -> dict:
 
 def _require_payload(type: str, payload: dict, artifact_id: str, session: str = "") -> None:
     """Reject artifact-shaped markdown blobs that cannot power their renderer."""
-    if type in {"decision", "plan"}:
+    if type in {"decision", "question", "plan"}:
         return
     missing = [key for key in _REQUIRED_FIELDS.get(type, ())
                if key not in payload or payload[key] in (None, "", {})
@@ -199,6 +199,16 @@ def _sanitize_json(value: Any) -> Any:
 def create(*, session: str, type: str, title: str, summary: str = "",
            status: str = "ready", reference_id: str = "", payload: Any = None,
            artifact_id: str = "") -> dict:
+    if type.strip().lower() in {"decision", "question", "plan"}:
+        raise ValueError(f"{type} must use its dedicated lifecycle endpoint")
+    return _create(session=session, type=type, title=title, summary=summary,
+                   status=status, reference_id=reference_id, payload=payload,
+                   artifact_id=artifact_id)
+
+
+def _create(*, session: str, type: str, title: str, summary: str = "",
+            status: str = "ready", reference_id: str = "", payload: Any = None,
+            artifact_id: str = "") -> dict:
     agent = _agent(session)
     type, status = type.strip().lower(), status.strip().lower()
     title = strip_hidden_blocks(title).strip()
@@ -227,7 +237,7 @@ def ensure_plan(*, plan_id: str, session: str, title: str) -> dict:
         "SELECT artifact_id FROM artifacts WHERE type='plan' AND reference_id=?",
         (plan_id,)).fetchone()
     return (get(row["artifact_id"]) if row else
-            create(session=session, type="plan", title=title, status="active",
+            _create(session=session, type="plan", title=title, status="active",
                    reference_id=plan_id, payload={"plan_id": plan_id})) or {}
 
 
@@ -240,7 +250,7 @@ def sync_plan(plan_id: str) -> None:
     status = {"active": "active", "completed": "completed", "blocked": "failed"}.get(
         plan["status"], "cancelled")
     db.conn().execute(
-        "UPDATE artifacts SET status=?,updated_at=?,completed_at=? WHERE type='plan' AND reference_id=?",
+        "UPDATE artifacts SET status=?,updated_at=MAX(?,updated_at+1),completed_at=? WHERE type='plan' AND reference_id=?",
         (status, plan["updated_at"], plan["completed_at"], plan_id))
 
 
@@ -259,10 +269,11 @@ def _public(row) -> dict:
                 "current_step", "conclusion", "total_steps", "completed_steps"):
         if key in item["payload"] and _public_field_valid(key, item["payload"][key]):
             item[key] = item["payload"][key]
-    if item["type"] == "decision":
+    if item["type"] in {"decision", "question"}:
         decision = db.conn().execute(
             "SELECT * FROM artifact_decisions WHERE artifact_id=?", (item["artifact_id"],)).fetchone()
-        item["decision"] = dict(decision) if decision else None
+        item["decision"] = (_public_decision(decision, archived_at=item["archived_at"])
+                            if decision else None)
     elif item["type"] == "plan" and item.get("reference_id"):
         from . import task_plans
         item["plan"] = task_plans.get(item["reference_id"])
@@ -340,7 +351,7 @@ def list_artifacts(*, session: str = "", agent_id: str = "", type: str = "", sea
 def update(artifact_id: str, data: dict) -> dict:
     current = get(artifact_id)
     if not current: raise ValueError("artifact not found")
-    if current["type"] in {"decision", "plan"}:
+    if current["type"] in {"decision", "question", "plan"}:
         raise ValueError(f"{current['type']} must use its dedicated lifecycle endpoint")
     status = str(data.get("status") or current["status"]).lower()
     if status not in STATUSES: raise ValueError("unsupported artifact status")
@@ -354,11 +365,11 @@ def update(artifact_id: str, data: dict) -> dict:
         _require_payload(current["type"], payload, artifact_id, str(current["session"]))
     title = strip_hidden_blocks(str(data.get("title") or current["title"])).strip()
     if not title: raise ValueError("artifact title required")
-    now = db.now_ms()
+    now = max(db.now_ms(), current["updated_at"] + 1)
     completed = (current["completed_at"] if status == current["status"] else
                  (now if status in {"completed", "cancelled", "expired"} else None))
     db.conn().execute(
-        """UPDATE artifacts SET title=?,summary=?,status=?,payload_json=?,updated_at=?,
+        """UPDATE artifacts SET title=?,summary=?,status=?,payload_json=?,updated_at=MAX(?,updated_at+1),
                   completed_at=? WHERE artifact_id=?""",
         (title[:300],
          strip_hidden_blocks(str(data.get("summary") if "summary" in data else current["summary"]))[:4000],
@@ -367,88 +378,323 @@ def update(artifact_id: str, data: dict) -> dict:
     return get(artifact_id) or {}
 
 
+def _decision_text(value: Any, field: str, limit: int, *, required: bool = False) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    value = strip_hidden_blocks(value).strip()
+    if required and not value:
+        raise ValueError(f"{field} required")
+    if len(value) > limit:
+        raise ValueError(f"{field} too large")
+    return value
+
+
+def _integer(value: Any, field: str, *, minimum: int = 0) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field} must be an integer")
+    if value < minimum or value > 9007199254740991:
+        raise ValueError(f"{field} is outside the supported range")
+    return value
+
+
+def _decision_options(options: Any) -> list[dict]:
+    if not isinstance(options, list) or not 2 <= len(options) <= 3:
+        raise ValueError("questions require 2 or 3 options")
+    normalized, ids = [], set()
+    for option in options:
+        if not isinstance(option, dict) or set(option) - {"id", "label", "description"}:
+            raise ValueError("options must contain id, label and optional description")
+        identifier = _decision_text(option.get("id"), "option id", 80, required=True)
+        if not _VALID_ID.fullmatch(identifier) or identifier in ids:
+            raise ValueError("option ids must be valid and unique")
+        label = _decision_text(option.get("label"), "option label", 200, required=True)
+        item = {"id": identifier, "label": label}
+        if "description" in option:
+            item["description"] = _decision_text(option["description"], "option description", 1000)
+        normalized.append(item)
+        ids.add(identifier)
+    return normalized
+
+
+def _priority(item: dict) -> int:
+    return (200 if item["blocks_progress"] else 100) + (10 if item["urgency"] == "time_sensitive" else 0)
+
+
+def _public_decision(row, *, archived_at: int | None = None) -> dict:
+    item = dict(row)
+    item["options"] = json.loads(item.pop("options_json"))
+    item["answer"] = json.loads(item.pop("answer_json") or "null")
+    item["allow_custom_text"] = bool(item["allow_custom_text"])
+    item["blocks_progress"] = bool(item["blocks_progress"])
+    item["priority"] = _priority(item)
+    item["archived_at"] = archived_at
+    item["delivery_pending"] = delivery_pending(item["decision_id"])
+    return item
+
+
 def create_decision(*, session: str, title: str, question: str, context: str = "",
                     yes_label: str = "Yes", no_label: str = "No", payload: Any = None,
-                    reference_id: str = "", expires_at: int | None = None) -> dict:
-    question = strip_hidden_blocks(question).strip()
-    context = strip_hidden_blocks(context).strip()
-    if not question: raise ValueError("decision question required")
-    if len(question) > 4000 or len(context) > 16000:
-        raise ValueError("decision text too large")
-    yes_label = strip_hidden_blocks(yes_label).strip() or "Yes"
-    no_label = strip_hidden_blocks(no_label).strip() or "No"
-    if len(yes_label) > 80 or len(no_label) > 80:
-        raise ValueError("decision label too large")
-    if expires_at is not None and (isinstance(expires_at, bool) or not isinstance(expires_at, int)):
-        raise ValueError("expires_at must be an integer")
-    if expires_at is not None and expires_at > db.now_ms() + 365 * 24 * 60 * 60 * 1000:
-        raise ValueError("expires_at is too far in the future")
+                    reference_id: str = "", expires_at: int | None = None,
+                    response_type: str = "approval", options: Any = None,
+                    allow_custom_text: bool | None = None,
+                    recommended_option_id: str | None = None,
+                    blocks_progress: bool = False, priority_reason: str = "",
+                    urgency: str = "normal", response_effort: str = "review",
+                    deadline_at: int | None = None) -> dict:
+    question = _decision_text(question, "decision question", 4000, required=True)
+    context = _decision_text(context, "decision context", 16000)
+    yes_label = _decision_text(yes_label, "decision label", 80) or "Yes"
+    no_label = _decision_text(no_label, "decision label", 80) or "No"
+    if response_type not in ("approval", "single_choice"):
+        raise ValueError("unsupported response_type")
+    if allow_custom_text is None:
+        allow_custom_text = response_type == "single_choice"
+    if not isinstance(allow_custom_text, bool):
+        raise ValueError("allow_custom_text must be a boolean")
+    if not isinstance(blocks_progress, bool):
+        raise ValueError("blocks_progress must be a boolean")
+    if urgency not in ("normal", "time_sensitive"):
+        raise ValueError("unsupported urgency")
+    if response_effort not in ("quick", "short", "review"):
+        raise ValueError("unsupported response_effort")
+    priority_reason = _decision_text(priority_reason, "priority_reason", 2000)
+    if (blocks_progress or urgency != "normal") and not priority_reason:
+        raise ValueError("blocking or time-sensitive requests require priority_reason")
+    if response_type == "single_choice":
+        options = _decision_options(options)
+        if recommended_option_id is not None:
+            recommended_option_id = _decision_text(
+                recommended_option_id, "recommended_option_id", 80, required=True)
+            if recommended_option_id not in {option["id"] for option in options}:
+                raise ValueError("recommended_option_id must identify an option")
+    else:
+        if options is not None or recommended_option_id is not None or allow_custom_text:
+            raise ValueError("approval requests do not support options or custom text")
+        options = []
+    if expires_at is not None:
+        _integer(expires_at, "expires_at")
+        if expires_at > db.now_ms() + 365 * 24 * 60 * 60 * 1000:
+            raise ValueError("expires_at is too far in the future")
+    if deadline_at is not None:
+        _integer(deadline_at, "deadline_at")
     con = db.conn(); con.execute("BEGIN IMMEDIATE")
     try:
-        artifact = create(session=session, type="decision", title=title,
-                          summary=question, status="active", reference_id=reference_id,
-                          payload=payload)
+        artifact = _create(session=session, type="question" if response_type == "single_choice" else "decision",
+                           title=title, summary=question, status="active",
+                           reference_id=reference_id, payload=payload)
         con.execute(
             """INSERT INTO artifact_decisions(decision_id,artifact_id,question,context,yes_label,
-                   no_label,expires_at) VALUES(?,?,?,?,?,?,?)""",
+                   no_label,expires_at,response_type,options_json,allow_custom_text,
+                   recommended_option_id,blocks_progress,priority_reason,urgency,
+                   response_effort,deadline_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (_new("decision"), artifact["artifact_id"], question, context,
-             yes_label, no_label, expires_at))
+             yes_label, no_label, expires_at, response_type,
+             json.dumps(options, ensure_ascii=False, separators=(",", ":")),
+             allow_custom_text, recommended_option_id, blocks_progress, priority_reason,
+             urgency, response_effort, deadline_at))
         con.execute("COMMIT")
         return get(artifact["artifact_id"]) or {}
     except BaseException:
         con.execute("ROLLBACK"); raise
 
 
-def resolve(decision_id: str, *, choice: str, expected_revision: int) -> tuple[dict, bool]:
-    choice = choice.strip().lower()
-    if choice not in {"accepted", "rejected"}: raise ValueError("invalid decision choice")
+def _answer(row, *, choice: Any, answer: Any) -> tuple[str, dict]:
+    if row["response_type"] == "approval":
+        if answer is not None or not isinstance(choice, str):
+            raise ValueError("approval requires an explicit accepted or rejected choice")
+        choice = choice.strip().lower()
+        if choice not in {"accepted", "rejected"}:
+            raise ValueError("invalid decision choice")
+        return choice, {"choice": choice}
+    if row["response_type"] != "single_choice":
+        raise ValueError("unsupported response_type")
+    if choice is not None:
+        raise ValueError("questions require a typed answer, not a binary choice")
+    if not isinstance(answer, dict) or set(answer) not in ({"option_id"}, {"text"}):
+        raise ValueError("answer must contain exactly one of option_id or text")
+    if "option_id" in answer:
+        identifier = answer["option_id"]
+        if not isinstance(identifier, str):
+            raise ValueError("answer option_id must be a string")
+        for option in json.loads(row["options_json"]):
+            if option["id"] == identifier.strip():
+                return "answered", {"option_id": option["id"], "label": option["label"]}
+        raise ValueError("answer option_id does not identify an option")
+    if not row["allow_custom_text"]:
+        raise ValueError("custom text answers are not enabled")
+    # This is the user's actual wording, not agent-authored presentation text.
+    # Preserve casing, internal whitespace and markup in the durable snapshot.
+    text = answer["text"]
+    if not isinstance(text, str) or not text.strip() or len(text.strip()) > 4000:
+        raise ValueError("answer text must be a nonempty string of at most 4000 characters")
+    return "answered", {"text": text.strip()}
+
+
+def _queue_delivery(con, row, *, choice: str, answer: dict | None, now: int) -> None:
+    artifact = con.execute("SELECT session,reference_id,payload_json FROM artifacts WHERE artifact_id=?",
+                           (row["artifact_id"],)).fetchone()
+    con.execute(
+        """INSERT INTO decision_deliveries(decision_id,artifact_id,session,question,
+               context,reference_id,payload_json,choice,status,created_at,response_type,answer_json)
+           VALUES(?,?,?,?,?,?,?,?, 'pending',?,?,?) ON CONFLICT(decision_id) DO NOTHING""",
+        (row["decision_id"], row["artifact_id"], artifact["session"], row["question"],
+         row["context"], artifact["reference_id"], artifact["payload_json"], choice, now,
+         row["response_type"], json.dumps(answer, ensure_ascii=False) if answer is not None else None))
+
+
+def resolve(decision_id: str, *, expected_revision: int,
+            choice: str | None = None, answer: Any = None) -> tuple[dict, bool]:
+    _integer(expected_revision, "expected_revision", minimum=1)
     _expire_decisions()
     con = db.conn(); con.execute("BEGIN IMMEDIATE")
     try:
         row = con.execute("SELECT * FROM artifact_decisions WHERE decision_id=?", (decision_id,)).fetchone()
         if not row: raise ValueError("decision not found")
-        if row["expires_at"] is not None and int(row["expires_at"]) <= db.now_ms():
-            raise ValueError("decision expired")
+        outcome, normalized = _answer(row, choice=choice, answer=answer)
         if row["status"] != "pending":
-            if row["status"] != choice:
-                raise ValueError("decision already resolved with a different choice")
+            if row["status"] == "expired":
+                raise ValueError("decision expired")
+            if row["status"] != outcome or json.loads(row["answer_json"] or "null") != normalized:
+                raise ValueError("decision already resolved with a different choice or answer")
             con.execute("COMMIT"); return get(row["artifact_id"]) or {}, False
-        if int(row["revision"]) != int(expected_revision): raise ValueError("decision revision changed")
-        now = db.now_ms()
-        con.execute("""UPDATE artifact_decisions SET status=?,resolved_choice=?,resolved_at=?,
+        if row["expires_at"] is not None and row["expires_at"] <= db.now_ms():
+            raise ValueError("decision expired")
+        if row["revision"] != expected_revision: raise ValueError("decision revision changed")
+        artifact = get(row["artifact_id"])
+        if not artifact: raise ValueError("artifact not found")
+        now = max(db.now_ms(), artifact["updated_at"] + 1)
+        con.execute("""UPDATE artifact_decisions SET status=?,resolved_choice=?,answer_json=?,resolved_at=?,
                      resolved_by='user',revision=revision+1 WHERE decision_id=?""",
-                    (choice, choice, now, decision_id))
+                    (outcome, outcome, json.dumps(normalized, ensure_ascii=False), now, decision_id))
         con.execute("UPDATE artifacts SET status='completed',updated_at=?,completed_at=? WHERE artifact_id=?",
                     (now, now, row["artifact_id"]))
-        artifact = con.execute("SELECT session,reference_id,payload_json FROM artifacts WHERE artifact_id=?",
-                               (row["artifact_id"],)).fetchone()
-        con.execute(
-            """INSERT INTO decision_deliveries(decision_id,artifact_id,session,question,
-                   context,reference_id,payload_json,choice,status,created_at)
-               VALUES(?,?,?,?,?,?,?,?, 'pending',?) ON CONFLICT(decision_id) DO NOTHING""",
-            (decision_id, row["artifact_id"], artifact["session"], row["question"],
-             row["context"], artifact["reference_id"], artifact["payload_json"], choice, now))
+        _queue_delivery(con, row, choice=outcome, answer=normalized, now=now)
         con.execute("COMMIT"); return get(row["artifact_id"]) or {}, True
     except BaseException:
         con.execute("ROLLBACK"); raise
 
 
-def attention() -> list[dict]:
+def dismiss(decision_id: str, *, expected_revision: int) -> tuple[dict, bool]:
+    """User discards a pending request without answering or granting permission."""
+    _integer(expected_revision, "expected_revision", minimum=1)
+    _expire_decisions()
+    con = db.conn(); con.execute("BEGIN IMMEDIATE")
+    try:
+        row = con.execute("SELECT * FROM artifact_decisions WHERE decision_id=?", (decision_id,)).fetchone()
+        if not row: raise ValueError("decision not found")
+        if row["status"] == "cancelled" and row["resolved_choice"] == "dismissed":
+            con.execute("COMMIT"); return get(row["artifact_id"]) or {}, False
+        if row["status"] != "pending": raise ValueError("decision is no longer pending")
+        if row["expires_at"] is not None and row["expires_at"] <= db.now_ms():
+            raise ValueError("decision expired")
+        if row["revision"] != expected_revision: raise ValueError("decision revision changed")
+        artifact = get(row["artifact_id"])
+        if not artifact: raise ValueError("artifact not found")
+        now = max(db.now_ms(), artifact["updated_at"] + 1)
+        con.execute("""UPDATE artifact_decisions SET status='cancelled',resolved_choice='dismissed',
+                       resolved_by='user',resolved_at=?,revision=revision+1 WHERE decision_id=?""",
+                    (now, decision_id))
+        con.execute("UPDATE artifacts SET status='cancelled',updated_at=?,completed_at=? WHERE artifact_id=?",
+                    (now, now, row["artifact_id"]))
+        _queue_delivery(con, row, choice="dismissed", answer=None, now=now)
+        con.execute("COMMIT"); return get(row["artifact_id"]) or {}, True
+    except BaseException:
+        con.execute("ROLLBACK"); raise
+
+
+def archive(artifact_id: str, *, archived: bool, expected_updated_at: int) -> tuple[dict, bool]:
+    """Hide/restore an inbox item independently of its underlying work state."""
+    if not isinstance(archived, bool): raise ValueError("archived must be a boolean")
+    _integer(expected_updated_at, "expected_updated_at")
+    con = db.conn(); con.execute("BEGIN IMMEDIATE")
+    try:
+        current = get(artifact_id)
+        if not current: raise ValueError("artifact not found")
+        if (current["archived_at"] is not None) == archived:
+            con.execute("COMMIT"); return current, False
+        if current["updated_at"] != expected_updated_at: raise ValueError("artifact changed")
+        now = max(db.now_ms(), current["updated_at"] + 1)
+        con.execute("UPDATE artifacts SET archived_at=?,updated_at=? WHERE artifact_id=?",
+                    (now if archived else None, now, artifact_id))
+        con.execute("COMMIT"); return get(artifact_id) or {}, True
+    except BaseException:
+        con.execute("ROLLBACK"); raise
+
+
+def discard(artifact_id: str, *, expected_updated_at: int) -> tuple[dict, bool]:
+    """Soft-delete a record only; never delete files or stop its agent/job."""
+    _integer(expected_updated_at, "expected_updated_at")
+    con = db.conn(); con.execute("BEGIN IMMEDIATE")
+    try:
+        raw = con.execute("""SELECT a.*,g.persona AS agent_name FROM artifacts a JOIN agents g
+                              ON g.agent_id=a.agent_id WHERE artifact_id=?""", (artifact_id,)).fetchone()
+        if not raw: raise ValueError("artifact not found")
+        current = _public(raw)
+        if current["type"] in {"decision", "question"}:
+            raise ValueError("decisions and questions must use their dedicated dismissal endpoint")
+        if current["deleted_at"] is not None:
+            con.execute("COMMIT"); return current, False
+        if current["updated_at"] != expected_updated_at: raise ValueError("artifact changed")
+        now = max(db.now_ms(), current["updated_at"] + 1)
+        con.execute("UPDATE artifacts SET deleted_at=?,updated_at=? WHERE artifact_id=?",
+                    (now, now, artifact_id))
+        con.execute("COMMIT")
+        return {**current, "deleted_at": now, "updated_at": now}, True
+    except BaseException:
+        con.execute("ROLLBACK"); raise
+
+
+def attention(*, include_questions: bool = False, include_archived: bool = False) -> list[dict]:
     _expire_decisions()
     rows = db.conn().execute(
-        """SELECT d.*,a.agent_id,a.session,a.title,a.summary,a.created_at,
+        """SELECT d.*,a.agent_id,a.session,a.title,a.summary,a.created_at,a.updated_at,a.archived_at,
                   g.persona AS agent_name FROM artifact_decisions d JOIN artifacts a
                   ON a.artifact_id=d.artifact_id JOIN agents g ON g.agent_id=a.agent_id
             WHERE d.status='pending' AND a.deleted_at IS NULL AND g.deleted_at IS NULL
-              AND (d.expires_at IS NULL OR d.expires_at>?) ORDER BY a.created_at""",
-        (db.now_ms(),)).fetchall()
-    return [{**dict(row), "kind": "decision", "priority": 100} for row in rows]
+              AND (? OR d.response_type='approval') AND (? OR a.archived_at IS NULL)
+              AND (d.expires_at IS NULL OR d.expires_at>?)""",
+        (include_questions, include_archived, db.now_ms())).fetchall()
+    items = [{**_public_decision(row, archived_at=row["archived_at"]),
+              "kind": "question" if row["response_type"] == "single_choice" else "decision"}
+             for row in rows]
+    return sorted(items, key=lambda item: (
+        -item["priority"], item["deadline_at"] is None, item["deadline_at"] or 0,
+        item["created_at"], item["decision_id"]))
 
 
 def pending_deliveries() -> list[dict]:
-    return [dict(row) for row in db.conn().execute(
+    return [{**dict(row), "answer": json.loads(row["answer_json"] or "null")}
+            for row in db.conn().execute(
         """SELECT x.* FROM decision_deliveries x JOIN agents g ON g.session=x.session
             WHERE x.status='pending' AND g.deleted_at IS NULL ORDER BY x.created_at""")]
+
+
+def format_delivery_prompt(delivery: dict) -> str:
+    """One durable snapshot interpretation for foreground and retry delivery."""
+    choice = delivery["choice"]
+    response_type = delivery.get("response_type", "approval")
+    answer = delivery.get("answer")
+    if answer is None:
+        answer = json.loads(delivery.get("answer_json") or "null")
+    if choice == "expired":
+        outcome = ("The request expired without an answer or approval. Do not infer a choice or "
+                   "perform the protected action. Continue independent work only.")
+    elif choice == "dismissed":
+        outcome = ("The user discarded this request. This is not an answer or approval. Do not "
+                   "guess permission or repeat the unchanged request. Continue independent work only.")
+    elif response_type == "single_choice" and choice == "answered" and isinstance(answer, dict):
+        outcome = ("The user answered this clarification: " + json.dumps(answer, ensure_ascii=False)
+                   + ". Continue using this answer. This does not grant approval for unrelated protected actions.")
+    elif response_type == "approval" and choice in {"accepted", "rejected"}:
+        outcome = (f"The user chose: {choice}. " + (
+            "Approval applies only to the described action. Revalidate it before acting."
+            if choice == "accepted" else "Do not perform the protected action."))
+    else:
+        raise ValueError("invalid durable decision delivery")
+    return ("[Clarp decision resolved]\n"
+            f"Decision ID: {delivery['decision_id']}\nArtifact ID: {delivery['artifact_id']}\n"
+            f"Question: {delivery['question']}\nContext: {delivery['context']}\n"
+            f"Reference: {delivery['reference_id']}\nPayload: {delivery['payload_json']}\n{outcome}")
 
 
 def mark_delivered(decision_id: str) -> None:
@@ -472,20 +718,20 @@ def cancel_for_agent(agent_id: str) -> None:
             "UPDATE decision_deliveries SET status='cancelled' WHERE session=? AND status='pending'",
             (agent["session"],))
     ids = [row["artifact_id"] for row in con.execute(
-        "SELECT artifact_id FROM artifacts WHERE agent_id=? AND type='decision' AND status='active'",
+        "SELECT artifact_id FROM artifacts WHERE agent_id=? AND type IN ('decision','question') AND status='active'",
         (agent_id,)).fetchall()]
     if ids:
         con.executemany(
             "UPDATE artifact_decisions SET status='cancelled',revision=revision+1 WHERE artifact_id=? AND status='pending'",
             [(artifact_id,) for artifact_id in ids])
         con.executemany(
-            "UPDATE artifacts SET status='cancelled',updated_at=?,completed_at=? WHERE artifact_id=?",
+            "UPDATE artifacts SET status='cancelled',updated_at=MAX(?,updated_at+1),completed_at=? WHERE artifact_id=?",
             [(now, now, artifact_id) for artifact_id in ids])
         con.executemany(
             "UPDATE decision_deliveries SET status='cancelled' WHERE decision_id IN (SELECT decision_id FROM artifact_decisions WHERE artifact_id=?)",
             [(artifact_id,) for artifact_id in ids])
     con.execute(
-        """UPDATE artifacts SET status='cancelled',updated_at=?,completed_at=?
+        """UPDATE artifacts SET status='cancelled',updated_at=MAX(?,updated_at+1),completed_at=?
              WHERE agent_id=? AND status='active'""",
         (now, now, agent_id))
 
@@ -495,26 +741,20 @@ def _expire_decisions() -> None:
     con.execute("BEGIN IMMEDIATE")
     try:
         rows = con.execute(
-            """SELECT d.decision_id,d.artifact_id,d.question,d.context,a.session,
-                      a.reference_id,a.payload_json
+            """SELECT d.*,a.updated_at
                  FROM artifact_decisions d JOIN artifacts a ON a.artifact_id=d.artifact_id
                 WHERE d.status='pending' AND d.expires_at IS NOT NULL AND d.expires_at<=?""",
             (now,)).fetchall()
         if rows:
             ids = [str(row["artifact_id"]) for row in rows]
             con.execute(
-                "UPDATE artifact_decisions SET status='expired',revision=revision+1 WHERE status='pending' AND expires_at IS NOT NULL AND expires_at<=?",
-                (now,))
+                "UPDATE artifact_decisions SET status='expired',resolved_at=?,revision=revision+1 WHERE status='pending' AND expires_at IS NOT NULL AND expires_at<=?",
+                (now, now))
             con.executemany(
-                "UPDATE artifacts SET status='expired',updated_at=?,completed_at=? WHERE artifact_id=?",
+                "UPDATE artifacts SET status='expired',updated_at=MAX(?,updated_at+1),completed_at=? WHERE artifact_id=?",
                 [(now, now, artifact_id) for artifact_id in ids])
-            con.executemany(
-                """INSERT INTO decision_deliveries(decision_id,artifact_id,session,question,
-                       context,reference_id,payload_json,choice,status,created_at)
-                   VALUES(?,?,?,?,?,?,?,'expired','pending',?)
-                   ON CONFLICT(decision_id) DO NOTHING""",
-                [(row["decision_id"], row["artifact_id"], row["session"], row["question"],
-                  row["context"], row["reference_id"], row["payload_json"], now) for row in rows])
+            for row in rows:
+                _queue_delivery(con, row, choice="expired", answer=None, now=now)
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")
