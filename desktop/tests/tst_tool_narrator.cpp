@@ -65,6 +65,7 @@ class ToolNarratorTest : public QObject {
     void failureFallsBackWithoutRetryStorm_data();
     void failureFallsBackWithoutRetryStorm();
     void scriptContextIsOptInBoundedAndInvalidatesCache();
+    void detailLevelsChangeInstructionsAndDiscardPreviousTranslations();
 };
 
 void ToolNarratorTest::optInDeduplicatesBatchesAndPreservesCache() {
@@ -96,6 +97,9 @@ void ToolNarratorTest::optInDeduplicatesBatchesAndPreservesCache() {
     QCOMPARE(calls.size(), 1);
     const auto call = calls.first().toObject();
     const QString prompt = call.value(QStringLiteral("prompt")).toString();
+    const auto requests = QJsonDocument::fromJson(prompt.toUtf8()).object().value(QStringLiteral("requests")).toArray();
+    QCOMPARE(requests.first().toObject().value(QStringLiteral("id")).toString(), QStringLiteral("1"));
+    QCOMPARE(requests.last().toObject().value(QStringLiteral("id")).toString(), QStringLiteral("2"));
     QCOMPARE(QJsonDocument::fromJson(prompt.toUtf8()).object().value(QStringLiteral("requests")).toArray().size(), 2);
     QVERIFY(!prompt.contains(QStringLiteral("PRIVATE OUTPUT")));
     QVERIFY(!prompt.contains(QStringLiteral("PRIVATE NESTED OUTPUT")));
@@ -140,6 +144,43 @@ void ToolNarratorTest::disableCancelsAndRejectsLateReplies() {
     QVERIFY(narrator.status().startsWith(QStringLiteral("Off")));
     narrator.reset();
     QVERIFY(narrator.explanation(Command).isEmpty());
+}
+
+void ToolNarratorTest::detailLevelsChangeInstructionsAndDiscardPreviousTranslations() {
+    QTemporaryDir directory;
+    const QString capture = directory.filePath(QStringLiteral("capture"));
+    ToolNarrator narrator(nullptr, QCoreApplication::applicationFilePath(),
+        {QStringLiteral("--fake-codex"), capture, QStringLiteral("ok")});
+    QCOMPARE(narrator.detailLevel(), 0);
+    QCOMPARE(narrator.detailLevels().size(), 5);
+    QSet<QString> prompts;
+    for (int level = 1; level <= 4; ++level) {
+        narrator.setDetailLevel(level);
+        QCOMPARE(narrator.detailLevel(), level);
+        QVERIFY(narrator.enabled());
+        QVERIFY(narrator.explanation(Command).isEmpty());
+        narrator.request(Command);
+        QTRY_VERIFY_WITH_TIMEOUT(!narrator.explanation(Command).isEmpty(), 3'000);
+        const auto call = captures(capture).last().toObject();
+        const auto args = call.value(QStringLiteral("argv")).toArray();
+        QString instructionsPath;
+        for (const auto& arg : args) {
+            const QString value = arg.toString();
+            if (value.startsWith(QStringLiteral("model_instructions_file=\"")))
+                instructionsPath = value.mid(25).chopped(1);
+        }
+        QFile instructions(instructionsPath);
+        QVERIFY(instructions.open(QIODevice::ReadOnly));
+        prompts.insert(QString::fromUtf8(instructions.readAll()));
+    }
+    QCOMPARE(prompts.size(), 4);
+    narrator.setDetailLevel(0);
+    QVERIFY(!narrator.enabled());
+    narrator.request(Command);
+    QTest::qWait(220);
+    QCOMPARE(captures(capture).size(), 4);
+    narrator.setEnabled(true);
+    QCOMPARE(narrator.detailLevel(), 4);
 }
 
 void ToolNarratorTest::scriptContextIsOptInBoundedAndInvalidatesCache() {

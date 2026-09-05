@@ -136,6 +136,20 @@ ToolNarrator::~ToolNarrator() {
 }
 
 bool ToolNarrator::enabled() const { return m_enabled; }
+int ToolNarrator::detailLevel() const { return m_detailLevel; }
+QStringList ToolNarrator::detailLevels() const {
+    return {QStringLiteral("Developer"), QStringLiteral("Technical"), QStringLiteral("Balanced"),
+        QStringLiteral("Plain English"), QStringLiteral("Grandma")};
+}
+QString ToolNarrator::levelDescription() const {
+    const QStringList descriptions{
+        QStringLiteral("Original tool calls. No translation requests or model usage."),
+        QStringLiteral("Explain the effect while retaining commands, paths, and precise technical terms."),
+        QStringLiteral("Explain the action and useful context, with only essential technical details."),
+        QStringLiteral("Everyday language about the task. Omit code, paths, and implementation jargon."),
+        QStringLiteral("Short, concrete explanations for someone with no technical background.")};
+    return descriptions.at(m_detailLevel);
+}
 quint64 ToolNarrator::revision() const { return m_revision; }
 QString ToolNarrator::status() const {
     if (!m_enabled) return QStringLiteral("Off — no background requests");
@@ -160,6 +174,7 @@ void ToolNarrator::logEvent(const QString& event, const QJsonObject& fields) {
     QJsonObject record = fields;
     record.insert(QStringLiteral("event"), event);
     record.insert(QStringLiteral("model"), QLatin1String(NarrationModel));
+    record.insert(QStringLiteral("detail_level"), m_batchLevel);
     record.insert(QStringLiteral("at"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     record.insert(QStringLiteral("batch"), static_cast<qint64>(m_batchNumber));
     record.insert(QStringLiteral("elapsed_ms"), m_runClock.isValid() ? m_runClock.elapsed() : 0);
@@ -184,18 +199,32 @@ void ToolNarrator::readEvents() {
 }
 
 void ToolNarrator::setEnabled(bool enabled) {
-    if (m_enabled == enabled) return;
-    m_enabled = enabled;
+    setDetailLevel(enabled ? m_lastTranslationLevel : 0);
+}
+
+void ToolNarrator::setDetailLevel(int level) {
+    level = std::clamp(level, 0, 4);
+    if (m_detailLevel == level) return;
+    const bool wasEnabled = m_enabled;
+    if (level > 0 && level != m_lastTranslationLevel) {
+        m_cache.clear();
+        m_cacheOrder.clear();
+    }
+    m_detailLevel = level;
+    m_enabled = level > 0;
+    if (m_enabled) m_lastTranslationLevel = level;
     m_debounce.stop();
     stopProcess();
     m_queue.clear();
     m_enqueuedAt.clear();
     m_batchKeys.clear();
+    m_batchIds.clear();
     m_requested.clear();
     for (auto it = m_cache.cbegin(); it != m_cache.cend(); ++it) m_requested.insert(it.key());
     m_error.clear();
     notify();
-    emit enabledChanged();
+    emit detailLevelChanged();
+    if (wasEnabled != m_enabled) emit enabledChanged();
 }
 
 void ToolNarrator::reset() {
@@ -205,6 +234,7 @@ void ToolNarrator::reset() {
     m_enqueuedAt.clear();
     m_requested.clear();
     m_batchKeys.clear();
+    m_batchIds.clear();
     m_cache.clear();
     m_cacheOrder.clear();
     m_error.clear();
@@ -284,6 +314,7 @@ void ToolNarrator::startBatch() {
     if (!m_directory.isValid()) { fail(QStringLiteral("Cannot create a private translator workspace.")); return; }
     QJsonArray requests;
     ++m_batchNumber;
+    m_batchLevel = m_detailLevel;
     m_runClock.start();
     m_queueWaitMs = 0;
     m_events.clear();
@@ -292,7 +323,9 @@ void ToolNarrator::startBatch() {
         const QString id = key(bytes);
         m_batchKeys.insert(id);
         m_queueWaitMs = std::max(m_queueWaitMs, m_clock.elapsed() - m_enqueuedAt.take(id));
-        requests.append(QJsonObject{{QStringLiteral("id"), id},
+        const QString shortId = QString::number(requests.size() + 1);
+        m_batchIds.insert(shortId, id);
+        requests.append(QJsonObject{{QStringLiteral("id"), shortId},
                                     {QStringLiteral("activity"), withScriptEvidence(QJsonDocument::fromJson(bytes).object())}});
     }
     logEvent(QStringLiteral("batch_started"), {{QStringLiteral("queue_wait_ms"), m_queueWaitMs},
@@ -301,7 +334,26 @@ void ToolNarrator::startBatch() {
     const QString instructionsPath = m_directory.filePath(QStringLiteral("instructions.txt"));
     const QString outputPath = m_directory.filePath(QStringLiteral("answer.json"));
     const QByteArray schema = R"({"type":"object","properties":{"explanations":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string"}},"required":["id","text"],"additionalProperties":false}}},"required":["explanations"],"additionalProperties":false})";
-    if (!writeFile(schemaPath, schema) || !writeFile(instructionsPath, Instructions) || !writeFile(outputPath, {})) {
+    auto schemaObject = QJsonDocument::fromJson(schema).object();
+    auto properties = schemaObject.value(QStringLiteral("properties")).toObject();
+    auto explanations = properties.value(QStringLiteral("explanations")).toObject();
+    auto itemSchema = explanations.value(QStringLiteral("items")).toObject();
+    auto fields = itemSchema.value(QStringLiteral("properties")).toObject();
+    fields.insert(QStringLiteral("id"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")},
+        {QStringLiteral("enum"), QJsonArray::fromStringList(m_batchIds.keys())}});
+    itemSchema.insert(QStringLiteral("properties"), fields);
+    explanations.insert(QStringLiteral("items"), itemSchema);
+    properties.insert(QStringLiteral("explanations"), explanations);
+    schemaObject.insert(QStringLiteral("properties"), properties);
+    const QList<QByteArray> policies{
+        "Developer: no translation.",
+        "Technical: The reader is a developer. Preserve relevant command names, flags, paths and precise terminology while explaining the concrete effect. One concise sentence.",
+        "Balanced: The reader is technically curious. Explain the action and its useful context; keep only essential component names or technical terms. Translate shell syntax into clear verbs. One concise sentence.",
+        "Plain English: Explain the real-world task in everyday language. Omit commands, filenames, programming languages, API names and jargon unless indispensable to distinguish the action. Keep it short.",
+        "Grandma: The reader has no technical background. Use familiar, concrete words about what is being checked or changed. No code, filenames, acronyms, technical terms, analogies or generic filler. Be respectful, never patronizing. Prefer 8-14 words."};
+    const QByteArray instructions = Instructions + "\nThe selected audience policy overrides stylistic examples above:\n" + policies.at(m_batchLevel);
+    if (!writeFile(schemaPath, QJsonDocument(schemaObject).toJson(QJsonDocument::Compact))
+        || !writeFile(instructionsPath, instructions) || !writeFile(outputPath, {})) {
         fail(QStringLiteral("Cannot prepare the background translator.")); return;
     }
     QStringList arguments = m_prefixArguments;
@@ -377,7 +429,7 @@ void ToolNarrator::stopProcess() {
 }
 
 void ToolNarrator::fail(const QString& message) {
-    logEvent(QStringLiteral("batch_failed"));
+    logEvent(QStringLiteral("batch_failed"), {{QStringLiteral("reason"), message}});
     m_error = message;
     m_queue.clear();
     m_enqueuedAt.clear();
@@ -402,9 +454,13 @@ void ToolNarrator::finishBatch(int exitCode, QProcess::ExitStatus exitStatus) {
     QHash<QString, QString> accepted;
     for (const auto& reply : replies) {
         const auto item = reply.toObject();
-        const QString id = item.value(QStringLiteral("id")).toString();
+        const QString id = m_batchIds.value(item.value(QStringLiteral("id")).toString());
         const QString text = item.value(QStringLiteral("text")).toString().simplified();
         if (!m_batchKeys.contains(id) || accepted.contains(id) || text.isEmpty() || text.size() > 240) {
+            logEvent(QStringLiteral("response_rejected"), {
+                {QStringLiteral("unknown_id"), !m_batchKeys.contains(id)},
+                {QStringLiteral("duplicate_id"), accepted.contains(id)},
+                {QStringLiteral("text_length"), text.size()}});
             fail(QStringLiteral("Invalid translation response; original tool details are unchanged.")); return;
         }
         accepted.insert(id, text);
@@ -423,6 +479,7 @@ void ToolNarrator::finishBatch(int exitCode, QProcess::ExitStatus exitStatus) {
         m_requested.remove(expired);
     }
     m_batchKeys.clear();
+    m_batchIds.clear();
     if (!m_queue.isEmpty()) m_debounce.start();
     notify();
 }

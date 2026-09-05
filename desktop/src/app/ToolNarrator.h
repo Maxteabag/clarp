@@ -23,6 +23,9 @@ class ToolNarrator : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString diagnosticsPath READ diagnosticsPath CONSTANT)
     Q_PROPERTY(bool unavailable READ unavailable NOTIFY statusChanged)
+    Q_PROPERTY(int detailLevel READ detailLevel WRITE setDetailLevel NOTIFY detailLevelChanged)
+    Q_PROPERTY(QStringList detailLevels READ detailLevels CONSTANT)
+    Q_PROPERTY(QString levelDescription READ levelDescription NOTIFY detailLevelChanged)
 
   public:
     explicit ToolNarrator(QObject* parent = nullptr, QString program = QStringLiteral("codex"),
@@ -34,6 +37,10 @@ class ToolNarrator : public QObject {
     [[nodiscard]] QString diagnosticsPath() const;
     [[nodiscard]] bool unavailable() const;
     void setEnabled(bool enabled);
+    [[nodiscard]] int detailLevel() const;
+    [[nodiscard]] QStringList detailLevels() const;
+    [[nodiscard]] QString levelDescription() const;
+    void setDetailLevel(int level);
     void reset();
     Q_INVOKABLE void request(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false);
     Q_INVOKABLE [[nodiscard]] QString explanation(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false) const;
@@ -42,6 +49,7 @@ class ToolNarrator : public QObject {
     void enabledChanged();
     void changed();
     void statusChanged();
+    void detailLevelChanged();
 
   private:
     static QByteArray payload(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false);
@@ -72,11 +80,15 @@ class ToolNarrator : public QObject {
     QQueue<QByteArray> m_queue;
     QSet<QString> m_requested;
     QSet<QString> m_batchKeys;
+    QHash<QString, QString> m_batchIds;
+    int m_batchLevel = 0;
     QHash<QString, QString> m_cache;
     QQueue<QString> m_cacheOrder;
     QString m_error;
     quint64 m_revision = 0;
     bool m_enabled = false;
+    int m_detailLevel = 0;
+    int m_lastTranslationLevel = 3;
 };
 
 } // namespace clarp

@@ -19,6 +19,10 @@ TestCase {
         property QtObject toolNarrator: QtObject {
             property bool enabled: false
             property string status: "Off"
+            property int detailLevel: 0
+            property var detailLevels: ["Developer", "Technical", "Balanced", "Plain English", "Grandma"]
+            property string levelDescription: "Selected audience instructions"
+            onDetailLevelChanged: enabled = detailLevel > 0
         }
         property string serverName: "Test Host"
         property string baseUrl: "http://localhost:1"
@@ -150,5 +154,27 @@ TestCase {
         waitForRendering(panel);
         verify(first.mapToItem(panel, first.width, 0).x <= panel.width,
                "The focused row and ON/OFF value must not be clipped in a narrow window");
+    }
+
+    function test_detailDialUsesArrowKeysWithoutMovingFocus() {
+        stub.toolNarrator.detailLevel = 0;
+        const panel = openPanel();
+        const row = findChild(panel, "setting-tool-narration");
+        const dial = findChild(panel, "toolDetailDial");
+        verify(row !== null && dial !== null);
+        row.forceActiveFocus();
+        keyClick(Qt.Key_Right);
+        compare(stub.toolNarrator.detailLevel, 1);
+        compare(row.activeFocus, true);
+        keyClick(Qt.Key_Left);
+        compare(stub.toolNarrator.detailLevel, 0);
+        keyClick(Qt.Key_Left);
+        compare(stub.toolNarrator.detailLevel, 0);
+        mouseClick(dial, dial.width - dial.rightPadding - 1, dial.height / 2);
+        compare(stub.toolNarrator.detailLevel, 4);
+        mouseClick(dial, dial.leftPadding + 1, dial.height / 2);
+        compare(stub.toolNarrator.detailLevel, 0);
+        keyClick(Qt.Key_Down);
+        tryCompare(findChild(panel, "setting-spoken-replies"), "activeFocus", true);
     }
 }

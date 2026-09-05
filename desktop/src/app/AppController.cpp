@@ -95,8 +95,16 @@ AppController::AppController(QObject* parent)
                                                    .toString()));
     m_muted = settings.value(QStringLiteral("audio/muted"), false).toBool();
     m_toolsVisible = settings.value(QStringLiteral("conversation/toolsVisible"), false).toBool();
-    m_toolNarrator.setEnabled(!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")
-        && settings.value(QStringLiteral("experiments/toolNarration"), false).toBool());
+    if (!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH"))
+        m_toolNarrator.setDetailLevel(std::clamp(settings.value(QStringLiteral("experiments/toolLastTranslationLevel"), 3).toInt(), 1, 4));
+    m_toolNarrator.setDetailLevel(qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH") ? 0
+        : settings.value(QStringLiteral("experiments/toolDetailLevel"),
+            settings.value(QStringLiteral("experiments/toolNarration"), false).toBool() ? 3 : 0).toInt());
+    connect(&m_toolNarrator, &ToolNarrator::detailLevelChanged, this, [this] {
+        QSettings().setValue(QStringLiteral("experiments/toolDetailLevel"), m_toolNarrator.detailLevel());
+        if (m_toolNarrator.detailLevel() > 0)
+            QSettings().setValue(QStringLiteral("experiments/toolLastTranslationLevel"), m_toolNarrator.detailLevel());
+    });
     connect(&m_toolNarrator, &ToolNarrator::enabledChanged, this, [this] {
         QSettings().setValue(QStringLiteral("experiments/toolNarration"), m_toolNarrator.enabled());
     });

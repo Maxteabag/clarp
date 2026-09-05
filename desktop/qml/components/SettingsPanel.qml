@@ -65,6 +65,9 @@ Rectangle {
             root.focusRow(-1);
         else if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             if (!event.isAutoRepeat) row.activated();
+        } else if (row === narrationRow && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
+            root.controller.toolNarrator.detailLevel = Math.max(0, Math.min(4,
+                root.controller.toolNarrator.detailLevel + (event.key === Qt.Key_Right ? 1 : -1)));
         } else if (row.checkable && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
             if (row.checked !== (event.key === Qt.Key_Right)) row.activated();
         } else if (event.key === Qt.Key_Escape)
@@ -134,17 +137,89 @@ Rectangle {
 
             SettingsGroup {
                 title: "EXPERIMENTS"
-                SettingsToggle {
+                SettingsAction {
                     id: narrationRow
                     objectName: "setting-tool-narration"
-                    label: "Plain-English tool activity"
-                    detail: "Blue explanations · Codex Spark, low · extra Codex usage"
-                    checked: root.controller.toolNarrator.enabled
-                    onToggled: value => root.controller.toolNarrator.enabled = value
+                    label: "Tool detail"
+                    detail: root.controller.toolNarrator.levelDescription
+                    rowClickable: false
+                    onActivated: root.controller.toolNarrator.detailLevel = (root.controller.toolNarrator.detailLevel + 1) % 5
+                    contentItem: ColumnLayout {
+                        spacing: 8
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: "Tool detail"; color: "#d2d7eb"; font.pixelSize: 14 }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: root.controller.toolNarrator.detailLevels[root.controller.toolNarrator.detailLevel]
+                                color: "#82aaff"
+                                font.pixelSize: 14
+                            }
+                        }
+                        Slider {
+                            id: detailDial
+                            objectName: "toolDetailDial"
+                            Layout.fillWidth: true
+                            from: 0
+                            to: 4
+                            stepSize: 1
+                            snapMode: Slider.SnapAlways
+                            live: true
+                            focusPolicy: Qt.NoFocus
+                            value: root.controller.toolNarrator.detailLevel
+                            Accessible.name: "Tool detail, Developer to Grandma"
+                            onMoved: root.controller.toolNarrator.detailLevel = Math.round(value)
+                            onPressedChanged: { if (pressed) narrationRow.forceActiveFocus(Qt.MouseFocusReason); }
+                            background: Rectangle {
+                                x: detailDial.leftPadding
+                                y: detailDial.topPadding + (detailDial.availableHeight - height) / 2
+                                width: detailDial.availableWidth
+                                height: 4
+                                radius: 2
+                                color: "#454c65"
+                                Rectangle { width: parent.width * detailDial.visualPosition; height: parent.height; radius: 2; color: "#82aaff" }
+                                Repeater {
+                                    model: 5
+                                    Rectangle {
+                                        required property int index
+                                        x: index * (parent.width - width) / 4
+                                        y: -2
+                                        width: 3
+                                        height: 8
+                                        color: index <= detailDial.value ? "#82aaff" : "#59627f"
+                                    }
+                                }
+                            }
+                            handle: Rectangle {
+                                x: detailDial.leftPadding + detailDial.visualPosition * (detailDial.availableWidth - width)
+                                y: detailDial.topPadding + (detailDial.availableHeight - height) / 2
+                                implicitWidth: 16
+                                implicitHeight: 16
+                                radius: 8
+                                color: "#c4cee9"
+                                border.color: "#82aaff"
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: "Developer"; color: "#858da8"; font.pixelSize: 11 }
+                            Item { Layout.fillWidth: true }
+                            Text { text: "← → to adjust"; color: "#858da8"; font.pixelSize: 11 }
+                            Item { Layout.fillWidth: true }
+                            Text { text: "Grandma"; color: "#858da8"; font.pixelSize: 11 }
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: narrationRow.detail
+                            color: "#a2aac4"
+                            font.pixelSize: 12
+                            wrapMode: Text.Wrap
+                        }
+                    }
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: "Sends command snippets and referenced local script excerpts to Codex. Explanations may be imperfect; expand a row for the original."
+                    text: "Translated levels use Spark low and send command/script excerpts to Codex. Explanations may be imperfect; expand a row for the original."
                     color: "#858aa5"
                     font.pixelSize: 12
                     wrapMode: Text.Wrap
@@ -310,6 +385,7 @@ Rectangle {
         required property string detail
         property bool checkable: false
         property bool checked: false
+        property bool rowClickable: true
         signal activated
         Layout.fillWidth: true
         implicitHeight: Math.max(52, contentItem.implicitHeight + 16)
@@ -360,6 +436,7 @@ Rectangle {
         }
         HoverHandler { id: hover }
         TapHandler {
+            enabled: actionRow.rowClickable
             onTapped: {
                 actionRow.forceActiveFocus(Qt.MouseFocusReason);
                 actionRow.activated();

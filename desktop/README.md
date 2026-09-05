@@ -97,8 +97,20 @@ setting, and UI zoom keeps keyboard focus in Settings.
 
 ### Experimental plain-English tools
 
-Enable **Settings → Experiments → Plain-English tool activity**, or search for
-**plain-English** in `Ctrl+K`. It is **off by default**. When enabled, visible
+Use **Settings → Experiments → Tool detail**, a five-stop keyboard-friendly dial:
+
+- **Developer:** original tool calls; no translation requests.
+- **Technical:** precise commands, paths and terminology with an explanation of their effect.
+- **Balanced:** useful technical context without shell syntax.
+- **Plain English:** everyday task descriptions without implementation jargon.
+- **Grandma:** short, concrete descriptions with no assumed technical background.
+
+Focus the dial and use `←`/`→`, or click/drag it. Each translated level has unique
+audience instructions. The selection is saved; existing enabled installations
+migrate to Plain English, while disabled installations stay at Developer. A level
+change cancels in-flight work and discards cached translations from another style.
+The **plain-English** command in `Ctrl+K` toggles Developer/the last translated level.
+When translation is enabled, visible
 activity is explained in blue by a local background worker running
 `codex exec --model gpt-5.3-codex-spark` with low reasoning effort. This uses the desktop's
 Codex login and consumes additional Codex usage; no Host deployment is required.
