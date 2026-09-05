@@ -40,7 +40,13 @@ Rectangle {
         + (queueCount > 0 ? 25 : 0) + (attachments.length > 0 ? 31 : 0)
     color: root.active ? "#14161f" : "#12141b"
     border.color: root.active ? "#454b6c" : "#272a39"
-    border.width: 1
+    border.width: 0
+
+    Rectangle {
+        width: parent.width
+        height: 1
+        color: root.active ? "#454b6c" : "#272a39"
+    }
 
     HoverHandler { id: composerHover }
 
@@ -205,10 +211,8 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            radius: 3
-            color: "#191b26"
-                border.color: editor.activeFocus ? "#aeb5e9" : (root.active ? "#363b53" : "#272a38")
-            border.width: 1
+            color: "transparent"
+            border.width: 0
 
             Text {
                 anchors.left: parent.left
@@ -237,7 +241,7 @@ Rectangle {
                 color: "#c7c9dc"
                 placeholderTextColor: "#55586c"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 12
+                font.pixelSize: 15
                 background: null
                 leftPadding: 7
                 topPadding: 6

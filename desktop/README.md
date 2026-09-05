@@ -67,6 +67,11 @@ CLARP_BASE_URL=https://computer.example.ts.net CLARP_TOKEN=cld_… \
   ./build/dev/clarp-desktop
 ```
 
+`Ctrl+B` hides or restores the sidebar, including its icon strip. This preference
+is remembered between launches. The command palette (`Ctrl+K`) offers **Hide
+sidebar** / **Show sidebar** and **Toggle compact sidebar** for switching between
+icons and full agent names.
+
 ## Quality gates
 
 ```bash

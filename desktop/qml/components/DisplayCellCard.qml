@@ -5,29 +5,33 @@ import QtQuick.Layouts
 
 Rectangle {
     id: root
+    objectName: "displayCellCard"
 
     required property var cell
     property bool expanded: false
     readonly property string title: String(cell.title || "Activity")
     readonly property string summary: String(cell.summary || "")
     readonly property string status: String(cell.status || "recorded")
-    readonly property var lines: Array.isArray(cell.lines) ? cell.lines : []
+    readonly property var lines: Array.from(cell.lines || [])
     readonly property int detailCount: Number(cell.detail_count || cell.detailCount || lines.length)
     readonly property color statusColor: status === "error" ? "#bd7484"
         : (status === "running" || status === "ok") ? "#89a879" : "#676b80"
 
-    implicitHeight: cardColumn.implicitHeight + 14
-    radius: 5
-    color: "#171923"
-    border.color: expanded ? "#596083" : "#303347"
+    implicitHeight: cardColumn.implicitHeight + 6
+    radius: 2
+    color: hover.hovered ? "#222638" : "transparent"
+    border.width: 0
+    HoverHandler { id: hover }
 
     ColumnLayout {
         id: cardColumn
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: 7
-        spacing: 5
+        anchors.leftMargin: 3
+        anchors.rightMargin: 3
+        anchors.topMargin: 3
+        spacing: 3
 
         RowLayout {
             Layout.fillWidth: true
@@ -40,17 +44,17 @@ Rectangle {
                 color: root.statusColor
             }
             Text {
-                text: root.title.toUpperCase()
+                text: root.title
                 color: "#9ea4c7"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 9
+                font.pixelSize: 12
                 font.weight: Font.DemiBold
             }
             Text {
                 Layout.fillWidth: true
                 text: root.summary
-                color: "#6e728b"
-                font.pixelSize: 10
+                color: "#969bb5"
+                font.pixelSize: 12
                 elide: Text.ElideMiddle
             }
             Text {
@@ -64,7 +68,8 @@ Rectangle {
         ColumnLayout {
             visible: root.expanded
             Layout.fillWidth: true
-            spacing: 4
+            Layout.leftMargin: 15
+            spacing: 0
 
             Repeater {
                 model: root.lines
@@ -73,21 +78,21 @@ Rectangle {
                     id: lineRow
                     required property var modelData
                     Layout.fillWidth: true
-                    implicitHeight: lineText.implicitHeight + 8
-                    radius: 3
+                    implicitHeight: lineText.implicitHeight + 4
+                    radius: 0
                     color: {
                         const kind = String(lineRow.modelData.kind || "");
                         if (kind === "diff_old")
                             return "#2b2028";
                         if (kind === "diff_new")
                             return "#1e2a27";
-                        return "#13151d";
+                        return "transparent";
                     }
 
                     TextEdit {
                         id: lineText
                         anchors.fill: parent
-                        anchors.margins: 4
+                        anchors.margins: 2
                         readOnly: true
                         selectByMouse: true
                         wrapMode: TextEdit.Wrap
@@ -99,7 +104,7 @@ Rectangle {
                         color: String(lineRow.modelData.kind || "") === "error"
                             ? "#c98794" : "#aeb2ca"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 9
+                        font.pixelSize: 12
                     }
                 }
             }
@@ -109,7 +114,7 @@ Rectangle {
                 text: (root.detailCount - root.lines.length) + " more details available"
                 color: "#62667e"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 8
+                font.pixelSize: 11
             }
         }
     }

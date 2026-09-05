@@ -5,6 +5,7 @@ import QtQuick.Layouts
 
 Rectangle {
     id: root
+    objectName: "toolCard"
 
     required property var tool
     property bool expanded: false
@@ -23,18 +24,21 @@ Rectangle {
     }
     readonly property color statusColor: status === "error" ? "#df7777" : status === "running" ? "#e7aa68" : "#6fbd98"
 
-    implicitHeight: toolColumn.implicitHeight + 14
-    radius: 5
-    color: "#171923"
-    border.color: expanded ? "#596083" : "#303347"
+    implicitHeight: toolColumn.implicitHeight + 6
+    radius: 2
+    color: hover.hovered ? "#222638" : "transparent"
+    border.width: 0
+    HoverHandler { id: hover }
 
     ColumnLayout {
         id: toolColumn
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: 7
-        spacing: 5
+        anchors.leftMargin: 3
+        anchors.rightMargin: 3
+        anchors.topMargin: 3
+        spacing: 3
 
         RowLayout {
             Layout.fillWidth: true
@@ -50,14 +54,14 @@ Rectangle {
                 text: root.toolName
                 color: "#9ea4c7"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 9
+                font.pixelSize: 12
                 font.weight: Font.DemiBold
             }
             Text {
                 Layout.fillWidth: true
                 text: root.summary
-                color: "#6e728b"
-                font.pixelSize: 10
+                color: "#969bb5"
+                font.pixelSize: 12
                 elide: Text.ElideRight
             }
             Text {
@@ -71,14 +75,14 @@ Rectangle {
         Rectangle {
             visible: root.expanded && root.detail.length > 0
             Layout.fillWidth: true
-            implicitHeight: detailText.implicitHeight + 16
-            radius: 3
-            color: "#13151d"
+            Layout.leftMargin: 15
+            implicitHeight: detailText.implicitHeight + 6
+            color: "transparent"
 
             TextEdit {
                 id: detailText
                 anchors.fill: parent
-                anchors.margins: 8
+                anchors.margins: 3
                 text: root.detail
                 textFormat: TextEdit.PlainText
                 readOnly: true
@@ -87,7 +91,7 @@ Rectangle {
                 color: "#aeb2ca"
                 selectionColor: "#565d82"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 9
+                font.pixelSize: 12
             }
         }
     }

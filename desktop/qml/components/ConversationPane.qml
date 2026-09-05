@@ -29,8 +29,8 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 40
-            color: root.active ? "#24283d" : "#191b26"
+            Layout.preferredHeight: 48
+            color: "transparent"
 
             HoverHandler { id: headerHover }
 
@@ -45,19 +45,19 @@ Rectangle {
                 spacing: 9
 
                 AgentAvatar {
-                    Layout.preferredWidth: 24
-                    Layout.preferredHeight: 24
+                    Layout.preferredWidth: 34
+                    Layout.preferredHeight: 34
                     controller: root.controller
                     session: root.session
                     name: root.controller.agentName(root.session)
-                    avatarSize: 24
-                    cornerRadius: 6
+                    avatarSize: 34
+                    cornerRadius: 2
                     fallbackColor: root.active ? "#555970" : "#3b3e50"
                 }
 
-                ColumnLayout {
+                RowLayout {
                     Layout.fillWidth: true
-                    spacing: 1
+                    spacing: 10
 
                     Text {
                         Layout.fillWidth: true
@@ -67,7 +67,7 @@ Rectangle {
                         }
                         color: root.active ? "#c9cbdc" : "#8b8ea5"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 12
+                        font.pixelSize: 16
                         font.weight: Font.DemiBold
                         horizontalAlignment: Text.AlignLeft
                         elide: Text.ElideRight
@@ -82,9 +82,8 @@ Rectangle {
                         visible: root.active && root.width > 520
                         color: "#5e6177"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 9
+                        font.pixelSize: 12
                         elide: Text.ElideRight
-                        Layout.fillWidth: true
                     }
                 }
 
@@ -195,7 +194,7 @@ Rectangle {
             Layout.fillHeight: true
             model: root.conversationModel
             clip: true
-            spacing: 4
+            spacing: 2
             leftMargin: 14
             rightMargin: 14
             topMargin: 10

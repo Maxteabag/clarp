@@ -56,3 +56,28 @@ add_test(
         -DCLARP_DESKTOP_SOURCE=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_SOURCE_DIR}/cmake/VerifyNativeOnly.cmake
 )
+
+# Exercise the actual window command and SplitView layout with an offline fixture.
+foreach(sidebar_toggles IN ITEMS 1 2)
+    set(sidebar_test "clarp-desktop-sidebar-${sidebar_toggles}")
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/config")
+    add_test(NAME ${sidebar_test} COMMAND clarp-desktop)
+    set_tests_properties(${sidebar_test} PROPERTIES
+        TIMEOUT 15
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=${sidebar_test};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_SIDEBAR_TOGGLES=${sidebar_toggles};CLARP_SCREENSHOT_REQUIRE_COMPOSER_FOCUS=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/capture.png"
+    )
+endforeach()
+
+find_program(CLARP_QML_TEST_RUNNER qmltestrunner HINTS "${QT6_INSTALL_PREFIX}/lib/qt6/bin" REQUIRED)
+add_test(NAME clarp-desktop-activity-layout
+    COMMAND ${CLARP_QML_TEST_RUNNER} -input "${CMAKE_CURRENT_SOURCE_DIR}/qml")
+set_tests_properties(clarp-desktop-activity-layout PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software"
+    TIMEOUT 20)
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/config")
+add_test(NAME clarp-desktop-tool-presentation COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-tool-presentation PROPERTIES
+    TIMEOUT 15
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=clarp-desktop-tool-presentation;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/config;CLARP_SCREENSHOT_SCENARIO=tool-spacing;CLARP_SCREENSHOT_EXPAND_TOOLS=1;CLARP_SCREENSHOT_REQUIRE_COMPOSER_FOCUS=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/capture.png"
+)

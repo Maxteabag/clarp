@@ -81,7 +81,7 @@ Rectangle {
                     Text {
                         text: String(root.details.name || "Agent")
                         color: "#d0d3e4"
-                        font.pixelSize: 13
+                        font.pixelSize: 15
                         font.weight: Font.DemiBold
                     }
                     Text {
@@ -89,7 +89,7 @@ Rectangle {
                         text: String(root.details.backend || "") + "  ·  " + root.session
                         color: "#686d84"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 8
+                        font.pixelSize: 11
                         elide: Text.ElideRight
                     }
                 }
@@ -148,7 +148,7 @@ Rectangle {
                                 Layout.fillWidth: true
                                 text: String(root.controller.profileTaskPlan.title || "Loading plan…")
                                 color: "#c2c6d9"
-                                font.pixelSize: 11
+                                font.pixelSize: 13
                                 font.weight: Font.DemiBold
                             }
                             Text {
@@ -157,7 +157,7 @@ Rectangle {
                                     + "/" + String(root.controller.profileTaskPlan.total_count || 0)
                                 color: "#7f859f"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 9
+                                font.pixelSize: 11
                             }
                             BusyIndicator {
                                 visible: root.controller.profileLoading
@@ -185,14 +185,14 @@ Rectangle {
                                     Layout.fillWidth: true
                                     text: String(taskRow.modelData.title || "Task")
                                     color: "#adb1c7"
-                                    font.pixelSize: 10
+                                    font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
                                 Text {
                                     visible: (taskRow.modelData.subtasks || []).length > 0
                                     text: String((taskRow.modelData.subtasks || []).length) + " steps"
                                     color: "#62677e"
-                                    font.pixelSize: 8
+                                    font.pixelSize: 11
                                 }
                             }
                         }
@@ -225,7 +225,7 @@ Rectangle {
                                         text: String(promptRow.modelData.text
                                             || promptRow.modelData.preview || "")
                                         color: "#b9bdd1"
-                                        font.pixelSize: 10
+                                        font.pixelSize: 12
                                     }
                                     Text {
                                         Layout.fillWidth: true
@@ -234,7 +234,7 @@ Rectangle {
                                             + String((promptRow.modelData.prompt_origin || {}).channel || "chat")
                                         color: "#61667e"
                                         font.family: "JetBrains Mono"
-                                        font.pixelSize: 8
+                                        font.pixelSize: 11
                                         elide: Text.ElideRight
                                     }
                                 }
@@ -248,7 +248,7 @@ Rectangle {
                                 Layout.fillWidth: true
                                 text: "No authenticated prompts recorded yet"
                                 color: "#666b82"
-                                font.pixelSize: 9
+                                font.pixelSize: 11
                             }
                             Item { Layout.fillWidth: true }
                             BusyIndicator {
@@ -276,7 +276,7 @@ Rectangle {
                                 String(modelBox.currentValue || ""))
                         RowLayout {
                             Layout.fillWidth: true
-                            Label { text: "Model"; color: "#9297af"; font.pixelSize: 10 }
+                            Label { text: "Model"; color: "#9297af"; font.pixelSize: 12 }
                             ComboBox {
                                 id: modelBox
                                 Layout.fillWidth: true
@@ -299,7 +299,7 @@ Rectangle {
                         }
                         RowLayout {
                             Layout.fillWidth: true
-                            Label { text: "Effort"; color: "#9297af"; font.pixelSize: 10 }
+                            Label { text: "Effort"; color: "#9297af"; font.pixelSize: 12 }
                             ComboBox {
                                 id: effortBox
                                 Layout.fillWidth: true
@@ -361,7 +361,7 @@ Rectangle {
                                     Layout.fillWidth: true
                                     text: String(heartbeatRow.modelData.text || "Heartbeat check")
                                     color: "#aeb2c8"
-                                    font.pixelSize: 9
+                                    font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
                             }
@@ -371,7 +371,7 @@ Rectangle {
                             text: heartbeatCard.schedule.enabled
                                 ? "No heartbeat history yet" : "Heartbeat is off"
                             color: "#666b82"
-                            font.pixelSize: 9
+                            font.pixelSize: 11
                         }
                     }
 
@@ -389,13 +389,13 @@ Rectangle {
                                     Layout.fillWidth: true
                                     text: root.controller.teamNameById(teamMembership.modelData)
                                     color: "#adb1c7"
-                                    font.pixelSize: 10
+                                    font.pixelSize: 12
                                 }
                                 Text {
                                     text: teamMembership.modelData
                                     color: "#62677e"
                                     font.family: "JetBrains Mono"
-                                    font.pixelSize: 8
+                                    font.pixelSize: 11
                                 }
                             }
                         }
@@ -475,7 +475,7 @@ Rectangle {
                                             Layout.fillWidth: true
                                             text: String(artifactRow.modelData.title || "Artifact")
                                             color: "#bfc3d7"
-                                            font.pixelSize: 10
+                                            font.pixelSize: 12
                                             font.weight: Font.DemiBold
                                             elide: Text.ElideRight
                                         }
@@ -483,14 +483,14 @@ Rectangle {
                                             text: String(artifactRow.modelData.type || "item").toUpperCase()
                                             color: "#777d99"
                                             font.family: "JetBrains Mono"
-                                            font.pixelSize: 8
+                                            font.pixelSize: 11
                                         }
                                     }
                                     Text {
                                         Layout.fillWidth: true
                                         text: String(artifactRow.modelData.summary || "")
                                         color: "#686d84"
-                                        font.pixelSize: 9
+                                        font.pixelSize: 11
                                         wrapMode: Text.Wrap
                                         maximumLineCount: 3
                                         elide: Text.ElideRight
@@ -502,7 +502,7 @@ Rectangle {
                             visible: root.artifacts.length === 0
                             text: "No artifacts for this agent yet"
                             color: "#666b82"
-                            font.pixelSize: 9
+                            font.pixelSize: 11
                         }
                     }
 
@@ -515,7 +515,7 @@ Rectangle {
                                 text: Number(root.details.queue_count || 0) === 0
                                     ? "Nothing waiting" : String(root.details.queue_count) + " waiting"
                                 color: "#858aa2"
-                                font.pixelSize: 10
+                                font.pixelSize: 12
                             }
                             Button {
                                 text: "Manage"
@@ -538,7 +538,7 @@ Rectangle {
                                     Layout.fillWidth: true
                                     text: String(schedule.modelData.name || "Scheduled task")
                                     color: "#adb1c7"
-                                    font.pixelSize: 10
+                                    font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
                                 Switch {
@@ -603,8 +603,8 @@ Rectangle {
         Layout.fillWidth: true
         implicitHeight: cardColumn.implicitHeight + 20
         radius: 6
-        color: "#1d202c"
-        border.color: "#303448"
+        color: "transparent"
+        border.width: 0
         ColumnLayout {
             id: cardColumn
             anchors.left: parent.left
@@ -616,7 +616,7 @@ Rectangle {
                 text: card.title
                 color: "#858aa5"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 9
+                font.pixelSize: 11
                 font.weight: Font.DemiBold
                 font.letterSpacing: 1
             }
@@ -629,14 +629,14 @@ Rectangle {
         required property string label
         required property string value
         Layout.fillWidth: true
-        Text { text: info.label; color: "#888da5"; font.pixelSize: 9 }
+        Text { text: info.label; color: "#888da5"; font.pixelSize: 11 }
         Item { Layout.fillWidth: true }
         Text {
             Layout.maximumWidth: 520
             text: info.value
             color: "#b2b6cc"
             font.family: "JetBrains Mono"
-            font.pixelSize: 9
+            font.pixelSize: 11
             elide: Text.ElideMiddle
         }
     }
@@ -647,7 +647,7 @@ Rectangle {
         property bool checked: false
         signal toggled(bool checked)
         Layout.fillWidth: true
-        Text { Layout.fillWidth: true; text: toggle.label; color: "#adb1c7"; font.pixelSize: 10 }
+        Text { Layout.fillWidth: true; text: toggle.label; color: "#adb1c7"; font.pixelSize: 12 }
         Switch { checked: toggle.checked; onToggled: toggle.toggled(checked) }
     }
 }

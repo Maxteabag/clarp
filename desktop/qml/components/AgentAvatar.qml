@@ -7,8 +7,8 @@ Item {
     required property string session
     required property string name
     property string symbol: ""
-    property real avatarSize: 28
-    property real cornerRadius: 7
+    property real avatarSize: 40
+    property real cornerRadius: 2
     property color fallbackColor: "#55596f"
     readonly property url resolvedSource: {
         root.controller.avatarRevision;
@@ -17,14 +17,15 @@ Item {
 
     implicitWidth: avatarSize
     implicitHeight: avatarSize
+    clip: true
 
     Rectangle {
         anchors.fill: parent
+        visible: portrait.status !== Image.Ready
         radius: root.cornerRadius
-        clip: true
+        antialiasing: true
         color: root.fallbackColor
-        border.width: 1
-        border.color: "#353749"
+        border.width: 0
 
         Text {
             anchors.centerIn: parent
@@ -35,13 +36,21 @@ Item {
             font.weight: Font.DemiBold
         }
 
-        Image {
-            anchors.fill: parent
-            source: root.resolvedSource
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
-            cache: true
-            visible: status === Image.Ready
-        }
+    }
+
+    Image {
+        id: portrait
+        anchors.fill: parent
+        source: root.resolvedSource
+        // Decode above the displayed pixel size, then filter down. This also
+        // covers the application's fractional UI scale on high-DPI screens.
+        sourceSize: Qt.size(Math.ceil(width * Screen.devicePixelRatio * 2),
+                            Math.ceil(height * Screen.devicePixelRatio * 2))
+        fillMode: Image.PreserveAspectCrop
+        smooth: true
+        mipmap: true
+        asynchronous: true
+        cache: true
+        visible: status === Image.Ready
     }
 }

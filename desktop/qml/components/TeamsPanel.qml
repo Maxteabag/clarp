@@ -43,7 +43,7 @@ Rectangle {
                 text: "TEAMS"
                 color: "#c9cde3"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 16
+                font.pixelSize: 19
                 font.weight: Font.DemiBold
                 font.letterSpacing: 1.5
             }
@@ -51,7 +51,7 @@ Rectangle {
                 text: root.controller.teams.length + " teams"
                 color: "#656a82"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 8
+                font.pixelSize: 11
             }
             Item { Layout.fillWidth: true }
             BusyIndicator {
@@ -90,7 +90,7 @@ Rectangle {
                 anchors.margins: 8
                 text: root.controller.teamsError
                 color: "#c98a98"
-                font.pixelSize: 10
+                font.pixelSize: 12
                 elide: Text.ElideRight
             }
         }
@@ -141,7 +141,7 @@ Rectangle {
                                 anchors.centerIn: parent
                                 text: String(teamRow.modelData.name || "?").slice(0, 1).toUpperCase()
                                 color: "#eef0fb"
-                                font.pixelSize: 13
+                                font.pixelSize: 15
                                 font.weight: Font.DemiBold
                             }
                         }
@@ -154,7 +154,7 @@ Rectangle {
                                     Layout.fillWidth: true
                                     text: String(teamRow.modelData.name || "Team")
                                     color: "#c8cadc"
-                                    font.pixelSize: 11
+                                    font.pixelSize: 13
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
                                 }
@@ -168,7 +168,7 @@ Rectangle {
                                         anchors.centerIn: parent
                                         text: String(teamRow.modelData.unread_count || 0)
                                         color: "#171923"
-                                        font.pixelSize: 8
+                                        font.pixelSize: 11
                                     }
                                 }
                             }
@@ -178,7 +178,7 @@ Rectangle {
                                     || String((teamRow.modelData.member_agent_ids || []).length)
                                         + " members"
                                 color: "#6c7188"
-                                font.pixelSize: 9
+                                font.pixelSize: 11
                                 elide: Text.ElideRight
                             }
                         }
@@ -213,7 +213,7 @@ Rectangle {
                                         return team ? String(team.name || "Team") : "Select a team";
                                     }
                                     color: "#d0d2e3"
-                                    font.pixelSize: 12
+                                    font.pixelSize: 14
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
                                 }
@@ -231,7 +231,7 @@ Rectangle {
                                     }
                                     color: "#686d85"
                                     font.family: "JetBrains Mono"
-                                    font.pixelSize: 8
+                                    font.pixelSize: 11
                                     elide: Text.ElideMiddle
                                 }
                             }
@@ -331,7 +331,7 @@ Rectangle {
                                                 id: memberName
                                                 text: root.controller.agentNameById(memberChip.modelData)
                                                 color: "#aeb2cb"
-                                                font.pixelSize: 9
+                                                font.pixelSize: 11
                                             }
                                             ToolButton {
                                                 id: removeMember
@@ -380,7 +380,7 @@ Rectangle {
                             implicitHeight: messageColumn.implicitHeight + 18
                             radius: 5
                             color: "#202331"
-                            border.color: "#30354b"
+                            border.width: 0
                             ColumnLayout {
                                 id: messageColumn
                                 anchors.left: parent.left
@@ -394,7 +394,7 @@ Rectangle {
                                         Layout.fillWidth: true
                                         text: String(message.modelData.source_name || "Agent")
                                         color: "#9ca3c7"
-                                        font.pixelSize: 10
+                                        font.pixelSize: 12
                                         font.weight: Font.DemiBold
                                     }
                                     Button {
@@ -412,7 +412,7 @@ Rectangle {
                                     wrapMode: TextEdit.Wrap
                                     text: String(message.modelData.text || "")
                                     color: "#b8bbcf"
-                                    font.pixelSize: 11
+                                    font.pixelSize: 13
                                 }
                             }
                         }
@@ -423,7 +423,7 @@ Rectangle {
                             text: root.controller.selectedTeamId.length > 0
                                 ? "No team messages yet" : "Choose a team"
                             color: "#62677f"
-                            font.pixelSize: 10
+                            font.pixelSize: 12
                         }
                     }
                 }

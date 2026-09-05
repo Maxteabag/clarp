@@ -28,7 +28,7 @@ Rectangle {
                 text: "UPDATES"
                 color: "#c9cde3"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 17
+                font.pixelSize: 20
                 font.weight: Font.DemiBold
                 font.letterSpacing: 1.6
             }
@@ -37,7 +37,7 @@ Rectangle {
                     ? root.controller.attentionCount + " need attention" : "All caught up"
                 color: root.controller.attentionCount > 0 ? "#c68b98" : "#687089"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 9
+                font.pixelSize: 11
             }
             Item { Layout.fillWidth: true }
             BusyIndicator {
@@ -70,7 +70,7 @@ Rectangle {
                 text: root.controller.updatesError
                 color: "#c98a98"
                 wrapMode: Text.Wrap
-                font.pixelSize: 10
+                font.pixelSize: 12
             }
         }
 
@@ -88,7 +88,7 @@ Rectangle {
                     text: "NEEDS ATTENTION"
                     color: "#8d91aa"
                     font.family: "JetBrains Mono"
-                    font.pixelSize: 9
+                    font.pixelSize: 11
                     font.weight: Font.DemiBold
                     font.letterSpacing: 1
                 }
@@ -108,7 +108,7 @@ Rectangle {
                         implicitHeight: decisionColumn.implicitHeight + 20
                         radius: 6
                         color: "#202334"
-                        border.color: "#444a68"
+                        border.width: 0
 
                         ColumnLayout {
                             id: decisionColumn
@@ -122,7 +122,7 @@ Rectangle {
                                 Layout.fillWidth: true
                                 text: String(decision.modelData.title || "Decision")
                                 color: "#d0d3e5"
-                                font.pixelSize: 12
+                                font.pixelSize: 14
                                 font.weight: Font.DemiBold
                                 elide: Text.ElideRight
                             }
@@ -131,7 +131,7 @@ Rectangle {
                                 text: String(decision.modelData.question || decision.modelData.summary || "")
                                 color: "#b8bbcf"
                                 wrapMode: Text.Wrap
-                                font.pixelSize: 11
+                                font.pixelSize: 13
                             }
                             Text {
                                 visible: text.length > 0
@@ -141,7 +141,7 @@ Rectangle {
                                 wrapMode: Text.Wrap
                                 maximumLineCount: 4
                                 elide: Text.ElideRight
-                                font.pixelSize: 9
+                                font.pixelSize: 11
                             }
                             RowLayout {
                                 Layout.fillWidth: true
@@ -151,7 +151,7 @@ Rectangle {
                                         + String(decision.modelData.session || "")
                                     color: "#666a81"
                                     font.family: "JetBrains Mono"
-                                    font.pixelSize: 8
+                                    font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
                                 Button {
@@ -181,7 +181,7 @@ Rectangle {
                     text: "BACKGROUND JOBS"
                     color: "#8d91aa"
                     font.family: "JetBrains Mono"
-                    font.pixelSize: 9
+                    font.pixelSize: 11
                     font.weight: Font.DemiBold
                     font.letterSpacing: 1
                 }
@@ -201,8 +201,8 @@ Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: jobRow.implicitHeight + 16
                         radius: 5
-                        color: root.isActiveJob(job.modelData) ? "#1e2730" : "#1b1d28"
-                        border.color: root.isActiveJob(job.modelData) ? "#405a58" : "#303347"
+                        color: "transparent"
+                        border.width: 0
 
                         RowLayout {
                             id: jobRow
@@ -227,7 +227,7 @@ Rectangle {
                                     Layout.fillWidth: true
                                     text: String(job.modelData.title || job.modelData.kind || "Background job")
                                     color: "#c4c7da"
-                                    font.pixelSize: 11
+                                    font.pixelSize: 13
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
                                 }
@@ -235,7 +235,7 @@ Rectangle {
                                     Layout.fillWidth: true
                                     text: String(job.modelData.detail || "")
                                     color: "#6e7289"
-                                    font.pixelSize: 9
+                                    font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
                                 ProgressBar {
@@ -251,7 +251,7 @@ Rectangle {
                                 text: String(job.modelData.status || "").toUpperCase()
                                 color: root.isActiveJob(job.modelData) ? "#91aa85" : "#686d83"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 8
+                                font.pixelSize: 11
                             }
                             ToolButton {
                                 visible: root.isActiveJob(job.modelData)
@@ -274,7 +274,7 @@ Rectangle {
                     text: "RECENT ARTIFACTS"
                     color: "#8d91aa"
                     font.family: "JetBrains Mono"
-                    font.pixelSize: 9
+                    font.pixelSize: 11
                     font.weight: Font.DemiBold
                     font.letterSpacing: 1
                 }
@@ -288,8 +288,8 @@ Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: artifactRow.implicitHeight + 16
                         radius: 5
-                        color: "#1b1d28"
-                        border.color: "#303347"
+                        color: "transparent"
+                        border.width: 0
 
                         RowLayout {
                             id: artifactRow
@@ -302,7 +302,7 @@ Rectangle {
                                 text: String(artifact.modelData.type || "item").toUpperCase()
                                 color: "#858baa"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 8
+                                font.pixelSize: 11
                             }
                             ColumnLayout {
                                 Layout.fillWidth: true
@@ -311,14 +311,14 @@ Rectangle {
                                     Layout.fillWidth: true
                                     text: String(artifact.modelData.title || "Artifact")
                                     color: "#c3c6da"
-                                    font.pixelSize: 11
+                                    font.pixelSize: 13
                                     elide: Text.ElideRight
                                 }
                                 Text {
                                     Layout.fillWidth: true
                                     text: String(artifact.modelData.summary || "")
                                     color: "#6b6f86"
-                                    font.pixelSize: 9
+                                    font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
                             }
@@ -350,7 +350,7 @@ Rectangle {
                         Layout.alignment: Qt.AlignHCenter
                         text: "Nothing needs you right now"
                         color: "#aeb2c9"
-                        font.pixelSize: 12
+                        font.pixelSize: 14
                     }
                 }
             }

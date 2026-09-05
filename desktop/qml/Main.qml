@@ -13,6 +13,7 @@ ApplicationWindow {
     property string voiceName: ""
     property string selectedSurface: "chats"
     property real uiScale: 1.15
+    property bool sidebarVisible: true
 
     width: 1360
     height: 900
@@ -93,7 +94,14 @@ ApplicationWindow {
         } else if (action === "talk") {
             app.toggleRecordingForSession(app.selectedSession);
         } else if (action === "sidebar") {
+            root.sidebarVisible = !root.sidebarVisible;
+            Qt.callLater(() => {
+                if (root.workspaceAvailable())
+                    app.requestComposerFocus(app.panes.activePaneId);
+            });
+        } else if (action === "sidebar-compact") {
             rail.collapsed = !rail.collapsed;
+            root.sidebarVisible = true;
         } else if (action === "ui-larger") {
             root.setUiScale(root.uiScale + 0.05);
         } else if (action === "ui-smaller") {
@@ -112,6 +120,7 @@ ApplicationWindow {
     Core.Settings {
         category: "appearance"
         property alias uiScale: root.uiScale
+        property alias sidebarVisible: root.sidebarVisible
     }
 
     onActiveChanged: {
@@ -346,10 +355,12 @@ ApplicationWindow {
 
             AgentRail {
                 id: rail
+                objectName: "sidebarRail"
+                visible: root.sidebarVisible
 
-                SplitView.preferredWidth: collapsed ? 48 : 232
-                SplitView.minimumWidth: collapsed ? 48 : 184
-                SplitView.maximumWidth: collapsed ? 48 : 320
+                SplitView.preferredWidth: collapsed ? 60 : 264
+                SplitView.minimumWidth: collapsed ? 60 : 208
+                SplitView.maximumWidth: collapsed ? 60 : 360
                 controller: app
                 selectedSurface: root.selectedSurface
                 onSelectSurface: surface => {
@@ -363,8 +374,9 @@ ApplicationWindow {
             }
 
             Item {
+                objectName: "workspaceSurface"
                 SplitView.fillWidth: true
-                SplitView.minimumWidth: 520
+                SplitView.minimumWidth: 320
 
                 Workspace {
                     id: workspace
@@ -522,6 +534,7 @@ ApplicationWindow {
         objectName: "quickSwitcher"
         anchors.fill: parent
         controller: app
+        sidebarVisible: root.sidebarVisible
         visible: false
         z: 110
         onCommandRequested: action => root.runCommand(action)

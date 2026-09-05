@@ -10,6 +10,7 @@ Rectangle {
     required property var controller
     property string query: ""
     property bool restoreComposer: false
+    property bool sidebarVisible: true
     signal commandRequested(string action)
     signal agentRequested(string session)
     readonly property var commands: [
@@ -20,7 +21,8 @@ Rectangle {
         { kind: "command", label: "Zoom pane", action: "zoom", key: "Ctrl+Alt+Z", group: "layout" },
         { kind: "command", label: "Balance panes", action: "balance", key: "Ctrl+Alt+=", group: "layout" },
         { kind: "command", label: "Show or hide tools", action: "tools", key: "Ctrl+Shift+T", group: "view" },
-        { kind: "command", label: "Toggle agent rail", action: "sidebar", key: "Ctrl+B", group: "view" },
+        { kind: "command", label: root.sidebarVisible ? "Hide sidebar" : "Show sidebar", action: "sidebar", key: "Ctrl+B", group: "view" },
+        { kind: "command", label: "Toggle compact sidebar", action: "sidebar-compact", key: "", group: "view" },
         { kind: "command", label: "Larger interface", action: "ui-larger", key: "Ctrl+=", group: "view" },
         { kind: "command", label: "Smaller interface", action: "ui-smaller", key: "Ctrl+-", group: "view" },
         { kind: "command", label: "Reset interface size", action: "ui-reset", key: "Ctrl+0", group: "view" },
@@ -116,7 +118,7 @@ Rectangle {
                 Layout.preferredHeight: 43
                 placeholderText: "Agent or command"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 12
+                font.pixelSize: 14
                 leftPadding: 12
                 rightPadding: 12
                 background: Rectangle {
@@ -159,7 +161,7 @@ Rectangle {
                     required property var modelData
                     required property int index
                     width: ListView.view.width
-                    height: String(modelData.kind) === "command" ? 34 : 42
+                    height: String(modelData.kind) === "command" ? 36 : 50
                     highlighted: ListView.isCurrentItem
                     hoverEnabled: true
                     onHoveredChanged: {
@@ -203,7 +205,7 @@ Rectangle {
                                 text: "›"
                                 color: "#8589a5"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 13
+                                font.pixelSize: 15
                             }
                         }
                         ColumnLayout {
@@ -214,7 +216,7 @@ Rectangle {
                                     ? String(resultRow.modelData.label) : String(resultRow.modelData.name)
                                 color: "#c6c8dc"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 10
+                                font.pixelSize: 12
                                 font.weight: Font.Medium
                             }
                             Text {
@@ -222,7 +224,7 @@ Rectangle {
                                 text: String(resultRow.modelData.backend) + "  ·  " + String(resultRow.modelData.session)
                                 color: "#62657b"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 8
+                                font.pixelSize: 11
                             }
                         }
                         StatusPill {
@@ -234,7 +236,7 @@ Rectangle {
                             text: String(resultRow.modelData.group || "").toUpperCase()
                             color: "#55586e"
                             font.family: "JetBrains Mono"
-                            font.pixelSize: 7
+                            font.pixelSize: 11
                             font.letterSpacing: 0.6
                         }
                         Rectangle {
@@ -251,7 +253,7 @@ Rectangle {
                                 text: String(resultRow.modelData.key || "")
                                 color: "#9a9db8"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 8
+                                font.pixelSize: 11
                             }
                         }
                     }
@@ -264,7 +266,7 @@ Rectangle {
                 text: "No matching agent"
                 color: "#62657b"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 10
+                font.pixelSize: 12
             }
         }
     }

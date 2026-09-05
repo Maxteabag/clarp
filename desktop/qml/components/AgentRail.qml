@@ -8,7 +8,7 @@ Rectangle {
     id: root
 
     required property var controller
-    property bool collapsed: true
+    property bool collapsed: false
     property string selectedSurface: "chats"
     signal openOverview
     signal selectSurface(string surface)
@@ -57,7 +57,7 @@ Rectangle {
                         text: "CLARP"
                         color: "#b9bcd0"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 11
+                        font.pixelSize: 15
                         font.weight: Font.DemiBold
                         font.letterSpacing: 1.7
                     }
@@ -65,7 +65,7 @@ Rectangle {
                         text: root.controller.serverName || "desktop"
                         color: "#585b70"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 9
+                        font.pixelSize: 11
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
@@ -122,9 +122,9 @@ Rectangle {
                 required property string avatarSymbol
 
                 width: ListView.view.width
-                height: 46
-                leftPadding: 7
-                rightPadding: 7
+                height: 56
+                leftPadding: 10
+                rightPadding: 10
                 hoverEnabled: true
                 highlighted: root.controller.selectedSession === session
                 onClicked: {
@@ -135,7 +135,7 @@ Rectangle {
                 }
 
                 background: Rectangle {
-                    radius: 4
+                    radius: 2
                     color: agentDelegate.highlighted ? "#242634" : agentDelegate.hovered ? "#20212d" : "transparent"
                     border.color: "transparent"
 
@@ -151,11 +151,11 @@ Rectangle {
                 }
 
                 contentItem: RowLayout {
-                    spacing: 8
+                    spacing: 12
 
                     Item {
-                        Layout.preferredWidth: 30
-                        Layout.preferredHeight: 30
+                        Layout.preferredWidth: 40
+                        Layout.preferredHeight: 40
 
                         AgentAvatar {
                             anchors.fill: parent
@@ -163,8 +163,8 @@ Rectangle {
                             session: agentDelegate.session
                             name: agentDelegate.name
                             symbol: agentDelegate.avatarSymbol
-                            avatarSize: 30
-                            cornerRadius: 7
+                            avatarSize: 40
+                            cornerRadius: 2
                             fallbackColor: agentDelegate.highlighted ? "#555970" : "#3b3e50"
                         }
 
@@ -195,7 +195,7 @@ Rectangle {
                                 text: agentDelegate.name
                                 color: "#c6c8d9"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 12
+                                font.pixelSize: 14
                                 font.weight: agentDelegate.unread ? Font.Bold : Font.Medium
                                 elide: Text.ElideRight
                             }
@@ -214,7 +214,7 @@ Rectangle {
                             text: agentDelegate.busy ? (agentDelegate.agentState || "working") : "new reply"
                             color: agentDelegate.busy ? "#8fa180" : "#9b8290"
                             font.family: "JetBrains Mono"
-                            font.pixelSize: 9
+                            font.pixelSize: 11
                             elide: Text.ElideRight
                             maximumLineCount: 1
                         }

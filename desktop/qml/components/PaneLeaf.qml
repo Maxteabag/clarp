@@ -16,7 +16,7 @@ Rectangle {
     color: active ? "#23273b" : "#171923"
     border.color: active ? "#a7addb" : "#303347"
     border.width: active ? 2 : 1
-    radius: 5
+    radius: 2
     clip: true
     opacity: active ? 1 : 0.76
 
@@ -28,16 +28,6 @@ Rectangle {
     }
     Behavior on border.color {
         ColorAnimation { duration: 120 }
-    }
-
-    Rectangle {
-        visible: root.active
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        height: 3
-        color: "#bbc0ed"
-        z: 3
     }
 
     ColumnLayout {

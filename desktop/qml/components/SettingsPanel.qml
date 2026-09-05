@@ -38,14 +38,14 @@ Rectangle {
                 text: "SETTINGS"
                 color: "#c9cde3"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 17
+                font.pixelSize: 20
                 font.weight: Font.DemiBold
                 font.letterSpacing: 1.6
             }
             Text {
                 text: "Desktop preferences and this Host"
                 color: "#676c84"
-                font.pixelSize: 10
+                font.pixelSize: 12
             }
 
             SettingsGroup {
@@ -145,6 +145,7 @@ Rectangle {
             SettingsGroup {
                 title: "KEYBOARD"
                 SettingsInfo { label: "Command palette"; value: "Ctrl+K" }
+                SettingsInfo { label: "Show / hide sidebar"; value: "Ctrl+B" }
                 SettingsInfo { label: "Move between panes"; value: "Ctrl+Alt+Arrow" }
                 SettingsInfo { label: "Split right / down"; value: "Ctrl+Alt+V / S" }
                 SettingsInfo { label: "Zoom / close / balance"; value: "Ctrl+Alt+Z / X / =" }
@@ -170,8 +171,8 @@ Rectangle {
         Layout.fillWidth: true
         implicitHeight: column.implicitHeight + 20
         radius: 6
-        color: "#1c1f2b"
-        border.color: "#303448"
+        color: "transparent"
+        border.width: 0
         ColumnLayout {
             id: column
             anchors.left: parent.left
@@ -183,7 +184,7 @@ Rectangle {
                 text: group.title
                 color: "#858aa5"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 9
+                font.pixelSize: 11
                 font.weight: Font.DemiBold
                 font.letterSpacing: 1
             }
@@ -204,7 +205,7 @@ Rectangle {
         Layout.fillWidth: true
         implicitHeight: 48
         radius: 4
-        color: "#202331"
+        color: "transparent"
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 10
@@ -212,8 +213,8 @@ Rectangle {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 1
-                Text { text: toggleRow.label; color: "#c2c5d8"; font.pixelSize: 11 }
-                Text { text: toggleRow.detail; color: "#666b82"; font.pixelSize: 9 }
+                Text { text: toggleRow.label; color: "#c2c5d8"; font.pixelSize: 13 }
+                Text { text: toggleRow.detail; color: "#666b82"; font.pixelSize: 11 }
             }
             Switch {
                 checked: toggleRow.checked
@@ -230,7 +231,7 @@ Rectangle {
         Layout.fillWidth: true
         implicitHeight: 48
         radius: 4
-        color: tap.hovered ? "#252839" : "#202331"
+        color: tap.hovered ? "#252839" : "transparent"
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 10
@@ -238,16 +239,16 @@ Rectangle {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 1
-                Text { text: linkRow.label; color: "#c2c5d8"; font.pixelSize: 11 }
+                Text { text: linkRow.label; color: "#c2c5d8"; font.pixelSize: 13 }
                 Text {
                     Layout.fillWidth: true
                     text: linkRow.detail
                     color: "#666b82"
-                    font.pixelSize: 9
+                    font.pixelSize: 11
                     elide: Text.ElideMiddle
                 }
             }
-            Text { text: "›"; color: "#737991"; font.pixelSize: 15 }
+            Text { text: "›"; color: "#737991"; font.pixelSize: 17 }
         }
         HoverHandler { id: tap }
         TapHandler { onTapped: linkRow.clicked() }
@@ -261,13 +262,13 @@ Rectangle {
         Layout.leftMargin: 8
         Layout.rightMargin: 8
         Layout.preferredHeight: 28
-        Text { text: infoRow.label; color: "#aeb2c8"; font.pixelSize: 10 }
+        Text { text: infoRow.label; color: "#aeb2c8"; font.pixelSize: 12 }
         Item { Layout.fillWidth: true }
         Text {
             text: infoRow.value
             color: "#6d728a"
             font.family: "JetBrains Mono"
-            font.pixelSize: 9
+            font.pixelSize: 11
         }
     }
 
@@ -300,7 +301,7 @@ Rectangle {
                 Layout.fillWidth: true
                 text: "Changing to a local provider may briefly restart the Host."
                 color: "#6d728a"
-                font.pixelSize: 9
+                font.pixelSize: 11
                 wrapMode: Text.Wrap
             }
         }

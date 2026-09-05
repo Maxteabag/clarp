@@ -44,7 +44,7 @@ Rectangle {
                         text: "AGENTS"
                         color: "#c8cadc"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 16
+                        font.pixelSize: 19
                         font.weight: Font.DemiBold
                         font.letterSpacing: 1.5
                     }
@@ -52,7 +52,7 @@ Rectangle {
                         text: root.controller.agents.count + " active conversations"
                         color: "#62657a"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 8
+                        font.pixelSize: 11
                     }
                 }
 
@@ -105,7 +105,7 @@ Rectangle {
                     implicitHeight: cardColumn.implicitHeight + 18
                     radius: 4
                     color: root.controller.selectedSession === session ? "#242634" : "#1c1d28"
-                    border.color: root.controller.selectedSession === session ? "#555970" : "#303142"
+                    border.width: 0
 
                     ColumnLayout {
                         id: cardColumn
@@ -138,14 +138,14 @@ Rectangle {
                                     text: card.name
                                     color: "#c8cadc"
                                     font.family: "JetBrains Mono"
-                                    font.pixelSize: 11
+                                    font.pixelSize: 13
                                     font.weight: Font.DemiBold
                                 }
                                 Text {
                                     Layout.fillWidth: true
                                     text: card.lastMessage || card.statusText || card.agentState
                                     color: "#686b80"
-                                    font.pixelSize: 10
+                                    font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
                             }
@@ -163,20 +163,20 @@ Rectangle {
                                 text: card.backend
                                 color: "#8e91aa"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 8
+                                font.pixelSize: 11
                             }
                             Label {
                                 text: card.modelName || "provider default"
                                 color: "#5f6277"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 8
+                                font.pixelSize: 11
                             }
                             Label {
                                 Layout.fillWidth: true
                                 text: card.workingDirectory
                                 color: "#5f6277"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 8
+                                font.pixelSize: 11
                                 elide: Text.ElideMiddle
                             }
                             Label {
@@ -184,7 +184,7 @@ Rectangle {
                                 text: card.queueCount + " queued"
                                 color: "#9d91a7"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 8
+                                font.pixelSize: 11
                             }
                         }
 
@@ -219,7 +219,7 @@ Rectangle {
                             Label {
                                 text: "SCHEDULED TASKS"
                                 color: "#8d8492"
-                                font.pixelSize: 9
+                                font.pixelSize: 11
                                 font.weight: Font.DemiBold
                                 font.letterSpacing: 1
                             }
@@ -249,7 +249,7 @@ Rectangle {
                                                 Layout.fillWidth: true
                                                 text: String(scheduleRow.modelData.name || "Scheduled task") + "  ·  " + String(scheduleRow.modelData.cron_expression || "")
                                                 color: "#cfc6d2"
-                                                font.pixelSize: 10
+                                                font.pixelSize: 12
                                                 font.weight: Font.Medium
                                                 elide: Text.ElideRight
                                             }
@@ -257,7 +257,7 @@ Rectangle {
                                                 Layout.fillWidth: true
                                                 text: String(scheduleRow.modelData.prompt || "")
                                                 color: "#716a77"
-                                                font.pixelSize: 9
+                                                font.pixelSize: 11
                                                 elide: Text.ElideRight
                                             }
                                         }
@@ -348,7 +348,7 @@ Rectangle {
                 Text {
                     text: "ARCHIVED"
                     color: "#8d8492"
-                    font.pixelSize: 10
+                    font.pixelSize: 12
                     font.weight: Font.DemiBold
                     font.letterSpacing: 1.2
                 }
@@ -382,14 +382,14 @@ Rectangle {
                                 Text {
                                     text: archivedCard.name
                                     color: "#c9c1cb"
-                                    font.pixelSize: 11
+                                    font.pixelSize: 13
                                     font.weight: Font.Medium
                                 }
                                 Text {
                                     Layout.fillWidth: true
                                     text: archivedCard.lastMessage || archivedCard.session
                                     color: "#6f6874"
-                                    font.pixelSize: 9
+                                    font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
                             }
@@ -415,7 +415,7 @@ Rectangle {
                 Text {
                     text: "READY CONTACTS"
                     color: "#8d8492"
-                    font.pixelSize: 10
+                    font.pixelSize: 12
                     font.weight: Font.DemiBold
                     font.letterSpacing: 1.2
                 }
@@ -462,14 +462,14 @@ Rectangle {
                                 Text {
                                     text: contactCard.name
                                     color: "#e7dfe9"
-                                    font.pixelSize: 12
+                                    font.pixelSize: 14
                                     font.weight: Font.Medium
                                 }
                                 Text {
                                     Layout.fillWidth: true
                                     text: contactCard.description || "Ready to start"
                                     color: "#746d7a"
-                                    font.pixelSize: 9
+                                    font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
                             }

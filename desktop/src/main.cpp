@@ -7,6 +7,7 @@
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QJSValue>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QLockFile>
@@ -174,7 +175,8 @@ int main(int argc, char* argv[]) {
         QTimer::singleShot(1'900, &application,
                            [controller, screenshotScenario] {
             QString session = controller->selectedSession();
-            if (session.isEmpty() && screenshotScenario == QStringLiteral("markdown")) {
+            if (session.isEmpty() && (screenshotScenario == QStringLiteral("markdown") ||
+                                      screenshotScenario == QStringLiteral("tool-spacing"))) {
                 session = QStringLiteral("markdown-fixture");
                 controller->agents()->applySnapshot(
                     {{QStringLiteral("agents"),
@@ -235,6 +237,52 @@ int main(int argc, char* argv[]) {
                                                  {QStringLiteral("status"), QStringLiteral("ok")}},
                                  }}},
                 };
+            } else if (screenshotScenario == QStringLiteral("tool-spacing")) {
+                controller->clearError();
+                controller->setToolsVisible(true);
+                turns = {
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("fixture-user")},
+                                {QStringLiteral("role"), QStringLiteral("user")},
+                                {QStringLiteral("text"), QStringLiteral("Make this easier to read and keep the tool calls compact.")},
+                                {QStringLiteral("revision"), 1}},
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("fixture-tools")},
+                                {QStringLiteral("role"), QStringLiteral("assistant")},
+                                {QStringLiteral("text"), QStringLiteral("I found the extra padding around each tool row.")},
+                                {QStringLiteral("revision"), 2},
+                                {QStringLiteral("activity_count"), 3},
+                                {QStringLiteral("display_cells"), QJsonArray{
+                                    QJsonObject{{QStringLiteral("title"), QStringLiteral("Read")},
+                                                {QStringLiteral("summary"), QStringLiteral("desktop/qml/components/MessageDelegate.qml")},
+                                                {QStringLiteral("status"), QStringLiteral("ok")}},
+                                    QJsonObject{{QStringLiteral("title"), QStringLiteral("Edit")},
+                                                {QStringLiteral("summary"), QStringLiteral("Compact activity rows and larger text")},
+                                                {QStringLiteral("status"), QStringLiteral("ok")},
+                                                {QStringLiteral("lines"), QJsonArray{
+                                                    QJsonObject{{QStringLiteral("kind"), QStringLiteral("diff_old")},
+                                                                {QStringLiteral("text"), QStringLiteral("- implicitHeight: content.implicitHeight + 14")}},
+                                                    QJsonObject{{QStringLiteral("kind"), QStringLiteral("diff_new")},
+                                                                {QStringLiteral("text"), QStringLiteral("+ implicitHeight: content.implicitHeight + 6")}},
+                                                }}},
+                                    QJsonObject{{QStringLiteral("title"), QStringLiteral("Test")},
+                                                {QStringLiteral("summary"), QStringLiteral("Sidebar visibility, composer focus, and layout")},
+                                                {QStringLiteral("status"), QStringLiteral("ok")}},
+                                }}},
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("fixture-command")},
+                                {QStringLiteral("role"), QStringLiteral("assistant")},
+                                {QStringLiteral("text"), QString{}},
+                                {QStringLiteral("revision"), 3},
+                                {QStringLiteral("tools"), QJsonArray{QJsonObject{
+                                    {QStringLiteral("name"), QStringLiteral("Bash")},
+                                    {QStringLiteral("summary"), QStringLiteral("Build the preview")},
+                                    {QStringLiteral("command"), QStringLiteral("cmake --build desktop/build/dev --parallel 4")},
+                                    {QStringLiteral("result"), QStringLiteral("Build complete.")},
+                                    {QStringLiteral("status"), QStringLiteral("ok")},
+                                }}}},
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("fixture-result")},
+                                {QStringLiteral("role"), QStringLiteral("assistant")},
+                                {QStringLiteral("text"), QStringLiteral("The sidebar can be fully hidden with **Ctrl+B**. Text is larger, and tool calls stay close to the reply.\n\nParagraphs still have breathing room. **Ctrl+K** opens commands from anywhere.")},
+                                {QStringLiteral("revision"), 4}},
+                };
             } else if (screenshotScenario == QStringLiteral("markdown")) {
                 turns = {
                     QJsonObject{{QStringLiteral("id"), QStringLiteral("fixture-user")},
@@ -282,9 +330,52 @@ int main(int argc, char* argv[]) {
         });
     }
     if (!screenshotPath.isEmpty()) {
-        const int captureDelay = screenshotScenario.isEmpty() ? 2'000 : 2'200;
-        QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath] {
+        const int sidebarToggles = qEnvironmentVariableIntValue("CLARP_SCREENSHOT_SIDEBAR_TOGGLES");
+        if (sidebarToggles > 0 && rootWindow != nullptr) {
+            QTimer::singleShot(2'000, &application, [rootWindow, sidebarToggles] {
+                rootWindow->setProperty("sidebarVisible", true);
+                for (int index = 0; index < sidebarToggles; ++index) {
+                    QMetaObject::invokeMethod(rootWindow, "runCommand",
+                                              Q_ARG(QVariant, QStringLiteral("sidebar")));
+                }
+            });
+        }
+        if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_EXPAND_TOOLS") && rootWindow != nullptr) {
+            QTimer::singleShot(2'100, &application, [&application, rootWindow, screenshotScenario] {
+                QList<QQuickItem*> pending{rootWindow->contentItem()};
+                while (!pending.isEmpty()) {
+                    QQuickItem* item = pending.takeLast();
+                    pending.append(item->childItems());
+                    if (item->objectName() == QStringLiteral("toolCard") ||
+                        item->objectName() == QStringLiteral("displayCellCard")) {
+                        item->setProperty("expanded", true);
+                        if (screenshotScenario == QStringLiteral("tool-spacing") &&
+                            item->objectName() == QStringLiteral("displayCellCard") &&
+                            item->property("title").toString() == QStringLiteral("Edit") &&
+                            item->property("lines").value<QJSValue>()
+                                    .property(QStringLiteral("length")).toInt() != 2) {
+                            qCritical("Native activity details were lost during QML conversion");
+                            application.exit(EXIT_FAILURE);
+                        }
+                    }
+                }
+            });
+        }
+        const int captureDelay = screenshotScenario.isEmpty() ? 2'000 : 2'400;
+        QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath, sidebarToggles] {
             if (rootWindow != nullptr) {
+                if (sidebarToggles > 0) {
+                    const auto* rail = rootWindow->findChild<QQuickItem*>(QStringLiteral("sidebarRail"));
+                    const auto* surface = rootWindow->findChild<QQuickItem*>(QStringLiteral("workspaceSurface"));
+                    const bool shown = sidebarToggles % 2 == 0;
+                    if (rail == nullptr || surface == nullptr || rail->isVisible() != shown ||
+                        (!shown && (surface->x() != 0 ||
+                                    qAbs(surface->width() - surface->parentItem()->width()) > 1))) {
+                        qCritical("Sidebar toggle did not restore visibility and workspace geometry");
+                        application.exit(EXIT_FAILURE);
+                        return;
+                    }
+                }
                 if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_REQUIRE_COMPOSER_FOCUS") &&
                     (rootWindow->activeFocusItem() == nullptr ||
                      rootWindow->activeFocusItem()->objectName() !=

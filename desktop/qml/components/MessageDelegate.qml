@@ -45,15 +45,16 @@ Item {
         ? [root.renderedBody]
         : root.controller.markdownDisplayBlocks(root.renderedBody)
 
-    width: ListView.view ? ListView.view.width : 600
+    width: ListView.view ? ListView.view.width - ListView.view.leftMargin
+        - ListView.view.rightMargin : 600
     visible: activity || body.length > 0 || displayCells.length > 0
         || presentedActivityCount > 0 || (showTools && tools.length > 0)
-    implicitHeight: visible ? content.implicitHeight + 8 : 0
+    implicitHeight: visible ? content.implicitHeight + (activity || body.length === 0 ? 2 : 6) : 0
 
     ColumnLayout {
         id: content
         width: parent.width
-        spacing: 4
+        spacing: 2
 
         Text {
             visible: !root.activity && (root.origin === "agent"
@@ -70,6 +71,7 @@ Item {
         }
 
         Item {
+            visible: root.activity || root.body.length > 0
             Layout.fillWidth: true
             implicitHeight: root.activity ? 24 : messageBubble.visible ? messageBubble.implicitHeight : 0
 
@@ -109,15 +111,15 @@ Item {
                         text: root.toolName || root.messageKind || "Working"
                         color: "#868a9f"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 9
+                        font.pixelSize: 12
                         font.weight: Font.DemiBold
                     }
                     Text {
                         Layout.fillWidth: true
                         text: root.body
-                        color: "#696c82"
+                        color: "#969bb5"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 10
+                        font.pixelSize: 12
                         elide: Text.ElideRight
                     }
                 }
@@ -130,7 +132,7 @@ Item {
                 x: 0
                 implicitHeight: messageBlocks.implicitHeight + (root.userAuthored ? 18 : 12)
                 radius: 3
-                color: root.userAuthored ? "#242737" : "transparent"
+                color: "transparent"
                 border.width: root.deliveryFailed ? 1 : 0
                 border.color: "#8d5763"
                 opacity: root.pending ? 0.68 : 1
@@ -169,7 +171,7 @@ Item {
                                 ? Text.PlainText : Text.MarkdownText
                             wrapMode: Text.Wrap
                             color: "#b9bbcf"
-                            font.pixelSize: 13
+                            font.pixelSize: 15
                             onLinkActivated: link => Qt.openUrlExternally(link)
                         }
                     }
@@ -192,7 +194,7 @@ Item {
                     : "+" + root.presentedActivityCount + " more"
                 color: "#72778f"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 10
+                font.pixelSize: 12
             }
 
             HoverHandler { id: activityTap }
@@ -211,7 +213,7 @@ Item {
             Layout.fillWidth: true
             Layout.leftMargin: 2
             Layout.rightMargin: 2
-            spacing: 3
+            spacing: 1
 
             Button {
                 visible: root.toolDetailsAvailable
