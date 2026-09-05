@@ -11,7 +11,7 @@
 namespace clarp {
 namespace {
 
-constexpr qint64 MaxCacheBytes = 8 * 1024 * 1024;
+constexpr qint64 MaxCacheBytes = qint64{8} * 1024 * 1024;
 
 } // namespace
 

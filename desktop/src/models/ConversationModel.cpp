@@ -543,7 +543,7 @@ void ConversationModel::mergeRows(const QJsonArray& rows) {
 void ConversationModel::prependRows(const QJsonArray& rows) {
     QVector<Message> older;
     older.reserve(rows.size());
-    for (const QJsonValue& value : rows) {
+    for (const auto& value : rows) {
         if (!value.isObject()) {
             continue;
         }

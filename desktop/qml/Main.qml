@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtCore as Core
 import "components"
 
 ApplicationWindow {
@@ -11,6 +12,7 @@ ApplicationWindow {
     property string voiceSession: ""
     property string voiceName: ""
     property string selectedSurface: "chats"
+    property real uiScale: 1.15
 
     width: 1360
     height: 900
@@ -35,14 +37,16 @@ ApplicationWindow {
     }
 
     function movePane(direction) {
-        const keepComposer = root.composerOwnsFocus();
         app.panes.navigate(direction);
-        if (keepComposer)
-            app.requestComposerFocus(app.panes.activePaneId);
+        app.requestComposerFocus(app.panes.activePaneId);
+    }
+
+    function setUiScale(value) {
+        root.uiScale = Math.max(1.0, Math.min(1.4, Math.round(value * 20) / 20));
+        Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId));
     }
 
     function runCommand(action) {
-        const keepComposer = root.composerOwnsFocus();
         let layoutChanged = false;
         if (action === "new") {
             root.relaunchSession = "";
@@ -59,6 +63,8 @@ ApplicationWindow {
                 app.loadUpdates();
             else if (action === "teams")
                 app.loadTeams();
+            else if (action === "chats")
+                Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId));
         } else if (action === "orchestrator") {
             orchestrator.visible = true;
             app.loadOrchestrator();
@@ -86,14 +92,35 @@ ApplicationWindow {
             app.muted = !app.muted;
         } else if (action === "talk") {
             app.toggleRecordingForSession(app.selectedSession);
+        } else if (action === "sidebar") {
+            rail.collapsed = !rail.collapsed;
+        } else if (action === "ui-larger") {
+            root.setUiScale(root.uiScale + 0.05);
+        } else if (action === "ui-smaller") {
+            root.setUiScale(root.uiScale - 0.05);
+        } else if (action === "ui-reset") {
+            root.setUiScale(1.15);
         }
-        if (keepComposer && layoutChanged)
+        if (layoutChanged)
             app.requestComposerFocus(app.panes.activePaneId);
     }
 
     AppController {
         id: app
     }
+
+    Core.Settings {
+        category: "appearance"
+        property alias uiScale: root.uiScale
+    }
+
+    onActiveChanged: {
+        if (active && root.workspaceAvailable())
+            Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId));
+    }
+
+    Component.onCompleted: Qt.callLater(
+        () => app.requestComposerFocus(app.panes.activePaneId))
 
     palette {
         window: "#1a1b26"
@@ -128,6 +155,31 @@ ApplicationWindow {
         context: Qt.ApplicationShortcut
         enabled: !root.overlayVisible()
         onActivated: quickSwitcher.open(root.composerOwnsFocus())
+    }
+
+    Shortcut {
+        sequence: "Ctrl+B"
+        context: Qt.ApplicationShortcut
+        enabled: !root.overlayVisible()
+        onActivated: root.runCommand("sidebar")
+    }
+
+    Shortcut {
+        sequence: "Ctrl+="
+        context: Qt.ApplicationShortcut
+        onActivated: root.runCommand("ui-larger")
+    }
+
+    Shortcut {
+        sequence: "Ctrl+-"
+        context: Qt.ApplicationShortcut
+        onActivated: root.runCommand("ui-smaller")
+    }
+
+    Shortcut {
+        sequence: "Ctrl+0"
+        context: Qt.ApplicationShortcut
+        onActivated: root.runCommand("ui-reset")
     }
 
     Shortcut {
@@ -276,6 +328,13 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+."; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("stop-agent") }
     Shortcut { sequence: "Ctrl+Shift+Space"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("talk") }
 
+    Item {
+        id: scaledSurface
+        width: root.width / root.uiScale
+        height: root.height / root.uiScale
+        scale: root.uiScale
+        transformOrigin: Item.TopLeft
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -288,9 +347,9 @@ ApplicationWindow {
             AgentRail {
                 id: rail
 
-                SplitView.preferredWidth: collapsed ? 44 : 224
-                SplitView.minimumWidth: collapsed ? 44 : 176
-                SplitView.maximumWidth: collapsed ? 44 : 320
+                SplitView.preferredWidth: collapsed ? 48 : 232
+                SplitView.minimumWidth: collapsed ? 48 : 184
+                SplitView.maximumWidth: collapsed ? 48 : 320
                 controller: app
                 selectedSurface: root.selectedSurface
                 onSelectSurface: surface => {
@@ -506,6 +565,8 @@ ApplicationWindow {
             root.relaunchName = name;
             startAgent.visible = true;
         }
+    }
+
     }
 
 }

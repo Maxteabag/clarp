@@ -4,6 +4,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <algorithm>
+#include <ranges>
 
 namespace clarp {
 namespace {
@@ -242,9 +243,9 @@ QStringList markdownDisplayBlocks(const QString& markdown) {
             ++nextIndex;
         }
         int previousKind = 0;
-        for (auto previous = current.crbegin(); previous != current.crend(); ++previous) {
-            if (!previous->trimmed().isEmpty()) {
-                previousKind = listKind(*previous);
+        for (const auto& previous : std::views::reverse(current)) {
+            if (!previous.trimmed().isEmpty()) {
+                previousKind = listKind(previous);
                 break;
             }
         }

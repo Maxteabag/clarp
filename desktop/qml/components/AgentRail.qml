@@ -8,7 +8,7 @@ Rectangle {
     id: root
 
     required property var controller
-    property bool collapsed: false
+    property bool collapsed: true
     property string selectedSurface: "chats"
     signal openOverview
     signal selectSurface(string surface)
@@ -23,7 +23,7 @@ Rectangle {
 
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: 40
+            Layout.preferredHeight: 42
 
             RowLayout {
                 anchors.fill: parent
@@ -43,7 +43,7 @@ Rectangle {
                         text: "C"
                         color: "#9296b1"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 9
+                        font.pixelSize: 10
                         font.weight: Font.DemiBold
                     }
                 }
@@ -57,7 +57,7 @@ Rectangle {
                         text: "CLARP"
                         color: "#b9bcd0"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 10
+                        font.pixelSize: 11
                         font.weight: Font.DemiBold
                         font.letterSpacing: 1.7
                     }
@@ -65,7 +65,7 @@ Rectangle {
                         text: root.controller.serverName || "desktop"
                         color: "#585b70"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 8
+                        font.pixelSize: 9
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
@@ -122,15 +122,16 @@ Rectangle {
                 required property string avatarSymbol
 
                 width: ListView.view.width
-                height: 42
+                height: 46
                 leftPadding: 7
                 rightPadding: 7
                 hoverEnabled: true
                 highlighted: root.controller.selectedSession === session
                 onClicked: {
                     root.selectSurface("chats");
-                    root.controller.requestComposerFocus("");
                     root.controller.selectSession(session);
+                    root.controller.requestComposerFocus(
+                        root.controller.panes.activePaneId);
                 }
 
                 background: Rectangle {
@@ -153,8 +154,8 @@ Rectangle {
                     spacing: 8
 
                     Item {
-                        Layout.preferredWidth: 28
-                        Layout.preferredHeight: 28
+                        Layout.preferredWidth: 30
+                        Layout.preferredHeight: 30
 
                         AgentAvatar {
                             anchors.fill: parent
@@ -162,7 +163,7 @@ Rectangle {
                             session: agentDelegate.session
                             name: agentDelegate.name
                             symbol: agentDelegate.avatarSymbol
-                            avatarSize: 28
+                            avatarSize: 30
                             cornerRadius: 7
                             fallbackColor: agentDelegate.highlighted ? "#555970" : "#3b3e50"
                         }
@@ -194,7 +195,7 @@ Rectangle {
                                 text: agentDelegate.name
                                 color: "#c6c8d9"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                                 font.weight: agentDelegate.unread ? Font.Bold : Font.Medium
                                 elide: Text.ElideRight
                             }
@@ -203,7 +204,7 @@ Rectangle {
                                 text: agentDelegate.queueCount
                                 color: "#a7a1b8"
                                 font.family: "JetBrains Mono"
-                                font.pixelSize: 9
+                                font.pixelSize: 10
                             }
                         }
 
@@ -213,7 +214,7 @@ Rectangle {
                             text: agentDelegate.busy ? (agentDelegate.agentState || "working") : "new reply"
                             color: agentDelegate.busy ? "#8fa180" : "#9b8290"
                             font.family: "JetBrains Mono"
-                            font.pixelSize: 8
+                            font.pixelSize: 9
                             elide: Text.ElideRight
                             maximumLineCount: 1
                         }
@@ -243,7 +244,7 @@ Rectangle {
                     text: "◌"
                     color: chatsButton.highlighted ? "#afb5dc" : "#696d84"
                     horizontalAlignment: Text.AlignHCenter
-                    font.pixelSize: 12
+                    font.pixelSize: 13
                 }
                 Text {
                     visible: !root.collapsed
@@ -251,7 +252,7 @@ Rectangle {
                     text: "Chats"
                     color: chatsButton.highlighted ? "#c7cadc" : "#74788f"
                     font.family: "JetBrains Mono"
-                    font.pixelSize: 9
+                    font.pixelSize: 10
                 }
             }
             background: Rectangle {
@@ -272,7 +273,7 @@ Rectangle {
                     text: "◇"
                     color: updatesButton.highlighted ? "#afb5dc" : "#696d84"
                     horizontalAlignment: Text.AlignHCenter
-                    font.pixelSize: 12
+                    font.pixelSize: 13
                 }
                 Text {
                     visible: !root.collapsed
@@ -280,7 +281,7 @@ Rectangle {
                     text: "Updates"
                     color: updatesButton.highlighted ? "#c7cadc" : "#74788f"
                     font.family: "JetBrains Mono"
-                    font.pixelSize: 9
+                    font.pixelSize: 10
                 }
                 Rectangle {
                     visible: root.controller.attentionCount > 0
@@ -293,7 +294,7 @@ Rectangle {
                         text: String(root.controller.attentionCount)
                         color: "#171923"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 8
+                        font.pixelSize: 9
                     }
                 }
             }
@@ -315,7 +316,7 @@ Rectangle {
                     text: "△"
                     color: teamsButton.highlighted ? "#afb5dc" : "#696d84"
                     horizontalAlignment: Text.AlignHCenter
-                    font.pixelSize: 12
+                    font.pixelSize: 13
                 }
                 Text {
                     visible: !root.collapsed
@@ -323,7 +324,7 @@ Rectangle {
                     text: "Teams"
                     color: teamsButton.highlighted ? "#c7cadc" : "#74788f"
                     font.family: "JetBrains Mono"
-                    font.pixelSize: 9
+                    font.pixelSize: 10
                 }
             }
             background: Rectangle {
@@ -342,7 +343,7 @@ Rectangle {
                 text: allAgentsButton.text
                 color: "#686b81"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 9
+                font.pixelSize: 10
                 font.weight: Font.Medium
                 horizontalAlignment: root.collapsed ? Text.AlignHCenter : Text.AlignLeft
                 verticalAlignment: Text.AlignVCenter
@@ -362,7 +363,7 @@ Rectangle {
                     text: "⚙"
                     color: settingsButton.highlighted ? "#afb5dc" : "#696d84"
                     horizontalAlignment: Text.AlignHCenter
-                    font.pixelSize: 11
+                    font.pixelSize: 12
                 }
                 Text {
                     visible: !root.collapsed
@@ -370,7 +371,7 @@ Rectangle {
                     text: "Settings"
                     color: settingsButton.highlighted ? "#c7cadc" : "#74788f"
                     font.family: "JetBrains Mono"
-                    font.pixelSize: 9
+                    font.pixelSize: 10
                 }
             }
             background: Rectangle {

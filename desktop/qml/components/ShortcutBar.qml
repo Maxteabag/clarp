@@ -6,47 +6,50 @@ Rectangle {
 
     required property var controller
 
-    implicitHeight: 25
-    color: "#15161e"
-    border.color: "#2a2c3b"
+    implicitHeight: 22
+    color: "#11131a"
+    border.color: "#262938"
     border.width: 1
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
-        spacing: 9
+        anchors.leftMargin: 10
+        anchors.rightMargin: 10
+        spacing: 7
 
         Rectangle {
-            implicitWidth: 5
-            implicitHeight: 5
-            radius: 2.5
-            color: root.controller.connected ? "#829b73" : "#817161"
+            implicitWidth: 6
+            implicitHeight: 6
+            radius: 3
+            color: root.controller.connected ? "#8aaa7a" : "#8b7868"
         }
 
         Text {
-            text: root.controller.panes.zoomedPaneId.length > 0 ? "ZOOM" : "PANE"
-            color: "#b3b6cb"
+            text: root.controller.panes.activeSession || "ready"
+            color: "#8e92aa"
             font.family: "JetBrains Mono"
-            font.pixelSize: 8
+            font.pixelSize: 9
             font.weight: Font.DemiBold
-            font.letterSpacing: 0.8
-        }
-
-        Text {
-            Layout.fillWidth: true
-            text: "Ctrl+K commands    Ctrl+Alt+arrows move    Ctrl+Alt+Z zoom    Ctrl+N new"
-            color: "#64677d"
-            font.family: "JetBrains Mono"
-            font.pixelSize: 8
             elide: Text.ElideRight
         }
 
+        Item {
+            Layout.fillWidth: true
+        }
+
         Text {
-            text: root.controller.panes.paneCount + (root.controller.panes.paneCount === 1 ? " pane" : " panes")
-            color: "#55586d"
+            text: root.controller.panes.zoomedPaneId.length > 0
+                ? "ZOOM" : root.controller.panes.paneCount + "P"
+            color: "#6e7289"
             font.family: "JetBrains Mono"
-            font.pixelSize: 8
+            font.pixelSize: 9
+        }
+
+        Text {
+            text: "⌃K"
+            color: "#575b70"
+            font.family: "JetBrains Mono"
+            font.pixelSize: 9
         }
 
     }

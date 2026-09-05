@@ -63,14 +63,12 @@ Rectangle {
         acceptedButtons: Qt.LeftButton
         gesturePolicy: TapHandler.WithinBounds
         onTapped: eventPoint => {
-            // The active composer occupies the bottom 46 px. Its TextArea
-            // keeps its own focus; taps anywhere else explicitly enter pane
-            // focus so subsequent typing cannot leak into a hidden caret.
-            if (root.active && eventPoint.position.y >= root.height - 46)
+            // The composer handles its own taps. Everywhere else, selecting a
+            // pane means it is immediately ready to receive text.
+            if (root.active && eventPoint.position.y >= root.height - 54)
                 return;
-            root.controller.requestComposerFocus("");
             root.controller.panes.focusPane(String(root.node.id));
-            root.forceActiveFocus();
+            root.controller.requestComposerFocus(String(root.node.id));
         }
     }
 }

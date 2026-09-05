@@ -48,12 +48,12 @@ Item {
     width: ListView.view ? ListView.view.width : 600
     visible: activity || body.length > 0 || displayCells.length > 0
         || presentedActivityCount > 0 || (showTools && tools.length > 0)
-    implicitHeight: visible ? content.implicitHeight + 6 : 0
+    implicitHeight: visible ? content.implicitHeight + 8 : 0
 
     ColumnLayout {
         id: content
         width: parent.width
-        spacing: 3
+        spacing: 4
 
         Text {
             visible: !root.activity && (root.origin === "agent"
@@ -64,7 +64,7 @@ Item {
                 : ((root.category || "AUTOMATION").toUpperCase())
             color: root.origin === "agent" ? "#8f96bc" : "#8a806f"
             font.family: "JetBrains Mono"
-            font.pixelSize: 8
+            font.pixelSize: 9
             font.weight: Font.DemiBold
             font.letterSpacing: 0.7
         }
@@ -109,7 +109,7 @@ Item {
                         text: root.toolName || root.messageKind || "Working"
                         color: "#868a9f"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 8
+                        font.pixelSize: 9
                         font.weight: Font.DemiBold
                     }
                     Text {
@@ -117,7 +117,7 @@ Item {
                         text: root.body
                         color: "#696c82"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 9
+                        font.pixelSize: 10
                         elide: Text.ElideRight
                     }
                 }
@@ -128,9 +128,9 @@ Item {
                 visible: !root.activity && root.body.length > 0
                 width: Math.min(parent.width, 840)
                 x: 0
-                implicitHeight: messageBlocks.implicitHeight + (root.userAuthored ? 16 : 10)
-                radius: 2
-                color: root.userAuthored ? "#222431" : "transparent"
+                implicitHeight: messageBlocks.implicitHeight + (root.userAuthored ? 18 : 12)
+                radius: 3
+                color: root.userAuthored ? "#242737" : "transparent"
                 border.width: root.deliveryFailed ? 1 : 0
                 border.color: "#8d5763"
                 opacity: root.pending ? 0.68 : 1
@@ -147,7 +147,7 @@ Item {
                 Column {
                     id: messageBlocks
                     x: root.userAuthored ? 10 : 2
-                    y: root.userAuthored ? 8 : 5
+                    y: root.userAuthored ? 9 : 6
                     width: parent.width - x - 8
                     spacing: 8
 
@@ -169,7 +169,7 @@ Item {
                                 ? Text.PlainText : Text.MarkdownText
                             wrapMode: Text.Wrap
                             color: "#b9bbcf"
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                             onLinkActivated: link => Qt.openUrlExternally(link)
                         }
                     }
@@ -192,7 +192,7 @@ Item {
                     : "+" + root.presentedActivityCount + " more"
                 color: "#72778f"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 9
+                font.pixelSize: 10
             }
 
             HoverHandler { id: activityTap }
@@ -254,7 +254,7 @@ Item {
             text: Qt.formatDateTime(new Date(root.timestamp), "MMM d  HH:mm")
             color: "#555a70"
             font.family: "JetBrains Mono"
-            font.pixelSize: 8
+            font.pixelSize: 9
         }
 
         RowLayout {
@@ -267,7 +267,7 @@ Item {
                 text: root.deliveryFailed ? "Not delivered" : "Delivering…"
                 color: root.deliveryFailed ? "#b56f7c" : "#5f6278"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 8
+                font.pixelSize: 9
             }
             Button {
                 visible: root.deliveryFailed

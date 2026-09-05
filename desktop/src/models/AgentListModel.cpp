@@ -216,7 +216,7 @@ void AgentListModel::applySnapshot(const QJsonObject& snapshot) {
             structureChanged = true;
             rebuildIndex();
         }
-        m_agents[desiredRow] = next.at(desiredRow);
+        m_agents.replace(desiredRow, next.at(desiredRow));
         QList<int> roles;
         for (int role = AgentIdRole; role <= UnreadRole; ++role) {
             roles.append(role);
@@ -269,7 +269,7 @@ void AgentListModel::applyQueueEvent(const QJsonObject& event) {
         }
         return;
     }
-    Agent& agent = m_agents[row];
+    Agent& agent = *(m_agents.begin() + row);
     const qint64 revision = event.value(QStringLiteral("queue_revision")).toInteger();
     if ((revision == 0 && agent.queueRevision > 0) || revision < agent.queueRevision) {
         return;

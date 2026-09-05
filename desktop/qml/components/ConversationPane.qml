@@ -17,7 +17,7 @@ Rectangle {
     signal queueRequested(string session)
     signal profileRequested(string session)
 
-    color: root.active ? "#202438" : "#171923"
+    color: root.active ? "#1d2132" : "#151720"
 
     Behavior on color {
         ColorAnimation { duration: 120 }
@@ -29,8 +29,10 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 39
-            color: root.active ? "#292d44" : "#1b1d29"
+            Layout.preferredHeight: 40
+            color: root.active ? "#24283d" : "#191b26"
+
+            HoverHandler { id: headerHover }
 
             Behavior on color {
                 ColorAnimation { duration: 120 }
@@ -38,17 +40,17 @@ Rectangle {
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 9
-                anchors.rightMargin: 9
-                spacing: 8
+                anchors.leftMargin: 11
+                anchors.rightMargin: 8
+                spacing: 9
 
                 AgentAvatar {
-                    Layout.preferredWidth: 23
-                    Layout.preferredHeight: 23
+                    Layout.preferredWidth: 24
+                    Layout.preferredHeight: 24
                     controller: root.controller
                     session: root.session
                     name: root.controller.agentName(root.session)
-                    avatarSize: 23
+                    avatarSize: 24
                     cornerRadius: 6
                     fallbackColor: root.active ? "#555970" : "#3b3e50"
                 }
@@ -65,7 +67,7 @@ Rectangle {
                         }
                         color: root.active ? "#c9cbdc" : "#8b8ea5"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 11
+                        font.pixelSize: 12
                         font.weight: Font.DemiBold
                         horizontalAlignment: Text.AlignLeft
                         elide: Text.ElideRight
@@ -73,12 +75,14 @@ Rectangle {
                     Text {
                         text: {
                             root.agentRevision;
-                            return root.session.length > 0 ? root.controller.agentBackend(root.session) + "  ·  " + root.session : root.controller.baseUrl;
+                            return root.session.length > 0
+                                ? root.controller.agentBackend(root.session)
+                                : root.controller.baseUrl;
                         }
-                        visible: root.width > 360
+                        visible: root.active && root.width > 520
                         color: "#5e6177"
                         font.family: "JetBrains Mono"
-                        font.pixelSize: 8
+                        font.pixelSize: 9
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
@@ -94,6 +98,7 @@ Rectangle {
                 ToolButton {
                     id: paneMenuButton
                     visible: root.active && root.session.length > 0
+                        && (headerHover.hovered || paneMenu.visible)
                     text: "···"
                     implicitWidth: 28
                     implicitHeight: 26
@@ -190,11 +195,11 @@ Rectangle {
             Layout.fillHeight: true
             model: root.conversationModel
             clip: true
-            spacing: 2
-            leftMargin: 11
-            rightMargin: 11
-            topMargin: 6
-            bottomMargin: 8
+            spacing: 4
+            leftMargin: 14
+            rightMargin: 14
+            topMargin: 10
+            bottomMargin: 10
             reuseItems: true
             boundsBehavior: Flickable.StopAtBounds
             onMovementStarted: userInteracting = true
@@ -281,7 +286,7 @@ Rectangle {
                 text: root.session.length > 0 ? "No messages yet. Start the conversation below." : "Choose an agent from the sidebar."
                 color: "#5e6176"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 10
+                font.pixelSize: 11
             }
         }
 
@@ -318,7 +323,7 @@ Rectangle {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 12
-        anchors.bottomMargin: 56
+        anchors.bottomMargin: 64
         width: 34
         height: 34
         z: 30

@@ -21,9 +21,9 @@ namespace clarp {
 namespace {
 
 constexpr int DeliveryTimeoutMs = 20'000;
-constexpr qsizetype MaxPortraitBytes = 20 * 1024 * 1024;
-constexpr qsizetype MaxInlineMediaBytes = 20 * 1024 * 1024;
-constexpr qsizetype MaxComposerUploadBytes = 50 * 1024 * 1024;
+constexpr qsizetype MaxPortraitBytes = qsizetype{20} * 1024 * 1024;
+constexpr qsizetype MaxInlineMediaBytes = qsizetype{20} * 1024 * 1024;
+constexpr qsizetype MaxComposerUploadBytes = qsizetype{50} * 1024 * 1024;
 
 QString avatarUrlForAgent(const Agent& agent) {
     if (!agent.avatarUrl.isEmpty()) {
@@ -81,8 +81,9 @@ QString sharedFilesystemSettingsKey(const QString& baseUrl) {
 AppController::AppController(QObject* parent)
     : QObject(parent), m_credentials(this), m_audio(this), m_agents(this),
       m_archivedAgents(true, this), m_contacts(this), m_panes(this), m_voices(this),
-      m_emptyConversation(this), m_conversation(&m_emptyConversation) {
-    m_cacheEnabled = !qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SCENARIO");
+      m_emptyConversation(this), m_conversation(&m_emptyConversation),
+      m_composerFocusPane(m_panes.activePaneId()),
+      m_cacheEnabled(!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SCENARIO")) {
     QSettings settings;
     m_baseUrl = normalizedBaseUrl(
         qEnvironmentVariable("CLARP_BASE_URL", settings
@@ -158,6 +159,10 @@ AppController::AppController(QObject* parent)
         const QString session = m_panes.activeSession();
         if (!session.isEmpty() && session != m_selectedSession) {
             selectSession(session);
+        }
+        const QString paneId = m_panes.activePaneId();
+        if (!paneId.isEmpty()) {
+            requestComposerFocus(paneId);
         }
     });
     const auto bumpAgentRevision = [this] {
@@ -1317,12 +1322,10 @@ void AppController::removeComposerAttachment(const QString& paneId, const QStrin
     }
     QVariantList attachments = composerAttachments(paneId, session);
     const auto oldSize = attachments.size();
-    attachments.erase(std::remove_if(attachments.begin(), attachments.end(),
-                                     [&attachmentId](const QVariant& value) {
-                                         return value.toMap().value(QStringLiteral("id")).toString() ==
-                                                attachmentId;
-                                     }),
-                      attachments.end());
+    const auto removed = std::ranges::remove_if(attachments, [&attachmentId](const QVariant& value) {
+        return value.toMap().value(QStringLiteral("id")).toString() == attachmentId;
+    });
+    attachments.erase(removed.begin(), removed.end());
     if (attachments.size() == oldSize) {
         return;
     }

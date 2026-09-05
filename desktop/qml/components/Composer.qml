@@ -32,13 +32,17 @@ Rectangle {
         return controller.composerCanSend(paneId, session);
     }
     readonly property string draftScope: paneId + "|" + session
+    readonly property bool revealControls: composerHover.hovered
+        || controller.audio.recording || attachments.length > 0
     signal openConnection
 
-    implicitHeight: 46 + (transcriptionCount > 0 ? 25 : 0)
+    implicitHeight: 54 + (transcriptionCount > 0 ? 25 : 0)
         + (queueCount > 0 ? 25 : 0) + (attachments.length > 0 ? 31 : 0)
-    color: root.active ? "#191a23" : "#151720"
-    border.color: root.active ? "#4f5577" : "#272a39"
+    color: root.active ? "#14161f" : "#12141b"
+    border.color: root.active ? "#454b6c" : "#272a39"
     border.width: 1
+
+    HoverHandler { id: composerHover }
 
     function restoreFocus() {
         if (root.visible && root.active && root.controller.composerFocusPane === root.paneId)
@@ -74,8 +78,8 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 6
-        spacing: 6
+        anchors.margins: 7
+        spacing: 7
 
         RowLayout {
             visible: root.transcriptionCount > 0
@@ -188,11 +192,11 @@ Rectangle {
             spacing: 6
 
         ToolButton {
-            visible: root.active
+            visible: root.active && root.revealControls
             text: "+"
             enabled: root.session.length > 0
-            implicitWidth: 28
-            implicitHeight: 28
+            implicitWidth: visible ? 30 : 0
+            implicitHeight: 30
             onClicked: fileDialog.open()
             ToolTip.visible: hovered
             ToolTip.text: "Attach file"
@@ -201,19 +205,19 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            radius: 4
-            color: "#1d1e29"
-                border.color: editor.activeFocus ? "#8f96c5" : (root.active ? "#3a3e55" : "#272a38")
+            radius: 3
+            color: "#191b26"
+                border.color: editor.activeFocus ? "#aeb5e9" : (root.active ? "#363b53" : "#272a38")
             border.width: 1
 
             Text {
                 anchors.left: parent.left
                 anchors.leftMargin: 9
                 anchors.verticalCenter: parent.verticalCenter
-                text: "›"
-                color: editor.activeFocus ? "#a7aac1" : "#676a80"
+                text: "❯"
+                color: editor.activeFocus ? "#c4caf2" : "#676a80"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 13
+                font.pixelSize: 15
                 font.weight: Font.DemiBold
             }
 
@@ -224,14 +228,16 @@ Rectangle {
                 anchors.margins: 2
                 anchors.leftMargin: 17
                 text: ""
-                placeholderText: root.session.length > 0 ? "Message " + root.controller.agentName(root.session) : "Choose an agent"
+                placeholderText: root.session.length > 0
+                    ? "Type to " + root.controller.agentName(root.session) + "…"
+                    : "Choose an agent"
                 enabled: root.active && root.session.length > 0
                 opacity: root.active ? 1 : 0.58
                 wrapMode: TextArea.Wrap
                 color: "#c7c9dc"
                 placeholderTextColor: "#55586c"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 11
+                font.pixelSize: 12
                 background: null
                 leftPadding: 7
                 topPadding: 6
@@ -310,10 +316,10 @@ Rectangle {
 
         ToolButton {
             id: recordButton
-            visible: root.active
+            visible: root.active && root.revealControls
             text: root.controller.audio.recording ? "■" : "●"
             enabled: root.session.length > 0
-            implicitWidth: 28
+            implicitWidth: visible ? 28 : 0
             implicitHeight: 28
             onClicked: root.controller.toggleRecordingForSession(root.session)
             ToolTip.visible: hovered
@@ -341,6 +347,13 @@ Rectangle {
             for (const file of selectedFiles)
                 root.controller.attachLocalFile(root.paneId, root.session, file);
         }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+A"
+        context: Qt.ApplicationShortcut
+        enabled: root.active && root.session.length > 0
+        onActivated: fileDialog.open()
     }
 
     DropArea {

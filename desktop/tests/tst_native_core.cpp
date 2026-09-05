@@ -600,6 +600,7 @@ class NativeCoreTest final : public QObject {
     void apiClientRejectsCrossOriginAuthenticatedMedia();
     void apiClientDropsRepliesFromPreviousEndpointGeneration();
     void paneDraftAndFocusSurviveLayoutStateChanges();
+    void paneActivationAlwaysTargetsItsComposer();
     void paneDraftIsDurableAndScopedToServerAndConversation();
     void transcriptCacheRestoresDurableRowsWithoutStaleRegression();
     void credentialStoreRoundTrip();
@@ -1358,6 +1359,35 @@ void NativeCoreTest::paneDraftAndFocusSurviveLayoutStateChanges() {
     QCOMPARE(controller.panes()->zoomedPaneId(), paneId);
     controller.setPaneDraft(paneId, QStringLiteral("first"), {});
     controller.setPaneDraft(paneId, QStringLiteral("second"), {});
+    if (previousBaseUrl.isEmpty())
+        qunsetenv("CLARP_BASE_URL");
+    else
+        qputenv("CLARP_BASE_URL", previousBaseUrl);
+    if (previousToken.isEmpty())
+        qunsetenv("CLARP_TOKEN");
+    else
+        qputenv("CLARP_TOKEN", previousToken);
+}
+
+void NativeCoreTest::paneActivationAlwaysTargetsItsComposer() {
+    const QByteArray previousBaseUrl = qgetenv("CLARP_BASE_URL");
+    const QByteArray previousToken = qgetenv("CLARP_TOKEN");
+    qputenv("CLARP_BASE_URL", "http://composer-focus-test.invalid");
+    qputenv("CLARP_TOKEN", "offline-composer-focus-test");
+
+    AppController controller;
+    const QString firstPane = controller.panes()->activePaneId();
+    QCOMPARE(controller.composerFocusPane(), firstPane);
+
+    controller.panes()->splitActive(QStringLiteral("vertical"), QStringLiteral("other"));
+    const QString secondPane = controller.panes()->activePaneId();
+    QVERIFY(secondPane != firstPane);
+    QCOMPARE(controller.composerFocusPane(), secondPane);
+
+    controller.requestComposerFocus({});
+    controller.panes()->focusPane(firstPane);
+    QCOMPARE(controller.composerFocusPane(), firstPane);
+
     if (previousBaseUrl.isEmpty())
         qunsetenv("CLARP_BASE_URL");
     else

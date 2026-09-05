@@ -12,6 +12,7 @@
 #include <QLockFile>
 #include <QQmlApplicationEngine>
 #include <QQmlError>
+#include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QStandardPaths>
@@ -86,17 +87,21 @@ int main(int argc, char* argv[]) {
         }
     }
     QObject::connect(&activationServer, &QLocalServer::newConnection, &application,
-                     [&activationServer, rootWindow] {
+                     [&activationServer, rootWindow, controller] {
                          while (activationServer.hasPendingConnections()) {
                              QLocalSocket* socket = activationServer.nextPendingConnection();
                              socket->deleteLater();
                          }
-                         if (rootWindow != nullptr) {
-                             rootWindow->show();
-                             rootWindow->raise();
-                             rootWindow->requestActivate();
-                         }
-                     });
+                        if (rootWindow != nullptr) {
+                            rootWindow->show();
+                            rootWindow->raise();
+                            rootWindow->requestActivate();
+                            if (controller != nullptr) {
+                                controller->requestComposerFocus(
+                                    controller->panes()->activePaneId());
+                            }
+                        }
+                    });
 
     const QString screenshotPath = qEnvironmentVariable("CLARP_SCREENSHOT_PATH");
     const QString screenshotLayout = qEnvironmentVariable("CLARP_SCREENSHOT_LAYOUT");
@@ -261,6 +266,14 @@ int main(int argc, char* argv[]) {
         const int captureDelay = screenshotScenario.isEmpty() ? 2'000 : 2'200;
         QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath] {
             if (rootWindow != nullptr) {
+                if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_REQUIRE_COMPOSER_FOCUS") &&
+                    (rootWindow->activeFocusItem() == nullptr ||
+                     rootWindow->activeFocusItem()->objectName() !=
+                         QStringLiteral("paneComposerEditor"))) {
+                    qCritical("The active pane composer did not own focus");
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
                 rootWindow->grabWindow().save(screenshotPath);
             }
             application.quit();
