@@ -126,7 +126,7 @@ class Collector(threading.Thread):
         self.port = port
         self.last_event_id = last_event_id
         self.events: list[tuple[int | None, dict]] = []
-        self._stop = threading.Event()
+        self._stop_requested = threading.Event()
 
     def run(self) -> None:
         head = ("GET /events HTTP/1.1\r\nHost: x\r\n"
@@ -145,7 +145,7 @@ class Collector(threading.Thread):
                     return
                 buf += chunk
             buf = buf.split(b"\r\n\r\n", 1)[1]
-            while not self._stop.is_set():
+            while not self._stop_requested.is_set():
                 try:
                     chunk = s.recv(4096)
                 except (socket.timeout, TimeoutError):
@@ -186,7 +186,7 @@ class Collector(threading.Thread):
                 if isinstance(ev, dict)}
 
     def close(self) -> None:
-        self._stop.set()
+        self._stop_requested.set()
         self.join(timeout=5)
 
 

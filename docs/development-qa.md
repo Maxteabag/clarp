@@ -8,6 +8,11 @@ another path: console-script shebangs contain absolute interpreter paths.
 environment. Source changes stay in the checkout; production deployment stays
 in a permanent installation.
 
+Install `ffmpeg` for the real audio/HLS fixtures. `make js` and the QA runner
+launch JavaScript tests through `uv run` so their Python child processes use
+the same locked dependencies as the Python suite. No provider CLI installation
+or login should be needed for these deterministic tests.
+
 `python3 scripts/qa.py` runs the Python and JavaScript suites plus a synthetic
 snapshot benchmark. `--full` adds disposable Docker and browser checks. Each
 run retains command lines, exits, timings, source SHA and change hashes under

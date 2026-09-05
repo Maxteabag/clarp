@@ -236,12 +236,21 @@ def test_focus_endpoint_updates_sqlite_focus_for_sticky_routing(server_with_hera
     assert focused["session"] == "rachel"
 
 
-def test_send_to_held_agent_releases_them(server_with_herald):
+def test_send_to_held_agent_releases_them(server_with_herald, monkeypatch):
+    from lib import clarp_runner
+    calls = []
+    # Exercise HTTP/admission/herald behavior without launching a real provider.
+    def complete_turn(**kwargs):
+        calls.append(kwargs)
+        kwargs["on_result"]({"subtype": "success", "result": "QA complete"})
+    monkeypatch.setattr(clarp_runner, "spawn_turn", complete_turn)
     base, ctx, _srv = server_with_herald
     ctx.herald.set_focus("claude")
     ctx.herald.ingest_clip("rachel", url="/audio/r1.mp3", ts=1)
     # the user addresses Rachel directly with /send → herald should clear.
     _post(base + "/send", {"text": "Rachel, anything to add?", "session": "rachel"})
+    assert len(calls) == 1
+    assert calls[0]["session"] == "rachel"
     assert "rachel" not in ctx.herald.pending_heralds()
     audio_urls = [e["url"] for e in ctx.stream.recent() if e.get("type") == "audio"]
     assert "/audio/r1.mp3" in audio_urls
