@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 
 namespace clarp {
 
@@ -23,11 +24,14 @@ struct Agent {
     QString conversationId;
     QString voiceId;
     QJsonArray schedules;
+    QJsonArray mcpServers;
+    QJsonArray teamIds;
     qint64 latestStateTimestamp = 0;
     qint64 lastActivity = 0;
     qint64 headRevision = 0;
     qint64 contextTokens = 0;
     qint64 contextWindow = 0;
+    qint64 queueRevision = 0;
     int queuedTurnCount = 0;
     bool alive = false;
     bool busy = false;
@@ -45,17 +49,27 @@ struct Message {
     QString id;
     QString role;
     QString text;
+    QString displayText;
     QString timestamp;
     QString kind;
     QString toolName;
     QString origin;
     QString senderName;
+    QString senderAgentId;
+    QString senderSession;
+    QString traceId;
+    QString category;
+    QString activityStatus;
+    QString activityMatchKey;
     QJsonArray tools;
     QJsonArray displayCells;
     qint64 revision = 0;
+    int activityCount = 0;
     bool pending = false;
     bool deliveryFailed = false;
     bool activity = false;
+    bool automated = false;
+    bool toolDetailsAvailable = false;
 
     [[nodiscard]] static Message fromJson(const QJsonObject& object);
 };
@@ -78,5 +92,8 @@ struct AudioClip {
 
 [[nodiscard]] bool isBusyState(const QString& state);
 [[nodiscard]] QString displayName(const Agent& agent);
+[[nodiscard]] QString voiceDeliverySession(const QString& captureSession,
+                                           const QString& currentSession);
+[[nodiscard]] QStringList markdownDisplayBlocks(const QString& markdown);
 
 } // namespace clarp

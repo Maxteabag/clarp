@@ -27,6 +27,7 @@ class ConversationModel : public QAbstractListModel {
         AuthorRole,
         BodyRole,
         TimestampRole,
+        DayLabelRole,
         RevisionRole,
         KindRole,
         ToolNameRole,
@@ -37,10 +38,15 @@ class ConversationModel : public QAbstractListModel {
         ActivityRole,
         ToolsRole,
         DisplayCellsRole,
+        ActivityStatusRole,
+        AutomatedRole,
+        CategoryRole,
+        ToolDetailsAvailableRole,
+        ActivityCountRole,
     };
     Q_ENUM(Role)
 
-    enum class LoadKind { Tail, Delta, Older };
+    enum class LoadKind { Tail, Delta, Older, Replace };
 
     explicit ConversationModel(QObject* parent = nullptr);
 
@@ -54,13 +60,20 @@ class ConversationModel : public QAbstractListModel {
     [[nodiscard]] bool hasMore() const;
     [[nodiscard]] bool loading() const;
     [[nodiscard]] QString error() const;
+    Q_INVOKABLE [[nodiscard]] int indexOfMessage(const QString& id) const { return m_byId.value(id, -1); }
 
     void openSession(const QString& session);
     void applyLog(const QJsonObject& response, LoadKind kind);
+    [[nodiscard]] QJsonObject cacheSnapshot() const;
+    bool restoreCacheSnapshot(const QJsonObject& snapshot);
     void addOptimistic(const QString& clientMessageId, const QString& text);
     void markDeliveryFailed(const QString& clientMessageId);
+    [[nodiscard]] QString takeFailedMessageForRetry(const QString& messageId);
     void applyActivityEvent(const QJsonObject& event);
+    bool applyToolDetails(const QString& messageId, const QJsonObject& details);
     void clearActivity();
+    void showTransientThinking(const QString& persona);
+    void clearRunningActivity();
     void setLoading(bool loading);
     void setError(const QString& error);
 
@@ -72,6 +85,8 @@ class ConversationModel : public QAbstractListModel {
     void loadingChanged();
     void errorChanged();
     void countChanged();
+    void rowsAppended(bool fromCurrentUser);
+    void rowsPrepended();
     void replacementRequired();
     void deliveryConfirmed(const QString& clientMessageId);
 
@@ -79,7 +94,8 @@ class ConversationModel : public QAbstractListModel {
     void rebuildIndex();
     void replaceRows(QVector<Message> rows);
     void mergeRows(const QJsonArray& rows);
-    void sortRows();
+    void prependRows(const QJsonArray& rows);
+    void dropSupersededLiveTurns();
 
     QString m_session;
     QString m_conversationId;
@@ -89,6 +105,7 @@ class ConversationModel : public QAbstractListModel {
     QString m_error;
     QVector<Message> m_messages;
     QHash<QString, int> m_byId;
+    quint64 m_activityCounter = 0;
 };
 
 } // namespace clarp

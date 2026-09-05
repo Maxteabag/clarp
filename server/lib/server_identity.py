@@ -44,6 +44,7 @@ FEATURES: tuple[str, ...] = (
     "tts",
     "pairing",
     "diagnostics",
+    "tool_explanations",
 )
 
 
