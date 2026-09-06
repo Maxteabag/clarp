@@ -272,3 +272,16 @@ Spark first determines whether the current source already represents them.
 The running `clarp-fleet-preview.service` uses an archived release and persistent
 library under `~/.local/share/clarp-fleet-preview/`; use the service's
 WorkingDirectory and ExecStart to verify its installed version and learning flag.
+
+
+### Agent portraits
+
+The owner explicitly replaced World-view boats with the agents' existing Clarp
+portraits. This supersedes the boat-marker portion of the Lantern Works baseline,
+not the workshop/harbor metaphor, activity machinery, routes or cabinet option.
+`actors[].avatar_url` identifies the exact agent's uploaded image; the shared PWA
+resolver supplies bundled persona portraits when appropriate. Missing images use
+initials. Cached, resized image blobs enter the sandbox independently of frames;
+the worker exposes decoded ImageBitmaps as `avatars[agent_id]` to visual modules.
+`viz_avatar_upgrade.avatar_edits` applies only this scoped marker change to live
+learned source so unrelated generated improvements survive deployment.
