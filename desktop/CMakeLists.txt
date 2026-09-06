@@ -50,6 +50,8 @@ include(cmake/ClarpQuality.cmake)
 add_executable(clarp-desktop)
 
 target_sources(clarp-desktop PRIVATE
+    src/platform/DesktopPresence.cpp
+    src/platform/DesktopPresence.h
     src/main.cpp
     src/terminal/TerminalLaunch.cpp
     src/terminal/TerminalLaunch.h
