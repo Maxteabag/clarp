@@ -36,3 +36,12 @@ clarp-agent-tasks update RETURNED_PLAN_ID server blocked "Waiting for credential
 
 Completing every item completes the plan automatically. Use `finish` only for
 an explicit blocked or cancelled plan, or when closing a plan without items.
+
+## Planning deliverable
+
+The durable checklist above remains the runtime source of task progress. When
+substantial planning also produces a finished proposal or design document, use
+`clarp-documents` to deliver a searchable PDF by default, with useful architecture
+relationships and clearly labeled UX concepts where they clarify the plan.
+Keep source Markdown/HTML and inspect rendered pages. This does not replace the
+checklist, ordinary progress replies, decisions or background-job bookkeeping.
