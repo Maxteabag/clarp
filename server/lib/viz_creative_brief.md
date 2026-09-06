@@ -92,3 +92,7 @@ Flow overview (ADR 0009): show observed workspaces and agents at a common scale.
 Selection only inspects; never promote one workspace and miniaturize the rest.
 Keep pan and zoom. Focus expansion is deferred. Extend the established concepts
 without reintroducing focus-based layout or replacing other views.
+
+Mobile support (ADR 0010): all views support phone and desktop viewports. The host
+owns responsive controls, touch pan/pinch and fit. Preserve world geometry and
+common-scale overview; do not recreate the former desktop-only viewport gate.

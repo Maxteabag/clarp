@@ -1,7 +1,7 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>Clarp · fleet map</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -37,29 +37,60 @@
   #inspector p { color:#a9b9ce; white-space:pre-wrap; overflow-wrap:anywhere; }
   #close-inspector { float:right; }
   #redesign { width:100%; }
-  #small-screen { display:none; }
+  #transport,#timeline { display:contents; }
+  .touch-hint { display:none; }
   @media(max-width:899px),(max-height:599px){
-    #c,#hud,#bar,#legend,#inspector { display:none; }
-    #small-screen { display:flex; position:fixed; inset:0; padding:32px;
-      flex-direction:column; justify-content:center; align-items:flex-start;
-      background:#0b0d12; }
-    #small-screen h1 { font:28px Georgia,serif; }
-    #small-screen p { max-width:30em; color:#a9b9ce; }
-    #small-screen a { color:#b7ceef; }
+    #hud { left:max(12px,env(safe-area-inset-left)); right:max(12px,env(safe-area-inset-right));
+      top:max(8px,env(safe-area-inset-top)); display:grid; grid-template-columns:1fr auto;
+      padding-bottom:8px; background:linear-gradient(#091c24e8,transparent); }
+    #hud a { grid-column:2; grid-row:1; margin:0; padding:4px 0 4px 12px; }
+    #hud b { grid-column:1; grid-row:1; font-size:22px; }
+    #hud span { grid-column:1 / -1; font-size:11px; margin-top:2px; }
+    #learning { max-height:32px; overflow:auto; pointer-events:auto; }
+    #view-switch { grid-column:1 / -1; margin-top:8px; gap:6px; }
+    #view-switch button { flex:1; }
+    button { min-height:44px; flex-shrink:0; }
+    #legend { top:auto; bottom:calc(110px + env(safe-area-inset-bottom)); left:12px; right:12px;
+      text-align:center; background:none; padding:0; color:#91a6ae; font-size:11px; }
+    .desktop-hint { display:none; }
+    .touch-hint { display:inline; }
+    #bar { display:flex; flex-direction:column; align-items:stretch; gap:4px;
+      padding:8px max(10px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));
+      background:linear-gradient(transparent,#0b171fea 15%); }
+    #transport { display:flex; gap:6px; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:thin; }
+    #timeline { display:flex; align-items:center; gap:10px; }
+    #t { min-width:0; width:100%; min-height:44px; margin:0; }
+    #clock { font-size:11px; min-width:7em; }
+    #inspector { left:max(10px,env(safe-area-inset-left)); right:max(10px,env(safe-area-inset-right));
+      bottom:calc(112px + env(safe-area-inset-bottom)); width:auto; max-height:40dvh;
+      overflow:auto; padding:12px 16px; overscroll-behavior:contain; }
+    #close-inspector { min-width:44px; }
+  }
+  @media(max-height:500px) and (min-width:500px){
+    #hud { grid-template-columns:1fr auto auto; gap:12px; align-items:center; }
+    #hud span { display:none; }
+    #hud a { grid-column:3; }
+    #view-switch { grid-column:2; grid-row:1; margin:0; }
+    #view-switch button { min-height:44px; }
+    #bar { padding-top:0; gap:0; }
+    #inspector { max-height:50dvh; bottom:100px; }
   }
 </style>
-<section id="small-screen"><h1>A larger window for the fleet</h1><p>Open the map in a desktop window at least 900 × 600. Pan and zoom to explore the workspace.</p><a href="/">← Back to Clarp</a></section>
 <canvas id="c" aria-label="Live fleet activity map"></canvas>
 <div id="hud"><a href="/" aria-label="Back to Clarp">← Clarp</a><b>Living atlas</b><span id="stat">loading…</span><span id="learning"></span><nav id="view-switch" aria-label="Fleet view"><button id="view-flow" aria-pressed="false">Flow</button><button id="view-world" aria-pressed="true">World</button><button id="view-cabinets" aria-pressed="false">Agent cabinets</button></nav></div>
-<div id="legend">A living world of work<br><small>scroll to enter · drag to travel</small></div><aside id="inspector" hidden><button id="close-inspector" aria-label="Close details">×</button><b id="node-title"></b><p id="node-detail"></p><button id="redesign">Improve this detail</button><p id="design-result" role="status"></p></aside>
+<div id="legend"><span class="desktop-hint">A living world of work<br><small>scroll to enter · drag to travel</small></span><span class="touch-hint">Pinch to zoom · drag to explore</span></div><aside id="inspector" hidden><button id="close-inspector" aria-label="Close details">×</button><b id="node-title"></b><p id="node-detail"></p><button id="redesign">Improve this detail</button><p id="design-result" role="status"></p></aside>
 <div id="bar">
+  <div id="transport" role="group" aria-label="Map controls">
   <button id="live" aria-pressed="true">live</button>
   <button id="fit">Fit world</button>
   <button id="play">Replay ×120</button>
   <button id="flow-demo" hidden aria-pressed="false">Workflow demo</button>
   <button id="flow-labels" hidden aria-pressed="false">Action labels</button>
   <button id="retry-render" hidden>Resume rendering</button>
+  </div>
+  <div id="timeline">
   <input id="t" aria-label="Replay time" type="range" min="0" max="1000" value="1000">
   <span id="clock"></span>
+  </div>
 </div>
 <script type="module" src="/static/viz-world-host.js"></script>
