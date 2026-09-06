@@ -23,6 +23,9 @@ try{
  // Work objects: every drawn slate comes from a recorded plan or artifact in the
  // payload, sits inside a drawn workspace, and never claims a preview it lacks.
  assert(live.meta.workEvidence.available,'work evidence section present');
+ // Live messages that name a plan are references; transfer needs an explicit handoff record.
+ assert(!live.meta.visualActions.some(a=>a.action==='handoff'),'no transfer semantics without a handoff record');
+ for(const w of live.meta.workObjects)assert.equal(w.handoffs,0,'live work objects carry references, not transfers');
  const plans=new Set((live.scene.work?.plans||[]).map(p=>p.id)),artifacts=new Set((live.scene.work?.artifacts||[]).map(a=>a.id));
  for(const w of live.meta.workObjects){
   assert(plans.has(w.id)||(w.id.startsWith('artifact:')&&artifacts.has(w.id.slice(9))),'work object has recorded provenance '+w.id);
@@ -64,7 +67,9 @@ try{
  state=await seek(36);assert(state.meta.visualActions.some(a=>a.action==='push'));assert.equal(state.meta.relations.deliveries,1,'a push is a delivery along the rail');await page.screenshot({path:out+'/push.png'});
  state=await seek(39.5);assert.equal(plan(state).stage,'outcome');assert(plan(state).preview,'the synthetic preview is shown on the outcome slate');
  assert(state.meta.visualActions.some(a=>a.action==='check'&&a.state==='failure'),'remote check result appears at the remote');assert(state.meta.visualActions.some(a=>a.action==='push'&&a.state==='delivered'));await page.screenshot({path:out+'/outcome.png'});
- state=await seek(44.5);assert(state.meta.visualActions.some(a=>a.action==='handoff'&&a.state==='traveling'),'a message naming the plan carries its seal');assert.equal(plan(state).handoffs,1);assert.equal(state.meta.relations.threads,1);await page.screenshot({path:out+'/handoff.png'});
+ state=await seek(37.5);assert(state.meta.visualActions.some(a=>a.action==='check'&&a.state==='running')&&!state.meta.visualActions.some(a=>a.action==='check'&&a.state!=='running'),'a remote run shows no conclusion before its evidenced completion');
+ state=await seek(39.5);assert(plan(state).link&&!plan(state).link.startsWith('demo:'),'the open link is the recorded media, not the preview');
+ state=await seek(44.5);assert(state.meta.visualActions.some(a=>a.action==='handoff'&&a.state==='traveling'),'the synthetic explicit handoff record carries its seal');assert.equal(plan(state).handoffs,1);assert.equal(state.meta.relations.threads,1);await page.screenshot({path:out+'/handoff.png'});
  state=await seek(48.5);assert(state.meta.visualActions.some(a=>a.action==='restart'&&a.state==='running'));assert(state.meta.workspaces.some(w=>w.id==='demo:service'));assert(state.meta.visualActions.some(a=>a.action==='check'&&a.state==='success'));await page.locator('#fit').click();await page.waitForTimeout(150);await page.screenshot({path:out+'/service-restart.png'});
  await page.locator('#flow-labels').click();assert((await snapshot()).actionLabels);
  await page.locator('#live').click();await page.waitForFunction(()=>!window.fleetWorldSnapshot().demoEnabled&&window.fleetWorldSnapshot().scene.host!=='Workflow demo');
