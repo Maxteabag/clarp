@@ -152,9 +152,20 @@ class ToolExplanations:
         if config is None:
             return None
         execution = config["execution"]
-        return {**{key: config[key] for key in ("agent_id", "generation", "backend", "model", "effort", "scope")},
+        return {**{key: config[key] for key in ("agent_id", "generation", "backend", "model", "effort", "scope", "options")},
                 "target_agent_id": target_agent_id,
                 "executor": execution["executor"], "provider": execution["provider"]}
+
+    @staticmethod
+    def _detail_level(config, requested):
+        if config is None:
+            return 0
+        # Old clients keep their audience until the built-in's one-time option
+        # adoption. Every explicit choice and every custom Janitor thereafter
+        # owns this setting centrally, including Developer's disabled default.
+        if config.get("builtin_role") == ROLE and "detail_level" not in config["configured_option_keys"]:
+            return requested
+        return config["options"]["detail_level"]
 
     @classmethod
     def _run_identity(cls, run):
@@ -182,6 +193,7 @@ class ToolExplanations:
         identity = self._identity(selected, target_agent_id)
         configured = selected or janitor_builtins.get_builtin(ROLE)
         model = configured["model"] if configured else ""
+        level = self._detail_level(configured, level)
         prepared = []
         ids = set()
         for item in items:

@@ -193,6 +193,7 @@ def test_reconfiguration_and_replacement_get_fresh_cache_and_frozen_model(change
             pause(config)
             agents.create_agent(persona="Alternative", voice_id="", cwd="/tmp", session="custom-explainer", backend="codex", model="new-model", effort="medium")
             config = janitors.create("custom-explainer", template_id="tool-explainer")
+            config = janitors.configure(config["session"], config["revision"], options={"detail_level": 3})
             config = janitors.set_enabled(config["session"], config["revision"], True)
         assert ready(service)["text"] == "Explanation 2."
         assert service.request(3, [ITEM])["model"] == "new-model"
@@ -348,6 +349,7 @@ def scoped_owner(session, target_ids):
     agents.create_agent(persona=session, voice_id="", cwd="/tmp", session=session,
                         backend="codex", model=f"{session}-model", effort="medium")
     config = janitors.create(session, template_id="tool-explainer", scope={"agent_ids": target_ids})
+    config = janitors.configure(session, config["revision"], options={"detail_level": 3})
     return janitors.set_enabled(session, config["revision"], True)
 
 
@@ -464,3 +466,162 @@ def test_paused_scoped_owner_does_not_block_other_targets_or_release_fences():
     assert len(calls) == 1
     assert janitors.list_runs(configs[0]["session"]) == []
     assert len(janitors.list_runs(configs[1]["session"])) == 1
+
+
+def test_custom_janitor_default_detail_disables_legacy_client_requests():
+    pause(seed())
+    agents.create_agent(persona="Custom", voice_id="", cwd="/tmp", session="custom", backend="codex")
+    config = janitors.create("custom", template_id="tool-explainer")
+    janitors.set_enabled("custom", config["revision"], True)
+    with tool_explanations.ToolExplanations(translate=lambda *_: pytest.fail("default Developer must not run"), debounce=5) as service:
+        response = service.request(3, [ITEM])
+        assert response["detail_level"] == 0
+        assert response["items"][0]["status"] == "disabled"
+        assert db.conn().execute("SELECT count(*) FROM tool_explanation_jobs").fetchone()[0] == 0
+    assert janitors.list_runs("custom") == []
+
+
+def configure_detail(config, level):
+    current = janitors.get(config["session"])
+    current = janitors.configure(current["session"], current["revision"], options={"detail_level": level})
+    return janitors.set_enabled(current["session"], current["revision"], True)
+
+
+def test_explicit_owner_detail_overrides_every_legacy_client_and_shares_audience_cache():
+    config = configure_detail(seed(), 4)
+    calls = []
+    def capture(level, items):
+        calls.append(level)
+        return translate(level, items)
+    with tool_explanations.ToolExplanations(translate=capture, debounce=.1) as service:
+        for requested in range(5):
+            result = service.request(requested, [ITEM])
+            assert result["detail_level"] == 4
+            assert result["items"][0]["status"] == "pending"
+        assert ready(service)["text"] == "List the files."
+        for requested in range(5):
+            assert service.request(requested, [ITEM])["items"][0]["status"] == "ready"
+    assert calls == [4]
+    run = janitors.list_runs(config["session"])[0]
+    assert run["configuration"]["options"] == {"detail_level": 4}
+    assert run["configuration"]["context"]["detail_level"] == 4
+    assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == 1
+
+
+def test_explicit_developer_detail_cannot_be_overridden_by_legacy_clients(monkeypatch):
+    config = configure_detail(seed(), 0)
+    monkeypatch.setattr(tool_explanations, "script_evidence", lambda *_: pytest.fail("disabled detail must not read scripts"))
+    with tool_explanations.ToolExplanations(translate=lambda *_: pytest.fail("Developer detail must not run"), debounce=0) as service:
+        for requested in range(5):
+            response = service.request(requested, [ITEM], cwd="/tmp")
+            assert response["detail_level"] == 0
+            assert response["items"][0]["status"] == "disabled"
+        assert db.conn().execute("SELECT count(*) FROM tool_explanation_jobs").fetchone()[0] == 0
+    assert janitors.list_runs(config["session"]) == []
+
+
+def test_unconfigured_builtin_alone_preserves_legacy_detail_until_adoption():
+    config = seed()
+    assert config["options"] == {"detail_level": 0}
+    assert "detail_level" not in config["configured_option_keys"]
+    calls = []
+    def capture(level, items):
+        calls.append(level)
+        return translate(level, items)
+    with tool_explanations.ToolExplanations(translate=capture, debounce=0) as service:
+        assert service.request(0, [ITEM])["items"][0]["status"] == "disabled"
+        assert ready(service)["text"] == "List the files."
+        assert calls == [3]
+        config = configure_detail(config, 0)
+        assert "detail_level" in config["configured_option_keys"]
+        assert service.request(3, [ITEM])["items"][0]["status"] == "disabled"
+        assert calls == [3]
+
+
+def test_legacy_request_schema_remains_validated_after_owner_detail_is_configured():
+    configure_detail(seed(), 3)
+    with tool_explanations.ToolExplanations(translate=translate) as service:
+        for invalid in [None, True, False, -1, 5, "3", 3.0]:
+            with pytest.raises(ValueError, match="detail_level"):
+                service.request(invalid, [ITEM])
+
+
+def test_owner_detail_change_invalidates_cache_and_changes_prompt_audience():
+    config = configure_detail(seed(), 3)
+    calls = []
+    def capture(level, items):
+        calls.append(level)
+        return {item["id"]: f"Audience {level}." for item in items}
+    with tool_explanations.ToolExplanations(translate=capture, debounce=0) as service:
+        assert ready(service)["text"] == "Audience 3."
+        old_keys = {row[0] for row in db.conn().execute("SELECT cache_key FROM tool_explanation_cache")}
+        config = configure_detail(config, 4)
+        assert ready(service)["text"] == "Audience 4."
+        keys = {row[0] for row in db.conn().execute("SELECT cache_key FROM tool_explanation_cache")}
+        assert len(keys - old_keys) == 1
+    assert calls == [3, 4]
+
+
+def test_owner_detail_change_rejects_inflight_output():
+    config = configure_detail(seed(), 3)
+    entered, finish = threading.Event(), threading.Event()
+    def capture(level, items):
+        entered.set()
+        assert finish.wait(3)
+        return translate(level, items)
+    with tool_explanations.ToolExplanations(translate=capture, debounce=0) as service:
+        service.request(3, [ITEM])
+        assert entered.wait(2)
+        configure_detail(config, 0)
+        finish.set()
+        wait_for(lambda: db.conn().execute("SELECT count(*) FROM tool_explanation_jobs").fetchone()[0] == 0)
+        assert service.request(3, [ITEM])["items"][0]["status"] == "disabled"
+        assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == 0
+    assert janitors.list_runs(config["session"])[0]["demand_result"] is None
+
+
+def test_configured_detail_remains_disabled_while_paused_and_releases_demand():
+    config = configure_detail(seed(), 4)
+    with tool_explanations.ToolExplanations(translate=lambda *_: pytest.fail("paused must not run"), debounce=5) as service:
+        assert service.request(0, [ITEM])["items"][0]["status"] == "pending"
+        pause(config)
+        result = service.request(3, [ITEM])
+        assert result["detail_level"] == 4 and result["items"][0]["status"] == "disabled"
+        service.request(3, [], release=["view"])
+        assert service.request(3, [ITEM])["items"][0]["status"] == "cancelled"
+
+
+@pytest.mark.parametrize("phase", ["queued", "running", "cached"])
+def test_adopting_explicit_default_revokes_legacy_detail_without_pausing(phase):
+    config = seed()
+    assert config["options"] == {"detail_level": 0}
+    assert config["configured_option_keys"] == []
+    entered, finish = threading.Event(), threading.Event()
+    calls = []
+    def capture(level, items):
+        calls.append(level)
+        entered.set()
+        if phase == "running":
+            assert finish.wait(3)
+        return translate(level, items)
+    with tool_explanations.ToolExplanations(translate=capture, debounce=.15 if phase == "queued" else 0) as service:
+        assert service.request(3, [ITEM])["items"][0]["status"] == "pending"
+        if phase == "running":
+            assert entered.wait(2)
+        elif phase == "cached":
+            assert ready(service)["text"] == "List the files."
+        adopted = janitors.adopt_options(config["session"], config["revision"], {"detail_level": 0})
+        assert adopted["enabled"] and adopted["options"] == config["options"]
+        assert adopted["generation"] == config["generation"] + 1
+        assert adopted["configured_option_keys"] == ["detail_level"]
+        finish.set()
+        wait_for(lambda: db.conn().execute("SELECT count(*) FROM tool_explanation_jobs").fetchone()[0] == 0)
+        result = service.request(3, [ITEM])
+        assert result["detail_level"] == 0 and result["items"][0]["status"] == "disabled"
+        assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == int(phase == "cached")
+    assert calls == ([] if phase == "queued" else [3])
+    runs = janitors.list_runs(config["session"])
+    if phase == "queued":
+        assert runs == []
+    elif phase == "running":
+        assert runs[0]["status"] == "cancelled" and runs[0]["demand_result"] is None
