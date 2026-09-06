@@ -119,6 +119,47 @@ def test_shutdown_does_not_accept_or_restart_jobs():
     assert service.request(3, [{"id": "1", "activity": {}}])["items"][0]["reason"] == "service_stopping"
 
 
+def test_viewport_release_respects_other_view_and_late_request():
+    with ToolExplanations(translate=lambda *_: {}, debounce=5) as service:
+        def request(owner):
+            return service.request(3, [{"id":"1", "demand_id":owner, "activity":{"command":"ls"}}])
+        request('desktop-view')
+        request('phone-view')
+        service.request(3, [], release=['desktop-view'])
+        assert len(service._queue)==1
+        assert request('desktop-view')['items'][0]['status']=='cancelled'
+        service.request(3, [], release=['phone-view'])
+        assert not service._queue
+        assert request('new-view')['items'][0]['status']=='pending'
+
+
+def test_expired_viewport_demand_drops_queued_not_legacy_work():
+    with ToolExplanations(translate=lambda *_: {}, debounce=5) as service:
+        service.request(3,[{'id':'1','demand_id':'view','activity':{'command':'ls'}}])
+        service.request(3,[{'id':'2','activity':{'command':'pwd'}}])
+        with service._condition:
+            service._prune_demands(time.monotonic()+6)
+            assert len(service._queue)==1
+            assert next(iter(service._queue.values()))[1]['command']=='pwd'
+
+
+def test_releasing_running_activity_keeps_completed_cache():
+    entered=threading.Event()
+    finish=threading.Event()
+    def translate(level, items):
+        entered.set()
+        assert finish.wait(2)
+        return {i['id']:'List the files.' for i in items}
+    with ToolExplanations(translate=translate,debounce=.001) as service:
+        activity={'id':'1','demand_id':'view','activity':{'command':'ls'}}
+        service.request(3,[activity])
+        assert entered.wait(2)
+        service.request(3,[],release=['view'])
+        finish.set()
+        result=wait_ready(service)
+        assert result['status']=='ready'
+
+
 def test_failure_can_be_retried_after_cooldown():
     calls = []
     def recover(level, items):
