@@ -7,6 +7,20 @@ import pytest
 from lib.janitor_runner import JanitorRunner, SQLiteSource, eligible_event, prompt_for_run
 
 
+def test_untraced_interruption_closes_only_the_matching_latest_maintenance_turn():
+    from lib import agents, db
+    aid = agents.create_agent(persona="Rivet", voice_id="", cwd="/tmp", session="rivet")
+    c = db.conn()
+    c.execute("INSERT INTO turns(agent_id,trace_id,started_at,source) VALUES (?,?,?,'janitor')", (aid,"run-trace",100))
+    agents.record_state(aid, "interrupted", {"reason":"usage_limit","error":"Spark usage limit reached"})
+    run = dict(agent_id=aid,trace_id="run-trace",created_at=100)
+    result = SQLiteSource().terminal(run)
+    assert result and result["kind"] == "error"
+    assert json.loads(result["detail"])["reason"] == "usage_limit"
+    c.execute("INSERT INTO turns(agent_id,trace_id,started_at,source) VALUES (?,?,?,'janitor')", (aid,"different-turn",200))
+    assert SQLiteSource().terminal(run) is None
+
+
 def test_periodic_label_runner_does_not_dispatch_demand_worker_as_chat(monkeypatch):
     store = Store()
     store.rows[0].update(template_id="tool-explainer", trigger_id="tool-explanation-requested")
