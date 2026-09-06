@@ -9,6 +9,7 @@
     {"id": "clarp-artifacts", "pack": "core", "description": "Shared secure artifact transport used by enabled artifact skills"},
     {"id": "clarp-decisions", "pack": "artifacts", "description": "Ask a native question or request explicit approval, with attention priority"},
     {"id": "clarp-html-forms", "pack": "artifacts", "description": "Publish interactive HTML plans with native drafts and direct answer submission"},
+    {"id": "clarp-countdown", "pack": "artifacts", "description": "Publish a live countdown to any concrete date and time"},
     {"id": "clarp-documents", "pack": "artifacts", "description": "Create HTML planning forms and explicitly requested PDFs"},
     {"id": "clarp-research", "pack": "artifacts", "description": "Publish sourced research briefs"},
     {"id": "clarp-code-changes", "pack": "artifacts", "description": "Publish repository changes and reviews", "default_enabled": false},
