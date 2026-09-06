@@ -27,3 +27,23 @@ def test_long_stall_admits_only_one_occurrence():
     assert advance(state, DEFAULTS, now=0, active=True)
     assert advance(state, DEFAULTS, now=999_999_999, active=True)
     assert state["next_run_at"] == 1_000_899_999
+
+
+def test_focus_flapping_cannot_bypass_interval():
+    state = {}
+    assert advance(state, DEFAULTS, now=0, active=True)
+    assert not advance(state, DEFAULTS, now=100, active=False)
+    assert not advance(state, DEFAULTS, now=200, active=True)
+    assert state["next_run_at"] == 900_000
+
+
+def test_schema76_adds_trigger_without_rewriting_other_definitions():
+    from lib import db
+    c = db.conn()
+    c.execute("DELETE FROM janitor_trigger_definitions WHERE trigger_id='active-interval'")
+    previous = [tuple(r) for r in c.execute("SELECT * FROM janitor_trigger_definitions ORDER BY trigger_id")]
+    c.execute("PRAGMA user_version=76")
+    db._migrate(c)
+    assert c.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+    assert [tuple(r) for r in c.execute("SELECT * FROM janitor_trigger_definitions WHERE trigger_id!='active-interval' ORDER BY trigger_id")] == previous
+    assert c.execute("SELECT COUNT(*) FROM janitor_trigger_definitions WHERE trigger_id='active-interval'").fetchone()[0] == 1
