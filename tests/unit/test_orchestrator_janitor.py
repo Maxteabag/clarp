@@ -233,3 +233,27 @@ def test_provider_output_cannot_control_a_janitor_identity():
         "target_session": builtins().get_builtin(ROLE)["session"], "confidence": .99})
     assert send().action in {"clarify", "fallback"}
     assert not agents.get_focus() and not dispatched
+
+
+def test_retry_of_orphaned_claim_after_deadline_returns_terminal_cancellation(monkeypatch):
+    calls = []
+    def interrupted_model(*_):
+        calls.append(True)
+        raise KeyboardInterrupt("Simulate Host stopping after admission")
+    configured, send, dispatched, _, speech = setup_router(interrupted_model)
+    with pytest.raises(KeyboardInterrupt):
+        send()
+    run = janitors.list_runs(configured["session"])[0]
+    assert run["status"] == "running"
+    monkeypatch.setattr(db, "now_ms", lambda: run["configuration"]["expires_at"] + 1)
+
+    retry = send(trace_id="after-deadline")
+
+    assert retry.action == "cancelled" and retry.status == 409 and not retry.ok
+    assert "expired" in retry.error.lower()
+    retired = janitors.get_run(run["run_id"])
+    assert retired["status"] == retired["outcome"] == "cancelled"
+    assert retired["finished_at"] is not None
+    assert send(trace_id="another-retry").action == "cancelled"
+    assert calls == [True] and not dispatched and not speech
+    assert len(janitors.list_runs(configured["session"])) == 1
