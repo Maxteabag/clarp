@@ -295,17 +295,20 @@ def _execution(template_id: str, value, backend: str) -> dict:
 
 def create(session: str, template_id: str = "task-labels", scope=None, attachments=None, options=_UNSET, execution=None) -> dict:
     a = _agent(session)
+    runtime_busy = bool(backends.active_handles(a["backend"], a["agent_id"]))
+    observed_backend = a["backend"]
     with _write() as c:
+        a = _agent(a["agent_id"])
         existing = c.execute("SELECT 1 FROM janitor_configs WHERE agent_id=?", (a["agent_id"],)).fetchone()
         if existing and a.get("is_janitor"):
-            return get(session)
+            return get(session, include_runtime=False)
         if a.get("archived_at"):
             raise JanitorError("Restore this agent before configuring maintenance", 409, "agent_archived")
-        if agents.is_busy(a["agent_id"]) or backends.active_handles(a["backend"], a["agent_id"]) or turn_queue.pending_count(a["agent_id"]):
+        if a["backend"] != observed_backend or agents.is_busy(a["agent_id"]) or runtime_busy or turn_queue.pending_count(a["agent_id"]):
             raise JanitorError("Wait for this agent's current work and queue to finish before converting it", 409, "agent_busy")
         if existing:
             c.execute("UPDATE agents SET is_janitor=1,heartbeat_enabled=0,dreaming_enabled=0 WHERE agent_id=?", (a["agent_id"],))
-            return get(session)
+            return get(session, include_runtime=False)
         selected_scope = _scope(scope if scope is not None else {})
         values = _attachment_values(attachments if attachments is not None else [{"trigger_id": template(template_id)["default_trigger_id"]}], a["agent_id"], template_id)
         now = db.now_ms()
@@ -475,16 +478,17 @@ def remove(session: str, expected_revision: int) -> bool:
     return True
 
 
-def _release_idle(c, agent: dict, configuration) -> None:
+def _release_idle(c, agent: dict, configuration, runtime_busy: dict) -> None:
     if configuration["enabled"]:
         raise JanitorError("Pause this Janitor before releasing or handing off maintenance", 409, "janitor_enabled")
-    if (agents.is_busy(agent["agent_id"]) or backends.active_handles(agent["backend"], agent["agent_id"])
+    observed_backend, active = runtime_busy[agent["agent_id"]]
+    if (agent["backend"] != observed_backend or agents.is_busy(agent["agent_id"]) or active
             or turn_queue.pending_count(agent["agent_id"]) or has_active_run(agent["agent_id"])
             or _pending_demand_claim(c, agent["agent_id"])):
         raise JanitorError("Wait for current maintenance and cancellation to finish", 409, "agent_busy")
 
 
-def _handoff_labels(c, source: dict, source_config, successor_session: str, successor_revision: int, now: int) -> dict:
+def _handoff_labels(c, source: dict, source_config, successor_session: str, successor_revision: int, now: int, runtime_busy: dict) -> dict:
     successor = _agent(successor_session)
     successor_config = _config(c, successor["agent_id"])
     _revision(successor_config, successor_revision)
@@ -496,7 +500,7 @@ def _handoff_labels(c, source: dict, source_config, successor_session: str, succ
         if configuration["template_id"] != "task-labels":
             raise JanitorError("Only compatible task-label jobs can hand off label ownership", 409, "capability_denied")
         if agent["agent_id"] != source["agent_id"]:
-            _release_idle(c, agent, configuration)
+            _release_idle(c, agent, configuration, runtime_busy)
         state = agents.latest_state(agent["agent_id"])
         if not state or state["kind"] not in {AgentState.IDLE, AgentState.DONE, AgentState.SPAWNED, AgentState.STOPPED}:
             raise JanitorError("Wait for both Janitors to finish before handing off maintenance", 409, "agent_busy")
@@ -533,20 +537,28 @@ def release(session: str, expected_revision: int, *, successor_session: str | No
         raise JanitorError("A maintenance successor needs its session and current revision")
     a = _agent(session)
     handoff = None
+    # The split runtime can write liveness while answering status. Never wait
+    # for it while holding the same database's writer lock. Both Janitors must
+    # already be paused; queue/state/claim/revision checks are repeated below.
+    participants = [a]
+    if successor_session is not None:
+        participants.append(_agent(successor_session))
+    runtime_busy = {row["agent_id"]: (row["backend"], bool(backends.active_handles(row["backend"], row["agent_id"])))
+                    for row in participants}
     with _write() as c:
         a = _agent(a["agent_id"])
         row = _config(c, a["agent_id"])
         _revision(row, expected_revision)
         if _builtin_role(c, a["agent_id"]):
             raise JanitorError("A built-in Janitor cannot be released", 409, "builtin_janitor")
-        _release_idle(c, a, row)
+        _release_idle(c, a, row, runtime_busy)
         if not a.get("is_janitor"):
             if successor_session is not None:
                 raise JanitorError("This Janitor was already released", 409, "janitor_released")
-            return get(session)
+            return get(session, include_runtime=False)
         now = db.now_ms()
         if successor_session is not None:
-            handoff = _handoff_labels(c, a, row, successor_session, successor_revision, now)
+            handoff = _handoff_labels(c, a, row, successor_session, successor_revision, now, runtime_busy)
         _fence(c, a["agent_id"], now)
         c.execute("UPDATE janitor_configs SET generation=generation+1,revision=revision+1,updated_at=? WHERE agent_id=?", (now, a["agent_id"]))
         c.execute("UPDATE agents SET is_janitor=0 WHERE agent_id=?", (a["agent_id"],))
@@ -796,6 +808,8 @@ def review(run_id: str, target_session: str, observed_state_id: int, outcome: st
     if outcome == "changed" and (not isinstance(label, str) or label != label.strip() or len(label) > 20 or not 2 <= len(label.split()) <= 3 or any(ord(ch) < 32 for ch in label)):
         raise JanitorError("A label must have two or three words and at most 20 characters")
     from .janitor_context import build_context_from_connection
+    observed_target = _agent(target_session)
+    runtime_busy = bool(backends.active_handles(observed_target["backend"], observed_target["agent_id"]))
     with _write() as c:
         target = _agent(target_session)
         existing = c.execute("SELECT * FROM janitor_effects WHERE run_id=? AND target_agent_id=?", (run_id, target["agent_id"])).fetchone()
@@ -821,7 +835,7 @@ def review(run_id: str, target_session: str, observed_state_id: int, outcome: st
         before = target.get("custom_status") or ""
         expected = candidate.get("current_status", candidate.get("expected_label", ""))
         queued = c.execute("SELECT 1 FROM queued_turns WHERE agent_id=? AND status IN ('queued','claimed') LIMIT 1", (target["agent_id"],)).fetchone()
-        if queued or backends.active_handles(target["backend"], target["agent_id"]) or current["state_id"] != observed_state_id or current["state"] in AgentState.busy_states() or before != expected or any(current.get(k) != candidate.get(k) for k in ("fingerprint", "task_key", "change_key", "source_refs")):
+        if queued or runtime_busy or target["backend"] != observed_target["backend"] or current["state_id"] != observed_state_id or current["state"] in AgentState.busy_states() or before != expected or any(current.get(k) != candidate.get(k) for k in ("fingerprint", "task_key", "change_key", "source_refs")):
             raise JanitorError("The target's work changed during this review", 409, "stale_candidate")
         ownership = c.execute("SELECT * FROM janitor_label_ownership WHERE target_agent_id=?", (target["agent_id"],)).fetchone()
         owned = bool(ownership and ownership["owner_agent_id"] == run["agent_id"] and ownership["label"] == before)

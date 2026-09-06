@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from contextlib import contextmanager
 
 import pytest
@@ -36,6 +37,38 @@ def setup_handoff():
     db.conn().execute("UPDATE agents SET custom_status='User changed text' WHERE agent_id=?", (identities["edited"],))
     agents.set_custom_status(identities["manual"], "Current feature")
     return identities, source, successor, run["run_id"]
+
+
+def runtime_status_that_writes(*_):
+    """The split runtime may persist liveness while answering a status query."""
+    with sqlite3.connect(db.DB_PATH, timeout=0.01, isolation_level=None) as remote:
+        remote.execute("BEGIN IMMEDIATE")
+        remote.execute("ROLLBACK")
+    return []
+
+
+def test_handoff_does_not_hold_writer_lock_during_runtime_status(monkeypatch):
+    _, source, successor, _ = setup_handoff()
+    monkeypatch.setattr(backends, "active_handles", runtime_status_that_writes)
+    result = janitors.release("sam", source["revision"], successor_session="rivet", successor_revision=successor["revision"])
+    assert not result["is_janitor"]
+    assert result["ownership_handoff"]["transferred_count"] == 1
+
+
+def test_conversion_does_not_hold_writer_lock_during_runtime_status(monkeypatch):
+    agents.create_agent(persona="Sam", voice_id="", cwd="/tmp", session="sam")
+    monkeypatch.setattr(backends, "active_handles", runtime_status_that_writes)
+    assert janitors.create("sam")["is_janitor"]
+
+
+def test_label_review_does_not_hold_writer_lock_during_runtime_status(monkeypatch):
+    _, source, _, _ = setup_handoff()
+    source = janitors.set_enabled("sam", source["revision"], True)
+    context = build_context_from_connection(db.conn(), "worker")
+    run = janitors.create_run(source["attachments"][0]["attachment_id"], source["generation"], [context])
+    monkeypatch.setattr(backends, "active_handles", runtime_status_that_writes)
+    result = janitors.review(run["run_id"], "worker", context["state_id"], "same_task")
+    assert result["outcome"] == "same_task"
 
 
 def snapshot():
