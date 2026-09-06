@@ -17,6 +17,43 @@ Rectangle {
     signal commandRequested(string action)
     signal agentRequested(string session)
     signal contactRequested(string name)
+    function settingToggle(property, label, keywords) {
+        const enabled = Boolean(root.controller[property]);
+        return {kind: "command", action: "setting:" + property,
+            label: (enabled ? "On → Off · " : "Off → On · ") + label,
+            key: property === "toolsVisible" ? "Ctrl+Shift+T" : "", group: "settings", keywords: keywords};
+    }
+    readonly property var settingCommands: {
+        const rows = [
+            settingToggle("timestampsVisible", "Timestamps", "date time messages"),
+            settingToggle("showWhenReady", "Show when ready", "stream streaming answers typing"),
+            settingToggle("toolsVisible", "Expanded tool details", "tools calls collapse expand"),
+            settingToggle("pauseMobilePush", "Pause phone alerts on desktop", "push notifications mobile iphone"),
+            settingToggle("sharedFilesystem", "Shared filesystem access (trusted Host)", "files local folders")
+        ];
+        const narrator = root.controller.toolNarrator;
+        if (narrator) {
+            for (let level = 0; level < narrator.detailLevels.length; ++level) {
+                rows.push({kind: "command", action: "setting:detail:" + level,
+                    label: "Tool detail: " + narrator.detailLevels[level]
+                        + (narrator.detailLevel === level ? " (current)" : level > 0 ? " (uses AI)" : " (no AI)"),
+                    key: "", group: "settings", keywords: "explanation explanations narration audience"});
+            }
+        }
+        return rows;
+    }
+    function applySetting(action) {
+        if (action.startsWith("setting:detail:")) {
+            const level = Number(action.slice("setting:detail:".length));
+            const narrator = root.controller.toolNarrator;
+            if (narrator && Number.isInteger(level) && level >= 0 && level < narrator.detailLevels.length)
+                narrator.detailLevel = level;
+        } else {
+            const property = action.slice("setting:".length);
+            if (["timestampsVisible", "showWhenReady", "toolsVisible", "pauseMobilePush", "sharedFilesystem"].includes(property))
+                root.controller[property] = !root.controller[property];
+        }
+    }
     readonly property var commands: [
         { kind: "command", label: "New agent", action: "new", key: "Ctrl+N", group: "agent" },
         { kind: "command", label: "Start an idle contact", action: "new-contact", key: "Ctrl+Alt+N", group: "agent" },
@@ -27,7 +64,6 @@ Rectangle {
         { kind: "command", label: "Close pane", action: "close-pane", key: "Ctrl+Alt+X", group: "layout" },
         { kind: "command", label: "Zoom pane", action: "zoom", key: "Ctrl+Alt+Z", group: "layout" },
         { kind: "command", label: "Balance panes", action: "balance", key: "Ctrl+Alt+=", group: "layout" },
-        { kind: "command", label: "Show or hide tools", action: "tools", key: "Ctrl+Shift+T", group: "view" },
         { kind: "command", label: root.sidebarVisible ? "Hide sidebar" : "Show sidebar", action: "sidebar", key: "Ctrl+B", group: "view" },
         { kind: "command", label: "Larger interface", action: "ui-larger", key: "Ctrl+=", group: "view" },
         { kind: "command", label: "Smaller interface", action: "ui-smaller", key: "Ctrl+-", group: "view" },
@@ -43,7 +79,7 @@ Rectangle {
         { kind: "command", label: "Next agent needing attention", action: "next-attention", key: "Ctrl+J", group: "agent" },
         { kind: "command", label: "Release agent", action: "release-agent", key: "Ctrl+Shift+R", group: "agent" },
         { kind: "command", label: "Stop agent", action: "stop-agent", key: "Ctrl+.", group: "agent" },
-        { kind: "command", label: "Toggle voice replies", action: "mute", key: "Ctrl+M", group: "audio" },
+        { kind: "command", label: root.controller.muted ? "Enable voice replies" : "Mute voice replies", action: "mute", key: "Ctrl+M", group: "settings" },
         { kind: "command", label: "Talk", action: "talk", key: "Ctrl+Shift+Space", group: "audio" }
     ]
     readonly property var results: {
@@ -52,8 +88,12 @@ Rectangle {
         controller.lastBackend;
         controller.selectedSession;
         const needle = query.trim().toLowerCase();
-        const commandRows = root.commands.filter(command => needle.length === 0
-            || (command.label + " " + command.group + " " + command.key).toLowerCase().includes(needle));
+        const terms = needle.split(/\s+/).filter(term => term.length > 0);
+        const commandRows = root.commands.concat(root.settingCommands).filter(command => {
+            const searchable = (command.label + " " + command.group + " " + command.key
+                + " " + (command.keywords || "")).toLowerCase();
+            return terms.every(term => searchable.includes(term));
+        });
         const agentRows = controller.matchingAgents(query).map(agent => ({
             kind: "agent",
             session: String(agent.session),
@@ -106,7 +146,8 @@ Rectangle {
                 root.openContacts(root.restoreComposer);
                 return;
             }
-            root.commandRequested(String(item.action));
+            if (String(item.action).startsWith("setting:")) root.applySetting(String(item.action));
+            else root.commandRequested(String(item.action));
             if (["new", "overview", "connection", "orchestrator", "updates", "teams", "settings"].includes(String(item.action)))
                 shouldRestore = false;
         } else if (String(item.kind) === "contact") {
@@ -148,7 +189,7 @@ Rectangle {
                 Layout.fillWidth: true
                 text: root.query
                 Layout.preferredHeight: 43
-                placeholderText: root.contactsOnly ? "Start an idle contact" : "Agent, contact or command"
+                placeholderText: root.contactsOnly ? "Start an idle contact" : "Agent, contact, setting or command"
                 font.family: "JetBrains Mono"
                 font.pixelSize: 14
                 leftPadding: 12
