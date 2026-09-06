@@ -39,6 +39,25 @@ python3 labs/explanations/analyze.py labs/explanations/results
 
 ## Boundaries and interpretation
 
+### Across all audience levels
+
+```sh
+python3 labs/explanations/levels.py --output /tmp/levels.jsonl
+python3 labs/explanations/levels.py --live --output /tmp/levels.jsonl
+python3 labs/explanations/level_report.py /tmp/levels.jsonl /tmp/levels.md
+```
+
+This matrix makes exactly 24 model calls (two prompts × four translated levels ×
+three repetitions). Developer is verified through the shipping bypass, without
+inference. The example-driven candidate is adapted to each audience; it is not
+the previous Plain-English-only candidate reused at Technical. The baseline
+retains the shipping base prompt plus its audience policy unchanged. Eight cases
+are identical across conditions, including a previously problematic weather task.
+Full instructions and level are recorded with each response. The report always
+uses repetition zero for its primary tables and includes all repetitions below.
+Do not combine timing groups across detail levels; older records without a level
+are Plain English (3).
+
 - Model stays `gpt-5.3-codex-spark`, effort `low`, audience Plain English (3).
 - Use standalone processes. The exec tracer temporarily patches Python's
   subprocess constructor and the shipping prompt; never import this live runner

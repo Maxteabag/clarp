@@ -34,3 +34,17 @@ def test_focused_row_waits_behind_history_without_priority():
     spec.loader.exec_module(module)
     assert module.contention(False)["live_batch_number"] == 9
     assert module.contention(True)["live_batch_number"] == 2
+
+
+def test_trial_uses_requested_audience_without_changing_default():
+    from unittest.mock import patch
+    observed = []
+    def fake(self, level, items):
+        observed.append(level)
+        return {item["id"]: "Read the file." for item in items}
+    with patch.object(lab.shipping.ToolExplanations, "_run_codex", fake):
+        for level in [1, 2, 3, 4]:
+            row = lab.trial("baseline", lab.fixtures()[:1], 0, detail_level=level)
+            assert row["detail_level"] == level
+        lab.trial("baseline", lab.fixtures()[:1], 0)
+    assert observed == [1, 2, 3, 4, 3]
