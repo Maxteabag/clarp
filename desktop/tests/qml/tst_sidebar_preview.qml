@@ -6,6 +6,7 @@ TestCase {
     name: "SidebarCompletedPreview"
     width: 360; height: 200; visible: true
     when: windowShown
+    function init() { stubController.showWhenReady = true; }
     QtObject {
         id: stubController
         property bool showWhenReady: true
@@ -23,12 +24,12 @@ TestCase {
             statusText: ""; lastActivity: 0; busy: true; unread: false; muted: false; queueCount: 0
         }
     }
-    function test_completedPreviewAndTypingAreSeparate() {
+    function test_completedPreviewAndWorkingAreSeparate() {
         const row = createTemporaryObject(rowComponent, testCase);
         verify(row !== null);
         const preview = findChild(row, "sidebarMessagePreview");
         compare(preview.text, "Previous completed reply");
-        compare(row.activityLine, "Typing…");
+        compare(row.activityLine, "Working…");
         row.lastMessage = "More unfinished text";
         compare(preview.text, "Previous completed reply");
         row.lastCompletedMessage = "New finished reply";
@@ -40,5 +41,22 @@ TestCase {
         stubController.showWhenReady = true;
         row.lastCompletedMessage = "";
         compare(preview.text, "/tmp");
+    }
+    function test_activityLabelDoesNotDependOnAnswerPresentation() {
+        const row = createTemporaryObject(rowComponent, testCase);
+        for (const state of ["thinking", "tool", "compacting", "running"]) {
+            row.agentState = state;
+            for (const ready of [false, true]) {
+                stubController.showWhenReady = ready;
+                compare(row.activityLine, "Working…");
+                row.statusText = "Running tests";
+                compare(row.activityLine, "Running tests");
+                row.statusText = "";
+            }
+        }
+        row.busy = false;
+        row.agentState = "done";
+        compare(row.activityLine, "");
+        stubController.showWhenReady = true;
     }
 }
