@@ -68,7 +68,9 @@ it('follows one work object from declared intent through attributed evidence to 
  expect(at(25).evidence.validation.state).toBe('recovered');// …until an evidenced rerun succeeds
  const done=at(39);expect(done.stage).toBe('outcome');expect(done.outcome.id).toBe('demo:artifact-video');expect(done.outcome.preview).toBe(true);
  expect(done.remoteRuns.map(r=>r.conclusion)).toEqual(['failure']);
- expect(at(44).handoffs.map(h=>[h.fromName,h.toName])).toEqual([['Builder','Reviewer']]);
+ expect(at(37.5).remoteRuns.map(r=>[r.conclusion,r.status])).toEqual([['','active']]); // no conclusion before evidenced completion
+ expect(done.outcome.link).toBe('https://example.invalid/demo-comparison.mp4'); // the recorded media, not its thumbnail
+ expect(at(44).handoffs.map(h=>[h.fromName,h.toName,h.link])).toEqual([['Builder','Reviewer','transfer']]);
  expect(at(44).workspace).toBe('demo:checkout');
 });
 it('shows outcomes without a plan as outcome-only slates and never claims a preview it lacks',()=>{
@@ -77,13 +79,26 @@ it('shows outcomes without a plan as outcome-only slates and never claims a prev
  expect(m.work.threads).toEqual([]);
  expect(build(scene,null,44000).threads.map(t=>t.plan)).toEqual([scene.work.plans[0].id]);
 });
-it('keeps compound-script validation outcomes inexact and attributes nothing outside the plan window',()=>{
- const runs=[{ts:1,finished_at:2,outcome:'failed',action:'execute',evidence:{validation:'test',validation_exact:false}},
-  {ts:3,finished_at:4,outcome:'succeeded',action:'execute',evidence:{validation:'test',validation_exact:false}}];
- expect(work.validationState(runs,10).state).toBe('failed');  // an inexact success cannot seal a failure
- expect(work.validationState([{...runs[1],evidence:{validation:'test',validation_exact:true}},runs[0]],10).state).toBe('recovered'); // order of arrival does not matter
- expect(work.validationState([runs[0],{...runs[1],evidence:{validation:'test',validation_exact:true}}],10).state).toBe('recovered');
+it('scopes validation failures and only lets the same checks recover them',()=>{
+ const run=(ts,outcome,scope,commands,extra={})=>({ts,finished_at:ts+1,outcome,action:'execute',evidence:{validation:'test',validation_exact:scope!=='script',validation_scope:scope,validation_commands:commands,...extra}});
+ // A single command's failure is that check failing; a chain failure is an interruption with unknown culprit.
+ expect(work.validationState([run(1,'failed','single',['npm test'])],10).state).toBe('failed');
+ expect(work.validationState([run(1,'failed','chain',['npm run test:a','npm run build'])],10).state).toBe('interrupted');
+ // An unrelated passing check never erases the failure.
+ expect(work.validationState([run(1,'failed','single',['npm test']),run(3,'succeeded','single',['npm run build'])],10).state).toBe('failed');
+ // The same checks passing later do, even across several runs.
+ const chain=[run(1,'failed','chain',['npm run test:a','npm run test:b','npm run build']),run(3,'succeeded','chain',['npm run test:b','npm run build']),run(5,'succeeded','single',['npm run test:a'])];
+ expect(work.validationState(chain,4).state).toBe('interrupted');expect(work.validationState(chain,4).unresolved).toEqual(['npm run test:a']);
+ expect(work.validationState(chain,10).state).toBe('recovered');
+ // A ; script's success proves nothing and cannot seal a failure.
+ expect(work.validationState([run(1,'failed','single',['npm test']),run(3,'succeeded','script',['npm test'])],10).state).toBe('failed');
+ // Attribution stops at the plan window.
  const scene=flowDemo(0);scene.events.push({...scene.events[2],id:'late',ts:scene.work.plans[0].completed_at+600000,finished_at:scene.work.plans[0].completed_at+600001});
- const m=build(scene,null,scene.work.plans[0].completed_at+700000);
- expect(m.work.claimed.has('late')).toBe(false);
+ expect(build(scene,null,scene.work.plans[0].completed_at+700000).work.claimed.has('late')).toBe(false);
+});
+it('treats a message naming a plan as a reference unless an explicit handoff record exists',()=>{
+ const scene=flowDemo(0);delete scene.work.messages[0].link;
+ const m=build(scene,null,44000);
+ expect(m.threads.map(t=>t.link)).toEqual(['reference']);
+ expect(m.slates.find(o=>o.id===scene.work.plans[0].id).handoffs.map(h=>h.link)).toEqual(['reference']);
 });

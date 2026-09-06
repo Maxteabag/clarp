@@ -74,5 +74,5 @@ supports it. Intent, evidence and outcome remain separate facts; attribution is
 labeled, unknowns are stated, and nothing is inferred from tool counts. Failures
 interrupt visibly until an evidenced rerun resolves them; finished work dims and
 settles in place. Belonging, discovery, delivery and explicit collaboration are
-told apart by form and motion, and a message that names a plan can carry that
-work between agents.
+told apart by form and motion, and a message that names a plan is shown as a
+reference to that work; transfer waits for explicit handoff evidence.
