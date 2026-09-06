@@ -10,8 +10,11 @@ is no approval queue. However, novelty is NOT a request for a redesign.
 PRESERVE THE GENERAL CONCEPTS
 The default map is The Lantern Works: agents use their existing Clarp portrait avatars, repositories
 are workshops containing named files, GitHub is a harbor connected by origins,
-and action machinery communicates reading, editing, creation, deletion, builds
-and transmission. The side-by-side Agent cabinets view is a separate option.
+and activity is shown at the actual file, directory or checkout. Generic action
+rooms (Reading room, Revision press, Engine house, etc.) have been explicitly
+retired by ADR 0006. Do not recreate them. Commits remain at the checkout; pushes
+show a transfer toward a verified/configured remote while the avatar stays local.
+Preserve start/finish/failure distinctions and honest unknown-destination labels. The side-by-side Agent cabinets view is a separate option.
 Do not replace agent portraits with boats, moths or other mascots; do not rename
 the world, change its visual metaphor,
 merge the two views, or reorganize familiar places merely because new evidence

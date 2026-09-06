@@ -13,13 +13,13 @@ def test_paged_scan_is_fenced_and_filters_without_skipping():
     con = sqlite3.connect(":memory:")
     con.row_factory = sqlite3.Row
     con.execute("CREATE TABLE state_log (state_id INTEGER PRIMARY KEY, "
-                "agent_id TEXT, ts INTEGER, kind TEXT, detail TEXT)")
+                "agent_id TEXT, ts INTEGER, kind TEXT, detail TEXT, runtime_id INTEGER)")
     detail = json.dumps({"tool": "Bash", "input": {"command": "frobnicate x"}})
-    con.executemany("INSERT INTO state_log VALUES (?, 'a', ?, ?, ?)",
+    con.executemany("INSERT INTO state_log(state_id,agent_id,ts,kind,detail) VALUES (?, 'a', ?, ?, ?)",
                     [(i, i, "tool" if i % 2 else "text", detail) for i in range(1, 10)])
     rows = tool_rows(con, since=3, until=20, page_size=2)
     first = next(rows)
-    con.execute("INSERT INTO state_log VALUES (10, 'a', 10, 'tool', ?)", (detail,))
+    con.execute("INSERT INTO state_log(state_id,agent_id,ts,kind,detail) VALUES (10, 'a', 10, 'tool', ?)", (detail,))
     assert [r["state_id"] for r in [first, *rows]] == [3, 5, 7, 9]
     clusters = unmatched_clusters(tool_rows(con, page_size=1))
     assert clusters[0]["count"] == 6

@@ -13,10 +13,11 @@ ideas, a task backlog, or an approval queue.
 | [0003](0003-separate-views.md) | Accepted | World and side-by-side Agent cabinets are separate views. |
 | [0004](0004-agent-avatars.md) | Accepted | World agents use their existing Clarp portraits instead of boats. |
 | [0005](0005-evidence-and-runtime.md) | Accepted | Real evidence, stable identity, deterministic rendering, isolated generation. |
+| [0006](0006-work-at-real-destinations.md) | Accepted | Agents act at real files, directories and repositories; retire action-category stations. |
 
 The combined current direction is **The Lantern Works with agent avatars**, plus
 an optional **Agent cabinets** view. Preserve workshops, harbor, hierarchy and
-meaningful activity; grow their detail and behavior as new evidence requires it.
+meaningful activity at real destinations; grow their detail and behavior as new evidence requires it.
 
 ## How to use and maintain these records
 

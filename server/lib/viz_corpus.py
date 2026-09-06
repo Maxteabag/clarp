@@ -21,7 +21,7 @@ def tool_rows(con: sqlite3.Connection, since: int = 0, until: int = 1 << 62,
     after = 0
     while after < end:
         cursor = con.execute(
-            "SELECT state_id, agent_id, ts, detail FROM state_log "
+            "SELECT state_id, agent_id, runtime_id, ts, detail FROM state_log "
             "WHERE state_id > ? AND state_id <= ? AND kind = ? "
             "AND ts >= ? AND ts <= ? ORDER BY state_id LIMIT ?",
             (after, end, AgentState.TOOL, since, until, page_size))
