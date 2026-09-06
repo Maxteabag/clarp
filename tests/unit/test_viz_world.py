@@ -172,3 +172,25 @@ def test_fleet_payload_uses_exact_agent_avatar_routes(tmp_path):
     assert actors['portrait-a']['avatar_url'].startswith('/avatars/portrait-a?v=')
     assert actors['portrait-b']['avatar_url'].startswith('/avatars/portrait-b?v=')
     assert actors['portrait-a']['avatar_url']!=actors['portrait-b']['avatar_url']
+
+
+def test_every_author_prompt_includes_vision_and_accepted_decisions():
+    records=viz_rule_author.decision_records()
+    assert {'README.md','VISION.md','0002-compatible-evolution.md','0004-agent-avatars.md'} <= records.keys()
+    prompt=viz_rule_author.world_prompt({'scene':{}},viz_library.seed())
+    for name,content in records.items():
+        assert json.dumps(name) in prompt
+        assert json.dumps(content) in prompt
+
+
+def test_installed_author_reads_the_shipped_decision_directory(tmp_path,monkeypatch):
+    root=tmp_path/'release';(root/'lib').mkdir(parents=True)
+    docs=root/'docs/architecture/fleet-map';docs.mkdir(parents=True)
+    (docs/'README.md').write_text('Decision index')
+    (docs/'VISION.md').write_text('Owner vision')
+    (docs/'0001-example.md').write_text('Accepted requirement')
+    monkeypatch.setattr(viz_rule_author,'__file__',str(root/'lib/viz_rule_author.py'))
+    assert viz_rule_author.decision_records()=={'README.md':'Decision index','VISION.md':'Owner vision','0001-example.md':'Accepted requirement'}
+    (docs/'VISION.md').unlink()
+    with pytest.raises(RuntimeError,match='records are missing'):
+        viz_rule_author.decision_records()

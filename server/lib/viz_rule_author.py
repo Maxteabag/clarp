@@ -237,9 +237,21 @@ def seed_program() -> dict:
     return {**manifest,'files':{name:(root/name).read_text() for name in manifest['files']}}
 
 
+def decision_records() -> dict[str, str]:
+    """Load the same versioned vision for checkout and installed authoring runs."""
+    here=pathlib.Path(__file__).resolve()
+    for root in (here.parents[2], here.parents[1]):
+        directory=root / 'docs/architecture/fleet-map'
+        if (directory/'README.md').is_file() and (directory/'VISION.md').is_file():
+            paths=[directory/'README.md',directory/'VISION.md']
+            paths.extend(sorted(directory.glob('[0-9]*.md')))
+            return {p.name:p.read_text() for p in paths}
+    raise RuntimeError('Fleet-map vision/decision records are missing; install the matching docs before authoring')
+
+
 def world_prompt(evidence: dict, library: dict) -> str:
     instructions=(pathlib.Path(__file__).with_name('viz_creative_brief.md')).read_text()
-    return instructions + "\n\nCURRENT SOURCE AND OBSERVED FACTS\n" + json.dumps({
+    return instructions + "\n\nOWNER VISION AND ACCEPTED ARCHITECTURE DECISIONS\n" + json.dumps(decision_records()) + "\n\nCURRENT SOURCE AND OBSERVED FACTS\n" + json.dumps({
         'program':library.get('program') or seed_program(),
         'evidence':evidence,'revision':library['revision'],
         'covered':library.get('scene_coverage',[]),'allow_redesign':False})

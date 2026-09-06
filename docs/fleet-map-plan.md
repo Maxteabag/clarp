@@ -7,6 +7,11 @@ glance should answer "what is everyone working on" without reading anything.
 
 Branch: `feat/fleet-map`. This document is the handover spec.
 
+The durable owner vision and current architectural decisions are in
+[docs/architecture/fleet-map](architecture/fleet-map/README.md). Read that index
+before changing this implementation; it distinguishes accepted concepts from
+historical design experiments.
+
 ## 1. What already works
 
 | file | what it does | state |
