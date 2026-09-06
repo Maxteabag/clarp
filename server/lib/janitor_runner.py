@@ -300,6 +300,8 @@ class JanitorRunner:
             self._save(attachment, state)
             return 0
         key = [aid, generation, [(c["session"], c["state_id"], c["fingerprint"], c["retry_count"]) for c in candidates]]
+        if attachment["trigger_id"] == "active-interval":
+            key.append(state.get("last_check_at"))
         run_id = "janitor-" + hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:32]
         for context in candidates:
             del state["pending"][context["session"]]

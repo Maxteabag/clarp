@@ -21,7 +21,8 @@ Use weathered iron, warm oxidized copper/rust, visible rivets and small practica
 sensor eyes; friendly, useful and slightly worn rather than threatening. Keep
 each robot distinguishable while retaining this shared visual family. Use the
 persona/avatar APIs for custom art, never overwrite existing conversation data.
-Native Janitor lists use a scalable rusty-robot badge for consistent recognition.
+Reuse the built-in rusty-robot portrait family and generic robot fallback for
+consistent recognition. Preserve explicitly configured custom portraits.
 
 ```bash
 clarp-admin janitor list
