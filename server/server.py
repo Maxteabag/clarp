@@ -324,6 +324,7 @@ class Handler(BaseHTTPRequestHandler):
         "/send": "_handle_send",
         "/orchestrator/route-delegation": "_handle_orchestrator_route_delegation",
         "/transcribe": "_handle_transcribe",
+        "/transcription/realtime-session": "_handle_scribe_session",
         "/transcription-models/install": "_handle_transcription_model_install",
         "/transcription-models/remove": "_handle_transcription_model_remove",
         "/transcription-guidance": "_handle_transcription_guidance_post",
@@ -1430,6 +1431,22 @@ class Handler(BaseHTTPRequestHandler):
                 400, json.dumps({"error": str(exc)}).encode(), "application/json")
         payload = self._transcription_guidance_payload()
         payload["ok"] = True
+        self._send(200, json.dumps(payload).encode(), "application/json")
+
+    def _handle_scribe_session(self):
+        # Unlike ordinary local endpoints, this issues a spend-capable provider
+        # credential. An auth-disabled Host must never mint one for callers.
+        if not getattr(self, "_request_auth_validated", False):
+            return self._reject_unauthorized()
+        data = self._read_json()
+        if not isinstance(data, dict) or data:
+            return self._json_error(400, "expected an empty JSON object")
+        from lib.scribe_session import create_session, ScribeSessionError
+        from lib.config import load
+        try:
+            payload = create_session(api_key=load().eleven_key())
+        except ScribeSessionError as error:
+            return self._json_error(503, str(error))
         self._send(200, json.dumps(payload).encode(), "application/json")
 
     def _handle_transcription_providers_get(self):
