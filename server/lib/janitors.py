@@ -55,7 +55,31 @@ def templates() -> list[dict]:
              "description": "Keep agents' current task labels clear and useful.",
              "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
              "recommended_effort": "low",
-             "allowed_effects": ["task_label"]}]
+             "allowed_effects": ["task_label"], "creatable": True,
+             "supported_trigger_ids": ["agent-work-completed", "schedule"],
+             "default_trigger_id": "agent-work-completed"},
+            {"id": "message-delegator", "name": "Message delegator",
+             "description": "Choose an eligible recipient for an explicitly requested message route.",
+             "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
+             "recommended_effort": "low", "allowed_effects": ["message_route"], "creatable": True,
+             "supported_trigger_ids": ["routing-requested"], "default_trigger_id": "routing-requested"},
+            {"id": "tool-explainer", "name": "Tool explainer",
+             "description": "Explain requested tool activity using bounded read-only input.",
+             "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
+             "recommended_effort": "low", "allowed_effects": ["tool_explanation"], "creatable": True,
+             "supported_trigger_ids": ["tool-explanation-requested"], "default_trigger_id": "tool-explanation-requested"}]
+
+
+def template(value: str) -> dict:
+    selected = next((v for v in templates() if v["id"] == value), None)
+    if selected is None:
+        raise JanitorError("Unsupported maintenance job", 400, "unsupported_template")
+    return selected
+
+
+def _builtin_role(c, agent_id: str) -> str | None:
+    row = c.execute("SELECT role FROM janitor_builtins WHERE agent_id=?", (agent_id,)).fetchone()
+    return row[0] if row else None
 
 
 def trigger_definitions() -> list[dict]:
@@ -103,12 +127,11 @@ def _scope(value) -> dict:
 
 
 def _template(value: str) -> str:
-    if value != "task-labels":
-        raise JanitorError("Unsupported maintenance job", 400, "unsupported_template")
+    template(value)
     return value
 
 
-def _attachment_values(values, agent_id: str) -> list[dict]:
+def _attachment_values(values, agent_id: str, template_id: str = "task-labels") -> list[dict]:
     if not isinstance(values, list) or not 1 <= len(values) <= 8:
         raise JanitorError("Choose between one and eight triggers")
     definitions = {(r["trigger_id"], r["version"]): r for r in trigger_definitions()}
@@ -122,6 +145,8 @@ def _attachment_values(values, agent_id: str) -> list[dict]:
         definition = definitions.get(key)
         if not definition:
             raise JanitorError("Unsupported trigger version", 400, "unsupported_trigger")
+        if key[0] not in template(template_id)["supported_trigger_ids"]:
+            raise JanitorError("This trigger is not supported by the maintenance job", 400, "incompatible_trigger")
         aid = value.get("attachment_id") or f"attachment-{uuid.uuid4().hex}"
         if not isinstance(aid, str) or len(aid) > 100 or aid in seen:
             raise JanitorError("Invalid or duplicate trigger attachment")
@@ -134,6 +159,8 @@ def _attachment_values(values, agent_id: str) -> list[dict]:
             raise JanitorError("Trigger settings must be an object")
         config = {**definition["defaults"], **supplied}
         allowed = {"max_targets", "coalesce_seconds", "min_interval_seconds"}
+        if definition["kind"] == "demand":
+            allowed = set()
         if definition["kind"] == "schedule":
             allowed |= {"cron", "timezone"}
         if set(config) - allowed:
@@ -173,27 +200,53 @@ def _save_attachments(c, agent_id: str, values: list[dict], now: int):
             c.execute("DELETE FROM janitor_progress WHERE attachment_id=?", (v["attachment_id"],))
 
 
-def _model(agent: dict, model, effort):
+def _model(agent: dict, model, effort, *, provider=None):
     if model is not None and (not isinstance(model, str) or len(model) > 160 or not backends.is_valid_model(agent["backend"], model)):
         raise JanitorError("Invalid model for this agent")
-    if effort is not None and (not isinstance(effort, str) or (effort and effort not in backends.valid_efforts(agent["backend"]))):
+    efforts = ("minimal", "low", "medium", "high") if provider == "openai" else backends.valid_efforts(agent["backend"])
+    if effort is not None and (not isinstance(effort, str) or (effort and effort not in efforts)):
         raise JanitorError("Invalid reasoning effort for this agent")
+
+
+def _execution(template_id: str, value, backend: str) -> dict:
+    if template_id == "task-labels":
+        if value not in ({}, None):
+            raise JanitorError("Task labels use the managed agent executor")
+        return {}
+    if value is None:
+        value = {"executor": "ephemeral", "provider": backend}
+    if not isinstance(value, dict) or set(value) - {"executor", "provider"}:
+        raise JanitorError("Invalid demand execution configuration")
+    provider = value.get("provider", backend)
+    if value.get("executor", "ephemeral") != "ephemeral" or not isinstance(provider, str):
+        raise JanitorError("Demand jobs require an ephemeral executor")
+    if provider != "openai" and not any(v.id == provider for v in backends.routing_adapters()):
+        raise JanitorError("Unsupported demand execution provider")
+    if backend != ("codex" if provider == "openai" else provider):
+        raise JanitorError("Execution provider must match the Janitor backend")
+    if template_id == "tool-explainer" and (provider != "codex" or backend != "codex"):
+        raise JanitorError("Tool explanation requires the codex provider")
+    return {"executor": "ephemeral", "provider": provider}
 
 
 def create(session: str, template_id: str = "task-labels", scope=None, attachments=None) -> dict:
     a = _agent(session)
     with _write() as c:
         existing = c.execute("SELECT 1 FROM janitor_configs WHERE agent_id=?", (a["agent_id"],)).fetchone()
-        if existing:
+        if existing and a.get("is_janitor"):
             return get(session)
         if a.get("archived_at"):
             raise JanitorError("Restore this agent before configuring maintenance", 409, "agent_archived")
         if agents.is_busy(a["agent_id"]) or backends.active_handles(a["backend"], a["agent_id"]) or turn_queue.pending_count(a["agent_id"]):
             raise JanitorError("Wait for this agent's current work and queue to finish before converting it", 409, "agent_busy")
+        if existing:
+            c.execute("UPDATE agents SET is_janitor=1,heartbeat_enabled=0,dreaming_enabled=0 WHERE agent_id=?", (a["agent_id"],))
+            return get(session)
         selected_scope = _scope(scope if scope is not None else {})
-        values = _attachment_values(attachments if attachments is not None else [{"trigger_id": "agent-work-completed"}], a["agent_id"])
+        values = _attachment_values(attachments if attachments is not None else [{"trigger_id": template(template_id)["default_trigger_id"]}], a["agent_id"], template_id)
         now = db.now_ms()
-        c.execute("INSERT INTO janitor_configs(agent_id,template_id,scope_json,created_at,updated_at) VALUES (?,?,?,?,?)", (a["agent_id"], _template(template_id), _json(selected_scope), now, now))
+        execution = _execution(template_id, None, a["backend"])
+        c.execute("INSERT INTO janitor_configs(agent_id,template_id,scope_json,execution_json,created_at,updated_at) VALUES (?,?,?,?,?,?)", (a["agent_id"], _template(template_id), _json(selected_scope), _json(execution), now, now))
         c.execute("UPDATE agents SET is_janitor=1,heartbeat_enabled=0,dreaming_enabled=0 WHERE agent_id=?", (a["agent_id"],))
         _save_attachments(c, a["agent_id"], values, now)
     return get(session)
@@ -205,14 +258,26 @@ def _public_attachment(row) -> dict:
             "config": _decode(row["config_json"], {}), "next_run_at": row["next_run_at"]}
 
 
-def get(session: str) -> dict:
+def _pending_demand_claim(c, agent_id: str) -> bool:
+    return bool(c.execute("""SELECT 1 FROM janitor_demand_claims d JOIN janitor_runs r ON r.run_id=d.run_id
+        WHERE r.agent_id=? AND d.finished_at IS NULL
+        AND json_extract(r.configuration_json,'$.expires_at')>? LIMIT 1""", (agent_id, db.now_ms())).fetchone())
+
+
+def get(session: str, *, include_runtime: bool = True) -> dict:
+    from .avatar_urls import janitor_avatar_url
     a = _agent(session)
     c = db.conn()
     row = _config(c, a["agent_id"])
+    builtin_role = _builtin_role(c, a["agent_id"])
     current = c.execute("SELECT run_id FROM janitor_runs WHERE agent_id=? AND status IN ('queued','running')", (a["agent_id"],)).fetchone()
     return {"agent_id": a["agent_id"], "session": a["session"], "name": a["persona"],
-            "is_janitor": True, "enabled": bool(row["enabled"]), "revision": row["revision"],
-            "cancellation_pending": not bool(row["enabled"]) and (agents.is_busy(a["agent_id"]) or bool(backends.active_handles(a["backend"], a["agent_id"]))),
+            "is_janitor": bool(a.get("is_janitor")), "enabled": bool(row["enabled"]), "revision": row["revision"],
+            "builtin_role": builtin_role, "execution": _decode(row["execution_json"], {}),
+            "avatar_url": janitor_avatar_url(bool(a.get("is_janitor")), row["template_id"]),
+            "capabilities": {"can_change_template": not bool(builtin_role), "can_remove": not bool(builtin_role), "can_release": not bool(builtin_role)},
+            "supported_trigger_ids": template(row["template_id"])["supported_trigger_ids"],
+            "cancellation_pending": not bool(row["enabled"]) and (agents.is_busy(a["agent_id"]) or (include_runtime and bool(backends.active_handles(a["backend"], a["agent_id"]))) or _pending_demand_claim(c, a["agent_id"])),
             "generation": row["generation"], "template_id": row["template_id"],
             "model": a["model"], "effort": a["effort"], "backend": a["backend"],
             "scope": _decode(row["scope_json"], {}), "health": ("paused" if not row["enabled"] else "running" if current else "needs_attention" if row["last_error"] else "ready"),
@@ -221,8 +286,8 @@ def get(session: str) -> dict:
             "attachments": [_public_attachment(r) for r in c.execute("SELECT * FROM janitor_attachments WHERE agent_id=? AND retired_at IS NULL ORDER BY created_at,attachment_id", (a["agent_id"],))]}
 
 
-def list_janitors() -> list[dict]:
-    return [get(r[0]) for r in db.conn().execute("SELECT a.agent_id FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id WHERE a.deleted_at IS NULL AND a.archived_at IS NULL ORDER BY a.persona")]
+def list_janitors(*, include_runtime: bool = True) -> list[dict]:
+    return [get(r[0], include_runtime=include_runtime) for r in db.conn().execute("SELECT a.agent_id FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id WHERE a.is_janitor=1 AND a.deleted_at IS NULL AND a.archived_at IS NULL ORDER BY a.persona")]
 
 
 def _fence(c, agent_id: str, now: int):
@@ -235,23 +300,33 @@ def _fence(c, agent_id: str, now: int):
     c.execute("UPDATE janitor_attachments SET next_run_at=NULL WHERE agent_id=?", (agent_id,))
 
 
-def configure(session: str, expected_revision: int, *, template_id=None, scope=None, attachments=None, model=None, effort=None) -> dict:
+def configure(session: str, expected_revision: int, *, template_id=None, scope=None, attachments=None, model=None, effort=None, execution=None, backend=None) -> dict:
     a = _agent(session)
     with _write() as c:
         row = _config(c, a["agent_id"])
         _revision(row, expected_revision)
-        _model(a, model, effort)
+        selected_backend = a["backend"] if backend is None else backend
+        if not isinstance(selected_backend, str) or not backends.get(selected_backend):
+            raise JanitorError("Unsupported Janitor backend")
         selected_scope = _scope(scope) if scope is not None else _decode(row["scope_json"], {})
         selected_template = _template(template_id) if template_id is not None else row["template_id"]
-        values = _attachment_values(attachments, a["agent_id"]) if attachments is not None else None
+        if _builtin_role(c, a["agent_id"]) and selected_template != row["template_id"]:
+            raise JanitorError("A built-in Janitor cannot change its job", 409, "builtin_janitor")
+        selected_execution = _execution(selected_template, execution if execution is not None else
+            (_decode(row["execution_json"], {}) if selected_template == row["template_id"] else None), selected_backend)
+        _model({**a, "backend": selected_backend}, a["model"] if model is None else model,
+               a["effort"] if effort is None else effort, provider=selected_execution.get("provider"))
+        values = _attachment_values(attachments, a["agent_id"], selected_template) if attachments is not None else None
+        if values is None and selected_template != row["template_id"]:
+            values = _attachment_values([{"trigger_id": template(selected_template)["default_trigger_id"]}], a["agent_id"], selected_template)
         now = db.now_ms()
         _fence(c, a["agent_id"], now)
-        c.execute("UPDATE janitor_configs SET enabled=0,generation=generation+1,revision=revision+1,template_id=?,scope_json=?,last_error='',updated_at=? WHERE agent_id=?", (selected_template, _json(selected_scope), now, a["agent_id"]))
+        c.execute("UPDATE janitor_configs SET enabled=0,generation=generation+1,revision=revision+1,template_id=?,scope_json=?,execution_json=?,last_error='',updated_at=? WHERE agent_id=?", (selected_template, _json(selected_scope), _json(selected_execution), now, a["agent_id"]))
         if selected_scope != _decode(row["scope_json"], {}) or selected_template != row["template_id"]:
             c.execute("DELETE FROM janitor_progress WHERE attachment_id IN (SELECT attachment_id FROM janitor_attachments WHERE agent_id=?)", (a["agent_id"],))
         if values is not None:
             _save_attachments(c, a["agent_id"], values, now)
-        agents.update_agent(a["agent_id"], model=model, effort=effort)
+        agents.update_agent(a["agent_id"], model=model, effort=effort, backend=backend)
     return get(session)
 
 
@@ -273,11 +348,14 @@ def set_enabled(session: str, expected_revision: int, enabled: bool) -> dict:
         if bool(row["enabled"]) == enabled:
             return get(session)
         if enabled:
+            if not a.get("is_janitor"):
+                raise JanitorError("This Janitor was released; convert it again before enabling", 409, "janitor_released")
             if a.get("archived_at"):
                 raise JanitorError("Archived maintenance cannot be enabled", 409, "agent_archived")
             for other in c.execute("SELECT j.* FROM janitor_configs j JOIN agents a ON a.agent_id=j.agent_id WHERE j.enabled=1 AND j.agent_id!=? AND a.deleted_at IS NULL AND a.archived_at IS NULL", (a["agent_id"],)):
-                if _overlap(_decode(row["scope_json"], {}), _decode(other["scope_json"], {})):
-                    raise JanitorError("Another enabled Janitor already maintains labels in this scope", 409, "scope_conflict")
+                if (set(template(row["template_id"])["allowed_effects"]) & set(template(other["template_id"])["allowed_effects"])
+                        and _overlap(_decode(row["scope_json"], {}), _decode(other["scope_json"], {}))):
+                    raise JanitorError("Another enabled Janitor already maintains this job in this scope", 409, "scope_conflict")
             if not c.execute("SELECT 1 FROM janitor_attachments WHERE agent_id=? AND enabled=1 AND retired_at IS NULL", (a["agent_id"],)).fetchone():
                 raise JanitorError("Enable at least one trigger first")
         now = db.now_ms()
@@ -291,6 +369,8 @@ def remove(session: str, expected_revision: int) -> bool:
     with _write() as c:
         row = _config(c, a["agent_id"])
         _revision(row, expected_revision)
+        if _builtin_role(c, a["agent_id"]):
+            raise JanitorError("Pause a built-in Janitor instead of removing it", 409, "builtin_janitor")
         now = db.now_ms()
         _fence(c, a["agent_id"], now)
         c.execute("UPDATE janitor_configs SET enabled=0,generation=generation+1,revision=revision+1,updated_at=? WHERE agent_id=?", (now, a["agent_id"]))
@@ -298,11 +378,34 @@ def remove(session: str, expected_revision: int) -> bool:
     return True
 
 
+def release(session: str, expected_revision: int) -> dict:
+    """Return a paused, idle Janitor to chat while retaining all maintenance history."""
+    a = _agent(session)
+    with _write() as c:
+        row = _config(c, a["agent_id"])
+        _revision(row, expected_revision)
+        if _builtin_role(c, a["agent_id"]):
+            raise JanitorError("A built-in Janitor cannot be released", 409, "builtin_janitor")
+        if row["enabled"]:
+            raise JanitorError("Pause this Janitor before releasing it", 409, "janitor_enabled")
+        if (agents.is_busy(a["agent_id"]) or backends.active_handles(a["backend"], a["agent_id"])
+                or turn_queue.pending_count(a["agent_id"]) or has_active_run(a["agent_id"])
+                or _pending_demand_claim(c, a["agent_id"])):
+            raise JanitorError("Wait for current maintenance and cancellation to finish", 409, "agent_busy")
+        if not a.get("is_janitor"):
+            return get(session)
+        now = db.now_ms()
+        _fence(c, a["agent_id"], now)
+        c.execute("UPDATE janitor_configs SET generation=generation+1,revision=revision+1,updated_at=? WHERE agent_id=?", (now, a["agent_id"]))
+        c.execute("UPDATE agents SET is_janitor=0 WHERE agent_id=?", (a["agent_id"],))
+    return get(session)
+
+
 def attachments(enabled_only: bool = False) -> list[dict]:
     query = """SELECT t.*,j.generation,j.template_id,j.scope_json,j.enabled AS janitor_enabled,
         a.session FROM janitor_attachments t JOIN janitor_configs j ON j.agent_id=t.agent_id
         JOIN agents a ON a.agent_id=t.agent_id WHERE t.retired_at IS NULL
-        AND a.deleted_at IS NULL AND a.archived_at IS NULL"""
+        AND a.is_janitor=1 AND a.deleted_at IS NULL AND a.archived_at IS NULL"""
     if enabled_only:
         query += " AND t.enabled=1 AND j.enabled=1"
     return [{**_public_attachment(r), "agent_id": r["agent_id"], "session": r["session"],
@@ -312,10 +415,10 @@ def attachments(enabled_only: bool = False) -> list[dict]:
 
 
 def _active_attachment(c, attachment_id: str, generation: int):
-    row = c.execute("""SELECT t.*,j.generation,j.scope_json,j.enabled AS janitor_enabled,a.session
+    row = c.execute("""SELECT t.*,j.generation,j.scope_json,j.template_id,j.enabled AS janitor_enabled,a.session
         FROM janitor_attachments t JOIN janitor_configs j ON j.agent_id=t.agent_id
         JOIN agents a ON a.agent_id=t.agent_id WHERE t.attachment_id=?
-        AND a.deleted_at IS NULL AND a.archived_at IS NULL""", (attachment_id,)).fetchone()
+        AND a.is_janitor=1 AND a.deleted_at IS NULL AND a.archived_at IS NULL""", (attachment_id,)).fetchone()
     if not row or row["generation"] != generation or not row["janitor_enabled"] or not row["enabled"] or row["retired_at"] is not None:
         raise JanitorError("This maintenance run was paused or superseded", 409, "stale_generation")
     return row
@@ -361,6 +464,8 @@ def create_run(attachment_id: str, generation: int, candidates: list[dict], run_
                 raise JanitorError("Run identity already refers to different work", 409, "run_conflict")
             return get_run(run_id)
         attachment = _active_attachment(c, attachment_id, generation)
+        if attachment["template_id"] != "task-labels":
+            raise JanitorError("Only a task-label job can admit label reviews", 409, "capability_denied")
         seen = set()
         for candidate in candidates:
             if not isinstance(candidate, dict):
@@ -389,6 +494,8 @@ def _public_run(row) -> dict:
     value["queue_id"] = value["client_msg_id"] = value["run_id"]
     value["candidates"] = _decode(value.pop("candidates_json"), [])
     value["configuration"] = _decode(value.pop("configuration_json"), {})
+    demand = db.conn().execute("SELECT result_json FROM janitor_demand_results WHERE run_id=?", (row["run_id"],)).fetchone()
+    value["demand_result"] = _decode(demand[0], {}) if demand else None
     value["results"] = [{"target_agent_id": r["target_agent_id"], "target_session": r["target_session"],
                          "observed_state_id": r["observed_state_id"], "before": r["before_label"],
                          "after": r["after_label"], "outcome": r["outcome"], "reason": r["reason"],
@@ -433,7 +540,8 @@ def _active_run(c, run_id):
 def validate_dispatch(session: str, run_id: str, trace_id: str) -> bool:
     try:
         row = _active_run(db.conn(), run_id)
-        return row["session"] == session and row["trace_id"] == trace_id
+        return (row["session"] == session and row["trace_id"] == trace_id
+                and _decode(row["configuration_json"], {}).get("template_id") == "task-labels")
     except JanitorError:
         return False
 
@@ -458,6 +566,8 @@ def finish_run(run_id: str, outcome: str = "", error: str = "") -> dict:
         if row["status"] not in {"queued", "running"}:
             return get_run(run_id)
         _active_run(c, run_id)
+        if _decode(row["configuration_json"], {}).get("executor") == "ephemeral":
+            raise JanitorError("Demand jobs require their guarded result receipt", 409, "capability_denied")
         receipts = list(c.execute("SELECT outcome FROM janitor_effects WHERE run_id=?", (run_id,)))
         if not outcome:
             outcome = ("error" if len(receipts) != len(_decode(row["candidates_json"], [])) or any(r[0] == "error" for r in receipts)
@@ -538,6 +648,8 @@ def review(run_id: str, target_session: str, observed_state_id: int, outcome: st
                 raise JanitorError("This target already has a different review receipt", 409, "review_conflict")
             return next(r for r in get_run(run_id)["results"] if r["target_agent_id"] == target["agent_id"])
         run = _active_run(c, run_id)
+        if _decode(run["configuration_json"], {}).get("template_id") != "task-labels":
+            raise JanitorError("Only a task-label job can write label reviews", 409, "capability_denied")
         candidate = next((v for v in _decode(run["candidates_json"], []) if v.get("agent_id") == target["agent_id"] and v.get("session", v.get("target_session")) == target_session), None)
         if not candidate or candidate.get("state_id", candidate.get("observed_state_id")) != observed_state_id:
             raise JanitorError("Target is not part of this frozen run", 409, "stale_candidate")
@@ -577,7 +689,7 @@ def review(run_id: str, target_session: str, observed_state_id: int, outcome: st
 def validate_configuration(template_id: str = "task-labels", scope=None, attachments=None) -> dict:
     """Validate new-identity input before creating any contact or agent row."""
     return {"template_id": _template(template_id), "scope": _scope(scope if scope is not None else {}),
-            "attachments": _attachment_values(attachments if attachments is not None else [{"trigger_id": "agent-work-completed"}], "")}
+            "attachments": _attachment_values(attachments if attachments is not None else [{"trigger_id": template(template_id)["default_trigger_id"]}], "", template_id)}
 
 
 def export_migration(session: str) -> dict:
