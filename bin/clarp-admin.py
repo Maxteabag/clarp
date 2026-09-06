@@ -1805,9 +1805,16 @@ def cmd_schedule(args) -> int:
     return 0
 
 
+def cmd_janitor(args) -> int:
+    from lib.janitor_cli import execute
+    return execute(args, api_request)
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="clarp-admin", description=__doc__)
     sub = result.add_subparsers(dest="command", required=True)
+    from lib.janitor_cli import add_parsers as add_janitor_parsers
+    add_janitor_parsers(sub, cmd_janitor)
     setup = sub.add_parser(
         "setup",
         formatter_class=argparse.RawDescriptionHelpFormatter,
