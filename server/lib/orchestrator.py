@@ -589,7 +589,19 @@ class OrchestratorService:
     def _replayed_run(run_id, requested_session, trace_id) -> OrchestratorOutcome:
         """A durable execution claim survives retries and Host restarts."""
         run = janitors.get_run(run_id) or {}
+        if run.get("status") in {"queued", "running"}:
+            # Retries bypass begin_run, which normally retires expired claims.
+            # Reconcile here too so an interrupted request cannot stay pending
+            # forever merely because every retry uses its original client ID.
+            janitor_builtins.recover_expired_runs()
+            run = janitors.get_run(run_id) or {}
         receipt = run.get("demand_result") or {}
+        if run.get("status") == "cancelled" and not receipt:
+            return OrchestratorOutcome(
+                handled=True, ok=False, session=requested_session,
+                trace_id=trace_id, action="cancelled", status=409,
+                error=run.get("error") or "Message routing was cancelled before completion",
+            )
         recipient = agents_db.get_by_agent_id(receipt.get("target_agent_id", "")) or {}
         pending = run.get("status") in {"queued", "running"}
         action = "pending" if pending else receipt.get("status", FINAL_CLARIFY)
