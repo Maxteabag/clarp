@@ -13,10 +13,13 @@ agent goes on to do more work. User messages remain immediate.
 Tool calls, activity metadata and explanations remain available while answer
 text is withheld, controlled independently by the activity detail setting.
 Live rows containing activity stay mounted with an empty answer body, preserving
-viewport-driven explanation requests. The desktop shows three animated typing dots while the agent is thinking,
+viewport-driven explanation requests. The desktop shows a labeled Working indicator while the agent is thinking,
 using a tool, or compacting. Waiting, interruption, completion, and disconnection
 stop that indicator. The sidebar uses the Host snapshot’s `last_completed_message`
-field in this mode and keeps it visible alongside the separate typing label.
+field in this mode and keeps it visible alongside the separate activity label.
+The activity label is independent of answer presentation: explicit status text
+is preserved, otherwise busy agents show “Working…”. Busy does not prove the
+agent is writing a reply, so neither the label nor accessibility announces typing.
 The batched projection excludes provisional assistant rows before ranking, so
 unopened chats and restarts retain their last completed preview. Normal streaming
 continues to use `last_message`. A missing completed preview falls back to the
