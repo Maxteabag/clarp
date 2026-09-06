@@ -57,6 +57,18 @@ TestCase {
         verify(message.implicitHeight - (top + card.height) <= 4,
                "Tool-only messages must not add a paragraph-sized trailing gap");
     }
+    function test_collapsedGroupDoesNotInstantiateExplanationCards() {
+        const message = createTemporaryObject(toolOnlyMessage, testCase, {
+            showTools: false, groupSummary: "5 tool calls", groupedExpanded: false
+        });
+        verify(message !== null);
+        waitForRendering(message);
+        compare(findChild(message, "displayCellCard"), null);
+        message.groupedExpanded = true;
+        tryVerify(() => findChild(message, "displayCellCard") !== null);
+        message.groupedExpanded = false;
+        tryVerify(() => findChild(message, "displayCellCard") === null);
+    }
 
     Component {
         id: toolCard
@@ -135,7 +147,7 @@ TestCase {
         const explanation = findChild(card, "activityExplanationText");
         verify(explanation !== null);
         compare(explanation.visible, true);
-        compare(explanation.text, "Explaining activity…");
+        verify([".", "..", "…"].includes(explanation.text));
         narratorStub.ready = true;
         narratorStub.revision++;
         tryCompare(explanation, "visible", true);
@@ -175,7 +187,7 @@ TestCase {
         });
         waitForRendering(message);
         verify(!visibleText(message).includes("private_script.js"));
-        verify(visibleText(message).includes("Explaining activity…"));
+        verify([".", "..", "…"].some(dots => visibleText(message).includes(dots)));
         message.width = 170;
         narratorStub.responseText = "Search the grocery catalogue for meat and compare prices per kilogram, sorted from cheapest to most expensive.";
         narratorStub.ready = true;

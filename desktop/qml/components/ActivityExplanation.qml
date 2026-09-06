@@ -41,8 +41,15 @@ Item {
         narrator.revision;
         return narrator.explanation(requestActivity, workingDirectory, localFilesAllowed);
     }
+    property int dotPhase: 0
     readonly property string displayText: !narrationEnabled ? "" : text ||
-        (narrator.unavailable ? "Explanation unavailable" : "Explaining activity…")
+        (narrator.unavailable ? "Explanation unavailable" : [".", "..", "…"][dotPhase])
+    Timer {
+        interval: 400; repeat: true
+        running: root.narrationEnabled && root.active && root.inViewport
+            && root.text.length === 0 && !root.narrator.unavailable
+        onTriggered: root.dotPhase = (root.dotPhase + 1) % 3
+    }
     function request() {
         if (narrationEnabled && active && inViewport && !settle.running) {
             if (narrator.acquireView) {
@@ -52,6 +59,7 @@ Item {
         }
     }
     function rescheduleActivity() {
+        dotPhase = 0;
         release();
         if (inViewport) settle.restart();
     }

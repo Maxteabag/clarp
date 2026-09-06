@@ -1161,6 +1161,7 @@ CREATE TABLE paired_devices (
 CREATE INDEX idx_paired_devices_active ON paired_devices(revoked_at, created_at DESC);
 
 CREATE TABLE oracle_delegations (
+    completion_trace_id TEXT NOT NULL DEFAULT '',
     delegation_id      TEXT PRIMARY KEY,
     owner_principal    TEXT NOT NULL,
     trace_id           TEXT NOT NULL UNIQUE,
@@ -1395,6 +1396,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             if version < 74:
                 for statement in _HTML_FORMS_SCHEMA.split(";"):
                     if statement.strip(): con.execute(statement)
+            if version < 75:
+                con.execute("ALTER TABLE oracle_delegations ADD COLUMN completion_trace_id TEXT NOT NULL DEFAULT ''")
             if version < 76:
                 _migrate_to_v76(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")

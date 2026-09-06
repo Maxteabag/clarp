@@ -68,6 +68,9 @@ Rectangle {
         } else if (row === narrationRow && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
             root.controller.toolNarrator.detailLevel = Math.max(0, Math.min(4,
                 root.controller.toolNarrator.detailLevel + (event.key === Qt.Key_Right ? 1 : -1)));
+        } else if (row === toolsRow && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
+            root.controller.activityDisplayMode = Math.max(0, Math.min(2,
+                (root.controller.activityDisplayMode || 0) + (event.key === Qt.Key_Right ? 1 : -1)));
         } else if (row.checkable && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
             if (row.checked !== (event.key === Qt.Key_Right)) row.activated();
         } else if (event.key === Qt.Key_Escape)
@@ -133,13 +136,12 @@ Rectangle {
                     checked: root.controller.showWhenReady
                     onToggled: value => root.controller.showWhenReady = value
                 }
-                SettingsToggle {
+                SettingsAction {
                     id: toolsRow
                     objectName: "setting-tools"
-                    label: "Tool details"
-                    detail: "Keep tool calls expanded in the timeline"
-                    checked: root.controller.toolsVisible
-                    onToggled: value => root.controller.toolsVisible = value
+                    label: "Tool activity"
+                    detail: ["Grouped", "Always visible", "Group old"][root.controller.activityDisplayMode || 0]
+                    onActivated: root.controller.activityDisplayMode = ((root.controller.activityDisplayMode || 0) + 1) % 3
                 }
             }
 

@@ -12,7 +12,7 @@ from typing import Any
 from . import agents, db, media_store
 from .voice_markup import strip_hidden_blocks
 
-TYPES = {"html_form", "decision", "question", "plan", "document", "research", "code_change", "data",
+TYPES = {"countdown", "html_form", "decision", "question", "plan", "document", "research", "code_change", "data",
          "audio", "video", "file", "release", "directory", "workflow_run"}
 STATUSES = {"draft", "active", "ready", "failed", "completed", "cancelled", "expired"}
 _VALID_ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
@@ -22,6 +22,7 @@ _VALID_ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
 # Existing rows created before this validation remain readable.
 _REQUIRED_FIELDS = {
     "document": ("content",),
+    "countdown": ("target_at", "time_zone"),
     "html_form": ("content", "version", "answer_schema"),
     "research": ("content",),
     "code_change": ("repository",),
@@ -62,7 +63,7 @@ def _payload(value: Any, *, preserve_html: bool = False) -> dict:
     if len(encoded.encode()) > (4 * 1024 * 1024 if "answer_schema" in value else 131072):
         raise ValueError("artifact payload too large")
     string_fields = {"url", "thumbnail_url", "mime_type", "file_name", "content",
-                     "source_url", "commit", "branch", "repository", "subject",
+                     "target_at", "source_url", "commit", "branch", "repository", "subject",
                      "starts_at", "ends_at", "time_zone", "location", "notes",
                      "version", "build", "environment", "diff", "path_label", "asset_id",
                      "root", "relative_path", "provider", "run_id", "run_url",
@@ -104,7 +105,26 @@ def _require_payload(type: str, payload: dict, artifact_id: str, session: str = 
     for field in ("source_url", "thumbnail_url"):
         if payload.get(field):
             _safe_url(str(payload[field]), field=field, allow_relative=field == "thumbnail_url")
-    if type == "html_form":
+    if type == "countdown":
+        from datetime import datetime
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        target = payload.get("target_at")
+        zone = payload.get("time_zone")
+        if not isinstance(target, str) or not re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})", target):
+            raise ValueError("countdown target_at must be an ISO 8601 timestamp with offset")
+        try:
+            instant = datetime.fromisoformat(target.replace("Z", "+00:00"))
+            if instant.tzinfo is None or instant.utcoffset() is None:
+                raise ValueError("offset required")
+        except ValueError as exc:
+            raise ValueError("countdown target_at requires a valid date/time and explicit UTC offset") from exc
+        if not isinstance(zone, str) or not zone.strip():
+            raise ValueError("countdown time_zone must be an IANA timezone")
+        try: ZoneInfo(zone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("countdown time_zone must be a known IANA timezone") from exc
+    elif type == "html_form":
         from .html_forms import validate_contract
         validate_contract(payload)
     elif type == "data":
@@ -266,7 +286,7 @@ def _public(row) -> dict:
     item = dict(row)
     try: item["payload"] = json.loads(item.pop("payload_json") or "{}")
     except json.JSONDecodeError: item["payload"] = {}
-    for key in ("url", "thumbnail_url", "mime_type", "file_name", "content",
+    for key in ("target_at", "url", "thumbnail_url", "mime_type", "file_name", "content",
                 "source_url", "commit", "branch", "repository", "progress",
                 "duration_ms", "size_bytes", "row_count", "source_count",
                 "sources", "columns", "rows", "chart", "recipients", "subject",
@@ -289,7 +309,7 @@ def _public(row) -> dict:
 
 
 def _public_field_valid(key: str, value: Any) -> bool:
-    strings = {"url", "thumbnail_url", "mime_type", "file_name", "content", "source_url",
+    strings = {"target_at", "url", "thumbnail_url", "mime_type", "file_name", "content", "source_url",
                "commit", "branch", "repository", "subject", "starts_at", "ends_at",
                "time_zone", "location", "notes", "version", "build", "environment",
                "diff", "path_label", "asset_id", "root", "relative_path", "provider",

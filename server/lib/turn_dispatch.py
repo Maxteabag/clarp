@@ -619,7 +619,7 @@ class TurnDispatchService:
 
         # A live Codex turn accepts follow-ups through the official turn/steer
         # protocol. Other backends retain their existing dispatch behavior.
-        if not queue_if_busy and self._steer_if_supported(spec):
+        if (not queue_if_busy or spec.origin == "oracle") and self._steer_if_supported(spec):
             return DispatchResult(session=session, backend=backend)
         if self._enqueue_if_busy(spec, queue_if_busy=queue_if_busy):
             if queue_if_busy:
@@ -820,7 +820,8 @@ class TurnDispatchService:
     def _steer_if_supported(self, spec: _TurnSpec) -> bool:
         """Append a follow-up to an active steerable turn without replacing it."""
         with _TURN_LOCK:
-            busy = spec.agent_id in _INFLIGHT
+            active_trace = _INFLIGHT.get(spec.agent_id, "")
+            busy = bool(active_trace)
         if not busy or _terminal_live(spec.agent_id):
             return False
         steer = getattr(self.backends, "steer_turn", None)
@@ -843,6 +844,12 @@ class TurnDispatchService:
             log_exception("turnSteerFail", e, detail=spec.agent_id)
             return False
         if accepted:
+            if spec.origin == "oracle":
+                from . import oracle_delegations
+                oracle_delegations.attach_steered_trace(spec.trace_id, active_trace)
+                turn_queue.mark_started(spec.queue_id)
+                self._record_user_message(spec)
+                self._broadcast_queue_state(spec, started=True)
             team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
             eventlog.emit("server", "turnSteered", context=spec.context,
                           detail={"active_trace": _INFLIGHT.get(spec.agent_id)})
