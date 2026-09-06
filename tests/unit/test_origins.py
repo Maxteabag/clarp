@@ -8,11 +8,12 @@ silently reappear when a new origin is added.
 from lib import origins
 
 
-def test_routine_set_is_exactly_the_three_self_scheduled_origins():
+def test_routine_set_includes_configured_maintenance():
     assert origins.ROUTINE_AUTOMATION_ORIGINS == {
         "heartbeat",
         "leader_tick",
         "dreaming",
+        "janitor",
     }
 
 
@@ -77,3 +78,10 @@ def test_regression_busy_gate_and_snapshot_use_the_same_full_set():
     assert "dreaming" in origins.ROUTINE_AUTOMATION_ORIGINS
     assert "leader_tick" in origins.ROUTINE_AUTOMATION_ORIGINS
     assert "heartbeat" in origins.ROUTINE_AUTOMATION_ORIGINS
+
+
+def test_janitor_origin_is_private_routine_and_always_suppressed():
+    assert "janitor" in origins.ROUTINE_AUTOMATION_ORIGINS
+    assert "janitor" in origins.SUPPRESSED_ORIGINS
+    assert "janitor" not in origins.CLIENT_SETTABLE_ORIGINS
+    assert "janitor" not in origins.USER_FACING_ORIGINS

@@ -116,6 +116,8 @@ def dispatch(*, ctx, delegation_id: str, session: str,
     agent = agents_db.get_by_session(session)
     if not agent:
         raise LookupError("unknown agent")
+    if not agents_db.interaction_capabilities(agent)["can_voice_target"]:
+        raise ValueError("Janitors cannot receive Oracle delegations")
     trace_id = f"oracle-{delegation_id}"
     client_msg_id = trace_id
     record, created = begin(
