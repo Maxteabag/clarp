@@ -33,3 +33,14 @@ Proceed with authorized work and make sensible implementation choices. This
 autonomy is not permission to turn every new event into a wholesale redesign.
 Preserve unrelated work, never perform an unsafe Git checkout, and verify what
 actually renders. A successful HTTP response or model call is not visual proof.
+
+
+The next direction is a compact, living overview of work and relationships
+(0007). Filesystem proximity matters, but giant static folder rectangles should
+not dominate the view. Show natural ownership such as GitHub → Maxteabag → its
+repositories. Make actions and meaningful recent changes visually understandable;
+retain durable relations so recurring workflows become recognizable. Avatars may
+move between meaningful contexts and interact with nearby targets through rays,
+beams or local effects rather than traveling for every tool call. Prefer fluid,
+legible motion while preserving spatial memory. These are goals for exploration,
+not a settled animation vocabulary or permission for another global theme reset.
