@@ -1,17 +1,19 @@
 """Opt-in, shared presentation cache. Never executes the described activity.
 
-Only bounded tool metadata leaves the Host. Raw inputs are held in memory,
-not logged or persisted. Cache entries are audience-specific and bounded.
+Only bounded tool metadata leaves the Host. SQLite holds queued metadata until
+completion/cancellation, and successful explanations for 24 hours. Raw inputs
+are not logged. Cache identity is audience- and prompt-version-specific.
 """
 from __future__ import annotations
 
-from collections import OrderedDict
+import uuid
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import signal
+import sqlite3
 import shlex
 import stat
 import subprocess
@@ -19,6 +21,8 @@ import tempfile
 import threading
 import time
 from .log import log
+from . import db
+from . import tool_explanation_queue as durable_queue
 
 MODEL = "gpt-5.3-codex-spark"
 PROMPT_VERSION = 2
@@ -120,12 +124,8 @@ class ToolExplanations:
         self._translate = translate or self._run_codex
         self._debounce = debounce
         self._condition = threading.Condition()
-        self._cache = OrderedDict()
-        self._failed_until = {}
+        self._owner = uuid.uuid4().hex
         self._failure_ttl = failure_ttl
-        self._queue = OrderedDict()
-        self._demands = {}
-        self._released = {}
         self._closed = False
         self._process = None
         self._thread = threading.Thread(target=self._work, name="tool-explanations", daemon=True)
@@ -140,11 +140,11 @@ class ToolExplanations:
     def close(self):
         with self._condition:
             self._closed = True
-            self._queue.clear()
             self._condition.notify_all()
             if self._process is not None:
                 self._kill(self._process)
         self._thread.join(timeout=5)
+        durable_queue.abandon(self._owner)
 
     def request(self, level, items, *, cwd=None, release=None):
         if type(level) is not int or level not in range(5):
@@ -170,100 +170,57 @@ class ToolExplanations:
                     activity["scripts"] = scripts
             key = hashlib.sha256(json.dumps([MODEL, PROMPT_VERSION, level, activity], sort_keys=True).encode()).hexdigest()
             prepared.append((item["id"], key, activity, demand))
-        response = []
         with self._condition:
-            now = time.monotonic()
-            self._released = {k:v for k,v in self._released.items() if v > now}
-            for demand in release:
-                self._released[demand] = now + 120
-                for owners in self._demands.values():
-                    owners.pop(demand, None)
-            while len(self._released) > 4096:
-                self._released.pop(next(iter(self._released)))
-            self._prune_demands(now)
-            for identity, key, activity, demand in prepared:
-                if demand in self._released:
-                    response.append({"id": identity, "status": "cancelled"})
-                    continue
-                if demand and demand not in self._demands.get(key, {}) and len(self._demands.get(key, {})) >= 256:
-                    response.append({"id": identity, "status": "busy", "reason": "too_many_views"})
-                    continue
-                if key in self._failed_until and time.monotonic() >= self._failed_until[key]:
-                    self._cache.pop(key, None)
-                    del self._failed_until[key]
-                if not level:
-                    value = {"status": "disabled"}
-                elif self._closed:
-                    value = {"status": "failed", "reason": "service_stopping"}
-                elif key in self._cache:
-                    value = self._cache[key]
-                    self._cache.move_to_end(key)
-                elif len(self._queue) >= 64:
-                    value = {"status": "busy", "reason": "queue_full"}
-                else:
-                    value = {"status": "pending"}
-                    self._cache[key] = value
-                    self._queue[key] = (level, activity, time.monotonic())
-                    self._condition.notify()
-                if value["status"] == "pending":
-                    # Older clients have no demand token and retain legacy work.
-                    self._demands.setdefault(key, {})[demand or "legacy"] = now + 5 if demand else float("inf")
-                response.append({"id": identity, **value})
+            if self._closed:
+                return {"model": MODEL, "detail_level": level, "items": [
+                    {"id": item[0], "status": "disabled" if not level else "failed",
+                     **({"reason": "service_stopping"} if level else {})} for item in prepared]}
+            response = durable_queue.request(level, prepared, release, self._debounce)
+            self._condition.notify()
         return {"model": MODEL, "detail_level": level, "items": response}
 
-    def _prune_demands(self, now):
-        for key in list(self._demands):
-            owners = {k:v for k,v in self._demands[key].items() if v > now}
-            if key not in self._queue:
-                self._demands.pop(key, None)
-            elif owners:
-                self._demands[key] = owners
-            else:
-                self._queue.pop(key, None)
-                self._cache.pop(key, None)
-                self._demands.pop(key, None)
-
     def _work(self):
-        while True:
-            with self._condition:
-                self._condition.wait_for(lambda: self._closed or self._queue)
-                if self._closed:
-                    return
-                # A timed condition wait permits shutdown without a blocking sleep.
-                self._condition.wait_for(lambda: self._closed, timeout=self._debounce)
-                if self._closed:
-                    return
-                self._prune_demands(time.monotonic())
-                if not self._queue:
-                    continue
-                level = next(iter(self._queue.values()))[0]
-                keys = [k for k, v in self._queue.items() if v[0] == level][:8]
-                batch = [self._queue.pop(k) for k in keys]
-            requests = [{"id": str(i + 1), "activity": entry[1]} for i, entry in enumerate(batch)]
-            started = time.monotonic()
+        while not self._closed:
             try:
-                translated = self._translate(level, requests)
-                if set(translated) != {r["id"] for r in requests} or any(not isinstance(t, str) or not t.strip() or len(t) > 240 for t in translated.values()):
-                    raise ValueError("invalid explanation response")
-                values = [{"status": "ready", "text": snippet(translated[r["id"]], 240).strip()} for r in requests]
-                outcome = "ready"
-            except Exception as error:  # Never include prompts, subprocess output or errors in logs.
-                reason = "timeout" if isinstance(error, subprocess.TimeoutExpired) else "codex_unavailable" if isinstance(error, FileNotFoundError) else "invalid_response" if isinstance(error, ValueError) else "translator_failed"
-                values = [{"status": "failed", "reason": reason} for _ in requests]
-                outcome = f"failed:{reason}"
-            log("toolExplanationsBatch", f"model={MODEL} level={level} count={len(keys)} outcome={outcome} elapsed_ms={int((time.monotonic() - started) * 1000)} queue_wait_ms={int((started - batch[0][2]) * 1000)}")
-            with self._condition:
-                for key, value in zip(keys, values):
-                    self._cache[key] = value
-                    if value["status"] == "failed":
-                        self._failed_until[key] = time.monotonic() + self._failure_ttl
-                    self._cache.move_to_end(key)
-                while len(self._cache) > 512:
-                    removable = next((k for k, v in self._cache.items() if v["status"] != "pending"), None)
-                    if removable is None:
-                        break
-                    del self._cache[removable]
-                    self._failed_until.pop(removable, None)
+                self._drain()
+                return
+            except sqlite3.Error:
+                log("toolExplanationDatabaseRetry", "SQLite unavailable; durable jobs remain recoverable")
+                with self._condition:
+                    if not self._closed:
+                        self._condition.wait(timeout=1)
+
+    def _drain(self):
+        try:
+            while True:
+                with self._condition:
+                    if self._closed:
+                        return
+                    batch = durable_queue.claim(self._owner)
+                    if not batch:
+                        self._condition.wait(timeout=.25)
+                        continue
+                level = batch[0][1]
+                requests = [{"id": str(i + 1), "activity": entry[2]} for i, entry in enumerate(batch)]
+                started = time.monotonic()
+                try:
+                    translated = self._translate(level, requests)
+                    if set(translated) != {r["id"] for r in requests} or any(not isinstance(t, str) or not t.strip() or len(t) > 240 for t in translated.values()):
+                        raise ValueError("invalid explanation response")
+                    values = [{"status": "ready", "text": snippet(translated[r["id"]], 240).strip()} for r in requests]
+                    outcome = "ready"
+                except Exception as error:
+                    reason = "timeout" if isinstance(error, subprocess.TimeoutExpired) else "codex_unavailable" if isinstance(error, FileNotFoundError) else "invalid_response" if isinstance(error, ValueError) else "translator_failed"
+                    values = [{"status": "failed", "reason": reason} for _ in requests]
+                    outcome = f"failed:{reason}"
+                log("toolExplanationsBatch", f"model={MODEL} level={level} count={len(batch)} outcome={outcome} elapsed_ms={int((time.monotonic() - started) * 1000)} queue_wait_ms={max(0, durable_queue.cache.now_ms() - batch[0][3] - int((time.monotonic() - started) * 1000))}")
+                with self._condition:
+                    if self._closed:
+                        durable_queue.abandon(self._owner)
+                        return
+                    durable_queue.complete(self._owner, [(entry[0], value) for entry,value in zip(batch,values)], self._failure_ttl)
+        finally:
+            db.close_local()
 
     @staticmethod
     def _kill(process):
