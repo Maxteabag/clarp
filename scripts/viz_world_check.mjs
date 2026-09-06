@@ -15,6 +15,26 @@ try{
  assert(!s.failure,s.failure);assert(s.meta.territories>1);assert(s.meta.files>0);assert(s.meta.agents.length>0);
  assert(s.scene.relations.some(r=>r.kind==='remote'));
  await page.screenshot({path:out+'/world.png'});
+ const worldCamera={...s.camera};
+ const startFrames=s.frames;
+ await page.locator('#view-cabinets').click();
+ await page.waitForFunction(()=>{const s=window.fleetWorldSnapshot();return s.view==='cabinets'&&s.meta.title==='The Jacquard Observatory';});
+ await page.locator('#fit').click();await page.waitForTimeout(300);
+ const cabinets=await page.evaluate(()=>window.fleetWorldSnapshot());
+ assert(cabinets.frames>startFrames && !cabinets.failure);
+ assert(cabinets.meta.agents.length>0);
+ await page.screenshot({path:out+'/cabinets.png'});
+ await page.locator('#view-world').click();
+ await page.waitForFunction(()=>window.fleetWorldSnapshot().view==='world'&&window.fleetWorldSnapshot().meta.title==='The Lantern Works');
+ assert.deepEqual(await page.evaluate(()=>window.fleetWorldSnapshot().camera),worldCamera);
+ await page.locator('#view-cabinets').click();
+ await page.reload();
+ await page.waitForFunction(()=>{const s=window.fleetWorldSnapshot?.();return s?.view==='cabinets'&&s.frames>5;});
+ assert.equal(await page.locator('#view-cabinets').getAttribute('aria-pressed'),'true');
+ await page.locator('#view-world').click();
+ await page.waitForFunction(()=>{const s=window.fleetWorldSnapshot();return s.view==='world'&&s.meta.title==='The Lantern Works';});
+ await page.locator('#fit').click();await page.waitForTimeout(200);
+
  // Trace real history at 120x. This is labeled replay, never fake live activity.
  await page.locator('#t').evaluate(el=>{el.value=650;el.dispatchEvent(new Event('input'));});
  const before=await page.evaluate(()=>window.fleetWorldSnapshot());
@@ -31,7 +51,7 @@ try{
  }
  assert.deepEqual(errors,[]);
  await fs.writeFile(out+'/verification.json',JSON.stringify({program:s.program,frames:after.frames,territories:s.meta.territories,
-   files:s.meta.files,agents:s.meta.agents.length,realEvents:s.scene.events.length,sourceRevision:s.revision,playback:true,errors},null,2));
+   files:s.meta.files,agents:s.meta.agents.length,realEvents:s.scene.events.length,sourceRevision:s.revision,playback:true,cabinetsView:true,persistedView:true,errors},null,2));
 }finally{await context.close();await browser.close();}
 // Fault tests in a separate recording-free browser preserve the user's demo.
 const faultBrowser=await chromium.launch();const p=await faultBrowser.newPage({viewport:{width:1200,height:800}});

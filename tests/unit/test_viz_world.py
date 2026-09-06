@@ -46,15 +46,20 @@ def test_bad_source_and_escaping_paths_cannot_replace_a_program(tmp_path,monkeyp
     assert not (tmp_path/'library.json').exists()
 
 
-def test_evolution_applies_executable_source_without_a_rule_or_icon(tmp_path,monkeypatch):
+def test_evolution_extends_the_current_source_and_preserves_world_identity(tmp_path,monkeypatch):
     monkeypatch.setattr(viz_library,'path',lambda:tmp_path/'library.json')
+    current=viz_rule_author.seed_program()
     def model(prompt,name):
         assert name==viz_rule_author.TIER_TWO
-        return json.dumps({'program':{'title':'New system','entry':'scene.js','files':{
-            'scene.js':'module.exports.render=({ctx})=>{ctx.fillRect(0,0,100,100);return {title:"New system"};};'}},'notes':'A new system'})
-    result=viz_rule_author.evolve_world({'events':[],'coverage_keys':['hierarchy']},'reinvent',model)
+        return json.dumps({'change':{'kind':'extension','evidence':'new path details','preserved':'Lantern Works'},
+            'edits':[], 'new_files':{'detail.js':'exports.label=x=>x.path;'},'notes':'Add a reusable path detail helper'})
+    result=viz_rule_author.evolve_world({'events':[],'coverage_keys':['hierarchy']},'expand',model)
     assert result['applied']==['decision:1']
-    assert viz_library.load()['scene_coverage']==['hierarchy']
+    updated=viz_library.load()
+    assert updated['scene_coverage']==['hierarchy']
+    assert updated['program']['title']==current['title']
+    assert all(updated['program']['files'][k]==v for k,v in current['files'].items())
+    assert 'detail.js' in updated['program']['files']
 
 
 def test_new_scene_reaches_astra_but_covered_scene_does_not(monkeypatch,tmp_path):
@@ -99,3 +104,40 @@ def test_invalid_spark_alias_escalates_instead_of_stalling_the_observer(monkeypa
     scene={'coverage_keys':['entity:new'],'entities':[]}
     assert viz_learning._develop_scene({'scene':scene,'example':'new'})['applied']==['new']
     assert calls==[scene]
+
+
+def test_ordinary_evolution_refuses_whole_world_replacement():
+    current={'title':'Lantern Works','entry':'world.js','files':{'world.js':'const boats=1;\nmodule.exports.render=()=>boats;'}}
+    for reply in [
+        {'change':{'kind':'redesign','evidence':'new filenames','preserved':'data'},'program':{'title':'Moths'}},
+        {'change':{'kind':'extension','evidence':'new filenames','preserved':'data'},'program':{'title':'Moths'}},
+        {'change':{'kind':'repair','evidence':'cleanup','preserved':'data'},'edits':[{'file':'world.js','before':current['files']['world.js'],'after':'moths();'}]},
+        {'change':{'kind':'extension','evidence':'more actions','preserved':'boats'},'new_files':{'world.js':'moths();'}},
+    ]:
+        with pytest.raises(ValueError):viz_library.evolution_program(reply,current)
+
+
+def test_focused_repair_leaves_unrelated_source_and_identity_unchanged():
+    current={'title':'Lantern Works','entry':'world.js','files':{'world.js':'const speed=1;\nmodule.exports.render=()=>speed;','other.js':'unrelated'}}
+    reply={'change':{'kind':'repair','evidence':'motion too fast','preserved':'boats and harbor'},'edits':[{'file':'world.js','before':'const speed=1;','after':'const speed=.5;'}]}
+    result=viz_library.evolution_program(reply,current)
+    assert result['files']['world.js']=='const speed=.5;\nmodule.exports.render=()=>speed;'
+    assert result['files']['other.js']=='unrelated'
+    assert result['title']==current['title'] and result['entry']==current['entry']
+    assert current['files']['world.js'].startswith('const speed=1;')
+
+
+def test_already_supported_evidence_can_leave_the_program_unchanged():
+    current=viz_rule_author.seed_program()
+    result=viz_library.evolution_program({'change':{'kind':'unchanged','evidence':'another existing file type','preserved':'all behavior'}},current)
+    assert result==current
+
+
+def test_unrequested_redesign_cannot_change_the_live_library(tmp_path,monkeypatch):
+    monkeypatch.setattr(viz_library,'path',lambda:tmp_path/'library.json')
+    before=viz_library.apply_program(viz_rule_author.seed_program(),0,'baseline')
+    def model(*args):
+        return json.dumps({'change':{'kind':'redesign','evidence':'new delete event','preserved':'facts'},'program':{'title':'Moths','entry':'world.js','files':{'world.js':'module.exports.render=()=>({});'}}})
+    with pytest.raises(ValueError,match='strong explicit demand'):
+        viz_rule_author.evolve_world({'events':[],'coverage_keys':['action:delete']},'ordinary novelty',model)
+    assert viz_library.load()==before

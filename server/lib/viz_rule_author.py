@@ -242,7 +242,7 @@ def world_prompt(evidence: dict, library: dict) -> str:
     return instructions + "\n\nCURRENT SOURCE AND OBSERVED FACTS\n" + json.dumps({
         'program':library.get('program') or seed_program(),
         'evidence':evidence,'revision':library['revision'],
-        'covered':library.get('scene_coverage',[])})
+        'covered':library.get('scene_coverage',[]),'allow_redesign':False})
 
 
 def evolve_world(scene: dict, reason: str, model=None) -> dict:
@@ -254,14 +254,15 @@ def evolve_world(scene: dict, reason: str, model=None) -> dict:
     prompt=world_prompt({'scene':evidence,'reason':reason},library)
     for attempt in range(2):
         reply=json.loads((model or call_tier)(prompt,TIER_TWO))
-        program=reply.get('program',reply)
         try:
+            current=library.get('program') or seed_program()
+            program=viz_library.evolution_program(reply,current)
             updated=viz_library.apply_program(program,library['revision'],reply.get('notes',reason),scene.get('coverage_keys',[]))
             return {'applied':[updated['decisions'][-1]['id']],'rejected':[]}
         except ValueError as error:
             if attempt or 'library changed' in str(error):raise
-            prompt=world_prompt({'scene':evidence,'reason':reason,'failed_program':program,
-                'compiler_feedback':str(error),'task':'Repair this source and return a complete working revision. Preserve its creative intent.'},library)
+            prompt=world_prompt({'scene':evidence,'reason':reason,'rejected_change':reply,
+                'compiler_feedback':str(error),'task':'Repair this targeted change. Preserve the existing world. Return unchanged if current behavior already fits.'},library)
 
 
 
@@ -289,8 +290,9 @@ def learn(clusters: list[dict], model=None, limit: int = 5,
             else:
                 design = json.loads((model or call_tier)(design_prompt(
                     exe, cluster['example'], result.get('why_novel', ''), library), TIER_TWO))
-                if 'program' in design:
-                    updated=viz_library.apply_program(design['program'],library['revision'],design.get('notes','Developed a new visual system'),tools=[exe])
+                if 'change' in design or 'program' in design:
+                    program=viz_library.evolution_program(design,library.get('program') or seed_program())
+                    updated=viz_library.apply_program(program,library['revision'],design.get('notes','Focused visual improvement'),tools=[exe])
                     applied.append(updated['decisions'][-1]['id'])
                     continue
                 if design.get('rule', {}).get('exe') != exe:

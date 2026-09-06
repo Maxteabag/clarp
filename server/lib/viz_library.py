@@ -238,3 +238,38 @@ def apply_program(program: dict, expected_revision: int, reason: str,
         finally:
             if os.path.exists(tmp):os.unlink(tmp)
         return updated
+
+
+def evolution_program(reply: dict, current: dict, *, allow_redesign=False) -> dict:
+    """Construct a compatible source revision; ordinary novelty cannot replace it."""
+    if not isinstance(reply, dict) or not isinstance(reply.get('change'), dict):
+        raise ValueError('evolution requires a change description')
+    change=reply['change'];kind=change.get('kind')
+    if not change.get('evidence') or not change.get('preserved'):
+        raise ValueError('explain the concrete evidence and preserved concepts')
+    if kind=='redesign':
+        if not allow_redesign:
+            raise ValueError('disruptive redesign requires a strong explicit demand; ordinary novelty is not authorization')
+        if not isinstance(reply.get('program'),dict):raise ValueError('authorized redesign needs a program')
+        return reply['program']
+    if kind not in {'extension','repair','unchanged'}:
+        raise ValueError('unknown evolution kind')
+    if 'program' in reply:
+        raise ValueError('ordinary evolution must use targeted source edits, not a replacement program')
+    edits=reply.get('edits',[]);new_files=reply.get('new_files',{})
+    if not isinstance(edits,list) or not isinstance(new_files,dict):raise ValueError('invalid source edits')
+    if kind=='unchanged' and (edits or new_files):raise ValueError('unchanged result cannot edit source')
+    result=copy.deepcopy(current)
+    for edit in edits:
+        if not isinstance(edit,dict):raise ValueError('invalid edit')
+        name=edit.get('file');before=edit.get('before');after=edit.get('after')
+        if name not in result['files']:raise ValueError('edit targets an unknown file')
+        source=result['files'][name]
+        if not isinstance(before,str) or not before or not isinstance(after,str):raise ValueError('edit needs exact before and after text')
+        if before.strip()==source.strip():raise ValueError('whole-file replacement requires an explicit redesign')
+        if source.count(before)!=1:raise ValueError('edit before text must match exactly once')
+        result['files'][name]=source.replace(before,after,1)
+    for name,source in new_files.items():
+        if name in result['files']:raise ValueError('new_files cannot replace an existing module')
+        result['files'][name]=source
+    return result

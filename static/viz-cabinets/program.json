@@ -1,0 +1,10 @@
+{
+  "title": "The Jacquard Observatory",
+  "entry": "world.js",
+  "files": [
+    "model.js",
+    "world.js"
+  ],
+  "source_digest": "0f47446a834455151aa2d73e206c7bd71babd5d3447500f059056f58ad6238ca",
+  "view_label": "Agent cabinets"
+}
