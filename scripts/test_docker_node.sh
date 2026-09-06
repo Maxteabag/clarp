@@ -50,7 +50,15 @@ assert version and version[0].isdigit(), f"invalid clarp_version: {version!r}"
 server_id="$(docker exec "$NAME" sqlite3 /data/clarp/state.sqlite \
     "select value from settings where key='server_instance_id';")"
 [[ -n "$server_id" ]]
-[[ "$(docker exec "$NAME" sqlite3 /data/clarp/state.sqlite 'select count(*) from agents;')" == 0 ]]
+docker exec "$NAME" python3 -c '
+import sqlite3
+db = sqlite3.connect("/data/clarp/state.sqlite")
+rows = db.execute("""SELECT b.role,a.is_janitor FROM janitor_builtins b
+    JOIN agents a ON a.agent_id=b.agent_id""").fetchall()
+assert set(rows) == {("message-delegator",1),("tool-explainer",1)}, rows
+assert db.execute("SELECT count(*) FROM agents WHERE is_janitor=0").fetchone()[0] == 0
+assert db.execute("SELECT count(*) FROM runtimes").fetchone()[0] == 0
+'
 expected_skill_links="$(jq '[.skills[] | select(.pack == "core")] | length' \
     skills/manifest.json)"
 [[ "$(docker exec "$NAME" sh -lc 'find /data/claude/skills -maxdepth 1 -type l | wc -l')" \

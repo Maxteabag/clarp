@@ -45,6 +45,22 @@ inspect the current configuration and obtain renewed intent for any changed scop
 `remove` archives the setup and retains identity and run history; it is not a
 conversation-history deletion command.
 
+`release` returns a paused, idle, custom Janitor to ordinary chat, preserving
+its identity, model, conversation, original portrait and maintenance history.
+Built-in workers cannot be released. For an explicitly authorized replacement,
+create the successor paused, then transfer matching maintained labels atomically:
+
+```bash
+clarp-admin janitor release SOURCE --expected-revision SOURCE_REVISION \
+  --successor REPLACEMENT --successor-revision REPLACEMENT_REVISION --dry-run
+clarp-admin janitor release SOURCE --expected-revision SOURCE_REVISION \
+  --successor REPLACEMENT --successor-revision REPLACEMENT_REVISION
+```
+
+Both configurations must be paused and idle with equal watched scope. The
+handoff preserves original label receipts and user-edited text. Read the new
+successor revision before separately enabling it within existing authorization.
+
 New identity creation requires `--name NAME --backend BACKEND --cwd PATH`.
 The CLI generates one UUID request ID and prints it before sending. If delivery
 is ambiguous, repeat the identical creation input with `--request-id THAT_UUID`;
@@ -55,7 +71,7 @@ conversion does not use this new-identity creation ledger.
 
 For structured configuration use `--config @configuration.json`; `--scope` also
 accepts JSON or `@file`. `configure` accepts `template_id`, `scope`, `attachments`,
-`model`, and `effort`. Scope uses stable agent IDs, with empty `agent_ids` meaning
+`model`, `effort`, `backend`, `execution`, and `options`. Scope uses stable agent IDs, with empty `agent_ids` meaning
 all eligible task agents on this Host except `exclude_agent_ids`. Supplied
 attachments replace that configuration; `attach` retains existing attachments.
 Pin `trigger_id` and `trigger_version`. Scheduled attachments use `schedule@1`
@@ -70,6 +86,26 @@ are not replayed. Returning checks once when due, not on every focus change.
 `reset-defaults` restores each attached trigger's parameters and compatible
 template model defaults, preserves watched scope/identity/history, and pauses.
 Review before deliberately enabling again; never retry a revision conflict.
+
+
+## Built-in demand workers
+
+Message delegation and tool explanation are persisted Janitor identities. Their
+model, provider, enabled state and typed job options belong to that identity.
+Pause the Janitor to disable its feature; do not maintain another enable flag
+or independent model/policy configuration in the calling feature.
+
+The catalog provides each job's supported providers, versioned triggers and
+typed options. Use these descriptors rather than a hardcoded settings screen.
+`routing-requested@1` and `tool-explanation-requested@1` are demand triggers:
+the relevant request invokes the selected compatible subscriber. A custom
+Janitor can replace a paused built-in, including a non-overlapping watched scope.
+These workers do not enter ordinary chat or the task-label scheduling loop.
+
+For the developer adapter contract, read the Host's
+`docs/janitor-demand-workers.md`. Do not ask task agents for bookkeeping or
+additional context reports. Scope comes from the authenticated request's
+resolved source agent, never a caller-supplied target ID.
 
 ## During an admitted maintenance run
 

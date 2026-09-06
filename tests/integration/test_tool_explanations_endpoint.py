@@ -8,6 +8,23 @@ import pytest
 from .test_avatar_settings_endpoint import running_server, _post, _get  # noqa: F401
 
 
+def test_explanation_scope_uses_resolved_session_not_caller_supplied_agent_id(running_server, monkeypatch):
+    from lib import agents
+    from lib.tool_explanations import ToolExplanations
+    calls = []
+
+    def capture(self, level, items, **kwargs):
+        calls.append(kwargs)
+        return {"items": []}
+
+    monkeypatch.setattr(ToolExplanations, "request", capture)
+    _post(running_server, "/tool-explanations", {
+        "session": "rachel-7b4b", "target_agent_id": "forged-other-agent",
+        "detail_level": 3, "items": []})
+    expected = agents.get_by_session("rachel-7b4b")["agent_id"]
+    assert calls[0]["target_agent_id"] == expected
+
+
 def test_developer_mode_and_capability(running_server):
     _, info = _get(running_server, "/server-info")
     assert "tool_explanations" in info["capabilities"]["features"]

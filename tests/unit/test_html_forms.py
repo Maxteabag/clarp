@@ -66,6 +66,6 @@ def test_upgrade_from_73_preserves_existing_artifacts(tmp_path):
     con.execute('PRAGMA user_version=73')
     before=tuple(con.execute('SELECT * FROM artifacts WHERE artifact_id=?',(f['artifact_id'],)).fetchone())
     db._migrate(con)
-    assert con.execute('PRAGMA user_version').fetchone()[0]==74
+    assert con.execute('PRAGMA user_version').fetchone()[0]==db._SCHEMA_VERSION
     assert tuple(con.execute('SELECT * FROM artifacts WHERE artifact_id=?',(f['artifact_id'],)).fetchone())==before
     assert con.execute('SELECT COUNT(*) FROM form_submissions').fetchone()[0]==0

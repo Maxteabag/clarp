@@ -2,7 +2,7 @@
 
 Only bounded tool metadata leaves the Host. SQLite holds queued metadata until
 completion/cancellation, and successful explanations for 24 hours. Raw inputs
-are not logged. Cache identity is audience- and prompt-version-specific.
+are not logged. Cache identity includes the Janitor configuration and audience.
 """
 from __future__ import annotations
 
@@ -22,9 +22,10 @@ import threading
 import time
 from .log import log
 from . import db
+from . import janitor_builtins
 from . import tool_explanation_queue as durable_queue
 
-MODEL = "gpt-5.3-codex-spark"
+ROLE = "tool-explainer"
 PROMPT_VERSION = 2
 # Exact refined-low audience instructions selected from the paired lab.
 REFINED_PROMPTS = json.loads(Path(__file__).with_name("tool_explanation_prompts.json").read_text())
@@ -121,7 +122,7 @@ def script_evidence(activity, cwd):
 
 class ToolExplanations:
     def __init__(self, *, translate=None, debounce=.18, failure_ttl=60):
-        self._translate = translate or self._run_codex
+        self._translate = translate
         self._debounce = debounce
         self._condition = threading.Condition()
         self._owner = uuid.uuid4().hex
@@ -146,7 +147,39 @@ class ToolExplanations:
         self._thread.join(timeout=5)
         durable_queue.abandon(self._owner)
 
-    def request(self, level, items, *, cwd=None, release=None):
+    @staticmethod
+    def _identity(config, target_agent_id=None):
+        if config is None:
+            return None
+        execution = config["execution"]
+        return {**{key: config[key] for key in ("agent_id", "generation", "backend", "model", "effort", "scope", "options")},
+                "target_agent_id": target_agent_id,
+                "executor": execution["executor"], "provider": execution["provider"]}
+
+    @staticmethod
+    def _detail_level(config, requested):
+        if config is None:
+            return 0
+        # Old clients keep their audience until the built-in's one-time option
+        # adoption. Every explicit choice and every custom Janitor thereafter
+        # owns this setting centrally, including Developer's disabled default.
+        if config.get("builtin_role") == ROLE and "detail_level" not in config["configured_option_keys"]:
+            return requested
+        return config["options"]["detail_level"]
+
+    @classmethod
+    def _run_identity(cls, run):
+        config = run["configuration"]
+        return cls._identity({**run, **config, "execution": config}, config.get("target_agent_id"))
+
+    @classmethod
+    def _matches(cls, identity):
+        if identity is None:
+            return False
+        target_agent_id = identity.get("target_agent_id")
+        return cls._identity(janitor_builtins.resolve(ROLE, target_agent_id=target_agent_id), target_agent_id) == identity
+
+    def request(self, level, items, *, cwd=None, release=None, target_agent_id=None):
         if type(level) is not int or level not in range(5):
             raise ValueError("detail_level must be an integer from 0 to 4")
         if not isinstance(items, list) or len(items) > 8:
@@ -154,6 +187,13 @@ class ToolExplanations:
         release = [] if release is None else release
         if not isinstance(release, list) or len(release) > 64 or any(not isinstance(v, str) or not 1 <= len(v) <= 128 for v in release):
             raise ValueError("invalid released demand IDs")
+        if target_agent_id is not None and (not isinstance(target_agent_id, str) or not 1 <= len(target_agent_id) <= 128):
+            raise ValueError("invalid target agent ID")
+        selected = janitor_builtins.resolve(ROLE, target_agent_id=target_agent_id)
+        identity = self._identity(selected, target_agent_id)
+        configured = selected or janitor_builtins.get_builtin(ROLE)
+        model = configured["model"] if configured else ""
+        level = self._detail_level(configured, level)
         prepared = []
         ids = set()
         for item in items:
@@ -164,20 +204,21 @@ class ToolExplanations:
             if demand is not None and (not isinstance(demand, str) or not 1 <= len(demand) <= 128):
                 raise ValueError("invalid demand ID")
             activity = normalize_activity(item.get("activity"))
-            if level and cwd:
+            if level and identity and cwd:
                 scripts = script_evidence(activity, cwd)
                 if scripts:
                     activity["scripts"] = scripts
-            key = hashlib.sha256(json.dumps([MODEL, PROMPT_VERSION, level, activity], sort_keys=True).encode()).hexdigest()
-            prepared.append((item["id"], key, activity, demand))
+            key = hashlib.sha256(json.dumps([identity, PROMPT_VERSION, level, activity], sort_keys=True).encode()).hexdigest()
+            prepared.append((item["id"], key, {"activity": activity, "janitor": identity}, demand))
         with self._condition:
             if self._closed:
-                return {"model": MODEL, "detail_level": level, "items": [
+                return {"model": model, "detail_level": level, "items": [
                     {"id": item[0], "status": "disabled" if not level else "failed",
                      **({"reason": "service_stopping"} if level else {})} for item in prepared]}
-            response = durable_queue.request(level, prepared, release, self._debounce)
+            response = durable_queue.request(level, prepared, release, self._debounce,
+                                             guard=lambda connection: self._matches(identity))
             self._condition.notify()
-        return {"model": MODEL, "detail_level": level, "items": response}
+        return {"model": model, "detail_level": level, "items": response}
 
     def _work(self):
         while not self._closed:
@@ -196,15 +237,41 @@ class ToolExplanations:
                 with self._condition:
                     if self._closed:
                         return
+                    # Eligibility belongs to each queued target. A Host may
+                    # have only scoped subscribers and no global resolver.
+                    # Claiming still prunes expiry; stale/paused work is
+                    # discarded below before any Janitor/model admission.
                     batch = durable_queue.claim(self._owner)
                     if not batch:
                         self._condition.wait(timeout=.25)
                         continue
                 level = batch[0][1]
-                requests = [{"id": str(i + 1), "activity": entry[2]} for i, entry in enumerate(batch)]
+                identity = batch[0][2].get("janitor")
+                if not self._matches(identity):
+                    durable_queue.complete(self._owner, [(entry[0], {}) for entry in batch],
+                                           self._failure_ttl, guard=lambda connection: False)
+                    continue
+                request_hash = hashlib.sha256(json.dumps(sorted(entry[0] for entry in batch)).encode()).hexdigest()
+                run = janitor_builtins.begin_run(ROLE, uuid.uuid4().hex, context={
+                    "request_hash": request_hash, "item_count": len(batch), "detail_level": level},
+                    target_agent_id=identity.get("target_agent_id"))
+                if run is None:
+                    # Another admitted invocation owns the Janitor. Keep the
+                    # durable demand and retry without a tight claim loop.
+                    durable_queue.abandon(self._owner, delay=.25)
+                    continue
+                if self._run_identity(run) != identity or not janitor_builtins.claim_run(run["run_id"]):
+                    janitor_builtins.complete_run(run["run_id"], outcome="cancelled", result={"summary": "Explanation configuration changed before execution"})
+                    durable_queue.complete(self._owner, [(entry[0], {}) for entry in batch],
+                                           self._failure_ttl, guard=lambda connection: False)
+                    continue
+                requests = [{"id": str(i + 1), "activity": entry[2]["activity"]} for i, entry in enumerate(batch)]
                 started = time.monotonic()
                 try:
-                    translated = self._translate(level, requests)
+                    if not janitor_builtins.is_current(run["run_id"]):
+                        raise RuntimeError("Janitor configuration changed")
+                    translated = (self._translate(level, requests) if self._translate is not None
+                                  else self._run_codex(level, requests, run=run))
                     if set(translated) != {r["id"] for r in requests} or any(not isinstance(t, str) or not t.strip() or len(t) > 240 for t in translated.values()):
                         raise ValueError("invalid explanation response")
                     values = [{"status": "ready", "text": snippet(translated[r["id"]], 240).strip()} for r in requests]
@@ -213,12 +280,21 @@ class ToolExplanations:
                     reason = "timeout" if isinstance(error, subprocess.TimeoutExpired) else "codex_unavailable" if isinstance(error, FileNotFoundError) else "invalid_response" if isinstance(error, ValueError) else "translator_failed"
                     values = [{"status": "failed", "reason": reason} for _ in requests]
                     outcome = f"failed:{reason}"
-                log("toolExplanationsBatch", f"model={MODEL} level={level} count={len(batch)} outcome={outcome} elapsed_ms={int((time.monotonic() - started) * 1000)} queue_wait_ms={max(0, durable_queue.cache.now_ms() - batch[0][3] - int((time.monotonic() - started) * 1000))}")
+                log("toolExplanationsBatch", f"model={run['configuration']['model']} level={level} count={len(batch)} outcome={outcome} elapsed_ms={int((time.monotonic() - started) * 1000)} queue_wait_ms={max(0, durable_queue.cache.now_ms() - batch[0][3] - int((time.monotonic() - started) * 1000))}")
                 with self._condition:
                     if self._closed:
+                        janitor_builtins.complete_run(run["run_id"], outcome="cancelled", result={"summary": "Explanation service stopped"})
                         durable_queue.abandon(self._owner)
                         return
-                    durable_queue.complete(self._owner, [(entry[0], value) for entry,value in zip(batch,values)], self._failure_ttl)
+                    result = {"summary": "Generated tool explanations" if outcome == "ready" else "Tool explanation generation failed",
+                              "status": "ready" if outcome == "ready" else "failed", "item_count": len(batch)}
+                    if outcome != "ready":
+                        result["reason"] = reason
+                    durable_queue.complete(self._owner, [(entry[0], value) for entry,value in zip(batch,values)],
+                                           self._failure_ttl, guard=lambda connection: janitor_builtins.complete_run(
+                                               run["run_id"], outcome="completed" if outcome == "ready" else "failed",
+                                               result=result, error="" if outcome == "ready" else reason,
+                                               connection=connection))
         finally:
             db.close_local()
 
@@ -229,7 +305,10 @@ class ToolExplanations:
         except ProcessLookupError:
             pass
 
-    def _run_codex(self, level, items):
+    def _run_codex(self, level, items, *, run):
+        configuration = run["configuration"]
+        if (configuration["executor"], configuration["provider"], configuration["backend"]) != ("ephemeral", "codex", "codex"):
+            raise ValueError("unsupported tool explanation executor")
         with tempfile.TemporaryDirectory(prefix="clarp-explanations-") as directory:
             root = Path(directory)
             schema = {"type": "object", "properties": {"explanations": {"type": "array", "items": {
@@ -237,9 +316,14 @@ class ToolExplanations:
                 "required": ["id", "text"], "additionalProperties": False}}}, "required": ["explanations"], "additionalProperties": False}
             (root / "schema.json").write_text(json.dumps(schema))
             (root / "instructions.txt").write_text(REFINED_PROMPTS[str(level)])
-            args = ["codex", "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--model", MODEL,
+            args = ["codex", "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only",
                     "--json", "--color", "never", "--output-schema", str(root / "schema.json"), "--output-last-message", str(root / "answer.json")]
-            for setting in ['model_reasoning_effort="low"', 'approval_policy="never"', 'web_search="disabled"', 'project_doc_max_bytes=0', 'mcp_servers={}', f'model_instructions_file={json.dumps(str(root / "instructions.txt"))}']:
+            if configuration["model"]:
+                args.extend(["--model", configuration["model"]])
+            settings = ['approval_policy="never"', 'web_search="disabled"', 'project_doc_max_bytes=0', 'mcp_servers={}', f'model_instructions_file={json.dumps(str(root / "instructions.txt"))}']
+            if configuration["effort"]:
+                settings.append(f'model_reasoning_effort={json.dumps(configuration["effort"])}')
+            for setting in settings:
                 args.extend(["-c", setting])
             for feature in ["shell_tool", "unified_exec", "apps", "plugins", "hooks", "memories", "multi_agent", "multi_agent_v2", "browser_use", "computer_use", "image_generation", "view_image", "code_mode_host", "remote_plugin", "skill_search", "shell_snapshot", "goals", "sleep_tool"]:
                 args.extend(["--disable", feature])
@@ -248,6 +332,8 @@ class ToolExplanations:
             with self._condition:
                 if self._closed:
                     raise RuntimeError("closed")
+                if not janitor_builtins.is_current(run["run_id"]):
+                    raise RuntimeError("Janitor configuration changed")
                 process = subprocess.Popen(args, cwd=root, env={k: v for k, v in os.environ.items() if k in allowed}, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
                 self._process = process
             try:

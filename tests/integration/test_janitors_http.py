@@ -20,6 +20,99 @@ _spec.loader.exec_module(server)
 TOKEN = "isolated-janitor-http-test"
 
 
+def test_release_returns_sam_to_chat_without_archiving_or_losing_identity(host):
+    before = agents.get_by_agent_id(host.sam)
+    row = create(host)
+    status, result = request(host, "/janitors/sam/release", {
+        "expected_revision": row["revision"]})
+    assert status == 200, result
+    after = agents.get_by_agent_id(host.sam)
+    assert after["is_janitor"] == 0 and after["archived_at"] is None
+    for field in ("agent_id", "session", "persona", "voice_id", "model", "avatar_path"):
+        assert after[field] == before[field]
+    assert agents.interaction_capabilities(after)["can_chat"] is True
+    assert agents.get_focus() == host.theo
+    assert request(host, "/janitors")[1]["janitors"] == []
+
+
+def test_release_requires_auth_and_current_revision(host):
+    row = create(host)
+    body = {"expected_revision": row["revision"]}
+    assert request(host, "/janitors/sam/release", body, auth=False)[0] == 401
+    status, result = request(host, "/janitors/sam/release", {"expected_revision": row["revision"] + 1})
+    assert status == 409, result
+    assert agents.get_by_agent_id(host.sam)["is_janitor"] == 1
+
+
+def test_release_refuses_enabled_maintenance_until_paused(host):
+    row = enable(host, create(host))
+    status, result = request(host, "/janitors/sam/release", {"expected_revision": row["revision"]})
+    assert status == 409, result
+    assert agents.get_by_agent_id(host.sam)["is_janitor"] == 1
+
+
+def test_ephemeral_janitor_does_not_require_task_agent_runtime(host):
+    agents.update_agent(host.sam, backend="codex")
+    host.ctx.runtime_client = SimpleNamespace(status=lambda: {"capabilities": {}})
+    status, result = request(host, "/janitors", {
+        "session": "sam", "template_id": "tool-explainer"})
+    assert status == 200, result
+    row = result["janitor"]
+    status, result = request(host, "/janitors/sam/enabled", {
+        "enabled": True, "expected_revision": row["revision"]})
+    assert status == 200 and result["janitor"]["enabled"], result
+
+
+def test_builtin_options_are_exposed_and_manual_detail_change_pauses_the_worker(host):
+    from lib import janitor_builtins
+    janitor_builtins.ensure_builtins(cwd=str(host.path))
+    row = janitor_builtins.get_builtin("tool-explainer")
+    status, response = request(host, f'/janitors/{row["session"]}/configure', {
+        "expected_revision": row["revision"], "options": {"detail_level": 4}})
+    assert status == 200, response
+    assert response["janitor"]["options"]["detail_level"] == 4
+    assert response["janitor"]["enabled"] is False
+    _, catalog = request(host, "/janitors")
+    template = next(t for t in catalog["templates"] if t["id"] == "tool-explainer")
+    option = next(o for o in template["options"] if o["key"] == "detail_level")
+    assert {choice["value"] for choice in option["choices"]} == set(range(5))
+    assert any(provider["id"] == "codex" for provider in catalog["providers"])
+
+
+def test_legacy_detail_adoption_preserves_enabled_and_first_device_choice(host):
+    from lib import janitor_builtins
+    janitor_builtins.ensure_builtins(cwd=str(host.path))
+    row = janitor_builtins.get_builtin("tool-explainer")
+    path = f'/janitors/{row["session"]}/adopt-options'
+    body = {"expected_revision": row["revision"], "options": {"detail_level": 3}}
+    assert request(host, path, body, auth=False)[0] == 401
+    status, response = request(host, path, body)
+    assert status == 200, response
+    assert response["janitor"]["options"]["detail_level"] == 3
+    assert response["janitor"]["enabled"] is row["enabled"]
+    body["options"]["detail_level"] = 1
+    status, response = request(host, path, body)
+    assert status == 200 and response["janitor"]["options"]["detail_level"] == 3
+
+
+def test_release_http_handoff_preserves_old_receipt_and_keeps_successor_paused(host):
+    row = enable(host, create(host))
+    run, context = run_for(host, row)
+    janitors.review(run["run_id"], "theo", context["state_id"], "changed", "Voice routing", "Verified task")
+    janitors.finish_run(run["run_id"])
+    paused = janitors.set_enabled("sam", row["revision"], False)
+    rivet = agents.create_agent(persona="Rivet", voice_id="", cwd=str(host.path), session="rivet", backend="codex")
+    successor = janitors.create("rivet")
+    status, result = request(host, "/janitors/sam/release", {
+        "expected_revision": paused["revision"], "successor_session": "rivet",
+        "successor_revision": successor["revision"]})
+    assert status == 200, result
+    assert result["janitor"]["ownership_handoff"]["transferred_count"] == 1
+    owner = db.conn().execute("SELECT owner_agent_id,run_id FROM janitor_label_ownership WHERE target_agent_id=?", (host.theo,)).fetchone()
+    assert tuple(owner) == (rivet, run["run_id"])
+    assert not janitors.get("rivet")["enabled"]
+
+
 @pytest.fixture
 def host(tmp_path):
     theo = agents.create_agent(persona="Theo", voice_id="V1", cwd=str(tmp_path), session="theo")
@@ -82,7 +175,8 @@ def test_empty_list_auth_and_paused_conversion_preserve_identity_and_focus(host)
     assert request(host, "/janitors", auth=False)[0] == 401
     status, body = request(host, "/janitors")
     assert status == 200 and body["janitors"] == []
-    assert {t["trigger_id"] for t in body["triggers"]} == {"agent-work-completed", "schedule", "active-interval"}
+    assert {t["trigger_id"] for t in body["triggers"]} == {
+        "agent-work-completed", "schedule", "routing-requested", "tool-explanation-requested", "active-interval"}
     row = create(host)
     assert row["agent_id"] == host.sam and row["enabled"] is False
     assert agents.get_focus() == host.theo

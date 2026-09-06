@@ -167,6 +167,10 @@ class JanitorRunner:
         try:
             dispatched = 0
             for attachment in self.store.attachments(enabled_only=True):
+                if attachment.get("template_id", "task-labels") != "task-labels":
+                    # Demand workers are invoked by their request path and
+                    # must never enter the ordinary chat/label turn queue.
+                    continue
                 try:
                     dispatched += self._attachment_tick(attachment, self.clock())
                 except Exception:

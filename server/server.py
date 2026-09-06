@@ -1968,7 +1968,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, b'{"error":"agent not found"}', "application/json")
         try:
             result = self.ctx.tool_explanations.request(
-                data.get("detail_level"), data.get("items"), cwd=agent.get("cwd"), release=data.get("release"))
+                data.get("detail_level"), data.get("items"), cwd=agent.get("cwd"),
+                release=data.get("release"), target_agent_id=agent["agent_id"])
         except ValueError as error:
             return self._send(400, json.dumps({"error": str(error)}).encode(), "application/json")
         self._send(200, json.dumps(result).encode(), "application/json")
@@ -4931,6 +4932,8 @@ def build_server(ctx: ServerContext, port: int,
     # before request threads start so every read model remains read-only.
     from lib import personas
     personas.ensure_builtins()
+    from lib.janitor_bootstrap import initialize as initialize_janitors
+    initialize_janitors(cwd=str(ctx.root))
 
     listener_addr = bind_addr or BIND_ADDR
     if listener_addr not in {"127.0.0.1", "::1", "localhost"} and not ctx.auth_token:
