@@ -16,8 +16,9 @@ ideas, a task backlog, or an approval queue.
 | [0006](0006-work-at-real-destinations.md) | Accepted | Agents act at real files, directories and repositories; retire action-category stations. |
 | [0007](0007-workflow-relevance-and-living-relations.md) | Accepted direction; encodings exploratory | Emphasize meaningful work, compact ownership regions, fluid interactions and persistent relationships. |
 | [0008](0008-recognizable-identity-and-information-economy.md) | Accepted; sizing resolved by 0009 | Prefer recognizable identities and useful, nonredundant labels. |
-| [0009](0009-overall-map-without-focus.md) | Accepted | Flow is an overall map with common scale; selection inspects, expansion is deferred. |
+| [0009](0009-overall-map-without-focus.md) | Accepted | Flow is an overall map; selection inspects. Uniform sizing superseded by 0011. |
 | [0010](0010-mobile-map-navigation.md) | Accepted | Support phone and desktop viewports with touch navigation; remove the desktop size gate. |
+| [0011](0011-interpretive-craft-and-logical-groups.md) | Accepted | Interpret the owner’s taste; craft logical groups, meaningful differences and visible workflows rather than literal file containers. |
 
 The combined current direction is **The Lantern Works with agent avatars**, plus
 an optional **Agent cabinets** view. Preserve workshops, harbor, hierarchy and

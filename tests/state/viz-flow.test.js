@@ -32,13 +32,21 @@ it('has distinct successful and failed outcomes in the local demonstration',()=>
  expect(scene.events.filter(e=>e.action==='test').map(e=>e.outcome)).toEqual(['failed','succeeded']);
  expect(scene.events.find(e=>e.action==='push').remote_target).toBe('demo:remote');
 });
-it('shows all workspaces and agents at common scale and ignores selection for layout',()=>{
+it('shows all workspaces and agents without selection-driven layout',()=>{
  const scene=flowDemo(0);scene.entities.push({id:'other',label:'Other',kind:'repository',path:'/other'});
  for(let i=0;i<8;i++)scene.events.push({...scene.events[0],id:'extra'+i,agent_id:'agent'+i,agent:'Agent '+i,world_target:'other',workspace_target:'other'});
  const a=build(scene,null,7000),b=build(scene,'other',7000);
- expect(a.regions.map(r=>r.id)).toEqual(['demo:checkout','other']);
+ expect(a.regions.map(r=>r.id).sort()).toEqual(['demo:checkout','demo:service','other']);
  expect(a.actors.length).toBe(10);
- expect(new Set(a.regions.map(r=>r.rx+':'+r.ry)).size).toBe(1);
  expect(a.regions.map(r=>[r.x,r.y])).toEqual(b.regions.map(r=>[r.x,r.y]));
  expect(a.actors.map(r=>[r.x,r.y])).toEqual(b.actors.map(r=>[r.x,r.y]));
+});
+
+it('groups verified worktrees into projects without merging names or scaling by selection',()=>{
+ const scene=flowDemo(0);scene.entities[0].project_id='shared-git';scene.entities[0].main_path=scene.entities[0].path;
+ scene.entities.push({id:'copy',label:'Workflow example',kind:'repository',path:'/worktrees/feature',project_id:'shared-git',is_worktree:true},
+ {id:'unrelated',label:'Workflow example',kind:'repository',path:'/unrelated'});
+ const m=build(scene,null,7000),project=m.projects.find(p=>p.id==='shared-git');
+ expect(project.members.map(r=>r.id).sort()).toEqual(['copy','demo:checkout']);expect(m.projects).toHaveLength(3);
+ expect(m.regionMap.get('copy').rx).toBeLessThan(m.regionMap.get('demo:checkout').rx);
 });

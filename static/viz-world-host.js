@@ -35,7 +35,9 @@ const requestedView=new URLSearchParams(location.search).get('view');
 if(['world','cabinets','flow'].includes(requestedView))view=requestedView;
 const cameras={world:{...camera},cabinets:{...camera},flow:{...camera}};
 function selectProgram(data){
-  const next=view==='flow'?flowBase:view==='cabinets'?cabinetBase:(data?.program||worldBase);
+  const baseline=view==='flow'?flowBase:view==='cabinets'?cabinetBase:worldBase;
+  const current=data?.program;
+  const next=(current&&(current.view||'world')===view?current:data?.view_programs?.[view])||baseline;
   const key=view+':'+JSON.stringify(next);
   if(key===signature)return;
   failure='';recoveryAttempts=0;
@@ -132,7 +134,7 @@ async function load(){
     if(!failure){
       const state=data.learning||{};
       const rejected=state.last_result?.rejected?.[0]?.error;
-      learning.textContent=demoEnabled?'Workflow demo · synthetic sequence, not live activity':view==='flow'?'Live activity':state.designing ? (state.stage||'Astra is developing')+'…' :
+      learning.textContent=demoEnabled?'Workflow demo · synthetic sequence, not live activity':view==='flow'&&data.authoring_view!=='flow'?'Live activity':state.designing ? (state.stage||'Astra is developing')+'…' :
         rejected ? 'Development paused: '+rejected :
         state.enabled ? 'Autonomous development on · watching for new entities' :
         'Preview · autonomous development off';
@@ -155,7 +157,7 @@ liveButton.onclick=()=>{demoEnabled=false;demoButton.ariaPressed='false';if(live
 slider.oninput=()=>{replay();playing=false;playhead=tmin+(tmax-tmin)*Number(slider.value)/1000;};
 document.getElementById('play').onclick=()=>{replay();if(playhead>=tmax-1000)playhead=tmin;playing=!playing;};
 demoButton.onclick=()=>{
-  demoEnabled=!demoEnabled;demoButton.ariaPressed=String(demoEnabled);selected=null;
+  demoEnabled=!demoEnabled;demoButton.ariaPressed=String(demoEnabled);selected=null;document.getElementById('inspector').hidden=true;
   if(demoEnabled){
     demoStart=Date.now();demoScene=flowDemo(demoStart);scene=demoScene;tmin=demoStart;tmax=demoStart+41000;playhead=tmin;
     live=false;playing=true;liveButton.ariaPressed='false';

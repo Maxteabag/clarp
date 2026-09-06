@@ -16,17 +16,40 @@ def checkout(path):
     for root in [p,*p.parents]:
         marker=root/'.git'
         if not marker.exists(): continue
-        gitdir=marker
+        gitdir=marker;family=None;main_path=None
         try:
             if marker.is_file(): gitdir=(root/marker.read_text().strip().removeprefix('gitdir: ')).resolve()
             common=gitdir/'commondir'
             if common.exists(): gitdir=(gitdir/common.read_text().strip()).resolve()
+            family='git:'+str(gitdir.resolve());main_path=str(gitdir.parent) if gitdir.name=='.git' else None
             cfg=configparser.ConfigParser(interpolation=None);cfg.read(gitdir/'config')
             remote=cfg.get('remote "origin"','url',fallback='')
             name=gitdir.parent.name if gitdir.name=='.git' else root.name
         except (OSError,ValueError,configparser.Error): name=root.name;remote=''
-        return {'id':'checkout:'+str(root),'name':name,'path':str(root),'remote':remote}
+        return {'id':'checkout:'+str(root),'name':name,'path':str(root),'remote':remote,'project_id':family,'main_path':main_path,'is_worktree':marker.is_file()}
     return None
+
+
+def service_operations(raw):
+    """Only direct shell commands, never strings inside an embedded program."""
+    if '<<' in raw:return []
+    result=[]
+    for line in raw.splitlines():
+        try:words=shlex.split(line,comments=True)
+        except ValueError:continue
+        if words[:1]==['sudo']:
+            words=words[1:]
+            while words and words[0] in {'-n','--non-interactive'}:words=words[1:]
+        if not words or os.path.basename(words[0])!='systemctl':continue
+        args=words[1:];scope='user' if '--user' in args else 'system'
+        while args and args[0] in {'--user','--system','--no-pager','--quiet','-q'}:args=args[1:]
+        if not args or args[0] not in {'restart','start','stop','reload','status','is-active'}:continue
+        operation=args[0]
+        for unit in args[1:]:
+            if unit in {'&&',';','|','>','2>'}:break
+            if not re.fullmatch(r'[A-Za-z0-9_@.:-]+',unit) or unit.startswith('-'):continue
+            result.append({'unit':unit if '.' in unit else unit+'.service','scope':scope,'operation':operation})
+    return result[:12]
 
 
 def evidence(tool, inp, path, target, verb):
@@ -79,7 +102,7 @@ def evidence(tool, inp, path, target, verb):
     location=anchored[0] if anchored else (cwd if os.path.isabs(cwd) else None)
     repo=checkout(location) if location else None
     return {'raw':raw[:2000],'path':location,'paths':anchored[:40],'cwd':cwd or None,'checkout':repo,'action':action,
-            'recorded_target':target,'tool':tool,'scope':'target' if anchored else 'workspace' if location else 'unknown'}
+            'services':service_operations(raw),'recorded_target':target,'tool':tool,'scope':'target' if anchored else 'workspace' if location else 'unknown'}
 
 
 def build(events):
@@ -90,7 +113,7 @@ def build(events):
         return entities[id]
     add(hostid,label=host,kind='host',parent=None,purpose='The Computer running these agents')
     def repo_entity(repo):
-        rid=repo['id'];add(rid,label=repo['name'],kind='repository',parent=hostid,path=repo['path'],purpose='Local working checkout')
+        rid=repo['id'];add(rid,label=repo['name'],kind='repository',parent=hostid,path=repo['path'],purpose='Local working checkout',project_id=repo.get('project_id'),main_path=repo.get('main_path'),is_worktree=repo.get('is_worktree',False))
         m=re.search(r'github\.com[:/]([^/]+)/([^\s]+)',repo['remote'])
         remote=None
         if m:
@@ -133,7 +156,15 @@ def build(events):
                     remaining=[w for w in push_words[push_words.index('push')+1:] if not w.startswith('-')]
                     if remaining and remaining[0]!='origin':remote=None
         paths=fact.get('paths') or []
-        if action in {'commit','push','vcs','build','test'} and repo:
+        services=fact.get('services') or []
+        if services:
+            for service in services:
+                sid='service:'+host+':'+service['scope']+':'+service['unit']
+                add(sid,label=service['unit'].removesuffix('.service'),kind='service',parent=hostid,
+                    unit=service['unit'],scope=service['scope'],purpose='Observed systemd service')
+                targets.append(sid)
+            target=targets[-1];action=services[-1]['operation']
+        elif action in {'commit','push','vcs','build','test'} and repo:
             target=workspace
         elif path:
             for value in paths:
@@ -148,9 +179,10 @@ def build(events):
         else:
             target='unknown:'+ev['agent_id'];add(target,label=ev['agent'],kind='unresolved',parent=None,purpose='Current location unknown')
         entities[target]['events']+=1
-        facts.append({**ev,'world_target':target,'world_targets':targets or [target],'workspace_target':workspace,
+        operation_exact=len(fact.get('raw','').splitlines())==1 and not any(token in fact.get('raw','') for token in ['&&',';','|'])
+        facts.append({**ev,**({'outcome':'unknown'} if services and not operation_exact else {}),'world_target':target,'world_targets':targets or [target],'workspace_target':workspace,
                       'remote_target':remote if action=='push' else None,'remote_basis':'configured origin' if remote and action=='push' else None,
-                      'action':action,'location_scope':fact.get('scope','unknown')})
+                      'action':action,'operations':services,'location_scope':'target' if services else fact.get('scope','unknown')})
     return {'entities':list(entities.values()),'relations':relations,'events':facts,
             'coverage_keys':sorted({'entity:'+e['id'] for e in entities.values()}|{e['kind']+':'+str(e.get('extension','')) for e in entities.values()}|{'action:'+e['action'] for e in facts}),
             'host':host,'evidence_note':'Exact native runtime records supply cwd, tool targets and lifecycle. Workspace evidence never implies a specific file.'}

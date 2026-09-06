@@ -3,11 +3,12 @@
   "entry": "world.js",
   "files": [
     "avatar.js",
+    "craft.js",
     "effects.js",
     "github.js",
     "model.js",
     "world.js"
   ],
-  "source_digest": "981b673f6be0965a7e39ed5f652e727b5f277388a5718806ba5dab9097beda24",
-  "notes": "Overall workflow map with common workspace and agent scale, inspection without focus expansion, service marks and verified owner portraits."
+  "source_digest": "f218138fc2b29b1dd0b8199ec46e2969d85102636bd78d38ce7d0bc1e0402938",
+  "notes": "Interpretive project families, handcrafted connected working copies, service machinery and truthful traces; creative baseline rather than fixed visual rules."
 }

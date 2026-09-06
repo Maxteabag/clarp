@@ -15,7 +15,8 @@ try{
  const observedAgents=[...new Set(live.scene.events.filter(e=>e.ts<=live.playhead).map(e=>e.agent_id))].sort();
  assert.deepEqual(live.meta.agents.map(a=>a.id).sort(),observedAgents);
  for(const repo of live.scene.entities.filter(e=>e.kind==='repository'))assert(live.meta.workspaces.some(w=>w.id===repo.id));
- assert.equal(new Set(live.meta.workspaces.map(w=>w.rx+':'+w.ry)).size,1);
+ assert(live.meta.projects.length>0);
+ for(const p of live.meta.projects)assert(p.children.every(id=>live.meta.workspaces.some(w=>w.id===id)));
  assert.equal(live.meta.focusedRepository,undefined);
  const workspace=live.meta.workspaces.find(w=>{
   const y=(w.y-120)*live.camera.k+live.camera.y;return y>160&&y<900;
@@ -41,6 +42,7 @@ try{
  state=await seek(27);assert(state.meta.visualActions.some(a=>a.action==='create'&&a.state==='succeeded'));await page.screenshot({path:out+'/create.png'});
  state=await seek(31);assert(state.meta.visualActions.some(a=>a.action==='delete'&&a.state==='succeeded'));await page.screenshot({path:out+'/delete.png'});
  state=await seek(36);assert(state.meta.visualActions.some(a=>a.action==='push'));await page.screenshot({path:out+'/push.png'});
+ state=await seek(39.5);assert(state.meta.visualActions.some(a=>a.action==='restart'&&a.state==='running'));assert(state.meta.workspaces.some(w=>w.id==='demo:service'));await page.locator('#fit').click();await page.waitForTimeout(150);await page.screenshot({path:out+'/service-restart.png'});
  await page.locator('#flow-labels').click();assert((await page.evaluate(()=>window.fleetWorldSnapshot())).actionLabels);
  await page.locator('#live').click();await page.waitForFunction(()=>!window.fleetWorldSnapshot().demoEnabled&&window.fleetWorldSnapshot().scene.host!=='Workflow demo');
  await page.reload();await page.waitForFunction(()=>window.fleetWorldSnapshot?.().view==='flow'&&window.fleetWorldSnapshot().frames>5);

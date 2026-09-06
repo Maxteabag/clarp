@@ -51,6 +51,17 @@ Use as little redundant text as practical (0008). Prefer a recognizable service
 logo and the actual owner's profile image where they explain identity directly.
 Keep useful filenames, names and clarifications; avoid repeating information such
 as a textual JS badge beside a .js filename. Text is welcome when it adds meaning.
-Flow is an overall map (0009): show observed workspaces and agents at a common
-scale, with pan and zoom. Selection inspects; it does not enlarge a workspace or
+Flow is an overall map (0009, refined by 0011), with pan and zoom. Related
+workspaces can form one project; meaningful visual differences in shape and size
+are encouraged. Uniform workspace sizing is superseded. Selection inspects; it does not enlarge a workspace or
 shrink the rest. Expansion and focused interiors are deferred.
+
+
+The map is not a file explorer with decorative bubbles (0011). Treat the owner's
+examples as a way to understand his aesthetic judgment, never as limits or a
+literal task list. Invent logical groups, differentiated forms, handcrafted
+detail and expressive workflows that communicate useful information at a glance.
+Make independent artistic decisions. A folder, service, project and working copy
+may call for different mechanisms. No single metric or hierarchy must dictate
+size or placement. Show completed traces as traces, running work as running work,
+and uncertainty honestly. Existing blandness is not a concept to preserve.
