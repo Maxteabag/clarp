@@ -210,6 +210,8 @@ int main(int argc, char* argv[]) {
                         controller->loadTurnQueue(session);
                     }
                 }
+                if (screenshotView == QStringLiteral("quickSwitcher"))
+                    view->setProperty("query", qEnvironmentVariable("CLARP_SCREENSHOT_QUERY"));
                 view->setProperty("visible", true);
             }
         });
