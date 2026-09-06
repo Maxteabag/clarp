@@ -33,6 +33,18 @@ def test_catalog_exposes_distinct_effects_and_reusable_demand_triggers():
         assert triggers[tid]["version"] == 1
 
 
+@pytest.mark.parametrize("role,patch", [("tool-explainer", {"detail_level": 4}), ("message-delegator", {"timeout_ms": 12000})])
+def test_builtin_reset_restores_options_and_keeps_identity_scope(role, patch):
+    original = enabled_role(role)
+    changed = janitors.configure(original["session"], original["revision"], options=patch)
+    reset = janitors.reset_defaults(changed["session"], changed["revision"])
+    assert reset["agent_id"] == original["agent_id"]
+    assert reset["scope"] == original["scope"]
+    assert not reset["enabled"]
+    expected = {item["key"]: item["default"] for item in janitors.template(role)["options"]}
+    assert all(reset["options"][key] == value for key, value in expected.items())
+
+
 def test_ensure_installs_real_stable_agents_once_and_preserves_existing_agents():
     sam = agents.create_agent(persona="Sam", voice_id="voice", cwd="/tmp", session="sam", model="chosen")
     before = agents.get_by_agent_id(sam)
