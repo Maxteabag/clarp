@@ -48,3 +48,16 @@ def test_trial_uses_requested_audience_without_changing_default():
             assert row["detail_level"] == level
         lab.trial("baseline", lab.fixtures()[:1], 0)
     assert observed == [1, 2, 3, 4, 3]
+
+
+def test_fresh_refinement_uses_identical_source_for_read_and_run():
+    import sys
+    from unittest.mock import patch
+    directory = Path(__file__).parents[2] / 'labs/explanations'
+    with patch.object(sys, 'path', [str(directory), *sys.path]):
+        spec = importlib.util.spec_from_file_location('fresh_refinement', directory / 'refined_all.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    assert module.CASES[0]['activity']['scripts'] == module.CASES[1]['activity']['scripts']
+    assert module.CASES[0]['activity']['command'] != module.CASES[1]['activity']['command']
+    assert set(module.REFINEMENTS) == {1, 2, 3, 4}
