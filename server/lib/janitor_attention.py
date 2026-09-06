@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 
-from . import artifacts, db
+from . import artifacts, db, janitor_builtins, janitors
 from .janitor_context import redact
 from .voice_markup import strip_hidden_blocks
 
@@ -21,16 +21,36 @@ _TERMINAL = "status IN ('completed','failed','cancelled')"
 _FAILED = "(status='failed' OR outcome='error')"
 
 
+def _valid_demand_receipt(config: dict, run) -> bool:
+    """A provider response is not recovery until the demand store accepts it."""
+    if config["template_id"] not in janitor_builtins.ROLES:
+        return False
+    try:
+        frozen = json.loads(run["configuration_json"])
+        result = janitor_builtins._metadata(json.loads(run["result_json"]))
+    except (ValueError, TypeError):
+        return False
+    return bool(
+        isinstance(frozen, dict) and frozen.get("executor") == "ephemeral"
+        and frozen.get("template_id") == config["template_id"]
+        and isinstance(result.get("summary"), str) and result["summary"].strip()
+    )
+
+
 def _episode(config: dict) -> tuple[str, dict | None, int]:
-    """A genuine successful review closes an episode, including dismissed ones."""
+    """A verified success closes an episode, including dismissed ones."""
     con = db.conn()
     identity = (config["agent_id"], config["generation"])
-    success = con.execute("""SELECT r.rowid AS sequence,r.* FROM janitor_runs r
+    candidates = con.execute("""SELECT r.rowid AS sequence,r.*,d.result_json FROM janitor_runs r
+        LEFT JOIN janitor_demand_results d ON d.run_id=r.run_id
         WHERE r.agent_id=? AND r.generation=? AND r.status='completed'
-          AND r.outcome IN ('changed','same_task')
+          AND ((r.outcome IN ('changed','same_task')
           AND EXISTS (SELECT 1 FROM janitor_effects e WHERE e.run_id=r.run_id
-                      AND e.outcome IN ('changed','same_task'))
-        ORDER BY r.finished_at DESC,r.rowid DESC LIMIT 1""", identity).fetchone()
+                      AND e.outcome IN ('changed','same_task')))
+            OR (r.outcome='completed' AND r.finished_at IS NOT NULL AND d.result_json IS NOT NULL))
+        ORDER BY r.finished_at DESC,r.rowid DESC""", identity)
+    success = next((run for run in candidates if run["outcome"] in {"changed", "same_task"}
+                    or _valid_demand_receipt(config, run)), None)
     boundary = success["run_id"] if success else "initial"
     reference = f"{PREFIX}{config['agent_id']}:{config['generation']}:{boundary}"
     latest = con.execute(f"""SELECT rowid AS sequence,* FROM janitor_runs
@@ -55,12 +75,22 @@ def _episode(config: dict) -> tuple[str, dict | None, int]:
 
 def _description(config, latest, count):
     name = strip_hidden_blocks(str(config["persona"] or config["session"]))[:80]
+    labels = config["template_id"] == "task-labels"
+    missing = ("Maintenance ended without all review receipts." if labels
+               else "Maintenance ended without a valid completion receipt.")
     diagnostic = strip_hidden_blocks(redact(str(latest.get("error") or
-        "Maintenance ended without all review receipts.")))
+        missing)))
     diagnostic = re.sub(r"<(think|analysis)\b[^>]*>.*?(?:</\1>|$)", "", diagnostic,
                         flags=re.IGNORECASE | re.DOTALL)
     diagnostic = " ".join(diagnostic.split())[:300]
-    summary = f"Task labels need attention after {count} failed reviews. Review the configuration or pause maintenance."
+    if labels:
+        summary = f"Task labels need attention after {count} failed reviews. Review the configuration or pause maintenance."
+    else:
+        try:
+            job = janitors.template(config["template_id"])["name"]
+        except janitors.JanitorError:
+            job = "Maintenance"
+        summary = f"{job} needs attention after {count} failed runs. Review the configuration or pause maintenance."
     return {
         "title": f"{name} needs attention",
         "summary": summary,
