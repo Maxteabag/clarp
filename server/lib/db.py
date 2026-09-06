@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 71
+_SCHEMA_VERSION = 72
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1309,6 +1309,41 @@ CREATE INDEX vocab_runs_trace ON vocab_runs(trace_id)
 """
 
 
+_EXPLANATION_CACHE_SCHEMA = """
+CREATE TABLE tool_explanation_cache (
+    cache_key TEXT PRIMARY KEY,
+    explanation TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX tool_explanation_cache_expiry ON tool_explanation_cache(expires_at);
+CREATE TABLE tool_explanation_jobs (
+    cache_key TEXT PRIMARY KEY,
+    detail_level INTEGER NOT NULL,
+    activity_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    available_at INTEGER NOT NULL,
+    owner TEXT NOT NULL DEFAULT '',
+    lease_until INTEGER NOT NULL DEFAULT 0,
+    failure_reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX tool_explanation_jobs_queue ON tool_explanation_jobs(status, available_at, created_at);
+CREATE TABLE tool_explanation_demands (
+    cache_key TEXT NOT NULL REFERENCES tool_explanation_jobs(cache_key) ON DELETE CASCADE,
+    demand_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY(cache_key, demand_id)
+);
+CREATE INDEX tool_explanation_demands_owner ON tool_explanation_demands(demand_id);
+CREATE TABLE tool_explanation_releases (
+    demand_id TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
+"""
+_SCHEMA_SQL += _EXPLANATION_CACHE_SCHEMA
+
+
 def _migrate(con: sqlite3.Connection) -> None:
     """Bring the DB up to the current schema version.
 
@@ -1348,6 +1383,10 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v70(con)
             if version < 71:
                 _migrate_to_v71(con)
+            if version < 72:
+                for statement in _EXPLANATION_CACHE_SCHEMA.split(";"):
+                    if statement.strip():
+                        con.execute(statement)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
