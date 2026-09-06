@@ -20,6 +20,36 @@ def test_atomic_claim_completion_and_payload_removal(monkeypatch):
     assert cache.get('digest')[1]==1000+86400000
 
 
+def test_completion_guard_shares_publication_transaction_and_rejects_stale_output():
+    queue.request(3,prepared(),[],0)
+    queue.claim('worker')
+    checked=[]
+    def guard(connection):
+        checked.append(connection.in_transaction)
+        return False
+    assert not queue.complete('worker',[('digest',{'status':'ready','text':'Stale.'})],60,guard=guard)
+    assert checked == [True]
+    assert cache.get('digest') is None
+    assert conn().execute('SELECT count(*) FROM tool_explanation_jobs').fetchone()[0] == 0
+
+
+def test_cache_failure_rolls_back_the_completion_receipt():
+    import sqlite3
+    import pytest
+    queue.request(3,prepared(),[],0)
+    queue.claim('worker')
+    conn().execute('CREATE TABLE guarded_receipts(value TEXT)')
+    conn().execute("CREATE TRIGGER reject_cache BEFORE INSERT ON tool_explanation_cache BEGIN SELECT RAISE(ABORT,'cache unavailable'); END")
+    def guard(connection):
+        connection.execute("INSERT INTO guarded_receipts VALUES('completed')")
+        return True
+    with pytest.raises(sqlite3.IntegrityError, match='cache unavailable'):
+        queue.complete('worker',[('digest',{'status':'ready','text':'Ready.'})],60,guard=guard)
+    assert conn().execute('SELECT count(*) FROM guarded_receipts').fetchone()[0] == 0
+    assert conn().execute('SELECT status FROM tool_explanation_jobs').fetchone()[0] == 'running'
+    assert cache.get('digest') is None
+
+
 def test_dead_worker_recovery_and_stale_completion_fence(monkeypatch):
     now=[1000]
     monkeypatch.setattr(cache,'now_ms',lambda:now[0])
@@ -61,6 +91,8 @@ def test_queued_job_survives_reopen_and_failure_discards_payload(monkeypatch):
 
 def test_ready_answer_survives_worker_restart_without_inference():
     from lib.tool_explanations import ToolExplanations
+    from lib import janitor_builtins
+    janitor_builtins.ensure_builtins(cwd='/tmp')
     import time
     activity=[{'id':'1','activity':{'command':'ls'}}]
     with ToolExplanations(translate=lambda level,items:{'1':'List the files.'},debounce=0) as first:
