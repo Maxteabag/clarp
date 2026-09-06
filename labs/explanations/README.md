@@ -41,6 +41,17 @@ python3 labs/explanations/analyze.py labs/explanations/results
 
 ### Across all audience levels
 
+For fresh invoice examples comparing CURRENT/REFINED across every audience:
+
+```sh
+python3 labs/explanations/refined_all.py --output /tmp/fresh.jsonl
+python3 labs/explanations/refined_all.py --live --output /tmp/fresh.jsonl
+python3 labs/explanations/refined_all.py --render /tmp/fresh.jsonl --output /tmp/fresh.md
+```
+
+This makes 24 calls on four matched new activities; the refinement is
+audience-specific and Developer is still a zero-inference bypass.
+
 For a six-call level-4-only refinement, add `--grandma-refinement` to `levels.py`.
 See `GRANDMA.md`. Aggregate by exact prompt hash as well as label and audience;
 the same candidate label may refer to different instruction revisions.
