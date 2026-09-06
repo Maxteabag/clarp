@@ -1,4 +1,5 @@
 #include "models/ConversationPresentationModel.h"
+#include <QStandardItemModel>
 #include "app/AppController.h"
 #include "app/CredentialStore.h"
 #include "app/TranscriptCache.h"
@@ -605,6 +606,7 @@ class NativeCoreTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void readyModePreservesActivityAndHidesOnlyProvisionalBody();
     void idleContactStartsFreshWithSavedDefaults();
     void redesignedRosterFiltersWithoutMutatingSource();
     void circularPortraitsAreBoundedAndAntialiased();
@@ -684,6 +686,50 @@ void NativeCoreTest::readyPresentationRetainsCanonicalStreamAndRevealsFinal() {
         QVERIFY(restored.showWhenReady());
         controller.setShowWhenReady(original);
     }
+}
+
+void NativeCoreTest::readyModePreservesActivityAndHidesOnlyProvisionalBody() {
+    QStandardItemModel source;
+    const QVariantList tools{QVariantMap{{QStringLiteral("name"), QStringLiteral("Bash")}}};
+    const QVariantList cells{QVariantMap{{QStringLiteral("kind"), QStringLiteral("command")}}};
+    auto* live = new QStandardItem;
+    live->setData(QStringLiteral("assistant"), ConversationModel::AuthorRole);
+    live->setData(QStringLiteral("live"), ConversationModel::KindRole);
+    live->setData(QStringLiteral("Unfinished answer"), ConversationModel::BodyRole);
+    live->setData(tools, ConversationModel::ToolsRole);
+    live->setData(cells, ConversationModel::DisplayCellsRole);
+    live->setData(1, ConversationModel::ActivityCountRole);
+    live->setData(true, ConversationModel::ToolDetailsAvailableRole);
+    source.appendRow(live);
+    auto* activity = new QStandardItem;
+    activity->setData(true, ConversationModel::ActivityRole);
+    activity->setData(QStringLiteral("Bash"), ConversationModel::ToolNameRole);
+    activity->setData(QStringLiteral("Search project files"), ConversationModel::BodyRole);
+    source.appendRow(activity);
+    ConversationPresentationModel view;
+    view.setSourceModel(&source);
+    view.setShowWhenReady(true);
+    QCOMPARE(view.rowCount(), 2);
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::BodyRole).toString(), QString{});
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::ToolsRole).toList(), tools);
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::DisplayCellsRole).toList(), cells);
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::ActivityCountRole).toInt(), 1);
+    QVERIFY(view.data(view.index(0, 0), ConversationModel::ToolDetailsAvailableRole).toBool());
+    QCOMPARE(view.data(view.index(1, 0), ConversationModel::BodyRole).toString(), QStringLiteral("Search project files"));
+    view.setShowWhenReady(false);
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::BodyRole).toString(), QStringLiteral("Unfinished answer"));
+    view.setShowWhenReady(true);
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::BodyRole).toString(), QString{});
+    live->setData(QStringLiteral("assistant"), ConversationModel::KindRole);
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::BodyRole).toString(), QStringLiteral("Unfinished answer"));
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::ToolsRole).toList(), tools);
+    live->setData(QString{}, ConversationModel::BodyRole);
+    live->setData(QVariantList{}, ConversationModel::ToolsRole);
+    live->setData(QVariantList{}, ConversationModel::DisplayCellsRole);
+    QCOMPARE(view.rowCount(), 2); // Lazy activity details remain discoverable without answer text.
+    QVERIFY(view.data(view.index(0, 0), ConversationModel::ToolDetailsAvailableRole).toBool());
+    view.setShowWhenReady(false);
+    QCOMPARE(view.rowCount(), 2);
 }
 
 void NativeCoreTest::nextAttentionCyclesWaitingUnreadAndPending() {

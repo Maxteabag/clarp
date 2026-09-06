@@ -250,7 +250,7 @@ class AppController : public QObject {
                                  const QString& effort, const QString& replaceSession = {},
                                  const QString& mode = {}, const QString& pastSessionId = {},
                                  const QVariantList& mcpServers = {});
-    Q_INVOKABLE QString nextAttentionSession() const;
+    Q_INVOKABLE [[nodiscard]] QString nextAttentionSession() const;
     Q_INVOKABLE void releaseAgent(const QString& session);
     Q_INVOKABLE void setAgentHeartbeat(const QString& session, bool enabled);
     Q_INVOKABLE void setAgentDreaming(const QString& session, bool enabled);
