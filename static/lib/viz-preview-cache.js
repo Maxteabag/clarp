@@ -1,12 +1,14 @@
 // Host-owned artifact previews. Only recorded media routes are fetched, once,
 // resized to a small thumbnail and handed to the sandbox as inert image blobs.
 // Generated source never receives a URL or network access.
+const MAX_BYTES=8*1024*1024;
+const MEDIA_ROUTE=/^\/media\/[A-Za-z0-9_-]{4,80}$/;
 export const PREVIEW_SIZE={width:192,height:144};
 export class PreviewCache {
   constructor(onchange,fetcher=fetch,limit=24){this.entries=new Map();this.onchange=onchange;this.fetcher=(...args)=>fetcher(...args);this.limit=limit;}
   blobs(){return Object.fromEntries([...this.entries].filter(([,e])=>e.blob).map(([id,e])=>[id,e.blob]));}
   async update(previews){
-    const wanted=previews.filter(p=>p&&typeof p.id==='string'&&typeof p.url==='string'&&p.url.startsWith('/media/')).slice(-this.limit);
+    const wanted=previews.filter(p=>p&&typeof p.id==='string'&&typeof p.url==='string'&&MEDIA_ROUTE.test(p.url)).slice(-this.limit);
     const ids=new Set(wanted.map(p=>p.id));let removed=false;
     for(const id of this.entries.keys())if(!ids.has(id)){this.entries.delete(id);removed=true;}
     if(removed)this.onchange(this.blobs());
@@ -15,11 +17,20 @@ export class PreviewCache {
       if(old?.url===preview.url&&(old.blob||Date.now()<old.retryAt))return;
       const entry={url:preview.url,blob:null,retryAt:Date.now()+120000};this.entries.set(preview.id,entry);
       try{
-        const response=await this.fetcher(preview.url,{credentials:'same-origin'});
+        const response=await this.fetcher(preview.url,{credentials:'same-origin',signal:AbortSignal.timeout(10000)});
         if(!response.ok)throw Error('Preview unavailable');
-        const blob=await response.blob();
+        if(Number(response.headers?.get('content-length'))>MAX_BYTES)throw Error('Preview too large');
+        let blob;
+        if(response.body?.getReader){
+          const reader=response.body.getReader(),chunks=[];let size=0;
+          try{while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;
+            if(size>MAX_BYTES){await reader.cancel();throw Error('Preview too large');}chunks.push(value);}}
+          finally{reader.releaseLock();}
+          blob=new Blob(chunks,{type:response.headers.get('content-type')||''});
+        }else blob=await response.blob();
+        if(blob.size>MAX_BYTES)throw Error('Preview too large');
         if(!blob.type.startsWith('image/'))throw Error('Not an image');
-        const image=await createImageBitmap(blob);
+        const image=await createImageBitmap(blob,{resizeWidth:384,resizeHeight:288,resizeQuality:'medium'});
         try{entry.blob=await thumbnail(image);}finally{image.close();}
         if(this.entries.get(preview.id)===entry)this.onchange(this.blobs());
       }catch{/* The slate keeps its type glyph until a preview arrives or retries. */}
