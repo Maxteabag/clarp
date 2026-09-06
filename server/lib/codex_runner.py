@@ -169,10 +169,7 @@ def persona_identity_instruction(persona: str, session: str = "") -> str:
     if session:
         identity = (
             f"{identity} Use the installed `clarp-background-jobs` skill for "
-            f"work that continues after your final response. Never set a visible "
-            f"status for foreground analysis, tool calls, or builds you are "
-            f"awaiting in the current turn. Detached statuses must be 2-3 words "
-            f"and under 20 characters."
+            f"work that continues after your final response."
         )
     return identity
 
