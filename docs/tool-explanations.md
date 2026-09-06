@@ -1,5 +1,14 @@
 # Shared tool explanations
 
+Translated levels use the user-selected **refined-low** instructions from the
+three-column Spark experiment (lab commit `ae97244`). The exact combined prompts
+are in `server/lib/tool_explanation_prompts.json`, with regression SHA-256 checks
+against the recorded experiment. Each audience has its own examples and wording
+rules; Developer remains raw and never starts inference. The model stays
+`gpt-5.3-codex-spark` with low reasoning, not medium. Cache prompt version is 2.
+This is a shared Host policy: desktop/iOS keep their existing per-device detail
+settings. Updating source on main does not itself update a running Host.
+
 Opt-in presentation only. Developer (0) never invokes a model. Technical (1),
 Balanced (2), Plain English (3), and Grandma (4) use distinct audience policies
 with `gpt-5.3-codex-spark`, low effort. Client preferences are per device, not a
