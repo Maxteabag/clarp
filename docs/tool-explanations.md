@@ -1,5 +1,31 @@
 # Shared tool explanations
 
+## Viewport demand
+
+New clients request only tool views intersecting the conversation viewport,
+after 180ms dwell. Mounted offscreen delegates are not demand. This first version
+has **no speculative prefetch buffer**. Cached answers remain available when a
+row returns; raw data is still hidden while its explanation is pending.
+
+Each request item may include a random `demand_id`. Clients refresh it while
+polling; the Host expires queued demand after five seconds without renewal.
+Send `items: []` and `release: ["demand-id"]` to release a departed view. Release
+affects only that token. Queued work disappears only after every requesting view
+has released/expired. Running model batches finish and populate the shared cache.
+Two panes on desktop share a local reference count; phones use separate UUIDs.
+Late requests for released tokens are fenced by bounded two-minute tombstones.
+Legacy clients without demand IDs retain their existing behavior.
+
+Desktop checks mapped card coordinates against the transcript ListView every
+80ms while narration is enabled, including minimized-window suppression. iOS uses
+one shared 100ms visibility sampler for mounted labels, intersects every clipping
+ancestor, and suppresses requests outside the active scene. It cancels the label
+task on exit and sends a separate best-effort release; Host expiry covers loss
+of connectivity. Visibility changes do not rewrite transcripts or move scroll.
+
+Tests cover offscreen/dwell/re-entry geometry, shared view ownership, queued
+expiry, released-token races, and completion of already running batches.
+
 Translated levels use the user-selected **refined-low** instructions from the
 three-column Spark experiment (lab commit `ae97244`). The exact combined prompts
 are in `server/lib/tool_explanation_prompts.json`, with regression SHA-256 checks

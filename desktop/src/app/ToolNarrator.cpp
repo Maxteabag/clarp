@@ -12,6 +12,7 @@
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <QUuid>
 #include <algorithm>
 #include <utility>
 #ifdef Q_OS_UNIX
@@ -155,6 +156,8 @@ void ToolNarrator::setApiClient(ApiClient* api) {
         if (rows.size() != m_remoteItems.size()) { fail(QStringLiteral("Invalid Host explanation response.")); return; }
         for (const auto& item : m_remoteItems) {
             const auto id = item.toObject().value(QStringLiteral("id")).toString();
+            const auto demand = item.toObject().value(QStringLiteral("demand_id")).toString();
+            if (!demand.isEmpty() && m_demandIds.value(id) != demand) continue;
             const auto row = std::find_if(rows.begin(), rows.end(), [&id](const QJsonValue& v) {
                 return v.toObject().value(QStringLiteral("id")).toString() == id;
             });
@@ -198,6 +201,37 @@ void ToolNarrator::pollRemote() {
         {QStringLiteral("items"), m_remoteItems}});
 }
 
+void ToolNarrator::acquireView(QObject* owner, const QVariantMap& activity) {
+    if (owner == nullptr || !m_enabled) return;
+    const auto id = key(payload(activity));
+    if (m_viewKeys.value(owner) != id) {
+        releaseView(owner);
+        m_viewKeys.insert(owner, id);
+        if (!m_demandIds.contains(id))
+            m_demandIds.insert(id, QUuid::createUuid().toString(QUuid::WithoutBraces));
+    }
+    request(activity);
+}
+
+void ToolNarrator::releaseView(QObject* owner) {
+    const auto id = m_viewKeys.take(owner);
+    if (id.isEmpty() || m_viewKeys.values().contains(id)) return;
+    const auto demand = m_demandIds.take(id);
+    if (m_api != nullptr && !demand.isEmpty()) {
+        QString session;
+        for (const auto& item : m_remoteItems) {
+            if (item.toObject().value(QStringLiteral("id")).toString() == id) session = m_remoteSession;
+        }
+        if (!session.isEmpty()) m_api->postJson(QStringLiteral("explanation-release"), QStringLiteral("/tool-explanations"), {
+            {QStringLiteral("session"), session}, {QStringLiteral("detail_level"), m_detailLevel},
+            {QStringLiteral("items"), QJsonArray{}}, {QStringLiteral("release"), QJsonArray{demand}}});
+    }
+    for (qsizetype i=m_queue.size(); i>0; --i)
+        if (key(m_queue.at(i-1)) == id) m_queue.removeAt(i-1);
+    m_enqueuedAt.remove(id);
+    if (!m_cache.contains(id)) m_requested.remove(id);
+}
+
 void ToolNarrator::startRemoteBatch() {
     if (!m_remoteItems.isEmpty()) return;
     m_remoteSession = QJsonDocument::fromJson(m_queue.head()).object().value(QStringLiteral("_session")).toString();
@@ -212,6 +246,11 @@ void ToolNarrator::startRemoteBatch() {
         activity.remove(QStringLiteral("_session"));
         m_enqueuedAt.remove(key(bytes));
         m_remoteItems.append(QJsonObject{{QStringLiteral("id"), key(bytes)}, {QStringLiteral("activity"), activity}});
+        if (m_demandIds.contains(key(bytes))) {
+            auto item = m_remoteItems.last().toObject();
+            item.insert(QStringLiteral("demand_id"), m_demandIds.value(key(bytes)));
+            m_remoteItems.replace(m_remoteItems.size()-1, item);
+        }
     }
     m_remoteTag = QStringLiteral("tool-explanations:%1").arg(++m_remoteGeneration);
     m_timeout.start(65'000);
@@ -289,6 +328,7 @@ void ToolNarrator::setEnabled(bool enabled) {
 void ToolNarrator::setDetailLevel(int level) {
     level = std::clamp(level, 0, 4);
     if (m_detailLevel == level) return;
+    for (auto* owner : m_viewKeys.keys()) releaseView(owner);
     const bool wasEnabled = m_enabled;
     for (const auto& failed : m_cache.keys(QStringLiteral("Explanation unavailable"))) {
         m_cache.remove(failed);
@@ -316,6 +356,7 @@ void ToolNarrator::setDetailLevel(int level) {
 }
 
 void ToolNarrator::reset() {
+    for (auto* owner : m_viewKeys.keys()) releaseView(owner);
     m_debounce.stop();
     stopProcess();
     m_queue.clear();
