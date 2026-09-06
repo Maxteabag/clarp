@@ -10,6 +10,8 @@ _pending = OrderedDict()
 _failed_until = {}
 _active = ''
 _running = False
+_last_result = None
+_stage = ''
 
 
 def offer(clusters: list[dict]) -> dict:
@@ -29,16 +31,16 @@ def offer(clusters: list[dict]) -> dict:
         if _pending and not _running:
             _running = True
             threading.Thread(target=_work, name='viz-author', daemon=True).start()
-        return {'designing': _active, 'queued': list(_pending)}
+        return {'enabled': True, 'designing': _active, 'stage': _stage, 'queued': list(_pending), 'last_result': _last_result}
 
 
 def status() -> dict:
     with _lock:
-        return {'designing': _active, 'queued': list(_pending)}
+        return {'enabled': True, 'designing': _active, 'stage': _stage, 'queued': list(_pending), 'last_result': _last_result}
 
 
 def _work():
-    global _active, _running
+    global _active, _running, _last_result, _stage
     while True:
         with _lock:
             if not _pending:
@@ -46,11 +48,14 @@ def _work():
                 _running = False
                 return
             _active, cluster = _pending.popitem(last=False)
+            _stage = 'Checking novelty'
         try:
             result = _develop_scene(cluster) if 'scene' in cluster else viz_rule_author.learn([cluster], limit=1, supersede=cluster.get('supersede'))
         except Exception as error:
             result = {'rejected': [{'error': str(error)}]}
         with _lock:
+            _last_result = {**result, 'at': int(time.time()*1000)}
+            _stage = ''
             if result['rejected']:
                 _failed_until[_active] = time.monotonic() + 600
                 if len(_failed_until) > 500:
@@ -88,6 +93,7 @@ def offer_scene(scene: dict, force=False, reason='New entities or interactions d
 
 
 def _develop_scene(cluster: dict) -> dict:
+    global _stage
     import json
     scene=cluster['scene'];library=viz_library.load()
     novel=sorted(set(scene.get('coverage_keys',[]))-set(library.get('scene_coverage',[])))
@@ -105,4 +111,6 @@ def _develop_scene(cluster: dict) -> dict:
             updated=viz_library.apply_program(library['program'],library['revision'],'Spark identified reusable visual software',scene.get('coverage_keys',[]))
             return {'applied':[updated['decisions'][-1]['id']],'rejected':[]}
         if answer.get('verdict')!='NOVEL':raise ValueError('Invalid visual triage')
+    with _lock:
+        _stage = 'Astra developing'
     return viz_rule_author.evolve_world(scene,cluster['example'])

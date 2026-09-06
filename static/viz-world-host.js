@@ -40,8 +40,14 @@ async function load(){
     }
     tmin=scene.events[0]?.ts||Date.now();tmax=Math.max(Date.now(),scene.events.at(-1)?.ts||0);
     if(live)playhead=tmax;
-    if(!failure)learning.textContent=data.learning?.designing?'Astra is developing '+data.learning.designing+'…':
-      next?'Autonomous world · '+(next.title||'new source revision'):base.title+' · drag to explore / scroll to enter';
+    if(!failure){
+      const state=data.learning||{};
+      const rejected=state.last_result?.rejected?.[0]?.error;
+      learning.textContent=state.designing ? (state.stage||'Astra is developing')+'…' :
+        rejected ? 'Development paused: '+rejected :
+        state.enabled ? 'Autonomous development on · watching for new entities' :
+        'Preview · autonomous development off';
+    }
   }catch(error){learning.textContent=error.message;}
   finally{loading=false;}
 }
