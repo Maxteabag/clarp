@@ -14,3 +14,5 @@ textual>=8.2.8,<9
 # machines often provide it transitively; clean images do not.
 websocket-client>=1.8
 zeroconf>=0.150.4,<1
+
+jsonschema>=4.23,<5

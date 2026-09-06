@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 73
+_SCHEMA_VERSION = 74
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1343,6 +1343,8 @@ CREATE TABLE tool_explanation_releases (
 );
 """
 _SCHEMA_SQL += _EXPLANATION_CACHE_SCHEMA
+from .html_forms import SCHEMA as _HTML_FORMS_SCHEMA
+_SCHEMA_SQL += _HTML_FORMS_SCHEMA
 
 
 def _migrate(con: sqlite3.Connection) -> None:
@@ -1390,6 +1392,9 @@ def _migrate(con: sqlite3.Connection) -> None:
                         con.execute(statement)
             if version < 73:
                 _migrate_to_v73(con)
+            if version < 74:
+                for statement in _HTML_FORMS_SCHEMA.split(";"):
+                    if statement.strip(): con.execute(statement)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
