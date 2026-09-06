@@ -510,3 +510,28 @@ def test_unmute_restores_push(monkeypatch):
     assert notification["unread"] is True
     assert notification["muted"] is False
     assert notification["reason"] == "speak"
+
+
+def test_janitor_category_is_quiet_even_without_automation_special_treatment(monkeypatch):
+    from lib import janitors
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    user_notifications.settings_store.set_text("automation_special_treatment", "false")
+    aid = _agent()
+    janitors.create("arnold")
+    # Legacy/imported content may carry user origin. Category is authoritative.
+    done_ts = _turn(aid, origin="user", assistant="<speak>Updated the task labels.</speak>")
+    result = _classify(aid, done_ts)
+    assert result["reason"] == "janitor-maintenance"
+    assert all(result[key] is False for key in ("notify", "push", "badge", "unread"))
+    assert result["preview"] == ""
+
+
+def test_janitor_origin_stays_quiet_independently_of_category_and_setting(monkeypatch):
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    for index, setting in enumerate(("true", "false")):
+        user_notifications.settings_store.set_text("automation_special_treatment", setting)
+        aid = _agent(persona=f"Maintenance{index}", session=f"maintenance{index}")
+        done_ts = _turn(aid, origin="janitor", assistant="Routine review completed.")
+        result = _classify(aid, done_ts)
+        assert result["reason"] == "janitor-maintenance"
+        assert all(result[key] is False for key in ("notify", "push", "badge", "unread"))

@@ -88,6 +88,8 @@ def test_turn_dispatch_forwards_complete_request_to_external_runtime():
     assert payload["text"] == "keep working"
     assert payload["prompt_admission"] is admission
     assert payload["unheard_audio_sessions"] == ("theo",)
+    # New HTTP must remain compatible with an older runtime for normal work.
+    assert "janitor_run_id" not in payload
 
 
 def test_queue_operations_are_owned_by_external_runtime():
@@ -477,3 +479,11 @@ def test_runtime_stop_lease_self_releases_if_http_server_disappears(
     finally:
         runtime.shutdown()
         runtime.server_close()
+
+
+def test_private_janitor_run_id_crosses_runtime_boundary():
+    runtime = RecordingRuntime()
+    service = TurnDispatchService(SimpleNamespace(runtime_client=runtime))
+    service.dispatch(text="Review candidates", requested_session="sam", forced_session="sam",
+                     trace_id="janitor-run", janitor_run_id="janitor-run")
+    assert runtime.calls[0][1]["janitor_run_id"] == "janitor-run"
