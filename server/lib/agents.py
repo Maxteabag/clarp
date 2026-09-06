@@ -138,7 +138,8 @@ def favorite_paths(limit: int = 5) -> list[dict[str, Any]]:
 
 def create_agent(*, persona: str, voice_id: str, cwd: str,
                  session: str, backend: str = AgentBackend.CLAUDE,
-                 model: str = "", effort: str = "") -> str:
+                 model: str = "", effort: str = "",
+                 creation_request_id: str = "") -> str:
     """Insert or resurrect an agent row. Returns the agent_id.
 
     If a soft-deleted row exists with the same `session`, it's
@@ -152,6 +153,11 @@ def create_agent(*, persona: str, voice_id: str, cwd: str,
     Raises sqlite3.IntegrityError only if a LIVE agent already owns the
     name — caller should relaunch or pick a different session.
     """
+    if creation_request_id:
+        from .janitors import create_reserved_agent
+        return create_reserved_agent(
+            creation_request_id, persona=persona, voice_id=voice_id, cwd=cwd,
+            session=session, backend=backend, model=model, effort=effort)
     c = conn()
     ghost = c.execute(
         "SELECT agent_id FROM agents "
