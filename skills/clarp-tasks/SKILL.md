@@ -39,9 +39,11 @@ an explicit blocked or cancelled plan, or when closing a plan without items.
 
 ## Planning deliverable
 
-The durable checklist above remains the runtime source of task progress. When
-substantial planning also produces a finished proposal or design document, use
-`clarp-documents` to deliver a searchable PDF by default, with useful architecture
-relationships and clearly labeled UX concepts where they clarify the plan.
-Keep source Markdown/HTML and inspect rendered pages. This does not replace the
-checklist, ordinary progress replies, decisions or background-job bookkeeping.
+The durable checklist above remains the runtime source of task progress.
+**Always prefer interactive HTML forms for planning deliverables**, including
+finished proposals. Use `html-planning-forms` when available and `clarp-documents`
+for the format guidance. Include controls for the choices, numbers, priorities
+and comments the plan needs; save/restore drafts and report submission truthfully.
+Preserve useful diagrams and clearly labeled UX concepts. PDF is only for an
+explicit request, not an automatic final snapshot. Keep quick decisions, ordinary
+progress replies and background-job bookkeeping in their existing native forms.

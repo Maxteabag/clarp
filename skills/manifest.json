@@ -8,7 +8,7 @@
     {"id": "clarp-janitors", "pack": "core", "description": "Configure maintenance agents and inspect guarded effects"},
     {"id": "clarp-artifacts", "pack": "core", "description": "Shared secure artifact transport used by enabled artifact skills"},
     {"id": "clarp-decisions", "pack": "artifacts", "description": "Ask a native question or request explicit approval, with attention priority"},
-    {"id": "clarp-documents", "pack": "artifacts", "description": "Generate and publish searchable PDF plans and documents", "requires": ["uv"]},
+    {"id": "clarp-documents", "pack": "artifacts", "description": "Create HTML planning forms and explicitly requested PDFs"},
     {"id": "clarp-research", "pack": "artifacts", "description": "Publish sourced research briefs"},
     {"id": "clarp-code-changes", "pack": "artifacts", "description": "Publish repository changes and reviews", "default_enabled": false},
     {"id": "clarp-data", "pack": "artifacts", "description": "Publish tables and chart-ready datasets"},

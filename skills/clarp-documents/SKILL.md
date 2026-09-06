@@ -1,17 +1,28 @@
 ---
 name: clarp-documents
-description: Generate, inspect and publish searchable PDF planning documents, proposals and finished writing with useful diagrams and UX concepts.
+description: Deliver plans as interactive HTML forms by default; generate and publish searchable PDFs only when explicitly requested.
 ---
 # Finished documents
 
-**Substantial finished planning documents are PDFs by default.** Keep the editable
-Markdown/HTML source. Publish the PDF as a durable `file` artifact so the phone
-can read, share and save it. A proposal can still be a proposal: PDF is the
-finished deliverable format, not a claim that its design has shipped.
+**Always prefer HTML forms for plans**, including detailed proposals and settled
+plans. Use the `html-planning-forms` skill when available. Include appropriate
+choices, numeric inputs, priorities and free text for the answers the plan needs;
+do not invent unnecessary questions just to fill a form. Preserve useful diagrams
+and clearly label proposed UX examples.
 
-Keep `clarp-agent-tasks` checklists, runtime/job state, decisions and ordinary
-conversation replies in their native form. Do not turn routine replies into
-files or replace durable task bookkeeping with a PDF.
+Save editable answers locally and restore drafts by Host, form identity and
+version. Distinguish saved drafts from confirmed submissions. Use a supported
+Clarp submission bridge when available; otherwise offer export/copy and clearly
+state that direct submission and native navigation are not implemented.
+
+PDF is not the default planning deliverable or an automatic final step. Generate
+a PDF only when the user explicitly requests that format. Keep existing PDFs
+and their viewing/sharing support.
+
+Keep `clarp-agent-tasks` checklists, runtime/job state, quick decisions and ordinary
+conversation replies in their native form. HTML planning does not replace them.
+
+The following helper is for explicitly requested PDF output.
 
 ## Generate and inspect
 
