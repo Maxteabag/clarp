@@ -18,6 +18,7 @@ class DesktopPresence final : public QObject {
     void setSessionState(bool available, bool unlocked);
     void noteInteraction();
   signals:
+    void applicationActivity(const QString& instance, quint64 sequence, bool foreground, qint64 inputAgeMs);
     void presenceReport(const QString& instance, quint64 sequence, bool active);
   protected:
     bool eventFilter(QObject* receiver, QEvent* event) override;
@@ -36,6 +37,9 @@ class DesktopPresence final : public QObject {
     QString m_instance;
     QString m_sessionPath;
     quint64 m_sequence = 0;
+    quint64 m_activitySequence = 0;
+    qint64 m_lastActivityReport = -10'000;
+    bool m_reportedForeground = false;
     quint64 m_queryGeneration = 0;
     bool m_monitorSystem = true;
     qint64 m_lastInput = -1;

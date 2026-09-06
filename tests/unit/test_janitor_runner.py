@@ -144,6 +144,25 @@ def test_no_agents_or_context_means_no_model_wakeup(lane):
     assert calls == [] and store.runs == {}
 
 
+def test_active_interval_waits_for_input_and_respects_delayed_first_check(lane):
+    store, source, calls, clock, make = lane
+    from lib.janitor_active_interval import DEFAULTS
+    store.rows[0].update(trigger_id="active-interval", config={**DEFAULTS, "interval_seconds": 60, "run_on_resume": False})
+    active = [False]
+    source.application_active = lambda timeout: active[0]
+    source.contexts["worker"] = context()
+    assert make().tick() == 0
+    clock[0] += 999_000
+    assert make().tick() == 0
+    active[0] = True
+    assert make().tick() == 0
+    clock[0] += 59_999
+    assert make().tick() == 0
+    clock[0] += 1
+    assert make().tick() == 1
+    assert len(calls) == 1
+
+
 def test_frozen_admission_restart_and_duplicate_completion_do_not_replay(lane):
     store, source, calls, clock, make = lane
     source.contexts["worker"] = context()
