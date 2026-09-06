@@ -40,6 +40,7 @@ Rectangle {
         { kind: "command", label: "Settings", action: "settings", key: "Ctrl+,", group: "destination" },
         { kind: "command", label: "Host connection", action: "connection", key: "", group: "settings" },
         { kind: "command", label: "Orchestrator settings", action: "orchestrator", key: "", group: "view" },
+        { kind: "command", label: "Release agent", action: "release-agent", key: "Ctrl+Shift+R", group: "agent" },
         { kind: "command", label: "Stop agent", action: "stop-agent", key: "Ctrl+.", group: "agent" },
         { kind: "command", label: "Toggle voice replies", action: "mute", key: "Ctrl+M", group: "audio" },
         { kind: "command", label: "Talk", action: "talk", key: "Ctrl+Shift+Space", group: "audio" }

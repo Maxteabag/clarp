@@ -134,6 +134,8 @@ ApplicationWindow {
             app.toolsVisible = !app.toolsVisible;
         } else if (action === "refresh") {
             app.refreshConversation();
+        } else if (action === "release-agent") {
+            app.releaseAgent(app.selectedSession);
         } else if (action === "stop-agent") {
             app.stopAgent();
         } else if (action === "mute") {
@@ -380,6 +382,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Alt+N"; context: Qt.ApplicationShortcut; enabled: !root.overlayVisible(); onActivated: quickSwitcher.openContacts(root.composerOwnsFocus()) }
     Shortcut { sequence: "Ctrl+Alt+Z"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("zoom") }
     Shortcut { sequence: "Ctrl+Alt+="; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("balance") }
+    Shortcut { sequence: "Ctrl+Shift+R"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable() && app.selectedSession.length > 0; autoRepeat: false; onActivated: root.runCommand("release-agent") }
     Shortcut { sequence: "Ctrl+."; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("stop-agent") }
     Shortcut { sequence: "Ctrl+Shift+Space"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("talk") }
 
