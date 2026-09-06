@@ -50,6 +50,7 @@ const glyph=(c,o,x,y,s,time,reduced,age)=>{
  c.restore();
 };
 
+exports.glyph=glyph;
 exports.draw=(c,o,pos,ink,images,time,t,reduced)=>{
  const [w,h]=exports.size(o),active=!o.finished,age=o.age;
  const dim=active?1:Math.max(.42,1-Math.max(0,age-120000)/3600000*.6);

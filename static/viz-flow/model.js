@@ -5,7 +5,9 @@ exports.hash=hash;
 exports.stateAt=(e,t)=>e.finished_at!=null&&t>=e.finished_at?(e.outcome||'unknown'):(e.finished_at!=null||e.outcome==='running'?'running':'unknown');
 const slots=new Map();
 // Where slates hang inside a lobe: lower right, clear of portraits and files.
-const slateSlots=(region,actors)=>region.core?(actors<=2?[[45,102],[-95,100]]:[[45,102]]):[[35,80]];
+// Where lanterns stand inside a lobe: the lower right floor, clear of portraits
+// and files; a second lantern to the lower left only when few agents work here.
+const slateSlots=(region,actors)=>region.core?(actors<=2?[[60,100],[-95,114]]:[[60,100]]):[[30,80]];
 exports.build=(scene,_selection,time)=>{
  const byId=new Map(scene.entities.map(e=>[e.id,e])),events=scene.events.filter(e=>e.ts<=time).sort((a,b)=>a.ts-b.ts);
  const ancestor=id=>{let e=byId.get(id);const seen=new Set();while(e&&!seen.has(e.id)){if(e.kind==='repository')return e.id;seen.add(e.id);e=byId.get(e.parent);}return null;};
@@ -27,7 +29,8 @@ exports.build=(scene,_selection,time)=>{
   if(o.workspace==='unlocated'&&!repos.some(r=>r.id==='unlocated'))repos.push({id:'unlocated',label:'Location unknown',kind:'unresolved'});
  }
  const slatesFor=new Map();
- for(const o of assembled.objects.sort((a,b)=>Number(a.finished)-Number(b.finished)||(b.created_at+b.age)-(a.created_at+a.age)||a.id.localeCompare(b.id))){const l=slatesFor.get(o.workspace)||[];l.push(o);slatesFor.set(o.workspace,l);}
+ // Active work first, then the most recently active finished work.
+ for(const o of assembled.objects.sort((a,b)=>Number(a.finished)-Number(b.finished)||a.age-b.age||a.id.localeCompare(b.id))){const l=slatesFor.get(o.workspace)||[];l.push(o);slatesFor.set(o.workspace,l);}
  const validation=work.workspaceValidation(events,time,groupFor);
  // Shared Git metadata supplies families, not a name-based guess. Each family
  // grows connected working-copy lobes; silhouettes and spacing remain source design.
@@ -44,11 +47,12 @@ exports.build=(scene,_selection,time)=>{
    const core=r===main,distance=core?0:330+Math.floor(i/6)*230;
    const x=Math.cos(angle)*distance,y=Math.sin(angle)*distance*.86;
    const n=[...history.values()].filter(h=>groupFor(h.at(-1))===r.id).length;
-   local.push({...r,x,y,rx:core?190:142+Math.min(3,n)*7,ry:core?143:112,project:g.id,core,
-    displayName:core?'':r.path?.split('/').filter(Boolean).at(-1)||r.label,carries:(slatesFor.get(r.id)||[]).length});
+   const carries=(slatesFor.get(r.id)||[]).length;
+   local.push({...r,x,y,rx:core?190:142+Math.min(3,n)*7,ry:(core?143:112)+(carries?34+(carries>1&&core?12:0):0),project:g.id,core,
+    displayName:core?'':r.path?.split('/').filter(Boolean).at(-1)||r.label,carries});
   }
   const extent={left:Math.min(-110,...local.map(r=>r.x-r.rx-30)),right:Math.max(110,...local.map(r=>r.x+r.rx+30)),
-   top:Math.min(-110,...local.map(r=>r.y-r.ry-50)),bottom:Math.max(110,...local.map(r=>r.y+r.ry+(r.carries?70:35)))};
+   top:Math.min(-110,...local.map(r=>r.y-r.ry-50)),bottom:Math.max(110,...local.map(r=>r.y+r.ry+(r.carries?50:35)))};
   const fits=p=>!projects.some(o=>p.x+extent.right+70>o.x+o.extent.left&&p.x+extent.left-70<o.x+o.extent.right&&p.y+extent.bottom+60>o.y+o.extent.top&&p.y+extent.top-60<o.y+o.extent.bottom);
   let p=slots.get(g.id);
   if(!p||!fits(p)){
@@ -73,7 +77,7 @@ exports.build=(scene,_selection,time)=>{
  const actorMap=new Map(actors.map(a=>[a.id,a]));
  const files=[];
  for(const region of regions){
-  const anchors=region.core?[[55,-30],[112,18],[140,-62]]:[[40,-42],[112,-12]];
+  const anchors=region.core?[[55,-30],[118,-2],[140,-62]]:[[40,-52],[112,-22]];
   const candidates=scene.entities.filter(e=>e.kind==='file'&&ancestor(e.id)===region.id);
   candidates.sort((a,b)=>(latest.get(b.id)?.ts||0)-(latest.get(a.id)?.ts||0)||a.id.localeCompare(b.id));
   region.totalFiles=candidates.length;

@@ -394,3 +394,21 @@ node scripts/viz_flow_check.mjs URL OUT      # demo lifecycle incl. work stages,
 node scripts/viz_work_check.mjs URL OUT UNTIL_MS 1800 PLAN_FRAGMENT   # real recorded work object, preview, inspector contract
 node scripts/viz_mobile_check.mjs URL OUT    # phone viewports incl. tapping a work slate
 ```
+
+
+### Stage two: the lantern material and zoom-aware scene
+
+`static/viz-flow/lantern.js` replaces the slate as the drawn work object (slate.js
+stays as the earlier treatment and still supplies the seal and type glyphs). One
+lantern per recorded plan: unlit wire frame for intent, paper panes for changed
+files, a base sweep while a check runs, a cracked pane and ember light for an
+interruption (dashed when the failing step is unknown), a gold mend for exact
+recovery, and a lit pane showing the recorded preview once published. Lobes that
+carry lanterns grow a floor so nothing hangs over the rim; a second lantern
+stands to the left only when two or fewer agents work there. The renderer's
+detail level from `camera.k` hides file names, badges and lantern titles at
+overview scale and reveals them as the viewer zooms; selection never promotes.
+The storyboard and treatments considered are in
+`docs/fleet-map/stage-two-storyboard.md`. Real proof uses the pistol-six replay
+and the movement-physics counterexample (published video with two checks never
+rerun), both via `?view=flow&window=…&until=…`.
