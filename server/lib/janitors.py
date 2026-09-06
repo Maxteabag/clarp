@@ -378,27 +378,85 @@ def remove(session: str, expected_revision: int) -> bool:
     return True
 
 
-def release(session: str, expected_revision: int) -> dict:
-    """Return a paused, idle Janitor to chat while retaining all maintenance history."""
+def _release_idle(c, agent: dict, configuration) -> None:
+    if configuration["enabled"]:
+        raise JanitorError("Pause this Janitor before releasing or handing off maintenance", 409, "janitor_enabled")
+    if (agents.is_busy(agent["agent_id"]) or backends.active_handles(agent["backend"], agent["agent_id"])
+            or turn_queue.pending_count(agent["agent_id"]) or has_active_run(agent["agent_id"])
+            or _pending_demand_claim(c, agent["agent_id"])):
+        raise JanitorError("Wait for current maintenance and cancellation to finish", 409, "agent_busy")
+
+
+def _handoff_labels(c, source: dict, source_config, successor_session: str, successor_revision: int, now: int) -> dict:
+    successor = _agent(successor_session)
+    successor_config = _config(c, successor["agent_id"])
+    _revision(successor_config, successor_revision)
+    if source["agent_id"] == successor["agent_id"]:
+        raise JanitorError("Choose a different successor Janitor")
+    for agent, configuration in ((source, source_config), (successor, successor_config)):
+        if not agent.get("is_janitor") or agent.get("archived_at"):
+            raise JanitorError("Both maintenance identities must be current, unarchived Janitors", 409, "invalid_successor")
+        if configuration["template_id"] != "task-labels":
+            raise JanitorError("Only compatible task-label jobs can hand off label ownership", 409, "capability_denied")
+        if agent["agent_id"] != source["agent_id"]:
+            _release_idle(c, agent, configuration)
+        state = agents.latest_state(agent["agent_id"])
+        if not state or state["kind"] not in {AgentState.IDLE, AgentState.DONE, AgentState.SPAWNED, AgentState.STOPPED}:
+            raise JanitorError("Wait for both Janitors to finish before handing off maintenance", 409, "agent_busy")
+    scope = _scope(_decode(source_config["scope_json"], {}))
+    if scope != _scope(_decode(successor_config["scope_json"], {})):
+        raise JanitorError("The successor must have the same watched scope", 409, "scope_conflict")
+    targets = [row["agent_id"] for row in c.execute("""SELECT a.* FROM agents a
+        JOIN janitor_label_ownership o ON o.target_agent_id=a.agent_id
+        WHERE o.owner_agent_id=? AND a.custom_status=o.label""", (source["agent_id"],))
+        if _in_scope(scope, dict(row))]
+    # Ownership changes, but the originating run and its effect receipts remain
+    # the prior Janitor's provenance until the successor writes a new one.
+    c.executemany("UPDATE janitor_label_ownership SET owner_agent_id=?,revision=revision+1,updated_at=? WHERE target_agent_id=?",
+                  [(successor["agent_id"], now, target_id) for target_id in targets])
+    c.execute("UPDATE janitor_configs SET generation=generation+1,revision=revision+1,updated_at=? WHERE agent_id=?",
+              (now, successor["agent_id"]))
+    # Repeat the existing idle state; this is an administrative audit, not an
+    # inferred completion, a new model receipt, or an event to notify the user.
+    agents.record_state(source["agent_id"], agents.latest_state(source["agent_id"])["kind"], {
+        "origin": "janitor", "event": "janitor_ownership_handoff", "source_agent_id": source["agent_id"],
+        "successor_agent_id": successor["agent_id"], "transferred_count": len(targets)})
+    return {"successor_agent_id": successor["agent_id"], "successor_session": successor["session"], "transferred_count": len(targets)}
+
+
+def release(session: str, expected_revision: int, *, successor_session: str | None = None,
+            successor_revision: int | None = None) -> dict:
+    """Return an idle Janitor to chat, optionally handing off matching owned labels.
+
+    Both sides of a handoff must be explicitly paused with current revisions and
+    equal scope. Text and original run provenance remain untouched. The successor
+    remains paused, with a fresh revision required for a later enable operation.
+    """
+    if (successor_session is None) != (successor_revision is None):
+        raise JanitorError("A maintenance successor needs its session and current revision")
     a = _agent(session)
+    handoff = None
     with _write() as c:
+        a = _agent(a["agent_id"])
         row = _config(c, a["agent_id"])
         _revision(row, expected_revision)
         if _builtin_role(c, a["agent_id"]):
             raise JanitorError("A built-in Janitor cannot be released", 409, "builtin_janitor")
-        if row["enabled"]:
-            raise JanitorError("Pause this Janitor before releasing it", 409, "janitor_enabled")
-        if (agents.is_busy(a["agent_id"]) or backends.active_handles(a["backend"], a["agent_id"])
-                or turn_queue.pending_count(a["agent_id"]) or has_active_run(a["agent_id"])
-                or _pending_demand_claim(c, a["agent_id"])):
-            raise JanitorError("Wait for current maintenance and cancellation to finish", 409, "agent_busy")
+        _release_idle(c, a, row)
         if not a.get("is_janitor"):
+            if successor_session is not None:
+                raise JanitorError("This Janitor was already released", 409, "janitor_released")
             return get(session)
         now = db.now_ms()
+        if successor_session is not None:
+            handoff = _handoff_labels(c, a, row, successor_session, successor_revision, now)
         _fence(c, a["agent_id"], now)
         c.execute("UPDATE janitor_configs SET generation=generation+1,revision=revision+1,updated_at=? WHERE agent_id=?", (now, a["agent_id"]))
         c.execute("UPDATE agents SET is_janitor=0 WHERE agent_id=?", (a["agent_id"],))
-    return get(session)
+    result = get(session)
+    if handoff is not None:
+        result["ownership_handoff"] = handoff
+    return result
 
 
 def attachments(enabled_only: bool = False) -> list[dict]:
