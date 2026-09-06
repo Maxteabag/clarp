@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 74
+_SCHEMA_VERSION = 75
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1161,6 +1161,7 @@ CREATE TABLE paired_devices (
 CREATE INDEX idx_paired_devices_active ON paired_devices(revoked_at, created_at DESC);
 
 CREATE TABLE oracle_delegations (
+    completion_trace_id TEXT NOT NULL DEFAULT '',
     delegation_id      TEXT PRIMARY KEY,
     owner_principal    TEXT NOT NULL,
     trace_id           TEXT NOT NULL UNIQUE,
@@ -1395,6 +1396,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             if version < 74:
                 for statement in _HTML_FORMS_SCHEMA.split(";"):
                     if statement.strip(): con.execute(statement)
+            if version < 75:
+                con.execute("ALTER TABLE oracle_delegations ADD COLUMN completion_trace_id TEXT NOT NULL DEFAULT ''")
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
