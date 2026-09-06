@@ -3,6 +3,9 @@
 import argparse
 import functools
 import pathlib
+import json
+import threading
+import time
 import sqlite3
 import sys
 from urllib.parse import unquote, urlsplit
@@ -19,7 +22,10 @@ def main():
     p.add_argument('--db', type=pathlib.Path, required=True)
     p.add_argument('--port', type=int, default=7699)
     p.add_argument('--library', type=pathlib.Path)
+    p.add_argument("--learn", action="store_true", help="Enable autonomous source development; requires --library")
     a = p.parse_args()
+    if a.learn and not a.library:
+        p.error("--learn requires an explicit persistent --library path")
     # Only this process sees these DI overrides. No migrate() or server workers.
     def connection():
         con = getattr(db._LOCAL, 'conn', None)
@@ -29,8 +35,10 @@ def main():
             db._LOCAL.conn = con
         return con
     db.conn = connection
-    viz_learning.offer = lambda clusters: {'designing': '', 'queued': []}
-    viz_learning.offer_scene = lambda *a, **k: {'designing':'','queued':[]}
+    if not a.learn:
+        viz_learning.offer = lambda clusters: {'designing': '', 'queued': []}
+        viz_learning.offer_scene = lambda *a, **k: {'designing':'','queued':[]}
+        viz_learning.status = lambda: {'enabled':False,'designing':'','queued':[]}
     if a.library:
         viz_library.path = lambda: a.library
     else:
@@ -43,6 +51,26 @@ def main():
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def _read_json(self):
+            try:
+                size=int(self.headers.get('Content-Length','0'))
+                if not 0 < size <= 16000:return None
+                return json.loads(self.rfile.read(size))
+            except (ValueError,OSError):return None
+
+        def do_POST(self):
+            if not a.learn or urlsplit(self.path).path != '/viz/supersede':
+                return self.send_error(404)
+            if self.headers.get('Content-Type','').split(';')[0] != 'application/json':
+                return self.send_error(415)
+            origin=self.headers.get('Origin')
+            if origin and urlsplit(origin).netloc != self.headers.get('Host'):
+                return self.send_error(403)
+            try:
+                ProductionHandler._handle_viz_supersede(self)
+            finally:
+                db.close_local()
 
         def do_HEAD(self):
             self.send_error(405)
@@ -64,10 +92,25 @@ def main():
                 self.send_error(404)
 
     server = ThreadingHTTPServer(('127.0.0.1', a.port), functools.partial(Handler, directory=str(ROOT)))
-    print(f'Preview http://127.0.0.1:{server.server_port}/viz', flush=True)
+    stop=threading.Event()
+    def observe():
+        from lib import viz_normalize
+        while not stop.is_set():
+            try:
+                world=viz_normalize.build_fleet_map(int(time.time()*1000)-3600000)['world']
+                viz_learning.offer_scene(world)
+            except Exception as error:
+                print('Fleet observer:', error, flush=True)
+            finally:
+                db.close_local()
+            stop.wait(15)
+    if a.learn:
+        threading.Thread(target=observe,name='fleet-observer',daemon=True).start()
+    print(f'Preview http://127.0.0.1:{server.server_port}/viz learning={a.learn}', flush=True)
     try:
         server.serve_forever()
     finally:
+        stop.set()
         server.server_close()
 
 

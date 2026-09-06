@@ -55,3 +55,35 @@ def test_evolution_applies_executable_source_without_a_rule_or_icon(tmp_path,mon
     result=viz_rule_author.evolve_world({'events':[],'coverage_keys':['hierarchy']},'reinvent',model)
     assert result['applied']==['decision:1']
     assert viz_library.load()['scene_coverage']==['hierarchy']
+
+
+def test_new_scene_reaches_astra_but_covered_scene_does_not(monkeypatch,tmp_path):
+    from lib import viz_learning
+    monkeypatch.setattr(viz_library,'path',lambda:tmp_path/'library.json')
+    calls=[]
+    monkeypatch.setattr(viz_rule_author,'evolve_world',lambda scene,reason:calls.append(scene) or {'applied':['new'],'rejected':[]})
+    scene={'coverage_keys':['entity:new'],'events':[],'entities':[]}
+    assert viz_learning._develop_scene({'scene':scene,'example':'new'})['applied']==['new']
+    assert calls==[scene]
+    known=viz_library.seed();known['scene_coverage']=['entity:new']
+    monkeypatch.setattr(viz_library,'load',lambda:known)
+    assert not viz_learning._develop_scene({'scene':scene,'example':'same'})['applied']
+    assert calls==[scene]
+
+
+def test_host_learning_flags_reach_preview_process(monkeypatch):
+    import importlib.util
+    import subprocess
+    spec=importlib.util.spec_from_file_location('viz_host_test',Path(__file__).resolve().parents[2]/'scripts/viz_host.py')
+    host=importlib.util.module_from_spec(spec);spec.loader.exec_module(host)
+    commands=[]
+    monkeypatch.setattr(host.sys,'argv',['viz_host.py','--session','test','--db','/tmp/db','--library','/tmp/library.json','--learn'])
+    monkeypatch.setattr(host.signal,'signal',lambda *args:None)
+    monkeypatch.setattr(host.subprocess,'run',lambda *a,**k:subprocess.CompletedProcess(a,0,'job@g1\n',''))
+    class Child:
+        def __init__(self,command):commands.append(command)
+        def wait(self,timeout):return 0
+        def poll(self):return 0
+    monkeypatch.setattr(host.subprocess,'Popen',Child)
+    assert host.main()==0
+    assert commands[0][-3:]==['--library','/tmp/library.json','--learn']

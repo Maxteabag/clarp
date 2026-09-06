@@ -13,18 +13,22 @@ def main():
     p.add_argument('--session',required=True)
     p.add_argument('--db',required=True)
     p.add_argument('--port',type=int,default=7699)
+    p.add_argument('--library')
+    p.add_argument('--learn',action='store_true')
     a=p.parse_args()
+    if a.learn and not a.library:p.error('--learn requires --library')
     env={**os.environ,'CLARP_BACKGROUND_WORKER_PID':str(os.getpid())}
     def job(*args):
         return subprocess.run(['clarp-agent-bg',a.session,*args],env=env,
                               capture_output=True,text=True,timeout=20)
     registered=job('job-upsert','fleet-map-preview','service','Serving fleet map',
-                   'Read-only live activity preview; managed by clarp-fleet-preview.service')
+                   ('Live activity with autonomous source development' if a.learn else 'Read-only live activity preview') + '; managed by clarp-fleet-preview.service')
     if registered.returncode:
         print(registered.stderr or registered.stdout,file=sys.stderr);return 1
     handle=registered.stdout.strip()
     child=subprocess.Popen([sys.executable,str(pathlib.Path(__file__).with_name('viz_preview.py')),
-                            '--db',a.db,'--port',str(a.port)])
+                            '--db',a.db,'--port',str(a.port)] +
+                           (['--library',a.library] if a.library else []) + (['--learn'] if a.learn else []))
     stopping=False
     def stop(*_):
         nonlocal stopping
