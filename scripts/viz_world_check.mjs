@@ -10,6 +10,7 @@ const context=await browser.newContext({viewport:{width:1600,height:1000},record
 const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
 try{
  await page.goto(url);await page.waitForFunction(()=>window.fleetWorldSnapshot?.().frames>10);
+ await page.screenshot({path:out+'/world.png'});
  await page.locator('#fit').click();await page.waitForTimeout(300);
  let s=await page.evaluate(()=>window.fleetWorldSnapshot());
  assert(!s.failure,s.failure);assert(s.meta.territories>1);assert(s.meta.files>0);assert(s.meta.agents.length>0);
@@ -18,7 +19,7 @@ try{
  const portraits=await page.evaluate(()=>window.fleetWorldSnapshot().meta.loadedAvatars);
  assert(portraits.some(id=>s.meta.agents.some(a=>a.id===id)),'portraits must correspond to rendered agent identities');
 
- await page.screenshot({path:out+'/world.png'});
+ await page.screenshot({path:out+'/overview.png'});
  const worldCamera={...s.camera};
  const startFrames=s.frames;
  await page.locator('#view-cabinets').click();

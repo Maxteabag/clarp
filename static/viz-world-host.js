@@ -12,8 +12,8 @@ let programHistory=[];
 let recoveryTimer=null,recoveryAttempts=0,lastFrameTimings={};
 const retryButton=document.getElementById('retry-render');
 const fittedViews=new Set();
-function fitView(){
-  const b=meta.bounds;if(!b)return;camera.k=Math.min((width-100)/b.w,(height-230)/b.h);
+function fitView(initial=false){
+  const b=initial?(meta.focusBounds||meta.bounds):meta.bounds;if(!b)return;camera.k=Math.min((width-100)/b.w,(height-230)/b.h);
   camera.x=(width-b.w*camera.k)/2-b.x*camera.k;camera.y=175-b.y*camera.k;
 }
 let worldBase=null,cabinetBase=null,lastData=null;
@@ -55,7 +55,7 @@ function use(next){
     if(failure)learning.textContent='Rendering resumed';
     failure='';retryButton.hidden=true;
     if(++goodFrames>=30)recoveryAttempts=0;
-    if(!fittedViews.has(view)&&result.bounds){fittedViews.add(view);fitView();}
+    if(!fittedViews.has(view)&&result.bounds){fittedViews.add(view);fitView(true);}
     stat.textContent=`${result.agents?.length||0} agents · ${result.territories||0} territories · ${result.files||0} located items`;
   },(error,kind)=>{
     failure=error;retryButton.hidden=false;
@@ -125,7 +125,7 @@ function replay(){live=false;liveButton.ariaPressed='false';}
 liveButton.onclick=()=>{live=true;playing=false;liveButton.ariaPressed='true';load();};
 slider.oninput=()=>{replay();playing=false;playhead=tmin+(tmax-tmin)*Number(slider.value)/1000;};
 document.getElementById('play').onclick=()=>{replay();if(playhead>=tmax-1000)playhead=tmin;playing=!playing;};
-document.getElementById('fit').onclick=fitView;
+document.getElementById('fit').onclick=()=>fitView();
 
 canvas.onpointerdown=e=>{drag={x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY};canvas.setPointerCapture(e.pointerId);};
 canvas.onpointermove=e=>{if(drag){camera.x+=e.clientX-drag.x;camera.y+=e.clientY-drag.y;drag={...drag,x:e.clientX,y:e.clientY};}};
@@ -145,4 +145,4 @@ document.getElementById('redesign').onclick=async()=>{
  const r=await fetch('/viz/supersede',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({world:true,revision,entity_id:selected,reason:'Improve only this selected detail where needed. Keep the Lantern Works concepts, unaffected interactions, layout conventions and visual language. Prefer a compatible expansion or targeted repair; this is not a request for a redesign.'})});
  document.getElementById('design-result').textContent=r.ok?'Astra is improving this detail…':'Could not start development';
 };
-window.fleetWorldSnapshot=()=>({frames,revision,view,live,playing,playhead,camera:{...camera},failure,program:program?.title,frameTimings:lastFrameTimings,meta,scene});
+window.fleetWorldSnapshot=()=>({frames,revision,view,live,playing,playhead,timeline:{since:tmin,until:tmax},camera:{...camera},failure,program:program?.title,frameTimings:lastFrameTimings,meta,scene});

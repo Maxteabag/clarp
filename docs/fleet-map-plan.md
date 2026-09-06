@@ -306,3 +306,29 @@ and offer Resume rendering even if the baseline fails. Source exceptions still
 fall back within the same view. `scripts/viz_deadline_check.mjs URL` verifies
 10x CPU throttling, a cheap frame with delayed delivery, retained pixels, manual
 recovery and hidden-tab resume; `viz_world_check.mjs` verifies runaway termination.
+
+
+### Destination-based activity (ADR 0006)
+
+World uses actual file/directory/checkout destinations and local action effects;
+category stations are retired. Avatars remain at checkouts during commits and
+pushes, with outward transfers to a known configured origin. Status reconstructs
+running/completed/failed/unknown work at the chosen replay time. Multi-file
+operations use a common scope, and sibling-file bursts group at their directory.
+Unknown file targets are not inferred from workspace-only evidence.
+
+`viz_native.py` incrementally reads native Codex JSONL item records, bound to the
+recorded runtime's backend session ID and lifetime. These retain commands, parsed
+targets, actual cwd and start/end times that the older state-log projection lost.
+The reader replaces lossy rows only for a matching supported native stream;
+otherwise the existing state log remains a fallback. It never stores tool output
+or evaluates recorded code. The shared runner's unrelated dirty edits remain
+untouched and no schema migration is required. Claude hooks additionally capture
+call IDs/cwd prospectively; only matching IDs can pair start and finish events.
+
+Use `scripts/viz_author.py --destinations` for a read-only evidence report, and
+`scripts/viz_destination_check.mjs URL OUTPUT_DIR` for labeled lifecycle scenarios.
+The regular world/browser checks still cover both views, avatars and isolation.
+Native completion details become available when the provider records them;
+while an orchestration call is pending, only its invocation context is known and
+its destination is labeled pending. Historical cwd is never taken from agents.cwd.

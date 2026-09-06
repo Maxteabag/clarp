@@ -256,27 +256,38 @@ def iter_normalize(rows: Iterable[Any], names: dict[str, str], library: dict | N
     from . import viz_library
     library = library if library is not None else viz_library.seed()
     seen: set[tuple] = set()
+    started_calls={}
     for row in rows:
         agent_id, ts, detail = row["agent_id"], row["ts"], row["detail"]
         try:
             data = json.loads(detail)
         except (TypeError, ValueError):
             continue
-        if not isinstance(data, dict) or data.get("phase") == "tool_finished":
-            continue                      # started/finished is one event
+        if not isinstance(data, dict):continue
+        call=(agent_id,row['runtime_id'] if 'runtime_id' in row.keys() else None,data.get('call_id'))
+        if data.get('phase')=='tool_finished':
+            if data.get('call_id') and call in started_calls:
+                event=started_calls.pop(call)
+                if ts>=event['ts']:
+                    event['finished_at']=ts
+                    event['outcome']='failed' if data.get('status') in {'error','failed'} else 'succeeded' if data.get('status') in {'ok','success'} else 'unknown'
+            continue
         tool = str(data.get("tool") or "")
-        key = (agent_id, ts, tool, data.get("trace_id"))
+        key = (agent_id, ts, tool, data.get("trace_id"), row["state_id"] if data.get("native") else data.get("call_id"))
         if key in seen:
             continue                      # codex emits duplicate rows
         seen.add(key)
         inp = data.get("input") or {}
+        if isinstance(inp,dict) and data.get("cwd") and not inp.get("cwd"):
+            inp={**inp,"cwd":data["cwd"]}
         hit = classify(tool, inp, data.get("file_path") or "", library)
         provisional = False
         if not hit:
             raw = inp.get("command", "") if isinstance(inp, dict) else ""
             hint, _ = first_known_executable(raw or tool, library["rules"])
             if not hint:
-                continue
+                if data.get("native"):hint=tool or "tool"
+                else:continue
             verb, target = "unknown", "unknown:" + hint
             provisional = True
         else:
@@ -298,8 +309,16 @@ def iter_normalize(rows: Iterable[Any], names: dict[str, str], library: dict | N
         archetype = archetype or viz_archetypes.archetype_for(verb)
         from .viz_world import evidence
         fact = evidence(tool, inp, path, target, verb)
-        yield {
+        if data.get('native') and data.get('action'):fact['action']=data['action']
+        fact['location_basis']=data.get('location_basis','recorded tool input')
+        if data.get('pending_tool'):fact['scope']='invocation'
+        finished=data.get('finished_at')
+        status=('running' if finished is None and (data.get('native') or (data.get('call_id') and data.get('phase')=='tool_started')) else data.get('outcome','unknown'))
+        event = {
             "evidence": fact,
+            "finished_at": finished,
+            "outcome": status,
+            "native": bool(data.get("native")),
             "id": row["state_id"] if "state_id" in row.keys() else f"{agent_id}:{ts}:{tool}",
             "ts": ts,
             "agent": names.get(agent_id, agent_id[:8]),
@@ -312,6 +331,9 @@ def iter_normalize(rows: Iterable[Any], names: dict[str, str], library: dict | N
             "specific": target.startswith(("repo:", "file:", "service:")),
             "clamped": bool(data.get("dispatch")) and len(tool) >= CODEX_TOOL_CLAMP,
         }
+        if data.get('call_id'):started_calls[call]=event
+        yield event
+
 
 
 def normalize(rows: Iterable[Any], names: dict[str, str], library: dict | None = None) -> list[dict]:
@@ -372,7 +394,11 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
     names = {aid: (r["persona"] or r["session"]) for aid,r in agent_rows.items()}
     from . import viz_library
     library = viz_library.load()
-    rows = viz_corpus.tool_rows(con, since_ms, until)
+    from . import viz_native
+    native_rows,covered=viz_native.tool_rows(con,since_ms,until)
+    import itertools
+    legacy=(row for row in viz_corpus.tool_rows(con,since_ms,until) if row['runtime_id'] not in covered)
+    rows=itertools.chain(legacy,native_rows)
     import heapq
     limit = max(1, min(limit, 10000))
     events = sorted(heapq.nlargest(limit, iter_normalize(rows, names, library),

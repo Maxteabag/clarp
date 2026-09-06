@@ -20,12 +20,25 @@ def main():
     p.add_argument('--learn', action='store_true', help='Invoke models and apply decisions')
     p.add_argument('--limit', type=int, default=5, help='Maximum novel tools to learn')
     p.add_argument('--library', type=pathlib.Path, help='Use an isolated JSON library for a model smoke test')
+    p.add_argument('--destinations',action='store_true',help='Report native-enriched destination/lifecycle coverage for the last hour')
     a = p.parse_args()
     if a.library:
         viz_library.path = lambda: a.library
     con = sqlite3.connect(a.db.resolve().as_uri() + '?mode=ro', uri=True)
     con.row_factory = sqlite3.Row
     started = time.monotonic()
+    if a.destinations:
+        from collections import Counter
+        from lib import db
+        db.conn=lambda:con
+        payload=viz_normalize.build_fleet_map(int(time.time()*1000)-3600000)
+        con.close();events=payload['world']['events']
+        print(json.dumps({'events':len(events),'native_events':sum(e.get('native',False) for e in events),
+            'location_scopes':dict(Counter(e['location_scope'] for e in events)),
+            'outcomes':dict(Counter(e['outcome'] for e in events)),
+            'seconds':round(time.monotonic()-started,3),
+            'max_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss},indent=2))
+        return
     stats = {'rows': 0, 'eligible': 0, 'matched': 0}
 
     def rows():

@@ -20,7 +20,7 @@ A genuine problem can receive a targeted repair. Replacing the whole metaphor
 requires a strong, specific demand; an ordinary novelty batch is not such a demand.
 
 The default World retains The Lantern Works' repository workshops, files,
-GitHub harbor and activity machinery. Agent markers are now the agents' existing
+GitHub harbor and actions shown at their real destinations (0006). Agent markers are now the agents' existing
 Clarp avatars, explicitly replacing the earlier boats. The side-by-side activity
 and nested cabinets from the Jacquard experiment remain a separate optional view.
 
