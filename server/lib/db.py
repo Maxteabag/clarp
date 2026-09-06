@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 75
+_SCHEMA_VERSION = 76
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1395,8 +1395,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             if version < 74:
                 for statement in _HTML_FORMS_SCHEMA.split(";"):
                     if statement.strip(): con.execute(statement)
-            if version < 75:
-                _migrate_to_v75(con)
+            if version < 76:
+                _migrate_to_v76(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1742,6 +1742,7 @@ CREATE TABLE IF NOT EXISTS janitor_configs (
     generation INTEGER NOT NULL DEFAULT 1,
     scope_json TEXT NOT NULL DEFAULT '{}',
     execution_json TEXT NOT NULL DEFAULT '{}',
+    options_json TEXT NOT NULL DEFAULT '{}',
     last_error TEXT NOT NULL DEFAULT '',
     last_run_at INTEGER,
     last_change_at INTEGER,
@@ -1890,11 +1891,13 @@ BEGIN SELECT RAISE(ABORT,'Demand trigger versions are immutable'); END;
 _SCHEMA_SQL += _BUILTIN_JANITOR_SCHEMA
 
 
-def _migrate_to_v75(con: sqlite3.Connection) -> None:
+def _migrate_to_v76(con: sqlite3.Connection) -> None:
     """Add demand execution contracts without enabling or converting agents."""
     columns = {row[1] for row in con.execute("PRAGMA table_info(janitor_configs)")}
     if "execution_json" not in columns:
         con.execute("ALTER TABLE janitor_configs ADD COLUMN execution_json TEXT NOT NULL DEFAULT '{}'")
+    if "options_json" not in columns:
+        con.execute("ALTER TABLE janitor_configs ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'")
     statement = ""
     for line in _BUILTIN_JANITOR_SCHEMA.splitlines(keepends=True):
         statement += line
