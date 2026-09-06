@@ -412,3 +412,21 @@ The storyboard and treatments considered are in
 `docs/fleet-map/stage-two-storyboard.md`. Real proof uses the pistol-six replay
 and the movement-physics counterexample (published video with two checks never
 rerun), both via `?view=flow&window=…&until=…`.
+
+
+### Stage three: journeys, waiting and remembered routes
+
+`viz_work.py` adds bounded `jobs` (background jobs with a boundary: GitHub
+Actions, TestFlight, test lane, Host update, service, unknown) and `decisions`
+(pending or recently resolved owner decisions) to the work payload, with the
+contract lines `waiting` and `routes`. `journey.js` derives each wait's state at
+the playhead (waiting, released, failed, expired, cancelled; stale when a
+heartbeat is overdue), attributes it to a lantern by agent and plan window, and
+draws boundary posts outside the workshop rim with mooring lines whose motion
+exists only while a wait is open. `viz-flow-memory.js` remembers repeated
+deliveries, messages and waits as bounded routes drawn still and faint, labeled
+as patterns. The evidence map for the pilot route (Paper Cuts Man's HTML-form
+release, with Theo's expired TestFlight wait as the counterexample) is in
+`docs/fleet-map/stage-three-evidence-map.md`. Service-name parsing now stops at
+a separator glued to a unit name, so `restart clarp; gh run view …` no longer
+mints services named after the next command's words.

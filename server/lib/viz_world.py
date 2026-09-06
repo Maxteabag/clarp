@@ -46,9 +46,14 @@ def service_operations(raw):
         if not args or args[0] not in {'restart','start','stop','reload','status','is-active'}:continue
         operation=args[0]
         for unit in args[1:]:
-            if unit in {'&&',';','|','>','2>'}:break
-            if not re.fullmatch(r'[A-Za-z0-9_@.:-]+',unit) or unit.startswith('-'):continue
-            result.append({'unit':unit if '.' in unit else unit+'.service','scope':scope,'operation':operation})
+            if unit in {'&&',';','|','||','>','2>'} or any(op in unit for op in ('&&','||','|','>')):break
+            # A unit glued to a separator (`clarp;`) ends the systemctl call; the
+            # words after it belong to another command, never to a service name.
+            ended=unit.endswith(';')
+            unit=unit.rstrip(';')
+            if unit and re.fullmatch(r'[A-Za-z0-9_@.:-]+',unit) and not unit.startswith('-'):
+                result.append({'unit':unit if '.' in unit else unit+'.service','scope':scope,'operation':operation})
+            if ended:break
     return result[:12]
 
 

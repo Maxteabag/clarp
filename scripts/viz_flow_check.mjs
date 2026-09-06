@@ -26,6 +26,11 @@ try{
  // Live messages that name a plan are references; transfer needs an explicit handoff record.
  assert(!live.meta.visualActions.some(a=>a.action==='handoff'),'no transfer semantics without a handoff record');
  for(const w of live.meta.workObjects)assert.equal(w.handoffs,0,'live work objects carry references, not transfers');
+ // Waiting is only ever a recorded job or pending decision; every drawn wait has one.
+ const recordedWaits=new Set([...(live.scene.work?.jobs||[]).map(j=>'job:'+j.id),...(live.scene.work?.decisions||[]).map(d=>'decision:'+d.id)]);
+ for(const wt of live.meta.waits)assert(recordedWaits.has(wt.id),'wait has a recorded source '+wt.id);
+ for(const post of live.meta.posts)assert(live.meta.workspaces.some(ws=>ws.id===post.region)&&post.waits>0,'posts stand at drawn workshops with waits');
+ for(const r of live.scene.flowMemory?.routes||[])assert(r.count>=1&&r.from!==r.to,'routes are counted observations between two ends');
  const plans=new Set((live.scene.work?.plans||[]).map(p=>p.id)),artifacts=new Set((live.scene.work?.artifacts||[]).map(a=>a.id));
  for(const w of live.meta.workObjects){
   assert(plans.has(w.id)||(w.id.startsWith('artifact:')&&artifacts.has(w.id.slice(9))),'work object has recorded provenance '+w.id);
@@ -67,9 +72,13 @@ try{
  state=await seek(36);assert(state.meta.visualActions.some(a=>a.action==='push'));assert.equal(state.meta.relations.deliveries,1,'a push is a delivery along the rail');await page.screenshot({path:out+'/push.png'});
  state=await seek(39.5);assert.equal(plan(state).stage,'outcome');assert(plan(state).preview,'the synthetic preview is shown on the outcome slate');
  assert(state.meta.visualActions.some(a=>a.action==='check'&&a.state==='failure'),'remote check result appears at the remote');assert(state.meta.visualActions.some(a=>a.action==='push'&&a.state==='delivered'));await page.screenshot({path:out+'/outcome.png'});
+ state=await seek(37);assert.deepEqual(state.meta.waits.map(w=>[w.id,w.state,w.anchor]).sort(),[['job:demo-job-ci','waiting','work'],['job:demo-job-tf','waiting','work']],'recorded jobs moor the work to their boundary posts while open');assert(state.meta.posts.length===2);await page.screenshot({path:out+'/waiting.png'});
+ state=await seek(20);assert.deepEqual(state.meta.waits,[],'quiet time draws no waiting');
  state=await seek(37.5);assert(state.meta.visualActions.some(a=>a.action==='check'&&a.state==='running')&&!state.meta.visualActions.some(a=>a.action==='check'&&a.state!=='running'),'a remote run shows no conclusion before its evidenced completion');
  state=await seek(39.5);assert(plan(state).link&&!plan(state).link.startsWith('demo:'),'the open link is the recorded media, not the preview');
  state=await seek(44.5);assert(state.meta.visualActions.some(a=>a.action==='handoff'&&a.state==='traveling'),'the synthetic explicit handoff record carries its seal');assert.equal(plan(state).handoffs,1);assert.equal(state.meta.relations.threads,1);await page.screenshot({path:out+'/handoff.png'});
+ state=await seek(46);assert(state.meta.waits.some(w=>w.id==='decision:demo-decision'&&w.state==='waiting'),'a pending decision is a wait on the owner');assert(state.meta.waits.some(w=>w.id==='job:demo-job-ci'&&w.state==='released'));
+ state=await seek(50);assert(state.meta.waits.some(w=>w.id==='job:demo-job-tf'&&w.state==='expired'),'an expired heartbeat is a wait that ended without evidence');await page.screenshot({path:out+'/expired-wait.png'});
  state=await seek(48.5);assert(state.meta.visualActions.some(a=>a.action==='restart'&&a.state==='running'));assert(state.meta.workspaces.some(w=>w.id==='demo:service'));assert(state.meta.visualActions.some(a=>a.action==='check'&&a.state==='success'));await page.locator('#fit').click();await page.waitForTimeout(150);await page.screenshot({path:out+'/service-restart.png'});
  await page.locator('#flow-labels').click();assert((await snapshot()).actionLabels);
  await page.locator('#live').click();await page.waitForFunction(()=>!window.fleetWorldSnapshot().demoEnabled&&window.fleetWorldSnapshot().scene.host!=='Workflow demo');
@@ -79,6 +88,6 @@ try{
  await page.locator('#view-world').click();await page.waitForFunction(()=>window.fleetWorldSnapshot().meta.title==='The Lantern Works');
  await page.locator('#view-cabinets').click();await page.waitForFunction(()=>window.fleetWorldSnapshot().meta.title==='The Jacquard Observatory');
  assert.deepEqual(errors,[]);assert.deepEqual(posts,[]);
- await fs.writeFile(out+'/verification.json',JSON.stringify({liveEvents:live.scene.events.length,owners:live.meta.ownerGroups,realAvatars:live.meta.loadedAvatars.length,overallWorkspaces:live.meta.workspaces.length,overallAgents:live.meta.agents.length,liveWorkObjects:live.meta.workObjects,liveRelations:live.meta.relations,selectionPreservesLayout:true,ownerPortraits:live.meta.ownerPortraits,githubLogo:live.meta.githubLogo,demonstration:'synthetic, client-local',actionLabelsInitiallyHidden:true,distinctActions:true,stableLocalAvatars:true,viewsPreserved:true,workStages:['intent','evidence','outcome'],validationLifecycle:['failed','recovered'],handoffCarriesSeal:true,posts,errors},null,2));
- console.log('Flow, ownership, work objects, validation lifecycle, delivery, handoff, demo isolation and all views passed.');
+ await fs.writeFile(out+'/verification.json',JSON.stringify({liveEvents:live.scene.events.length,owners:live.meta.ownerGroups,realAvatars:live.meta.loadedAvatars.length,overallWorkspaces:live.meta.workspaces.length,overallAgents:live.meta.agents.length,liveWorkObjects:live.meta.workObjects,liveRelations:live.meta.relations,selectionPreservesLayout:true,ownerPortraits:live.meta.ownerPortraits,githubLogo:live.meta.githubLogo,demonstration:'synthetic, client-local',actionLabelsInitiallyHidden:true,distinctActions:true,stableLocalAvatars:true,viewsPreserved:true,workStages:['intent','evidence','outcome'],validationLifecycle:['failed','recovered'],handoffCarriesSeal:true,waits:['waiting','released','expired','owner-decision'],liveWaits:live.meta.waits,liveRoutes:live.meta.relations.routes,posts,errors},null,2));
+ console.log('Flow, ownership, work objects, validation lifecycle, delivery, handoff, waits, demo isolation and all views passed.');
 }finally{await context.close();await browser.close();}

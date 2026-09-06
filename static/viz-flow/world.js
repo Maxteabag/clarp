@@ -3,6 +3,7 @@ const fx=require('./effects.js');
 const craft=require('./craft.js');
 const slate=require('./slate.js');
 const lantern=require('./lantern.js');
+const journey=require('./journey.js');
 const {drawAgentAvatar}=require('./avatar.js');
 const {drawGitHub}=require('./github.js');
 let key='',model,lastTime=0;const poses=new Map();
@@ -18,6 +19,7 @@ const describe=o=>{
   o.outcome?'Outcome: '+o.outcome.type+' “'+o.outcome.title+'” at '+clock(o.outcome.created_at)+(o.outcome.count>1?' (+'+(o.outcome.count-1)+' more)':'')+(o.outcome.preview?' · preview from recorded media':'')+(o.outcome.source_count?' · '+o.outcome.source_count+' sources':''):o.finished?'Outcome: none recorded · closed without an artifact':'Outcome: none yet'];
  for(const h of o.handoffs)lines.push((h.link==='transfer'?'Handoff: ':'Referenced: ')+h.fromName+' → '+h.toName+' at '+clock(h.ts)+(h.link==='transfer'?' (explicit handoff record)':' (message names this plan; not a transfer)'));
  if(o.remoteRuns.length)lines.push('Remote checks: '+o.remoteRuns.map(r=>r.conclusion||'running').join(', '));
+ for(const wt of o.waits||[])lines.push(journey.describe({...wt,attributed:null}));
  return lines.join('\n');
 };
 module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhead,interaction={},avatars={},images={},reducedMotion=false})=>{
@@ -30,7 +32,7 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhe
  // Zoom reveals detail; selection never does. Overview keeps silhouettes, light
  // and identity; names and small marks appear as the viewer moves closer.
  const detail=lantern.detailLevel(camera.k,pixelRatio);
- const relations={rails:0,tethers:0,threads:0,deliveries:0,discoveries:0};
+ const relations={rails:0,tethers:0,threads:0,deliveries:0,discoveries:0,moorings:0,routes:0};
  c.fillStyle='#091c24';c.fillRect(0,0,width,height);
  const glow=c.createRadialGradient(width*.4,height*.5,10,width*.4,height*.5,width*.7);glow.addColorStop(0,'#19484455');glow.addColorStop(1,'#091c2400');c.fillStyle=glow;c.fillRect(0,0,width,height);
  c.save();c.translate(camera.x,camera.y);c.scale(camera.k,camera.k);c.textBaseline='alphabetic';
@@ -40,6 +42,15 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhe
  for(const relation of m.structural){const workspace=m.regionMap.get(relation.from),a=m.projects.find(p=>p.id===workspace.project),r=m.remoteMap.get(relation.to);
   const id=a.id+'>'+r.id;if(drawnOrigins.has(id))continue;drawnOrigins.set(id,{a,r});relations.rails++;
   craft.rail(c,(c,a,b)=>fx.path(c,a,b,35),a,r);
+ }
+ // Remembered routes: repeated observed interactions, drawn still and faint
+ // beneath everything live. A pattern is not a dependency.
+ const routeHits=[];
+ for(const route of (scene.flowMemory?.routes||[]).filter(r=>r.count>=2&&r.lastObserved<=playhead).slice(-80)){
+  const end=id=>m.regionMap.get(id)||m.remoteMap.get(id)||(m.actorMap.get(id)?{x:m.actorMap.get(id).x,y:m.actorMap.get(id).y}:null)||m.posts.find(p=>p.region+'\n'+p.boundary===id);
+  const a=end(route.from),b=end(route.to);if(!a||!b)continue;relations.routes++;
+  journey.drawRoute(c,a,b,route.count,detail);
+  routeHits.push({id:'route:'+route.kind+':'+route.from+'>'+route.to,label:'Remembered route',purpose:route.kind+' observed '+route.count+' times · a pattern in this browser\'s memory, not a dependency or a cause',x:(a.x+b.x)/2-12,y:(a.y+b.y)/2+3,w:24,h:24});
  }
  for(const project of m.projects){
   const seed=hash(project.id),children=m.regions.filter(r=>r.project===project.id);
@@ -154,6 +165,18 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhe
   agents.push({id:actor.id,agent:actor.name,target:actor.workspace,x:pos.x,y:pos.y,action:e.action,status,interactionTarget:f?.id||e.remote_target||null,work:claimedBy?.id||null});
   hits.push({id:'agent:'+actor.id,label:actor.name,purpose:e.action+' · '+status+(knownTarget?'':' · exact target not recorded')+(claimedBy?'\nWorking on: '+claimedBy.title:''),path:e.evidence?.path||'',sample:e.evidence?.raw||'',x:pos.x-35,y:pos.y-60,w:100,h:115});
  }
+ // Waiting at real boundaries: moorings from work (or its agent) to posts.
+ const waitMeta=[];
+ for(const post of m.posts){
+  for(const wt of post.waits){const from=wt.anchor.kind==='agent'&&m.actorMap.get(wt.agent_id)?.pos?{x:m.actorMap.get(wt.agent_id).pos.x+22,y:m.actorMap.get(wt.agent_id).pos.y+10}:wt.anchor;
+   journey.drawMooring(c,from,post,wt,time,playhead,reducedMotion);relations.moorings++;
+   visualActions.push({target:wt.id,action:'wait',state:wt.state});
+   waitMeta.push({id:wt.id,kind:wt.kind,boundary:wt.boundary,state:wt.state,stale:wt.stale,work:wt.work||null,agent:wt.agent_id,anchor:wt.anchor.kind,post:{region:post.region,x:post.x,y:post.y}});}
+  journey.drawPost(c,post,post.waits,time,playhead,reducedMotion,detail);
+  hits.push({id:'post:'+post.region+':'+post.boundary,label:post.label,purpose:post.waits.map(wt=>journey.describe(wt)+(wt.since?' · since '+clock(wt.since):'')+(wt.until?' until '+clock(wt.until):'')).join('\n'),link:post.waits.find(wt=>wt.link)?.link||null,linkLabel:'Open run',x:post.x-18,y:post.y-34,w:36,h:52});
+ }
+ for(const r of m.regions)if(r.hiddenWaits)label(c,'+'+r.hiddenWaits+' waits',r.x+r.rx-30,r.y+r.ry+16,9,'#b9ad86');
+ hits.push(...routeHits);
  // Explicit collaboration: a recorded agent-to-agent message is a thread with a
  // knot. When the message names a plan, that work's seal travels the thread.
  for(const th of m.threads){
@@ -174,5 +197,5 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhe
  c.restore();return {title:'Flow · The Lantern Works',hits,bounds:m.bounds,agents,territories:m.projects.length+m.ownerGroups.length,files:drawnFiles,visualActions,
   projects:m.projects.map(p=>({id:p.id,label:p.label,children:p.members.map(r=>r.id),character:p.character||null})),recentTraces:m.actors.filter(a=>playhead-(a.event.finished_at??a.event.ts)<180000).length,
   detail,workspaces:m.regions.map(r=>({id:r.id,x:r.x,y:r.y,rx:r.rx,ry:r.ry,validation:r.validation?.state||'none',hiddenWork:r.hiddenWork||0})),ownerGroups:m.ownerGroups.map(o=>({id:o.id,children:o.repos.map(r=>r.id),runs:o.repos.flatMap(r=>(r.runs||[]).map(run=>({repo:r.id,conclusion:run.conclusion,status:run.status})))})),ownerPortraits:m.ownerGroups.filter(o=>avatars[o.id]).map(o=>o.id),githubLogo:m.ownerGroups.length>0,
-  workObjects,relations,workEvidence:{available:m.work.available,synthetic:m.work.synthetic,plans:m.work.objects.length,threads:m.threads.length,contract:m.work.contract}};
+  workObjects,waits:waitMeta,posts:m.posts.map(p=>({region:p.region,boundary:p.boundary,x:p.x,y:p.y,waits:p.waits.length})),relations,workEvidence:{available:m.work.available,synthetic:m.work.synthetic,plans:m.work.objects.length,threads:m.threads.length,contract:m.work.contract}};
 };

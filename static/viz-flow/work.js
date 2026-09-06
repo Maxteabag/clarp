@@ -2,6 +2,7 @@
 // evidence to a recorded outcome. Attribution is by agent identity and time
 // overlap and is labeled as such; counts never become progress.
 const {hash}=require('./model-util.js');
+const journey=require('./journey.js');
 const TAIL=120000; // publishing usually lands within two minutes of completion
 const isValidation=e=>['test','build','lint'].includes(e.action)||!!e.evidence?.validation;
 const isChange=e=>['edit','write','create','delete'].includes(e.action)&&e.location_scope==='target';
@@ -85,9 +86,16 @@ exports.assemble=(scene,t,history,groupFor,actorWorkspace)=>{
    outcome:{id:a.id,type:a.type,title:a.title,created_at:a.created_at,preview:!!a.preview,link:a.media_url||null,sources:a.sources||null,source_count:a.source_count||0,media:a.media||null,count:1},
    remoteRuns:[],handoffs:[],age:Math.max(0,t-a.created_at),finished:true});
  }
+ // Waits: recorded jobs and pending decisions at the playhead. A wait that
+ // started inside a plan's window by the same agent is attributed to that work.
+ const waits=[...(work.jobs||[]).map(j=>journey.waitAt(j,t)),...(work.decisions||[]).map(d=>journey.decisionAt(d,t))].filter(Boolean);
+ for(const wt of waits){
+  const owner=objects.find(o=>!o.kind&&o.agent_id===wt.agent_id&&wt.since>=o.created_at&&wt.since<=(o.completed_at!=null?o.completed_at+TAIL:t));
+  if(owner){wt.work=owner.id;wt.attributed=owner.title;(owner.waits=owner.waits||[]).push(wt);}
+ }
  const remoteRuns=artifacts.filter(a=>a.type==='workflow_run'&&a.remote_target).map(a=>runAt(a,t));
  const threads=messages.map(m=>({id:m.id,from:m.from_agent_id,fromName:m.from,to:m.to_agent_id,toName:m.to,ts:m.ts,plan:m.plan_ids?.[0]||null,link:m.plan_ids?.length?(m.link==='transfer'?'transfer':'reference'):null,excerpt:m.excerpt}));
- return {objects,claimed,orphanArtifacts,remoteRuns,threads,contract:work.contract||null,synthetic:!!work.synthetic,available:work.available!==false};
+ return {objects,claimed,orphanArtifacts,remoteRuns,threads,waits,contract:work.contract||null,synthetic:!!work.synthetic,available:work.available!==false};
 };
 
 // Per-workspace validation from every recorded run there, attributed or not.
