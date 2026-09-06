@@ -39,6 +39,18 @@ def test_create_converts_existing_identity_without_enabling_or_changing_model():
     assert calls == [("POST", "/janitors", {"session": "sam-042d", "template_id": "task-labels"})]
 
 
+def test_release_uses_explicit_revision_and_does_not_archive_the_agent():
+    calls = invoke(["janitor", "release", "sam-042d", "--expected-revision", "4"])
+    assert calls == [("POST", "/janitors/sam-042d/release", {"expected_revision": 4})]
+
+
+def test_release_can_explicitly_handoff_maintenance_to_another_paused_robot():
+    calls = invoke(["janitor", "release", "sam", "--expected-revision", "4",
+                    "--successor", "rivet", "--successor-revision", "1"])
+    assert calls == [("POST", "/janitors/sam/release", {
+        "expected_revision": 4, "successor_session": "rivet", "successor_revision": 1})]
+
+
 def test_create_new_agent_requires_complete_identity():
     with pytest.raises(SystemExit, match="provide --agent"):
         invoke(["janitor", "create", "--name", "Sam"])

@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 75
+_SCHEMA_VERSION = 76
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1397,7 +1397,11 @@ def _migrate(con: sqlite3.Connection) -> None:
                 for statement in _HTML_FORMS_SCHEMA.split(";"):
                     if statement.strip(): con.execute(statement)
             if version < 75:
-                con.execute("ALTER TABLE oracle_delegations ADD COLUMN completion_trace_id TEXT NOT NULL DEFAULT ''")
+                columns = {row[1] for row in con.execute("PRAGMA table_info(oracle_delegations)")}
+                if "completion_trace_id" not in columns:
+                    con.execute("ALTER TABLE oracle_delegations ADD COLUMN completion_trace_id TEXT NOT NULL DEFAULT ''")
+            if version < 76:
+                _migrate_to_v76(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1742,6 +1746,8 @@ CREATE TABLE IF NOT EXISTS janitor_configs (
     revision INTEGER NOT NULL DEFAULT 1,
     generation INTEGER NOT NULL DEFAULT 1,
     scope_json TEXT NOT NULL DEFAULT '{}',
+    execution_json TEXT NOT NULL DEFAULT '{}',
+    options_json TEXT NOT NULL DEFAULT '{}',
     last_error TEXT NOT NULL DEFAULT '',
     last_run_at INTEGER,
     last_change_at INTEGER,
@@ -1855,3 +1861,52 @@ def _migrate_to_v73(con: sqlite3.Connection) -> None:
     for statement in _JANITOR_SCHEMA.split(";"):
         if statement.strip():
             con.execute(statement)
+
+
+_BUILTIN_JANITOR_SCHEMA = """
+CREATE TABLE IF NOT EXISTS janitor_builtins (
+    role TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL UNIQUE REFERENCES agents(agent_id),
+    seed_version INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_demand_results (
+    run_id TEXT PRIMARY KEY REFERENCES janitor_runs(run_id),
+    result_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_demand_claims (
+    run_id TEXT PRIMARY KEY REFERENCES janitor_runs(run_id),
+    claimed_at INTEGER NOT NULL,
+    finished_at INTEGER
+);
+INSERT OR IGNORE INTO janitor_trigger_definitions
+    (trigger_id,version,name,kind,defaults_json) VALUES
+    ('routing-requested',1,'When a message needs a recipient','demand','{}'),
+    ('tool-explanation-requested',1,'When a tool explanation is requested','demand','{}');
+CREATE TRIGGER IF NOT EXISTS janitor_demand_trigger_no_update
+BEFORE UPDATE ON janitor_trigger_definitions
+WHEN OLD.kind='demand'
+BEGIN SELECT RAISE(ABORT,'Demand trigger versions are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS janitor_demand_trigger_no_delete
+BEFORE DELETE ON janitor_trigger_definitions
+WHEN OLD.kind='demand'
+BEGIN SELECT RAISE(ABORT,'Demand trigger versions are immutable'); END;
+"""
+_SCHEMA_SQL += _BUILTIN_JANITOR_SCHEMA
+
+
+def _migrate_to_v76(con: sqlite3.Connection) -> None:
+    """Add demand execution contracts without enabling or converting agents."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(janitor_configs)")}
+    if "execution_json" not in columns:
+        con.execute("ALTER TABLE janitor_configs ADD COLUMN execution_json TEXT NOT NULL DEFAULT '{}'")
+    if "options_json" not in columns:
+        con.execute("ALTER TABLE janitor_configs ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'")
+    statement = ""
+    for line in _BUILTIN_JANITOR_SCHEMA.splitlines(keepends=True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            con.execute(statement)
+            statement = ""
+    assert not statement.strip()

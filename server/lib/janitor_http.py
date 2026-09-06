@@ -94,11 +94,13 @@ def handle(handler, method: str) -> None:
             raise ValueError("Invalid Janitor route")
         if method == "GET":
             if path == "/janitors":
+                from .orchestrator import provider_options
                 return _send(handler, 200, {
                     "janitors": janitors.list_janitors(),
                     "templates": janitors.templates(),
                     "triggers": janitors.trigger_definitions(),
                     "runtime_available": runtime_available(handler.ctx),
+                    "providers": provider_options(),
                 })
             if path == "/janitor-triggers":
                 return _send(handler, 200, {"triggers": janitors.trigger_definitions()})
@@ -128,8 +130,9 @@ def handle(handler, method: str) -> None:
             if data is None:
                 raise ValueError("Expected a JSON object")
             if path == "/janitors":
-                _require_runtime(handler.ctx)
-                fields = {key: data[key] for key in ("template_id", "scope", "attachments") if key in data}
+                if data.get("template_id", "task-labels") == "task-labels":
+                    _require_runtime(handler.ctx)
+                fields = {key: data[key] for key in ("template_id", "scope", "attachments", "options", "execution") if key in data}
                 session = str(data.get("session") or "").strip()
                 new_identity = not session
                 if new_identity:
@@ -165,12 +168,12 @@ def handle(handler, method: str) -> None:
                 old_runs = _old_runs(session)
                 if action == "configure":
                     fields = {key: data[key] for key in
-                              ("template_id", "scope", "attachments", "model", "effort") if key in data}
+                              ("template_id", "scope", "attachments", "model", "effort", "execution", "backend", "options") if key in data}
                     result = janitors.configure(session, revision, **fields)
                 elif action == "enabled":
                     if not isinstance(data.get("enabled"), bool):
                         raise ValueError("enabled must be true or false")
-                    if data["enabled"]:
+                    if data["enabled"] and janitors.get(session)["template_id"] == "task-labels":
                         _require_runtime(handler.ctx)
                     result = janitors.set_enabled(session, revision, data["enabled"])
                 elif action == "import-pilot":
@@ -178,6 +181,15 @@ def handle(handler, method: str) -> None:
                         **{key: value for key, value in data.items() if key != "expected_revision"})
                     _changed(handler)
                     return _send(handler, 200, result)
+                elif action == "release":
+                    fields = {key: data[key] for key in ("successor_session", "successor_revision") if key in data}
+                    result = janitors.release(session, revision, **fields)
+                    _changed(handler)
+                    return _send(handler, 200, {"janitor": result, "cancellation_pending": False})
+                elif action == "adopt-options":
+                    result = janitors.adopt_options(session, revision, data.get("options"))
+                    _changed(handler)
+                    return _send(handler, 200, {"janitor": result})
                 else:
                     return _send(handler, 404, {"error": "Janitor action not found"})
                 pending = _cancel_fenced_runs(handler, old_runs) if not result["enabled"] else False
