@@ -45,10 +45,13 @@ migration. Prefer the supported `clarp-admin update --ref FULL_SHA` once the
 candidate is verified; do not hand-edit generated releases.
 
 For an authorized update that must survive the HTTP connection restarting, run
-`scripts/update_with_job.sh SESSION FULL_SHA PRIVATE_STATE_DIR` in an owned
+`bash scripts/update_with_job.sh SESSION FULL_SHA PRIVATE_STATE_DIR` in an owned
 `systemd-run --user` unit with a private append log and the normal CLI PATH.
 Use `--dry-run` first to inspect its target without starting a job. Keep the
 script in a permanent location outside the generated release being switched.
+Invoke it with `/usr/bin/bash` in the unit too: managed copies may not have an
+executable bit. Resolve symlinks before choosing the helper path; a dotfiles
+skill link can still point into the generated release.
 It heartbeats a process-fenced job and records `installer-exit`; job completion
 means the installer finished, not that phone/runtime verification is complete.
 Once installation starts, the installer owns rollback; cancelling the tracking
