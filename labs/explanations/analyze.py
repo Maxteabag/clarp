@@ -17,9 +17,9 @@ def analyze(directory):
             if 'transport' not in row:
                 continue  # Developer bypass is not a model timing sample.
             rows.append(row)
-            groups[(row["transport"], row["prompt"], row["batch_size"], row.get("detail_level", 3))].append(row)
+            groups[(row["transport"], row["prompt"], row["batch_size"], row.get("detail_level", 3), row.get("prompt_sha256", "legacy"))].append(row)
     result = {"recorded_model_calls": len(rows), "format_valid": sum(bool(r.get("valid")) for r in rows), "conditions": []}
-    for (transport, prompt, size, level), samples in groups.items():
+    for (transport, prompt, size, level, prompt_hash), samples in groups.items():
         times = [r.get("elapsed_including_startup_ms", r["total_ms"] + (r.get("startup_ms", 0) if transport == "app-server" and r["repetition"] == 0 else 0)) for r in samples]
         answer_sets = [r.get("answers", {}) for r in samples]
         texts = [t for answers in answer_sets for t in answers.values() if isinstance(t, str)]
@@ -28,7 +28,7 @@ def analyze(directory):
         leaks = sum(bool(re.search(r"\b(?:javascript|python|typescript|json|csv|api|endpoint)\b|\b[\w-]+\.(?:js|py|sh|ts)\b", text, re.I)) for text in texts)
         startup = [r["thread_started_ms"] for r in samples if "thread_started_ms" in r]
         tails = [r["total_ms"] - event["ms"] for r in samples for event in r.get("events", []) if event["type"] == "turn.completed"]
-        result["conditions"].append({"transport": transport, "prompt": prompt, "batch_size": size, "detail_level": level,
+        result["conditions"].append({"transport": transport, "prompt": prompt, "batch_size": size, "detail_level": level, "prompt_sha256": prompt_hash,
             "n": len(samples), "median_ms": round(statistics.median(times), 2), "range_ms": [min(times), max(times)],
             "session_ready_median_ms": round(statistics.median(startup), 2) if startup else None,
             "post_turn_tail_median_ms": round(statistics.median(tails), 2) if tails else None,

@@ -41,6 +41,10 @@ python3 labs/explanations/analyze.py labs/explanations/results
 
 ### Across all audience levels
 
+For a six-call level-4-only refinement, add `--grandma-refinement` to `levels.py`.
+See `GRANDMA.md`. Aggregate by exact prompt hash as well as label and audience;
+the same candidate label may refer to different instruction revisions.
+
 ```sh
 python3 labs/explanations/levels.py --output /tmp/levels.jsonl
 python3 labs/explanations/levels.py --live --output /tmp/levels.jsonl

@@ -25,11 +25,13 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--live', action='store_true')
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--grandma-refinement', action='store_true', help='Six paired trials: current versus plain-language refinement at level 4')
     args = p.parse_args()
     # Eight matched cases, including the prior weather regression.
     cases = fixtures()[:7] + [fixtures(True)[0]]
+    levels = [4] if args.grandma_refinement else [1,2,3,4]
     if not args.live:
-        print(json.dumps({'calls':24,'rounds':3,'levels':NAMES,'cases':[c['case'] for c in cases]}))
+        print(json.dumps({'calls':len(levels)*6,'rounds':3,'levels':[NAMES[i] for i in levels],'cases':[c['case'] for c in cases]}))
         return
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('x') as output:
@@ -38,14 +40,29 @@ def main():
             assert all(i['status']=='disabled' for i in bypass['items'])
         output.write(json.dumps({'detail_level':0,'model_calls':0,'bypass_verified':True,'raw':requests(cases)})+'\n')
         for repetition in range(3):
-            for level in [1,2,3,4]:
+            for level in levels:
                 for variant in (['baseline','examples'] if (repetition+level)%2 else ['examples','baseline']):
                     if variant == 'examples':
-                        PROMPTS['examples'] = candidate(level)
+                        PROMPTS['examples'] = candidate(level) + (GRANDMA_REFINEMENT if args.grandma_refinement else '')
                     row=trial(variant,cases,repetition,detail_level=level)
+                    row['experiment'] = 'grandma-refinement' if args.grandma_refinement else 'all-levels'
                     row['audience']=NAMES[level]
                     row['instructions']=PROMPTS[variant]+shipping.POLICIES[level]
                     output.write(json.dumps(row,ensure_ascii=False)+'\n'); output.flush()
                     print(json.dumps({k:row[k] for k in ['audience','prompt','repetition','valid','total_ms']}),flush=True)
+
+GRANDMA_REFINEMENT = '''
+The reader does not know software development. Before returning, rewrite the label
+using ordinary everyday words, while keeping the actual operation and restrictions.
+Avoid these words in your labels: Python, JavaScript, script, API, JSON, CSV,
+authorization, token, timeout, retry, branch, repository, endpoint, implementation.
+Do not merely remove jargon: explain its meaning. A timeout of 30 seconds means
+waiting up to 30 seconds for a reply. Searching authentication errors means looking
+for signs that access was refused or a login expired. A push attempts to send saved
+changes to the shared project, not to release or deploy an application.
+Reading code is checking how a task works, not doing the task. If no purpose can be
+established, say "Start a task whose purpose is not yet clear."
+Use 8-14 words when that preserves the facts. Never invent safety or success.
+'''
 
 if __name__ == '__main__': main()
