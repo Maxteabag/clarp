@@ -86,3 +86,40 @@ personality with no live session.
 
 Never expose provider API keys to the phone or place them in prompts. Creating
 or editing a persona does not authorize deleting its conversation history.
+
+## Organizing agents into teams
+
+For requests to group the current fleet, base assignments on current evidence:
+
+1. Resolve active agents with `clarp-admin sessions` or authenticated
+   `GET /agents/snapshot`.
+2. Use the `fleet-activity` skill for recent tool destinations and inspect the
+   latest user requests when purpose is ambiguous. Exclude archived agents
+   unless the user asks to organize archives.
+3. Prefer a small hierarchy of stable projects or responsibilities. Put agents
+   in leaf teams and use empty parent teams as containers. Avoid assigning one
+   agent to several teams merely because it touched several repositories.
+4. Keep communication and leadership disabled unless explicitly requested;
+   teams are presentation-only by default.
+5. Reconcile through the HTTP API, never by writing SQLite directly.
+
+Write a JSON array in parent-before-child order, using session slugs for members:
+
+```json
+[
+  {"name":"Product","color":"moss","members":[]},
+  {"name":"iOS","parent":"Product","color":"gold","members":["marcus","theo"]}
+]
+```
+
+Preview, then apply:
+
+```bash
+python3 scripts/reconcile_teams.py plan.json --require-all-active
+python3 scripts/reconcile_teams.py plan.json --apply --require-all-active
+```
+
+The helper creates or updates named teams and replaces direct membership only
+for teams in the plan. It preserves unrelated teams. `--require-all-active`
+refuses a plan that omits an active agent. Success requires final verification
+with no omitted or multiply assigned active agents.
