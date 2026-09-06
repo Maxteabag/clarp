@@ -260,3 +260,19 @@ Inspect the screenshots and the recorded video. The verifier checks real
 hierarchy/remotes, source execution, agent movement through recorded playback,
 throws, infinite loops, opaque origin and blocked host storage. A successful
 model call alone is not proof that the authored software works.
+
+
+### Hosted live development
+
+The local service must pass `--learn --library PERSISTENT_PATH` to
+`scripts/viz_host.py`. Without `--learn`, the preview intentionally does not run
+models. The learning-enabled host observes the live corpus every 15 seconds,
+including when no browser is open, and accepts explicit source reinvention from
+the inspector. It keeps the activity database read-only while publishing source
+revisions to its separate JSON library. The HUD exposes actual novelty checking,
+Astra development, and the last failure. New observations do not imply a redraw:
+Spark first determines whether the current source already represents them.
+
+The running `clarp-fleet-preview.service` uses an archived release and persistent
+library under `~/.local/share/clarp-fleet-preview/`; use the service's
+WorkingDirectory and ExecStart to verify its installed version and learning flag.
