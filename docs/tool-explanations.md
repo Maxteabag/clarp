@@ -14,7 +14,7 @@ affects only that token. Queued work disappears only after every requesting view
 has released/expired. Running model batches finish and populate the shared cache.
 Two panes on desktop share a local reference count; phones use separate UUIDs.
 Late requests for released tokens are fenced by bounded two-minute tombstones.
-Legacy clients without demand IDs retain their existing behavior.
+Legacy clients without demand IDs retain work for up to 24 hours after their last poll.
 
 Desktop checks mapped card coordinates against the transcript ListView every
 80ms while narration is enabled, including minimized-window suppression. iOS uses
@@ -54,12 +54,38 @@ each ID with `status`: `disabled`, `pending`, `ready` (with `text`), `failed`
 every 600–700ms, with a bounded overall wait. Switching Host, activity or audience
 must cancel/ignore stale client responses. Never reveal raw activity while pending.
 
-The Host coalesces equivalent metadata at each audience level. A serial worker
-batches eight requests after a 180ms debounce; the queue holds at most 64 and the
-in-memory cache at most 512 entries. Restarting the HTTP service clears the cache.
-Failure entries are cached for 60 seconds, preventing polling retry storms; a new
-request after that can retry. Clients stop polling terminal failures. Cache entries
-are not permanent records; raw payloads and script excerpts are not persisted.
+## SQLite state and retention
+
+SQLite is authoritative for the whole explanation system, in the Host database
+reported by `clarp-admin paths` (normally `~/.local/share/clarp/state.sqlite`).
+Schema v72 adds four tables:
+
+- `tool_explanation_cache`: lookup hash, completed text, creation and expiry time.
+- `tool_explanation_jobs`: queued/running work, bounded normalized payload,
+  audience, claim owner, lease expiry, and temporary failure state.
+- `tool_explanation_demands`: per-view ownership and demand expiry.
+- `tool_explanation_releases`: short-lived fences against late cancelled requests.
+
+Ready explanations expire exactly **24 hours after generation**; reads do not
+extend expiry. Reads reject expired answers and worker/request maintenance removes
+expired rows. Cleanup resumes after downtime; this is logical retention, not secure
+erasure of SQLite WAL pages or backups. The previous 512-entry RAM limit is gone.
+No Python in-memory queue or answer cache is authoritative. Client render caches
+remain transient copies; this migration does not add client-side databases.
+
+The queue holds at most 64 waiting jobs plus one batch of at most eight running
+jobs, with the existing 180ms debounce. Workers claim atomically using a unique
+owner token and a 60-second lease, longer than the 45-second model timeout. A
+crashed worker's expired claim can be recovered if viewer demand remains; stale
+completions cannot overwrite a newer claim. Recovery is at-least-once model work,
+not a guarantee against duplicate model usage after a crash. No described command
+is executed. A clean shutdown releases owned jobs for recovery.
+
+Pending payloads, including bounded script excerpts, are stored only while needed
+for queued/running work. Success deletes the job and demand rows, retaining only
+the answer/hash/timestamps. Cancellation deletes abandoned queued jobs. Failure
+clears the payload and persists a safe failure reason for 60 seconds to prevent
+retry storms. Every state survives HTTP process restarts until its own expiry.
 
 Only selected bounded metadata and labeled operations are accepted; tool output,
 diffs, arbitrary nested payloads, history and client-provided script excerpts are
@@ -84,5 +110,6 @@ Headless regression gates:
 
 ```sh
 uv run --group dev pytest tests/unit/test_tool_explanations.py tests/integration/test_tool_explanations_endpoint.py
+uv run --group dev pytest tests/unit/test_tool_explanation_cache.py tests/unit/test_tool_explanation_queue.py
 ctest --test-dir desktop/build/release -R 'tool-narrator|activity-layout' --output-on-failure
 ```
