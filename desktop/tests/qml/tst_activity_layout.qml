@@ -57,6 +57,18 @@ TestCase {
         verify(message.implicitHeight - (top + card.height) <= 4,
                "Tool-only messages must not add a paragraph-sized trailing gap");
     }
+    function test_collapsedGroupDoesNotInstantiateExplanationCards() {
+        const message = createTemporaryObject(toolOnlyMessage, testCase, {
+            showTools: false, groupSummary: "5 tool calls", groupedExpanded: false
+        });
+        verify(message !== null);
+        waitForRendering(message);
+        compare(findChild(message, "displayCellCard"), null);
+        message.groupedExpanded = true;
+        tryVerify(() => findChild(message, "displayCellCard") !== null);
+        message.groupedExpanded = false;
+        tryVerify(() => findChild(message, "displayCellCard") === null);
+    }
 
     Component {
         id: toolCard
