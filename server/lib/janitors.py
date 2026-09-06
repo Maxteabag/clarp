@@ -627,7 +627,7 @@ def _save_progress(c, attachment_id, generation, state, next_run_at=None):
     c.execute("""INSERT INTO janitor_progress(attachment_id,generation,state_json,updated_at)
         VALUES (?,?,?,?) ON CONFLICT(attachment_id) DO UPDATE SET generation=excluded.generation,
         state_json=excluded.state_json,updated_at=excluded.updated_at""", (attachment_id, generation, _json(state), db.now_ms()))
-    if next_run_at is not None:
+    if next_run_at is not None or "next_run_at" in state:
         c.execute("UPDATE janitor_attachments SET next_run_at=? WHERE attachment_id=?", (next_run_at, attachment_id))
 
 
@@ -736,8 +736,16 @@ def _active_run(c, run_id):
 def validate_dispatch(session: str, run_id: str, trace_id: str) -> bool:
     try:
         row = _active_run(db.conn(), run_id)
-        return (row["session"] == session and row["trace_id"] == trace_id
-                and _decode(row["configuration_json"], {}).get("template_id") == "task-labels")
+        if (row["session"] != session or row["trace_id"] != trace_id
+                or _decode(row["configuration_json"], {}).get("template_id") != "task-labels"):
+            return False
+        attachment = _active_attachment(db.conn(), row["attachment_id"], row["generation"])
+        if row["status"] == "queued" and attachment["trigger_id"] == "active-interval":
+            from . import application_activity
+            if not application_activity.active(_decode(attachment["config_json"], {})["idle_timeout_seconds"]):
+                db.conn().execute("UPDATE janitor_runs SET status='cancelled',outcome='cancelled',finished_at=?,error='Application became inactive before execution' WHERE run_id=? AND status='queued'", (db.now_ms(), run_id))
+                return False
+        return True
     except JanitorError:
         return False
 
