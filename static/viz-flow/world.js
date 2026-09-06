@@ -13,10 +13,10 @@ const describe=o=>{
  const v=o.evidence.validation;
  const lines=['Work · '+o.agent+' · '+o.status+(o.completed_at?' at '+clock(o.completed_at):''),
   o.intent.none?'Intent: no plan recorded · outcome only':'Intent: '+o.intent.done+'/'+o.intent.total+' declared items complete'+(o.intent.current?' · now: '+o.intent.current:''),
-  'Evidence: '+o.evidence.events+' tool events, '+o.evidence.changes+' recorded changes across '+o.evidence.files.length+' files, '+v.runs+' validation runs'+(v.state==='none'?'':' · last '+v.kind+' '+({failed:'failed',recovered:'recovered after failure',ok:'succeeded',running:'running',unknown:'outcome unknown'}[v.state]||v.state)+(v.exact?'':' (compound script, not exact)'))+' · attributed by '+o.evidence.basis,
+  'Evidence: '+o.evidence.events+' tool events, '+o.evidence.changes+' recorded changes across '+o.evidence.files.length+' files, '+v.runs+' validation runs'+(v.state==='none'?'':' · '+v.kind+' '+({failed:'failed',interrupted:'chain failed; failing step unknown',recovered:'recovered: the same checks later passed',ok:'succeeded',running:'running',unknown:'outcome unknown'}[v.state]||v.state)+(v.unresolved?.length?' · unresolved: '+v.unresolved.slice(0,3).join(' · '):''))+' · attributed by '+o.evidence.basis,
   o.outcome?'Outcome: '+o.outcome.type+' “'+o.outcome.title+'” at '+clock(o.outcome.created_at)+(o.outcome.count>1?' (+'+(o.outcome.count-1)+' more)':'')+(o.outcome.preview?' · preview from recorded media':'')+(o.outcome.source_count?' · '+o.outcome.source_count+' sources':''):o.finished?'Outcome: none recorded · closed without an artifact':'Outcome: none yet'];
- for(const h of o.handoffs)lines.push('Handoff: '+h.fromName+' → '+h.toName+' at '+clock(h.ts)+' (message names this plan)');
- if(o.remoteRuns.length)lines.push('Remote checks: '+o.remoteRuns.map(r=>r.conclusion||r.status).join(', '));
+ for(const h of o.handoffs)lines.push((h.link==='transfer'?'Handoff: ':'Referenced: ')+h.fromName+' → '+h.toName+' at '+clock(h.ts)+(h.link==='transfer'?' (explicit handoff record)':' (message names this plan; not a transfer)'));
+ if(o.remoteRuns.length)lines.push('Remote checks: '+o.remoteRuns.map(r=>r.conclusion||'running').join(', '));
  return lines.join('\n');
 };
 module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interaction={},avatars={},images={},reducedMotion=false})=>{
@@ -52,7 +52,7 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interactio
    craft.kiln(c,r,r.validation,time,playhead,reducedMotion);
    if(r.validation&&r.validation.state!=='none')visualActions.push({target:r.id,action:'validation',state:r.validation.state});
    const v=r.validation;
-   hits.push({id:r.id,label:r.label+(r.displayName?' · '+r.displayName:''),path:r.path,purpose:(r.kind==='service'?'Observed service':r.is_worktree?'Working copy · shared repository':r.kind==='unresolved'?'Location not recorded':'Workspace')+(v&&v.state!=='none'?'\nValidation: '+v.runs+' runs · '+({failed:'interrupted by a failure',recovered:'recovered after a failure',ok:'passing',running:'running now',unknown:'outcome unknown'}[v.state]||v.state)+(v.exact?'':' · compound script, not exact'):'')+(r.hiddenWork?'\n+'+r.hiddenWork+' more work objects not drawn':''),x:r.x-r.rx,y:r.y-r.ry,w:r.rx*2,h:r.ry*2});
+   hits.push({id:r.id,label:r.label+(r.displayName?' · '+r.displayName:''),path:r.path,purpose:(r.kind==='service'?'Observed service':r.is_worktree?'Working copy · shared repository':r.kind==='unresolved'?'Location not recorded':'Workspace')+(v&&v.state!=='none'?'\nValidation: '+v.runs+' runs · '+({failed:'a check failed',interrupted:'a check chain failed; failing step unknown',recovered:'recovered: the same checks later passed',ok:'passing',running:'running now',unknown:'outcome unknown'}[v.state]||v.state)+(v.unresolved?.length?' · unresolved: '+v.unresolved.slice(0,3).join(' · '):''):'')+(r.hiddenWork?'\n+'+r.hiddenWork+' more work objects not drawn':''),x:r.x-r.rx,y:r.y-r.ry,w:r.rx*2,h:r.ry*2});
    if(r.hiddenWork){label(c,'+'+r.hiddenWork,r.x+(r.core?165:95),r.y+(r.core?118:100),10,'#b9ad86','Georgia');}
   }
   label(c,project.label,project.x-75,project.y-(children.some(r=>r.core)?110:43),30,'#e4dfbc','Georgia');
@@ -76,7 +76,7 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interactio
     if(!done){c.strokeStyle='#e9cc88';c.lineWidth=1.2;c.stroke();if(!reducedMotion){c.beginPath();c.arc(x,y,3,time/400,time/400+2);c.stroke();}}
     else {c.fillStyle=run.conclusion==='success'?'#99e1b3':run.conclusion==='failure'?'#ed9eb0':'#a5bec6';c.fill();}
     visualActions.push({target:r.id,action:'check',state:done?run.conclusion:'running'});});
-   hits.push({id:r.id,label:r.label,path:r.url,purpose:'Remote repository · '+owner.label+((r.runs||[]).length?'\nRemote checks: '+r.runs.map(run=>(run.workflow||'run')+' '+(run.conclusion||run.status)+(run.branch?' on '+run.branch:'')).join(' · '):''),x:r.x-36,y:r.y-30,w:78,h:72});
+   hits.push({id:r.id,label:r.label,path:r.url,purpose:'Remote repository · '+owner.label+((r.runs||[]).length?'\nRemote checks: '+r.runs.map(run=>(run.workflow||'run')+' '+(run.conclusion||'running')+(run.branch?' on '+run.branch:'')).join(' · '):''),x:r.x-36,y:r.y-30,w:78,h:72});
   }
  }
  // Recent file detail is bounded per workspace; workspace and agent coverage is not.
@@ -103,7 +103,7 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interactio
   const {w,h}=slate.draw(c,o,o,ink,images,time,playhead,reducedMotion);
   if(interaction.actionLabels)label(c,o.stage+(o.finished?' · '+o.status:''),o.x-w/2,o.y+h/2+11,9,'#acc5c5');
   visualActions.push({target:o.id,action:'work',state:o.stage});
-  workObjects.push({id:o.id,stage:o.stage,status:o.status,workspace:o.workspace,x:o.x,y:o.y,w,h,artifact:o.outcome?.id||null,preview:!!(o.outcome&&images[o.outcome.id]),validation:o.evidence.validation.state,handoffs:o.handoffs.length,agent:o.agent_id});
+  workObjects.push({id:o.id,stage:o.stage,status:o.status,workspace:o.workspace,x:o.x,y:o.y,w,h,artifact:o.outcome?.id||null,preview:!!(o.outcome&&images[o.outcome.id]),validation:o.evidence.validation.state,handoffs:o.handoffs.filter(h=>h.link==='transfer').length,references:o.handoffs.filter(h=>h.link!=='transfer').length,link:o.outcome?.link||null,agent:o.agent_id});
   hits.push({id:'work:'+o.id,label:o.title,purpose:describe(o),link:o.outcome?.link||null,linkLabel:o.outcome?'Open '+o.outcome.type:'',x:o.x-w/2-3,y:o.y-h/2-3,w:w+6,h:h+6});
  }
  for(const actor of m.actors){
@@ -155,12 +155,16 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interactio
  for(const th of m.threads){
   const a=m.actorMap.get(th.from).pos,b=m.actorMap.get(th.to).pos,age=playhead-th.ts;if(!a||!b||age>1800000)continue;
   relations.threads++;fx.thread(c,a,b,age);
-  const knot=fx.sag(a,b,.5),plan=th.plan?m.slateMap.get(th.plan)||m.work.objects.find(o=>o.id===th.plan):null;
+  const knot=fx.sag(a,b,.5),plan=th.plan?m.slateMap.get(th.plan)||m.work.objects.find(o=>o.id===th.plan):null,transfer=!!plan&&th.link==='transfer';
+  // Only an explicit handoff record carries the seal across; a message that
+  // merely names a plan pins that plan's seal at the knot as a reference.
+  const kind=transfer?'handoff':plan?'reference':'message';
   if(age<6000){const tt=reducedMotion?.5:age/6000,p=fx.sag(a,b,tt);fx.carry(c,p,'#e4cf9a');
-   if(plan)slate.seal(c,p.x,p.y,8,plan.seed,'#f0e6c8');else{c.save();c.strokeStyle='#e4cf9a';c.lineWidth=1.4;c.beginPath();c.rect(p.x-6,p.y-4,12,8);c.moveTo(p.x-6,p.y-4);c.lineTo(p.x,p.y+1);c.lineTo(p.x+6,p.y-4);c.stroke();c.restore();}
-   visualActions.push({target:th.id,action:plan?'handoff':'message',state:'traveling'});}
-  else {if(plan)slate.seal(c,knot.x,knot.y,5,plan.seed,'#d8c9a0',Math.max(.2,1-age/1800000));visualActions.push({target:th.id,action:plan?'handoff':'message',state:'settled'});}
-  hits.push({id:'thread:'+th.id,label:th.fromName+' → '+th.toName,purpose:(plan?'Verified handoff · message names “'+plan.title+'”':'Agent message · collaboration, no object transfer')+' · '+clock(th.ts),sample:th.excerpt,x:knot.x-14,y:knot.y-14,w:28,h:28});
+   if(transfer)slate.seal(c,p.x,p.y,8,plan.seed,'#f0e6c8');else{c.save();c.strokeStyle='#e4cf9a';c.lineWidth=1.4;c.beginPath();c.rect(p.x-6,p.y-4,12,8);c.moveTo(p.x-6,p.y-4);c.lineTo(p.x,p.y+1);c.lineTo(p.x+6,p.y-4);c.stroke();c.restore();}
+   visualActions.push({target:th.id,action:kind,state:'traveling'});}
+  else visualActions.push({target:th.id,action:kind,state:'settled'});
+  if(plan&&(age>=6000||!transfer))slate.seal(c,knot.x,knot.y,5,plan.seed,'#d8c9a0',Math.max(.2,1-age/1800000));
+  hits.push({id:'thread:'+th.id,label:th.fromName+' → '+th.toName,purpose:(transfer?'Explicit handoff · “'+plan.title+'” transferred':plan?'Agent message referencing “'+plan.title+'” · a reference, not a transfer':'Agent message · collaboration, no object transfer')+' · '+clock(th.ts),sample:th.excerpt,x:knot.x-14,y:knot.y-14,w:28,h:28});
  }
  if(interaction.selected){const h=hits.find(h=>h.id===interaction.selected);if(h){c.strokeStyle='#f3dfaeaa';c.lineWidth=1;c.beginPath();c.roundRect(h.x-3,h.y-3,h.w+6,h.h+6,16);c.stroke();}}
  c.restore();return {title:'Flow · The Lantern Works',hits,bounds:m.bounds,agents,territories:m.projects.length+m.ownerGroups.length,files:drawnFiles,visualActions,

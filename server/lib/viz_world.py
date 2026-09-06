@@ -105,7 +105,8 @@ def evidence(tool, inp, path, target, verb):
     repo=checkout(location) if location else None
     return {'raw':raw[:2000],'path':location,'paths':anchored[:40],'cwd':cwd or None,'checkout':repo,'action':action,
             'services':service_operations(raw),'recorded_target':target,'tool':tool,'scope':'target' if anchored else 'workspace' if location else 'unknown',
-            **({'validation':validation['kind'],'validation_exact':validation['exact']} if validation['kind'] else {})}
+            **({'validation':validation['kind'],'validation_exact':validation['exact'],'validation_scope':validation['scope'],
+                'validation_commands':validation['commands']} if validation['kind'] else {})}
 
 
 _VALIDATORS={'pytest':'test','vitest':'test','jest':'test','mocha':'test','ctest':'test','tsc':'build','eslint':'lint','ruff':'lint',
@@ -117,19 +118,24 @@ _SEGMENT=re.compile(r'\s*(?:&&|\|\||;|\|)\s*')
 def validation_evidence(raw):
     """Which recorded shell segments are tests, builds or lint checks.
 
-    A chain joined only by && reports one exact outcome for every segment; a
-    script using ';' or '||' hides individual results, so its validation
-    outcome is not exact. Nothing here claims a result, only intent.
+    scope: 'single' is one validation command, so its exit code is that check's
+    result. 'chain' is joined only by &&: success proves every segment ran and
+    passed, but a failure does not say which segment failed or whether the check
+    ran at all. 'script' uses ';' or '||', so neither outcome is attributable.
+    commands lists the normalized validation segments so a later run can be
+    matched against the same checks. Nothing here claims a result, only intent.
     """
-    if '<<' in raw or '\n' in raw:return {'kind':None,'exact':False}
-    kinds=[]
-    for segment in _SEGMENT.split(raw):
+    none={'kind':None,'exact':False,'scope':None,'commands':[]}
+    if '<<' in raw or '\n' in raw:return none
+    kinds=[];commands=[];segments=_SEGMENT.split(raw)
+    for segment in segments:
         try:words=shlex.split(segment,comments=True)
         except ValueError:continue
         if not words:continue
+        before=len(kinds)
         exe=os.path.basename(words[0]);args=[w for w in words[1:] if not w.startswith('-')]
         named=[_VALIDATORS[os.path.basename(w)] for w in [exe,*args] if os.path.basename(w) in _VALIDATORS]
-        if named:kinds.append(named[0]);continue
+        if named:kinds.append(named[0]);commands.append(' '.join([exe,*words[1:]])[:120]);continue
         script=re.compile(r'(^|/)[^/\s]*(check|test|verify)[^/\s]*\.(mjs|js|py|sh)$')
         if exe not in _RUNNERS:
             if script.search(words[0]):kinds.append('test')
@@ -138,9 +144,11 @@ def validation_evidence(raw):
         if re.search(r'(^|[\s:])(test|tests|check|verify|e2e|py|js)(\b|:)',head) or any(script.search(w) for w in args):kinds.append('test')
         elif re.search(r'(^|\s)(build|compile|typecheck)(\b|:)',head):kinds.append('build')
         elif re.search(r'(^|\s)(lint|fmt|format)(\b|:)',head) and 'run' in args[:1]+[exe]:kinds.append('lint')
-    if not kinds:return {'kind':None,'exact':False}
+        if len(kinds)>before:commands.append(' '.join([exe,*words[1:]])[:120])
+    if not kinds:return none
     kind='test' if 'test' in kinds else 'build' if 'build' in kinds else 'lint'
-    return {'kind':kind,'exact':not re.search(r';|\|\|',raw)}
+    scope='script' if re.search(r';|\|\|',raw) else 'chain' if len(segments)>1 else 'single'
+    return {'kind':kind,'exact':scope!='script','scope':scope,'commands':commands[:8]}
 
 
 def build(events):

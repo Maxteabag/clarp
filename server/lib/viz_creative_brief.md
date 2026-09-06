@@ -132,4 +132,8 @@ sources or relation forms; the current slate is a revisable design, not a rule.
 Relations: structural belonging is still material (necks, double rails);
 discovery flows toward the agent; attribution is a quiet tether; delivery
 carries a recognizable object along the rail; explicit collaboration is a
-thread with a knot. Shared targets alone are never drawn as communication.
+thread with a knot; a message naming a plan is a reference pinned at the knot,
+and only an explicit handoff record moves the seal. Validation failures resolve
+only when the same checks later pass; remote run conclusions appear only once
+their completion is evidenced at the playhead. Shared targets alone are never
+drawn as communication.

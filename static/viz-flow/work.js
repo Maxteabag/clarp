@@ -11,23 +11,38 @@ const isMaterial=e=>!['read','search','media','status','is-active','network','un
 const finishedAt=e=>e.finished_at??e.ts;
 exports.outcomeOf=(e,t)=>e.finished_at!=null&&t>=e.finished_at?(e.outcome||'unknown'):(e.finished_at!=null||e.outcome==='running'?'running':'unknown');
 
-// Validation runs in time order become one legible state: running, failed
-// (an interruption that stays), recovered (a later evidenced success), ok.
+// Validation runs in time order become one legible state. A single command's
+// failure is that check failing; a failed && chain or ; script is an interruption
+// whose failing component is unknown. Only a later exact success of the same
+// checks (every failed or interrupted command covered) resolves it; an unrelated
+// passing check never erases a failure.
+const commandsOf=r=>{const c=r.evidence?.validation_commands;return Array.isArray(c)&&c.length?c:[String(r.evidence?.raw||r.action).slice(0,120)];};
 exports.validationState=(runs,t)=>{
  const seen=runs.filter(r=>r.ts<=t).sort((a,b)=>a.ts-b.ts);
  if(!seen.length)return {state:'none',runs:0};
- let failedAt=null,recoveredAt=null,okAt=null,running=null;
+ let open=null,recoveredAt=null,okAt=null,running=null;
  for(const r of seen){
-  const outcome=exports.outcomeOf(r,t),exact=r.evidence?.validation_exact!==false;
+  const outcome=exports.outcomeOf(r,t),scope=r.evidence?.validation_scope||(r.evidence?.validation_exact===false?'script':'single'),cmds=commandsOf(r);
   if(outcome==='running'){running=r;continue;}
-  if(outcome==='failed'){failedAt=finishedAt(r);recoveredAt=null;}
-  else if(outcome==='succeeded'&&exact){if(failedAt!=null){recoveredAt=finishedAt(r);failedAt=null;}else okAt=finishedAt(r);}
+  if(outcome==='failed'){open={kind:scope==='single'?'failed':'interrupted',at:finishedAt(r),scope,pending:new Set(cmds)};recoveredAt=null;}
+  else if(outcome==='succeeded'&&scope!=='script'){
+   if(open){for(const c of cmds)open.pending.delete(c);if(!open.pending.size){recoveredAt=finishedAt(r);open=null;}}
+   else okAt=finishedAt(r);
+  }
  }
  const last=seen.at(-1);
- return {runs:seen.length,state:running?'running':failedAt!=null?'failed':recoveredAt!=null?'recovered':okAt!=null?'ok':'unknown',
-  failedAt,recoveredAt,okAt,since:running?running.ts:(failedAt??recoveredAt??okAt??finishedAt(last)),kind:last.evidence?.validation||last.action,exact:last.evidence?.validation_exact!==false};
+ return {runs:seen.length,state:running?'running':open?open.kind:recoveredAt!=null?'recovered':okAt!=null?'ok':'unknown',
+  failedAt:open?.at??null,recoveredAt,okAt,unresolved:open?[...open.pending]:[],scope:open?.scope||last.evidence?.validation_scope||'single',
+  since:running?running.ts:(open?.at??recoveredAt??okAt??finishedAt(last)),kind:last.evidence?.validation||last.action,exact:last.evidence?.validation_exact!==false};
 };
 
+// A remote run's conclusion exists only once its completion is evidenced at
+// the playhead; before that it is running, whatever the database says now.
+const runAt=(a,t)=>{
+ const terminal=['completed','failed','cancelled'].includes(a.status),done=a.completed_at??(terminal?a.updated_at:null);
+ const finished=done!=null&&done<=t;
+ return {id:a.id,remote:a.remote_target,conclusion:finished?(a.run?.conclusion||a.status):'',status:finished?a.status:'active',created_at:a.created_at,completed_at:finished?done:null,agent_id:a.agent_id,branch:a.run?.branch||'',workflow:a.run?.workflow_name||a.title};
+};
 exports.assemble=(scene,t,history,groupFor,actorWorkspace)=>{
  const work=scene.work||{};const plans=(work.plans||[]).filter(p=>p.created_at<=t);
  const artifacts=(work.artifacts||[]).filter(a=>a.created_at<=t),messages=(work.messages||[]).filter(m=>m.ts<=t);
@@ -43,9 +58,10 @@ exports.assemble=(scene,t,history,groupFor,actorWorkspace)=>{
   for(const e of events){const g=groupFor(e);tally.set(g,(tally.get(g)||0)+(e.location_scope==='target'?2:1));}
   const workspace=[...tally.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]||actorWorkspace(plan.agent_id)||'unlocated';
   const own=artifacts.filter(a=>a.agent_id===plan.agent_id&&a.session===plan.session&&a.created_at>=plan.created_at&&a.created_at<=windowEnd);
-  const outputs=own.filter(a=>a.type!=='workflow_run'),runsRemote=own.filter(a=>a.type==='workflow_run');
+  const outputs=own.filter(a=>a.type!=='workflow_run'),runsRemote=own.filter(a=>a.type==='workflow_run').map(a=>runAt(a,t));
   const primary=[...outputs].reverse().find(a=>a.preview)||outputs.at(-1)||null;
-  const handoffs=messages.filter(m=>m.plan_ids?.includes(plan.id)).map(m=>({id:m.id,from:m.from_agent_id,fromName:m.from,to:m.to_agent_id,toName:m.to,ts:m.ts,excerpt:m.excerpt}));
+  // A message naming this plan is a reference; a transfer needs an explicit handoff record.
+  const handoffs=messages.filter(m=>m.plan_ids?.includes(plan.id)).map(m=>({id:m.id,from:m.from_agent_id,fromName:m.from,to:m.to_agent_id,toName:m.to,ts:m.ts,excerpt:m.excerpt,link:m.link==='transfer'?'transfer':'reference'}));
   const items=plan.items||[],done=items.filter(i=>i.status==='completed'&&(i.completed_at==null||i.completed_at<=t)).length;
   const stage=primary?'outcome':(events.some(isMaterial)?'evidence':'intent');
   const finished=end!=null||['completed','cancelled','failed'].includes(plan.status)&&plan.updated_at<=t;
@@ -54,8 +70,8 @@ exports.assemble=(scene,t,history,groupFor,actorWorkspace)=>{
    created_at:plan.created_at,completed_at:end,workspace,stage,seed:hash(plan.id),
    intent:{declared:items.length,total:plan.item_total||items.length,done,current:items.find(i=>i.status==='in_progress')?.title||null},
    evidence:{events:events.length,changes:changes.length,files:files.slice(0,6),validation:exports.validationState(runs,t),basis:'same agent, inside the plan window'},
-   outcome:primary?{id:primary.id,type:primary.type,title:primary.title,created_at:primary.created_at,preview:!!primary.preview,link:primary.run?.run_url||(primary.media?.mime_type&&primary.preview?primary.preview.url:null),sources:primary.sources||null,source_count:primary.source_count||0,media:primary.media||null,count:outputs.length}:null,
-   remoteRuns:runsRemote.map(a=>({id:a.id,remote:a.remote_target,conclusion:a.run?.conclusion,status:a.status,created_at:a.created_at,completed_at:a.completed_at})),
+   outcome:primary?{id:primary.id,type:primary.type,title:primary.title,created_at:primary.created_at,preview:!!primary.preview,link:primary.run?.run_url||primary.media_url||null,sources:primary.sources||null,source_count:primary.source_count||0,media:primary.media||null,count:outputs.length}:null,
+   remoteRuns:runsRemote,
    handoffs,age:Math.max(0,t-lastActivity),finished});
  }
  // Artifacts nobody's plan claims still happened: outcomes without declared
@@ -66,11 +82,11 @@ exports.assemble=(scene,t,history,groupFor,actorWorkspace)=>{
   const workspace=actorWorkspace(a.agent_id)||'unlocated';
   objects.push({id:'artifact:'+a.id,kind:'artifact',title:a.title,agent:a.agent,agent_id:a.agent_id,status:'published',created_at:a.created_at,completed_at:a.created_at,workspace,stage:'outcome',seed:hash(a.id),
    intent:{declared:0,total:0,done:0,current:null,none:true},evidence:{events:0,changes:0,files:[],validation:{state:'none',runs:0},basis:'no plan window; artifact only'},
-   outcome:{id:a.id,type:a.type,title:a.title,created_at:a.created_at,preview:!!a.preview,link:(a.media?.mime_type&&a.preview?a.preview.url:null),sources:a.sources||null,source_count:a.source_count||0,media:a.media||null,count:1},
+   outcome:{id:a.id,type:a.type,title:a.title,created_at:a.created_at,preview:!!a.preview,link:a.media_url||null,sources:a.sources||null,source_count:a.source_count||0,media:a.media||null,count:1},
    remoteRuns:[],handoffs:[],age:Math.max(0,t-a.created_at),finished:true});
  }
- const remoteRuns=artifacts.filter(a=>a.type==='workflow_run'&&a.remote_target).map(a=>({id:a.id,remote:a.remote_target,conclusion:a.run?.conclusion||'',status:a.status,created_at:a.created_at,completed_at:a.completed_at,agent_id:a.agent_id,branch:a.run?.branch||'',workflow:a.run?.workflow_name||a.title}));
- const threads=messages.map(m=>({id:m.id,from:m.from_agent_id,fromName:m.from,to:m.to_agent_id,toName:m.to,ts:m.ts,plan:m.plan_ids?.[0]||null,excerpt:m.excerpt}));
+ const remoteRuns=artifacts.filter(a=>a.type==='workflow_run'&&a.remote_target).map(a=>runAt(a,t));
+ const threads=messages.map(m=>({id:m.id,from:m.from_agent_id,fromName:m.from,to:m.to_agent_id,toName:m.to,ts:m.ts,plan:m.plan_ids?.[0]||null,link:m.plan_ids?.length?(m.link==='transfer'?'transfer':'reference'):null,excerpt:m.excerpt}));
  return {objects,claimed,orphanArtifacts,remoteRuns,threads,contract:work.contract||null,synthetic:!!work.synthetic,available:work.available!==false};
 };
 
