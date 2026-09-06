@@ -137,7 +137,7 @@ expand the row (hover for live activity) to read the original details.
 
 Requests are batched, deduplicated, and cached in memory (512 entries). Only one
 Codex process runs at a time. Raw commands stay hidden while waiting: rows show
-“Explaining activity…” until ready, or “Explanation unavailable” on failure.
+cycling `.`, `..`, `…` until ready, or “Explanation unavailable” on failure.
 Failures pause new requests until you toggle off/on; disabling
 cancels the worker and restores the normal view immediately. Switching Hosts
 clears the cache. Translations are not written into the conversation transcript.
