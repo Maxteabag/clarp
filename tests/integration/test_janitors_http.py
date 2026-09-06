@@ -224,6 +224,15 @@ def test_pause_rejects_late_effect_and_preserves_worker(host, monkeypatch):
     assert agents.get_focus() == host.theo
 
 
+def test_reset_defaults_endpoint_pauses_and_rejects_stale_revision(host):
+    row = enable(host, create(host))
+    status, body = request(host, "/janitors/sam/reset-defaults", {"expected_revision": row["revision"]})
+    assert status == 200 and not body["janitor"]["enabled"]
+    assert body["janitor"]["scope"] == row["scope"]
+    assert body["janitor"]["agent_id"] == row["agent_id"]
+    assert request(host, "/janitors/sam/reset-defaults", {"expected_revision": row["revision"]})[0] == 409
+
+
 def test_effect_receipt_is_idempotent_and_late_configuration_is_rejected(host):
     row = enable(host, create(host))
     run, context = run_for(host, row)
