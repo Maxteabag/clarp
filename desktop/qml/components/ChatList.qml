@@ -17,6 +17,31 @@ Rectangle {
     signal hideRequested
     signal chatSelected
     readonly property bool searchOwnsFocus: search.activeFocus
+    readonly property string keyboardSession: chats.currentItem ? chats.currentItem.session : ""
+    readonly property int rowCount: chats.count
+    function focusCurrentAgent() {
+        showingArchive = false;
+        if (roster.indexOfSession(controller.selectedSession) < 0) {
+            scope = "all";
+            search.clear();
+        }
+        Qt.callLater(() => {
+            const index = roster.indexOfSession(controller.selectedSession);
+            chats.currentIndex = index >= 0 ? index : (chats.count > 0 ? 0 : -1);
+            if (chats.currentIndex >= 0)
+                chats.positionViewAtIndex(chats.currentIndex, ListView.Contain);
+            chats.forceActiveFocus();
+        });
+    }
+    function moveSelection(delta) {
+        chats.currentIndex = Math.max(0, Math.min(chats.count - 1, chats.currentIndex + delta));
+        chats.positionViewAtIndex(chats.currentIndex, ListView.Contain);
+    }
+    function openSelection() {
+        const item = chats.currentItem as ItemDelegate;
+        if (item) item.clicked();
+    }
+    function focusSearch() { search.forceActiveFocus(); }
     function clearSearch() { search.clear(); }
 
     color: "#20212e"
@@ -253,6 +278,8 @@ Rectangle {
 
         ListView {
             id: chats
+            objectName: "sidebarAgentList"
+            keyNavigationEnabled: true
 
             Layout.fillWidth: true
             Layout.fillHeight: true

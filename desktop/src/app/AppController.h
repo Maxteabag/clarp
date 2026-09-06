@@ -64,6 +64,8 @@ class AppController : public QObject {
     Q_PROPERTY(bool connecting READ connecting NOTIFY connectingChanged)
     Q_PROPERTY(bool sending READ sending NOTIFY sendingChanged)
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
+    Q_PROPERTY(bool pauseMobilePush READ pauseMobilePush WRITE setPauseMobilePush NOTIFY pauseMobilePushChanged)
+    Q_PROPERTY(bool showWhenReady READ showWhenReady WRITE setShowWhenReady NOTIFY showWhenReadyChanged)
     Q_PROPERTY(bool toolsVisible READ toolsVisible WRITE setToolsVisible NOTIFY toolsVisibleChanged)
     Q_PROPERTY(bool timestampsVisible READ timestampsVisible WRITE setTimestampsVisible
                    NOTIFY timestampsVisibleChanged)
@@ -81,6 +83,7 @@ class AppController : public QObject {
     Q_PROPERTY(bool updatesLoading READ updatesLoading NOTIFY updatesChanged)
     Q_PROPERTY(QString updatesError READ updatesError NOTIFY updatesChanged)
     Q_PROPERTY(int attentionCount READ attentionCount NOTIFY updatesChanged)
+    Q_PROPERTY(QString nextAttentionTarget READ nextAttentionSession NOTIFY nextAttentionChanged)
     Q_PROPERTY(QVariantList teams READ teams NOTIFY teamsChanged)
     Q_PROPERTY(QVariantList teamMessages READ teamMessages NOTIFY teamsChanged)
     Q_PROPERTY(QString selectedTeamId READ selectedTeamId NOTIFY teamsChanged)
@@ -151,6 +154,11 @@ class AppController : public QObject {
     [[nodiscard]] bool connecting() const;
     [[nodiscard]] bool sending() const;
     [[nodiscard]] bool muted() const;
+    [[nodiscard]] bool pauseMobilePush() const { return m_pauseMobilePush; }
+    void setPauseMobilePush(bool value);
+    void reportDesktopPresence(const QString& instance, quint64 sequence, bool active);
+    [[nodiscard]] bool showWhenReady() const { return m_showWhenReady; }
+    void setShowWhenReady(bool value);
     [[nodiscard]] bool toolsVisible() const;
     [[nodiscard]] bool timestampsVisible() const;
     [[nodiscard]] bool sharedFilesystem() const;
@@ -242,6 +250,7 @@ class AppController : public QObject {
                                  const QString& effort, const QString& replaceSession = {},
                                  const QString& mode = {}, const QString& pastSessionId = {},
                                  const QVariantList& mcpServers = {});
+    Q_INVOKABLE [[nodiscard]] QString nextAttentionSession() const;
     Q_INVOKABLE void releaseAgent(const QString& session);
     Q_INVOKABLE void setAgentHeartbeat(const QString& session, bool enabled);
     Q_INVOKABLE void setAgentDreaming(const QString& session, bool enabled);
@@ -317,6 +326,8 @@ class AppController : public QObject {
     void connectingChanged();
     void sendingChanged();
     void mutedChanged();
+    void pauseMobilePushChanged();
+    void showWhenReadyChanged();
     void toolsVisibleChanged();
     void timestampsVisibleChanged();
     void sharedFilesystemChanged();
@@ -330,6 +341,7 @@ class AppController : public QObject {
     void orchestratorChanged();
     void modelCatalogChanged();
     void agentRevisionChanged();
+    void nextAttentionChanged();
     void avatarRevisionChanged();
     void mediaChanged();
     void pastSessionsChanged();
@@ -453,6 +465,8 @@ class AppController : public QObject {
     bool m_connecting = false;
     bool m_sending = false;
     bool m_muted = false;
+    bool m_pauseMobilePush = true;
+    bool m_showWhenReady = false;
     bool m_toolsVisible = false;
     bool m_timestampsVisible = false;
     bool m_sharedFilesystem = false;

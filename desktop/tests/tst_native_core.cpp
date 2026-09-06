@@ -1,3 +1,5 @@
+#include "models/ConversationPresentationModel.h"
+#include <QStandardItemModel>
 #include "app/AppController.h"
 #include "app/CredentialStore.h"
 #include "app/TranscriptCache.h"
@@ -604,11 +606,15 @@ class NativeCoreTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void readyModePreservesActivityAndHidesOnlyProvisionalBody();
     void idleContactStartsFreshWithSavedDefaults();
     void redesignedRosterFiltersWithoutMutatingSource();
+    void rosterLookupIsConsistentDuringStructuralSignals();
     void circularPortraitsAreBoundedAndAntialiased();
     void agentTerminalLaunchesNativeCliThroughDefaultTerminal();
     void sseParserHandlesChunksCommentsAndReplayIds();
+    void nextAttentionCyclesWaitingUnreadAndPending();
+    void readyPresentationRetainsCanonicalStreamAndRevealsFinal();
     void sseCursorIsScopedToOneHost();
     void snapshotFiltersArchivedAgentsAndPatchesEvents();
     void agentSnapshotDiffsInPlaceAndRejectsStaleState();
@@ -637,6 +643,116 @@ class NativeCoreTest final : public QObject {
     void markdownParagraphsBecomeVisibleDisplayBlocks();
 };
 
+void NativeCoreTest::readyPresentationRetainsCanonicalStreamAndRevealsFinal() {
+    ConversationModel source;
+    source.openSession(QStringLiteral("ready"));
+    ConversationPresentationModel view;
+    view.setSourceModel(&source);
+    const auto row = [](const QString& id, const QString& role, const QString& kind, const QString& text, int revision) {
+        return QJsonObject{{QStringLiteral("id"), id}, {QStringLiteral("role"), role},
+            {QStringLiteral("kind"), kind}, {QStringLiteral("text"), text}, {QStringLiteral("revision"), revision}};
+    };
+    source.applyLog({{QStringLiteral("conversation_id"), QStringLiteral("ready-thread")},
+        {QStringLiteral("turns"), QJsonArray{row(QStringLiteral("u"), QStringLiteral("user"), QString{}, QStringLiteral("Question"), 1),
+            row(QStringLiteral("live"), QStringLiteral("assistant"), QStringLiteral("live"), QStringLiteral("Partial"), 2)}},
+        {QStringLiteral("latest_revision"), 2}}, ConversationModel::LoadKind::Tail);
+    QCOMPARE(view.rowCount(), 2);
+    view.setShowWhenReady(true);
+    QCOMPARE(view.rowCount(), 1);
+    QCOMPARE(source.rowCount(), 2);
+    QCOMPARE(view.indexOfMessage(QStringLiteral("live")), -1);
+    QSignalSpy updates(&view, &QAbstractItemModel::dataChanged);
+    source.applyLog({{QStringLiteral("conversation_id"), QStringLiteral("ready-thread")},
+        {QStringLiteral("turns"), QJsonArray{row(QStringLiteral("live"), QStringLiteral("assistant"), QStringLiteral("live"), QStringLiteral("Partial updated"), 3)}},
+        {QStringLiteral("latest_revision"), 3}}, ConversationModel::LoadKind::Delta);
+    QCOMPARE(view.rowCount(), 1);
+    QCOMPARE(updates.count(), 0);
+    source.showTransientThinking(QStringLiteral("Agent"));
+    QCOMPARE(view.rowCount(), 1);
+    view.setShowWhenReady(false);
+    QCOMPARE(view.rowCount(), source.rowCount());
+    QCOMPARE(view.indexOfMessage(QStringLiteral("live")), 1);
+    view.setShowWhenReady(true);
+    source.applyLog({{QStringLiteral("conversation_id"), QStringLiteral("ready-thread")},
+        {QStringLiteral("turns"), QJsonArray{row(QStringLiteral("final"), QStringLiteral("assistant"), QStringLiteral("assistant"), QStringLiteral("Partial updated complete"), 4)}},
+        {QStringLiteral("latest_revision"), 4}}, ConversationModel::LoadKind::Delta);
+    QCOMPARE(view.rowCount(), 2);
+    QCOMPARE(view.data(view.index(1, 0), ConversationModel::BodyRole).toString(), QStringLiteral("Partial updated complete"));
+    QCOMPARE(view.data(view.index(1, 0), ConversationModel::DisplayCellsRole).toList().size(), 0);
+    const bool original = QSettings().value(QStringLiteral("conversation/showWhenReady"), false).toBool();
+    {
+        AppController controller;
+        controller.setShowWhenReady(true);
+        AppController restored;
+        QVERIFY(restored.showWhenReady());
+        controller.setShowWhenReady(original);
+    }
+}
+
+void NativeCoreTest::readyModePreservesActivityAndHidesOnlyProvisionalBody() {
+    QStandardItemModel source;
+    const QVariantList tools{QVariantMap{{QStringLiteral("name"), QStringLiteral("Bash")}}};
+    const QVariantList cells{QVariantMap{{QStringLiteral("kind"), QStringLiteral("command")}}};
+    auto* live = new QStandardItem;
+    live->setData(QStringLiteral("assistant"), ConversationModel::AuthorRole);
+    live->setData(QStringLiteral("live"), ConversationModel::KindRole);
+    live->setData(QStringLiteral("Unfinished answer"), ConversationModel::BodyRole);
+    live->setData(tools, ConversationModel::ToolsRole);
+    live->setData(cells, ConversationModel::DisplayCellsRole);
+    live->setData(1, ConversationModel::ActivityCountRole);
+    live->setData(true, ConversationModel::ToolDetailsAvailableRole);
+    source.appendRow(live);
+    auto* activity = new QStandardItem;
+    activity->setData(true, ConversationModel::ActivityRole);
+    activity->setData(QStringLiteral("Bash"), ConversationModel::ToolNameRole);
+    activity->setData(QStringLiteral("Search project files"), ConversationModel::BodyRole);
+    source.appendRow(activity);
+    ConversationPresentationModel view;
+    view.setSourceModel(&source);
+    view.setShowWhenReady(true);
+    QCOMPARE(view.rowCount(), 2);
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::BodyRole).toString(), QString{});
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::ToolsRole).toList(), tools);
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::DisplayCellsRole).toList(), cells);
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::ActivityCountRole).toInt(), 1);
+    QVERIFY(view.data(view.index(0, 0), ConversationModel::ToolDetailsAvailableRole).toBool());
+    QCOMPARE(view.data(view.index(1, 0), ConversationModel::BodyRole).toString(), QStringLiteral("Search project files"));
+    view.setShowWhenReady(false);
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::BodyRole).toString(), QStringLiteral("Unfinished answer"));
+    view.setShowWhenReady(true);
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::BodyRole).toString(), QString{});
+    live->setData(QStringLiteral("assistant"), ConversationModel::KindRole);
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::BodyRole).toString(), QStringLiteral("Unfinished answer"));
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::ToolsRole).toList(), tools);
+    live->setData(QString{}, ConversationModel::BodyRole);
+    live->setData(QVariantList{}, ConversationModel::ToolsRole);
+    live->setData(QVariantList{}, ConversationModel::DisplayCellsRole);
+    QCOMPARE(view.rowCount(), 2); // Lazy activity details remain discoverable without answer text.
+    QVERIFY(view.data(view.index(0, 0), ConversationModel::ToolDetailsAvailableRole).toBool());
+    view.setShowWhenReady(false);
+    QCOMPARE(view.rowCount(), 2);
+}
+
+void NativeCoreTest::nextAttentionCyclesWaitingUnreadAndPending() {
+    AgentListModel model;
+    QJsonArray rows;
+    for (const QString& name : {QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c"), QStringLiteral("d")})
+        rows.append(QJsonObject{{QStringLiteral("session"), name}, {QStringLiteral("persona"), name},
+            {QStringLiteral("latest_state"), name == QStringLiteral("c") ? QStringLiteral("waiting") : QStringLiteral("idle")}});
+    model.applySnapshot({{QStringLiteral("agents"), rows}});
+    model.applyNotificationEvent({{QStringLiteral("session"), QStringLiteral("b")}});
+    QCOMPARE(model.nextAttentionSession(QStringLiteral("a")), QStringLiteral("b"));
+    QCOMPARE(model.nextAttentionSession(QStringLiteral("b")), QStringLiteral("c"));
+    QCOMPARE(model.nextAttentionSession(QStringLiteral("c")), QStringLiteral("b"));
+    QCOMPARE(model.nextAttentionSession(QStringLiteral("c"), {QStringLiteral("d")}), QStringLiteral("d"));
+    model.clearUnread(QStringLiteral("b"));
+    QCOMPARE(model.nextAttentionSession(QStringLiteral("a")), QStringLiteral("c"));
+    QVERIFY(model.nextAttentionSession(QStringLiteral("c")).isEmpty());
+    QCOMPARE(model.nextAttentionSession(QString{}, {QStringLiteral("a")}), QStringLiteral("a"));
+    model.applySnapshot({{QStringLiteral("agents"), QJsonArray{}}});
+    QVERIFY(model.nextAttentionSession(QString{}, {QStringLiteral("missing")}).isEmpty());
+}
+
 void NativeCoreTest::sseParserHandlesChunksCommentsAndReplayIds() {
     SseParser parser;
     QVERIFY(parser.feed(": connected\r\n\r\nid: 41\r\ndata: {\"type\":\"agent-").isEmpty());
@@ -647,22 +763,52 @@ void NativeCoreTest::sseParserHandlesChunksCommentsAndReplayIds() {
              QStringLiteral("agent-roster"));
 }
 
+void NativeCoreTest::rosterLookupIsConsistentDuringStructuralSignals() {
+    AgentListModel model;
+    const auto snapshot = [](const QStringList& names) {
+        QJsonArray rows;
+        for (const QString& name : names)
+            rows.append(QJsonObject{{QStringLiteral("session"), name}, {QStringLiteral("persona"), name}});
+        return QJsonObject{{QStringLiteral("agents"), rows}};
+    };
+    model.applySnapshot(snapshot({QStringLiteral("a"), QStringLiteral("b")}));
+    int checked = 0;
+    const auto validate = [&] {
+        ++checked;
+        const auto sessions = model.sessions();
+        for (const QString& name : {QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c")})
+            QCOMPARE(model.indexOfSession(name), sessions.indexOf(name));
+    };
+    connect(&model, &QAbstractItemModel::rowsRemoved, &model, validate);
+    connect(&model, &QAbstractItemModel::rowsInserted, &model, validate);
+    connect(&model, &QAbstractItemModel::rowsMoved, &model, validate);
+    model.applySnapshot(snapshot({QStringLiteral("b"), QStringLiteral("c")}));
+    QVERIFY(model.recordOutgoingActivity(QStringLiteral("c")));
+    model.applySnapshot(snapshot({}));
+    QVERIFY(checked >= 4);
+}
+
 void NativeCoreTest::redesignedRosterFiltersWithoutMutatingSource() {
     AgentListModel source;
     source.applySnapshot({{QStringLiteral("agents"), QJsonArray{
         QJsonObject{{QStringLiteral("session"), QStringLiteral("alpha")}, {QStringLiteral("persona"), QStringLiteral("Alpha")},
             {QStringLiteral("backend"), QStringLiteral("codex")}, {QStringLiteral("cwd"), QStringLiteral("/work/one")},
-            {QStringLiteral("last_activity"), 1'788'000'000'000.0}},
+            {QStringLiteral("last_activity"), 1'788'000'000'000.0},
+            {QStringLiteral("last_completed_message"), QStringLiteral("Completed preview")}},
         QJsonObject{{QStringLiteral("session"), QStringLiteral("beta")}, {QStringLiteral("persona"), QStringLiteral("Beta")},
             {QStringLiteral("backend"), QStringLiteral("claude")}, {QStringLiteral("cwd"), QStringLiteral("/work/two")}}
     }}});
     AgentFilterModel filtered;
     filtered.setSourceModel(&source);
     QCOMPARE(filtered.rowCount(), 2);
+    QCOMPARE(filtered.index(0, 0).data(AgentListModel::LastCompletedMessageRole).toString(), QStringLiteral("Completed preview"));
+    QCOMPARE(filtered.indexOfSession(QStringLiteral("beta")), 1);
     filtered.setQuery(QStringLiteral("WORK/TWO"));
     QCOMPARE(filtered.rowCount(), 1);
     QCOMPARE(filtered.index(0, 0).data(AgentListModel::SessionRole).toString(), QStringLiteral("beta"));
     QCOMPARE(source.rowCount(), 2);
+    QCOMPARE(filtered.indexOfSession(QStringLiteral("beta")), 0);
+    QCOMPARE(filtered.indexOfSession(QStringLiteral("alpha")), -1);
     filtered.setQuery({});
     filtered.setUnreadOnly(true);
     QCOMPARE(filtered.rowCount(), 0);
@@ -1053,6 +1199,11 @@ void NativeCoreTest::streamingRowsUpdateInPlaceAndRetireWhenFinalized() {
     QCOMPARE(model.data(model.index(0, 0), ConversationModel::BodyRole).toString(),
              QStringLiteral("Hello world"));
     QCOMPARE(changes.count(), 1);
+    const auto roles = qvariant_cast<QList<int>>(changes.at(0).at(2));
+    QVERIFY(roles.contains(ConversationModel::BodyRole));
+    QVERIFY(roles.contains(ConversationModel::RevisionRole));
+    QVERIFY(!roles.contains(ConversationModel::ToolsRole));
+    QVERIFY(!roles.contains(ConversationModel::DisplayCellsRole));
     QCOMPARE(resets.count(), 0);
     QCOMPARE(layouts.count(), 0);
     QCOMPARE(inserts.count(), 0);
