@@ -2,6 +2,7 @@ const {build,hash,stateAt}=require('./model.js');
 const fx=require('./effects.js');
 const craft=require('./craft.js');
 const slate=require('./slate.js');
+const lantern=require('./lantern.js');
 const {drawAgentAvatar}=require('./avatar.js');
 const {drawGitHub}=require('./github.js');
 let key='',model,lastTime=0;const poses=new Map();
@@ -26,6 +27,9 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interactio
  const files=model.files.map(f=>{let p=poses.get(f.id);if(!p){p={x:f.x,y:f.y,vx:0,vy:0};poses.set(f.id,p);}
   if(reducedMotion){p.x=f.x;p.y=f.y;p.vx=p.vy=0;}else{p.vx=(p.vx+(f.x-p.x)*.035*dt)*Math.pow(.76,dt);p.vy=(p.vy+(f.y-p.y)*.035*dt)*Math.pow(.76,dt);p.x+=p.vx*dt;p.y+=p.vy*dt;}return {...f,x:p.x,y:p.y};});
  const m={...model,files,fileMap:new Map(files.map(f=>[f.id,f]))},phase=reducedMotion?0:time/4000,hits=[],agents=[],visualActions=[];let drawnFiles=0;
+ // Zoom reveals detail; selection never does. Overview keeps silhouettes, light
+ // and identity; names and small marks appear as the viewer moves closer.
+ const detail=camera.k<.45?0:camera.k<1.1?1:2;
  const relations={rails:0,tethers:0,threads:0,deliveries:0,discoveries:0};
  c.fillStyle='#091c24';c.fillRect(0,0,width,height);
  const glow=c.createRadialGradient(width*.4,height*.5,10,width*.4,height*.5,width*.7);glow.addColorStop(0,'#19484455');glow.addColorStop(1,'#091c2400');c.fillStyle=glow;c.fillRect(0,0,width,height);
@@ -69,7 +73,7 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interactio
   hits.push({id:owner.id,label:owner.label,purpose:'GitHub repository owner',x:owner.x,y:owner.y,w:owner.w,h:53});
   for(const r of owner.repos){c.fillStyle='#343a51';c.strokeStyle='#bca8d377';c.beginPath();c.roundRect(r.x-24,r.y-19,48,38,13);c.fill();c.stroke();
    c.strokeStyle='#bba7d4';c.beginPath();c.moveTo(r.x-8,r.y-6);c.lineTo(r.x-8,r.y+8);c.lineTo(r.x+8,r.y+8);c.moveTo(r.x-8,r.y);c.lineTo(r.x+8,r.y-8);c.stroke();
-   label(c,r.label.length>15?r.label.slice(0,14)+'…':r.label,r.x-34,r.y+32,9,'#c6bfdb');
+   if(detail>=1)label(c,r.label.length>15?r.label.slice(0,14)+'…':r.label,r.x-34,r.y+32,9,'#c6bfdb');
    // Recorded remote checks: results at the remote, not invented from a push.
    (r.runs||[]).forEach((run,i)=>{const x=r.x-8+i*8,y=r.y-26,done=run.status!=='active'&&run.conclusion;
     c.beginPath();c.arc(x,y,3,0,7);
@@ -90,7 +94,7 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interactio
   c.fillStyle='#d5d5b9';c.beginPath();c.moveTo(-22,-24);c.lineTo(12,-24);c.lineTo(24,-12);c.lineTo(24,25);c.lineTo(-22,25);c.closePath();c.fill();c.strokeStyle='#667e73';
   craft.document(c,f);
   c.restore();
-  label(c,f.label.length>20?f.label.slice(0,19)+'…':f.label,f.x-42,f.y+34,10,'#d3e1d7');
+  if(detail>=1)label(c,f.label.length>20?f.label.slice(0,19)+'…':f.label,f.x-42,f.y+34,10,'#d3e1d7');
   if(e&&['edit','write','create','delete'].includes(e.action)&&state==='succeeded'&&age<120000){c.globalAlpha=.25*Math.exp(-age/35000);c.strokeStyle=fx.color(e.action);c.lineWidth=3;fx.region(c,f.x,f.y,30,24,0);c.stroke();c.globalAlpha=1;}
   c.save();c.translate(f.x,f.y);c.scale(.65,.65);fx.action(c,{x:0,y:0},e,playhead,reducedMotion);c.restore();
   if(e&&age<8000)visualActions.push({target:f.id,action:e.action,state});
@@ -100,7 +104,7 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interactio
  const workObjects=[];
  for(const o of m.slates){
   const project=m.projects.find(p=>p.id===m.regionMap.get(o.region)?.project),ink=craft.tinted(hash(project?.id||o.region),project?.character)[1];
-  const {w,h}=slate.draw(c,o,o,ink,images,time,playhead,reducedMotion);
+  const {w,h}=lantern.draw(c,o,o,ink,images,time,playhead,reducedMotion,detail);
   if(interaction.actionLabels)label(c,o.stage+(o.finished?' · '+o.status:''),o.x-w/2,o.y+h/2+11,9,'#acc5c5');
   visualActions.push({target:o.id,action:'work',state:o.stage});
   workObjects.push({id:o.id,stage:o.stage,status:o.status,workspace:o.workspace,x:o.x,y:o.y,w,h,artifact:o.outcome?.id||null,preview:!!(o.outcome&&images[o.outcome.id]),validation:o.evidence.validation.state,handoffs:o.handoffs.filter(h=>h.link==='transfer').length,references:o.handoffs.filter(h=>h.link!=='transfer').length,link:o.outcome?.link||null,agent:o.agent_id});
@@ -117,17 +121,17 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interactio
   // receives a moving halo: a recent afterimage is not invented ongoing work.
   const recent=actor.history.filter(v=>playhead-(v.finished_at??v.ts)<180000);
   const remembered=recent.filter((v,i)=>i===recent.length-1||v.action!==recent[i+1].action||stateAt(v,playhead)!==stateAt(recent[i+1],playhead)).slice(-3);
-  remembered.forEach((v,i)=>{const state=stateAt(v,playhead),elapsed=Math.max(0,playhead-(v.finished_at??v.ts));
+  if(detail>=1){remembered.forEach((v,i)=>{const state=stateAt(v,playhead),elapsed=Math.max(0,playhead-(v.finished_at??v.ts));
    craft.badge(c,pos.x-30+i*29,pos.y+47,v.action,state,reducedMotion?0:time/700,state==='running'?1:Math.max(.12,Math.exp(-elapsed/75000)));
   });
-  if(!remembered.length){c.save();c.globalAlpha=.22;craft.badge(c,pos.x,pos.y+47,e.action,status,0);c.restore();}
+  if(!remembered.length){c.save();c.globalAlpha=.22;craft.badge(c,pos.x,pos.y+47,e.action,status,0);c.restore();}}
   if(active&&!f){visualActions.push({target:e.world_target,action:e.action,state:status});}
   // The avatar stays settled within its context and reaches toward nearby work.
   if(f&&active){fx.beam(c,pos,{x:f.x-25,y:f.y},e.action,(playhead-e.ts)/1800,Math.max(.2,1-Math.max(0,age)/8000),status==='failed',reducedMotion);if(['read','search'].includes(e.action))relations.discoveries++;}
   if(!f&&active&&['test','build','commit'].includes(e.action)){fx.action(c,{x:pos.x+65,y:pos.y+40},e,playhead,reducedMotion);visualActions.push({target:e.world_target,action:e.action,state:status});}
   // Attribution tether: current work reaches its slate quietly while active.
   const claimedBy=active&&m.work.claimed.has(e.id)?m.slates.find(s=>s.agent_id===actor.id&&e.ts>=s.created_at&&e.ts<=(s.completed_at!=null?s.completed_at+120000:playhead)):null;
-  if(claimedBy){relations.tethers++;c.save();c.globalAlpha=.3;c.strokeStyle=col;c.lineWidth=1.2;c.setLineDash([1,4]);c.beginPath();c.moveTo(pos.x+22,pos.y+8);c.quadraticCurveTo((pos.x+claimedBy.x)/2,pos.y+40,claimedBy.x-slate.size(claimedBy)[0]/2,claimedBy.y);c.stroke();c.restore();}
+  if(claimedBy){relations.tethers++;c.save();c.globalAlpha=.3;c.strokeStyle=col;c.lineWidth=1.2;c.setLineDash([1,4]);c.beginPath();c.moveTo(pos.x+22,pos.y+8);c.quadraticCurveTo((pos.x+claimedBy.x)/2,pos.y+40,claimedBy.x-lantern.size(claimedBy)[0]/2,claimedBy.y);c.stroke();c.restore();}
   // Delivery: a push carries a recognizable object along the origin rail and
   // arrives at the remote. The avatar itself stays at the checkout.
   if(e.action==='push'&&e.remote_target){const remote=m.remoteMap.get(e.remote_target),region=m.regionMap.get(actor.workspace),project=m.projects.find(p=>p.id===region?.project);
@@ -169,6 +173,6 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interactio
  if(interaction.selected){const h=hits.find(h=>h.id===interaction.selected);if(h){c.strokeStyle='#f3dfaeaa';c.lineWidth=1;c.beginPath();c.roundRect(h.x-3,h.y-3,h.w+6,h.h+6,16);c.stroke();}}
  c.restore();return {title:'Flow · The Lantern Works',hits,bounds:m.bounds,agents,territories:m.projects.length+m.ownerGroups.length,files:drawnFiles,visualActions,
   projects:m.projects.map(p=>({id:p.id,label:p.label,children:p.members.map(r=>r.id),character:p.character||null})),recentTraces:m.actors.filter(a=>playhead-(a.event.finished_at??a.event.ts)<180000).length,
-  workspaces:m.regions.map(r=>({id:r.id,x:r.x,y:r.y,rx:r.rx,ry:r.ry,validation:r.validation?.state||'none',hiddenWork:r.hiddenWork||0})),ownerGroups:m.ownerGroups.map(o=>({id:o.id,children:o.repos.map(r=>r.id),runs:o.repos.flatMap(r=>(r.runs||[]).map(run=>({repo:r.id,conclusion:run.conclusion,status:run.status})))})),ownerPortraits:m.ownerGroups.filter(o=>avatars[o.id]).map(o=>o.id),githubLogo:m.ownerGroups.length>0,
+  detail,workspaces:m.regions.map(r=>({id:r.id,x:r.x,y:r.y,rx:r.rx,ry:r.ry,validation:r.validation?.state||'none',hiddenWork:r.hiddenWork||0})),ownerGroups:m.ownerGroups.map(o=>({id:o.id,children:o.repos.map(r=>r.id),runs:o.repos.flatMap(r=>(r.runs||[]).map(run=>({repo:r.id,conclusion:run.conclusion,status:run.status})))})),ownerPortraits:m.ownerGroups.filter(o=>avatars[o.id]).map(o=>o.id),githubLogo:m.ownerGroups.length>0,
   workObjects,relations,workEvidence:{available:m.work.available,synthetic:m.work.synthetic,plans:m.work.objects.length,threads:m.threads.length,contract:m.work.contract}};
 };

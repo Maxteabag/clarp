@@ -137,3 +137,18 @@ and only an explicit handoff record moves the seal. Validation failures resolve
 only when the same checks later pass; remote run conclusions appear only once
 their completion is evidenced at the playhead. Shared targets alone are never
 drawn as communication.
+
+The work object's material (stage two): in Flow a piece of work is a lantern,
+the thing The Lantern Works makes (lantern.js). Intent is an unlit wire frame
+with its seal; making adds paper panes as files change; a running check sweeps
+light around the base; an interruption cracks the front pane and dims the light
+to an ember (dashed when the failing step is unknown); recovery mends the crack
+with a gold seam that stays; publication lights the lantern and the recorded
+preview shows through the pane; unresolved checks keep an ember dot even after
+publication. Finished lanterns dim slowly and keep standing. Light means state,
+never decoration: only running work flickers. Zoom, not selection, reveals
+detail: the renderer's detail level (camera.k) hides names and small marks at
+overview scale and shows them as the viewer approaches. Extend this material
+for new evidence (new artifact kinds, new check states, new relations) in the
+same spirit; the lantern's exact silhouette, palette and sizes are revisable
+source choices, not rules, and slate.js remains as the earlier treatment.
