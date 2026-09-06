@@ -1,6 +1,8 @@
 // Evidence supplies relationships; the visual composition is a revisable interpretation.
 const {hash}=require('./model-util.js');
 const work=require('./work.js');
+const journey=require('./journey.js');
+const lantern=require('./lantern.js');
 exports.hash=hash;
 exports.stateAt=(e,t)=>e.finished_at!=null&&t>=e.finished_at?(e.outcome||'unknown'):(e.finished_at!=null||e.outcome==='running'?'running':'unknown');
 const slots=new Map();
@@ -100,10 +102,28 @@ exports.build=(scene,_selection,time)=>{
  }
  const remoteMap=new Map(ownerGroups.flatMap(o=>o.repos.map(r=>[r.id,r])));
  const structural=(scene.relations||[]).filter(r=>regionMap.has(r.from)&&remoteMap.has(r.to));
+ // Boundary posts: every wait anchors to its lantern, else to its agent, else to
+ // the agent's workshop; each workshop gets one post per distinct boundary.
+ const slateMap=new Map(slates.map(s=>[s.id,s]));
+ const outward=region=>{const project=projects.find(p=>p.id===region.project),siblings=regions.filter(r=>r.project===region.project&&r.id!==region.id);
+  if(!project||!siblings.length)return .4;
+  if(!region.core)return Math.atan2(region.y-project.y,region.x-project.x);
+  const mean=siblings.reduce((a,r)=>({x:a.x+r.x-region.x,y:a.y+r.y-region.y}),{x:0,y:0});return Math.atan2(-mean.y,-mean.x);};
+ const posts=[],postMap=new Map();
+ for(const wt of assembled.waits){
+  const lanternHome=wt.work?slateMap.get(wt.work):null,actor=actorMap.get(wt.agent_id);
+  const regionId=lanternHome?lanternHome.region:actor?actor.workspace:null;const region=regionId?regionMap.get(regionId):null;
+  if(!region){wt.anchor=null;continue;}
+  wt.anchor=lanternHome?{x:lanternHome.x,y:lanternHome.y+lantern.size(lanternHome)[1]/2-12,kind:'work'}:actor?{x:actor.x+22,y:actor.y+10,kind:'agent'}:{x:region.x,y:region.y,kind:'workspace'};
+  const key=region.id+'\n'+wt.boundary;
+  if(!postMap.has(key)){const list=posts.filter(p=>p.region===region.id);if(list.length>=3){region.hiddenWaits=(region.hiddenWaits||0)+1;wt.anchor=null;continue;}
+   const p=journey.posts(region,[...list.map(x=>x.boundary),wt.boundary],outward(region))[list.length];p.waits=[];posts.push(p);postMap.set(key,p);}
+  const post=postMap.get(key);if(post.waits.length<4)post.waits.push(wt);else wt.anchor=null;wt.post=post;
+ }
  const threads=assembled.threads.filter(th=>actorMap.has(th.from)&&actorMap.has(th.to)&&th.from!==th.to);
  const minX=Math.min(-280,...regions.map(r=>r.x-r.rx-40)),minY=Math.min(-240,...regions.map(r=>r.y-r.ry-60));
  const maxX=Math.max(right+60,...ownerGroups.map(o=>o.x+o.w+55)),maxY=Math.max(240,ownerY+20,...regions.map(r=>r.y+r.ry+65));
  return {projects,regions,regionMap,repos,actors,actorMap,files,fileMap:new Map(files.map(f=>[f.id,f])),ownerGroups,remoteMap,structural,history,latest,
-  slates,slateMap:new Map(slates.map(s=>[s.id,s])),work:assembled,threads,
+  slates,slateMap,work:assembled,threads,posts,waits:assembled.waits.filter(w=>w.anchor),
   bounds:{x:minX,y:minY,w:maxX-minX,h:maxY-minY},github:{x:right+140,y:-205,w:360,h:ownerY+230}};
 };

@@ -21,7 +21,9 @@ try{
  await page.screenshot({path:out+'/work-overview.png'});
  const candidates=s.meta.workObjects.filter(w=>!w.id.startsWith('artifact:')&&w.stage==='outcome'&&(!fragment||w.id.includes(fragment)));
  const target=candidates.find(w=>w.preview)||candidates[0];
- const result={until,windowSeconds,workObjects:s.meta.workObjects,relations:s.meta.relations,previews:s.previews,errors};
+ const result={until,windowSeconds,workObjects:s.meta.workObjects,relations:s.meta.relations,previews:s.previews,waits:s.meta.waits,posts:s.meta.posts,errors};
+ const recordedWaits=new Set([...(s.scene.work?.jobs||[]).map(j=>'job:'+j.id),...(s.scene.work?.decisions||[]).map(d=>'decision:'+d.id)]);
+ for(const wt of s.meta.waits)assert(recordedWaits.has(wt.id),'every drawn wait is a recorded job or decision');
  if(!target){
   result.verdict='no plan-backed work object reached an outcome in this window; nothing was invented';
   await fs.writeFile(out+'/verification.json',JSON.stringify(result,null,2));console.log(result.verdict);process.exit(0);

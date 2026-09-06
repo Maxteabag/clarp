@@ -159,3 +159,17 @@ phone must not reveal more detail solely because its bitmap has more pixels.
 Lantern flicker requires observed running events or validation, not merely a
 recent timestamp; a completed observation is a trace. Do not invent research
 source dots when source_count is absent.
+
+The journey beyond the workshop (stage three, journey.js): scene.work carries
+recorded background jobs and pending decisions with the boundary each depends
+on. A wait exists only while such a record is open at the playhead; it moors
+the work (or its agent when no plan window claims it) to a boundary post
+outside the workshop rim, and its ring turns hollow while waiting, fills when
+released, crosses when failed, and slashes when a heartbeat expired without
+evidence. Quiet time, an old timestamp or a still avatar is never drawn as
+waiting. scene.flowMemory.routes are browser-remembered repeated observations
+(deliveries, messages, waits) drawn as still dotted patterns beneath everything
+live; a route is never a dependency or a cause, and it is bounded. Keep these
+three distinguishable: moving live actions, unresolved waiting, and remembered
+history. Extend with new boundary kinds or wait sources in the same spirit;
+the gate silhouette, ring and mooring curve are revisable source choices.

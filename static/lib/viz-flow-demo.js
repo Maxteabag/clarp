@@ -27,7 +27,7 @@ export function flowDemo(start){
     e(12,47,'restart','demo:service',2,'succeeded',reviewer),
   ];
   const work={synthetic:true,available:true,
-    contract:{intent:'Synthetic plan declared by the Builder role.',evidence:'Synthetic events attributed by role and time.',outcome:'Synthetic artifacts with a generated placeholder preview.',handoff:'Synthetic explicit handoff record; live messages that name a plan are references only.'},
+    contract:{waiting:'Synthetic jobs and decision; live waits come from recorded background jobs and pending decisions.',intent:'Synthetic plan declared by the Builder role.',evidence:'Synthetic events attributed by role and time.',outcome:'Synthetic artifacts with a generated placeholder preview.',handoff:'Synthetic explicit handoff record; live messages that name a plan are references only.'},
     plans:[{id:plan,title:'Ship the reload lab',status:'completed',agent_id:builder,agent:'Builder',session:'demo-builder',created_at:at(0),updated_at:at(38.5),completed_at:at(38.5),item_total:3,
       items:[{id:'implement',title:'Implement the reload profile',status:'completed',position:0,started_at:at(0),completed_at:at(9)},
              {id:'verify',title:'Run the regression suite',status:'completed',position:1,started_at:at(9),completed_at:at(24)},
@@ -44,6 +44,11 @@ export function flowDemo(start){
     ],
     // The demo's message carries a synthetic explicit handoff record so the
     // transfer visual can be exercised; live messages only ever reference plans.
+    // Synthetic waits: a GitHub verification that releases, a TestFlight wait
+    // whose heartbeat expires, and a decision the owner has not answered.
+    jobs:[{id:'demo-job-ci',agent_id:builder,agent:'Builder',session:'demo-builder',kind:'github-workflow',boundary:'github',boundary_label:'GitHub Actions',title:'Verify reload lab',detail:'',status:'succeeded',started_at:at(35),updated_at:at(41.5),terminal_at:at(41.5),terminal_reason:'',heartbeat_at:at(41),heartbeat_timeout_ms:600000},
+          {id:'demo-job-tf',agent_id:builder,agent:'Builder',session:'demo-builder',kind:'release',boundary:'apple',boundary_label:'TestFlight',title:'Reload lab beta',detail:'',status:'failed',started_at:at(36),updated_at:at(49),terminal_at:at(49),terminal_reason:'heartbeat_expired',heartbeat_at:at(40),heartbeat_timeout_ms:5000}],
+    decisions:[{id:'demo-decision',agent_id:reviewer,agent:'Reviewer',session:'demo-reviewer',title:'Publish the reload lab to the team?',status:'pending',created_at:at(45),resolved_at:null,blocks_progress:true,urgency:'normal'}],
     messages:[{id:'demo:message-1',from_agent_id:builder,from:'Builder',to_agent_id:reviewer,to:'Reviewer',session:'demo-reviewer',ts:at(43),plan_ids:[plan],link:'transfer',
       excerpt:'Handing you the reload lab plan for the service restart and a final look. (synthetic explicit handoff record)'}]};
   return {host:'Workflow demo',entities,relations:[{from:repo,to:remote,kind:'remote',label:'origin'}],coverage_keys:[],events,work};
