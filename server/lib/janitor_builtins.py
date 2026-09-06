@@ -65,7 +65,7 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
                 continue
             defaults = janitors.template(role)
             seed = initial.get(role, {})
-            if not isinstance(seed, dict) or set(seed) - {"enabled", "backend", "model", "effort", "provider"}:
+            if not isinstance(seed, dict) or set(seed) - {"enabled", "backend", "model", "effort", "provider", "options"}:
                 raise janitors.JanitorError("Invalid built-in seed configuration")
             enabled = seed.get("enabled", role == "tool-explainer")
             if not isinstance(enabled, bool):
@@ -77,6 +77,7 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
             effort = seed.get("effort", defaults["recommended_effort"])
             execution = janitors._execution(role, {"executor": "ephemeral", "provider": seed.get("provider", backend)}, backend)
             janitors._model({"backend": backend}, model, effort, provider=execution["provider"])
+            options = janitors._option_patch(role, seed.get("options", {}))
             agent_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"clarp:janitor:builtin:{role}"))
             if c.execute("SELECT 1 FROM agents WHERE agent_id=?", (agent_id,)).fetchone():
                 raise janitors.JanitorError("Built-in identity is already owned", 409, "builtin_identity_conflict")
@@ -90,8 +91,8 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
                 is_janitor,heartbeat_enabled,dreaming_enabled,created_at) VALUES (?,?,?,?,?,?,?,?,1,0,0,?)""",
                 (agent_id, defaults["name"], "", cwd or os.getcwd(), session, backend, model, effort, now))
             agents.record_state(agent_id, "spawned", {"origin": "janitor", "builtin_role": role})
-            c.execute("""INSERT INTO janitor_configs(agent_id,template_id,enabled,scope_json,execution_json,created_at,updated_at)
-                VALUES (?,?,?,'{}',?,?,?)""", (agent_id, role, int(enabled), janitors._json(execution), now, now))
+            c.execute("""INSERT INTO janitor_configs(agent_id,template_id,enabled,scope_json,execution_json,options_json,created_at,updated_at)
+                VALUES (?,?,?,'{}',?,?,?,?)""", (agent_id, role, int(enabled), janitors._json(execution), janitors._json(options), now, now))
             janitors._save_attachments(c, agent_id, [{"attachment_id": f"builtin-{role}-v1",
                 "trigger_id": defaults["default_trigger_id"], "trigger_version": 1, "enabled": True, "config": {}}], now)
             c.execute("INSERT INTO janitor_builtins(role,agent_id,seed_version,created_at) VALUES (?,?,?,?)", (role, agent_id, SEED_VERSION, now))
@@ -163,7 +164,7 @@ def begin_run(role: str, request_id: str, *, context=None, target_agent_id: str 
         now = db.now_ms()
         frozen = {"template_id": role, "executor": "ephemeral", "provider": config["execution"]["provider"],
             "backend": config["backend"], "model": config["model"], "effort": config["effort"],
-            "scope": config["scope"], "trigger_id": attachment["trigger_id"],
+            "scope": config["scope"], "options": config["options"], "trigger_id": attachment["trigger_id"],
             "trigger_version": attachment["trigger_version"], "config": attachment["config"],
             "context": metadata, "target_agent_id": target_agent_id, "expires_at": now + DEMAND_RUN_TTL_MS}
         c.execute("""INSERT INTO janitor_runs(run_id,agent_id,session,attachment_id,generation,trace_id,status,
@@ -200,12 +201,14 @@ def is_current(run_id: str, *, connection=None) -> bool:
             return False
         if db.now_ms() >= frozen.get("expires_at", run["created_at"] + DEMAND_RUN_TTL_MS):
             return False
-        config = c.execute("""SELECT a.backend,a.model,a.effort,j.template_id,j.scope_json,j.execution_json
+        config = c.execute("""SELECT a.backend,a.model,a.effort,j.template_id,j.scope_json,j.execution_json,j.options_json
             FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id WHERE a.agent_id=?""", (run["agent_id"],)).fetchone()
         execution = janitors._decode(config["execution_json"], {})
         if any(config[key] != frozen[key] for key in ("backend", "model", "effort", "template_id")):
             return False
         if execution != {"executor": "ephemeral", "provider": frozen["provider"]} or janitors._decode(config["scope_json"], {}) != frozen["scope"]:
+            return False
+        if janitors.option_values(config["template_id"], janitors._decode(config["options_json"], {})) != frozen.get("options", {}):
             return False
         attachment = janitors._active_attachment(c, run["attachment_id"], run["generation"])
         if (attachment["trigger_id"] != frozen["trigger_id"] or attachment["trigger_version"] != frozen["trigger_version"]

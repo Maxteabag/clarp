@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime
 import hashlib
 import json
+import math
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -18,6 +19,7 @@ from .protocol import AgentState
 LABEL_MAX_AGE_MS = 24 * 60 * 60 * 1000
 MAX_PAYLOAD_BYTES = 1024 * 1024
 TERMINAL_OUTCOMES = frozenset({"changed", "same_task", "insufficient_context", "skipped", "error", "cancelled"})
+_UNSET = object()
 
 
 class JanitorError(ValueError):
@@ -57,17 +59,33 @@ def templates() -> list[dict]:
              "recommended_effort": "low",
              "allowed_effects": ["task_label"], "creatable": True,
              "supported_trigger_ids": ["agent-work-completed", "schedule"],
-             "default_trigger_id": "agent-work-completed"},
+             "default_trigger_id": "agent-work-completed", "options": []},
             {"id": "message-delegator", "name": "Message delegator",
              "description": "Choose an eligible recipient for an explicitly requested message route.",
              "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
              "recommended_effort": "low", "allowed_effects": ["message_route"], "creatable": True,
-             "supported_trigger_ids": ["routing-requested"], "default_trigger_id": "routing-requested"},
+             "supported_trigger_ids": ["routing-requested"], "default_trigger_id": "routing-requested",
+             "supported_providers": ["openai", *(item.id for item in backends.routing_adapters())],
+             "options": [
+                 {"key": "fallback_only", "label": "Only when name matching cannot decide", "type": "boolean", "default": True,
+                  "description": "Ask the delegator when the recipient cannot be selected directly from an agent name."},
+                 {"key": "hands_free_only", "label": "Only in hands-free mode", "type": "boolean", "default": True},
+                 {"key": "confidence_threshold", "label": "Routing confidence", "type": "number", "default": .78,
+                  "min": .5, "max": .99, "step": .01},
+                 {"key": "timeout_ms", "label": "Routing timeout (milliseconds)", "type": "integer", "default": 30000,
+                  "min": 250, "max": 60000, "step": 250},
+                 {"key": "voice_id", "label": "Routing voice", "type": "string",
+                  "default": "79f8b5fb-2cc8-479a-80df-29f7a7cf1a3e"}]},
             {"id": "tool-explainer", "name": "Tool explainer",
              "description": "Explain requested tool activity using bounded read-only input.",
              "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
              "recommended_effort": "low", "allowed_effects": ["tool_explanation"], "creatable": True,
-             "supported_trigger_ids": ["tool-explanation-requested"], "default_trigger_id": "tool-explanation-requested"}]
+             "supported_trigger_ids": ["tool-explanation-requested"], "default_trigger_id": "tool-explanation-requested",
+             "supported_providers": ["codex"],
+             "options": [{"key": "detail_level", "label": "Tool detail", "type": "choice", "default": 0,
+                 "description": "Choose how requested tool activity is explained. Developer keeps the original activity.",
+                 "choices": [{"value": value, "label": label} for value, label in enumerate(
+                     ["Developer", "Technical", "Balanced", "Plain English", "Grandma"])]}]}]
 
 
 def template(value: str) -> dict:
@@ -75,6 +93,52 @@ def template(value: str) -> dict:
     if selected is None:
         raise JanitorError("Unsupported maintenance job", 400, "unsupported_template")
     return selected
+
+
+def _validate_option(descriptor: dict, value) -> None:
+    kind = descriptor["type"]
+    if kind == "boolean":
+        valid = isinstance(value, bool)
+    elif kind in {"integer", "number"}:
+        valid = (not isinstance(value, bool) and isinstance(value, int if kind == "integer" else (int, float))
+                 and descriptor.get("min", -math.inf) <= value <= descriptor.get("max", math.inf)
+                 and (isinstance(value, int) or math.isfinite(value)))
+    elif kind == "string":
+        valid = isinstance(value, str) and len(value) <= 160 and not any(ord(ch) < 32 for ch in value)
+    elif kind == "choice":
+        valid = any(type(value) is type(choice["value"]) and value == choice["value"] for choice in descriptor["choices"])
+    else:
+        valid = False
+    if not valid:
+        raise JanitorError(f"Invalid option: {descriptor['key']}", 400, "invalid_option")
+
+
+def option_values(template_id: str, stored: dict | None = None) -> dict:
+    """Resolve typed defaults without marking a device preference as configured."""
+    raw = stored if stored is not None else {}
+    if not isinstance(raw, dict):
+        raise JanitorError("Stored options must be an object", 400, "invalid_option")
+    descriptors = {item["key"]: item for item in template(template_id)["options"]}
+    for key, value in raw.items():
+        if key in descriptors:
+            _validate_option(descriptors[key], value)
+    return {**{key: item["default"] for key, item in descriptors.items()}, **raw}
+
+
+def _option_patch(template_id: str, values, stored: dict | None = None) -> dict:
+    if not isinstance(values, dict):
+        raise JanitorError("Job options must be an object", 400, "invalid_option")
+    raw = dict(stored or {})
+    descriptors = {item["key"]: item for item in template(template_id)["options"]}
+    for key, value in values.items():
+        if key in descriptors:
+            _validate_option(descriptors[key], value)
+        elif key not in raw or _json(raw[key]) != _json(value):
+            raise JanitorError(f"Unsupported option: {key}", 400, "unsupported_option")
+    result = {**raw, **values}
+    option_values(template_id, result)
+    _json(result)
+    return result
 
 
 def _builtin_role(c, agent_id: str) -> str | None:
@@ -229,7 +293,7 @@ def _execution(template_id: str, value, backend: str) -> dict:
     return {"executor": "ephemeral", "provider": provider}
 
 
-def create(session: str, template_id: str = "task-labels", scope=None, attachments=None) -> dict:
+def create(session: str, template_id: str = "task-labels", scope=None, attachments=None, options=_UNSET, execution=None) -> dict:
     a = _agent(session)
     with _write() as c:
         existing = c.execute("SELECT 1 FROM janitor_configs WHERE agent_id=?", (a["agent_id"],)).fetchone()
@@ -245,8 +309,10 @@ def create(session: str, template_id: str = "task-labels", scope=None, attachmen
         selected_scope = _scope(scope if scope is not None else {})
         values = _attachment_values(attachments if attachments is not None else [{"trigger_id": template(template_id)["default_trigger_id"]}], a["agent_id"], template_id)
         now = db.now_ms()
-        execution = _execution(template_id, None, a["backend"])
-        c.execute("INSERT INTO janitor_configs(agent_id,template_id,scope_json,execution_json,created_at,updated_at) VALUES (?,?,?,?,?,?)", (a["agent_id"], _template(template_id), _json(selected_scope), _json(execution), now, now))
+        execution = _execution(template_id, execution, a["backend"])
+        _model(a, a["model"], a["effort"], provider=execution.get("provider"))
+        selected_options = {} if options is _UNSET else _option_patch(template_id, options)
+        c.execute("INSERT INTO janitor_configs(agent_id,template_id,scope_json,execution_json,options_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)", (a["agent_id"], _template(template_id), _json(selected_scope), _json(execution), _json(selected_options), now, now))
         c.execute("UPDATE agents SET is_janitor=1,heartbeat_enabled=0,dreaming_enabled=0 WHERE agent_id=?", (a["agent_id"],))
         _save_attachments(c, a["agent_id"], values, now)
     return get(session)
@@ -274,6 +340,8 @@ def get(session: str, *, include_runtime: bool = True) -> dict:
     return {"agent_id": a["agent_id"], "session": a["session"], "name": a["persona"],
             "is_janitor": bool(a.get("is_janitor")), "enabled": bool(row["enabled"]), "revision": row["revision"],
             "builtin_role": builtin_role, "execution": _decode(row["execution_json"], {}),
+            "options": option_values(row["template_id"], _decode(row["options_json"], {})),
+            "configured_option_keys": sorted(_decode(row["options_json"], {})),
             "avatar_url": janitor_avatar_url(bool(a.get("is_janitor")), row["template_id"]),
             "capabilities": {"can_change_template": not bool(builtin_role), "can_remove": not bool(builtin_role), "can_release": not bool(builtin_role)},
             "supported_trigger_ids": template(row["template_id"])["supported_trigger_ids"],
@@ -300,7 +368,7 @@ def _fence(c, agent_id: str, now: int):
     c.execute("UPDATE janitor_attachments SET next_run_at=NULL WHERE agent_id=?", (agent_id,))
 
 
-def configure(session: str, expected_revision: int, *, template_id=None, scope=None, attachments=None, model=None, effort=None, execution=None, backend=None) -> dict:
+def configure(session: str, expected_revision: int, *, template_id=None, scope=None, attachments=None, model=None, effort=None, execution=None, backend=None, options=_UNSET) -> dict:
     a = _agent(session)
     with _write() as c:
         row = _config(c, a["agent_id"])
@@ -316,18 +384,47 @@ def configure(session: str, expected_revision: int, *, template_id=None, scope=N
             (_decode(row["execution_json"], {}) if selected_template == row["template_id"] else None), selected_backend)
         _model({**a, "backend": selected_backend}, a["model"] if model is None else model,
                a["effort"] if effort is None else effort, provider=selected_execution.get("provider"))
+        selected_options = _decode(row["options_json"], {}) if selected_template == row["template_id"] else {}
+        if options is not _UNSET:
+            selected_options = _option_patch(selected_template, options, selected_options)
         values = _attachment_values(attachments, a["agent_id"], selected_template) if attachments is not None else None
         if values is None and selected_template != row["template_id"]:
             values = _attachment_values([{"trigger_id": template(selected_template)["default_trigger_id"]}], a["agent_id"], selected_template)
         now = db.now_ms()
         _fence(c, a["agent_id"], now)
-        c.execute("UPDATE janitor_configs SET enabled=0,generation=generation+1,revision=revision+1,template_id=?,scope_json=?,execution_json=?,last_error='',updated_at=? WHERE agent_id=?", (selected_template, _json(selected_scope), _json(selected_execution), now, a["agent_id"]))
+        c.execute("UPDATE janitor_configs SET enabled=0,generation=generation+1,revision=revision+1,template_id=?,scope_json=?,execution_json=?,options_json=?,last_error='',updated_at=? WHERE agent_id=?", (selected_template, _json(selected_scope), _json(selected_execution), _json(selected_options), now, a["agent_id"]))
         if selected_scope != _decode(row["scope_json"], {}) or selected_template != row["template_id"]:
             c.execute("DELETE FROM janitor_progress WHERE attachment_id IN (SELECT attachment_id FROM janitor_attachments WHERE agent_id=?)", (a["agent_id"],))
         if values is not None:
             _save_attachments(c, a["agent_id"], values, now)
         agents.update_agent(a["agent_id"], model=model, effort=effort, backend=backend)
     return get(session)
+
+
+def adopt_options(session: str, expected_revision: int, options: dict) -> dict:
+    """Adopt one existing device's tool-detail choice once, without enabling work.
+
+    Once any device or explicit configuration owns the setting, its value wins.
+    A stale repeat is then a read; an unset stale write still conflicts.
+    """
+    if not isinstance(options, dict) or set(options) != {"detail_level"}:
+        raise JanitorError("Only the legacy detail_level option may be adopted")
+    _option_patch("tool-explainer", options)
+    with _write() as c:
+        a = _agent(session)
+        row = _config(c, a["agent_id"])
+        if (_builtin_role(c, a["agent_id"]) != "tool-explainer" or not a.get("is_janitor")
+                or a.get("archived_at") or row["template_id"] != "tool-explainer"):
+            raise JanitorError("Legacy options can only be adopted by the built-in tool explainer", 409, "invalid_adoption")
+        stored = _decode(row["options_json"], {})
+        if "detail_level" in stored:
+            return get(a["agent_id"], include_runtime=False)
+        _revision(row, expected_revision)
+        now = db.now_ms()
+        _fence(c, a["agent_id"], now)
+        c.execute("UPDATE janitor_configs SET options_json=?,generation=generation+1,revision=revision+1,updated_at=? WHERE agent_id=?",
+                  (_json(_option_patch("tool-explainer", options, stored)), now, a["agent_id"]))
+    return get(session, include_runtime=False)
 
 
 def _overlap(a: dict, b: dict) -> bool:
@@ -541,6 +638,7 @@ def create_run(attachment_id: str, generation: int, candidates: list[dict], run_
         frozen = {"template_id": _config(c, attachment["agent_id"])["template_id"],
                   "scope": _decode(attachment["scope_json"], {}), "trigger_id": attachment["trigger_id"],
                   "trigger_version": attachment["trigger_version"], "config": _decode(attachment["config_json"], {})}
+        frozen["options"] = option_values(frozen["template_id"], _decode(_config(c, attachment["agent_id"])["options_json"], {}))
         c.execute("INSERT INTO janitor_runs(run_id,agent_id,session,attachment_id,generation,trace_id,candidates_json,configuration_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)", (run_id, attachment["agent_id"], attachment["session"], attachment_id, generation, run_id, _json(candidates), _json(frozen), db.now_ms()))
         if progress is not None:
             _save_progress(c, attachment_id, generation, progress)
@@ -592,6 +690,9 @@ def _active_run(c, run_id):
     if row["status"] not in {"queued", "running"}:
         raise JanitorError("This maintenance run is no longer active", 409, "run_terminal")
     _active_attachment(c, row["attachment_id"], row["generation"])
+    configured = _config(c, row["agent_id"])
+    if _decode(row["configuration_json"], {}).get("options", {}) != option_values(configured["template_id"], _decode(configured["options_json"], {})):
+        raise JanitorError("This maintenance run's options were superseded", 409, "stale_generation")
     return row
 
 
@@ -744,10 +845,13 @@ def review(run_id: str, target_session: str, observed_state_id: int, outcome: st
     return next(r for r in get_run(run_id)["results"] if r["target_agent_id"] == target["agent_id"])
 
 
-def validate_configuration(template_id: str = "task-labels", scope=None, attachments=None) -> dict:
+def validate_configuration(template_id: str = "task-labels", scope=None, attachments=None, options=_UNSET) -> dict:
     """Validate new-identity input before creating any contact or agent row."""
-    return {"template_id": _template(template_id), "scope": _scope(scope if scope is not None else {}),
+    result = {"template_id": _template(template_id), "scope": _scope(scope if scope is not None else {}),
             "attachments": _attachment_values(attachments if attachments is not None else [{"trigger_id": template(template_id)["default_trigger_id"]}], "", template_id)}
+    if options is not _UNSET:
+        result["options"] = _option_patch(template_id, options)
+    return result
 
 
 def export_migration(session: str) -> dict:
@@ -904,7 +1008,7 @@ def begin_creation(request_id: str, payload: dict) -> dict:
     if not isinstance(payload, dict):
         raise JanitorError("Creation payload must be an object")
     values = {key: value for key, value in payload.items() if key != "request_id"}
-    allowed = {"name", "backend", "cwd", "model", "effort", "template_id", "scope", "attachments"}
+    allowed = {"name", "backend", "cwd", "model", "effort", "template_id", "scope", "attachments", "options", "execution"}
     if set(values) - allowed:
         raise JanitorError("Unsupported new Janitor configuration field")
     encoded = _json(values)
@@ -932,10 +1036,11 @@ def begin_creation(request_id: str, payload: dict) -> dict:
         if not isinstance(model, str) or not isinstance(effort, str):
             raise JanitorError("Model and effort must be text")
         model, effort = model.strip(), effort.strip().lower()
-        _model({"backend": backend}, model, effort)
+        execution = _execution(values.get("template_id", "task-labels"), values.get("execution"), backend)
+        _model({"backend": backend}, model, effort, provider=execution.get("provider"))
         if backend == backends.AGY and effort:
             raise JanitorError("AGY model-specific effort compatibility is unknown")
-        validate_configuration(**{k: values[k] for k in ("template_id", "scope", "attachments") if k in values})
+        validate_configuration(**{k: values[k] for k in ("template_id", "scope", "attachments", "options") if k in values})
         from .agent_lifecycle import _existing_cwd
         identity = {"persona": name.strip(), "backend": backend, "cwd": _existing_cwd(values.get("cwd")),
                     "model": model, "effort": effort}
