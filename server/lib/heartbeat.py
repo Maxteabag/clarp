@@ -29,9 +29,8 @@ HEARTBEAT_PROMPT = (
     "or in-progress plan item can be advanced safely, continue it now; do not "
     "reply HEARTBEAT_OK merely because no new chat message arrived. Do not infer "
     "or repeat old tasks from prior chats. Do not restart completed or stale work. "
-    "Audit your visible custom status and durable background jobs: clear a status "
-    "that describes completed, failed, or cancelled work, and update any live job "
-    "whose displayed state is stale. Do not clear genuine active work. If no current "
+    "Audit durable background jobs and update any job whose displayed state is stale. "
+    "Preserve genuine active work. If no current "
     "work can be advanced and nothing needs attention, reply HEARTBEAT_OK and "
     "take no action."
 )

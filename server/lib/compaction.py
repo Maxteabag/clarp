@@ -66,9 +66,11 @@ def active_sessions() -> list[str]:
 def compact_session(session: str) -> dict[str, Any]:
     """Kick off compaction for a session in the background. Returns immediately;
     the app polls the snapshot (compacting flag + context_tokens) for progress."""
+    agent = agents_db.get_by_session(session)
+    if agent and not agents_db.interaction_capabilities(agent)["can_restart"]:
+        return {"ok": False, "error": "Janitors are managed from their configuration"}
     if _runtime_client is not None:
         return _runtime_client.compact(session)
-    agent = agents_db.get_by_session(session)
     if not agent:
         return {"ok": False, "error": "no such agent"}
     backend = backends.normalize(agent.get("backend"))

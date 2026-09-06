@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { createAgentSnapshotStore } from '../../static/lib/agent-snapshot.js';
 
 describe('agent snapshot store', () => {
+  it('retains maintenance identity and capabilities across state updates', () => {
+    const store = createAgentSnapshotStore();
+    store.replaceFromSnapshot({ agents: [{ session: 'sam', is_janitor: true,
+      interaction_capabilities: { can_chat: false, can_inspect: true } }] });
+    const status = store.patchState({ session: 'sam', kind: 'thinking', ts: 123 });
+    expect(status.sam.is_janitor).toBe(true);
+    expect(status.sam.interaction_capabilities.can_chat).toBe(false);
+  });
   it('normalizes full snapshot rows into the status map shape', () => {
     const store = createAgentSnapshotStore();
     const status = store.replaceFromSnapshot({

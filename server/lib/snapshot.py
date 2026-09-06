@@ -7,7 +7,7 @@ import json
 
 from . import (agents as agents_db, avatar_settings, backends, compaction,
                config, message_store, model_avatars, team_store,
-               turn_queue, scheduler)
+               turn_queue, scheduler, janitors)
 from . import reconcile
 from . import personas as persona_store
 from .avatar_urls import versioned_avatar_url
@@ -37,6 +37,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     static_root = getattr(ctx, "static", None)
     model_avatar_root = (static_root / "avatars" / "models") if static_root else None
     default_models: dict[str, str] = {}
+    visible_labels = janitors.visible_labels()
     for a in agents_db.list_agents():
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
@@ -69,8 +70,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         _sdetail = state.get("detail")
         if not isinstance(_sdetail, dict):
             _sdetail = {}
-        status_text = str(a.get("custom_status") or "").strip() or None
-        if status_text is None and state.get("kind") == "background":
+        status_text = str(visible_labels.get(agent_id, a.get("custom_status")) or "").strip() or None
+        if status_text is None and agent_id not in visible_labels and state.get("kind") == "background":
             status_text = str(_sdetail.get("label") or "").strip() or None
         turn_started_at = int(state.get('turn_started_at') or 0)
         if active and not turn_started_at:
@@ -121,6 +122,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "effort":         a.get("effort") or "",
             "mcp_servers":    mcp_servers,
             "schedules":      schedules.get(agent_id, []),
+            "is_janitor": bool(a.get("is_janitor")),
+            "interaction_capabilities": agents_db.interaction_capabilities(a),
             "heartbeat_enabled": bool(a.get("heartbeat_enabled")),
             "dreaming_enabled": bool(a.get("dreaming_enabled")),
             "muted":          bool(a.get("muted")),
