@@ -1188,13 +1188,6 @@ void AppController::releaseAgent(const QString& session) {
     if (session.isEmpty()) {
         return;
     }
-    const Agent* agent = m_agents.find(session);
-    if (session.compare(QStringLiteral("mike"), Qt::CaseInsensitive) == 0 ||
-        (agent != nullptr && displayName(*agent).compare(QStringLiteral("Mike"),
-                                                        Qt::CaseInsensitive) == 0)) {
-        setErrorMessage(QStringLiteral("Mike is the protected default chat and cannot be released"));
-        return;
-    }
     m_api.deleteResource(QStringLiteral("agent-release:") + session,
                          QStringLiteral("/agents/") +
                              QString::fromUtf8(QUrl::toPercentEncoding(session)));

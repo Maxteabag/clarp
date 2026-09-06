@@ -561,7 +561,6 @@ Rectangle {
                             }
                             Item { Layout.fillWidth: true }
                             Button {
-                                visible: String(root.details.name || "").toLowerCase() !== "mike"
                                 text: "Release…"
                                 onClicked: releaseDialog.open()
                             }
