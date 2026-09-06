@@ -2213,8 +2213,17 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
                  .toArray(),
              QJsonArray{QStringLiteral("github")});
     controller.releaseAgent(QStringLiteral("mike"));
-    QVERIFY(controller.errorMessage().contains(QStringLiteral("protected")));
-    QVERIFY(!server.receivedRequest(QStringLiteral("DELETE"), QStringLiteral("/agents/mike")));
+    QTRY_VERIFY_WITH_TIMEOUT(server.receivedRequest(QStringLiteral("DELETE"), QStringLiteral("/agents/mike")), 3'000);
+    QVERIFY(!controller.errorMessage().contains(QStringLiteral("protected")));
+    // Persona names must not grant an implicit lifecycle exemption either.
+    controller.agents()->applySnapshot({{QStringLiteral("agents"), QJsonArray{QJsonObject{
+        {QStringLiteral("session"), QStringLiteral("mike-fixture")},
+        {QStringLiteral("persona"), QStringLiteral("Mike")}}}}});
+    controller.releaseAgent(QStringLiteral("mike-fixture"));
+    QTRY_VERIFY_WITH_TIMEOUT(server.receivedRequest(QStringLiteral("DELETE"), QStringLiteral("/agents/mike-fixture")), 3'000);
+    QVERIFY(!controller.errorMessage().contains(QStringLiteral("protected")));
+    controller.reconnect();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.selectedSession(), QStringLiteral("rachel"), 3'000);
     controller.clearError();
 
     controller.setScheduleEnabled(QStringLiteral("sched-test"), false);
