@@ -46,7 +46,8 @@ try{
   await page.evaluate(({t})=>{const st=window.fleetWorldSnapshot();const el=document.getElementById('t');el.value=1000*(t-st.timeline.since)/(st.timeline.until-st.timeline.since);el.dispatchEvent(new Event('input'));},{t});
   await page.waitForTimeout(450);const st=await snapshot();const w=st.meta.workObjects.find(w=>w.id===target.id);
   stages.push({t,stage:w?.stage,validation:w?.validation,workspaceValidation:st.meta.workspaces.find(x=>x.id===w?.workspace)?.validation});
-  if(w?.validation==='failed'&&!stages.some((x,i)=>i<stages.length-1&&x.validation==='failed')){
+  const broken=v=>v==='failed'||v==='interrupted';
+  if(broken(w?.validation)&&!stages.some((x,i)=>i<stages.length-1&&broken(x.validation))){
    // Layout can shift while scrubbing; re-center on the slate so the crack is in frame at normal scale.
    await page.locator('#fit').click();await page.waitForTimeout(250);const f=await snapshot();
    const fx=w.x*f.camera.k+f.camera.x,fy=w.y*f.camera.k+f.camera.y;await page.mouse.move(fx,fy);for(let i=0;i<11;i++){await page.mouse.wheel(0,-100);await page.waitForTimeout(30);}
