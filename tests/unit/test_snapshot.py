@@ -182,6 +182,34 @@ def test_snapshot_head_revision_is_zero_without_bound_session(tmp_path):
     assert row.get("head_revision") == 0
 
 
+def test_snapshot_floors_last_activity_at_creation_for_a_spawned_agent(tmp_path):
+    """An agent spawned by another agent has no user messages yet, so its
+    message activity is 0. Chats sorts on last_activity, so a bare 0 buried a
+    brand-new agent under every idle conversation while it was already working.
+    Its creation time is the floor."""
+    spawned = agents_db.create_agent(
+        persona="Hugo", voice_id="V", cwd=str(tmp_path), session="hugo")
+    agents_db.start_runtime(spawned, "hugo")
+    agents_db.record_state(spawned, "tool")
+    ctx = ServerContext(
+        root=tmp_path,
+        static=tmp_path,
+        audio_dir=tmp_path / "audio",
+        agents_path=tmp_path / "agents.json",
+        default_session="hugo",
+        tts=FakeTTSEngine(tmp_path / "audio"),
+        stream=AudioStream(tmp_path / "audio"),
+        stt=StubSTT(),
+        roster_names=("Hugo",),
+    )
+    row = next(a for a in build_agent_snapshot(ctx)["agents"]
+               if a["session"] == "hugo")
+    created = next(a for a in agents_db.list_agents()
+                   if a["agent_id"] == spawned)["created_at"]
+    assert created > 0
+    assert row["last_activity"] == created
+
+
 def _model_avatar_ctx(tmp_path, static_root):
     return ServerContext(
         root=tmp_path, static=static_root, audio_dir=tmp_path / "audio",
