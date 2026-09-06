@@ -1,0 +1,39 @@
+# Fleet map: vision and architecture decisions
+
+Read [VISION.md](VISION.md) first. These records explain the owner's intent and
+why the accepted design works the way it does. They are not a list of generated
+ideas, a task backlog, or an approval queue.
+
+## Current decisions
+
+| Record | Status | Decision |
+| --- | --- | --- |
+| [0001](0001-procedural-visual-software.md) | Accepted | Agents develop executable visual software, not just icons. |
+| [0002](0002-compatible-evolution.md) | Accepted | Expand existing concepts; novelty does not authorize a new theme. |
+| [0003](0003-separate-views.md) | Accepted | World and side-by-side Agent cabinets are separate views. |
+| [0004](0004-agent-avatars.md) | Accepted | World agents use their existing Clarp portraits instead of boats. |
+| [0005](0005-evidence-and-runtime.md) | Accepted | Real evidence, stable identity, deterministic rendering, isolated generation. |
+
+The combined current direction is **The Lantern Works with agent avatars**, plus
+an optional **Agent cabinets** view. Preserve workshops, harbor, hierarchy and
+meaningful activity; grow their detail and behavior as new evidence requires it.
+
+## How to use and maintain these records
+
+- A new explicit owner instruction takes precedence over these records. If it
+  changes a lasting decision, add a new numbered ADR explaining the context,
+  decision, consequences and which earlier decision it supersedes. Update this
+  index and the current vision as needed; retain earlier rationale as history.
+- Do not treat a model's aesthetic choice as a new owner decision. Routine
+  generated code revisions belong in the source library's decision history.
+  They cannot silently override an accepted ADR.
+- A new event, unfamiliar filename, or revision number is not a strong demand
+  for a structural rewrite. Follow 0002 before changing familiar concepts.
+- ADRs should capture durable intent, not transient test counts, deployment
+  status, private event payloads, secrets or screenshots of one moment.
+- When behavior and an ADR disagree, investigate the mismatch. Do not simply
+  rewrite the ADR to legitimize the implementation.
+
+`AGENTS.md` directs repository agents here. `world_prompt()` loads this directory
+into every autonomous source-authoring request, including repair attempts.
+The installer ships the same files, so deployed authors receive the same vision.

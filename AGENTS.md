@@ -31,3 +31,12 @@ when safe so `.build` and similar caches do not accumulate indefinitely.
 Check for uncommitted changes before running `git checkout` on a path. This is a
 shared working tree; if the file is dirty, the checkout destroys work that
 exists nowhere else.
+
+## Fleet-map vision and decisions
+
+Before changing fleet-map behavior, authoring prompts, visuals, or generated-source
+contracts, read [the vision and decision index](docs/architecture/fleet-map/README.md)
+and the linked accepted ADRs. The current direction is creative but not disruptive:
+extend established concepts; do not interpret ordinary novelty as a redesign request.
+New explicit owner instructions take precedence. Record lasting changes to the vision
+as a new ADR and update the index; do not silently rewrite the rationale to match code.
