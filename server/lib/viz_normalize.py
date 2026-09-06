@@ -444,9 +444,11 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
         if not ev["clamped"]:
             c["example"] = sample
     specific = sum(1 for e in events if e["specific"])
-    from . import viz_world
+    from . import viz_world, viz_work
+    world = viz_world.build(events)
+    world["work"] = viz_work.build(con, since_ms, until, names)
     return {
-        "world": viz_world.build(events),
+        "world": world,
         "program": library.get("program"),
         "previous_program": library.get("previous_program"),
         "view_programs": library.get("view_programs",{}),

@@ -354,3 +354,41 @@ workspace and compact nearby context rather than permanently expanding every fil
 owner containment, distinct action states with labels hidden, settled avatars,
 demo isolation, selection persistence and preservation of both prior views.
 `tests/state/viz-flow.test.js` covers relation persistence and touch deduplication.
+
+
+### Work objects, relationship vocabulary and validation (ADR 0012)
+
+`server/lib/viz_work.py` adds a bounded `work` section to the world payload:
+recorded task plans with their items (declared intent), artifacts with a
+verified image preview route when the media asset is an image (outcome), and
+agent-origin prompt admissions with the plan IDs they name (handoff). It ships a
+`contract` object stating each basis. `viz_world.validation_evidence` recognizes
+tests, builds and lint runs in recorded commands and records whether a compound
+chain reports an exact outcome.
+
+Flow's `work.js` attributes events to plans by agent identity and time overlap
+at the playhead; `slate.js` draws one persistent slate per plan whose size is the
+stage reached (intent, evidence, outcome). A failed validation cracks the slate
+and its workspace; a later evidenced success seals it and the seam fades. The
+host's `viz-preview-cache.js` loads at most 24 artifact thumbnails from `/media/`
+routes and passes them into the sandbox through a separate `images` channel.
+Outcomes without a plan appear as outcome-only slates. Projects take a tint and
+rim ornament from what they actually produced.
+
+Relations: double rails with anchors are configured origins; beams toward the
+agent are discovery; a dotted tether is attribution; a push carries the work's
+seal along the rail and glows on arrival; recorded remote check results sit at
+the remote repository; a thread with a knot is a recorded agent message, and a
+message naming a plan carries that seal between avatars.
+
+`?window=SECONDS` and `?until=EPOCH_MS` on `/viz` open Flow paused at a past
+instant with a bounded window so older real work can be replayed and proven.
+`scripts/viz_publish_flow.py --library COPY` publishes the checked-in Flow source
+as a new Flow revision without touching `view_programs.world`; it refuses the live
+library unless `--allow-live` is given.
+
+```bash
+node scripts/viz_flow_check.mjs URL OUT      # demo lifecycle incl. work stages, failure→recovery, delivery, handoff
+node scripts/viz_work_check.mjs URL OUT UNTIL_MS 1800 PLAN_FRAGMENT   # real recorded work object, preview, inspector contract
+node scripts/viz_mobile_check.mjs URL OUT    # phone viewports incl. tapping a work slate
+```

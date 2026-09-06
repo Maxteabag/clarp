@@ -4,6 +4,7 @@ import argparse
 import functools
 import pathlib
 import json
+import re
 import mimetypes
 import threading
 import time
@@ -88,6 +89,19 @@ def main():
                 result=portrait(login)
                 if not result:return self.send_error(404)
                 self._send(200,*result)
+            elif urlsplit(self.path).path.startswith('/media/'):
+                # Recorded media assets back artifact previews. Only the asset
+                # row's own storage path is served, read-only, like production.
+                asset_id=unquote(urlsplit(self.path).path[len('/media/'):]).strip('/')
+                if not re.fullmatch(r'[A-Za-z0-9_-]{4,80}',asset_id):return self.send_error(400)
+                try:
+                    row=db.conn().execute('SELECT storage_path,mime_type FROM media_assets WHERE asset_id=? AND deleted_at IS NULL',(asset_id,)).fetchone()
+                    path=pathlib.Path(str(row['storage_path'])).resolve() if row else None
+                    root=(pathlib.Path.home()/'.local/share/clarp/media').resolve()
+                    if not path or not path.is_file() or root not in path.parents:return self.send_error(404)
+                    self._send(200,path.read_bytes(),str(row['mime_type']))
+                finally:
+                    db.close_local()
             elif urlsplit(self.path).path.startswith('/avatars/'):
                 # Same exact-agent portrait resolution as the main app. Never
                 # accept a filesystem path from the URL.

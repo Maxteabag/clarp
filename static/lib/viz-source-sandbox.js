@@ -4,7 +4,7 @@ import {FrameDeadline} from './viz-deadline.js';
 const bootstrap = `
 const workerSource = ${JSON.stringify(`
 let render, canvas, ctx, clock=0, seed=1234;
-let avatars={},avatarVersion=0,scene={entities:[],relations:[],events:[]};
+let avatars={},avatarVersion=0,images={},imageVersion=0,scene={entities:[],relations:[],events:[]};
 const monotonic=performance.now.bind(performance);
 Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
 Date.now=()=>clock;
@@ -39,11 +39,22 @@ self.onmessage=async({data})=>{
    for(const image of Object.values(avatars))image.close();
    avatars=next;return;
   }
+  if(data.type==='images'){
+   // Host-owned artifact previews: decoded once, keyed by artifact id.
+   const version=++imageVersion;
+   const next={};
+   for(const [id,blob] of Object.entries(data.images||{})){
+    try{next[id]=await createImageBitmap(blob);}catch{}
+   }
+   if(version!==imageVersion){for(const image of Object.values(next))image.close();return;}
+   for(const image of Object.values(images))image.close();
+   images=next;return;
+  }
   const started=monotonic();
   clock=data.playhead;seed=1234;
   canvas.width=data.width;canvas.height=data.height;
-  const meta=render({...data,scene,ctx,avatars})||{};
-  meta.loadedAvatars=Object.keys(avatars);
+  const meta=render({...data,scene,ctx,avatars,images})||{};
+  meta.loadedAvatars=Object.keys(avatars);meta.loadedImages=Object.keys(images);
   const bitmap=canvas.transferToImageBitmap();
   self.postMessage({type:'frame',request:data.request,bitmap,meta,executionMs:monotonic()-started},[bitmap]);
  }catch(e){self.postMessage({type:'error',error:String(e.message||e).slice(0,500)});}
@@ -66,7 +77,7 @@ export class SourceSandbox {
   constructor(program,onframe,onerror){
     this.frame=document.createElement('iframe');this.frame.hidden=true;
     this.frame.sandbox='allow-scripts';
-    this.avatars={};this.frameTimings={};this.ready=false;this.pending=false;this.stopped=false;this.sequence=0;
+    this.avatars={};this.images={};this.frameTimings={};this.ready=false;this.pending=false;this.stopped=false;this.sequence=0;
     const fail=(error,kind='source')=>{if(this.stopped)return;this.destroy();onerror(error,kind);};
     this.deadline=new FrameDeadline(()=>fail('The render worker stopped responding','delivery'));
     this.initDeadline=new FrameDeadline(()=>fail('The render worker could not start','startup'),{deliveryMs:10000});
@@ -80,7 +91,7 @@ export class SourceSandbox {
     this.listener=e=>{
       if(e.source!==this.frame.contentWindow||this.stopped)return;
       if(e.data.type==='boot')this.frame.contentWindow.postMessage({type:'init',program},'*');
-      else if(e.data.type==='ready'){this.initDeadline.clear();this.ready=true;this.setAvatars(this.avatars);}
+      else if(e.data.type==='ready'){this.initDeadline.clear();this.ready=true;this.setAvatars(this.avatars);this.setImages(this.images);}
       else if(e.data.type==='error')fail(e.data.error);
       else if(e.data.type==='frame'&&e.data.request===this.sequence){
         this.deadline.clear();this.pending=false;
@@ -103,6 +114,10 @@ export class SourceSandbox {
   setAvatars(avatars){
     this.avatars=avatars;
     if(this.ready&&!this.stopped)this.frame.contentWindow.postMessage({type:'avatars',avatars},'*');
+  }
+  setImages(images){
+    this.images=images;
+    if(this.ready&&!this.stopped)this.frame.contentWindow.postMessage({type:'images',images},'*');
   }
   draw(input){
     if(!this.ready||this.pending||this.stopped||document.hidden||performance.now()<(this.nextFrameAt||0))return;
