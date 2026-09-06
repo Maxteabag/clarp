@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "generated_on": "2026-09-06",
+  "generation_mode": "built-in image_gen.imagegen",
+  "notes": "Built-in image generation, one image per role. JPEG transcodes preserve the generated composition and dimensions; PNG originals are retained outside the runtime bundle. Sam keeps his ordinary profile.",
+  "assets": [
+    {
+      "file": "rivet-task-label-keeper.jpg",
+      "role": "Task-label keeper Rivet",
+      "prompt": "Use case: stylized-concept. Asset type: production square profile avatar for one Clarp Janitor robot. Create one image only, one subject only, square 1024 by 1024. Premium tactile 3D stop-motion miniature portrait, exquisitely real sculpted worn metal and chipped paint, refined cinematic product lighting. A friendly confident capable industrial robot with expressive luminous optical eyes. Dark warm charcoal studio background with a subtle warm halo. Restrained rusty iron, aged brass, copper palette with one muted paint accent, dusty patina and large rivets, charmingly hand-built. Close head-and-shoulders portrait; the head fills most of the frame; leave just enough margin for its distinctive silhouette and circular avatar cropping. Slight three-quarter turn, eyes engaging camera. Soft warm upper-left key light, subtle edge light, strong readable face contrast. Large simple facial features must remain recognizable at 40-pixel avatar size. No text, lettering, logos, watermark, symbols, border, collage, humans, clutter, tools held in foreground, bright background, glossy plastic, or cartoon flat vector art. This belongs to a coherent four-character family sharing identical photographic composition, backdrop, material language, and lighting. Subject: Rivet, the steady task-label keeper. A broad sturdy square-headed robot, softened square edges, thick squat cheek plates and strong little shoulders; faded moss-green paint over deeply weathered rusty iron. Two large warm amber camera-lens eyes set into the square face, a small calm gently smiling mechanical mouth. The defining silhouette is an unmistakably solid rectangular head, no antenna, no headset, no lamp. Trustworthy organized workshop veteran, endearing but cool.",
+      "width": 1254,
+      "height": 1254,
+      "bytes": 290705,
+      "sha256": "f34fc00281e306f3d6d7e6a4c5145eca1732fbcf2cdec02544b84eac4a2fd032"
+    },
+    {
+      "file": "delegator-message-dispatcher.jpg",
+      "role": "Built-in Delegator / message dispatcher",
+      "prompt": "Use case: stylized-concept. Asset type: production square profile avatar for one Clarp Janitor robot. Create one image only, one subject only, square 1024 by 1024. Premium tactile 3D stop-motion miniature portrait, exquisitely real sculpted worn metal and chipped paint, refined cinematic product lighting. A friendly confident capable industrial robot with expressive luminous optical eyes. Dark warm charcoal studio background with a subtle warm halo. Restrained rusty iron, aged brass, copper palette with one muted paint accent, dusty patina and large rivets, charmingly hand-built. Close head-and-shoulders portrait; the head fills most of the frame; leave just enough margin for its distinctive silhouette and circular avatar cropping. Slight three-quarter turn, eyes engaging camera. Soft warm upper-left key light, subtle edge light, strong readable face contrast. Large simple facial features must remain recognizable at 40-pixel avatar size. No text, lettering, logos, watermark, symbols, border, collage, humans, clutter, tools held in foreground, bright background, glossy plastic, or cartoon flat vector art. This belongs to a coherent four-character family sharing identical photographic composition, backdrop, material language, and lighting. Subject: the message-dispatching Delegator. A compact tapered copper-and-rust robot head with a substantial old radio communications headset, one clearly visible short antenna rising diagonally from a headset earpiece, and a small unobtrusive rounded microphone near the cheek. Two large warm pale amber optical eyes, a confident friendly slight mechanical smile. Chipped dark burnt-orange paint over copper metal. The defining silhouette is the asymmetrical radio headset and antenna, with clear uncluttered outline. Resourceful station operator; cool, attentive, ready to connect people.",
+      "width": 1254,
+      "height": 1254,
+      "bytes": 216129,
+      "sha256": "861f43596af6a7ae65b062257c11f6c0eb139b2f4b940013eb720ff9a4dcbae9"
+    },
+    {
+      "file": "explainer-tool-guide.jpg",
+      "role": "Built-in Explainer / tool explainer",
+      "prompt": "Use case: stylized-concept. Asset type: production square profile avatar for one Clarp Janitor robot. Create one image only, one subject only, square 1024 by 1024. Premium tactile 3D stop-motion miniature portrait, exquisitely real sculpted worn metal and chipped paint, refined cinematic product lighting. A friendly confident capable industrial robot with expressive luminous optical eyes. Dark warm charcoal studio background with a subtle warm halo. Restrained rusty iron, aged brass, copper palette with one muted paint accent, dusty patina and large rivets, charmingly hand-built. Close head-and-shoulders portrait; the head fills most of the frame; leave just enough margin for its distinctive silhouette and circular avatar cropping. Slight three-quarter turn, eyes engaging camera. Soft warm upper-left key light, subtle edge light, strong readable face contrast. Large simple facial features must remain recognizable at 40-pixel avatar size. No text, lettering, logos, watermark, symbols, border, collage, humans, clutter, tools held in foreground, bright background, glossy plastic, or cartoon flat vector art. This belongs to a coherent four-character family sharing identical photographic composition, backdrop, material language, and lighting. Subject: the tool-explaining Explainer. A rounded trapezoidal aged-brass robot head, two prominent large binocular-like cylindrical optical eyes in a single paired goggle assembly with gentle luminous teal lenses; muted chipped teal accent paint. A very small vintage warm workshop lamp fixed beside the temple, with a tiny domed brass shade casting warm light, fully inside the frame. Rusted neck fittings, a quiet knowing mechanical smile. The defining silhouette is the protruding paired binocular eyes and tiny side lamp; no headset and no antenna. A friendly curious workshop tutor, precise, welcoming, and cool.",
+      "width": 1254,
+      "height": 1254,
+      "bytes": 258490,
+      "sha256": "bdf1d73c581ca739b569269c68a0151c58d381140b3ab672a57589af7c4bc409"
+    },
+    {
+      "file": "janitor-default.jpg",
+      "role": "Generic future-Janitor fallback",
+      "prompt": "Use case: stylized-concept. Asset type: production square profile avatar for one Clarp Janitor robot. Create one image only, one subject only, square 1024 by 1024. Premium tactile 3D stop-motion miniature portrait, exquisitely real sculpted worn metal and chipped paint, refined cinematic product lighting. A friendly confident capable industrial robot with expressive luminous optical eyes. Dark warm charcoal studio background with a subtle warm halo. Restrained rusty iron, aged brass, copper palette with one muted paint accent, dusty patina and large rivets, charmingly hand-built. Close head-and-shoulders portrait; the head fills most of the frame; leave just enough margin for its distinctive silhouette and circular avatar cropping. Slight three-quarter turn, eyes engaging camera. Soft warm upper-left key light, subtle edge light, strong readable face contrast. Large simple facial features must remain recognizable at 40-pixel avatar size. No text, lettering, logos, watermark, symbols, border, collage, humans, clutter, tools held in foreground, bright background, glossy plastic, or cartoon flat vector art. This belongs to a coherent four-character family sharing identical photographic composition, backdrop, material language, and lighting. Subject: the general-purpose future Janitor. A friendly simple round riveted robot head, smooth domed circular silhouette made of weathered rusty iron panels, muted warm ochre chipped paint, evenly spaced broad rivets and two generously sized warm amber glass optical eyes. A modest gently upturned mechanical mouth, small round ear bolts, rounded shoulders. The defining silhouette is a classic round orb-shaped head; no headset, no antenna, no lamp, no goggles. Dependable humble maintenance companion with a relaxed confident expression; timeless and cool.",
+      "width": 1254,
+      "height": 1254,
+      "bytes": 205079,
+      "sha256": "ad1e43276b7341200770bdc3a15c144c2fa0210afb1805d600e3caf490fc0c87"
+    }
+  ]
+}

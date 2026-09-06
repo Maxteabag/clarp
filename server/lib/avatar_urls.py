@@ -6,6 +6,33 @@ import hmac
 import pathlib
 from urllib.parse import quote
 
+
+_JANITOR_PORTRAITS = {
+    "task-labels": "rivet-task-label-keeper.jpg",
+    "message-delegator": "delegator-message-dispatcher.jpg",
+    "tool-explainer": "explainer-tool-guide.jpg",
+}
+
+
+def janitor_avatar_url(is_janitor: bool, template_id: str | None = None,
+                       *, static_root: pathlib.Path | None = None) -> str:
+    """Project a role portrait without replacing the agent's original photo."""
+    if not is_janitor:
+        return ""
+    if static_root is None:
+        # Source checkout: server/lib; installed release: lib.
+        code = pathlib.Path(__file__).resolve().parent.parent
+        static_root = code / "static"
+        if not static_root.is_dir():
+            static_root = code.parent / "static"
+    root = pathlib.Path(static_root) / "janitor-avatars"
+    name = _JANITOR_PORTRAITS.get(template_id, "janitor-default.jpg")
+    if not (root / name).is_file():
+        name = "janitor-default.jpg"
+    if not (root / name).is_file():
+        return ""
+    return versioned_avatar_url("/static/janitor-avatars", name, str(root / name))
+
 def avatar_content_version(path: pathlib.Path) -> str:
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
