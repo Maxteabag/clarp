@@ -13,6 +13,8 @@ TestCase {
     QtObject {
         id: stub
         property bool timestampsVisible: false
+        property bool pauseMobilePush: true
+        property bool showWhenReady: false
         property bool toolsVisible: false
         property bool muted: false
         property bool sharedFilesystem: false
@@ -63,9 +65,10 @@ TestCase {
     function test_openNavigateToggleAndEscape() {
         stub.timestampsVisible = false;
         stub.toolsVisible = false;
+        stub.showWhenReady = false;
         const panel = openPanel();
         const first = findChild(panel, "setting-timestamps");
-        const second = findChild(panel, "setting-tools");
+        const second = findChild(panel, "setting-show-when-ready");
         verify(first !== null && second !== null);
         tryCompare(first, "activeFocus", true);
         keyClick(Qt.Key_Space);
@@ -74,7 +77,7 @@ TestCase {
         keyClick(Qt.Key_Down);
         tryCompare(second, "activeFocus", true);
         keyClick(Qt.Key_Return);
-        compare(stub.toolsVisible, true);
+        compare(stub.showWhenReady, true);
         keyClick(Qt.Key_Tab, Qt.ShiftModifier);
         tryCompare(first, "activeFocus", true);
         keyClick(Qt.Key_Tab);
@@ -135,8 +138,8 @@ TestCase {
     function test_navigationSkipsDisabledRowsInBothDirections() {
         const panel = openPanel();
         const first = findChild(panel, "setting-timestamps");
-        const second = findChild(panel, "setting-tools");
-        const third = findChild(panel, "setting-tool-narration");
+        const second = findChild(panel, "setting-show-when-ready");
+        const third = findChild(panel, "setting-tools");
         verify(first !== null && second !== null && third !== null);
         tryCompare(first, "activeFocus", true);
         second.enabled = false;

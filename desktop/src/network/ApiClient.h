@@ -21,7 +21,7 @@ class ApiClient final : public QObject {
 
     void get(const QString& tag, const QString& path, const QUrlQuery& query = {});
     void getBytes(const QString& tag, const QString& path);
-    void postJson(const QString& tag, const QString& path, const QJsonObject& body);
+    void postJson(const QString& tag, const QString& path, const QJsonObject& body, int timeoutMs = 0);
     void putJson(const QString& tag, const QString& path, const QJsonObject& body);
     void deleteResource(const QString& tag, const QString& path);
     void postBytes(const QString& tag, const QString& path, const QByteArray& body,

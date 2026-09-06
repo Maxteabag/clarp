@@ -21,6 +21,7 @@ struct Agent {
     QString latestState;
     QString statusText;
     QString lastMessage;
+    QString lastCompletedMessage;
     QString conversationId;
     QString voiceId;
     QJsonArray schedules;

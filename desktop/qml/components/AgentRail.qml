@@ -12,6 +12,18 @@ Rectangle {
     signal selectSurface(string surface)
     color: "#20212e"
     readonly property bool searchOwnsFocus: chatList.searchOwnsFocus
+    readonly property string keyboardSession: chatList.keyboardSession
+    readonly property int rowCount: chatList.rowCount
+    function ownsFocus(item) {
+        for (let current = item; current; current = current.parent) {
+            if (current === root) return true;
+        }
+        return false;
+    }
+    function focusCurrentAgent() { chatList.focusCurrentAgent(); }
+    function moveSelection(delta) { chatList.moveSelection(delta); }
+    function openSelection() { chatList.openSelection(); }
+    function focusSearch() { chatList.focusSearch(); }
     function clearSearch() { chatList.clearSearch(); }
     RowLayout {
         anchors.fill: parent

@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -66,6 +68,13 @@ ApplicationWindow {
         return root.selectedSurface === "chats" && !root.overlayVisible();
     }
 
+    function focusConversation() {
+        app.requestComposerFocus("");
+        Qt.callLater(() => {
+            if (root.workspaceAvailable()) workspace.focusNavigation();
+        });
+    }
+
     function movePane(direction) {
         app.panes.navigate(direction);
         app.requestComposerFocus(app.panes.activePaneId);
@@ -90,7 +99,40 @@ ApplicationWindow {
 
     function runCommand(action) {
         let layoutChanged = false;
-        if (action === "new") {
+        if (action === "escape") {
+            if (keyboard.contextName === "search") rail.focusCurrentAgent();
+            else if (keyboard.contextName === "sidebar") root.focusConversation();
+            else root.escapeFocus();
+        } else if (action === "next-attention") {
+            const session = app.nextAttentionSession();
+            if (session.length > 0) {
+                root.selectedSurface = "chats";
+                app.selectSession(session);
+                app.requestComposerFocus(app.panes.activePaneId);
+            }
+        } else if (action === "focus-sidebar") {
+            root.sidebarVisible = true;
+            app.requestComposerFocus("");
+            Qt.callLater(rail.focusCurrentAgent);
+        } else if (action === "focus-pane") {
+            root.focusConversation();
+        } else if (action === "focus-composer") {
+            app.requestComposerFocus(app.panes.activePaneId);
+        } else if (action === "toggle-focus") {
+            root.runCommand(rail.ownsFocus(root.activeFocusItem) ? "focus-pane" : "focus-sidebar");
+        } else if (action === "agent-next" || action === "agent-previous") {
+            rail.moveSelection(action === "agent-next" ? 1 : -1);
+        } else if (action === "agent-open") {
+            rail.openSelection();
+        } else if (action === "agent-search") {
+            rail.focusSearch();
+        } else if (action === "switcher") {
+            quickSwitcher.open(root.composerOwnsFocus());
+        } else if (action === "new-contact") {
+            quickSwitcher.openContacts(root.composerOwnsFocus());
+        } else if (action.startsWith("move-")) {
+            root.movePane(action.slice(5));
+        } else if (action === "new") {
             root.relaunchSession = "";
             root.relaunchName = "";
             startAgent.visible = true;
@@ -133,7 +175,8 @@ ApplicationWindow {
         } else if (action === "tools") {
             app.toolsVisible = !app.toolsVisible;
         } else if (action === "refresh") {
-            app.refreshConversation();
+            if (root.selectedSurface === "updates") app.loadUpdates();
+            else app.refreshConversation();
         } else if (action === "release-agent") {
             app.releaseAgent(app.selectedSession);
         } else if (action === "stop-agent") {
@@ -184,207 +227,62 @@ ApplicationWindow {
         Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId));
     }
 
-    Shortcut {
-        sequence: "Ctrl+R"
-        context: Qt.ApplicationShortcut
-        enabled: !root.overlayVisible()
-        onActivated: root.selectedSurface === "updates"
-            ? app.loadUpdates() : app.refreshConversation()
-    }
-
-    Shortcut {
-        sequence: "Ctrl+M"
-        context: Qt.ApplicationShortcut
-        enabled: !root.overlayVisible()
-        onActivated: app.muted = !app.muted
-    }
-
-    Shortcut {
-        sequence: "Ctrl+K"
-        context: Qt.ApplicationShortcut
-        enabled: !root.overlayVisible()
-        onActivated: quickSwitcher.open(root.composerOwnsFocus())
-    }
-
-    Shortcut {
-        sequence: "Ctrl+B"
-        context: Qt.ApplicationShortcut
-        enabled: !root.overlayVisible()
-        onActivated: root.runCommand("sidebar")
-    }
-
-    Shortcut {
-        sequence: "Ctrl+="
-        context: Qt.ApplicationShortcut
-        onActivated: root.runCommand("ui-larger")
-    }
-
-    Shortcut {
-        sequence: "Ctrl+-"
-        context: Qt.ApplicationShortcut
-        onActivated: root.runCommand("ui-smaller")
-    }
-
-    Shortcut {
-        sequence: "Ctrl+0"
-        context: Qt.ApplicationShortcut
-        onActivated: root.runCommand("ui-reset")
-    }
-
-    Shortcut {
-        sequence: "Escape"
-        context: Qt.ApplicationShortcut
-        // Let the settings dialog (and its ComboBox popup) consume Escape first.
-        enabled: !settingsPanel.dialogOpen
-        onActivated: {
-            if (quickSwitcher.visible)
-                quickSwitcher.close();
-            else if (voiceDialog.visible)
-                voiceDialog.visible = false;
-            else if (orchestrator.visible)
-                orchestrator.visible = false;
-            else if (startAgent.visible)
-                startAgent.visible = false;
-            else if (overview.visible)
-                overview.visible = false;
-            else if (connection.visible && app.agents.count > 0)
-                connection.visible = false;
-            else if (queueDialog.visible)
-                queueDialog.visible = false;
-            else if (profilePanel.visible)
-                profilePanel.visible = false;
-            else if (rail.searchOwnsFocus) {
-                rail.clearSearch();
-                root.runCommand("chats");
-            }
-            else if (root.selectedSurface !== "chats")
-                root.runCommand("chats");
-            else {
-                app.requestComposerFocus("");
-                workspace.forceActiveFocus();
-            }
+    function escapeFocus() {
+        if (quickSwitcher.visible)
+            quickSwitcher.close();
+        else if (voiceDialog.visible)
+            voiceDialog.visible = false;
+        else if (orchestrator.visible)
+            orchestrator.visible = false;
+        else if (startAgent.visible)
+            startAgent.visible = false;
+        else if (overview.visible)
+            overview.visible = false;
+        else if (connection.visible && app.agents.count > 0)
+            connection.visible = false;
+        else if (queueDialog.visible)
+            queueDialog.visible = false;
+        else if (profilePanel.visible)
+            profilePanel.visible = false;
+        else if (rail.searchOwnsFocus) {
+            rail.clearSearch();
+            root.runCommand("chats");
+        }
+        else if (root.selectedSurface !== "chats")
+            root.runCommand("chats");
+        else {
+            app.requestComposerFocus("");
+            workspace.focusNavigation();
         }
     }
 
-    Shortcut {
-        sequence: "Ctrl+Shift+V"
-        context: Qt.ApplicationShortcut
-        enabled: root.workspaceAvailable() && !root.composerOwnsFocus()
-        onActivated: root.runCommand("split-right")
-    }
-
-    Shortcut {
-        sequence: "Ctrl+Shift+H"
-        context: Qt.ApplicationShortcut
-        enabled: root.workspaceAvailable() && !root.composerOwnsFocus()
-        onActivated: root.runCommand("split-down")
-    }
-
-    Shortcut {
-        sequence: "Ctrl+Shift+W"
-        context: Qt.ApplicationShortcut
-        enabled: root.workspaceAvailable() && !root.composerOwnsFocus()
-        onActivated: root.runCommand("close-pane")
-    }
-
-    Shortcut {
-        sequence: "Ctrl+Shift+Z"
-        context: Qt.ApplicationShortcut
-        enabled: root.workspaceAvailable() && !root.composerOwnsFocus()
-        onActivated: root.runCommand("zoom")
-    }
-
-    Shortcut {
-        sequence: "Ctrl+Shift+="
-        context: Qt.ApplicationShortcut
-        enabled: root.workspaceAvailable() && !root.composerOwnsFocus()
-        onActivated: app.panes.equalize()
-    }
-
-    Shortcut {
-        sequence: "Ctrl+Alt+Left"
-        context: Qt.ApplicationShortcut
-        enabled: root.workspaceAvailable()
-        onActivated: root.movePane("left")
-    }
-
-    Shortcut {
-        sequence: "Ctrl+Alt+Right"
-        context: Qt.ApplicationShortcut
-        enabled: root.workspaceAvailable()
-        onActivated: root.movePane("right")
-    }
-
-    Shortcut {
-        sequence: "Ctrl+Alt+Up"
-        context: Qt.ApplicationShortcut
-        enabled: root.workspaceAvailable()
-        onActivated: root.movePane("up")
-    }
-
-    Shortcut {
-        sequence: "Ctrl+Alt+Down"
-        context: Qt.ApplicationShortcut
-        enabled: root.workspaceAvailable()
-        onActivated: root.movePane("down")
-    }
-
-    Shortcut {
-        sequence: "Ctrl+N"
-        context: Qt.ApplicationShortcut
-        enabled: !root.overlayVisible()
-        onActivated: {
-            root.relaunchSession = "";
-            root.relaunchName = "";
-            startAgent.visible = true;
+    KeyboardMap {
+        id: keyboard
+        objectName: "keyboardMap"
+        contextName: settingsPanel.dialogOpen ? "blocked" : root.overlayVisible() ? "modal"
+            : root.selectedSurface !== "chats" ? root.selectedSurface
+            : rail.searchOwnsFocus ? "search"
+            : root.composerOwnsFocus() ? "composer"
+            : rail.ownsFocus(root.activeFocusItem) ? "sidebar" : "pane"
+        hasAttention: app.nextAttentionTarget.length > 0
+        hasAgent: app.selectedSession.length > 0
+        hasRows: rail.rowCount > 0
+        canSend: {
+            app.composerRevision;
+            return app.composerCanSend(app.panes.activePaneId, app.selectedSession);
         }
     }
 
-    Shortcut {
-        sequence: "Ctrl+Shift+O"
-        context: Qt.ApplicationShortcut
-        enabled: !root.overlayVisible()
-        onActivated: overview.visible = true
+    Instantiator {
+        model: keyboard.shortcuts
+        delegate: Shortcut {
+            required property var modelData
+            sequence: modelData.key
+            context: Qt.WindowShortcut
+            autoRepeat: modelData.action === "agent-next" || modelData.action === "agent-previous"
+            onActivated: root.runCommand(modelData.action)
+        }
     }
-
-    Shortcut {
-        sequence: "Ctrl+Shift+T"
-        context: Qt.ApplicationShortcut
-        enabled: !root.overlayVisible()
-        onActivated: app.toolsVisible = !app.toolsVisible
-    }
-
-    Shortcut {
-        sequence: "Ctrl+,"
-        context: Qt.ApplicationShortcut
-        enabled: !root.overlayVisible()
-        onActivated: root.runCommand("settings")
-    }
-
-    Shortcut { sequence: "Ctrl+1"; context: Qt.ApplicationShortcut; enabled: !root.overlayVisible(); onActivated: root.runCommand("chats") }
-    Shortcut { sequence: "Ctrl+2"; context: Qt.ApplicationShortcut; enabled: !root.overlayVisible(); onActivated: root.runCommand("updates") }
-    Shortcut { sequence: "Ctrl+3"; context: Qt.ApplicationShortcut; enabled: !root.overlayVisible(); onActivated: root.runCommand("teams") }
-    Shortcut { sequence: "Ctrl+4"; context: Qt.ApplicationShortcut; enabled: !root.overlayVisible(); onActivated: root.runCommand("settings") }
-
-    Shortcut { sequence: "Alt+Left"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable() && !root.composerOwnsFocus(); onActivated: root.movePane("left") }
-    Shortcut { sequence: "Alt+Right"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable() && !root.composerOwnsFocus(); onActivated: root.movePane("right") }
-    Shortcut { sequence: "Alt+Up"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable() && !root.composerOwnsFocus(); onActivated: root.movePane("up") }
-    Shortcut { sequence: "Alt+Down"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable() && !root.composerOwnsFocus(); onActivated: root.movePane("down") }
-    Shortcut { sequence: "Alt+V"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable() && !root.composerOwnsFocus(); onActivated: root.runCommand("split-right") }
-    Shortcut { sequence: "Alt+S"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable() && !root.composerOwnsFocus(); onActivated: root.runCommand("split-down") }
-    Shortcut { sequence: "Alt+X"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable() && !root.composerOwnsFocus(); onActivated: root.runCommand("close-pane") }
-    Shortcut { sequence: "Alt+Z"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable() && !root.composerOwnsFocus(); onActivated: root.runCommand("zoom") }
-    Shortcut { sequence: "Alt+="; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable() && !root.composerOwnsFocus(); onActivated: root.runCommand("balance") }
-    Shortcut { sequence: "Ctrl+Alt+V"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("split-right") }
-    Shortcut { sequence: "Ctrl+Alt+S"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("split-down") }
-    Shortcut { sequence: "Ctrl+Alt+X"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("close-pane") }
-    Shortcut { sequence: "Ctrl+Alt+T"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("agent-terminal") }
-    Shortcut { sequence: "Ctrl+Alt+N"; context: Qt.ApplicationShortcut; enabled: !root.overlayVisible(); onActivated: quickSwitcher.openContacts(root.composerOwnsFocus()) }
-    Shortcut { sequence: "Ctrl+Alt+Z"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("zoom") }
-    Shortcut { sequence: "Ctrl+Alt+="; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("balance") }
-    Shortcut { sequence: "Ctrl+Shift+R"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable() && app.selectedSession.length > 0; autoRepeat: false; onActivated: root.runCommand("release-agent") }
-    Shortcut { sequence: "Ctrl+."; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("stop-agent") }
-    Shortcut { sequence: "Ctrl+Shift+Space"; context: Qt.ApplicationShortcut; enabled: root.workspaceAvailable(); onActivated: root.runCommand("talk") }
 
     Item {
         id: scaledSurface
@@ -502,7 +400,10 @@ ApplicationWindow {
             }
 
         }
-
+        ShortcutBar {
+            Layout.fillWidth: true
+            keymap: keyboard
+        }
     }
 
     ConnectionPage {

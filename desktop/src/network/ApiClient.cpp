@@ -66,8 +66,9 @@ void ApiClient::getBytes(const QString& tag, const QString& path) {
     watchBytes(tag, m_network.get(request));
 }
 
-void ApiClient::postJson(const QString& tag, const QString& path, const QJsonObject& body) {
+void ApiClient::postJson(const QString& tag, const QString& path, const QJsonObject& body, int timeoutMs) {
     QNetworkRequest request = requestFor(resolve(path));
+    if (timeoutMs > 0) request.setTransferTimeout(timeoutMs);
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     watchJson(tag, m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact)));
 }

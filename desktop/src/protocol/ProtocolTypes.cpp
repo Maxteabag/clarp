@@ -81,6 +81,7 @@ Agent Agent::fromJson(const QJsonObject& object) {
     agent.latestState = stringValue(object, "latest_state");
     agent.statusText = stringValue(object, "status_text");
     agent.lastMessage = stringValue(object, "last_message");
+    agent.lastCompletedMessage = stringValue(object, "last_completed_message");
     agent.conversationId = stringValue(object, "conversation_id");
     agent.voiceId = stringValue(object, "voice_id");
     if (object.value(QStringLiteral("schedules")).isArray()) {

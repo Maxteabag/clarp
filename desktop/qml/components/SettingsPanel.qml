@@ -13,7 +13,7 @@ Rectangle {
     signal closeRequested
     readonly property bool dialogOpen: ttsDialog.visible
     property int focusedIndex: 0
-    readonly property var actions: [timestampsRow, toolsRow, narrationRow, spokenRow,
+    readonly property var actions: [timestampsRow, readyRow, toolsRow, narrationRow, spokenRow, mobilePushRow,
         connectionRow, orchestratorRow, filesystemRow, routingRow]
     color: "#1a1b26"
     objectName: "settingsPanel"
@@ -124,6 +124,14 @@ Rectangle {
                     detail: "Show the date and time under each message"
                     checked: root.controller.timestampsVisible
                     onToggled: value => root.controller.timestampsVisible = value
+                }
+                SettingsToggle {
+                    id: readyRow
+                    objectName: "setting-show-when-ready"
+                    label: "Show when ready"
+                    detail: "Show a typing indicator, then the finished reply"
+                    checked: root.controller.showWhenReady
+                    onToggled: value => root.controller.showWhenReady = value
                 }
                 SettingsToggle {
                     id: toolsRow
@@ -242,6 +250,18 @@ Rectangle {
                     detail: "Mute or resume agent voice playback"
                     checked: !root.controller.muted
                     onToggled: value => root.controller.muted = !value
+                }
+            }
+
+            SettingsGroup {
+                title: "NOTIFICATIONS"
+                SettingsToggle {
+                    id: mobilePushRow
+                    objectName: "setting-pause-mobile-push"
+                    label: "Pause phone alerts while active on desktop"
+                    detail: "Resume when Clarp loses focus, the screen locks, or you go idle"
+                    checked: root.controller.pauseMobilePush
+                    onToggled: value => root.controller.pauseMobilePush = value
                 }
             }
 

@@ -321,6 +321,7 @@ class Handler(BaseHTTPRequestHandler):
     _ROOT_STATIC = {"/manifest.json", "/styles.css", "/icon.png"}
     _POST_ROUTES = {
         "/tool-explanations": "_handle_tool_explanations",
+        "/desktop-presence": "_handle_desktop_presence",
         "/send": "_handle_send",
         "/orchestrator/route-delegation": "_handle_orchestrator_route_delegation",
         "/transcribe": "_handle_transcribe",
@@ -1919,6 +1920,23 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_server_info(self):
         from lib.server_identity import get_server_info
         self._send(200, json.dumps(get_server_info()).encode(), "application/json")
+
+    def _handle_desktop_presence(self):
+        if not getattr(self, "_request_auth_validated", False):
+            return self._send(401, b'{"error":"authenticated desktop required"}', "application/json")
+        if getattr(self, "_request_device_scope", "") != "full":
+            return self._send(403, b'{"error":"full device access required"}', "application/json")
+        from lib import desktop_presence
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"object required"}', "application/json")
+        try:
+            result = desktop_presence.update(principal=self._request_principal,
+                instance_id=data.get("instance_id"), sequence=data.get("sequence"), active=data.get("active"),
+                sent_at_ms=data.get("sent_at_ms"))
+        except ValueError as error:
+            return self._send(400, json.dumps({"error": str(error)}).encode(), "application/json")
+        self._send(200, json.dumps(result).encode(), "application/json")
 
     def _handle_tool_explanations(self):
         data = self._read_json()
