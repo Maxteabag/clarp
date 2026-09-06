@@ -14,10 +14,14 @@ ideas, a task backlog, or an approval queue.
 | [0004](0004-agent-avatars.md) | Accepted | World agents use their existing Clarp portraits instead of boats. |
 | [0005](0005-evidence-and-runtime.md) | Accepted | Real evidence, stable identity, deterministic rendering, isolated generation. |
 | [0006](0006-work-at-real-destinations.md) | Accepted | Agents act at real files, directories and repositories; retire action-category stations. |
+| [0007](0007-workflow-relevance-and-living-relations.md) | Accepted direction; encodings exploratory | Emphasize meaningful work, compact ownership regions, fluid interactions and persistent relationships. |
 
 The combined current direction is **The Lantern Works with agent avatars**, plus
 an optional **Agent cabinets** view. Preserve workshops, harbor, hierarchy and
-meaningful activity at real destinations; grow their detail and behavior as new evidence requires it.
+meaningful activity at real destinations. ADR 0007 refines the direction toward
+compact, fluid workflow visualization: filesystem structure supplies context,
+while activity, relevant changes and persistent relationships receive emphasis.
+Specific new layouts and animation encodings are still exploratory.
 
 ## How to use and maintain these records
 
