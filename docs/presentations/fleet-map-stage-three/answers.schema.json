@@ -1,0 +1,1 @@
+{"type":"object","properties":{"emphasis":{"type":"string","enum":["journey","waiting","patterns"]},"notes":{"type":"string","maxLength":2000}},"required":["emphasis"],"additionalProperties":false}
