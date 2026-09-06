@@ -12,6 +12,8 @@ ItemDelegate {
     required property string workingDirectory
     required property string avatarUrl
     required property string lastMessage
+    required property string lastCompletedMessage
+    readonly property string messagePreview: controller.showWhenReady ? lastCompletedMessage : lastMessage
     required property string agentState
     required property string statusText
     required property real lastActivity
@@ -116,7 +118,8 @@ ItemDelegate {
                 Text {
                     Layout.fillWidth: true
                     textFormat: Text.PlainText
-                    text: (row.controller.showWhenReady ? "" : row.lastMessage).length > 0 ? (row.controller.showWhenReady ? "" : row.lastMessage) : (row.workingDirectory.length > 0 ? row.workingDirectory : row.backend)
+                    objectName: "sidebarMessagePreview"
+                    text: row.messagePreview.length > 0 ? row.messagePreview : (row.workingDirectory.length > 0 ? row.workingDirectory : row.backend)
                     color: row.unread ? "#b3aab9" : "#77717f"
                     font.pixelSize: 11
                     elide: Text.ElideRight

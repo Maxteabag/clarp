@@ -134,6 +134,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             # Eager last-message preview for the agent-list overview, so the
             # client shows it without opening each chat.
             "last_message":   message_head["preview"],
+            "last_completed_message": message.get("completed_head", {}).get("preview", ""),
             # Version the eager preview against the same canonical conversation
             # used by /log. Clients can now prove that an instant cached chat is
             # behind the overview instead of displaying two silently divergent

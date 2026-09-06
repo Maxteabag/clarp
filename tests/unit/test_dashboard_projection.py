@@ -53,3 +53,31 @@ def test_cached_busy_state_cannot_overwrite_a_new_background_state():
     repaired = reconcile.reconcile_agent(aid, 'codex', observed_state={'kind': 'thinking'})
     assert 'state' not in repaired
     assert agents.latest_state(aid)['kind'] == 'background'
+
+
+def test_completed_preview_survives_live_updates_for_unopened_chats():
+    aid = agents.create_agent(persona='Ready', voice_id='', cwd='/tmp', session='ready')
+    for number, source, text in ((1, 'transcript:one', 'Completed reply'),
+                                 (2, 'live:ready', 'Unfinished reply')):
+        db.conn().execute('''INSERT INTO messages
+            (message_id, agent_id, seq, role, text, tools_json, updated_at, origin, source_file)
+            VALUES(?,?,?,?,?,?,?,?,?)''',
+            (f'preview-{number}', aid, number, 'assistant', text, '[]', number, 'user', source))
+    row = next(row for row in build_agent_snapshot(None)['agents'] if row['agent_id'] == aid)
+    assert row['last_message'] == 'Unfinished reply'
+    assert row['last_completed_message'] == 'Completed reply'
+    db.conn().execute("UPDATE messages SET text='Growing unfinished reply' WHERE message_id='preview-2'")
+    assert message_store.dashboard_messages()[aid]['completed_head']['preview'] == 'Completed reply'
+    db.conn().execute("UPDATE messages SET source_file='transcript:two', text='New finished reply' WHERE message_id='preview-2'")
+    assert message_store.dashboard_messages()[aid]['completed_head']['preview'] == 'New finished reply'
+
+
+def test_completed_preview_is_ranked_independently_of_provisional_rows():
+    aid = agents.create_agent(persona='History', voice_id='', cwd='/tmp', session='history')
+    for number in range(62):
+        db.conn().execute('''INSERT INTO messages
+            (message_id, agent_id, seq, role, text, tools_json, updated_at, origin, source_file)
+            VALUES(?,?,?,?,?,?,?,?,?)''',
+            (f'history-{number}', aid, number, 'assistant', 'Completed' if number == 0 else 'Partial',
+             '[]', number + 1, 'user', 'transcript:old' if number == 0 else f'live:{number}'))
+    assert message_store.dashboard_messages()[aid]['completed_head']['preview'] == 'Completed'
