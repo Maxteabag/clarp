@@ -6,6 +6,7 @@
     "craft.js",
     "effects.js",
     "github.js",
+    "journey.js",
     "lantern.js",
     "model-util.js",
     "model.js",
@@ -13,6 +14,6 @@
     "work.js",
     "world.js"
   ],
-  "source_digest": "5366353484703a2a27f79f96d1f27df3f59985a39149124b17838d78e68ac9a8",
-  "notes": "Interpretive project families, connected working copies, service machinery and truthful traces; work is a lantern that keeps its seal from unlit intent through paper panes, a running sweep, a cracked pane, a gold mend and a lit pane showing the recorded preview. Rails, tethers, threads and carried seals distinguish belonging, attribution, collaboration and delivery. A creative baseline rather than fixed visual rules."
+  "source_digest": "df4021050d4f7b29203b5c6061a47e4ac3761e496f314d7ee415c179dda0032a",
+  "notes": "Interpretive project families, connected working copies, service machinery and truthful traces; work is a lantern that keeps its seal from unlit intent through paper panes, a running sweep, a cracked pane, a gold mend and a lit pane showing the recorded preview. Rails, tethers, threads and carried seals distinguish belonging, attribution, collaboration and delivery. A creative baseline rather than fixed visual rules. Beyond the workshop, recorded waits moor work to boundary posts (GitHub Actions, TestFlight, test lanes, Host updates, the owner) and repeated observed interactions leave still, remembered routes that are patterns, not dependencies."
 }

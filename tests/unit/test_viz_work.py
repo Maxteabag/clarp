@@ -10,7 +10,13 @@ def _db():
     CREATE TABLE artifacts(artifact_id TEXT PRIMARY KEY,agent_id TEXT,session TEXT,type TEXT,title TEXT,summary TEXT DEFAULT '',status TEXT,reference_id TEXT DEFAULT '',payload_json TEXT,created_at INTEGER,completed_at INTEGER,deleted_at INTEGER,updated_at INTEGER DEFAULT 0);
     CREATE TABLE media_assets(asset_id TEXT PRIMARY KEY,mime_type TEXT,width INTEGER,height INTEGER,bytes INTEGER,deleted_at INTEGER);
     CREATE TABLE prompt_admissions(admission_id TEXT PRIMARY KEY,origin TEXT,sender_agent_id TEXT,agent_id TEXT,session TEXT,observed_at INTEGER,original_text TEXT,trace_id TEXT);
+    CREATE TABLE background_jobs(job_id TEXT PRIMARY KEY,agent_id TEXT,session TEXT,kind TEXT,title TEXT,detail TEXT DEFAULT '',status TEXT,started_at INTEGER,updated_at INTEGER,terminal_at INTEGER,terminal_reason TEXT DEFAULT '',heartbeat_at INTEGER,heartbeat_timeout_ms INTEGER DEFAULT 600000,metadata_json TEXT DEFAULT '{}');
+    CREATE TABLE artifact_decisions(decision_id TEXT PRIMARY KEY,artifact_id TEXT,status TEXT,resolved_at INTEGER,blocks_progress INTEGER DEFAULT 0,urgency TEXT DEFAULT 'normal',deadline_at INTEGER,expires_at INTEGER);
     ''')
+    con.execute("INSERT INTO background_jobs VALUES('job-ci','a','axel','github-workflow','Verify release','','running',4200,4300,NULL,'',4300,600000,'{\"run_url\":\"https://github.com/x/y/actions/runs/1\"}')")
+    con.execute("INSERT INTO background_jobs VALUES('job-tf','b','felix','release','TestFlight','','failed',4000,4600,4600,'heartbeat_expired',4100,600000,'{}')")
+    con.execute("INSERT INTO artifacts(artifact_id,agent_id,session,type,title,summary,status,reference_id,payload_json,created_at,completed_at,deleted_at) VALUES('art-decision','a','axel','decision','Ship it?','','ready','','{}',4400,NULL,NULL)")
+    con.execute("INSERT INTO artifact_decisions VALUES('dec-1','art-decision','pending',NULL,1,'normal',NULL,NULL)")
     con.execute("INSERT INTO task_plans VALUES('aaaaaaaaaaaaaaaa:pistol:deadbeef','a','axel','Compare six pistol approaches','completed',1000,5000,5000)")
     con.execute("INSERT INTO task_items VALUES('aaaaaaaaaaaaaaaa:pistol:deadbeef:verify','aaaaaaaaaaaaaaaa:pistol:deadbeef',NULL,0,'Check mechanics','completed',NULL,4000)")
     con.execute("INSERT INTO task_items VALUES('aaaaaaaaaaaaaaaa:pistol:deadbeef:sub','aaaaaaaaaaaaaaaa:pistol:deadbeef','aaaaaaaaaaaaaaaa:pistol:deadbeef:verify',0,'nested','completed',NULL,4000)")
@@ -50,13 +56,17 @@ def test_work_objects_separate_intent_evidence_basis_and_outcome():
     assert [m['id'] for m in work['messages']]==['adm-1']
     assert work['messages'][0]['plan_ids']==['aaaaaaaaaaaaaaaa:pistol:deadbeef'] and work['messages'][0]['from']=='Nadia'
     assert work['messages'][0]['link']=='reference'
-    assert set(work['contract'])=={'intent','evidence','validation','outcome','handoff','unknown'}
+    assert set(work['contract'])=={'intent','evidence','validation','outcome','handoff','unknown','waiting','routes'}
+    jobs={j['id']:j for j in work['jobs']}
+    assert jobs['job-ci']['boundary']=='github' and jobs['job-ci']['boundary_label']=='GitHub Actions' and jobs['job-ci']['link'].startswith('https://')
+    assert jobs['job-tf']['boundary']=='apple' and jobs['job-tf']['terminal_reason']=='heartbeat_expired' and jobs['job-tf']['terminal_at']==4600
+    assert [d['id'] for d in work['decisions']]==['dec-1'] and work['decisions'][0]['blocks_progress'] is True and work['decisions'][0]['status']=='pending'
 
 
 def test_missing_tables_degrade_to_an_unavailable_empty_section():
     con=sqlite3.connect(':memory:');con.row_factory=sqlite3.Row
     work=viz_work.build(con,0,10,{})
-    assert work['plans']==[] and work['available'] is False
+    assert work['plans']==[] and work['jobs']==[] and work['decisions']==[] and work['available'] is False
 
 
 def test_validation_evidence_distinguishes_single_commands_chains_and_scripts():
@@ -82,3 +92,11 @@ def test_validation_does_not_invent_results_from_pipelines_or_printed_commands()
     assert viz_world.validation_evidence('echo pytest')['kind'] is None
     assert viz_world.validation_evidence("echo 'something && npm test'")['kind'] is None
     assert viz_world.validation_evidence("npm test -- -k 'one || two'")['scope']=='single'
+
+
+def test_service_names_stop_at_a_glued_separator():
+    ops=viz_world.service_operations('systemctl --user restart clarp; gh run view 34043019826 --json status')
+    assert [o['unit'] for o in ops]==['clarp.service']
+    ops=viz_world.service_operations('systemctl --user status clarp-fleet-preview&&cat /tmp/x')
+    assert [o['unit'] for o in ops]==[]
+    assert [o['unit'] for o in viz_world.service_operations('systemctl --user restart a.service b.timer')]==['a.service','b.timer']
