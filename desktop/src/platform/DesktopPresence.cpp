@@ -33,7 +33,7 @@ DesktopPresence::DesktopPresence(QQuickWindow* window, QObject* parent, bool mon
         else refresh();
     });
     connect(window, &QWindow::visibilityChanged, this, &DesktopPresence::refresh);
-    connect(qApp, &QCoreApplication::aboutToQuit, this, [this] { setEnabled(false); });
+    connect(qApp, &QCoreApplication::aboutToQuit, this, [this] { setEnabled(false); setConnected(false); });
     m_tick.setInterval(1'000);
     connect(&m_tick, &QTimer::timeout, this, &DesktopPresence::refresh);
     m_tick.start();
@@ -76,6 +76,13 @@ void DesktopPresence::refresh() {
     const qint64 now = m_clock.elapsed();
     const bool foreground = m_window && m_window->isActive() && m_window->isVisible()
         && m_window->visibility() != QWindow::Minimized;
+    const bool usable = foreground && m_connected && m_sessionAvailable && m_unlocked && !m_sleeping;
+    if (usable != m_reportedForeground || (usable && now - m_lastActivityReport >= 10'000)) {
+        m_reportedForeground = usable;
+        m_lastActivityReport = now;
+        emit applicationActivity(m_instance, ++m_activitySequence, usable,
+            m_lastInput < 0 ? 86'400'000 : std::min<qint64>(86'400'000, now - m_lastInput));
+    }
     m_active = eligible(m_enabled && m_connected, foreground,
         m_sessionAvailable && m_unlocked && !m_sleeping, m_lastInput < 0 ? -1 : now - m_lastInput);
     // Inactive transitions release immediately; only active use renews leases.

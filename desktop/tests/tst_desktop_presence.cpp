@@ -7,6 +7,22 @@ using clarp::DesktopPresence;
 class DesktopPresenceTest : public QObject {
     Q_OBJECT
   private slots:
+    void maintenanceActivityDoesNotDependOnPushPreference() {
+        QQuickWindow window;
+        DesktopPresence presence(&window, nullptr, false);
+        QSignalSpy reports(&presence, &DesktopPresence::applicationActivity);
+        presence.setEnabled(false);
+        presence.setConnected(true);
+        presence.setSessionState(true, true);
+        window.show(); window.requestActivate();
+        QTRY_VERIFY(window.isActive());
+        presence.noteInteraction();
+        QTRY_VERIFY(!reports.isEmpty());
+        QVERIFY(reports.last().at(2).toBool());
+        QVERIFY(!presence.active());
+        window.hide();
+        QTRY_VERIFY(!reports.last().at(2).toBool());
+    }
     void eligibilityExpiresWithoutUserInput() {
         QVERIFY(DesktopPresence::eligible(true, true, true, 0));
         QVERIFY(DesktopPresence::eligible(true, true, true, 119999));

@@ -637,6 +637,13 @@ void AppController::reportDesktopPresence(const QString& instance, quint64 seque
         {{QStringLiteral("instance_id"), instance}, {QStringLiteral("sequence"), static_cast<qint64>(sequence)},
          {QStringLiteral("active"), active}, {QStringLiteral("sent_at_ms"), QDateTime::currentMSecsSinceEpoch()}}, 5'000);
 }
+void AppController::reportApplicationActivity(const QString& instance, quint64 sequence, bool foreground, qint64 inputAgeMs) {
+    if (m_bearerToken.isEmpty()) return;
+    m_api.postJson(QStringLiteral("application-activity"), QStringLiteral("/application-activity"),
+        {{QStringLiteral("instance_id"), instance}, {QStringLiteral("sequence"), static_cast<qint64>(sequence)},
+         {QStringLiteral("foreground"), foreground}, {QStringLiteral("input_age_ms"), inputAgeMs},
+         {QStringLiteral("sent_at_ms"), QDateTime::currentMSecsSinceEpoch()}}, 5'000);
+}
 
 void AppController::setShowWhenReady(bool value) {
     if (m_showWhenReady == value) return;
@@ -2608,7 +2615,7 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
 
 void AppController::handleRequestFailure(const QString& tag, const QString& message,
                                          int statusCode) {
-    if (tag == QStringLiteral("desktop-presence")) return; // Lease expiry fails open on old/offline Hosts.
+    if (tag == QStringLiteral("desktop-presence") || tag == QStringLiteral("application-activity")) return; // Old/offline Hosts ignore optional leases.
 
     if (tag == QStringLiteral("contact-create")) {
         m_startingContact.clear();

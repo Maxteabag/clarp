@@ -58,7 +58,7 @@ def templates() -> list[dict]:
              "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
              "recommended_effort": "low",
              "allowed_effects": ["task_label"], "creatable": True,
-             "supported_trigger_ids": ["agent-work-completed", "schedule"],
+             "supported_trigger_ids": ["agent-work-completed", "schedule", "active-interval"],
              "default_trigger_id": "agent-work-completed", "options": []},
             {"id": "message-delegator", "name": "Message delegator",
              "description": "Choose an eligible recipient for an explicitly requested message route.",
@@ -227,8 +227,16 @@ def _attachment_values(values, agent_id: str, template_id: str = "task-labels") 
             allowed = set()
         if definition["kind"] == "schedule":
             allowed |= {"cron", "timezone"}
+        if key[0] == "active-interval":
+            allowed |= {"interval_seconds", "idle_timeout_seconds", "run_on_resume"}
         if set(config) - allowed:
             raise JanitorError("Unsupported trigger setting")
+        if key[0] == "active-interval":
+            for field in ("interval_seconds", "idle_timeout_seconds"):
+                if type(config[field]) is not int or not 60 <= config[field] <= 86400:
+                    raise JanitorError(f"{field} must be between 60 and 86400 seconds")
+            if type(config["run_on_resume"]) is not bool:
+                raise JanitorError("run_on_resume must be boolean")
         for field, low, high in (("max_targets", 1, 3), ("coalesce_seconds", 0, 300), ("min_interval_seconds", 0, 3600)):
             if field in config and (isinstance(config[field], bool) or not isinstance(config[field], int) or not low <= config[field] <= high):
                 raise JanitorError(f"Invalid {field.replace('_', ' ')}")
@@ -402,6 +410,23 @@ def configure(session: str, expected_revision: int, *, template_id=None, scope=N
             _save_attachments(c, a["agent_id"], values, now)
         agents.update_agent(a["agent_id"], model=model, effort=effort, backend=backend)
     return get(session)
+
+
+def reset_defaults(session: str, expected_revision: int) -> dict:
+    """Reset tuning, never identity/history/scope or enablement. Revision fenced."""
+    current = get(session)
+    if not current:
+        raise JanitorError("Janitor not found", 404, "janitor_not_found")
+    definitions = {(d["trigger_id"], d["version"]): d for d in trigger_definitions()}
+    attachments = [{"attachment_id": a["attachment_id"], "trigger_id": a["trigger_id"],
+                    "trigger_version": a["trigger_version"], "enabled": a["enabled"],
+                    "config": definitions[(a["trigger_id"], a["trigger_version"])]["defaults"]}
+                   for a in current["attachments"]]
+    template = next(t for t in templates() if t["id"] == current["template_id"])
+    model = template["recommended_model"] if current["backend"] == template["recommended_backend"] else None
+    effort = template["recommended_effort"] if model else None
+    return configure(session, expected_revision, attachments=attachments, model=model, effort=effort,
+        execution={}, options={item["key"]: item["default"] for item in template["options"]})
 
 
 def adopt_options(session: str, expected_revision: int, options: dict) -> dict:
@@ -602,7 +627,7 @@ def _save_progress(c, attachment_id, generation, state, next_run_at=None):
     c.execute("""INSERT INTO janitor_progress(attachment_id,generation,state_json,updated_at)
         VALUES (?,?,?,?) ON CONFLICT(attachment_id) DO UPDATE SET generation=excluded.generation,
         state_json=excluded.state_json,updated_at=excluded.updated_at""", (attachment_id, generation, _json(state), db.now_ms()))
-    if next_run_at is not None:
+    if next_run_at is not None or "next_run_at" in state:
         c.execute("UPDATE janitor_attachments SET next_run_at=? WHERE attachment_id=?", (next_run_at, attachment_id))
 
 
@@ -711,8 +736,16 @@ def _active_run(c, run_id):
 def validate_dispatch(session: str, run_id: str, trace_id: str) -> bool:
     try:
         row = _active_run(db.conn(), run_id)
-        return (row["session"] == session and row["trace_id"] == trace_id
-                and _decode(row["configuration_json"], {}).get("template_id") == "task-labels")
+        if (row["session"] != session or row["trace_id"] != trace_id
+                or _decode(row["configuration_json"], {}).get("template_id") != "task-labels"):
+            return False
+        attachment = _active_attachment(db.conn(), row["attachment_id"], row["generation"])
+        if row["status"] == "queued" and attachment["trigger_id"] == "active-interval":
+            from . import application_activity
+            if not application_activity.active(_decode(attachment["config_json"], {})["idle_timeout_seconds"]):
+                db.conn().execute("UPDATE janitor_runs SET status='cancelled',outcome='cancelled',finished_at=?,error='Application became inactive before execution' WHERE run_id=? AND status='queued'", (db.now_ms(), run_id))
+                return False
+        return True
     except JanitorError:
         return False
 

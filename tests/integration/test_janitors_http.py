@@ -176,7 +176,7 @@ def test_empty_list_auth_and_paused_conversion_preserve_identity_and_focus(host)
     status, body = request(host, "/janitors")
     assert status == 200 and body["janitors"] == []
     assert {t["trigger_id"] for t in body["triggers"]} == {
-        "agent-work-completed", "schedule", "routing-requested", "tool-explanation-requested"}
+        "agent-work-completed", "schedule", "routing-requested", "tool-explanation-requested", "active-interval"}
     row = create(host)
     assert row["agent_id"] == host.sam and row["enabled"] is False
     assert agents.get_focus() == host.theo
@@ -222,6 +222,15 @@ def test_pause_rejects_late_effect_and_preserves_worker(host, monkeypatch):
     assert agents.get_by_agent_id(host.theo)["custom_status"] == ""
     assert agents.latest_state(host.theo)["kind"] == "done"
     assert agents.get_focus() == host.theo
+
+
+def test_reset_defaults_endpoint_pauses_and_rejects_stale_revision(host):
+    row = enable(host, create(host))
+    status, body = request(host, "/janitors/sam/reset-defaults", {"expected_revision": row["revision"]})
+    assert status == 200 and not body["janitor"]["enabled"]
+    assert body["janitor"]["scope"] == row["scope"]
+    assert body["janitor"]["agent_id"] == row["agent_id"]
+    assert request(host, "/janitors/sam/reset-defaults", {"expected_revision": row["revision"]})[0] == 409
 
 
 def test_effect_receipt_is_idempotent_and_late_configuration_is_rejected(host):

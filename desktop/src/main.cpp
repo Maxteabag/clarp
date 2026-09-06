@@ -103,6 +103,7 @@ int main(int argc, char* argv[]) {
                 desktopPresence = std::make_unique<clarp::DesktopPresence>(rootWindow, &application);
                 auto* presence = desktopPresence.get();
                 QObject::connect(presence, &clarp::DesktopPresence::presenceReport, controller, &clarp::AppController::reportDesktopPresence);
+                QObject::connect(presence, &clarp::DesktopPresence::applicationActivity, controller, &clarp::AppController::reportApplicationActivity);
                 QObject::connect(controller, &clarp::AppController::pauseMobilePushChanged, presence,
                     [presence, controller] { presence->setEnabled(controller->pauseMobilePush()); });
                 QObject::connect(controller, &clarp::AppController::connectedChanged, presence,

@@ -39,6 +39,11 @@ def test_create_converts_existing_identity_without_enabling_or_changing_model():
     assert calls == [("POST", "/janitors", {"session": "sam-042d", "template_id": "task-labels"})]
 
 
+def test_reset_defaults_is_revision_guarded():
+    assert invoke(["janitor", "reset-defaults", "sam", "--expected-revision", "8"]) == [
+        ("POST", "/janitors/sam/reset-defaults", {"expected_revision": 8})]
+
+
 def test_release_uses_explicit_revision_and_does_not_archive_the_agent():
     calls = invoke(["janitor", "release", "sam-042d", "--expected-revision", "4"])
     assert calls == [("POST", "/janitors/sam-042d/release", {"expected_revision": 4})]
