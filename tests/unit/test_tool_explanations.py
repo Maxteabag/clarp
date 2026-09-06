@@ -7,6 +7,12 @@ import pytest
 from lib.tool_explanations import ToolExplanations, normalize_activity
 
 
+@pytest.fixture(autouse=True)
+def configured_explainer():
+    from lib import janitor_builtins
+    janitor_builtins.ensure_builtins(cwd="/tmp")
+
+
 def test_refined_prompts_match_user_selected_lab_and_keep_low(monkeypatch):
     import hashlib
     from pathlib import Path
@@ -30,7 +36,9 @@ def test_refined_prompts_match_user_selected_lab_and_keep_low(monkeypatch):
     monkeypatch.setattr(module.subprocess,'Popen',spawn)
     with ToolExplanations() as service:
         for level in expected:
-            with pytest.raises(Captured): service._run_codex(level,[{'id':'1','activity':{'command':'ls'}}])
+            run = module.janitor_builtins.begin_run('tool-explainer', f'prompt-{level}')
+            with pytest.raises(Captured): service._run_codex(level,[{'id':'1','activity':{'command':'ls'}}], run=run)
+            module.janitor_builtins.complete_run(run['run_id'], result={'summary':'Verified audience prompt'})
     for level,text in enumerate(captured,1):
         assert hashlib.sha256(text.encode()).hexdigest()==expected[level]
 
