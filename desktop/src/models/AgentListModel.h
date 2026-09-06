@@ -29,6 +29,7 @@ class AgentListModel : public QAbstractListModel {
         StateRole,
         StatusTextRole,
         LastMessageRole,
+        LastCompletedMessageRole,
         LastActivityRole,
         ConversationIdRole,
         HeadRevisionRole,
