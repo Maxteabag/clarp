@@ -9,10 +9,10 @@ class DesktopPresence final : public QObject {
     Q_OBJECT
   public:
     explicit DesktopPresence(QQuickWindow* window, QObject* parent = nullptr, bool monitorSystemSession = true);
-    static bool eligible(bool enabled, bool foreground, bool unlocked, qint64 inputAgeMs);
-    bool active() const { return m_active; }
-    bool sessionAvailable() const { return m_sessionAvailable; }
-    bool sessionUnlocked() const { return m_unlocked; }
+    [[nodiscard]] static bool eligible(bool enabled, bool foreground, bool unlocked, qint64 inputAgeMs);
+    [[nodiscard]] bool active() const { return m_active; }
+    [[nodiscard]] bool sessionAvailable() const { return m_sessionAvailable; }
+    [[nodiscard]] bool sessionUnlocked() const { return m_unlocked; }
     void setEnabled(bool enabled);
     void setConnected(bool connected);
     void setSessionState(bool available, bool unlocked);

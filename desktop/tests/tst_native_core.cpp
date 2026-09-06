@@ -609,6 +609,7 @@ class NativeCoreTest final : public QObject {
     void readyModePreservesActivityAndHidesOnlyProvisionalBody();
     void idleContactStartsFreshWithSavedDefaults();
     void redesignedRosterFiltersWithoutMutatingSource();
+    void rosterLookupIsConsistentDuringStructuralSignals();
     void circularPortraitsAreBoundedAndAntialiased();
     void agentTerminalLaunchesNativeCliThroughDefaultTerminal();
     void sseParserHandlesChunksCommentsAndReplayIds();
@@ -760,6 +761,31 @@ void NativeCoreTest::sseParserHandlesChunksCommentsAndReplayIds() {
     QCOMPARE(messages.first().id, QStringLiteral("41"));
     QCOMPARE(messages.first().data.value(QStringLiteral("type")).toString(),
              QStringLiteral("agent-roster"));
+}
+
+void NativeCoreTest::rosterLookupIsConsistentDuringStructuralSignals() {
+    AgentListModel model;
+    const auto snapshot = [](const QStringList& names) {
+        QJsonArray rows;
+        for (const QString& name : names)
+            rows.append(QJsonObject{{QStringLiteral("session"), name}, {QStringLiteral("persona"), name}});
+        return QJsonObject{{QStringLiteral("agents"), rows}};
+    };
+    model.applySnapshot(snapshot({QStringLiteral("a"), QStringLiteral("b")}));
+    int checked = 0;
+    const auto validate = [&] {
+        ++checked;
+        const auto sessions = model.sessions();
+        for (const QString& name : {QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c")})
+            QCOMPARE(model.indexOfSession(name), sessions.indexOf(name));
+    };
+    connect(&model, &QAbstractItemModel::rowsRemoved, &model, validate);
+    connect(&model, &QAbstractItemModel::rowsInserted, &model, validate);
+    connect(&model, &QAbstractItemModel::rowsMoved, &model, validate);
+    model.applySnapshot(snapshot({QStringLiteral("b"), QStringLiteral("c")}));
+    QVERIFY(model.recordOutgoingActivity(QStringLiteral("c")));
+    model.applySnapshot(snapshot({}));
+    QVERIFY(checked >= 4);
 }
 
 void NativeCoreTest::redesignedRosterFiltersWithoutMutatingSource() {

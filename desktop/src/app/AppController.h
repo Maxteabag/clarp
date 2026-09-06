@@ -154,7 +154,7 @@ class AppController : public QObject {
     [[nodiscard]] bool connecting() const;
     [[nodiscard]] bool sending() const;
     [[nodiscard]] bool muted() const;
-    bool pauseMobilePush() const { return m_pauseMobilePush; }
+    [[nodiscard]] bool pauseMobilePush() const { return m_pauseMobilePush; }
     void setPauseMobilePush(bool value);
     void reportDesktopPresence(const QString& instance, quint64 sequence, bool active);
     [[nodiscard]] bool showWhenReady() const { return m_showWhenReady; }
