@@ -83,6 +83,8 @@ def evidence(tool, inp, path, target, verb):
     # Simple actual shell operands supplement native parsed targets. Complex
     # scripts retain their execution cwd as a workspace, not a guessed file.
     simple=not any(x in raw for x in ['\n','<<','|',';','&&'])
+    validation=validation_evidence(raw)
+    if simple and validation['kind'] and action in {'unknown','execute','build','run'}:action=validation['kind']
     if not simple and tool=='Bash':action='execute'
     if not paths and simple and exe in {'cat','head','tail','bat','rm','unlink','touch','mkdir','ls'}:
         skip=False
@@ -102,7 +104,43 @@ def evidence(tool, inp, path, target, verb):
     location=anchored[0] if anchored else (cwd if os.path.isabs(cwd) else None)
     repo=checkout(location) if location else None
     return {'raw':raw[:2000],'path':location,'paths':anchored[:40],'cwd':cwd or None,'checkout':repo,'action':action,
-            'services':service_operations(raw),'recorded_target':target,'tool':tool,'scope':'target' if anchored else 'workspace' if location else 'unknown'}
+            'services':service_operations(raw),'recorded_target':target,'tool':tool,'scope':'target' if anchored else 'workspace' if location else 'unknown',
+            **({'validation':validation['kind'],'validation_exact':validation['exact']} if validation['kind'] else {})}
+
+
+_VALIDATORS={'pytest':'test','vitest':'test','jest':'test','mocha':'test','ctest':'test','tsc':'build','eslint':'lint','ruff':'lint',
+             'mypy':'lint','flake8':'lint','clippy':'lint','xcodebuild':'build','swiftlint':'lint','playwright':'test'}
+_RUNNERS={'npm','pnpm','yarn','npx','bun','make','cargo','go','dotnet','uv','python','python3','node','swift','gradle','mvn','just'}
+_SEGMENT=re.compile(r'\s*(?:&&|\|\||;|\|)\s*')
+
+
+def validation_evidence(raw):
+    """Which recorded shell segments are tests, builds or lint checks.
+
+    A chain joined only by && reports one exact outcome for every segment; a
+    script using ';' or '||' hides individual results, so its validation
+    outcome is not exact. Nothing here claims a result, only intent.
+    """
+    if '<<' in raw or '\n' in raw:return {'kind':None,'exact':False}
+    kinds=[]
+    for segment in _SEGMENT.split(raw):
+        try:words=shlex.split(segment,comments=True)
+        except ValueError:continue
+        if not words:continue
+        exe=os.path.basename(words[0]);args=[w for w in words[1:] if not w.startswith('-')]
+        named=[_VALIDATORS[os.path.basename(w)] for w in [exe,*args] if os.path.basename(w) in _VALIDATORS]
+        if named:kinds.append(named[0]);continue
+        script=re.compile(r'(^|/)[^/\s]*(check|test|verify)[^/\s]*\.(mjs|js|py|sh)$')
+        if exe not in _RUNNERS:
+            if script.search(words[0]):kinds.append('test')
+            continue
+        head=' '.join(args[:3]) if exe not in {'python','python3','node','uv','npx','bun'} else ''
+        if re.search(r'(^|[\s:])(test|tests|check|verify|e2e|py|js)(\b|:)',head) or any(script.search(w) for w in args):kinds.append('test')
+        elif re.search(r'(^|\s)(build|compile|typecheck)(\b|:)',head):kinds.append('build')
+        elif re.search(r'(^|\s)(lint|fmt|format)(\b|:)',head) and 'run' in args[:1]+[exe]:kinds.append('lint')
+    if not kinds:return {'kind':None,'exact':False}
+    kind='test' if 'test' in kinds else 'build' if 'build' in kinds else 'lint'
+    return {'kind':kind,'exact':not re.search(r';|\|\|',raw)}
 
 
 def build(events):

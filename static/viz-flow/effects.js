@@ -38,3 +38,15 @@ exports.action=(c,file,e,time,reduced=false)=>{
  }
  c.restore();
 };
+
+// Explicit collaboration: a taut thread with a knot between two agents. It is
+// only drawn for a recorded agent-to-agent message, and it fades with age.
+exports.thread=(c,a,b,age,knot=true)=>{
+ const alpha=Math.max(.08,.5-age/1800000*.42);c.save();c.globalAlpha=alpha;c.strokeStyle='#d8c9a0';c.lineWidth=1;
+ c.beginPath();c.moveTo(a.x,a.y);c.quadraticCurveTo((a.x+b.x)/2,(a.y+b.y)/2+22,b.x,b.y);c.stroke();
+ if(knot){const m=exports.sag(a,b,.5);c.fillStyle='#d8c9a0';c.beginPath();c.arc(m.x,m.y,3,0,7);c.fill();c.beginPath();c.arc(m.x,m.y,5.5,0,7);c.stroke();}
+ c.restore();
+};
+exports.sag=(a,b,t)=>{const q=1-t,mx=(a.x+b.x)/2,my=(a.y+b.y)/2+22;return {x:q*q*a.x+2*q*t*mx+t*t*b.x,y:q*q*a.y+2*q*t*my+t*t*b.y};};
+// A carried object: something recognizable moving from a to b with a soft wake.
+exports.carry=(c,p,color)=>{c.save();c.shadowColor=color;c.shadowBlur=12;c.fillStyle=color+'33';c.beginPath();c.arc(p.x,p.y,11,0,7);c.fill();c.restore();};

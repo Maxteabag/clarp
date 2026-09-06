@@ -2,7 +2,8 @@
 import {SourceSandbox} from '/static/lib/viz-source-sandbox.js';
 import {AvatarCache} from '/static/lib/viz-avatar-cache.js';
 import {FlowMemory} from '/static/lib/viz-flow-memory.js';
-import {flowDemo} from '/static/lib/viz-flow-demo.js';
+import {flowDemo,DEMO_LENGTH_MS} from '/static/lib/viz-flow-demo.js';
+import {PreviewCache,syntheticPreview} from '/static/lib/viz-preview-cache.js';
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
 const stat=document.getElementById('stat'),learning=document.getElementById('learning');
 const slider=document.getElementById('t'),liveButton=document.getElementById('live');
@@ -11,6 +12,11 @@ let pixelRatio=Math.min(devicePixelRatio||1,2);
 let width=innerWidth,height=innerHeight,camera={x:20,y:70,k:.7},revision=0,live=true,playing=false,playhead=Date.now(),tmin=0,tmax=0;
 let frames=0,failure='',loading=false,last=performance.now(),signature='',selected=null;
 const avatarCache=new AvatarCache(blobs=>sandbox?.setAvatars(blobs));
+// Artifact previews are host-owned thumbnails of recorded media; the demo uses
+// a generated placeholder so the synthetic sequence never resembles live output.
+const previewCache=new PreviewCache(()=>sandbox?.setImages(currentImages()));
+let demoImages={};
+function currentImages(){return demoEnabled?demoImages:previewCache.blobs();}
 let programHistory=[];
 let recoveryTimer=null,recoveryAttempts=0,lastFrameTimings={};
 const retryButton=document.getElementById('retry-render');
@@ -32,6 +38,11 @@ let actionLabels=false;
 let view='world';
 try{const saved=localStorage.getItem('clarp.fleet.view');if(['cabinets','flow'].includes(saved))view=saved;}catch{}
 const requestedView=new URLSearchParams(location.search).get('view');
+// ?window=SECONDS widens the live evidence window (server-bounded) so older real
+// work can be replayed; the default remains the last hour.
+const windowSeconds=Math.max(60,Math.min(90*86400,Number(new URLSearchParams(location.search).get('window'))||3600));
+// ?until=EPOCH_MS anchors that window at a past instant and opens paused there.
+const untilMs=Math.max(0,Math.floor(Number(new URLSearchParams(location.search).get('until'))||0));
 if(['world','cabinets','flow'].includes(requestedView))view=requestedView;
 const cameras={world:{...camera},cabinets:{...camera},flow:{...camera}};
 function selectProgram(data){
@@ -101,7 +112,7 @@ function use(next){
       learning.textContent='Rendering paused · last picture retained';
     }
   });
-  sandbox.setAvatars(avatarCache.blobs());
+  sandbox.setAvatars(avatarCache.blobs());sandbox.setImages(currentImages());
 }
 function retryRender(){
   if(!program)return;
@@ -124,13 +135,14 @@ async function init(){
 async function load(){
   if(loading)return;loading=true;
   try{
-    const response=await fetch('/viz/events?window=3600');if(!response.ok)throw Error('Fleet data unavailable');
+    const response=await fetch('/viz/events?window='+windowSeconds+(untilMs?'&until='+untilMs:''));if(!response.ok)throw Error('Fleet data unavailable');
     const data=await response.json();liveScene=data.world;flowScene=flowMemory.update(liveScene);
     if(!demoEnabled)scene=view==='flow'?flowScene:liveScene;revision=data.library_revision;
     lastData=data;selectProgram(data);
+    previewCache.update((liveScene.work?.artifacts||[]).filter(a=>a.preview).map(a=>({id:a.id,url:a.preview.url})));
     avatarCache.update([...(data.actors||[]),
       ...liveScene.entities.filter(e=>e.kind==='organization'&&e.parent==='github').map(e=>({id:e.id,label:e.label,avatar_url:'/viz/owner-avatar/'+encodeURIComponent(e.label)}))]);
-    if(!demoEnabled){tmin=scene.events[0]?.ts||Date.now();tmax=Math.max(Date.now(),scene.events.at(-1)?.ts||0);if(live)playhead=tmax;}
+    if(!demoEnabled){tmin=scene.events[0]?.ts||Date.now();tmax=untilMs?untilMs:Math.max(Date.now(),scene.events.at(-1)?.ts||0);if(live)playhead=tmax;if(untilMs&&live){live=false;liveButton.ariaPressed='false';}}
     if(!failure){
       const state=data.learning||{};
       const rejected=state.last_result?.rejected?.[0]?.error;
@@ -144,7 +156,7 @@ async function load(){
 }
 function frame(now){
   const dt=Math.min(now-last,100);last=now;
-  if(demoEnabled&&playing){playhead+=dt;if(playhead>demoStart+41000)playhead=demoStart;}
+  if(demoEnabled&&playing){playhead+=dt;if(playhead>demoStart+DEMO_LENGTH_MS)playhead=demoStart;}
   else if(live)playhead=Date.now();else if(playing){playhead=Math.min(tmax,playhead+dt*120);if(playhead===tmax)playing=false;}
   slider.value=String(1000*(playhead-tmin)/Math.max(1,tmax-tmin));
   document.getElementById('clock').textContent=new Date(playhead).toLocaleTimeString();
@@ -159,10 +171,12 @@ document.getElementById('play').onclick=()=>{replay();if(playhead>=tmax-1000)pla
 demoButton.onclick=()=>{
   demoEnabled=!demoEnabled;demoButton.ariaPressed=String(demoEnabled);selected=null;document.getElementById('inspector').hidden=true;
   if(demoEnabled){
-    demoStart=Date.now();demoScene=flowDemo(demoStart);scene=demoScene;tmin=demoStart;tmax=demoStart+41000;playhead=tmin;
+    demoStart=Date.now();demoScene=flowDemo(demoStart);scene=demoScene;tmin=demoStart;tmax=demoStart+DEMO_LENGTH_MS;playhead=tmin;
+    syntheticPreview().then(blob=>{demoImages={'demo:artifact-video':blob};if(demoEnabled)sandbox?.setImages(currentImages());});
     live=false;playing=true;liveButton.ariaPressed='false';
     learning.textContent='Workflow demo · synthetic sequence, not live activity';
   }else{scene=flowScene||liveScene;live=true;playing=false;liveButton.ariaPressed='true';load();}
+  sandbox?.setImages(currentImages());
   // Reset only the prototype renderer's context selection for a different dataset.
   fittedViews.delete('flow');programHistory=[];signature='';selectProgram(lastData);
 };
@@ -197,7 +211,9 @@ canvas.onpointerup=e=>{
   const x=(e.clientX-camera.x)/camera.k,y=(e.clientY-camera.y)/camera.k;
   const hit=[...(meta.hits||[])].reverse().find(b=>x>=b.x&&y>=b.y&&x<=b.x+b.w&&y<=b.y+b.h);
   if(hit){selected=hit.id;document.getElementById('inspector').hidden=false;document.getElementById('node-title').textContent=hit.label;
-   document.getElementById('node-detail').textContent=[hit.purpose,hit.path,hit.sample].filter(Boolean).join('\n');}
+   document.getElementById('node-detail').textContent=[hit.purpose,hit.path,hit.sample].filter(Boolean).join('\n');
+   const link=document.getElementById('node-link'),href=typeof hit.link==='string'&&/^(\/media\/|https:\/\/)/.test(hit.link)?hit.link:'';
+   link.hidden=!href;if(href){link.href=href;link.textContent=hit.linkLabel||'Open';}}
  }
  pointers.delete(e.pointerId);
 };
@@ -208,4 +224,4 @@ document.getElementById('redesign').onclick=async()=>{
  const r=await fetch('/viz/supersede',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({world:true,revision,entity_id:selected,reason:'Improve only this selected detail where needed. Keep the Lantern Works concepts, unaffected interactions, layout conventions and visual language. Prefer a compatible expansion or targeted repair; this is not a request for a redesign.'})});
  document.getElementById('design-result').textContent=r.ok?'Astra is improving this detail…':'Could not start development';
 };
-window.fleetWorldSnapshot=()=>({frames,revision,view,demoEnabled,actionLabels,live,playing,playhead,timeline:{since:tmin,until:tmax},camera:{...camera},failure,program:program?.title,frameTimings:lastFrameTimings,meta,scene});
+window.fleetWorldSnapshot=()=>({frames,revision,view,demoEnabled,actionLabels,live,playing,playhead,timeline:{since:tmin,until:tmax},camera:{...camera},failure,program:program?.title,frameTimings:lastFrameTimings,meta,scene,previews:Object.keys(currentImages())});

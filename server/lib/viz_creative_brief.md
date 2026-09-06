@@ -119,3 +119,17 @@ without reintroducing focus-based layout or replacing other views.
 Mobile support (ADR 0010): all views support phone and desktop viewports. The host
 owns responsive controls, touch pan/pinch and fit. Preserve world geometry and
 overall-map navigation; do not recreate the former desktop-only viewport gate.
+
+Work objects (ADR 0012): scene.work carries recorded plans, artifacts, agent
+messages and a contract describing their basis. Flow's work.js attributes them
+at the playhead and slate.js draws one persistent object per plan (seal, stage
+rail, stitches, crack/seam, outcome frame). Keep intent, evidence and outcome
+distinguishable; label attribution; state unknowns; never turn counts into
+progress. render receives images, an object keyed by artifact id whose values
+are host-loaded preview bitmaps; draw them only for that artifact and never
+request media yourself. Extend this contract for new artifact types, evidence
+sources or relation forms; the current slate is a revisable design, not a rule.
+Relations: structural belonging is still material (necks, double rails);
+discovery flows toward the agent; attribution is a quiet tether; delivery
+carries a recognizable object along the rail; explicit collaboration is a
+thread with a knot. Shared targets alone are never drawn as communication.
