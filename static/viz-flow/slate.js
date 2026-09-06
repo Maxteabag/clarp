@@ -26,9 +26,9 @@ const rail=(c,o,w,h,time,reduced)=>{
  c.lineWidth=1;c.strokeStyle='#8fb1ad66';c.beginPath();c.moveTo(cells[0]+5,y);c.lineTo(cells[2]-5,y);c.stroke();
  const cell=(x,filled,color)=>{c.beginPath();c.rect(x-3.5,y-3.5,7,7);c.fillStyle=filled?color:'#0c202b';c.fill();c.strokeStyle=color;c.lineWidth=1.2;c.stroke();};
  cell(cells[0],!o.intent.none,'#cbdedc');
- cell(cells[1],o.evidence.events>0,v.state==='failed'?'#ed9eb0':v.state==='recovered'||v.state==='ok'?'#99e1b3':'#cbdedc');
+ cell(cells[1],o.evidence.events>0,v.state==='failed'||v.state==='interrupted'?'#ed9eb0':v.state==='recovered'||v.state==='ok'?'#99e1b3':'#cbdedc');
  if(v.state==='running'){c.beginPath();const a=reduced?0:time/500;c.arc(cells[1],y,8,a,a+4.2);c.strokeStyle='#e9cc88';c.stroke();}
- else if(v.state==='failed'){c.strokeStyle='#ed9eb0';c.lineWidth=1.6;c.beginPath();c.moveTo(cells[1]-6,y-9);c.lineTo(cells[1]-2,y-5);c.lineTo(cells[1]+1,y-8);c.lineTo(cells[1]+5,y-4);c.stroke();}
+ else if(v.state==='failed'||v.state==='interrupted'){c.strokeStyle='#ed9eb0';c.lineWidth=1.6;if(v.state==='interrupted')c.setLineDash([2,2]);c.beginPath();c.moveTo(cells[1]-6,y-9);c.lineTo(cells[1]-2,y-5);c.lineTo(cells[1]+1,y-8);c.lineTo(cells[1]+5,y-4);c.stroke();c.setLineDash([]);}
  else if(v.state==='recovered'){c.strokeStyle='#99e1b3';c.lineWidth=1.4;c.beginPath();c.moveTo(cells[1]-6,y-6);c.lineTo(cells[1]-2,y-3);c.lineTo(cells[1]+6,y-10);c.stroke();}
  if(o.outcome)cell(cells[2],true,exports.typeColor(o.outcome.type));
  else if(o.finished){cell(cells[2],false,'#8fa7a6');c.beginPath();c.moveTo(cells[2]-5,y+5);c.lineTo(cells[2]+5,y-5);c.strokeStyle='#8fa7a6';c.stroke();}
@@ -80,9 +80,10 @@ exports.draw=(c,o,pos,ink,images,time,t,reduced)=>{
  rail(c,o,w,h,time,reduced);
  // A failed validation cracks the slate's top edge; a recovery leaves a green seam.
  const v=o.evidence.validation;
- if(v.state==='failed'||v.state==='recovered'){c.strokeStyle=v.state==='failed'?'#ed9eb0':'#99e1b3';c.lineWidth=v.state==='failed'?1.8:1.2;
-  c.globalAlpha=dim*(v.state==='failed'?1:Math.max(.15,1-Math.max(0,t-v.recoveredAt)/1800000));
-  c.beginPath();c.moveTo(w*.05,-h/2);c.lineTo(w*.12,-h/2+6);c.lineTo(w*.08,-h/2+11);c.lineTo(w*.18,-h/2+18);c.stroke();c.globalAlpha=dim;}
+ if(['failed','interrupted','recovered'].includes(v.state)){const broken=v.state!=='recovered';c.strokeStyle=broken?'#ed9eb0':'#99e1b3';c.lineWidth=broken?1.8:1.2;
+  if(v.state==='interrupted')c.setLineDash([3,3]);
+  c.globalAlpha=dim*(broken?1:Math.max(.15,1-Math.max(0,t-v.recoveredAt)/1800000));
+  c.beginPath();c.moveTo(w*.05,-h/2);c.lineTo(w*.12,-h/2+6);c.lineTo(w*.08,-h/2+11);c.lineTo(w*.18,-h/2+18);c.stroke();c.setLineDash([]);c.globalAlpha=dim;}
  c.restore();
  return {w,h};
 };

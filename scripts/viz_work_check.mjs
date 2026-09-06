@@ -55,7 +55,7 @@ try{
  result.stages=stages;
  assert(stages.every(x=>x.stage),'the object persists across the whole window');
  assert(stages[0].stage!=='outcome'||stages[0].validation!==target.validation,'earlier frames show an earlier state');
- if(target.validation==='recovered')assert(stages.some(x=>x.validation==='failed'),'recovery follows a visible failure');
+ if(target.validation==='recovered')assert(stages.some(x=>['failed','interrupted'].includes(x.validation)),'recovery follows a visible failure or interruption');
  assert.deepEqual(errors,[]);
  result.verdict='real work object followed from intent through evidence to a recorded outcome';
  await fs.writeFile(out+'/verification.json',JSON.stringify(result,null,2));

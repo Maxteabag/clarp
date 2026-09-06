@@ -26,12 +26,17 @@ from intent through evidence to outcome. Its three facts stay separate:
   window plus a short publishing tail. Attribution is by identity and time
   overlap, is labeled as such on inspection, and never becomes a count-based
   progress bar. Tests, builds and lint runs are recognized from the recorded
-  command; a chain joined by `&&` reports one exact outcome, a script using
-  `;` or `||` does not and is labeled not exact.
+  command. A single command's failure is that check failing. A chain joined by
+  `&&` proves that every segment passed when it succeeds, but a failed chain is
+  an interruption whose failing step is unknown. A script using `;` or `||`
+  proves neither. A failure is resolved only when the same checks later pass
+  exactly; an unrelated passing check never erases it.
 - **Outcome** is an artifact published by the same agent session in that
   window. When the artifact has a recorded image asset, the host loads a small
   thumbnail and hands it to the sandbox as an inert bitmap; generated source
-  never receives a URL or network access. Without provenance the object shows
+  never receives a URL or network access. Only image assets with validated,
+  bounded dimensions and size are previewed; the inspector's open link is the
+  recorded media itself, not its thumbnail. Without provenance the object shows
   its type, or is explicitly closed without a recorded artifact.
 
 Validation states are legible and persistent: a failed run leaves an
@@ -45,9 +50,13 @@ set: structural belonging is still material (necks, double rails with anchors),
 discovery flows toward the agent, attribution is a quiet tether, delivery carries
 a recognizable object along the rail and arrives at the remote, and explicit
 collaboration is a thread with a knot between agents. A message that names a
-plan ID transfers that object's seal; other messages are collaboration without
-transfer. Shared targets alone are never drawn as communication. Recorded remote
-check results appear at the remote repository, not inferred from a push.
+plan ID is a reference: that plan's seal is pinned at the knot, and inspection
+says so. Transfer semantics (the seal traveling between avatars) require an
+explicit handoff record, which Clarp does not yet write; the synthetic demo
+carries one so the visual can be exercised. Shared targets alone are never drawn
+as communication. Recorded remote check results appear at the remote repository
+only once their completion is evidenced at the playhead, never inferred from a
+push or read ahead from the present database state during replay.
 
 Projects gain character from what they actually produced (media, writing, code
 and deployments) through tint and rim ornament. No random skins. Research with

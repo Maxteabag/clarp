@@ -42,7 +42,7 @@ const requestedView=new URLSearchParams(location.search).get('view');
 // work can be replayed; the default remains the last hour.
 const windowSeconds=Math.max(60,Math.min(90*86400,Number(new URLSearchParams(location.search).get('window'))||3600));
 // ?until=EPOCH_MS anchors that window at a past instant and opens paused there.
-const untilMs=Math.max(0,Math.floor(Number(new URLSearchParams(location.search).get('until'))||0));
+let untilMs=Math.max(0,Math.floor(Number(new URLSearchParams(location.search).get('until'))||0));
 if(['world','cabinets','flow'].includes(requestedView))view=requestedView;
 const cameras={world:{...camera},cabinets:{...camera},flow:{...camera}};
 function selectProgram(data){
@@ -165,7 +165,10 @@ function frame(now){
 }
 requestAnimationFrame(frame);init();setInterval(()=>{if(live)load();},5000);
 function replay(){live=false;liveButton.ariaPressed='false';}
-liveButton.onclick=()=>{demoEnabled=false;demoButton.ariaPressed='false';if(liveScene)scene=view==='flow'?flowScene:liveScene;live=true;playing=false;liveButton.ariaPressed='true';load();};
+liveButton.onclick=()=>{
+  // Live means now: drop any historical anchor so polling returns to the present.
+  if(untilMs){untilMs=0;const liveURL=new URL(location.href);liveURL.searchParams.delete('until');history.replaceState(null,'',liveURL);}
+  demoEnabled=false;demoButton.ariaPressed='false';if(liveScene)scene=view==='flow'?flowScene:liveScene;live=true;playing=false;liveButton.ariaPressed='true';load();};
 slider.oninput=()=>{replay();playing=false;playhead=tmin+(tmax-tmin)*Number(slider.value)/1000;};
 document.getElementById('play').onclick=()=>{replay();if(playhead>=tmax-1000)playhead=tmin;playing=!playing;};
 demoButton.onclick=()=>{
