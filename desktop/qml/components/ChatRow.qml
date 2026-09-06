@@ -28,7 +28,7 @@ ItemDelegate {
     signal chatSelected
 
     readonly property bool current: !archived && controller.selectedSession === session
-    readonly property string activityLine: controller.showWhenReady && busy ? "Typing…" : busy ? (statusText.length > 0 ? statusText : (agentState.length > 0 ? agentState : "Working")) : statusText
+    readonly property string activityLine: statusText.length > 0 ? statusText : busy ? "Working…" : ""
 
     width: ListView.view ? ListView.view.width : 280
     leftPadding: collapsed ? 0 : 14
