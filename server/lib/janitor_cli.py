@@ -50,7 +50,7 @@ def _send(args, request, method: str, path: str, body=None):
 
 def _configuration(args, *, create=False) -> dict:
     body = dict(getattr(args, "config", None) or {})
-    allowed = {"template_id", "scope", "attachments", "model", "effort"}
+    allowed = {"template_id", "scope", "attachments", "model", "effort", "execution", "backend", "options"}
     if create:
         allowed |= {"name", "backend", "cwd", "session", "request_id"}
     unknown = body.keys() - allowed
@@ -167,6 +167,17 @@ def _execute(args, request) -> int:
         elif cmd == "remove":
             revision = _revision(args, request, path)
             _emit(_send(args, request, "DELETE", path + f"?expected_revision={revision}"))
+        elif cmd == "release":
+            body = {"expected_revision": _revision(args, request, path)}
+            if args.successor:
+                successor_revision = args.successor_revision
+                if successor_revision is None:
+                    successor = request("GET", "/janitors/" + quote(args.successor, safe=""))["janitor"]
+                    successor_revision = int(successor["revision"])
+                body.update(successor_session=args.successor, successor_revision=successor_revision)
+            elif args.successor_revision is not None:
+                raise ValueError("--successor-revision requires --successor")
+            _emit(_send(args, request, "POST", path + "/release", body))
     return 0
 
 
@@ -178,13 +189,16 @@ def add_parsers(sub, handler) -> None:
     trigger = sub.add_parser("trigger", help="Inspect reusable Janitor triggers")
     trigger.add_subparsers(dest="trigger_command", required=True).add_parser("list").set_defaults(
         func=handler, janitor_command="triggers")
-    for name in ("inspect", "runs", "configure", "attach", "enable", "pause", "remove", "export"):
+    for name in ("inspect", "runs", "configure", "attach", "enable", "pause", "remove", "release", "export"):
         command = commands.add_parser(name)
         command.add_argument("session")
         command.set_defaults(func=handler)
-        if name in {"configure", "attach", "enable", "pause", "remove"}:
+        if name in {"configure", "attach", "enable", "pause", "remove", "release"}:
             command.add_argument("--expected-revision", type=_positive)
             command.add_argument("--dry-run", action="store_true")
+        if name == "release":
+            command.add_argument("--successor", help="Transfer matching maintained labels to this paused Janitor")
+            command.add_argument("--successor-revision", type=_positive)
         if name == "runs":
             command.add_argument("--limit", type=_positive, default=30)
         if name in {"configure", "attach"}:

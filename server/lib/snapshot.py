@@ -5,12 +5,12 @@ from typing import Any
 
 import json
 
-from . import (agents as agents_db, avatar_settings, backends, compaction,
+from . import (agents as agents_db, avatar_settings, backends, compaction, db,
                config, message_store, model_avatars, team_store,
                turn_queue, scheduler, janitors)
 from . import reconcile
 from . import personas as persona_store
-from .avatar_urls import versioned_avatar_url
+from .avatar_urls import versioned_avatar_url, janitor_avatar_url
 from .log import log_exception
 from .activity import state_activity_event
 from .transcript_log import context_tokens_from_jsonl, find_latest_jsonl
@@ -38,6 +38,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     model_avatar_root = (static_root / "avatars" / "models") if static_root else None
     default_models: dict[str, str] = {}
     visible_labels = janitors.visible_labels()
+    janitor_templates = {row["agent_id"]: row["template_id"] for row in
+                         db.conn().execute("SELECT agent_id,template_id FROM janitor_configs")}
     for a in agents_db.list_agents():
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
@@ -112,7 +114,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "persona":        a["persona"],
             "voice_id":       a["voice_id"],
             "avatar_symbol":  a.get("avatar_symbol") or "",
-            "avatar_url": versioned_avatar_url(
+            "avatar_url": janitor_avatar_url(bool(a.get("is_janitor")),
+                janitor_templates.get(agent_id), static_root=static_root) or versioned_avatar_url(
                 "/avatars", agent_id, str(a.get("avatar_path") or "")),
             "model_avatar_url": model_avatar_url,
             "cwd":            a["cwd"],
