@@ -21,6 +21,9 @@ import time
 from .log import log
 
 MODEL = "gpt-5.3-codex-spark"
+PROMPT_VERSION = 2
+# Exact refined-low audience instructions selected from the paired lab.
+REFINED_PROMPTS = json.loads(Path(__file__).with_name("tool_explanation_prompts.json").read_text())
 POLICIES = (
     "Developer: no translation.",
     "Technical: preserve relevant command names, flags, paths and precise terminology; explain their concrete effect.",
@@ -157,7 +160,7 @@ class ToolExplanations:
                 scripts = script_evidence(activity, cwd)
                 if scripts:
                     activity["scripts"] = scripts
-            key = hashlib.sha256(json.dumps([MODEL, 1, level, activity], sort_keys=True).encode()).hexdigest()
+            key = hashlib.sha256(json.dumps([MODEL, PROMPT_VERSION, level, activity], sort_keys=True).encode()).hexdigest()
             prepared.append((item["id"], key, activity))
         response = []
         with self._condition:
@@ -235,7 +238,7 @@ class ToolExplanations:
                 "type": "object", "properties": {"id": {"type": "string", "enum": [i["id"] for i in items]}, "text": {"type": "string"}},
                 "required": ["id", "text"], "additionalProperties": False}}}, "required": ["explanations"], "additionalProperties": False}
             (root / "schema.json").write_text(json.dumps(schema))
-            (root / "instructions.txt").write_text(INSTRUCTIONS + POLICIES[level])
+            (root / "instructions.txt").write_text(REFINED_PROMPTS[str(level)])
             args = ["codex", "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--model", MODEL,
                     "--json", "--color", "never", "--output-schema", str(root / "schema.json"), "--output-last-message", str(root / "answer.json")]
             for setting in ['model_reasoning_effort="low"', 'approval_policy="never"', 'web_search="disabled"', 'project_doc_max_bytes=0', 'mcp_servers={}', f'model_instructions_file={json.dumps(str(root / "instructions.txt"))}']:

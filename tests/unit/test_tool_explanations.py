@@ -7,6 +7,34 @@ import pytest
 from lib.tool_explanations import ToolExplanations, normalize_activity
 
 
+def test_refined_prompts_match_user_selected_lab_and_keep_low(monkeypatch):
+    import hashlib
+    from pathlib import Path
+    from lib import tool_explanations as module
+    expected = {
+        1: '6affcc6f06e4a2362da99a56d37c2cc83f402e2c12bdf3ac31fb95f361f5d898',
+        2: 'da2571dc9fcc80e1ec34e390f9b8f5e2f7c6a0b989ab8c61d85905a1259d3d94',
+        3: 'e26fa022c6f04baf94fe943fe56e285ba4d4b6b7b4e03b1f6b9ace6eb5227507',
+        4: '79b52c28db2bb285ba1410e2b851119d3fe93c6eaeb91743a9f1429a9fe55463',
+    }
+    class Captured(Exception): pass
+    captured=[]
+    def spawn(args, **kwargs):
+        root=Path(kwargs['cwd'])
+        captured.append(root.joinpath('instructions.txt').read_text())
+        assert args[args.index('--model')+1]=='gpt-5.3-codex-spark'
+        assert 'model_reasoning_effort="low"' in args
+        assert '--ignore-user-config' in args and '--ignore-rules' in args
+        assert args[args.index('--sandbox')+1]=='read-only'
+        raise Captured()
+    monkeypatch.setattr(module.subprocess,'Popen',spawn)
+    with ToolExplanations() as service:
+        for level in expected:
+            with pytest.raises(Captured): service._run_codex(level,[{'id':'1','activity':{'command':'ls'}}])
+    for level,text in enumerate(captured,1):
+        assert hashlib.sha256(text.encode()).hexdigest()==expected[level]
+
+
 def wait_ready(service, level=3):
     for _ in range(100):
         result = service.request(level, [{"id": "phone", "activity": {"command": "ls"}}])
