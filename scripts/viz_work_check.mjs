@@ -46,7 +46,7 @@ try{
   await page.evaluate(({t})=>{const st=window.fleetWorldSnapshot();const el=document.getElementById('t');el.value=1000*(t-st.timeline.since)/(st.timeline.until-st.timeline.since);el.dispatchEvent(new Event('input'));},{t});
   await page.waitForTimeout(450);const st=await snapshot();const w=st.meta.workObjects.find(w=>w.id===target.id);
   const detailsNow=await page.locator('#node-detail').textContent();
-  if(w?.stage!=='outcome')assert(!detailsNow.includes('preview from recorded media'),'inspector must follow the replay playhead');
+  if(w?.stage!=='outcome'){assert(!detailsNow.includes('preview from recorded media'),'inspector must follow the replay playhead');assert(await page.locator('#node-link').isHidden(),'future artifact link must be hidden');}
   stages.push({t,stage:w?.stage,validation:w?.validation,workspaceValidation:st.meta.workspaces.find(x=>x.id===w?.workspace)?.validation});
   const broken=v=>v==='failed'||v==='interrupted';
   if(broken(w?.validation)&&!stages.some((x,i)=>i<stages.length-1&&broken(x.validation))){

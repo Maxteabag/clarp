@@ -192,7 +192,7 @@ function inspectHit(hit){
  const set=(id,value)=>{const el=document.getElementById(id);if(el.textContent!==value)el.textContent=value;};
  set('node-title',hit.label||'');set('node-detail',[hit.purpose,hit.path,hit.sample].filter(Boolean).join('\n'));
  const link=document.getElementById('node-link'),href=typeof hit.link==='string'&&/^(\/media\/|https:\/\/)/.test(hit.link)?hit.link:'';
- link.hidden=!href;if(href){if(link.getAttribute('href')!==href)link.href=href;set('node-link',hit.linkLabel||'Open');}
+ link.hidden=!href;if(!href)link.removeAttribute('href');if(href){if(link.getAttribute('href')!==href)link.href=href;set('node-link',hit.linkLabel||'Open');}
 }
 const pointers=new Map();let gestureMoved=false;
 const point=e=>({x:e.clientX,y:e.clientY});
