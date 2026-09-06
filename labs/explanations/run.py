@@ -110,10 +110,10 @@ def validate_result(result, count):
             and all(isinstance(v, str) and 0 < len(v.strip()) <= 160 for v in result.values()))
 
 
-def trial(prompt, cases, repetition, private_profile=False):
+def trial(prompt, cases, repetition, private_profile=False, detail_level=3):
     record = {"transport": "exec", "prompt": prompt, "batch_size": len(cases),
               "repetition": repetition, "events": [], "model": shipping.MODEL,
-              "effort": "low", "prompt_sha256": hashlib.sha256(PROMPTS[prompt].encode()).hexdigest()}
+              "effort": "low", "detail_level": detail_level, "prompt_sha256": hashlib.sha256((PROMPTS[prompt] + shipping.POLICIES[detail_level]).encode()).hexdigest()}
     started = time.perf_counter()
     profile = tempfile.TemporaryDirectory(prefix="clarp-exec-profile-lab-")
     def factory(*args, **kwargs):
@@ -129,7 +129,9 @@ def trial(prompt, cases, repetition, private_profile=False):
     try:
         with shipping.ToolExplanations() as service, patch.object(shipping, "INSTRUCTIONS", PROMPTS[prompt]), \
                 patch.object(shipping.subprocess, "Popen", factory):
-            result = service._run_codex(3, requests(cases))
+            if detail_level == 0:
+                raise ValueError("Developer must use request bypass, not inference")
+            result = service._run_codex(detail_level, requests(cases))
         record["valid"] = validate_result(result, len(cases))
         record["answers"] = {case["case"]: result.get(str(i + 1)) for i, case in enumerate(cases)}
     except Exception as error:
