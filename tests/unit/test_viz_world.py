@@ -194,3 +194,18 @@ def test_installed_author_reads_the_shipped_decision_directory(tmp_path,monkeypa
     (docs/'VISION.md').unlink()
     with pytest.raises(RuntimeError,match='records are missing'):
         viz_rule_author.decision_records()
+
+
+def test_author_view_switch_preserves_previous_visual_software(tmp_path,monkeypatch):
+    monkeypatch.setattr(viz_library,'path',lambda:tmp_path/'library.json')
+    world=viz_rule_author.seed_program()
+    old=viz_library.apply_program(world,0,'Existing world')
+    flow={**world,'view':'flow','title':'Flow'}
+    new=viz_library.apply_program(flow,old['revision'],'Owner-selected authoring view')
+    assert new['program']['view']=='flow'
+    assert new['view_programs']['world']==old['program']
+    assert new['previous_program'] is None
+    revised=viz_library.evolution_program({'change':{'kind':'unchanged','evidence':'supported','preserved':'all'}},new['program'])
+    final=viz_library.apply_program(revised,new['revision'],'Reused')
+    assert final['view_programs']['world']==old['program']
+    assert final['previous_program']==new['program']

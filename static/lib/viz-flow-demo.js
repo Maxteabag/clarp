@@ -4,6 +4,7 @@ export function flowDemo(start){
   const entities=[{id:repo,label:'Workflow example',kind:'repository',path:'/example/project'},
     {id:'demo:directory',label:'src',kind:'directory',parent:repo,path:'/example/project/src'},
     ...[[file,'controller.py','Python source'],[test,'test_controller.py','Regression tests'],[created,'cache.py','New module'],[deleted,'legacy.py','Retired module']].map(([id,label,purpose])=>({id,label,purpose,kind:'file',parent:'demo:directory',path:'/example/project/src/'+label,extension:'.py'})),
+    {id:'demo:service',label:'Preview server',kind:'service',unit:'preview.service',scope:'user',purpose:'Synthetic service'},
     {id:'github',label:'GitHub',kind:'platform'},
     {id:'github:example-owner',label:'Example owner',kind:'organization',parent:'github'},
     {id:remote,label:'project',kind:'remote-repository',parent:'github:example-owner',url:'https://github.com/example-owner/project'}];
@@ -15,5 +16,6 @@ export function flowDemo(start){
     e(5,15,'edit',file,4),e(6,20,'test',test,4,'succeeded','demo-reviewer'),
     e(7,24,'create',created,2),e(8,28,'delete',deleted,2),e(9,31,'commit',repo,2),
     {...e(10,34,'push',repo,4),remote_target:remote},
+    e(11,39,'restart','demo:service',2),
   ]};
 }

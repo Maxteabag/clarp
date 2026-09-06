@@ -219,7 +219,13 @@ def apply_program(program: dict, expected_revision: int, reason: str,
         updated=copy.deepcopy(current);updated['revision']+=1
         program=copy.deepcopy(program)
         program['digest']=hashlib.sha256(json.dumps(files,sort_keys=True).encode()).hexdigest()
-        updated['previous_program']=current.get('program')
+        view=program.get('view','world')
+        if view not in {'world','flow','cabinets'}:raise ValueError('unknown program view')
+        views=updated.setdefault('view_programs',{})
+        previous=current.get('program')
+        if previous:views[previous.get('view','world')]=previous
+        updated['previous_program']=views.get(view)
+        views[view]=program
         updated['program']=program
         updated['scene_coverage']=sorted(set(current.get('scene_coverage',[]))|set(coverage_keys))
         updated['authored_tools']=sorted(set(current.get('authored_tools',[]))|set(tools))

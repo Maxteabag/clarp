@@ -95,3 +95,30 @@ def test_native_source_must_match_runtime_identity_and_lifetime(tmp_path,monkeyp
 def test_compound_script_does_not_claim_each_subcommand_succeeded(tmp_path):
     fact=viz_world.evidence('Bash',{'command':'git commit -m x; echo done','cwd':str(tmp_path)},'','repo','vcs')
     assert fact['action']=='execute'
+
+
+def test_worktree_family_uses_common_git_directory_not_label(tmp_path):
+    repo=tmp_path/'project';common=repo/'.git';common.mkdir(parents=True)
+    worktree=tmp_path/'feature';worktree.mkdir()
+    private=common/'worktrees/feature';private.mkdir(parents=True)
+    (private/'commondir').write_text('../..')
+    (worktree/'.git').write_text('gitdir: '+str(private))
+    a=viz_world.checkout(str(repo));b=viz_world.checkout(str(worktree))
+    assert a['project_id']==b['project_id']
+    assert b['main_path']==str(repo) and b['is_worktree'] and not a['is_worktree']
+    unrelated=tmp_path/'unrelated/project';(unrelated/'.git').mkdir(parents=True)
+    assert viz_world.checkout(str(unrelated))['project_id']!=a['project_id']
+
+
+def test_service_operation_has_actual_unit_and_honest_compound_outcome(tmp_path):
+    def build(command):
+        fact=viz_world.evidence('Bash',{'command':command,'cwd':str(tmp_path)},'','service','ops')
+        return viz_world.build([{'id':1,'ts':1,'finished_at':2,'outcome':'succeeded','agent':'Nadia','agent_id':'a','target':'service','verb':'ops','evidence':fact}])
+    world=build('sudo -n systemctl --user restart clarp-fleet-preview')
+    service=next(e for e in world['entities'] if e['kind']=='service')
+    assert service['unit']=='clarp-fleet-preview.service' and service['scope']=='user'
+    assert world['events'][0]['world_target']==service['id']
+    assert world['events'][0]['action']=='restart' and world['events'][0]['outcome']=='succeeded'
+    assert build('systemctl --user restart clarp-fleet-preview\necho done')['events'][0]['outcome']=='unknown'
+    assert not viz_world.service_operations("python -c 'print(\"systemctl restart pretend\")'")
+    assert not viz_world.service_operations("cat <<'EOF'\nsystemctl restart pretend\nEOF")

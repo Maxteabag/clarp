@@ -44,7 +44,7 @@ try{
   await page.screenshot({path:`${out}/${viewport.width}-zoom.png`});
   await page.locator('#fit').click();await page.waitForTimeout(200);
   const target=await page.evaluate(()=>{
-   const s=window.fleetWorldSnapshot(),c=s.camera,h=s.meta.hits.find(h=>h.purpose==='Workspace');
+   const s=window.fleetWorldSnapshot(),c=s.camera,h=s.meta.hits.find(h=>h.purpose==='Workspace'||h.purpose.startsWith('Working copy'));
    return {x:(h.x+h.w*.4)*c.k+c.x,y:(h.y+35)*c.k+c.y};
   });
   await page.touchscreen.tap(target.x,target.y);assert(await page.locator('#inspector').isVisible());
