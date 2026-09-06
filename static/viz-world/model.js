@@ -15,7 +15,7 @@ exports.build=scene=>{
   const col=columnY.indexOf(Math.min(...columnY)),x=60+col*650,y=columnY[col],w=620;
   const buckets=new Map();
   for(const item of r.items){const parent=byId.get(item.parent);const key=parent?.id||r.id;if(!buckets.has(key))buckets.set(key,{parent,items:[]});buckets.get(key).items.push(item);}
-  let yy=y+95;
+  let yy=y+175;
   const room={...r,x,y,w,h:150,color:['#8edbc2','#f3bf80','#aeb9ef','#d7b1e6'][index%4],kind:'repository'};
   rooms.push(room);places.set(r.id,room);
   for(const [key,bucket] of [...buckets].sort(([a],[b])=>a.localeCompare(b))){
@@ -27,7 +27,7 @@ exports.build=scene=>{
     cards.push(card);places.set(item.id,card);
    });yy+=dh+14;
   }
-  room.h=Math.max(160,yy-y+35);columnY[col]+=room.h+55;
+  room.h=Math.max(210,yy-y+35);columnY[col]+=room.h+55;
  }
  const remote=entities.filter(e=>e.kind==='remote-repository').sort((a,b)=>a.id.localeCompare(b.id));
  let ry=160;
