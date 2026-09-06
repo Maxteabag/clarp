@@ -1,6 +1,7 @@
 # 0003 — Preserve agent cabinets as a separate view
 
-Status: Accepted  
+Status: Accepted
+
 Date: 2026-09-06
 
 ## Context

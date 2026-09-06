@@ -1,7 +1,9 @@
 # 0005 — Keep the living world truthful and usable
 
-Status: Accepted  
-Date: 2026-09-06  
+Status: Accepted
+
+Date: 2026-09-06
+
 Origin: The mechanical constraints and evidence requirements in the original handover.
 
 ## Context

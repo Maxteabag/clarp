@@ -1,7 +1,9 @@
 # 0004 — Use the agents' Clarp avatars in World
 
-Status: Accepted  
-Date: 2026-09-06  
+Status: Accepted
+
+Date: 2026-09-06
+
 Supersedes: Boat markers for agents in The Lantern Works.
 
 ## Context
