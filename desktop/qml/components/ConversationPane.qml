@@ -17,6 +17,21 @@ Rectangle {
     signal queueRequested(string session)
     signal profileRequested(string session)
 
+    readonly property bool typing: root.controller.showWhenReady
+        && ["thinking", "tool", "compacting", "running"].includes(root.currentAgentState)
+    readonly property string currentAgentState: root.agentRevision >= 0
+        ? root.controller.agentState(root.session) : ""
+    onConversationModelChanged: Qt.callLater(() => transcript.scrollToLatest())
+    Connections {
+        target: root.conversationModel
+        function onConversationIdChanged() { transcript.scrollToLatest(); }
+    }
+    ConversationPresentationModel {
+        id: presentation
+        sourceModel: root.conversationModel
+        showWhenReady: root.controller.showWhenReady
+    }
+
     color: root.active ? "#1a1b26" : "#1a1b26"
 
     Behavior on color {
@@ -104,6 +119,12 @@ Rectangle {
                     Menu {
                         id: paneMenu
                         MenuItem {
+                            text: "Show when ready"
+                            checkable: true
+                            checked: root.controller.showWhenReady
+                            onTriggered: root.controller.showWhenReady = !root.controller.showWhenReady
+                        }
+                        MenuItem {
                             text: "Queued messages"
                             onTriggered: root.queueRequested(root.session)
                         }
@@ -179,7 +200,7 @@ Rectangle {
 
             Layout.fillWidth: true
             Layout.fillHeight: true
-            model: root.conversationModel
+            model: presentation
             clip: true
             spacing: 2
             leftMargin: 14
@@ -226,11 +247,16 @@ Rectangle {
 
             footer: Item {
                 width: transcript.width
-                height: root.conversationModel.loading ? 34 : 6
+                height: root.typing ? 46 : root.conversationModel.loading ? 34 : 6
 
+                TypingIndicator {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.typing
+                }
                 BusyIndicator {
                     anchors.centerIn: parent
-                    running: root.conversationModel.loading
+                    running: root.conversationModel.loading && !root.typing
                     visible: running
                     implicitWidth: 22
                     implicitHeight: 22
@@ -238,7 +264,7 @@ Rectangle {
             }
 
             Connections {
-                target: root.conversationModel
+                target: presentation
                 function onRowsAppended(fromCurrentUser) {
                     if (fromCurrentUser || (transcript.followLatest && !transcript.userInteracting)) {
                         transcript.scrollToLatest();

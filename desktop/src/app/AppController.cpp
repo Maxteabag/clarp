@@ -96,6 +96,7 @@ AppController::AppController(QObject* parent)
                                                           QStringLiteral("http://127.0.0.1:7682"))
                                                    .toString()));
     m_muted = settings.value(QStringLiteral("audio/muted"), false).toBool();
+    m_showWhenReady = settings.value(QStringLiteral("conversation/showWhenReady"), false).toBool();
     m_toolsVisible = settings.value(QStringLiteral("conversation/toolsVisible"), false).toBool();
     if (!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH"))
         m_toolNarrator.setDetailLevel(std::clamp(settings.value(QStringLiteral("experiments/toolLastTranslationLevel"), 3).toInt(), 1, 4));
@@ -619,6 +620,13 @@ void AppController::setMuted(bool muted) {
     m_audio.setMuted(muted);
     QSettings().setValue(QStringLiteral("audio/muted"), muted);
     emit mutedChanged();
+}
+
+void AppController::setShowWhenReady(bool value) {
+    if (m_showWhenReady == value) return;
+    m_showWhenReady = value;
+    QSettings().setValue(QStringLiteral("conversation/showWhenReady"), value);
+    emit showWhenReadyChanged();
 }
 
 void AppController::setToolsVisible(bool visible) {

@@ -73,6 +73,8 @@ target_sources(clarp-desktop PRIVATE
     src/media/WavEncoder.h
     src/models/AgentListModel.cpp
     src/models/AgentListModel.h
+    src/models/ConversationPresentationModel.cpp
+    src/models/ConversationPresentationModel.h
     src/models/ConversationModel.cpp
     src/models/ConversationModel.h
     src/models/ContactListModel.cpp
@@ -106,6 +108,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/ChatRow.qml
         qml/components/AgentOverview.qml
         qml/components/AgentAvatar.qml
+        qml/components/TypingIndicator.qml
         qml/components/Composer.qml
         qml/components/ConnectionPage.qml
         qml/components/ConversationPane.qml
