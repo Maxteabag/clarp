@@ -108,3 +108,15 @@ it('keeps earlier unresolved failures when another check fails and recovers',()=
  const result=work.validationState([run(1,'failed','a'),run(3,'failed','b'),run(5,'succeeded','b')],10);
  expect(result.state).toBe('failed');expect(result.unresolved).toEqual(['a']);
 });
+
+it('uses recorded lifecycle for lantern motion and CSS scale for detail',()=>{
+ const module={exports:{}};
+ new Function('exports','module','require',fs.readFileSync(new URL('../../static/viz-flow/lantern.js',import.meta.url),'utf8'))(module.exports,module,()=>({}));
+ const lantern=module.exports;
+ const object={stage:'evidence',finished:false,age:0,evidence:{running:false,validation:{state:'none'}}};
+ expect(lantern.isRunning(object)).toBe(false);
+ expect(lantern.isRunning({...object,evidence:{...object.evidence,running:true}})).toBe(true);
+ expect(lantern.detailLevel(.4,1)).toBe(lantern.detailLevel(.8,2));
+ expect(lantern.detailLevel(.8,2)).toBe(0);
+ expect(lantern.detailLevel(1.6,2)).toBe(1);
+});
