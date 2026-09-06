@@ -1,9 +1,11 @@
+import {FrameDeadline} from './viz-deadline.js';
 // Arbitrary authored JavaScript runs in a worker inside an opaque-origin frame.
 // The host accepts bitmap frames and inert metadata, never generated DOM/code.
 const bootstrap = `
 const workerSource = ${JSON.stringify(`
 let render, canvas, ctx, clock=0, seed=1234;
-let avatars={},avatarVersion=0;
+let avatars={},avatarVersion=0,scene={entities:[],relations:[],events:[]};
+const monotonic=performance.now.bind(performance);
 Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
 Date.now=()=>clock;
 self.Worker=undefined;self.SharedWorker=undefined;
@@ -26,6 +28,7 @@ self.onmessage=async({data})=>{
    render=compile(data.program);if(typeof render!=='function')throw Error('Entry must export render');
    canvas=new OffscreenCanvas(1,1);ctx=canvas.getContext('2d');self.postMessage({type:'ready'});return;
   }
+  if(data.type==='scene'){scene=data.scene;return;}
   if(data.type==='avatars'){
    const version=++avatarVersion;
    const next={};
@@ -36,12 +39,13 @@ self.onmessage=async({data})=>{
    for(const image of Object.values(avatars))image.close();
    avatars=next;return;
   }
+  const started=monotonic();
   clock=data.playhead;seed=1234;
   canvas.width=data.width;canvas.height=data.height;
-  const meta=render({...data,ctx,avatars})||{};
+  const meta=render({...data,scene,ctx,avatars})||{};
   meta.loadedAvatars=Object.keys(avatars);
   const bitmap=canvas.transferToImageBitmap();
-  self.postMessage({type:'frame',request:data.request,bitmap,meta},[bitmap]);
+  self.postMessage({type:'frame',request:data.request,bitmap,meta,executionMs:monotonic()-started},[bitmap]);
  }catch(e){self.postMessage({type:'error',error:String(e.message||e).slice(0,500)});}
 };
 `)};
@@ -62,24 +66,38 @@ export class SourceSandbox {
   constructor(program,onframe,onerror){
     this.frame=document.createElement('iframe');this.frame.hidden=true;
     this.frame.sandbox='allow-scripts';
-    this.avatars={};this.ready=false;this.pending=false;this.stopped=false;this.sequence=0;
-    const fail=error=>{if(this.stopped)return;this.destroy();onerror(error);};
+    this.avatars={};this.frameTimings={};this.ready=false;this.pending=false;this.stopped=false;this.sequence=0;
+    const fail=(error,kind='source')=>{if(this.stopped)return;this.destroy();onerror(error,kind);};
+    this.deadline=new FrameDeadline(()=>fail('The render worker stopped responding','delivery'));
+    this.initDeadline=new FrameDeadline(()=>fail('The render worker could not start','startup'),{deliveryMs:10000});
+    this.visibility=()=>{
+      // Suspend the worker itself, not just its watchdog. A runaway program
+      // cannot consume CPU indefinitely while this tab is hidden.
+      if(document.hidden){this.destroy();return;}
+      this.deadline.visibilityChanged();this.initDeadline.visibilityChanged();
+    };
+    document.addEventListener('visibilitychange',this.visibility);
     this.listener=e=>{
       if(e.source!==this.frame.contentWindow||this.stopped)return;
       if(e.data.type==='boot')this.frame.contentWindow.postMessage({type:'init',program},'*');
-      else if(e.data.type==='ready'){clearTimeout(this.timer);this.ready=true;this.setAvatars(this.avatars);}
+      else if(e.data.type==='ready'){this.initDeadline.clear();this.ready=true;this.setAvatars(this.avatars);}
       else if(e.data.type==='error')fail(e.data.error);
       else if(e.data.type==='frame'&&e.data.request===this.sequence){
-        clearTimeout(this.timer);this.pending=false;
+        this.deadline.clear();this.pending=false;
+        this.frameTimings={executionMs:e.data.executionMs,deliveryMs:performance.now()-this.sentAt};
+        // A slow completed frame is usable; pace subsequent requests instead
+        // of mistaking load for an infinite loop. The external fuse still
+        // terminates source that never returns.
+        this.nextFrameAt=performance.now()+Math.max(0,(e.data.executionMs||0)-33);
         if(!(e.data.bitmap instanceof ImageBitmap))return fail('Invalid frame');
-        onframe(e.data.bitmap,e.data.meta);
+        onframe(e.data.bitmap,e.data.meta,this.frameTimings);
       }
     };
     addEventListener('message',this.listener);
     // Opaque origin denies host storage; CSP denies network and nested content.
     this.frame.srcdoc='<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;unsafe-inline&#39; &#39;unsafe-eval&#39;; worker-src blob:; connect-src &#39;none&#39;"><script>'+bootstrap.replaceAll('</script','<\\/script')+'</script>';
     document.body.append(this.frame);
-    this.timer=setTimeout(()=>fail('Source initialization deadline exceeded'),2000);
+    this.initDeadline.arm(0);
     this.fail=fail;
   }
   setAvatars(avatars){
@@ -87,10 +105,13 @@ export class SourceSandbox {
     if(this.ready&&!this.stopped)this.frame.contentWindow.postMessage({type:'avatars',avatars},'*');
   }
   draw(input){
-    if(!this.ready||this.pending||this.stopped)return;
+    if(!this.ready||this.pending||this.stopped||document.hidden||performance.now()<(this.nextFrameAt||0))return;
     this.pending=true;this.sequence++;
-    this.frame.contentWindow.postMessage({...input,type:'frame',request:this.sequence},'*');
-    this.timer=setTimeout(()=>this.fail('Source frame deadline exceeded'),150);
+    this.sentAt=performance.now();
+    const {scene,...frame}=input;
+    if(scene!==this.scene){this.scene=scene;this.frame.contentWindow.postMessage({type:'scene',scene},'*');}
+    this.frame.contentWindow.postMessage({...frame,type:'frame',request:this.sequence},'*');
+    this.deadline.arm(this.sequence);
   }
-  destroy(){this.stopped=true;clearTimeout(this.timer);removeEventListener('message',this.listener);this.frame.remove();}
+  destroy(){this.stopped=true;this.initDeadline.clear();this.deadline.clear();document.removeEventListener('visibilitychange',this.visibility);removeEventListener('message',this.listener);this.frame.remove();}
 }

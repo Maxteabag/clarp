@@ -73,7 +73,7 @@ try{
   await run('loops','module.exports.render=()=>{while(true){}};');
   await run('isolation','module.exports.render=()=>{let blocked=false;try{indexedDB.open("host-storage")}catch(e){blocked=true;}return {storageBlocked:blocked,origin:location.origin};};');
  });
- const checks=await p.evaluate(()=>window.sandboxChecks);assert.match(checks.throws,/generated failure/);assert.match(checks.loops,/deadline/);
+ const checks=await p.evaluate(()=>window.sandboxChecks);assert.match(checks.throws,/generated failure/);assert.match(checks.loops,/deadline|stopped responding/);
  assert(checks.isolation.storageBlocked);assert.equal(checks.isolation.origin,'null');
  const f=await p.evaluate(()=>window.fleetWorldSnapshot().frames);await p.waitForTimeout(200);
  assert((await p.evaluate(()=>window.fleetWorldSnapshot().frames))>f);
