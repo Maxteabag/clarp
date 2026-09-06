@@ -36,7 +36,7 @@ Rectangle {
         || controller.audio.recording || attachments.length > 0
     signal openConnection
 
-    implicitHeight: 54 + (transcriptionCount > 0 ? 25 : 0)
+    implicitHeight: Math.max(54, Math.min(200, editor.contentHeight + editor.topPadding + editor.bottomPadding + 4) + 14) + (transcriptionCount > 0 ? 25 : 0)
         + (queueCount > 0 ? 25 : 0) + (attachments.length > 0 ? 31 : 0)
         + (root.active && root.controller.startingContact.length > 0 ? 25 : 0)
     color: root.active ? "#1a1b26" : "#1a1b26"
@@ -237,45 +237,49 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
 
-            TextArea {
-                id: editor
-                objectName: "paneComposerEditor"
+            ScrollView {
                 anchors.fill: parent
                 anchors.margins: 2
                 anchors.leftMargin: 17
-                text: ""
-                placeholderText: root.session.length > 0
-                    ? "Type to " + root.controller.agentName(root.session) + "…"
-                    : "Choose an agent"
-                enabled: root.active && root.session.length > 0
-                    && root.controller.startingContact.length === 0
-                opacity: root.active ? 1 : 0.58
-                wrapMode: TextArea.Wrap
-                color: "#c7c9dc"
-                placeholderTextColor: "#55586c"
-                font.family: "JetBrains Mono"
-                font.pixelSize: 15
-                background: null
-                leftPadding: 7
-                topPadding: 6
-                bottomPadding: 5
-                onTextChanged: root.controller.setPaneDraft(root.paneId, root.session, text)
-                onActiveFocusChanged: {
-                    if (activeFocus)
-                        root.controller.requestComposerFocus(root.paneId);
-                }
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-                Keys.onPressed: event => {
-                    const shift = (event.modifiers & Qt.ShiftModifier) !== 0;
-                    if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !shift) {
-                        if (editor.text.trim().length > 0 || root.attachments.length > 0) {
-                            const queue = (event.modifiers & Qt.ControlModifier) !== 0;
-                            const sent = root.controller.sendComposerMessage(
-                                root.paneId, root.session, editor.text, queue);
-                            if (sent)
-                                editor.clear();
+                TextArea {
+                    id: editor
+                    objectName: "paneComposerEditor"
+                    text: ""
+                    placeholderText: root.session.length > 0
+                        ? "Type to " + root.controller.agentName(root.session) + "…"
+                        : "Choose an agent"
+                    enabled: root.active && root.session.length > 0
+                        && root.controller.startingContact.length === 0
+                    opacity: root.active ? 1 : 0.58
+                    wrapMode: TextArea.Wrap
+                    color: "#c7c9dc"
+                    placeholderTextColor: "#55586c"
+                    font.family: "JetBrains Mono"
+                    font.pixelSize: 15
+                    background: null
+                    leftPadding: 7
+                    topPadding: 6
+                    bottomPadding: 5
+                    onTextChanged: root.controller.setPaneDraft(root.paneId, root.session, text)
+                    onActiveFocusChanged: {
+                        if (activeFocus)
+                            root.controller.requestComposerFocus(root.paneId);
+                    }
+
+                    Keys.onPressed: event => {
+                        const shift = (event.modifiers & Qt.ShiftModifier) !== 0;
+                        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !shift) {
+                            if (editor.text.trim().length > 0 || root.attachments.length > 0) {
+                                const queue = (event.modifiers & Qt.ControlModifier) !== 0;
+                                const sent = root.controller.sendComposerMessage(
+                                    root.paneId, root.session, editor.text, queue);
+                                if (sent)
+                                    editor.clear();
+                            }
+                            event.accepted = true;
                         }
-                        event.accepted = true;
                     }
                 }
             }
