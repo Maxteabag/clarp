@@ -1,0 +1,18 @@
+#!/usr/bin/env node
+import {chromium} from '@playwright/test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';
+const url=process.argv[2],out=process.argv[3]||'/var/tmp/fleet-stage-three-proof';if(!url)throw Error('Pass proposal URL');await fs.mkdir(out,{recursive:true});const browser=await chromium.launch(),errors=[];
+try{
+ for(const width of [390,1280]){
+  const c=await browser.newContext({viewport:{width,height:900},acceptDownloads:true}),p=await c.newPage();p.on('pageerror',e=>errors.push(e.message));await p.goto(url);
+  assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await p.screenshot({path:`${out}/${width}-intro.png`});
+  for(const phase of ['making','review','waiting','delivered']){await p.locator(`button[data-phase=${phase}]`).click();assert.equal(await p.locator('#journey-demo').getAttribute('data-phase'),phase);await p.locator('.journey').screenshot({path:`${out}/${width}-${phase}.png`});}
+  await p.locator('#history').click();assert((await p.locator('#journey-demo').getAttribute('class')).includes('history'));await p.waitForTimeout(3700);assert(!(await p.locator('#journey-demo').getAttribute('class')).includes('delivering'));
+  await p.locator('#emphasis').selectOption('waiting');await p.locator('#notes').fill('Show explicit dependencies.');await p.reload();assert.equal(await p.locator('#emphasis').inputValue(),'waiting');assert.equal(await p.locator('#notes').inputValue(),'Show explicit dependencies.');
+  const downloaded=p.waitForEvent('download');await p.locator('#export').click();await (await downloaded).saveAs(`${out}/${width}.json`);const saved=JSON.parse(await fs.readFile(`${out}/${width}.json`));assert.deepEqual(saved.answers,{emphasis:'waiting',notes:'Show explicit dependencies.'});assert.equal(saved.submitted,false);
+  await p.evaluate(()=>navigator.serviceWorker.ready);await p.reload();await p.waitForFunction(()=>!!navigator.serviceWorker.controller);await c.setOffline(true);await p.reload();assert.equal(await p.locator('#notes').inputValue(),'Show explicit dependencies.');await c.setOffline(false);
+  await p.locator('#direction').scrollIntoViewIfNeeded();await p.screenshot({path:`${out}/${width}-notes.png`});await c.close();
+ }
+ const c=await browser.newContext(),p=await c.newPage();await p.addInitScript(()=>{window.clarpForm={getDraft:()=>({emphasis:'patterns',notes:'Native draft'}),setAnswers:a=>window.lastAnswers=a,submit:async a=>{window.submitted=a;throw Error('mock delivery failed');}};});await p.goto(url);assert.equal(await p.locator('#notes').inputValue(),'Native draft');await p.locator('#notes').fill('Retain this draft');await p.locator('#send').click();assert((await p.locator('#save-status').textContent()).includes('draft retained'));assert.equal((await p.evaluate(()=>window.submitted)).notes,'Retain this draft');assert.equal(await p.locator('#notes').inputValue(),'Retain this draft');await c.close();
+ const fail=await browser.newContext();await fail.addInitScript(()=>{Storage.prototype.setItem=()=>{throw Error('No storage');};});const q=await fail.newPage();await q.goto(url);await q.locator('#notes').fill('Export me');assert((await q.locator('#save-status').textContent()).includes('Storage unavailable'));await fail.close();
+ assert.deepEqual(errors,[]);await fs.writeFile(`${out}/verification.json`,JSON.stringify({phone:true,desktop:true,phases:4,historicalRoute:true,deliverySettles:true,draftRestore:true,export:true,offline:true,storageWarning:true,bridge:'mock only; no live submission',errors},null,2));console.log('Stage-three proposal verified: views, route states, drafts, export, offline, storage failure and mocked bridge failure.');
+}finally{await browser.close();}
