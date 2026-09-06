@@ -109,39 +109,28 @@ Change it to:
 memory). Page the `state_log` query instead of loading 59k rows at once. This
 is the first work package.
 
-## 6. Astra's authority
+## 6. Astra's authority: creative, compatible expansion
 
-Tier 2 has full authority over how the system represents things, and standing
-permission to *restructure*, not merely to add. Explicitly:
+The owner clarified the policy after a disruptive boat-to-moth redesign:
+**freedom to develop software is not permission to replace established concepts
+on every new event.** Keep The Lantern Works as the default world and retain
+Agent cabinets as a separate optional view.
 
-- invent a new archetype when the existing five do not fit, and add it to the
-  library;
-- **merge** entities that should have been one;
-- **split** entities that conflate different things — the `file`, `path`,
-  `script` and `repo` buckets are 84% of all traffic and almost certainly
-  hide real structure;
-- refactor the renderer, the stores, or these contracts when a better shape
-  becomes apparent as the map grows;
-- mark an earlier decision stale and redesign it.
+Astra may add new mechanisms, hierarchy, interactions and semantic types, and
+repair demonstrated defects. Ordinary evolution must grow in the direction the
+app is already going: preserve familiar identities, visual language, existing
+behavior and places. A new agent, file, checkout or repeated action normally
+instantiates an existing representation and needs no code change.
 
-That last point matters. A decision is frozen so the map stays readable, but
-frozen must not become stuck: if a representation is wrong, Astra may
-supersede it. Prefer an explicit "this one is wrong, think again" path over
-periodic regeneration — regenerating nightly reintroduces the churn that
-freezing exists to prevent.
+A structural rewrite requires a strong, specific demand or a demonstrated
+incompatibility that cannot be repaired locally. Broad aesthetic redesign is a
+separate explicitly requested operation, not a consequence of novelty, a
+revision increment, or clicking “Improve this detail”. Routine work applies
+itself without a review queue; uncertain cases may leave the source unchanged.
 
-### The three constraints that remain
-
-These are mechanical, not permission gates:
-
-1. **The hot path stays deterministic.** No model call during a render. Same
-   command must always reach the same node, or position stops meaning
-   anything and the map is worth less than a log.
-2. **Generated logic is sandboxed and time-boxed.** Pure function: state in,
-   drawing commands out. On throw or overrun the node reverts to the
-   placeholder. Degrade to boring, never to broken.
-3. **A live decision is stable until explicitly superseded.** Not immutable —
-   stable.
+The mechanical constraints remain: models never run in a frame, generated code
+is sandboxed and time-boxed with fallback, and established decisions remain
+stable until explicitly superseded for a concrete reason.
 
 ## 7. Blockers outside this branch
 
@@ -177,36 +166,41 @@ Both cap target resolution at ~19%; neither is fixable retroactively.
   `clarp` — passed its HTTP test and returned 200 with no console errors.
   A green suite is not evidence that a picture is right.
 
-## 10. Creative source authorship — current implementation
+## 10. Source authorship with continuity — current implementation
 
-The owner's clarification supersedes the earlier recipe-only interpretation:
-**the application writes its visual software, not just its icons.** Astra is
-encouraged to improvise, invent systems, rewrite hierarchy and layout, develop
-animations and change the premises of the whole world. A territory, machine,
-organism or transport system is an artistic choice. There is no closed shape,
-kind, archetype or animation vocabulary for the source author.
+The operative instructions are `server/lib/viz_creative_brief.md`. They encourage
+creative local systems, compatible expansion and targeted repairs while
+preserving the established world. Old instructions inviting wholesale novelty-
+driven reinvention are superseded by §6 and this section.
 
-The operative creative brief is `server/lib/viz_creative_brief.md`. It is loaded
-into real Astra requests with the current complete source and observed facts.
-Spark identifies whether that software can meaningfully represent new evidence;
-Astra develops a new source revision when it cannot. Explicit reinvention also
-bypasses novelty triage. Both apply automatically, without a review queue.
+The default **World** is The Lantern Works, with repository workshops, file
+manuscripts, GitHub harbor, origin routes, action machinery and lantern sailboats.
+The **Agent cabinets** option preserves The Jacquard Observatory's side-by-side
+agent activity and nested cabinets. The selector is local to the browser, persists
+across refreshes, and does not ask a model to regenerate either view. Cameras and
+fallback source are kept separate. Routine autonomous learning targets World;
+it does not silently replace the optional cabinets view.
 
-### What the author actually writes
+### What the author writes
 
-`program.files` contains executable CommonJS source modules. The entry exports
-`render({ctx, scene, time, width, height, camera, playhead, interaction,
-reducedMotion})`. It has the full Canvas API, ordinary JavaScript algorithms,
-module state and imports of other supplied modules. It draws the entire world.
-The server's `scene.entities` and `relations` are evidence helpers, not a required
-visual schema: authored source can derive a different model from the raw events.
+Published `program.files` contains executable CommonJS modules with the full
+Canvas API. The render entry point and evidence helpers remain as before.
+However, ordinary model replies now describe the concrete need and what they
+preserve, then supply unique exact source-fragment edits and optional new helper
+files. They may return `unchanged` when the current source already fits.
 
-`static/viz-world/` contains **The Lantern Works**, produced by a real
-`gpt-6-astra` development call: two source modules replace the initial renderer
-with local repository workshops, file manuscripts, a GitHub harbor, origin
-routes, action machinery and agents traveling as lantern sailboats. Its manifest
-records the source digest and the author's explanation. This is the initial
-software, not a permanent style restriction.
+`viz_library.evolution_program` preserves title, entry and untouched modules,
+rejects replacement programs, whole-file replacement and replacing existing files
+through `new_files`, and requires an explicit redesign allowance for disruptive
+changes. No live observer or generic improvement button grants that allowance.
+This is a source-update contract, not a fixed drawing vocabulary. Existing
+metaphors are reinforced by the brief; automatic semantic correctness is still
+checked through runtime/visual verification, not inferred from a revision number.
+
+`static/viz-world/` holds the original Astra-authored Lantern Works. Its exact
+Jacquard successor is preserved under `static/viz-cabinets/`. Both manifests
+record source provenance. Restoring the default is an explicit new JSON-library
+revision with a backup of previous decisions; it requires no Git checkout.
 
 ### Evidence and honest uncertainty
 
@@ -221,11 +215,13 @@ observed commands, not an inferred successful result.
 
 ### Mechanical containment
 
-Source is syntax-checked without executing it, materialized into versioned
+Targeted edits are applied to the current revision; the resulting source is
+syntax-checked without executing it, materialized into versioned
 `viz-programs/<digest>/` directories, and atomically published through the JSON
 library with a revision check. No schema migration is introduced. Compiler
-feedback can trigger automatic repair. New source explicitly supersedes the
-previous version; novelty is recorded so normal polling does not regenerate it.
+feedback can trigger automatic repair. A compatible source revision updates only its scoped behavior; it does not grant
+permission to change the world's concepts. Covered novelty is recorded so normal
+polling does not regenerate it.
 
 The browser runs source in a worker inside an opaque-origin sandboxed iframe.
 It has no host storage, DOM, filesystem or network. The host receives pixels and
@@ -245,7 +241,7 @@ uv sync --frozen --group dev
 # A real source-writing call, isolated from the live library:
 .venv/bin/python scripts/viz_evolve.py --db ~/.local/share/clarp/state.sqlite \
   --library /var/tmp/fleet-world/library.json \
-  --reason 'Invent and implement a new visual system for this evidence'
+  --reason 'Extend the current world where this evidence needs new behavior'
 # Read-only preview of that exact generated source, no automatic model calls:
 .venv/bin/python scripts/viz_preview.py --db ~/.local/share/clarp/state.sqlite \
   --library /var/tmp/fleet-world/library.json --port 7700
@@ -267,7 +263,7 @@ model call alone is not proof that the authored software works.
 The local service must pass `--learn --library PERSISTENT_PATH` to
 `scripts/viz_host.py`. Without `--learn`, the preview intentionally does not run
 models. The learning-enabled host observes the live corpus every 15 seconds,
-including when no browser is open, and accepts explicit source reinvention from
+including when no browser is open, and accepts focused compatible improvements from
 the inspector. It keeps the activity database read-only while publishing source
 revisions to its separate JSON library. The HUD exposes actual novelty checking,
 Astra development, and the last failure. New observations do not imply a redraw:

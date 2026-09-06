@@ -13,6 +13,7 @@
          text-shadow:0 1px 3px #000; }
   #hud a { color:#9caec8; display:block; margin-bottom:12px; pointer-events:auto; text-decoration:none; }
   #hud span { display:block; margin-top:4px; }
+  #view-switch { display:flex; gap:6px; margin-top:12px; pointer-events:auto; }
   #hud b { font-weight:600; font-size:26px; font-family:Georgia,serif; letter-spacing:.02em; }
   #hud span { opacity:.55; }
   #bar { position:fixed; left:0; right:0; bottom:0; padding:10px 14px 12px;
@@ -49,8 +50,8 @@
 </style>
 <section id="small-screen"><h1>A larger window for the fleet</h1><p>Open the map in a desktop window at least 900 × 600. Pan and zoom to explore the workspace.</p><a href="/">← Back to Clarp</a></section>
 <canvas id="c" aria-label="Live fleet activity map"></canvas>
-<div id="hud"><a href="/" aria-label="Back to Clarp">← Clarp</a><b>Living atlas</b><span id="stat">loading…</span><span id="learning"></span></div>
-<div id="legend">A living world of work<br><small>scroll to enter · drag to travel</small></div><aside id="inspector" hidden><button id="close-inspector" aria-label="Close details">×</button><b id="node-title"></b><p id="node-detail"></p><button id="redesign">Let Astra reinvent this</button><p id="design-result" role="status"></p></aside>
+<div id="hud"><a href="/" aria-label="Back to Clarp">← Clarp</a><b>Living atlas</b><span id="stat">loading…</span><span id="learning"></span><nav id="view-switch" aria-label="Fleet view"><button id="view-world" aria-pressed="true">World</button><button id="view-cabinets" aria-pressed="false">Agent cabinets</button></nav></div>
+<div id="legend">A living world of work<br><small>scroll to enter · drag to travel</small></div><aside id="inspector" hidden><button id="close-inspector" aria-label="Close details">×</button><b id="node-title"></b><p id="node-detail"></p><button id="redesign">Improve this detail</button><p id="design-result" role="status"></p></aside>
 <div id="bar">
   <button id="live" aria-pressed="true">live</button>
   <button id="fit">Fit world</button>

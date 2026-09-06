@@ -6,7 +6,7 @@ from lib import db,viz_library,viz_normalize,viz_rule_author
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--db',type=pathlib.Path,required=True)
 p.add_argument('--library',type=pathlib.Path,required=True)
-p.add_argument('--reason',default='Reinvent the fleet map as a beautiful, living, hierarchical world. Develop real source software and new visual systems; do not just choose icons.')
+p.add_argument('--reason',default='Extend the existing fleet world only where evidence demonstrates missing behavior. Preserve its concepts and visual language; prefer a targeted repair or compatible expansion, and leave it unchanged when current software fits.')
 p.add_argument('--snapshot',type=pathlib.Path)
 a=p.parse_args()
 con=sqlite3.connect(a.db.resolve().as_uri()+'?mode=ro',uri=True);con.row_factory=sqlite3.Row

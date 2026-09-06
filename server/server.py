@@ -1184,7 +1184,7 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(data, dict) and data.get("world"):
             import time
             world = viz_normalize.build_fleet_map(int(time.time()*1000)-3600000)["world"]
-            result = viz_learning.offer_scene(world, force=True, reason=str(data.get("reason", "Reinvent this world")) + " Selected entity: " + str(data.get("entity_id", "whole world")))
+            result = viz_learning.offer_scene(world, force=True, reason=str(data.get("reason", "Improve this detail while preserving the established world")) + " Selected entity: " + str(data.get("entity_id", "whole world")))
             return self._send(202, json.dumps(result).encode(), "application/json")
         if (not isinstance(data, dict) or not isinstance(data.get("entity_id"), str)
                 or not isinstance(data.get("revision"), int)):
