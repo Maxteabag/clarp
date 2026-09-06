@@ -148,23 +148,27 @@ class ToolExplanations:
         durable_queue.abandon(self._owner)
 
     @staticmethod
-    def _identity(config):
+    def _identity(config, target_agent_id=None):
         if config is None:
             return None
         execution = config["execution"]
-        return {**{key: config[key] for key in ("agent_id", "generation", "backend", "model", "effort")},
+        return {**{key: config[key] for key in ("agent_id", "generation", "backend", "model", "effort", "scope")},
+                "target_agent_id": target_agent_id,
                 "executor": execution["executor"], "provider": execution["provider"]}
 
     @classmethod
     def _run_identity(cls, run):
         config = run["configuration"]
-        return cls._identity({**run, **config, "execution": config})
+        return cls._identity({**run, **config, "execution": config}, config.get("target_agent_id"))
 
     @classmethod
     def _matches(cls, identity):
-        return identity is not None and cls._identity(janitor_builtins.resolve(ROLE)) == identity
+        if identity is None:
+            return False
+        target_agent_id = identity.get("target_agent_id")
+        return cls._identity(janitor_builtins.resolve(ROLE, target_agent_id=target_agent_id), target_agent_id) == identity
 
-    def request(self, level, items, *, cwd=None, release=None):
+    def request(self, level, items, *, cwd=None, release=None, target_agent_id=None):
         if type(level) is not int or level not in range(5):
             raise ValueError("detail_level must be an integer from 0 to 4")
         if not isinstance(items, list) or len(items) > 8:
@@ -172,8 +176,10 @@ class ToolExplanations:
         release = [] if release is None else release
         if not isinstance(release, list) or len(release) > 64 or any(not isinstance(v, str) or not 1 <= len(v) <= 128 for v in release):
             raise ValueError("invalid released demand IDs")
-        selected = janitor_builtins.resolve(ROLE)
-        identity = self._identity(selected)
+        if target_agent_id is not None and (not isinstance(target_agent_id, str) or not 1 <= len(target_agent_id) <= 128):
+            raise ValueError("invalid target agent ID")
+        selected = janitor_builtins.resolve(ROLE, target_agent_id=target_agent_id)
+        identity = self._identity(selected, target_agent_id)
         configured = selected or janitor_builtins.get_builtin(ROLE)
         model = configured["model"] if configured else ""
         prepared = []
@@ -219,7 +225,11 @@ class ToolExplanations:
                 with self._condition:
                     if self._closed:
                         return
-                    batch = durable_queue.claim(self._owner, enabled=janitor_builtins.resolve(ROLE) is not None)
+                    # Eligibility belongs to each queued target. A Host may
+                    # have only scoped subscribers and no global resolver.
+                    # Claiming still prunes expiry; stale/paused work is
+                    # discarded below before any Janitor/model admission.
+                    batch = durable_queue.claim(self._owner)
                     if not batch:
                         self._condition.wait(timeout=.25)
                         continue
@@ -231,7 +241,8 @@ class ToolExplanations:
                     continue
                 request_hash = hashlib.sha256(json.dumps(sorted(entry[0] for entry in batch)).encode()).hexdigest()
                 run = janitor_builtins.begin_run(ROLE, uuid.uuid4().hex, context={
-                    "request_hash": request_hash, "item_count": len(batch), "detail_level": level})
+                    "request_hash": request_hash, "item_count": len(batch), "detail_level": level},
+                    target_agent_id=identity.get("target_agent_id"))
                 if run is None:
                     # Another admitted invocation owns the Janitor. Keep the
                     # durable demand and retry without a tight claim loop.

@@ -38,9 +38,9 @@ def wait_for(check):
     pytest.fail("explanation worker did not finish")
 
 
-def ready(service, item=ITEM):
+def ready(service, item=ITEM, *, target_agent_id=None):
     def check():
-        result = service.request(3, [item])["items"][0]
+        result = service.request(3, [item], target_agent_id=target_agent_id)["items"][0]
         return result if result["status"] == "ready" else None
     return wait_for(check)
 
@@ -342,3 +342,125 @@ def test_eight_distinct_activities_share_one_audience_batch():
     assert len(calls) == 1 and len(calls[0]) == 8
     runs = janitors.list_runs(config["session"])
     assert len(runs) == 1 and runs[0]["configuration"]["context"]["item_count"] == 8
+
+
+def scoped_owner(session, target_ids):
+    agents.create_agent(persona=session, voice_id="", cwd="/tmp", session=session,
+                        backend="codex", model=f"{session}-model", effort="medium")
+    config = janitors.create(session, template_id="tool-explainer", scope={"agent_ids": target_ids})
+    return janitors.set_enabled(session, config["revision"], True)
+
+
+def test_scoped_owners_admit_correct_targets_and_freeze_separate_runs():
+    pause(seed())
+    targets = [agents.create_agent(persona=name, voice_id="", cwd="/tmp", session=name)
+               for name in ["target-a", "target-b", "outside"]]
+    configs = [scoped_owner(f"scoped-{index}", [target]) for index, target in enumerate(targets[:2])]
+    calls = []
+    def capture(level, items):
+        calls.append(items)
+        return translate(level, items)
+    with tool_explanations.ToolExplanations(translate=capture, debounce=.1) as service:
+        for target, config in zip(targets, configs):
+            response = service.request(3, [ITEM], target_agent_id=target)
+            assert response["items"][0]["status"] == "pending"
+            assert response["model"] == config["model"]
+        assert service.request(3, [ITEM], target_agent_id=targets[2])["items"][0]["status"] == "disabled"
+        assert service.request(3, [ITEM])["items"][0]["status"] == "disabled"
+        for target in targets[:2]:
+            assert ready(service, target_agent_id=target)["text"] == "List the files."
+    assert len(calls) == 2 and all(len(batch) == 1 for batch in calls)
+    assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == 2
+    for target, config in zip(targets, configs):
+        runs = janitors.list_runs(config["session"])
+        assert len(runs) == 1 and runs[0]["status"] == "completed"
+        assert runs[0]["configuration"]["model"] == config["model"]
+        assert runs[0]["configuration"]["target_agent_id"] == target
+
+
+def test_same_scoped_owner_keeps_distinct_targets_out_of_shared_batches_and_cache():
+    pause(seed())
+    targets = [agents.create_agent(persona=name, voice_id="", cwd="/tmp", session=name)
+               for name in ["target-a", "target-b"]]
+    config = scoped_owner("scoped", targets)
+    calls = []
+    def capture(level, items):
+        running = next(run for run in janitors.list_runs(config["session"]) if run["status"] == "running")
+        target = running["configuration"]["target_agent_id"]
+        calls.append((target, len(items)))
+        return {item["id"]: f"Explanation for {target}." for item in items}
+    with tool_explanations.ToolExplanations(translate=capture, debounce=.1) as first, tool_explanations.ToolExplanations(translate=capture, debounce=.1) as second:
+        first.request(3, [ITEM], target_agent_id=targets[0])
+        second.request(3, [ITEM], target_agent_id=targets[1])
+        for service, target in zip([first, second], targets):
+            assert ready(service, target_agent_id=target)["text"] == f"Explanation for {target}."
+    assert sorted(calls) == sorted((target, 1) for target in targets)
+    assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == 2
+    assert len(janitors.list_runs(config["session"])) == 2
+
+
+def invalidate_target(target, change):
+    if change == "archive":
+        agents.set_archived(target, True)
+    elif change == "delete":
+        agents.soft_delete(target)
+    else:
+        janitors.create(agents.get_by_agent_id(target)["session"])
+
+
+@pytest.mark.parametrize("change", ["archive", "delete", "convert"])
+@pytest.mark.parametrize("phase", ["queued", "running", "cached"])
+def test_scoped_target_lifecycle_fences_inference_and_cache(change, phase):
+    pause(seed())
+    target = agents.create_agent(persona="Target", voice_id="", cwd="/tmp", session="target")
+    config = scoped_owner("scoped", [target])
+    entered, finish = threading.Event(), threading.Event()
+    calls = []
+    def capture(level, items):
+        calls.append(1)
+        entered.set()
+        if phase == "running":
+            assert finish.wait(3)
+        return translate(level, items)
+    with tool_explanations.ToolExplanations(translate=capture, debounce=.15 if phase == "queued" else 0) as service:
+        assert service.request(3, [ITEM], target_agent_id=target)["items"][0]["status"] == "pending"
+        if phase == "running":
+            assert entered.wait(2)
+        elif phase == "cached":
+            assert ready(service, target_agent_id=target)["text"] == "List the files."
+        invalidate_target(target, change)
+        finish.set()
+        wait_for(lambda: db.conn().execute("SELECT count(*) FROM tool_explanation_jobs").fetchone()[0] == 0)
+        response = service.request(3, [ITEM], target_agent_id=target)["items"][0]
+        assert response["status"] == "disabled" and "text" not in response
+        assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == int(phase == "cached")
+    runs = janitors.list_runs(config["session"])
+    if phase == "queued":
+        assert calls == [] and runs == []
+    elif phase == "running":
+        assert calls == [1] and runs[0]["status"] == "cancelled"
+        assert runs[0]["demand_result"] is None
+    else:
+        assert calls == [1] and runs[0]["status"] == "completed"
+
+
+def test_paused_scoped_owner_does_not_block_other_targets_or_release_fences():
+    pause(seed())
+    targets = [agents.create_agent(persona=name, voice_id="", cwd="/tmp", session=name)
+               for name in ["target-a", "target-b"]]
+    configs = [scoped_owner(f"scoped-{index}", [target]) for index, target in enumerate(targets)]
+    calls = []
+    def capture(level, items):
+        calls.append(items)
+        return translate(level, items)
+    with tool_explanations.ToolExplanations(translate=capture, debounce=.15) as service:
+        service.request(3, [ITEM], target_agent_id=targets[0])
+        service.request(3, [{**ITEM, "demand_id": "other-view"}], target_agent_id=targets[1])
+        pause(configs[0])
+        assert ready(service, {**ITEM, "demand_id": "other-view"}, target_agent_id=targets[1])["text"] == "List the files."
+        assert service.request(3, [ITEM], target_agent_id=targets[0])["items"][0]["status"] == "disabled"
+        service.request(3, [], release=["view"], target_agent_id=targets[0])
+        assert service.request(3, [ITEM], target_agent_id=targets[0])["items"][0]["status"] == "cancelled"
+    assert len(calls) == 1
+    assert janitors.list_runs(configs[0]["session"]) == []
+    assert len(janitors.list_runs(configs[1]["session"])) == 1
