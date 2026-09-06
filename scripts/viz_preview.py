@@ -5,6 +5,7 @@ import functools
 import pathlib
 import sqlite3
 import sys
+from urllib.parse import unquote, urlsplit
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -43,6 +44,9 @@ def main():
             self.end_headers()
             self.wfile.write(body)
 
+        def do_HEAD(self):
+            self.send_error(405)
+
         def do_GET(self):
             if self.path.split('?')[0] == '/viz/events':
                 try:
@@ -52,6 +56,9 @@ def main():
             elif self.path == '/viz':
                 self._send(200, (ROOT / 'static/viz.html').read_bytes(), 'text/html')
             elif self.path.startswith('/static/'):
+                target=(ROOT/unquote(urlsplit(self.path).path).lstrip('/')).resolve()
+                if not target.is_relative_to((ROOT/'static').resolve()) or not target.is_file():
+                    return self.send_error(404)
                 super().do_GET()
             else:
                 self.send_error(404)
