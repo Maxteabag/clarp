@@ -310,6 +310,7 @@ def iter_normalize(rows: Iterable[Any], names: dict[str, str], library: dict | N
         from .viz_world import evidence
         fact = evidence(tool, inp, path, target, verb)
         if data.get('native') and data.get('action'):fact['action']=data['action']
+        elif data.get('native') and tool=='Bash' and fact['action']=='unknown':fact['action']='execute'
         fact['location_basis']=data.get('location_basis','recorded tool input')
         if data.get('pending_tool'):fact['scope']='invocation'
         finished=data.get('finished_at')

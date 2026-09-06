@@ -37,7 +37,7 @@ module.exports.render=({ctx:c,scene={},time=0,width=1200,height=800,camera={},pl
  for(const r of m.rooms){box(c,r.x-5,r.y+8,r.w+10,r.h,26,'#152c34');box(c,r.x,r.y,r.w,r.h,22,r.kind==='remote'?'#292c41':'#1b343b',r.color+'70');
   text(c,r.label,r.x+22,r.y+33,24,r.color,'Georgia');fitted(c,r.path||r.url,r.x+22,r.y+54,r.w-44,10,muted,'monospace');line(c,r.x+22,r.y+72,r.x+r.w-22,r.y+72,r.color+'35');
   if(r.kind==='remote')text(c,'Remote repository',r.x+22,r.y+107,12,muted);
-  else if(!r.items?.length)text(c,'Workspace known · individual target may be unrecorded',r.x+22,r.y+118,11,muted);
+  else if(!r.items?.length)text(c,'Workspace known · individual target may be unrecorded',r.x+22,r.y+r.h-16,11,muted);
   hit({...r,h:72});
  }
  for(const d of m.directories){box(c,d.x,d.y,d.w,d.h,12,'#112930',d.color+'25');fitted(c,d.label,d.x+12,d.y+22,d.w-24,11,d.color,'monospace');hit({...d,h:30});}
