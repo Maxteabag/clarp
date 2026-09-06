@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import uuid
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -48,6 +49,42 @@ def test_create_dry_run_is_offline_and_always_paused(capsys):
     assert json.loads(capsys.readouterr().out)["body"] == {"session": "sam", "template_id": "task-labels"}
     with pytest.raises(SystemExit, match="unsupported configuration fields: enabled"):
         invoke(["janitor", "create", "--agent", "sam", "--config", '{"enabled":true}'])
+
+
+def test_new_creation_emits_recoverable_uuid_before_sending(capsys):
+    args = admin.parser().parse_args(["janitor", "create", "--name", "Sam", "--backend", "codex", "--cwd", "/tmp"])
+    calls = []
+
+    def request(method, path, body=None):
+        emitted = json.loads(capsys.readouterr().err)
+        assert emitted["request_id"] == body["request_id"]
+        assert str(uuid.UUID(body["request_id"])) == body["request_id"]
+        calls.append(body)
+        return {"janitor": {"session": "sam", "enabled": False}}
+
+    janitor_cli.execute(args, request)
+    assert len(calls) == 1
+
+
+def test_new_creation_retry_and_dry_run_preserve_supplied_request_id(capsys):
+    identifier = "69b634f8-835f-4281-8607-eece6a9d7f9e"
+    command = ["janitor", "create", "--name", "Sam", "--backend", "codex", "--cwd", "/tmp", "--request-id", identifier]
+    assert invoke([*command, "--dry-run"]) == []
+    dry = json.loads(capsys.readouterr().out)["body"]
+    sent = invoke(command)[0][2]
+    assert dry == sent and sent["request_id"] == identifier
+
+
+def test_new_creation_accepts_request_id_in_structured_config(capsys):
+    body = {"name": "Sam", "backend": "codex", "cwd": "/tmp", "request_id": "69b634f8-835f-4281-8607-eece6a9d7f9e"}
+    assert invoke(["janitor", "create", "--config", json.dumps(body)])[0][2]["request_id"] == body["request_id"]
+
+
+def test_creation_rejects_invalid_uuid_and_conversion_does_not_use_new_identity_ledger():
+    with pytest.raises(SystemExit, match="must be a UUID"):
+        invoke(["janitor", "create", "--name", "Sam", "--backend", "codex", "--cwd", "/tmp", "--request-id", "not-a-uuid"])
+    with pytest.raises(SystemExit, match="only for creating a new identity"):
+        invoke(["janitor", "create", "--agent", "sam", "--request-id", "69b634f8-835f-4281-8607-eece6a9d7f9e"])
 
 
 def test_structured_configuration_preserves_literal_shell_metacharacters(tmp_path):

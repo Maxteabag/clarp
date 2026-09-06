@@ -35,6 +35,14 @@ inspect the current configuration and obtain renewed intent for any changed scop
 `remove` archives the setup and retains identity and run history; it is not a
 conversation-history deletion command.
 
+New identity creation requires `--name NAME --backend BACKEND --cwd PATH`.
+The CLI generates one UUID request ID and prints it before sending. If delivery
+is ambiguous, repeat the identical creation input with `--request-id THAT_UUID`;
+never retry without the original ID or reuse it for changed settings. Supply an
+ID before `--dry-run` when the subsequent real request must match that preview.
+Structured creation JSON may also contain `request_id`. Existing-session
+conversion does not use this new-identity creation ledger.
+
 For structured configuration use `--config @configuration.json`; `--scope` also
 accepts JSON or `@file`. `configure` accepts `template_id`, `scope`, `attachments`,
 `model`, and `effort`. Scope uses stable agent IDs, with empty `agent_ids` meaning

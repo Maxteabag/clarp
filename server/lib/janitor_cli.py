@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+import uuid
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote
@@ -50,7 +52,7 @@ def _configuration(args, *, create=False) -> dict:
     body = dict(getattr(args, "config", None) or {})
     allowed = {"template_id", "scope", "attachments", "model", "effort"}
     if create:
-        allowed |= {"name", "backend", "cwd", "session"}
+        allowed |= {"name", "backend", "cwd", "session", "request_id"}
     unknown = body.keys() - allowed
     if unknown:
         raise ValueError("unsupported configuration fields: " + ", ".join(sorted(unknown)))
@@ -100,6 +102,19 @@ def _execute(args, request) -> int:
             if not body.get("session") and not all(body.get(k) for k in ("name", "backend", "cwd")):
                 raise ValueError("provide --agent or all of --name, --backend and --cwd")
         body.setdefault("template_id", "task-labels")
+        supplied_id = args.request_id if args.request_id is not None else body.get("request_id")
+        if body.get("session"):
+            if supplied_id is not None:
+                raise ValueError("--request-id is only for creating a new identity; conversion uses its existing session")
+        else:
+            try:
+                request_id = str(uuid.UUID(supplied_id)) if supplied_id is not None else str(uuid.uuid4())
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError("request_id must be a UUID") from exc
+            body["request_id"] = request_id
+            # Persist a recoverable key in command output even if the HTTP
+            # response is lost. Retrying requires this key AND identical input.
+            print(json.dumps({"request_id": request_id}), file=sys.stderr, flush=True)
         _emit(_send(args, request, "POST", "/janitors", body))
     elif cmd in {"run-context", "review"}:
         path = "/janitor-runs/" + quote(args.run_id, safe="")
@@ -187,6 +202,7 @@ def add_parsers(sub, handler) -> None:
         create.add_argument("--" + name)
     create.add_argument("--config", type=json_object, help="JSON or @file")
     create.add_argument("--scope", type=json_object, help="JSON or @file")
+    create.add_argument("--request-id", help="Stable UUID for retrying the same new-agent creation")
     create.add_argument("--paused", action="store_true", help="Explicit spelling of the default")
     create.add_argument("--dry-run", action="store_true")
     context = commands.add_parser("run-context", help="Read bounded evidence for an admitted run")
