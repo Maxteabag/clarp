@@ -5,13 +5,15 @@ same toggle appears in each conversation's menu. Default is streaming, and
 switching modes does not discard transcript rows or change agent execution.
 
 The final-reply rule matches iOS `AnswerPresentationPolicy`: provisional
-assistant rows explicitly marked `kind=live` are withheld until the Host
+assistant text explicitly marked `kind=live` is withheld until the Host
 publishes an authoritative final row. Do not guess completion from punctuation,
 a quiet stream, or a timer. Final messages and errors stay visible even if the
 agent goes on to do more work. User messages remain immediate.
 
-The desktop quiet presentation additionally hides tool/activity rows and tool
-metadata and shows three animated typing dots while the agent is thinking,
+Tool calls, activity metadata and explanations remain available while answer
+text is withheld, controlled independently by the activity detail setting.
+Live rows containing activity stay mounted with an empty answer body, preserving
+viewport-driven explanation requests. The desktop shows three animated typing dots while the agent is thinking,
 using a tool, or compacting. Waiting, interruption, completion, and disconnection
 stop that indicator. The sidebar uses the Host snapshot’s `last_completed_message`
 field in this mode and keeps it visible alongside the separate typing label.
@@ -24,7 +26,7 @@ working directory; it never substitutes potentially unfinished text.
 It retains message-ID lookup for scroll anchoring and only signals visible
 appends. Conversation identity changes explicitly reset follow intent, while
 refreshes within a conversation preserve the anchor. Hidden live rows do not
-create text delegates or emit visible text changes.
+create answer text delegates. Activity-bearing rows can still update independently.
 
 Verification:
 
@@ -34,7 +36,7 @@ QT_FORCE_STDERR_LOGGING=1 ctest --test-dir desktop/build/release \
 ```
 
 The model test checks hidden live updates, returning to streaming, final
-publication, activity filtering, canonical retention and settings persistence.
+publication, activity retention, canonical retention and settings persistence.
 The isolated `clarp-desktop-ready-reply` lane checks actual TextEdit content,
 visible typing dots, and final reply arrival. It writes `capture.png.typing.png`
 before completion and `capture.png` afterward, under

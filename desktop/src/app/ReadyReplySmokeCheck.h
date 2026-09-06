@@ -21,9 +21,11 @@ inline void startReadyReplySmokeCheck(QGuiApplication& application, QQuickWindow
             }
             return result;
         }();
-        bool typing = false, partial = false, final = false;
+        bool typing = false, partial = false, final = false, tool = false;
         for (const auto* item : items) {
             if (item->objectName() == QStringLiteral("replyTypingIndicator") && item->isVisible()) typing = true;
+            if (item->objectName() == QStringLiteral("toolCard") && item->isVisible()
+                && item->property("summary").toString() == QStringLiteral("Search project files")) tool = true;
             if (item->objectName() == QStringLiteral("messageTextBlock")) {
                 partial = partial || item->property("text").toString().contains(QStringLiteral("Provisional secret reply"));
                 final = final || item->property("text").toString().contains(QStringLiteral("Finished answer"));
@@ -41,7 +43,10 @@ inline void startReadyReplySmokeCheck(QGuiApplication& application, QQuickWindow
             model->applyLog({{QStringLiteral("conversation_id"), model->conversationId()},
                 {QStringLiteral("turns"), QJsonArray{QJsonObject{
                     {QStringLiteral("id"), QStringLiteral("ready-reply")}, {QStringLiteral("role"), QStringLiteral("assistant")},
-                    {QStringLiteral("kind"), kind}, {QStringLiteral("text"), text}, {QStringLiteral("revision"), revision}}}},
+                    {QStringLiteral("kind"), kind}, {QStringLiteral("text"), text}, {QStringLiteral("revision"), revision},
+                    {QStringLiteral("tools"), QJsonArray{QJsonObject{
+                        {QStringLiteral("name"), QStringLiteral("Bash")},
+                        {QStringLiteral("summary"), QStringLiteral("Search project files")}}}}}}},
                 {QStringLiteral("latest_revision"), revision}}, clarp::ConversationModel::LoadKind::Delta);
         };
         switch (step++) {
@@ -51,13 +56,13 @@ inline void startReadyReplySmokeCheck(QGuiApplication& application, QQuickWindow
             controller->agents()->applyStateEvent({{QStringLiteral("session"), session}, {QStringLiteral("kind"), QStringLiteral("thinking")}, {QStringLiteral("ts"), 4'000'000'000'000LL}});
             break;
         case 1:
-            if (!require(typing && !partial && model->indexOfMessage(QStringLiteral("ready-reply")) >= 0)) return;
+            if (!require(typing && !partial && tool && model->indexOfMessage(QStringLiteral("ready-reply")) >= 0)) return;
             if (!require(window->grabWindow().save(screenshotPath + QStringLiteral(".typing.png")))) return;
             update(QStringLiteral("assistant"), QStringLiteral("Finished answer"), 1001);
             controller->agents()->applyStateEvent({{QStringLiteral("session"), session}, {QStringLiteral("kind"), QStringLiteral("done")}, {QStringLiteral("ts"), 4'000'000'000'001LL}});
             break;
         default:
-            if (!require(!typing && !partial && final)) return;
+            if (!require(!typing && !partial && final && tool)) return;
             window->setProperty("readyReplyVerified", true);
             timer->stop();
         }
