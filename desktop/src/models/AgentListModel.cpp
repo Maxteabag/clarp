@@ -199,6 +199,7 @@ void AgentListModel::applySnapshot(const QJsonObject& snapshot) {
         }
         beginRemoveRows({}, row, row);
         m_agents.removeAt(row);
+        rebuildIndex(); // Synchronous row observers must see the new index.
         endRemoveRows();
         structureChanged = true;
     }
@@ -210,6 +211,7 @@ void AgentListModel::applySnapshot(const QJsonObject& snapshot) {
         if (currentRow < 0) {
             beginInsertRows({}, desiredRow, desiredRow);
             m_agents.insert(desiredRow, next.at(desiredRow));
+            rebuildIndex();
             endInsertRows();
             structureChanged = true;
             rebuildIndex();
@@ -219,6 +221,7 @@ void AgentListModel::applySnapshot(const QJsonObject& snapshot) {
             const int destination = currentRow < desiredRow ? desiredRow + 1 : desiredRow;
             beginMoveRows({}, currentRow, currentRow, {}, destination);
             m_agents.move(currentRow, desiredRow);
+            rebuildIndex();
             endMoveRows();
             structureChanged = true;
             rebuildIndex();
@@ -328,8 +331,8 @@ bool AgentListModel::recordOutgoingActivity(const QString& session) {
     if (row > 0) {
         beginMoveRows({}, row, row, {}, 0);
         m_agents.move(row, 0);
-        endMoveRows();
         rebuildIndex();
+        endMoveRows();
     }
     return true;
 }
