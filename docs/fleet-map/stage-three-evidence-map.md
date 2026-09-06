@@ -16,7 +16,7 @@ Replay window: `/viz?view=flow&window=7200&until=<now>` while it is active.
 | GitHub (remote) | push events with a configured origin; `workflow_run` artifacts | delivery; remote checks | explicit push record; conclusions only once evidenced |
 | Host update (global Clarp server) | background job `host-update-10e53d0c54c4`, kind server-update, succeeded | wait on the Host boundary → released | explicit job record |
 | Mac test lane | jobs `papercuts-html-form-*-watch`, kind external_test_watch, succeeded | waits on a test lane → released | explicit job records |
-| GitHub Actions verification | jobs `html-form-testflight-3404…`, kind github-workflow, one succeeded, one running | wait → released; wait still open | explicit job records; running = waiting, never inferred from silence |
+| GitHub Actions verification | jobs `html-form-testflight-3404…`, kind github-workflow, one succeeded, one running | wait → released; wait still open | explicit job records; awaiting recorded job outcome; dependency not established |
 | Owner | pending decisions (`artifact_decisions`) when present | wait on the owner | explicit record with blocks_progress |
 
 What is **not** recorded and therefore not drawn: that Theo's merge caused the
@@ -50,3 +50,18 @@ of the release. Nothing claims the release failed or succeeded.
 - Host updates and service restarts are recorded as jobs or compound shell
   operations; a deployment artifact type exists but is rarely written. When it
   is, it will appear as a lantern outcome and a release at the Host post.
+
+
+## Integration qualifications
+
+An open job is awaiting its recorded outcome; it is not automatically a dependency
+that blocks an agent or a plan. Only explicitly blocking owner decisions appear as
+owner waits. Nonblocking questions are omitted from that representation. A generic
+release remains a Release boundary unless its recorded title or metadata identifies
+TestFlight. Expired and cancelled tracking retains a slashed hollow ring, distinct
+from a confirmed job failure or completion.
+
+Historical routes retain at most 128 distinct observations per route and 200 routes
+per browser. Counts refer to those retained observations, filtered by replay time,
+not an all-time total. Job observation identity includes agent and generation start
+so distinct tracked runs are not collapsed by a reused job name.
