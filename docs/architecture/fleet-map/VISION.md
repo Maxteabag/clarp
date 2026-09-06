@@ -65,3 +65,14 @@ Make independent artistic decisions. A folder, service, project and working copy
 may call for different mechanisms. No single metric or hierarchy must dictate
 size or placement. Show completed traces as traces, running work as running work,
 and uncertainty honestly. Existing blandness is not a concept to preserve.
+
+
+The work itself is now visible (0012). A recorded plan becomes one persistent
+object that grows from a declared intent through attributed evidence into a
+recorded outcome, and can show the actual resulting artifact when provenance
+supports it. Intent, evidence and outcome remain separate facts; attribution is
+labeled, unknowns are stated, and nothing is inferred from tool counts. Failures
+interrupt visibly until an evidenced rerun resolves them; finished work dims and
+settles in place. Belonging, discovery, delivery and explicit collaboration are
+told apart by form and motion, and a message that names a plan can carry that
+work between agents.

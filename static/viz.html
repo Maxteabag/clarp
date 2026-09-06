@@ -35,6 +35,7 @@
     background:#141b26f5; border:1px solid #34455d; border-radius:10px; }
   #inspector b { display:block; margin:5px 25px 10px 0; overflow-wrap:anywhere; }
   #inspector p { color:#a9b9ce; white-space:pre-wrap; overflow-wrap:anywhere; }
+  #node-link { display:inline-block; margin:0 0 10px; color:#e4cf9a; }
   #close-inspector { float:right; }
   #redesign { width:100%; }
   #transport,#timeline { display:contents; }
@@ -78,7 +79,7 @@
 </style>
 <canvas id="c" aria-label="Live fleet activity map"></canvas>
 <div id="hud"><a href="/" aria-label="Back to Clarp">← Clarp</a><b>Living atlas</b><span id="stat">loading…</span><span id="learning"></span><nav id="view-switch" aria-label="Fleet view"><button id="view-flow" aria-pressed="false">Flow</button><button id="view-world" aria-pressed="true">World</button><button id="view-cabinets" aria-pressed="false">Agent cabinets</button></nav></div>
-<div id="legend"><span class="desktop-hint">A living world of work<br><small>scroll to enter · drag to travel</small></span><span class="touch-hint">Pinch to zoom · drag to explore</span></div><aside id="inspector" hidden><button id="close-inspector" aria-label="Close details">×</button><b id="node-title"></b><p id="node-detail"></p><button id="redesign">Improve this detail</button><p id="design-result" role="status"></p></aside>
+<div id="legend"><span class="desktop-hint">A living world of work<br><small>scroll to enter · drag to travel</small></span><span class="touch-hint">Pinch to zoom · drag to explore</span></div><aside id="inspector" hidden><button id="close-inspector" aria-label="Close details">×</button><b id="node-title"></b><p id="node-detail"></p><a id="node-link" hidden target="_blank" rel="noopener"></a><button id="redesign">Improve this detail</button><p id="design-result" role="status"></p></aside>
 <div id="bar">
   <div id="transport" role="group" aria-label="Map controls">
   <button id="live" aria-pressed="true">live</button>

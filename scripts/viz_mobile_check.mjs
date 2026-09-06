@@ -50,11 +50,28 @@ try{
   await page.touchscreen.tap(target.x,target.y);assert(await page.locator('#inspector').isVisible());
   const inspector=await page.locator('#inspector').boundingBox();assert(inspector.x>=0&&inspector.x+inspector.width<=viewport.width);
   await page.screenshot({path:`${out}/${viewport.width}-details.png`});await page.locator('#close-inspector').click();
+  // Work slates are tappable on a phone too, and their contract text fits the panel.
+  await page.locator('#flow-demo').click();await page.waitForTimeout(600);
+  await page.locator('#t').evaluate(el=>{el.value=39.5/52*1000;el.dispatchEvent(new Event('input'));});await page.waitForTimeout(400);
+  const slateHit=await page.evaluate(()=>{const s=window.fleetWorldSnapshot(),c=s.camera,w=s.meta.workObjects.find(o=>o.stage==='outcome'&&!o.id.startsWith('artifact:'));if(!w)return null;
+   const zoom=Math.max(1,220/(w.w*c.k));return {x:w.x,y:w.y,zoom,stage:w.stage,preview:w.preview};});
+  assert(slateHit&&slateHit.preview,'demo outcome slate with synthetic preview exists');
+  await page.evaluate(()=>{const s=window.fleetWorldSnapshot();});
+  const focus=await page.evaluate(({x,y,zoom,cx,cy})=>{const s=window.fleetWorldSnapshot();return {sx:x*s.camera.k+s.camera.x,sy:y*s.camera.k+s.camera.y};},{...slateHit,cx:x,cy:y});
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[touch(1,focus.sx-10,focus.sy),touch(2,focus.sx+10,focus.sy)]});
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[touch(1,focus.sx-10*slateHit.zoom,focus.sy),touch(2,focus.sx+10*slateHit.zoom,focus.sy)]});
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await page.waitForTimeout(300);
+  const after=await page.evaluate(({x,y})=>{const s=window.fleetWorldSnapshot();return {sx:x*s.camera.k+s.camera.x,sy:y*s.camera.k+s.camera.y};},slateHit);
+  await page.touchscreen.tap(after.sx,after.sy);await page.waitForTimeout(300);
+  assert(await page.locator('#inspector').isVisible(),'a work slate opens its details on tap');
+  const detail=await page.locator('#node-detail').textContent();assert(detail.includes('Intent:')&&detail.includes('Outcome:'));
+  await page.screenshot({path:`${out}/${viewport.width}-work.png`});await page.locator('#close-inspector').click();
+  await page.locator('#live').click();await page.waitForTimeout(400);
   for(const id of ['flow-demo','flow-labels']){
    await page.locator('#'+id).scrollIntoViewIfNeeded();const b=await page.locator('#'+id).boundingBox();assert(b.height>=44);assert(b.x>=0&&b.x+b.width<=viewport.width);
   }
   await context.close();
  }
- assert.deepEqual(errors,[]);await fs.writeFile(out+'/verification.json',JSON.stringify({results,touchPan:true,pinchAnchor:true,tapInspection:true,errors},null,2));
- console.log('Mobile portrait, small phone, landscape, all views, real touch pan/pinch/tap passed.');
+ assert.deepEqual(errors,[]);await fs.writeFile(out+'/verification.json',JSON.stringify({results,touchPan:true,pinchAnchor:true,tapInspection:true,workSlateTap:true,errors},null,2));
+ console.log('Mobile portrait, small phone, landscape, all views, real touch pan/pinch/tap and work slate inspection passed.');
 }finally{await browser.close();}
