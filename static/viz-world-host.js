@@ -1,6 +1,8 @@
 // Small transport/camera shell. All visual semantics live in replaceable source.
 import {SourceSandbox} from '/static/lib/viz-source-sandbox.js';
 import {AvatarCache} from '/static/lib/viz-avatar-cache.js';
+import {FlowMemory} from '/static/lib/viz-flow-memory.js';
+import {flowDemo} from '/static/lib/viz-flow-demo.js';
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
 const stat=document.getElementById('stat'),learning=document.getElementById('learning');
 const slider=document.getElementById('t'),liveButton=document.getElementById('live');
@@ -16,12 +18,18 @@ function fitView(initial=false){
   const b=initial?(meta.focusBounds||meta.bounds):meta.bounds;if(!b)return;camera.k=Math.min((width-100)/b.w,(height-230)/b.h);
   camera.x=(width-b.w*camera.k)/2-b.x*camera.k;camera.y=175-b.y*camera.k;
 }
-let worldBase=null,cabinetBase=null,lastData=null;
+let worldBase=null,cabinetBase=null,flowBase=null,lastData=null,liveScene=null;
+let demoEnabled=false,demoScene=null,demoStart=0,flowScene=null;
+const flowMemory=new FlowMemory();
+const demoButton=document.getElementById('flow-demo'),labelsButton=document.getElementById('flow-labels');
+let actionLabels=false;
 let view='world';
-try{if(localStorage.getItem('clarp.fleet.view')==='cabinets')view='cabinets';}catch{}
-const cameras={world:{...camera},cabinets:{...camera}};
+try{const saved=localStorage.getItem('clarp.fleet.view');if(['cabinets','flow'].includes(saved))view=saved;}catch{}
+const requestedView=new URLSearchParams(location.search).get('view');
+if(['world','cabinets','flow'].includes(requestedView))view=requestedView;
+const cameras={world:{...camera},cabinets:{...camera},flow:{...camera}};
 function selectProgram(data){
-  const next=view==='cabinets'?cabinetBase:(data?.program||worldBase);
+  const next=view==='flow'?flowBase:view==='cabinets'?cabinetBase:(data?.program||worldBase);
   const key=view+':'+JSON.stringify(next);
   if(key===signature)return;
   failure='';recoveryAttempts=0;
@@ -30,17 +38,24 @@ function selectProgram(data){
   use(next);signature=key;
 }
 function selectView(next){
-  if(!worldBase||!cabinetBase)return;
+  if(!worldBase||!cabinetBase||!flowBase)return;
   cameras[view]={...camera};view=next;camera={...cameras[view]};
-  base=view==='cabinets'?cabinetBase:worldBase;
+  base=view==='flow'?flowBase:view==='cabinets'?cabinetBase:worldBase;
+  if(demoEnabled){demoEnabled=false;demoButton.ariaPressed='false';live=true;playing=false;liveButton.ariaPressed='true';}
+  if(liveScene)scene=view==='flow'?(flowScene||liveScene):liveScene;
+  demoButton.hidden=labelsButton.hidden=view!=='flow';
+  learning.textContent=view==='flow'?'Flow prototype · live activity · select a workspace to focus':lastData?.learning?.enabled?'Autonomous development on':'Preview · autonomous development off';
   programHistory=[];signature='';selected=null;
   document.getElementById('inspector').hidden=true;
+  document.getElementById('view-flow').ariaPressed=String(view==='flow');
   document.getElementById('view-world').ariaPressed=String(view==='world');
   document.getElementById('view-cabinets').ariaPressed=String(view==='cabinets');
   document.getElementById('redesign').hidden=view!=='world';
   try{localStorage.setItem('clarp.fleet.view',view);}catch{}
+  const viewURL=new URL(location.href);viewURL.searchParams.set('view',view);history.replaceState(null,'',viewURL);
   selectProgram(lastData);
 }
+document.getElementById('view-flow').onclick=()=>selectView('flow');
 document.getElementById('view-world').onclick=()=>selectView('world');
 document.getElementById('view-cabinets').onclick=()=>selectView('cabinets');
 function size(){width=innerWidth;height=innerHeight;canvas.width=width;canvas.height=height;}
@@ -89,22 +104,22 @@ async function init(){
     const files=Object.fromEntries(await Promise.all(manifest.files.map(async n=>[n,await(await fetch(root+'/'+n)).text()])));
     return {...manifest,files};
   }
-  [worldBase,cabinetBase]=await Promise.all([readProgram('/static/viz-world'),readProgram('/static/viz-cabinets')]);
+  [worldBase,cabinetBase,flowBase]=await Promise.all([readProgram('/static/viz-world'),readProgram('/static/viz-cabinets'),readProgram('/static/viz-flow')]);
   selectView(view);await load();
 }
 async function load(){
   if(loading||width<900||height<600)return;loading=true;
   try{
     const response=await fetch('/viz/events?window=3600');if(!response.ok)throw Error('Fleet data unavailable');
-    const data=await response.json();scene=data.world;revision=data.library_revision;
+    const data=await response.json();liveScene=data.world;flowScene=flowMemory.update(liveScene);
+    if(!demoEnabled)scene=view==='flow'?flowScene:liveScene;revision=data.library_revision;
     lastData=data;selectProgram(data);
     avatarCache.update(data.actors||[]);
-    tmin=scene.events[0]?.ts||Date.now();tmax=Math.max(Date.now(),scene.events.at(-1)?.ts||0);
-    if(live)playhead=tmax;
+    if(!demoEnabled){tmin=scene.events[0]?.ts||Date.now();tmax=Math.max(Date.now(),scene.events.at(-1)?.ts||0);if(live)playhead=tmax;}
     if(!failure){
       const state=data.learning||{};
       const rejected=state.last_result?.rejected?.[0]?.error;
-      learning.textContent=state.designing ? (state.stage||'Astra is developing')+'…' :
+      learning.textContent=demoEnabled?'Workflow demo · synthetic sequence, not live activity':view==='flow'?'Flow prototype · live activity · select a workspace to focus':state.designing ? (state.stage||'Astra is developing')+'…' :
         rejected ? 'Development paused: '+rejected :
         state.enabled ? 'Autonomous development on · watching for new entities' :
         'Preview · autonomous development off';
@@ -114,17 +129,29 @@ async function load(){
 }
 function frame(now){
   const dt=Math.min(now-last,100);last=now;
-  if(live)playhead=Date.now();else if(playing){playhead=Math.min(tmax,playhead+dt*120);if(playhead===tmax)playing=false;}
+  if(demoEnabled&&playing){playhead+=dt;if(playhead>demoStart+41000)playhead=demoStart;}
+  else if(live)playhead=Date.now();else if(playing){playhead=Math.min(tmax,playhead+dt*120);if(playhead===tmax)playing=false;}
   slider.value=String(1000*(playhead-tmin)/Math.max(1,tmax-tmin));
   document.getElementById('clock').textContent=new Date(playhead).toLocaleTimeString();
-  if(width>=900&&height>=600&&scene.entities.length)sandbox?.draw({scene,time:now,width,height,camera,playhead,interaction:{selected},reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches});
+  if(width>=900&&height>=600&&scene.entities.length)sandbox?.draw({scene,time:now,width,height,camera,playhead,interaction:{selected,actionLabels},reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches});
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);init();setInterval(()=>{if(live)load();},5000);
 function replay(){live=false;liveButton.ariaPressed='false';}
-liveButton.onclick=()=>{live=true;playing=false;liveButton.ariaPressed='true';load();};
+liveButton.onclick=()=>{demoEnabled=false;demoButton.ariaPressed='false';if(liveScene)scene=view==='flow'?flowScene:liveScene;live=true;playing=false;liveButton.ariaPressed='true';load();};
 slider.oninput=()=>{replay();playing=false;playhead=tmin+(tmax-tmin)*Number(slider.value)/1000;};
 document.getElementById('play').onclick=()=>{replay();if(playhead>=tmax-1000)playhead=tmin;playing=!playing;};
+demoButton.onclick=()=>{
+  demoEnabled=!demoEnabled;demoButton.ariaPressed=String(demoEnabled);selected=null;
+  if(demoEnabled){
+    demoStart=Date.now();demoScene=flowDemo(demoStart);scene=demoScene;tmin=demoStart;tmax=demoStart+41000;playhead=tmin;
+    live=false;playing=true;liveButton.ariaPressed='false';
+    learning.textContent='Workflow demo · synthetic sequence, not live activity';
+  }else{scene=flowScene||liveScene;live=true;playing=false;liveButton.ariaPressed='true';load();}
+  // Reset only the prototype renderer's context selection for a different dataset.
+  fittedViews.delete('flow');programHistory=[];signature='';selectProgram(lastData);
+};
+labelsButton.onclick=()=>{actionLabels=!actionLabels;labelsButton.ariaPressed=String(actionLabels);};
 document.getElementById('fit').onclick=()=>fitView();
 
 canvas.onpointerdown=e=>{drag={x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY};canvas.setPointerCapture(e.pointerId);};
@@ -145,4 +172,4 @@ document.getElementById('redesign').onclick=async()=>{
  const r=await fetch('/viz/supersede',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({world:true,revision,entity_id:selected,reason:'Improve only this selected detail where needed. Keep the Lantern Works concepts, unaffected interactions, layout conventions and visual language. Prefer a compatible expansion or targeted repair; this is not a request for a redesign.'})});
  document.getElementById('design-result').textContent=r.ok?'Astra is improving this detail…':'Could not start development';
 };
-window.fleetWorldSnapshot=()=>({frames,revision,view,live,playing,playhead,timeline:{since:tmin,until:tmax},camera:{...camera},failure,program:program?.title,frameTimings:lastFrameTimings,meta,scene});
+window.fleetWorldSnapshot=()=>({frames,revision,view,demoEnabled,actionLabels,live,playing,playhead,timeline:{since:tmin,until:tmax},camera:{...camera},failure,program:program?.title,frameTimings:lastFrameTimings,meta,scene});

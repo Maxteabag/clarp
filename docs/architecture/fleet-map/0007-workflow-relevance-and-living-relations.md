@@ -119,3 +119,21 @@ not only a zoomed-out screenshot. Keep previous versions available.
 
 This direction should guide compatible expansions and deliberate focused
 experiments. It does not repeal 0002 or authorize spontaneous global redesigns.
+
+
+## First authorized prototype
+
+Peter approved building the initial compact workflow trial. It is offered as the
+optional **Flow** view; World and Agent cabinets remain available. The prototype
+focuses a workspace, shows nearby files with local interaction effects, nests
+GitHub repositories inside their observed owners, and retains browser-local
+structural relationship/touch memory. Quiet workspaces are compact and selectable.
+Action labels are optional and initially hidden.
+
+A separately labeled, synthetic Workflow demo exercises two roles through reading,
+editing, a failed test, repair, successful testing, creation, deletion, commit and
+push. It never enters the Host activity stream or invokes the learning pipeline.
+The chosen layouts, focus limits and animation encodings are prototype choices,
+not new permanent artistic constraints. Evaluate clarity and usefulness before
+promoting or extending the view. Automatic source evolution still targets World;
+it does not silently rewrite this experiment or replace other views.

@@ -332,3 +332,25 @@ The regular world/browser checks still cover both views, avatars and isolation.
 Native completion details become available when the provider records them;
 while an orchestration call is pending, only its invocation context is known and
 its destination is labeled pending. Historical cwd is never taken from agents.cwd.
+
+
+### Flow prototype (ADR 0007)
+
+`static/viz-flow/` contains an optional compact workflow lens alongside World and
+Agent cabinets. Open `/viz?view=flow`. The browser remembers the selected view.
+Actual activity is the default dataset. Workflow demo is a clearly labeled,
+client-local synthetic sequence; Live restores real activity. Action labels are
+optional. Avatars reach toward nearby files, while local effects distinguish
+reading, edits, tests, confirmed creation/deletion and transfers.
+
+GitHub remotes are grouped by observed owner. `FlowMemory` stores a bounded set
+of observed structural relations and repeated file touches in browser localStorage,
+partitioned by Host. Historical entities are marked as such; touch traces do not
+invent handoffs, causal dependencies or transfers. Demo data bypasses this store.
+The full filesystem detail remains in World; the prototype exposes a selected
+workspace and compact nearby context rather than permanently expanding every file.
+
+`node scripts/viz_flow_check.mjs URL OUTPUT_DIR` records visual proof and checks
+owner containment, distinct action states with labels hidden, settled avatars,
+demo isolation, selection persistence and preservation of both prior views.
+`tests/state/viz-flow.test.js` covers relation persistence and touch deduplication.

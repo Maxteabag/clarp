@@ -93,7 +93,7 @@ def main():
                     self._send(200,path.read_bytes(),mimetypes.guess_type(str(path))[0] or 'application/octet-stream')
                 finally:
                     db.close_local()
-            elif self.path == '/viz':
+            elif urlsplit(self.path).path == '/viz':
                 self._send(200, (ROOT / 'static/viz.html').read_bytes(), 'text/html')
             elif self.path.startswith('/static/'):
                 target=(ROOT/unquote(urlsplit(self.path).path).lstrip('/')).resolve()
