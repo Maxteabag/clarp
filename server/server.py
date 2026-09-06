@@ -761,6 +761,10 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/notification-avatars/"):
             return self._handle_notification_avatar(
                 path[len("/notification-avatars/"):].strip("/"))
+        if path.startswith("/viz/owner-avatar/"):
+            from lib.viz_owner_avatar import portrait
+            result=portrait(unquote(path[len("/viz/owner-avatar/"):]))
+            return self._send(200,*result) if result else self._send(404,b"not found")
         if path.startswith("/avatars/"):
             return self._handle_agent_avatar(path[len("/avatars/"):].strip("/"))
         if path.startswith("/persona-avatars/"):

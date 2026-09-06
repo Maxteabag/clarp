@@ -44,7 +44,7 @@ function selectView(next){
   if(demoEnabled){demoEnabled=false;demoButton.ariaPressed='false';live=true;playing=false;liveButton.ariaPressed='true';}
   if(liveScene)scene=view==='flow'?(flowScene||liveScene):liveScene;
   demoButton.hidden=labelsButton.hidden=view!=='flow';
-  learning.textContent=view==='flow'?'Flow prototype · live activity · select a workspace to focus':lastData?.learning?.enabled?'Autonomous development on':'Preview · autonomous development off';
+  learning.textContent=view==='flow'?'Live activity':lastData?.learning?.enabled?'Autonomous development on':'Preview · autonomous development off';
   programHistory=[];signature='';selected=null;
   document.getElementById('inspector').hidden=true;
   document.getElementById('view-flow').ariaPressed=String(view==='flow');
@@ -114,12 +114,13 @@ async function load(){
     const data=await response.json();liveScene=data.world;flowScene=flowMemory.update(liveScene);
     if(!demoEnabled)scene=view==='flow'?flowScene:liveScene;revision=data.library_revision;
     lastData=data;selectProgram(data);
-    avatarCache.update(data.actors||[]);
+    avatarCache.update([...(data.actors||[]),
+      ...liveScene.entities.filter(e=>e.kind==='organization'&&e.parent==='github').map(e=>({id:e.id,label:e.label,avatar_url:'/viz/owner-avatar/'+encodeURIComponent(e.label)}))]);
     if(!demoEnabled){tmin=scene.events[0]?.ts||Date.now();tmax=Math.max(Date.now(),scene.events.at(-1)?.ts||0);if(live)playhead=tmax;}
     if(!failure){
       const state=data.learning||{};
       const rejected=state.last_result?.rejected?.[0]?.error;
-      learning.textContent=demoEnabled?'Workflow demo · synthetic sequence, not live activity':view==='flow'?'Flow prototype · live activity · select a workspace to focus':state.designing ? (state.stage||'Astra is developing')+'…' :
+      learning.textContent=demoEnabled?'Workflow demo · synthetic sequence, not live activity':view==='flow'?'Live activity':state.designing ? (state.stage||'Astra is developing')+'…' :
         rejected ? 'Development paused: '+rejected :
         state.enabled ? 'Autonomous development on · watching for new entities' :
         'Preview · autonomous development off';

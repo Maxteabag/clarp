@@ -11,6 +11,23 @@ try{
  await page.waitForTimeout(500);const live=await page.evaluate(()=>window.fleetWorldSnapshot());
  assert.equal(live.view,'flow');assert(!live.demoEnabled);assert(!live.failure);
  assert(live.meta.ownerGroups.some(o=>o.children.length));
+ assert(live.meta.githubLogo);
+ const observedAgents=[...new Set(live.scene.events.filter(e=>e.ts<=live.playhead).map(e=>e.agent_id))].sort();
+ assert.deepEqual(live.meta.agents.map(a=>a.id).sort(),observedAgents);
+ for(const repo of live.scene.entities.filter(e=>e.kind==='repository'))assert(live.meta.workspaces.some(w=>w.id===repo.id));
+ assert.equal(new Set(live.meta.workspaces.map(w=>w.rx+':'+w.ry)).size,1);
+ assert.equal(live.meta.focusedRepository,undefined);
+ const workspace=live.meta.workspaces.find(w=>{
+  const y=(w.y-120)*live.camera.k+live.camera.y;return y>160&&y<900;
+ });
+ assert(workspace,'a workspace is visible for inspection');
+ await page.mouse.click((workspace.x-100)*live.camera.k+live.camera.x,(workspace.y-120)*live.camera.k+live.camera.y);
+ await page.waitForTimeout(300);
+ const selected=await page.evaluate(()=>window.fleetWorldSnapshot());
+ assert.deepEqual(selected.camera,live.camera);
+ assert.deepEqual(selected.meta.workspaces,live.meta.workspaces);
+ assert.equal(selected.meta.agents.length,live.meta.agents.length);
+ assert(await page.locator('#inspector').isVisible());
  await page.screenshot({path:out+'/flow-live.png'});
  await page.locator('#flow-demo').click();await page.waitForTimeout(2300);
  const demo=await page.evaluate(()=>window.fleetWorldSnapshot());assert(demo.demoEnabled);assert.equal(demo.scene.host,'Workflow demo');assert(!demo.actionLabels);
@@ -30,6 +47,6 @@ try{
  await page.locator('#view-world').click();await page.waitForFunction(()=>window.fleetWorldSnapshot().meta.title==='The Lantern Works');
  await page.locator('#view-cabinets').click();await page.waitForFunction(()=>window.fleetWorldSnapshot().meta.title==='The Jacquard Observatory');
  assert.deepEqual(errors,[]);assert.deepEqual(posts,[]);
- await fs.writeFile(out+'/verification.json',JSON.stringify({liveEvents:live.scene.events.length,owners:live.meta.ownerGroups,realAvatars:live.meta.loadedAvatars.length,demonstration:'synthetic, client-local',actionLabelsInitiallyHidden:true,distinctActions:true,stableLocalAvatars:true,viewsPreserved:true,posts,errors},null,2));
+ await fs.writeFile(out+'/verification.json',JSON.stringify({liveEvents:live.scene.events.length,owners:live.meta.ownerGroups,realAvatars:live.meta.loadedAvatars.length,overallWorkspaces:live.meta.workspaces.length,overallAgents:live.meta.agents.length,selectionPreservesLayout:true,ownerPortraits:live.meta.ownerPortraits,githubLogo:live.meta.githubLogo,demonstration:'synthetic, client-local',actionLabelsInitiallyHidden:true,distinctActions:true,stableLocalAvatars:true,viewsPreserved:true,posts,errors},null,2));
  console.log('Flow, ownership, lifecycle encodings, demo isolation and all views passed.');
 }finally{await context.close();await browser.close();}
