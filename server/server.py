@@ -325,6 +325,7 @@ class Handler(BaseHTTPRequestHandler):
         "/orchestrator/route-delegation": "_handle_orchestrator_route_delegation",
         "/transcribe": "_handle_transcribe",
         "/transcription/realtime-session": "_handle_scribe_session",
+        "/transcription/live-result": "_handle_scribe_result",
         "/transcription-models/install": "_handle_transcription_model_install",
         "/transcription-models/remove": "_handle_transcription_model_remove",
         "/transcription-guidance": "_handle_transcription_guidance_post",
@@ -1432,6 +1433,34 @@ class Handler(BaseHTTPRequestHandler):
         payload = self._transcription_guidance_payload()
         payload["ok"] = True
         self._send(200, json.dumps(payload).encode(), "application/json")
+
+    def _handle_scribe_result(self):
+        if not getattr(self, "_request_auth_validated", False):
+            return self._reject_unauthorized()
+        from lib import scribe_result, transcription_results
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            if size <= 0 or size > 36 * 1024 * 1024:
+                raise ValueError("invalid request size")
+            self._body_consumed = True
+            body = self.rfile.read(size)
+            if len(body) != size:
+                self.close_connection = True
+                return self._json_error(408, "incomplete live transcript upload")
+            audio, text, job_id, hands_free, fingerprint = scribe_result.parse_result(json.loads(body))
+        except (ValueError, UnicodeDecodeError):
+            return self._json_error(400, "invalid live transcript request")
+        with transcription_results.serialize(job_id):
+            try:
+                cached = transcription_results.load(job_id, fingerprint)
+            except transcription_results.JobIDCollisionError as error:
+                return self._json_error(409, str(error))
+            if cached is not None:
+                cached["cached"] = True
+                return self._json_ok(cached)
+            return self._transcribe_uncached(audio, "audio/wav", hands_free,
+                                             scribe_result.MODEL, job_id, fingerprint,
+                                             live_text=text)
 
     def _handle_scribe_session(self):
         # Unlike ordinary local endpoints, this issues a spend-capable provider
@@ -4362,7 +4391,7 @@ class Handler(BaseHTTPRequestHandler):
                 transcription_id, fingerprint)
 
     def _transcribe_uncached(self, audio_bytes, ctype, hands_free,
-                             requested_model, transcription_id, fingerprint):
+                             requested_model, transcription_id, fingerprint, live_text=None):
         from lib import transcription_results
 
         if getattr(self.ctx.stt, "available", True) is False:
@@ -4378,6 +4407,10 @@ class Handler(BaseHTTPRequestHandler):
                     requested_model = engine
             except Exception as e:  # noqa: BLE001
                 log_exception("sttEngineSettingFail", e)
+        if requested_model == "elevenlabs:scribe_v2_realtime" and live_text is None:
+            # Old clients/recovered WAVs use batch Scribe as an explicit fallback.
+            requested_model = "elevenlabs:scribe_v2"
+        clip_seconds = 0.0
         # Long recordings escalate to the stronger model configured for them.
         # This deliberately overrides a client-pinned model too: the pin says
         # which model handles an ordinary clip, and escalation is the whole
@@ -4392,6 +4425,7 @@ class Handler(BaseHTTPRequestHandler):
                     f"{stt_providers.long_form_threshold_sec()}s → {long_model}"
                     f" (was {requested_model or 'server-default'})")
                 requested_model = long_model
+                live_text = None
         except Exception as e:  # noqa: BLE001 - escalation never blocks STT
             log_exception("sttLongFormRouteFail", e)
         if not requested_model and not self.ctx.stt.ready.is_set():
@@ -4423,7 +4457,11 @@ class Handler(BaseHTTPRequestHandler):
             # Authoritative transcript: wait for the whisper lock rather than
             # 429 — best-effort live-transcription partials must yield to it.
             model_transcribe = getattr(self.ctx.stt, "transcribe_model_bytes", None)
-            if requested_model and callable(model_transcribe):
+            if live_text is not None:
+                text = live_text
+                ends_terminal = live_text.rstrip().endswith((".", "?", "!"))
+                _dur = clip_seconds
+            elif requested_model and callable(model_transcribe):
                 text, ends_terminal, _dur = model_transcribe(
                     requested_model, audio_bytes, ctype, prompt, wait=10.0)
             elif requested_model and requested_model != "server-default":
@@ -4498,7 +4536,8 @@ class Handler(BaseHTTPRequestHandler):
                               "hands_free": hands_free,
                               "orchestrator_skip_herald": skip_herald,
                               "vocab_run_id": vocab_run_id or None,
-                              "stt_latency_ms": latency_ms})
+                              "stt_latency_ms": latency_ms,
+                              "transcript_source": "native_scribe_realtime" if live_text is not None else "host_stt"})
 
         # Blank the text when the utterance was a herald grant/decline so the
         # client's empty-text guard skips dispatch — it released the buffer,

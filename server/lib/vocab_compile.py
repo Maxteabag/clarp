@@ -91,6 +91,10 @@ def budget_for(provider: str, model: str = "") -> Budget:
 
 
 _MODEL_BUDGETS.update({
+    # Live native sessions currently send no vocabulary; never record hints
+    # as applied when they were not on the socket.
+    ("elevenlabs", "scribe_v2_realtime"): Budget(
+        provider="elevenlabs", model="scribe_v2_realtime", unit=Unit.TERMS, capacity=0),
     ("cartesia", "ink-whisper"): Budget(
         provider="cartesia", model="ink-whisper", unit=Unit.TERMS, capacity=0),
 })
