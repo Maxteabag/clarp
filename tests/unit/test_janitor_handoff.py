@@ -55,6 +55,14 @@ def test_handoff_does_not_hold_writer_lock_during_runtime_status(monkeypatch):
     assert result["ownership_handoff"]["transferred_count"] == 1
 
 
+def test_pausing_a_running_janitor_can_handoff_after_interruption_is_confirmed():
+    identities, source, successor, _ = setup_handoff()
+    agents.record_state(identities["sam"], "interrupted", {"reason": "user_cancelled"})
+    result = janitors.release("sam", source["revision"], successor_session="rivet", successor_revision=successor["revision"])
+    assert not result["is_janitor"]
+    assert result["ownership_handoff"]["transferred_count"] == 1
+
+
 def test_conversion_does_not_hold_writer_lock_during_runtime_status(monkeypatch):
     agents.create_agent(persona="Sam", voice_id="", cwd="/tmp", session="sam")
     monkeypatch.setattr(backends, "active_handles", runtime_status_that_writes)
