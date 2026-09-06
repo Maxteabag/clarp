@@ -17,7 +17,7 @@ Rectangle {
     signal queueRequested(string session)
     signal profileRequested(string session)
 
-    readonly property bool typing: root.controller.showWhenReady
+    readonly property bool working: root.controller.showWhenReady
         && ["thinking", "tool", "compacting", "running"].includes(root.currentAgentState)
     readonly property string currentAgentState: root.agentRevision >= 0
         ? root.controller.agentState(root.session) : ""
@@ -247,16 +247,16 @@ Rectangle {
 
             footer: Item {
                 width: transcript.width
-                height: root.typing ? 46 : root.conversationModel.loading ? 34 : 6
+                height: root.working ? 46 : root.conversationModel.loading ? 34 : 6
 
                 TypingIndicator {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
-                    visible: root.typing
+                    visible: root.working
                 }
                 BusyIndicator {
                     anchors.centerIn: parent
-                    running: root.conversationModel.loading && !root.typing
+                    running: root.conversationModel.loading && !root.working
                     visible: running
                     implicitWidth: 22
                     implicitHeight: 22
