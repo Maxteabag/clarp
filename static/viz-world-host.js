@@ -9,6 +9,8 @@ let width=innerWidth,height=innerHeight,camera={x:20,y:70,k:.7},revision=0,live=
 let frames=0,failure='',loading=false,last=performance.now(),signature='',drag=null,selected=null;
 const avatarCache=new AvatarCache(blobs=>sandbox?.setAvatars(blobs));
 let programHistory=[];
+let recoveryTimer=null,recoveryAttempts=0,lastFrameTimings={};
+const retryButton=document.getElementById('retry-render');
 const fittedViews=new Set();
 function fitView(){
   const b=meta.bounds;if(!b)return;camera.k=Math.min((width-100)/b.w,(height-230)/b.h);
@@ -22,7 +24,7 @@ function selectProgram(data){
   const next=view==='cabinets'?cabinetBase:(data?.program||worldBase);
   const key=view+':'+JSON.stringify(next);
   if(key===signature)return;
-  failure='';
+  failure='';recoveryAttempts=0;
   if(program&&signature.startsWith(view+':')&&program!==base)programHistory.push(program);
   // Only fall back to the same view's stable baseline, never another metaphor.
   use(next);signature=key;
@@ -44,18 +46,43 @@ document.getElementById('view-cabinets').onclick=()=>selectView('cabinets');
 function size(){width=innerWidth;height=innerHeight;canvas.width=width;canvas.height=height;}
 size();addEventListener('resize',size);
 function use(next){
+  clearTimeout(recoveryTimer);recoveryTimer=null;
   sandbox?.destroy();program=next;
-  sandbox=new SourceSandbox(next,(bitmap,result)=>{
+  let goodFrames=0;
+  sandbox=new SourceSandbox(next,(bitmap,result,timings)=>{
     ctx.drawImage(bitmap,0,0);bitmap.close();meta=result;frames++;
+    lastFrameTimings=timings;
+    if(failure)learning.textContent='Rendering resumed';
+    failure='';retryButton.hidden=true;
+    if(++goodFrames>=30)recoveryAttempts=0;
     if(!fittedViews.has(view)&&result.bounds){fittedViews.add(view);fitView();}
     stat.textContent=`${result.agents?.length||0} agents · ${result.territories||0} territories · ${result.files||0} located items`;
-  },error=>{
-    failure=error;learning.textContent='Design failed · restoring the previous world';
-    if(program!==base){const prior=programHistory.pop();use(prior||base);}
-    else {ctx.fillStyle='#0b1422';ctx.fillRect(0,0,width,height);ctx.fillStyle='#b4c9d5';ctx.fillText('World unavailable: '+error,40,160);}
+  },(error,kind)=>{
+    failure=error;retryButton.hidden=false;
+    // Retain the last canvas image. A delayed message or failed fallback must
+    // not erase the world or leave the user with an unrecoverable blank screen.
+    if(kind!=='source' && recoveryAttempts<2){
+      recoveryAttempts++;
+      learning.textContent='Rendering paused · reconnecting…';
+      recoveryTimer=setTimeout(()=>use(program),500*recoveryAttempts);
+    }else if(program!==base){
+      learning.textContent='Using the last stable view';
+      const prior=programHistory.pop();use(prior||base);
+    }else{
+      learning.textContent='Rendering paused · last picture retained';
+    }
   });
   sandbox.setAvatars(avatarCache.blobs());
 }
+function retryRender(){
+  if(!program)return;
+  recoveryAttempts=0;use(program);
+}
+retryButton.onclick=retryRender;
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&sandbox?.stopped)retryRender();
+});
+
 async function init(){
   async function readProgram(root){
     const manifest=await(await fetch(root+'/program.json')).json();
@@ -118,4 +145,4 @@ document.getElementById('redesign').onclick=async()=>{
  const r=await fetch('/viz/supersede',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({world:true,revision,entity_id:selected,reason:'Improve only this selected detail where needed. Keep the Lantern Works concepts, unaffected interactions, layout conventions and visual language. Prefer a compatible expansion or targeted repair; this is not a request for a redesign.'})});
  document.getElementById('design-result').textContent=r.ok?'Astra is improving this detail…':'Could not start development';
 };
-window.fleetWorldSnapshot=()=>({frames,revision,view,live,playing,playhead,camera:{...camera},failure,program:program?.title,meta,scene});
+window.fleetWorldSnapshot=()=>({frames,revision,view,live,playing,playhead,camera:{...camera},failure,program:program?.title,frameTimings:lastFrameTimings,meta,scene});

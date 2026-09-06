@@ -290,3 +290,19 @@ initials. Cached, resized image blobs enter the sandbox independently of frames;
 the worker exposes decoded ImageBitmaps as `avatars[agent_id]` to visual modules.
 `viz_avatar_upgrade.avatar_edits` applies only this scoped marker change to live
 learned source so unrelated generated improvements survive deployment.
+
+
+### Render scheduling and recovery
+
+The worker reports its execution time separately from message round-trip time.
+A slow completed frame is paced, not treated as runaway code. A visible worker
+that does not respond within the bounded 3-second delivery fuse is terminated;
+startup has a separate 10-second budget. The full scene is sent once per update,
+not cloned through two message channels every frame. Hidden tabs dispose their
+worker and recreate it on return, preserving the camera and last picture.
+
+Render failures retain the last canvas image, retry transient transport failures,
+and offer Resume rendering even if the baseline fails. Source exceptions still
+fall back within the same view. `scripts/viz_deadline_check.mjs URL` verifies
+10x CPU throttling, a cheap frame with delayed delivery, retained pixels, manual
+recovery and hidden-tab resume; `viz_world_check.mjs` verifies runaway termination.
