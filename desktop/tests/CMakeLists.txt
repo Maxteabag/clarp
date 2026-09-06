@@ -133,3 +133,12 @@ file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ready-reply/config")
 add_test(NAME clarp-desktop-ready-reply COMMAND clarp-desktop)
 set_tests_properties(clarp-desktop-ready-reply PROPERTIES TIMEOUT 15
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=ready-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/ready-reply/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_READY_REPLY=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/ready-reply/capture.png")
+
+add_executable(clarp-desktop-presence-tests tst_desktop_presence.cpp
+    ../src/platform/DesktopPresence.cpp ../src/platform/DesktopPresence.h)
+target_include_directories(clarp-desktop-presence-tests PRIVATE ../src)
+target_link_libraries(clarp-desktop-presence-tests PRIVATE Qt6::Quick Qt6::DBus Qt6::Test)
+clarp_apply_quality_settings(clarp-desktop-presence-tests)
+add_test(NAME clarp-desktop-presence COMMAND clarp-desktop-presence-tests)
+set_tests_properties(clarp-desktop-presence PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_FORCE_STDERR_LOGGING=1" TIMEOUT 15)

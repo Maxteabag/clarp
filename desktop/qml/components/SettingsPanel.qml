@@ -13,7 +13,7 @@ Rectangle {
     signal closeRequested
     readonly property bool dialogOpen: ttsDialog.visible
     property int focusedIndex: 0
-    readonly property var actions: [timestampsRow, readyRow, toolsRow, narrationRow, spokenRow,
+    readonly property var actions: [timestampsRow, readyRow, toolsRow, narrationRow, spokenRow, mobilePushRow,
         connectionRow, orchestratorRow, filesystemRow, routingRow]
     color: "#1a1b26"
     objectName: "settingsPanel"
@@ -250,6 +250,18 @@ Rectangle {
                     detail: "Mute or resume agent voice playback"
                     checked: !root.controller.muted
                     onToggled: value => root.controller.muted = !value
+                }
+            }
+
+            SettingsGroup {
+                title: "NOTIFICATIONS"
+                SettingsToggle {
+                    id: mobilePushRow
+                    objectName: "setting-pause-mobile-push"
+                    label: "Pause phone alerts while active on desktop"
+                    detail: "Resume when Clarp loses focus, the screen locks, or you go idle"
+                    checked: root.controller.pauseMobilePush
+                    onToggled: value => root.controller.pauseMobilePush = value
                 }
             }
 
