@@ -12,7 +12,7 @@ from typing import Any
 from . import agents, db, media_store
 from .voice_markup import strip_hidden_blocks
 
-TYPES = {"decision", "question", "plan", "document", "research", "code_change", "data",
+TYPES = {"html_form", "decision", "question", "plan", "document", "research", "code_change", "data",
          "audio", "video", "file", "release", "directory", "workflow_run"}
 STATUSES = {"draft", "active", "ready", "failed", "completed", "cancelled", "expired"}
 _VALID_ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
@@ -22,6 +22,7 @@ _VALID_ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
 # Existing rows created before this validation remain readable.
 _REQUIRED_FIELDS = {
     "document": ("content",),
+    "html_form": ("content", "version", "answer_schema"),
     "research": ("content",),
     "code_change": ("repository",),
     "data": ("columns", "rows"),
@@ -45,17 +46,20 @@ def _agent(session: str) -> dict:
     return row
 
 
-def _payload(value: Any) -> dict:
+def _payload(value: Any, *, preserve_html: bool = False) -> dict:
     if value is None:
         return {}
     if not isinstance(value, dict):
         raise ValueError("payload must be an object")
+    raw_html = value.get("content") if preserve_html else None
     value = _sanitize_json(value)
+    if preserve_html and raw_html is not None:
+        value["content"] = raw_html
     try:
         encoded = json.dumps(value, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise ValueError("payload must contain finite JSON values") from exc
-    if len(encoded.encode()) > 131072:
+    if len(encoded.encode()) > (4 * 1024 * 1024 if "answer_schema" in value else 131072):
         raise ValueError("artifact payload too large")
     string_fields = {"url", "thumbnail_url", "mime_type", "file_name", "content",
                      "source_url", "commit", "branch", "repository", "subject",
@@ -68,7 +72,8 @@ def _payload(value: Any) -> dict:
     for key in string_fields & value.keys():
         if not isinstance(value[key], str): raise ValueError(f"payload {key} must be a string")
         value = dict(value)
-        value[key] = strip_hidden_blocks(value[key])
+        if not (preserve_html and key == "content"):
+            value[key] = strip_hidden_blocks(value[key])
     for key in integer_fields & value.keys():
         if isinstance(value[key], bool) or not isinstance(value[key], int):
             raise ValueError(f"payload {key} must be an integer")
@@ -79,7 +84,7 @@ def _payload(value: Any) -> dict:
         raise ValueError("payload progress must be numeric")
     if "progress" in value and not 0 <= float(value["progress"]) <= 1:
         raise ValueError("payload progress must be between 0 and 1")
-    if "content" in value:
+    if "content" in value and not preserve_html:
         value = dict(value)
         value["content"] = strip_hidden_blocks(value["content"])
     if "all_day" in value and not isinstance(value["all_day"], bool):
@@ -99,7 +104,10 @@ def _require_payload(type: str, payload: dict, artifact_id: str, session: str = 
     for field in ("source_url", "thumbnail_url"):
         if payload.get(field):
             _safe_url(str(payload[field]), field=field, allow_relative=field == "thumbnail_url")
-    if type == "data":
+    if type == "html_form":
+        from .html_forms import validate_contract
+        validate_contract(payload)
+    elif type == "data":
         columns, rows = payload["columns"], payload["rows"]
         if not isinstance(columns, list) or not columns or not all(
                 isinstance(item, str) and item.strip() for item in columns):
@@ -217,7 +225,7 @@ def _create(*, session: str, type: str, title: str, summary: str = "",
     if not title: raise ValueError("artifact title required")
     artifact_id = artifact_id.strip() or _new("artifact")
     if not _VALID_ID.fullmatch(artifact_id): raise ValueError("invalid artifact id")
-    payload = _payload(payload)
+    payload = _payload(payload, preserve_html=type == "html_form")
     _require_payload(type, payload, artifact_id, str(agent["session"]))
     now = db.now_ms()
     db.conn().execute(
@@ -353,6 +361,8 @@ def update(artifact_id: str, data: dict) -> dict:
     if not current: raise ValueError("artifact not found")
     if current["type"] in {"decision", "question", "plan"}:
         raise ValueError(f"{current['type']} must use its dedicated lifecycle endpoint")
+    if current["type"] == "html_form" and any(key in data for key in ("payload", "payload_patch")):
+        raise ValueError("HTML forms are immutable; publish a new artifact/version")
     status = str(data.get("status") or current["status"]).lower()
     if status not in STATUSES: raise ValueError("unsupported artifact status")
     if "payload" in data and "payload_patch" in data:

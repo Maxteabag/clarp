@@ -128,6 +128,27 @@ def _attention(args: list[str]) -> dict:
     return result
 
 
+def _create_form(args: list[str]) -> dict:
+    parser = _Parser(prog="clarp-agent-artifacts create-form")
+    parser.add_argument("session")
+    parser.add_argument("title")
+    parser.add_argument("html_file", type=pathlib.Path)
+    parser.add_argument("schema_file", type=pathlib.Path)
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--summary", default="")
+    parser.add_argument("--artifact-id", required=True,
+                        help="stable client-chosen identity; reconcile this ID after ambiguous publication")
+    parser.add_argument("--dry-run", action="store_true")
+    parsed = parser.parse_args(args)
+    payload = {"content": parsed.html_file.read_text(), "version": parsed.version,
+               "answer_schema": json.loads(parsed.schema_file.read_text())}
+    body = {"session": parsed.session, "title": parsed.title, "type": "html_form",
+            "summary": parsed.summary, "artifact_id": parsed.artifact_id, "payload": payload}
+    if parsed.dry_run:
+        return {"method": "POST", "path": "/artifacts", "body": body}
+    return _request("POST", "/artifacts", body)["artifact"]
+
+
 def main(argv: list[str]) -> int:
     usage = ("usage: agent_artifacts.py create SESSION TYPE TITLE [SUMMARY] [JSON_PAYLOAD] | "
              "decision SESSION TITLE QUESTION YES_LABEL NO_LABEL [JSON_PAYLOAD] [OPTIONS] | "
@@ -136,7 +157,9 @@ def main(argv: list[str]) -> int:
              "update ARTIFACT_ID STATUS [JSON_PAYLOAD] | progress ARTIFACT_ID VALUE [CONTENT] | list SESSION")
     try:
         cmd = argv[1]
-        if cmd == "create" and len(argv) in {5, 6, 7}:
+        if cmd == "create-form":
+            result = _create_form(argv[2:])
+        elif cmd == "create" and len(argv) in {5, 6, 7}:
             result = _request("POST", "/artifacts", {
                 "session": argv[2], "type": argv[3], "title": argv[4],
                 "summary": argv[5] if len(argv) >= 6 else "",
