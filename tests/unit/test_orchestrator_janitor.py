@@ -21,14 +21,14 @@ def no_processes(monkeypatch):
     monkeypatch.setattr(backends, "active_handles", lambda *args: [])
 
 
-def setup_router(model_call, *, enabled=True):
+def setup_router(model_call, *, enabled=True, options=None):
     for session in ("mike", "antoni"):
         agents.create_agent(persona=session.title(), voice_id="", cwd="/tmp", session=session)
     configured = builtins().ensure_builtins(initial={ROLE: {
         "enabled": enabled, "backend": "codex", "provider": "codex",
         "model": "gpt-5.3-codex-spark", "effort": "",
+        "options": {"fallback_only": False, **(options or {})},
     }})[ROLE]
-    settings_store.set_bool("orchestrator.fallback_only", False)
     events, speech, dispatched = [], [], []
     context = SimpleNamespace(
         default_session="mike", stream=SimpleNamespace(broadcast=events.append),
@@ -36,7 +36,7 @@ def setup_router(model_call, *, enabled=True):
     )
     service = orchestrator.OrchestratorService(context, model_call=model_call)
 
-    def send(*, trace_id="route-1", request_id="request-1", fallback_request=False):
+    def send(*, trace_id="route-1", request_id="request-1", fallback_request=False, hands_free=True):
         admission = prompt_admissions.create(
             authenticated_at_admission=True, origin="user", sender_agent_id="",
             channel="voice", observed_at=db.now_ms(), client_admission_id=request_id,
@@ -47,7 +47,7 @@ def setup_router(model_call, *, enabled=True):
             return SimpleNamespace(session=kwargs["forced_session"], backend="claude")
         return service.handle_send(
             text=admission.original_text, requested_session="mike", trace_id=trace_id,
-            prompt_admission=admission, hands_free=True, synthesize_audio=False,
+            prompt_admission=admission, hands_free=hands_free, synthesize_audio=False,
             dispatch=dispatch, fallback_request=fallback_request,
         )
     return configured, send, dispatched, events, speech
@@ -221,7 +221,7 @@ def test_replacement_janitor_receives_scoped_demand_with_its_own_model():
         lambda _, settings: calls.append(settings.model) or route(), enabled=False)
     agents.create_agent(persona="Scoped", voice_id="", cwd="/tmp", session="scoped", backend="codex", model="custom-model")
     configured = janitors.create("scoped", template_id=ROLE,
-        scope={"agent_ids": [agents.get_by_session("mike")["agent_id"]]})
+        scope={"agent_ids": [agents.get_by_session("mike")["agent_id"]]}, options={"fallback_only": False})
     janitors.set_enabled("scoped", configured["revision"], True)
     assert send().action == "route" and len(dispatched) == 1
     assert calls == ["custom-model"]
@@ -257,3 +257,112 @@ def test_retry_of_orphaned_claim_after_deadline_returns_terminal_cancellation(mo
     assert send(trace_id="another-retry").action == "cancelled"
     assert calls == [True] and not dispatched and not speech
     assert len(janitors.list_runs(configured["session"])) == 1
+
+
+POLICY = {"fallback_only": True, "hands_free_only": False, "confidence_threshold": .91,
+          "timeout_ms": 1250, "voice_id": "chosen-routing-voice"}
+
+
+def test_all_routing_settings_read_the_janitor_options_over_stale_legacy_values(monkeypatch):
+    setup_router(lambda *_: route(), options=POLICY)
+    settings_store.set_text("orchestrator.confidence_threshold", ".5")
+    settings_store.set_text("orchestrator.timeout_ms", "60000")
+    settings_store.set_text("orchestrator.voice_id", "stale-legacy-voice")
+    settings = orchestrator.get_settings()
+    assert {key: getattr(settings, key) for key in POLICY} == POLICY
+    monkeypatch.setattr(orchestrator, "get_legacy_settings", lambda: pytest.fail("read legacy after migration"))
+    assert orchestrator.get_settings() == settings
+
+
+def test_legacy_policy_update_patches_same_options_and_never_writes_legacy_keys():
+    owner, _, _, _, _ = setup_router(lambda *_: route())
+    before = {key: settings_store.get_text(f"orchestrator.{key}", default="absent") for key in POLICY}
+    settings = orchestrator.update_settings(POLICY)
+    changed = builtins().get_builtin(ROLE)
+    assert changed["agent_id"] == owner["agent_id"] and changed["generation"] > owner["generation"]
+    assert changed["options"] == POLICY
+    assert {key: getattr(settings, key) for key in POLICY} == POLICY
+    assert settings.enabled and changed["enabled"]
+    assert before == {key: settings_store.get_text(f"orchestrator.{key}", default="absent") for key in POLICY}
+
+
+def test_legacy_policy_update_rejects_unknown_or_invalid_options_atomically():
+    owner, _, _, _, _ = setup_router(lambda *_: route())
+    for data in ({"made_up_setting": True}, {"confidence_threshold": float("nan")},
+                 {"fallback_only": "false"}, {"timeout_ms": 100000}):
+        with pytest.raises(ValueError):
+            orchestrator.update_settings(data)
+        assert builtins().get_builtin(ROLE) == owner
+
+
+def test_scoped_subscriber_owns_eligibility_and_confidence_before_model_admission():
+    observed = []
+    def model(packet, settings):
+        observed.append((packet, settings))
+        return {**route(), "confidence": .6}
+    _, send, dispatched, _, speech = setup_router(model, enabled=False,
+        options={"hands_free_only": True, "fallback_only": True, "confidence_threshold": .99})
+    agents.create_agent(persona="Scoped", voice_id="", cwd="/tmp", session="scoped", backend="codex", model="custom-model")
+    options = {**POLICY, "fallback_only": False, "confidence_threshold": .55}
+    owner = janitors.create("scoped", template_id=ROLE,
+        scope={"agent_ids": [agents.get_by_session("mike")["agent_id"]]}, options=options)
+    janitors.set_enabled("scoped", owner["revision"], True)
+    result = send(hands_free=False)
+    assert result.action == "route" and len(dispatched) == 1 and not speech
+    frozen = janitors.list_runs("scoped")[0]["configuration"]["options"]
+    assert frozen == options
+    assert {key: getattr(observed[0][1], key) for key in options} == frozen
+    assert {key: observed[0][0]["settings"][key] for key in options} == frozen
+
+
+def test_scoped_subscriber_can_require_fallback_even_if_builtin_policy_does_not():
+    _, send, dispatched, _, _ = setup_router(lambda *_: pytest.fail("policy should prevent admission"), enabled=False)
+    agents.create_agent(persona="Scoped", voice_id="", cwd="/tmp", session="scoped", backend="codex")
+    owner = janitors.create("scoped", template_id=ROLE,
+        scope={"agent_ids": [agents.get_by_session("mike")["agent_id"]]}, options={"fallback_only": True})
+    janitors.set_enabled("scoped", owner["revision"], True)
+    assert send() is None and not dispatched and janitors.list_runs("scoped") == []
+
+
+def test_routing_control_uses_selected_janitor_voice_option():
+    _, send, _, _, speech = setup_router(lambda *_: {"kind": "control", "control_action": "current_agent"},
+                                         options={"voice_id": "chosen-routing-voice"})
+    assert send().action == "control"
+    assert speech[0][0][1] == "chosen-routing-voice"
+
+
+def test_legacy_policy_edit_fences_already_admitted_output():
+    def model(*_):
+        orchestrator.update_settings({"confidence_threshold": .95})
+        return route()
+    owner, send, dispatched, _, speech = setup_router(model)
+    assert send().action == "fallback" and not dispatched and not speech
+    assert builtins().get_builtin(ROLE)["generation"] > owner["generation"]
+    assert janitors.list_runs(owner["session"])[0]["outcome"] == "cancelled"
+
+
+def test_execution_uses_policy_frozen_at_admission_instead_of_earlier_read(monkeypatch):
+    observed = []
+    _, send, dispatched, _, _ = setup_router(lambda _, settings: observed.append(settings) or {**route(), "confidence": .6})
+    original = builtins().begin_run
+    def changed_before_admission(*args, **kwargs):
+        owner = builtins().get_builtin(ROLE)
+        changed = janitors.configure(owner["session"], owner["revision"], options={"confidence_threshold": .55, "timeout_ms": 1250})
+        janitors.set_enabled(changed["session"], changed["revision"], True)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(builtins(), "begin_run", changed_before_admission)
+    assert send().action == "route" and len(dispatched) == 1
+    assert observed[0].confidence_threshold == .55 and observed[0].timeout_ms == 1250
+
+
+def test_policy_frozen_at_admission_can_decline_previously_eligible_request(monkeypatch):
+    owner, send, dispatched, _, _ = setup_router(lambda *_: pytest.fail("new policy forbids model call"))
+    original = builtins().begin_run
+    def changed_before_admission(*args, **kwargs):
+        changed = janitors.configure(owner["session"], owner["revision"], options={"fallback_only": True})
+        janitors.set_enabled(changed["session"], changed["revision"], True)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(builtins(), "begin_run", changed_before_admission)
+    assert send().action == "fallback" and not dispatched
+    run = janitors.list_runs(owner["session"])[0]
+    assert run["status"] == "cancelled" and run["configuration"]["options"]["fallback_only"]
