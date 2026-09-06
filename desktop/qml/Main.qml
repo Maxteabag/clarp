@@ -103,6 +103,13 @@ ApplicationWindow {
             if (keyboard.contextName === "search") rail.focusCurrentAgent();
             else if (keyboard.contextName === "sidebar") root.focusConversation();
             else root.escapeFocus();
+        } else if (action === "next-attention") {
+            const session = app.nextAttentionSession();
+            if (session.length > 0) {
+                root.selectedSurface = "chats";
+                app.selectSession(session);
+                app.requestComposerFocus(app.panes.activePaneId);
+            }
         } else if (action === "focus-sidebar") {
             root.sidebarVisible = true;
             app.requestComposerFocus("");
@@ -257,6 +264,7 @@ ApplicationWindow {
             : rail.searchOwnsFocus ? "search"
             : root.composerOwnsFocus() ? "composer"
             : rail.ownsFocus(root.activeFocusItem) ? "sidebar" : "pane"
+        hasAttention: app.nextAttentionTarget.length > 0
         hasAgent: app.selectedSession.length > 0
         hasRows: rail.rowCount > 0
         canSend: {

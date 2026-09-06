@@ -335,6 +335,19 @@ const Agent* AgentListModel::find(const QString& session) const {
     return row < 0 ? nullptr : &m_agents.at(row);
 }
 
+QString AgentListModel::nextAttentionSession(const QString& current, const QStringList& pending) const {
+    if (m_agents.isEmpty()) return {};
+    const int start = indexOfSession(current);
+    const int count = static_cast<int>(m_agents.size());
+    for (int offset = 1; offset <= count; ++offset) {
+        const Agent& agent = m_agents.at((start + offset) % count);
+        if (agent.session != current && !agent.archived &&
+            (agent.unread || agent.latestState == QStringLiteral("waiting") || pending.contains(agent.session)))
+            return agent.session;
+    }
+    return {};
+}
+
 QString AgentListModel::firstSession() const {
     return m_agents.isEmpty() ? QString{} : m_agents.first().session;
 }

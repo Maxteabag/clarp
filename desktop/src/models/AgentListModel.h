@@ -64,6 +64,7 @@ class AgentListModel : public QAbstractListModel {
     bool recordOutgoingActivity(const QString& session);
 
     [[nodiscard]] const Agent* find(const QString& session) const;
+    [[nodiscard]] QString nextAttentionSession(const QString& current, const QStringList& pending = {}) const;
     [[nodiscard]] QString firstSession() const;
     [[nodiscard]] QStringList sessions() const;
     Q_INVOKABLE [[nodiscard]] int indexOfSession(const QString& session) const;

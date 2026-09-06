@@ -114,8 +114,30 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             if (!require(state("search") && rail->property("rowCount").toInt() == 0)) return;
             press(Qt::Key_Escape);
             break;
-        default:
+        case 15:
             if (!require(state("sidebar") && selected() && rail->property("rowCount").toInt() == 2)) return;
+            controller->agents()->applyNotificationEvent({{QStringLiteral("session"), QStringLiteral("keyboard-first")}});
+            break;
+        case 16:
+            if (!require(map->property("hasAttention").toBool())) return;
+            press(Qt::Key_N);
+            break;
+        case 17:
+            if (!require(state("composer") && controller->selectedSession() == QStringLiteral("keyboard-first"))) return;
+            controller->agents()->applyNotificationEvent({{QStringLiteral("session"), second}});
+            break;
+        case 18:
+            if (!require(map->property("hasAttention").toBool())) return;
+            press(Qt::Key_J, Qt::ControlModifier);
+            break;
+        case 19:
+            if (!require(state("composer") && controller->selectedSession() == second
+                         && !map->property("hasAttention").toBool())) return;
+            press(Qt::Key_Escape);
+            press(Qt::Key_E);
+            break;
+        default:
+            if (!require(state("sidebar") && selected())) return;
             window->setProperty("contextKeyboardVerified", true);
             timer->stop();
         }

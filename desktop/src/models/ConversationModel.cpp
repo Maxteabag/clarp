@@ -497,10 +497,31 @@ void ConversationModel::mergeRows(const QJsonArray& rows) {
             if (m_messages.at(existing).revision > incoming.revision && incoming.revision != 0) {
                 continue;
             }
-            const bool confirmed = m_messages.at(existing).pending;
+            const Message& previous = m_messages.at(existing);
+            const bool confirmed = previous.pending;
+            QList<int> changedRoles;
+            if (previous.role != incoming.role) changedRoles.append(AuthorRole);
+            if (previous.displayText != incoming.displayText) changedRoles.append(BodyRole);
+            if (previous.timestamp != incoming.timestamp) changedRoles.append(TimestampRole);
+            if (previous.revision != incoming.revision) changedRoles.append(RevisionRole);
+            if (previous.kind != incoming.kind) changedRoles.append(KindRole);
+            if (previous.toolName != incoming.toolName) changedRoles.append(ToolNameRole);
+            if (previous.origin != incoming.origin) changedRoles.append(OriginRole);
+            if (previous.senderName != incoming.senderName) changedRoles.append(SenderNameRole);
+            if (previous.pending != incoming.pending) changedRoles.append(PendingRole);
+            if (previous.deliveryFailed != incoming.deliveryFailed) changedRoles.append(DeliveryFailedRole);
+            if (previous.activity != incoming.activity) changedRoles.append(ActivityRole);
+            if (previous.tools != incoming.tools) changedRoles.append(ToolsRole);
+            if (previous.displayCells != incoming.displayCells) changedRoles.append(DisplayCellsRole);
+            if (previous.activityStatus != incoming.activityStatus) changedRoles.append(ActivityStatusRole);
+            if (previous.automated != incoming.automated) changedRoles.append(AutomatedRole);
+            if (previous.category != incoming.category) changedRoles.append(CategoryRole);
+            if (previous.toolDetailsAvailable != incoming.toolDetailsAvailable) changedRoles.append(ToolDetailsAvailableRole);
+            if (previous.activityCount != incoming.activityCount) changedRoles.append(ActivityCountRole);
+            if (previous.timestamp != incoming.timestamp) changedRoles.append(DayLabelRole);
             m_messages.replace(existing, std::move(incoming));
             const QModelIndex changedIndex = index(existing, 0);
-            emit dataChanged(changedIndex, changedIndex);
+            if (!changedRoles.isEmpty()) emit dataChanged(changedIndex, changedIndex, changedRoles);
             if (confirmed && m_messages.at(existing).id.startsWith(QStringLiteral("u-"))) {
                 emit deliveryConfirmed(m_messages.at(existing).id.sliced(2));
             }
