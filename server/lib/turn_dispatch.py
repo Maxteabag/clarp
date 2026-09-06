@@ -47,6 +47,7 @@ _QUEUED: dict[str, list] = {}
 _CLAIMED_AT: dict[str, float] = {}
 _RECOVERY_LOCK = threading.Lock()
 _RUNTIME_CLIENT: Any | None = None
+_JANITOR_SPAWN_LOCKS: dict[str, Any] = {}
 
 # Placeholder trace owning the in-flight slot while an interactive terminal is
 # attached to an agent. A normal turn routed to that agent queues behind it
@@ -205,12 +206,60 @@ class _TurnSpec:
     # Provider-only continuation; the admitted user message keeps its original
     # text and client ID across an account change.
     recovery_text: str = ""
+    # Private runtime capability; never sourced from an ordinary send payload.
+    janitor_run_id: str = ""
 
 
 class DispatchError(RuntimeError):
     def __init__(self, status: int, message: str):
         self.status = status
         super().__init__(message)
+
+
+class JanitorDispatchError(DispatchError):
+    """A maintenance run lost authorization; retrying cannot restore it."""
+
+
+def _validate_janitor_target(agent: dict, run_id: str, trace_id: str) -> None:
+    if not agents_db.interaction_capabilities(agent)["can_chat"]:
+        if not run_id:
+            raise JanitorDispatchError(409, "Janitors accept configured maintenance runs only")
+        from . import janitors
+        if not janitors.validate_dispatch(agent["session"], run_id, trace_id):
+            raise JanitorDispatchError(409, "Maintenance run is not active for this configuration")
+    elif run_id:
+        raise JanitorDispatchError(409, "Maintenance run does not target a Janitor")
+
+
+def _recovered_janitor_run(row: dict) -> str:
+    """Recover capability from both durable records, never from an origin."""
+    agent = agents_db.get_by_agent_id(str(row["agent_id"]))
+    if not agent or agents_db.interaction_capabilities(agent)["can_chat"]:
+        return ""
+    from . import janitors
+    trace_id = str(row["trace_id"])
+    run = janitors.get_run_for_trace(trace_id)
+    if (not run or run["run_id"] != trace_id
+            or str(row["queue_id"]) != run["run_id"]
+            or str(row["client_msg_id"]) != run["run_id"]
+            or str(row["session"]) != run["session"]
+            or str(row["agent_id"]) != run["agent_id"]):
+        raise JanitorDispatchError(409, "Queued message has no matching maintenance run")
+    _validate_janitor_target(agent, run["run_id"], trace_id)
+    return run["run_id"]
+
+
+def _janitor_spawn_lock(agent_id: str):
+    # Separate from the global turn lock: Codex's blocking start RPC needs its
+    # read-thread callbacks to take _TURN_LOCK before the response arrives.
+    with _TURN_LOCK:
+        return _JANITOR_SPAWN_LOCKS.setdefault(agent_id, threading.RLock())
+
+
+def _remove_queued_run(queue_id: str) -> None:
+    # Use the queue API to preserve revisions and unmaterialized admissions.
+    turn_queue.release_claim(queue_id)
+    turn_queue.remove(queue_id)
 
 
 def _default_retry_scheduler(delay: float, fn: Callable[[], None]) -> None:
@@ -320,8 +369,12 @@ class TurnDispatchService:
                     prompt_admission_id=row["prompt_admission_id"],
                     queue_if_busy=True, skip_admission=True,
                     durable_queue_id=row["queue_id"],
+                    janitor_run_id=_recovered_janitor_run(row),
                 )
                 recovered += 1
+            except JanitorDispatchError as exc:
+                _remove_queued_run(str(row["queue_id"]))
+                log("janitorQueueRejected", str(exc))
             except Exception as exc:  # keep ledger row for the next retry/restart
                 log_exception("queuedRecoveryFail", exc, detail=row["session"])
         if deferred or turn_queue.claimed_count() > 0:
@@ -341,7 +394,8 @@ class TurnDispatchService:
                  skip_admission: bool = False,
                  durable_queue_id: str = "",
                  unheard_audio_sessions: tuple[str, ...] = (),
-                 allow_paused_queue: bool = False) -> DispatchResult:
+                 allow_paused_queue: bool = False,
+                 janitor_run_id: str = "") -> DispatchResult:
         runtime = getattr(self.ctx, "runtime_client", None)
         if runtime is not None:
             try:
@@ -362,6 +416,7 @@ class TurnDispatchService:
                     durable_queue_id=durable_queue_id,
                     unheard_audio_sessions=unheard_audio_sessions,
                     allow_paused_queue=allow_paused_queue,
+                    **({"janitor_run_id": janitor_run_id} if janitor_run_id else {}),
                 )
             except Exception as exc:
                 from .runtime_bridge import RuntimeUnavailable
@@ -399,13 +454,25 @@ class TurnDispatchService:
         session = target.session
         text = target.text
         unheard_audio = session in set(unheard_audio_sessions)
-        if origin not in origins.ROUTINE_AUTOMATION_ORIGINS:
-            self._notify_herald(session)
-
         agent = agents_db.get_by_session(session)
         if not agent:
             raise DispatchError(404, "unknown agent")
         agent_id = agent["agent_id"]
+        _validate_janitor_target(agent, janitor_run_id, trace_id)
+        if janitor_run_id:
+            if client_msg_id and client_msg_id != janitor_run_id:
+                raise JanitorDispatchError(409, "Maintenance request ID must match its run")
+            if durable_queue_id and durable_queue_id != janitor_run_id:
+                raise JanitorDispatchError(409, "Maintenance queue ID must match its run")
+            client_msg_id = janitor_run_id
+            origin = "janitor"
+            synthesize_audio = False
+            queue_if_busy = True
+            unheard_audio = False
+        elif origin == "janitor":
+            raise JanitorDispatchError(409, "Janitor origin requires an admitted run")
+        if origin not in origins.ROUTINE_AUTOMATION_ORIGINS:
+            self._notify_herald(session)
         if origin == "leader_tick" and not any(
             t.get("leader_enabled") and t.get("nudge_enabled")
             and t.get("leader_agent_id") == agent_id
@@ -415,7 +482,7 @@ class TurnDispatchService:
         # Sticky focus: addressing an agent by name makes them the new default,
         # so subsequent un-named messages keep going to them (hands-free, you
         # don't want to re-say the name every turn).
-        if target.routed_by_name or routed_by_orchestrator:
+        if not janitor_run_id and (target.routed_by_name or routed_by_orchestrator):
             try:
                 agents_db.set_focus(agent_id)
             except Exception as e:
@@ -485,6 +552,7 @@ class TurnDispatchService:
             queue_id=(durable_queue_id
                       or ((client_msg_id or trace_id) if queue_if_busy else "")),
             unheard_audio=unheard_audio,
+            janitor_run_id=janitor_run_id,
         )
         # Queue receipts and ordinary user admissions share one SQLite write
         # transaction, preserving client_msg_id idempotency even if concurrent
@@ -588,6 +656,9 @@ class TurnDispatchService:
         try:
             if not self._spawn_attempt(spec, attempt=1):
                 raise DispatchError(409, "turn superseded before spawn")
+        except JanitorDispatchError:
+            self._discard_fenced_janitor(spec)
+            raise
         except DispatchError:
             # Spawn never started: release the in-flight slot (and drain any
             # message that queued behind it) so the agent isn't wedged.
@@ -621,6 +692,9 @@ class TurnDispatchService:
         with _TURN_LOCK:
             busy = agent_id in _INFLIGHT
         agent = agents_db.get_by_agent_id(agent_id)
+        if agent and not agents_db.interaction_capabilities(agent)["can_chat"]:
+            turn_queue.release_claim(queue_id)
+            raise JanitorDispatchError(409, "Janitor queues are managed by their configuration")
         if busy or (agent and self.backends.active_handles(
                 self.backends.normalize(agent.get("backend")), agent_id)):
             turn_queue.release_claim(queue_id)
@@ -786,6 +860,13 @@ class TurnDispatchService:
         except Exception:  # noqa: BLE001
             return True  # can't tell → assume live (don't double-spawn)
 
+    def _discard_fenced_janitor(self, spec: _TurnSpec) -> None:
+        _remove_queued_run(spec.queue_id)
+        with _TURN_LOCK:
+            if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
+                _record_janitor_cancelled(self.ctx, spec.agent_id, spec.session, spec.trace_id)
+        self._finish_turn(spec)
+
     def _finish_turn(self, spec: _TurnSpec) -> None:
         """A turn reached a terminal state. If a message queued behind it, take
         over the in-flight slot and spawn it; otherwise free the slot. Guarded
@@ -826,6 +907,15 @@ class TurnDispatchService:
                 sender_agent_id=str(durable["sender_agent_id"]),
                 prompt_admission_id=str(durable["prompt_admission_id"]),
             )
+        try:
+            agent = agents_db.get_by_agent_id(agent_id) or {}
+            _validate_janitor_target(agent, next_spec.janitor_run_id, next_spec.trace_id)
+            if next_spec.janitor_run_id:
+                if not next_spec.queue_id or _recovered_janitor_run(durable) != next_spec.janitor_run_id:
+                    raise JanitorDispatchError(409, "Maintenance queue ownership changed")
+        except JanitorDispatchError:
+            self._discard_fenced_janitor(next_spec)
+            return
         bsid = (agents_db.live_backend_session(agent_id)
                 or next_spec.backend_session_id)
         next_spec = replace(next_spec, backend_session_id=bsid,
@@ -843,6 +933,8 @@ class TurnDispatchService:
             if not self._spawn_attempt(next_spec, attempt=1):
                 return
             self._mark_spawned(next_spec)
+        except JanitorDispatchError:
+            self._discard_fenced_janitor(next_spec)
         except DispatchError as e:
             log_exception("queuedSpawnFail", e, detail=next_spec.session)
             if not next_spec.queue_id:
@@ -867,6 +959,14 @@ class TurnDispatchService:
                 return
             if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
                 _CLAIMED_AT.pop(spec.agent_id, None)
+        if spec.janitor_run_id:
+            from . import janitors
+            try:
+                janitors.mark_started(spec.janitor_run_id)
+            except janitors.JanitorError:
+                # Pause may fence the run immediately after backend spawn.
+                # Its exact-run cancellation owns teardown; do not revive it.
+                return
         turn_queue.mark_started(spec.queue_id)
         if spec.origin == "oracle":
             from . import oracle_delegations
@@ -994,7 +1094,14 @@ class TurnDispatchService:
                     f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
                     "ownership lost before spawn")
                 return False
-        self._spawn_attempt_claimed(spec, attempt=attempt)
+        if spec.janitor_run_id:
+            with _janitor_spawn_lock(spec.agent_id):
+                with _TURN_LOCK:
+                    if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
+                        return False
+                self._spawn_attempt_claimed(spec, attempt=attempt)
+        else:
+            self._spawn_attempt_claimed(spec, attempt=attempt)
         return True
 
     def _resume_after_account_switch(self, spec, attempt, state):
@@ -1021,6 +1128,8 @@ class TurnDispatchService:
         try:
             if self._spawn_attempt(resume_spec, attempt=attempt):
                 self._mark_spawned(resume_spec)
+        except JanitorDispatchError:
+            self._discard_fenced_janitor(resume_spec)
         except DispatchError as exc:
             self._mark_interrupted(resume_spec, error_classify.RUNNER_EXIT,
                                    str(exc), attempts=attempt)
@@ -1029,6 +1138,9 @@ class TurnDispatchService:
         """Spawn one attempt of a turn. Attempt 1 surfaces spawn failures as
         a DispatchError (so /send returns 500); later attempts run from a
         timer thread and just mark the agent INTERRUPTED on failure."""
+        _validate_janitor_target(
+            agents_db.get_by_agent_id(spec.agent_id) or {},
+            spec.janitor_run_id, spec.trace_id)
         if spec.origin == "leader_tick" and not any(
             t.get("leader_enabled") and t.get("nudge_enabled")
             and t.get("leader_agent_id") == spec.agent_id
@@ -1075,6 +1187,12 @@ class TurnDispatchService:
             with _TURN_LOCK:
                 if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
                     return False
+                try:
+                    _validate_janitor_target(
+                        agents_db.get_by_agent_id(spec.agent_id) or {},
+                        spec.janitor_run_id, spec.trace_id)
+                except JanitorDispatchError:
+                    return False
                 action()
                 return True
         try:
@@ -1086,6 +1204,9 @@ class TurnDispatchService:
                 # The outer envelope is filtered by the native transcript
                 # importer, including when team/delivery context is present.
                 prompt = f"<clarp-account-recovery>\n{prompt}\n</clarp-account-recovery>"
+            _validate_janitor_target(
+                agents_db.get_by_agent_id(spec.agent_id) or {},
+                spec.janitor_run_id, spec.trace_id)
             state["spawn_started"] = True
             handle = self.backends.spawn_turn(
                 spec.backend,
@@ -1109,6 +1230,8 @@ class TurnDispatchService:
             team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
             if account_attempt is not None:
                 account_attempt.handle = handle
+        except JanitorDispatchError:
+            raise
         except FileNotFoundError as e:
             if attempt == 1:
                 log("backendMissing", str(e))
@@ -1243,7 +1366,7 @@ class TurnDispatchService:
             except Exception as e:
                 log_exception("clarpOnErrorFail", e, detail=trace_id)
 
-        if spec.backend == self.backends.CLAUDE:
+        if spec.backend == self.backends.CLAUDE or spec.janitor_run_id:
             def guarded(callback):
                 def invoke(*args):
                     with _TURN_LOCK:
@@ -1355,7 +1478,13 @@ class TurnDispatchService:
                         f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
                         f"preempted during backoff")
                     return
+                if not next_spec.janitor_run_id:
+                    self._spawn_attempt(next_spec, attempt=next_attempt)
+                    return
+            try:
                 self._spawn_attempt(next_spec, attempt=next_attempt)
+            except JanitorDispatchError:
+                self._discard_fenced_janitor(next_spec)
 
         self.retry_scheduler(delay, _retry_spawn)
 
@@ -1460,7 +1589,8 @@ class TurnDispatchService:
             if not agent_id:
                 return ""
             agent = agents_db.get_by_agent_id(agent_id)
-            return agent["session"] if agent else ""
+            return (agent["session"] if agent and
+                    agents_db.interaction_capabilities(agent)["can_chat"] else "")
         except Exception:
             return ""
 
@@ -1473,9 +1603,16 @@ class TurnDispatchService:
         /send's; a stale turn carries an older one. Same-trace retries are NOT
         superseded (they share spec.trace_id), so they still record normally."""
         try:
+            if spec.janitor_run_id:
+                from . import janitors
+                with _TURN_LOCK:
+                    if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
+                        return True
+                    if not janitors.validate_dispatch(spec.session, spec.janitor_run_id, spec.trace_id):
+                        return True
             current = agents_db.get_trace(spec.agent_id)
         except Exception:
-            return False
+            return bool(spec.janitor_run_id)
         return bool(current) and current != spec.trace_id
 
     def _preempt(self, *, agent_id: str, backend: str,
@@ -1579,6 +1716,80 @@ def owns_inflight_trace(agent_id: str, trace_id: str) -> bool:
                 agents_db.get_trace(agent_id) == trace_id
     with _TURN_LOCK:
         return bool(trace_id) and _INFLIGHT.get(agent_id) == trace_id
+
+
+def _record_janitor_cancelled(ctx, agent_id: str, session: str, trace_id: str) -> None:
+    """Publish a truthful terminal state only for this agent's current trace."""
+    if agents_db.get_trace(agent_id) != trace_id:
+        return
+    agents_db.record_state(agent_id, AgentState.INTERRUPTED, {
+        "source": "janitor_pause", "origin": "janitor", "trace_id": trace_id,
+        "message": "Maintenance run cancelled"})
+    db.conn().execute("UPDATE turns SET ended_at=? WHERE agent_id=? AND trace_id=? AND ended_at IS NULL",
+                      (db.now_ms(), agent_id, trace_id))
+    if getattr(ctx, "stream", None) is not None:
+        ctx.stream.broadcast({"type": SSEType.AGENT_STATE, "session": session,
+            "agent_id": agent_id, "kind": AgentState.INTERRUPTED, "origin": "janitor"})
+
+
+def cancel_janitor_run(ctx, run_id: str, *, backend_registry=backends) -> dict:
+    """Cancel only a fenced run, in the process that owns its exact trace.
+
+    Pause/configure invalidates the store generation before calling this. The
+    process barrier protects against new spawns while interruption happens; no
+    SQLite write transaction is held across a backend call.
+    """
+    runtime = getattr(ctx, "runtime_client", None)
+    if runtime is not None:
+        return runtime.cancel_janitor_run(run_id)
+    from . import janitors
+    run_id = str(run_id or "").strip()
+    run = janitors.get_run_for_trace(run_id)
+    if not run or run.get("run_id") != run_id or run.get("trace_id") != run_id:
+        raise JanitorDispatchError(404, "Maintenance run not found")
+    agent_id = str(run["agent_id"])
+    agent = agents_db.get_by_agent_id(agent_id)
+    if not agent or agents_db.interaction_capabilities(agent)["can_chat"]:
+        raise JanitorDispatchError(409, "Maintenance run no longer belongs to a Janitor")
+    if janitors.validate_dispatch(run["session"], run_id, run_id):
+        raise JanitorDispatchError(409, "Pause the maintenance configuration before cancellation")
+    with _janitor_spawn_lock(agent_id):
+        return _cancel_fenced_janitor_run(ctx, run, agent, backend_registry)
+
+
+def _cancel_fenced_janitor_run(ctx, run: dict, agent: dict, backend_registry) -> dict:
+    run_id, agent_id = run["run_id"], run["agent_id"]
+    # A queued run may sit behind unrelated work. Remove its own queue copy
+    # without installing a stop barrier or touching that other backend turn.
+    with _TURN_LOCK:
+        matching = _INFLIGHT.get(agent_id) == run_id
+        if not matching:
+            _QUEUED[agent_id] = [spec for spec in _QUEUED.get(agent_id, [])
+                                 if spec.trace_id != run_id]
+            if not _QUEUED[agent_id]:
+                _QUEUED.pop(agent_id, None)
+            _remove_queued_run(run_id)
+            return {"cancelled": True, "interrupted": False, "run_id": run_id}
+        snapshot, _dropped, queue_was_paused = begin_stop(agent_id)
+    try:
+        backend = backend_registry.normalize(agent.get("backend"))
+        terminated = int(backend_registry.interrupt(backend, agent_id) or 0)
+        if (terminated <= 0 and not snapshot.get("account_recovery_parked")
+                and backend_registry.active_handles(backend, agent_id)):
+            raise DispatchError(502, "Backend did not confirm maintenance interruption")
+    except BaseException:
+        restore_stop_state(agent_id, snapshot)
+        turn_queue.set_paused(agent_id, queue_was_paused)
+        raise
+    try:
+        _remove_queued_run(run_id)
+        turn_queue.set_paused(agent_id, queue_was_paused)
+        with _TURN_LOCK:
+            _CLAUDE_FAILOVER.discard(agent_id, run_id)
+            _record_janitor_cancelled(ctx, agent_id, run["session"], run_id)
+    finally:
+        complete_stop(ctx, agent_id, snapshot, {run_id}, backend_registry=backend_registry)
+    return {"cancelled": True, "interrupted": bool(terminated), "run_id": run_id}
 
 
 def snapshot_stop_state(agent_id: str) -> dict:

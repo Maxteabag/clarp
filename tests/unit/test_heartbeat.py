@@ -55,8 +55,9 @@ def test_prompt_mirrors_openclaw_contract():
     assert "Do not infer or repeat old tasks from prior chats." in prompt
     assert "HEARTBEAT_OK" in prompt
     assert "take no action" in prompt
-    assert "Audit your visible custom status and durable background jobs" in prompt
-    assert "Do not clear genuine active work" in prompt
+    assert "Audit durable background jobs and update any job whose displayed state is stale" in prompt
+    assert "Preserve genuine active work" in prompt
+    assert "custom status" not in prompt
 
 
 def test_prompt_includes_current_durable_plan_and_requires_continuation():
@@ -740,6 +741,5 @@ def test_record_heartbeat_noop_with_explicit_is_interrupted_prevents_dormancy(mo
     state = heartbeat._state_for(aid)  # noqa: SLF001
     assert state.noop_streak == 10
     assert state.dormant is False
-
 
 

@@ -84,7 +84,7 @@ def test_v71_migration_preserves_existing_rows():
         connection.execute('DROP TABLE '+table)
     connection.execute('PRAGMA user_version=71')
     db._migrate(connection)
-    assert connection.execute('PRAGMA user_version').fetchone()[0]==72
+    assert connection.execute('PRAGMA user_version').fetchone()[0]==db._SCHEMA_VERSION
     assert connection.execute("SELECT value FROM settings WHERE key='cache-migration-sentinel'").fetchone()[0]=='preserved'
     assert connection.execute('SELECT count(*) FROM tool_explanation_cache').fetchone()[0]==0
     connection.close()

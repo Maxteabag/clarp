@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 72
+_SCHEMA_VERSION = 73
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -317,7 +317,8 @@ CREATE TABLE agents (
     avatar_symbol TEXT NOT NULL DEFAULT '',
     personality TEXT NOT NULL DEFAULT '',
     avatar_path TEXT NOT NULL DEFAULT '',
-    archived_at INTEGER
+    archived_at INTEGER,
+    is_janitor INTEGER NOT NULL DEFAULT 0 CHECK (is_janitor IN (0, 1))
 );
 
 CREATE TABLE runtimes (
@@ -1387,6 +1388,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 for statement in _EXPLANATION_CACHE_SCHEMA.split(";"):
                     if statement.strip():
                         con.execute(statement)
+            if version < 73:
+                _migrate_to_v73(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1721,3 +1724,126 @@ def _migrate_to_v71(con: sqlite3.Connection) -> None:
         con.execute("UPDATE teams SET communication_enabled = 1")
     if "leader_enabled" not in columns:
         con.execute("UPDATE teams SET leader_enabled = CASE WHEN COALESCE(leader_agent_id, '') != '' THEN 1 ELSE 0 END")
+
+
+_JANITOR_SCHEMA = """
+CREATE TABLE IF NOT EXISTS janitor_configs (
+    agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
+    template_id TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    revision INTEGER NOT NULL DEFAULT 1,
+    generation INTEGER NOT NULL DEFAULT 1,
+    scope_json TEXT NOT NULL DEFAULT '{}',
+    last_error TEXT NOT NULL DEFAULT '',
+    last_run_at INTEGER,
+    last_change_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_trigger_definitions (
+    trigger_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    defaults_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (trigger_id, version)
+);
+CREATE TABLE IF NOT EXISTS janitor_attachments (
+    attachment_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),
+    trigger_id TEXT NOT NULL,
+    trigger_version INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    next_run_at INTEGER,
+    retired_at INTEGER,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(trigger_id, trigger_version)
+        REFERENCES janitor_trigger_definitions(trigger_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_janitor_attachments_agent
+    ON janitor_attachments(agent_id, retired_at);
+CREATE TABLE IF NOT EXISTS janitor_progress (
+    attachment_id TEXT PRIMARY KEY REFERENCES janitor_attachments(attachment_id),
+    generation INTEGER NOT NULL,
+    state_json TEXT NOT NULL DEFAULT '{}',
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_runs (
+    run_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),
+    session TEXT NOT NULL,
+    attachment_id TEXT NOT NULL REFERENCES janitor_attachments(attachment_id),
+    generation INTEGER NOT NULL,
+    trace_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'queued',
+    outcome TEXT NOT NULL DEFAULT '',
+    candidates_json TEXT NOT NULL,
+    configuration_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    finished_at INTEGER,
+    error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_janitor_runs_agent
+    ON janitor_runs(agent_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_janitor_runs_one_active
+    ON janitor_runs(agent_id) WHERE status IN ('queued', 'running');
+CREATE TABLE IF NOT EXISTS janitor_effects (
+    run_id TEXT NOT NULL REFERENCES janitor_runs(run_id),
+    target_agent_id TEXT NOT NULL REFERENCES agents(agent_id),
+    target_session TEXT NOT NULL,
+    observed_state_id INTEGER NOT NULL,
+    outcome TEXT NOT NULL,
+    before_label TEXT NOT NULL,
+    after_label TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(run_id, target_agent_id)
+);
+CREATE TABLE IF NOT EXISTS janitor_label_ownership (
+    target_agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
+    owner_agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),
+    run_id TEXT NOT NULL REFERENCES janitor_runs(run_id),
+    label TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1,
+    task_signature TEXT NOT NULL,
+    valid_until INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_creation_requests (
+    request_id TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    identity_json TEXT NOT NULL,
+    session TEXT NOT NULL UNIQUE,
+    agent_id TEXT REFERENCES agents(agent_id),
+    response_json TEXT,
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS janitor_pilot_imports (
+    import_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),
+    imported_at INTEGER NOT NULL,
+    payload_sha256 TEXT NOT NULL
+);
+INSERT OR IGNORE INTO janitor_trigger_definitions
+    (trigger_id, version, name, kind, defaults_json) VALUES
+    ('agent-work-completed', 1, 'After an agent finishes a turn', 'event',
+     '{"coalesce_seconds":8,"max_targets":3}'),
+    ('schedule', 1, 'On a schedule', 'schedule',
+     '{"cron":"0 9 * * *","timezone":"UTC","max_targets":3}');
+"""
+_SCHEMA_SQL += _JANITOR_SCHEMA
+
+
+def _migrate_to_v73(con: sqlite3.Connection) -> None:
+    """Add optional maintenance without rewriting existing identities/history."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if "is_janitor" not in columns:
+        con.execute("ALTER TABLE agents ADD COLUMN is_janitor INTEGER NOT NULL "
+                    "DEFAULT 0 CHECK (is_janitor IN (0, 1))")
+    for statement in _JANITOR_SCHEMA.split(";"):
+        if statement.strip():
+            con.execute(statement)

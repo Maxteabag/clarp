@@ -211,6 +211,14 @@ class RuntimeClient:
             raise RuntimeProtocolError(
                 str(response.get("error") or "runtime stop lease failed"))
 
+    def cancel_janitor_run(self, run_id: str) -> dict[str, Any]:
+        response = self._request("cancel_janitor_run", {"run_id": run_id})
+        if not response.get("ok"):
+            from .turn_dispatch import DispatchError
+            raise DispatchError(int(response.get("status") or 502),
+                                str(response.get("error") or "Maintenance cancellation failed"))
+        return dict(response.get("result") or {})
+
     def release_agent(self, agent_id: str) -> int:
         response = self._request("release_agent", {"agent_id": agent_id})
         if not response.get("ok"):
@@ -320,9 +328,25 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             return self._dispatch_request(method, params)
 
     def _dispatch_request(self, method: str, params: dict[str, Any]) -> dict:
+        if method in {"interrupt", "interrupt_any", "steer", "begin_stop", "release_agent"}:
+            from . import agents as agents_db
+            agent = agents_db.get_by_agent_id(str(params.get("agent_id") or ""))
+            if agent and not agents_db.interaction_capabilities(agent)["can_restart"]:
+                return {"ok": False, "status": 409,
+                        "error": "Janitors are managed from their maintenance configuration"}
+        if method == "cancel_janitor_run":
+            from . import turn_dispatch
+            try:
+                result = turn_dispatch.cancel_janitor_run(
+                    self.dispatch_service.ctx, str(params.get("run_id") or ""),
+                    backend_registry=self.dispatch_service.backends)
+            except turn_dispatch.DispatchError as exc:
+                return {"ok": False, "status": exc.status, "error": str(exc)}
+            return {"ok": True, "result": result}
         if method == "status":
             return {"ok": True, "result": {
                 "protocol_version": PROTOCOL_VERSION,
+                "capabilities": {"janitor_runs": True},
                 "draining": self._draining,
                 "release_id": self.release_id,
                 **dict(self.status_provider()),

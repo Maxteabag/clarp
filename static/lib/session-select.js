@@ -32,6 +32,8 @@ export function chooseSession({ sessions, serverDefault, current } = {}) {
 export function visibleSessions(sessions, agentsBySession = {}) {
   return (Array.isArray(sessions) ? sessions : []).filter(session => {
     if (typeof session !== 'string' || !session) return false;
-    return !agentsBySession[session]?.archived_at;
+    const agent = agentsBySession[session];
+    return !agent?.archived_at && !agent?.is_janitor
+      && agent?.interaction_capabilities?.can_chat !== false;
   });
 }

@@ -31,7 +31,7 @@ def list_agents() -> list[dict[str, Any]]:
         SELECT agent_id, persona, voice_id, cwd, session, backend, created_at,
                model, effort, mcp_servers, heartbeat_enabled,
                dreaming_enabled, dreaming_last_local_date, muted,
-               custom_status, avatar_symbol, avatar_path, personality, archived_at
+               custom_status, avatar_symbol, avatar_path, personality, archived_at, is_janitor
           FROM agents
          WHERE deleted_at IS NULL
          ORDER BY created_at
@@ -45,7 +45,7 @@ def get_by_session(session: str) -> dict[str, Any] | None:
         SELECT agent_id, persona, voice_id, cwd, session, backend, created_at,
                model, effort, mcp_servers, heartbeat_enabled,
                dreaming_enabled, dreaming_last_local_date, muted,
-               custom_status, avatar_symbol, avatar_path, personality, archived_at
+               custom_status, avatar_symbol, avatar_path, personality, archived_at, is_janitor
           FROM agents
          WHERE session = ? AND deleted_at IS NULL
     """, (session,)).fetchone()
@@ -72,7 +72,7 @@ def get_by_backend_session(backend_session_id: str) -> dict[str, Any] | None:
                a.backend, a.created_at, a.model, a.effort, a.mcp_servers,
                a.heartbeat_enabled, a.dreaming_enabled,
                a.dreaming_last_local_date, a.muted, a.custom_status,
-               a.avatar_symbol, a.avatar_path, a.personality, a.archived_at
+               a.avatar_symbol, a.avatar_path, a.personality, a.archived_at, a.is_janitor
           FROM agents a
           JOIN runtimes r ON r.agent_id = a.agent_id
          WHERE r.backend_session_id = ?
@@ -109,11 +109,18 @@ def get_by_agent_id(agent_id: str) -> dict[str, Any] | None:
         SELECT agent_id, persona, voice_id, cwd, session, backend, created_at,
                model, effort, mcp_servers, heartbeat_enabled,
                dreaming_enabled, dreaming_last_local_date, muted,
-               custom_status, avatar_symbol, avatar_path, personality, archived_at
+               custom_status, avatar_symbol, avatar_path, personality, archived_at, is_janitor
           FROM agents
          WHERE agent_id = ? AND deleted_at IS NULL
     """, (agent_id,)).fetchone()
     return dict(row) if row else None
+
+
+def interaction_capabilities(agent: dict[str, Any]) -> dict[str, bool]:
+    """One product capability policy shared by admission and clients."""
+    ordinary = not bool(agent.get("is_janitor"))
+    return {"can_chat": ordinary, "can_voice_target": ordinary,
+            "can_restart": ordinary, "can_inspect": True}
 
 
 def favorite_paths(limit: int = 5) -> list[dict[str, Any]]:
@@ -131,7 +138,8 @@ def favorite_paths(limit: int = 5) -> list[dict[str, Any]]:
 
 def create_agent(*, persona: str, voice_id: str, cwd: str,
                  session: str, backend: str = AgentBackend.CLAUDE,
-                 model: str = "", effort: str = "") -> str:
+                 model: str = "", effort: str = "",
+                 creation_request_id: str = "") -> str:
     """Insert or resurrect an agent row. Returns the agent_id.
 
     If a soft-deleted row exists with the same `session`, it's
@@ -145,6 +153,11 @@ def create_agent(*, persona: str, voice_id: str, cwd: str,
     Raises sqlite3.IntegrityError only if a LIVE agent already owns the
     name — caller should relaunch or pick a different session.
     """
+    if creation_request_id:
+        from .janitors import create_reserved_agent
+        return create_reserved_agent(
+            creation_request_id, persona=persona, voice_id=voice_id, cwd=cwd,
+            session=session, backend=backend, model=model, effort=effort)
     c = conn()
     ghost = c.execute(
         "SELECT agent_id FROM agents "
@@ -183,10 +196,19 @@ def update_voice(agent_id: str, voice_id: str) -> None:
 
 def set_custom_status(agent_id: str, status: str | None) -> None:
     """Persist free-text agent status shown while the agent is not busy."""
-    conn().execute(
-        "UPDATE agents SET custom_status = ? WHERE agent_id = ?",
-        ((status or "").strip(), agent_id),
-    )
+    c = conn()
+    # A deliberate manual/legacy write owns the field, even if it repeats the
+    # same text. A Janitor cannot reclaim it by comparing the visible string.
+    c.execute("SAVEPOINT manual_custom_status")
+    try:
+        c.execute("DELETE FROM janitor_label_ownership WHERE target_agent_id=?", (agent_id,))
+        c.execute("UPDATE agents SET custom_status = ? WHERE agent_id = ?",
+                  ((status or "").strip(), agent_id))
+        c.execute("RELEASE SAVEPOINT manual_custom_status")
+    except BaseException:
+        c.execute("ROLLBACK TO SAVEPOINT manual_custom_status")
+        c.execute("RELEASE SAVEPOINT manual_custom_status")
+        raise
 
 
 def set_archived(agent_id: str, archived: bool) -> None:
@@ -953,6 +975,8 @@ def session_dict() -> dict[str, dict[str, Any]]:
             # the map key.
             "session": a["session"],
             "persona": a["persona"],
+            "is_janitor": bool(a.get("is_janitor")),
+            "interaction_capabilities": interaction_capabilities(a),
             "backend": a.get("backend") or AgentBackend.CLAUDE,
         }
     return out

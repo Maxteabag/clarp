@@ -695,7 +695,7 @@ class Handler(BaseHTTPRequestHandler):
         "/orchestrator/", "/herald/", "/personalities/",
         "/automation-settings", "/avatar-settings", "/paired-devices",
         "/tts/providers",
-        "/oracle/", "/agent-file",
+        "/oracle/", "/agent-file", "/janitor-runs/",
     )
     _LIMITED_DEVICE_POST_EXACT = frozenset({
         "/send", "/transcribe", "/upload", "/select", "/focus",
@@ -737,6 +737,9 @@ class Handler(BaseHTTPRequestHandler):
         if self._device_forbidden(path, "GET"):
             return self._send(403, b'{"error":"full device access required"}',
                               "application/json")
+        from lib import janitor_http
+        if janitor_http.handles(path):
+            return janitor_http.handle(self, "GET")
         if path in self._ROOT_STATIC:
             return self._send_root_static(path)
         if self._dispatch_exact(self._GET_ROUTES, path):
@@ -2327,6 +2330,23 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- POST dispatch ---------------------------------------------------
 
+    def _reject_janitor_control(self, data) -> bool:
+        """Old clients cannot use chat controls to operate a maintenance agent."""
+        if not isinstance(data, dict):
+            return False
+        from lib import agents as agents_db
+        session = str(data.get("session") or data.get("replace_sid") or "").strip()
+        if not session:
+            session = str(getattr(self.ctx, "default_session", "") or "")
+        agent = agents_db.get_by_session(session) if session else None
+        if not agent or not agent.get("is_janitor"):
+            return False
+        self._send(403, json.dumps({
+            "error": "Janitors are inspection-only. Use their Pause or Configure controls.",
+            "code": "janitor_inspection_only",
+        }).encode(), "application/json")
+        return True
+
     def do_POST(self):
         if not self._authorized():
             return self._reject_unauthorized()
@@ -2338,6 +2358,9 @@ class Handler(BaseHTTPRequestHandler):
         if self._device_forbidden(path, "POST"):
             return self._send(403, b'{"error":"full device access required"}',
                               "application/json")
+        from lib import janitor_http
+        if janitor_http.handles(path):
+            return janitor_http.handle(self, "POST")
         if self._dispatch_exact(self._POST_ROUTES, path):
             return
         if path.startswith("/turn-queue/") and path.endswith("/send"):
@@ -2382,6 +2405,8 @@ class Handler(BaseHTTPRequestHandler):
         """Client tells us which agent view the user is looking at. Drives the
         herald system's decision of whether to suppress an off-focus agent."""
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if data is None:
             return self._send(400, b'{"error":"bad json"}', "application/json")
         sid = (data.get("session") or "").strip()
@@ -2700,6 +2725,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_agent_voice(self):
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if data is None:
             return self._send(400, b'{"error":"bad json"}', "application/json")
         session = (data.get("session") or "").strip()
@@ -2737,6 +2764,8 @@ class Handler(BaseHTTPRequestHandler):
         from lib import backends
         from lib import config
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if data is None:
             return self._send(400, b'{"error":"bad json"}', "application/json")
         session = (data.get("session") or "").strip()
@@ -2795,6 +2824,8 @@ class Handler(BaseHTTPRequestHandler):
         from lib import agents as agents_db
         from lib import config
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if data is None:
             return self._send(400, b'{"error":"bad json"}', "application/json")
         session = (data.get("session") or "").strip()
@@ -2828,6 +2859,8 @@ class Handler(BaseHTTPRequestHandler):
         from lib import agents as agents_db
         from lib import heartbeat
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if data is None:
             return self._send(400, b'{"error":"bad json"}', "application/json")
         session = (data.get("session") or "").strip()
@@ -2870,6 +2903,8 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_agent_schedules_post(self):
         from lib import scheduler
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if not isinstance(data, dict):
             return self._send(400, b'{"error":"bad json"}', "application/json")
         session = str(data.get("session") or "").strip()
@@ -2943,6 +2978,8 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_agent_archive(self):
         from lib import agents as agents_db
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if not isinstance(data, dict):
             return self._send(400, b'{"error":"bad json"}', "application/json")
         session = str(data.get("session") or "").strip()
@@ -3035,6 +3072,8 @@ class Handler(BaseHTTPRequestHandler):
         from lib import agents as agents_db
         from lib import dreaming
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if data is None:
             return self._send(400, b'{"error":"bad json"}', "application/json")
         session = (data.get("session") or "").strip()
@@ -3070,6 +3109,8 @@ class Handler(BaseHTTPRequestHandler):
         """
         from lib import agents as agents_db
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if data is None:
             return self._send(400, b'{"error":"bad json"}', "application/json")
         session = (data.get("session") or "").strip()
@@ -3148,6 +3189,8 @@ class Handler(BaseHTTPRequestHandler):
         snapshot's `compacting` flag + `context_tokens` for progress."""
         from lib import compaction
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if data is None:
             return self._send(400, b'{"error":"bad json"}', "application/json")
         session = (data.get("session") or "").strip()
@@ -3387,6 +3430,8 @@ class Handler(BaseHTTPRequestHandler):
         clarp subprocess is registered in clarp_runner._ACTIVE and we
         SIGTERM the lot."""
         data = self._read_json() or {}
+        if self._reject_janitor_control(data):
+            return
         session = (data.get("session") or self.ctx.default_session).strip() or self.ctx.default_session
         n = self._stop_agent_session(session, strict=False)
         return self._send(200, json.dumps({"ok": True, "terminated": n}).encode(),
@@ -3500,6 +3545,9 @@ class Handler(BaseHTTPRequestHandler):
         if self._device_forbidden(path, "DELETE"):
             return self._send(403, b'{"error":"full device access required"}',
                               "application/json")
+        from lib import janitor_http
+        if janitor_http.handles(path):
+            return janitor_http.handle(self, "DELETE")
         if path.startswith("/teams/") and "/members/" in path:
             rest = path[len("/teams/"):]
             team_id, agent_id = rest.split("/members/", 1)
@@ -3747,7 +3795,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_attention(self):
         from urllib.parse import parse_qs, urlparse
-        from lib import artifacts
+        from lib import artifacts, janitor_attention
         query = parse_qs(urlparse(self.path).query)
         items = artifacts.attention(
             include_questions=query.get("decision_format", [""])[0] == "2",
@@ -3757,6 +3805,8 @@ class Handler(BaseHTTPRequestHandler):
         # which otherwise silently interpret question creation as approval.
         return self._send(200, json.dumps({
             "items": items, "count": len(items), "decision_format": 2,
+            "janitor_items": janitor_attention.pending(
+                include_archived=query.get("include_archived", [""])[0] == "1"),
         }).encode(), "application/json")
 
     def _handle_turn_queue(self):
@@ -3803,6 +3853,8 @@ class Handler(BaseHTTPRequestHandler):
         queue_id = unquote(queue_id)
         row = turn_queue.get(queue_id)
         data = self._read_json()
+        if row and self._reject_janitor_control({"session": row["session"]}):
+            return
         text = str((data or {}).get("text") or "").strip()
         if data is None or not text:
             return self._send(400, b'{"error":"text required"}', "application/json")
@@ -3816,6 +3868,8 @@ class Handler(BaseHTTPRequestHandler):
         from lib import turn_queue
         queue_id = unquote(queue_id)
         row = turn_queue.get(queue_id)
+        if row and self._reject_janitor_control({"session": row["session"]}):
+            return
         if not row or not turn_queue.remove(queue_id):
             return self._send(404, b'{"error":"queued message not found"}', "application/json")
         self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]))
@@ -3873,8 +3927,7 @@ class Handler(BaseHTTPRequestHandler):
                           f"{worker_identity}). Before stopping anything, run "
                           f"`{gate_command}`. Proceed only if it returns 0 and "
                           "the target process still matches that exact worker identity; "
-                          "otherwise this cleanup was superseded by a newer generation. "
-                          "Then clear the short status if no jobs remain."),
+                          "otherwise this cleanup was superseded by a newer generation."),
                     requested_session=job["session"],
                     forced_session=job["session"],
                     trace_id=_trace.new_id(),
@@ -3972,6 +4025,8 @@ class Handler(BaseHTTPRequestHandler):
         from lib import turn_dispatch
         session = unquote(session).strip("/")
         agent = agents_db.get_by_session(session)
+        if self._reject_janitor_control({"session": session}):
+            return
         if agent and getattr(self.ctx, "runtime_client", None) is None:
             # Invalidate dispatch state before delete interrupts the backend;
             # its terminal callback must not drain queued work after deletion.
@@ -4051,6 +4106,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_select(self):
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if data is None:
             return self._send(400, b'{"error":"bad json"}', "application/json")
         session = (data.get("session") or "").strip()
@@ -4101,6 +4158,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_send(self):
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if data is None:
             return self._send(400, b"bad json")
         text = (data.get("text") or "").strip()
@@ -4693,6 +4752,8 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_agent_portraits_update(self):
         from lib import agent_portraits
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if data is None:
             return self._send(400, b'{"error":"bad json"}', "application/json")
         action = str(data.get("action") or "").strip()
@@ -4740,6 +4801,8 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_agent_portrait_generation_start(self):
         from lib import portrait_generation
         data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
         if data is None or not isinstance(data, dict):
             return self._send(400, b'{"error":"bad json"}', "application/json")
         session = str(data.get("session") or self.ctx.default_session).strip()
@@ -4978,6 +5041,33 @@ def build_server(ctx: ServerContext, port: int,
     schedule_runner = AgentScheduleRunner(dispatch_turn=_send_scheduled_job)
     schedule_runner.start()
     srv.on_close(schedule_runner.stop)
+
+    from lib.janitor_runner import JanitorRunner
+    from lib.janitor_http import runtime_available
+    from lib import janitor_attention
+
+    def _dispatch_janitor_run(run: dict, prompt: str):
+        if not runtime_available(ctx):
+            raise RuntimeError("Janitor runtime support is unavailable")
+        result = TurnDispatchService(ctx).dispatch(
+            text=prompt, requested_session=run["session"],
+            forced_session=run["session"], trace_id=run["trace_id"],
+            client_msg_id=run["trace_id"], origin="janitor",
+            synthesize_audio=False, queue_if_busy=True,
+            janitor_run_id=run["run_id"],
+        )
+        return {"ok": True, "queued": result.queued}
+
+    def _janitor_after_tick():
+        if janitor_attention.reconcile():
+            ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER,
+                                  "kind": "janitor-attention"})
+
+    janitor_runner = JanitorRunner(
+        _dispatch_janitor_run, admission_ready=lambda: runtime_available(ctx),
+        after_tick=_janitor_after_tick)
+    janitor_runner.start()
+    srv.on_close(janitor_runner.stop)
 
     broadcast_boot_version(ctx)
     runtime_client = getattr(ctx, "runtime_client", None)
