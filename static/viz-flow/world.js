@@ -20,7 +20,7 @@ const describe=o=>{
  if(o.remoteRuns.length)lines.push('Remote checks: '+o.remoteRuns.map(r=>r.conclusion||'running').join(', '));
  return lines.join('\n');
 };
-module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interaction={},avatars={},images={},reducedMotion=false})=>{
+module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhead,interaction={},avatars={},images={},reducedMotion=false})=>{
  const next=JSON.stringify([scene,Math.floor(playhead/500)]);
  if(!model||key!==next){model=build(scene,null,playhead);key=next;}
  const dt=Math.min(2,Math.max(.1,(time-lastTime)/16.67));lastTime=time;
@@ -29,7 +29,7 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,playhead,interactio
  const m={...model,files,fileMap:new Map(files.map(f=>[f.id,f]))},phase=reducedMotion?0:time/4000,hits=[],agents=[],visualActions=[];let drawnFiles=0;
  // Zoom reveals detail; selection never does. Overview keeps silhouettes, light
  // and identity; names and small marks appear as the viewer moves closer.
- const detail=camera.k<.45?0:camera.k<1.1?1:2;
+ const detail=lantern.detailLevel(camera.k,pixelRatio);
  const relations={rails:0,tethers:0,threads:0,deliveries:0,discoveries:0};
  c.fillStyle='#091c24';c.fillRect(0,0,width,height);
  const glow=c.createRadialGradient(width*.4,height*.5,10,width*.4,height*.5,width*.7);glow.addColorStop(0,'#19484455');glow.addColorStop(1,'#091c2400');c.fillStyle=glow;c.fillRect(0,0,width,height);

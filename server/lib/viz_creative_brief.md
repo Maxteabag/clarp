@@ -152,3 +152,10 @@ overview scale and shows them as the viewer approaches. Extend this material
 for new evidence (new artifact kinds, new check states, new relations) in the
 same spirit; the lantern's exact silhouette, palette and sizes are revisable
 source choices, not rules, and slate.js remains as the earlier treatment.
+
+Zoom detail thresholds use CSS-pixel scale: the host supplies pixelRatio alongside
+its physical-pixel camera, so use camera.k / pixelRatio (default 1). A high-density
+phone must not reveal more detail solely because its bitmap has more pixels.
+Lantern flicker requires observed running events or validation, not merely a
+recent timestamp; a completed observation is a trace. Do not invent research
+source dots when source_count is absent.

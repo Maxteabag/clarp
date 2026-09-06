@@ -8,6 +8,8 @@
 const {seal,typeColor,glyph}=require('./slate.js');
 exports.seal=seal;exports.typeColor=typeColor;
 exports.SIZES={intent:[56,78],evidence:[68,98],outcome:[90,126]};
+exports.detailLevel=(scale,pixelRatio=1)=>scale/pixelRatio<.45?0:scale/pixelRatio<1.1?1:2;
+exports.isRunning=o=>o.evidence.running===true||o.evidence.validation.state==='running';
 exports.size=o=>exports.SIZES[o.stage]||exports.SIZES.intent;
 const PAPER='#e8dcb4',WIRE='#8fa7a6',EMBER='#e0705a',GOLD='#e4c26a';
 const alphaHex=a=>Math.round(Math.max(0,Math.min(1,a))*255).toString(16).padStart(2,'0');
@@ -36,7 +38,7 @@ const crackPath=(c,w,a)=>{c.beginPath();c.moveTo(w*.05,a.bodyTop+2);c.lineTo(w*.
 
 exports.draw=(c,o,pos,ink,images,time,t,reduced,detail=1)=>{
  const [w,h]=exports.size(o),a=anatomy(w,h),v=o.evidence.validation,{glow,color}=exports.light(o,t,images);
- const running=v.state==='running'||(o.stage!=='intent'&&!o.finished&&o.age<8000);
+ const running=exports.isRunning(o);
  const flicker=running&&!reduced?.06*Math.sin(time/90+o.seed%7)+.04*Math.sin(time/230):0;
  const dim=o.finished?Math.max(.5,1-Math.max(0,o.age-120000)/3600000*.5):1;
  c.save();c.translate(pos.x,pos.y);
@@ -85,7 +87,7 @@ exports.draw=(c,o,pos,ink,images,time,t,reduced,detail=1)=>{
  // Unresolved checks after publication: an ember dot on the base, never hidden by success.
  if(v.unresolved?.length&&o.outcome){c.fillStyle=EMBER;c.beginPath();c.arc(-w*.3,a.bodyBottom+4,2.6,0,7);c.fill();}
  // Research sources gather into the lantern when the report is fresh.
- if(o.outcome?.type==='research'&&detail>=1){const n=Math.min(7,o.outcome.source_count||3),k=reduced?1:Math.min(1,Math.max(0,t-o.outcome.created_at)/4000);
+ if(o.outcome?.type==='research'&&detail>=1){const n=Math.min(7,o.outcome.source_count||0),k=reduced?1:Math.min(1,Math.max(0,t-o.outcome.created_at)/4000);
   c.fillStyle='#c9c2ea';for(let i=0;i<n;i++){const ang=-2.9+i/(n-1||1)*2.6,r=w*(1.5-.7*k);c.globalAlpha=dim*.8;c.beginPath();c.arc(Math.cos(ang)*r,a.bodyTop+Math.sin(ang)*r*.6,1.6,0,7);c.fill();}c.globalAlpha=dim;}
  // Title beneath the base, only when there is room to read it.
  if(detail>=1){c.fillStyle='#e7e8dc';c.font='11px Georgia';c.textAlign='center';c.textBaseline='alphabetic';

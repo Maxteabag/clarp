@@ -69,7 +69,7 @@ exports.assemble=(scene,t,history,groupFor,actorWorkspace)=>{
   objects.push({id:plan.id,title:plan.title,agent:plan.agent,agent_id:plan.agent_id,status:finished?(plan.status==='active'?'completed':plan.status):'active',
    created_at:plan.created_at,completed_at:end,workspace,stage,seed:hash(plan.id),
    intent:{declared:items.length,total:plan.item_total||items.length,done,current:items.find(i=>i.status==='in_progress')?.title||null},
-   evidence:{events:events.length,changes:changes.length,files:files.slice(0,6),validation:exports.validationState(runs,t),basis:'same agent, inside the plan window'},
+   evidence:{running:events.some(e=>exports.outcomeOf(e,t)==='running'),events:events.length,changes:changes.length,files:files.slice(0,6),validation:exports.validationState(runs,t),basis:'same agent, inside the plan window'},
    outcome:primary?{id:primary.id,type:primary.type,title:primary.title,created_at:primary.created_at,preview:!!primary.preview,link:primary.run?.run_url||primary.media_url||null,sources:primary.sources||null,source_count:primary.source_count||0,media:primary.media||null,count:outputs.length}:null,
    remoteRuns:runsRemote,
    handoffs,age:Math.max(0,t-lastActivity),finished});
