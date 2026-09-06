@@ -30,7 +30,7 @@ export class PreviewCache {
         }else blob=await response.blob();
         if(blob.size>MAX_BYTES)throw Error('Preview too large');
         if(!blob.type.startsWith('image/'))throw Error('Not an image');
-        const image=await createImageBitmap(blob,{resizeWidth:384,resizeHeight:288,resizeQuality:'medium'});
+        const image=await createImageBitmap(blob,{resizeWidth:384,resizeQuality:'medium'});
         try{entry.blob=await thumbnail(image);}finally{image.close();}
         if(this.entries.get(preview.id)===entry)this.onchange(this.blobs());
       }catch{/* The slate keeps its type glyph until a preview arrives or retries. */}
