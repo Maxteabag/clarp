@@ -106,11 +106,12 @@ def _develop_scene(cluster: dict) -> dict:
                     'new':novel,'known':library.get('scene_coverage',[]),'source':library['program'],
                     'entities':scene['entities']}))
         answer=json.loads(viz_rule_author.call_tier(prompt,viz_rule_author.TIER_ONE))
-        if answer.get('verdict')=='variant':
-            if answer.get('of') not in library.get('scene_coverage',[]):raise ValueError('Invented visual alias')
+        if answer.get('verdict')=='variant' and answer.get('of') in library.get('scene_coverage',[]):
             updated=viz_library.apply_program(library['program'],library['revision'],'Spark identified reusable visual software',scene.get('coverage_keys',[]))
             return {'applied':[updated['decisions'][-1]['id']],'rejected':[]}
-        if answer.get('verdict')!='NOVEL':raise ValueError('Invalid visual triage')
+        # An invalid alias establishes no equivalence. Treat it as unresolved
+        # novelty and let the creative tier inspect the evidence; do not stall
+        # the entire observer on an invented tier-one identifier.
     with _lock:
         _stage = 'Astra developing'
     return viz_rule_author.evolve_world(scene,cluster['example'])

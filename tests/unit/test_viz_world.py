@@ -87,3 +87,15 @@ def test_host_learning_flags_reach_preview_process(monkeypatch):
     monkeypatch.setattr(host.subprocess,'Popen',Child)
     assert host.main()==0
     assert commands[0][-3:]==['--library','/tmp/library.json','--learn']
+
+
+def test_invalid_spark_alias_escalates_instead_of_stalling_the_observer(monkeypatch):
+    from lib import viz_learning
+    library=viz_library.seed();library.update(program={'title':'Existing'},scene_coverage=['entity:old'])
+    monkeypatch.setattr(viz_library,'load',lambda:library)
+    monkeypatch.setattr(viz_rule_author,'call_tier',lambda *a:json.dumps({'verdict':'variant','of':'invented'}))
+    calls=[]
+    monkeypatch.setattr(viz_rule_author,'evolve_world',lambda scene,reason:calls.append(scene) or {'applied':['new'],'rejected':[]})
+    scene={'coverage_keys':['entity:new'],'entities':[]}
+    assert viz_learning._develop_scene({'scene':scene,'example':'new'})['applied']==['new']
+    assert calls==[scene]
