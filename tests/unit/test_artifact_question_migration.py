@@ -9,6 +9,19 @@ import pytest
 from lib import db
 
 
+def _stamp_legacy_version(con, version):
+    """Remove unrelated v72 additions before simulating a pre-v72 Host.
+
+    Attention columns intentionally overlap historical version stamps below;
+    explanation tables did not exist in any of those historical releases.
+    """
+    assert 66 <= version <= 69
+    for table in ("tool_explanation_demands", "tool_explanation_jobs",
+                  "tool_explanation_releases", "tool_explanation_cache"):
+        con.execute(f"DROP TABLE IF EXISTS {table}")
+    con.execute(f"PRAGMA user_version={version}")
+
+
 # The pre-question table definitions are independent of the current schema.
 _LEGACY_TABLES = """
 CREATE TABLE artifacts (
@@ -64,8 +77,9 @@ def test_v66_approval_migration_preserves_rows_and_matches_fresh_tables(tmp_path
     con = sqlite3.connect(tmp_path / "old.sqlite", isolation_level=None)
     con.row_factory = sqlite3.Row
     # Keep the other Host tables present: later migrations may upgrade them.
-    # Only the approval tables are intentionally downgraded by this fixture.
+    # Rebuild legacy approval tables and remove later, unrelated table additions.
     db._migrate(con)
+    _stamp_legacy_version(con, 66)
     for table in ("decision_deliveries", "artifact_decisions", "artifacts"):
         con.execute(f"DROP TABLE {table}")
     con.executescript(_LEGACY_TABLES)
@@ -123,6 +137,7 @@ def _legacy_host(tmp_path, version, attention_shape, *, v68_variant="both"):
     con = sqlite3.connect(tmp_path / "legacy-host.sqlite", isolation_level=None)
     con.row_factory = sqlite3.Row
     db._migrate(con)
+    _stamp_legacy_version(con, 66)
     # Keep the full Host schema, but rebuild the three old tables from their
     # independent pre-attention definitions. No new production column list is
     # used to manufacture the legacy attention shape.
@@ -204,7 +219,7 @@ def _legacy_host(tmp_path, version, attention_shape, *, v68_variant="both"):
         # Missing snapshots must be backfilled even when all columns exist.
         con.execute("UPDATE artifact_decisions SET answer_json=NULL WHERE decision_id='rejected'")
         con.execute("UPDATE decision_deliveries SET answer_json=NULL WHERE decision_id='rejected'")
-    con.execute(f"PRAGMA user_version={version}")
+    _stamp_legacy_version(con, version)
     return con
 
 
@@ -253,7 +268,7 @@ def test_overlap_versions_reconcile_attention_without_touching_unrelated_data(tm
     assert decisions["pending"]["blocks_progress"] == (0 if attention_shape == "absent" else 1)
     # A historical build may have reused a lower version stamp. Exercise the
     # reconciliation itself again, not just the current-version early return.
-    con.execute("PRAGMA user_version=69")
+    _stamp_legacy_version(con, 69)
     before_rerun = con.total_changes
     db._migrate(con)
     assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
