@@ -1278,3 +1278,40 @@ def test_retry_refreshes_team_context_after_communication_disabled(tmp_path):
     scheduled.pop(0)()
     assert len(backend.spawned) == 2
     assert backend.spawned[1][1]["text"] == "hello"
+
+
+def test_oracle_followup_steers_and_tracks_actual_terminal_result(tmp_path):
+    from lib import oracle_delegations, turn_queue
+    agent_id = agents_db.create_agent(persona="Marcus", voice_id="V", cwd=str(tmp_path),
+                                      session="marcus", backend="codex")
+    agents_db.start_runtime(agent_id, "marcus")
+    backend = _SteerableBackends()
+    ctx = SimpleNamespace(default_session="marcus", agents_path=tmp_path / "unused", stream=_Stream())
+    service = TurnDispatchService(ctx, backend_registry=backend, home=tmp_path)
+    service.dispatch(text="investigate", requested_session="marcus", trace_id="original",
+                     synthesize_audio=False)
+    oracle_delegations.begin(delegation_id="followup", trace_id="oracle-followup",
+        client_msg_id="oracle-followup", agent_id=agent_id, session="marcus",
+        request_text="also check cutoffs")
+    result = service.dispatch(text="also check cutoffs", requested_session="marcus",
+        trace_id="oracle-followup", client_msg_id="oracle-followup", origin="oracle",
+        queue_if_busy=True, synthesize_audio=False)
+    assert not result.queued
+    assert len(backend.spawned) == 1
+    assert backend.interrupted == []
+    assert backend.steered == [("codex", agent_id, "also check cutoffs", "oracle-followup", False)]
+    assert turn_queue.status("oracle-followup") == "started"
+    assert turn_queue.pending_count(agent_id) == 0
+    assert oracle_delegations.get("followup")["completion_trace_id"] == "original"
+    assert oracle_delegations.complete_for_trace(trace_id="original", message_id="final", text="Checked both")
+    row = oracle_delegations.get("followup")
+    assert row["status"] == "completed"
+    assert row["result_text"] == "Checked both"
+    assert row["trace_id"] == "oracle-followup"
+    assert not row["delivered"]
+    assert oracle_delegations.acknowledge("followup")
+    service.dispatch(text="also check cutoffs", requested_session="marcus",
+        trace_id="oracle-followup", client_msg_id="oracle-followup", origin="oracle",
+        queue_if_busy=True, synthesize_audio=False)
+    assert len(backend.steered) == 1
+    assert len(backend.spawned) == 1

@@ -441,3 +441,14 @@ def test_result_delivery_is_scoped_to_creating_device(tmp_path):
         "owned-a", owner_principal="phone-b")
     assert oracle_delegations.acknowledge(
         "owned-a", owner_principal="phone-a")
+
+
+def test_steered_followup_failure_tracks_original_turn(tmp_path):
+    agent = _agent(tmp_path)
+    oracle_delegations.begin(delegation_id="steered", trace_id="own-trace",
+        client_msg_id="own-message", agent_id=agent["agent_id"], session="theo",
+        request_text="extra detail")
+    oracle_delegations.attach_steered_trace("own-trace", "running-trace")
+    assert oracle_delegations.fail_for_trace("running-trace", "connection lost")
+    assert oracle_delegations.get("steered")["status"] == "failed"
+    assert oracle_delegations.get("steered")["error"] == "connection lost"

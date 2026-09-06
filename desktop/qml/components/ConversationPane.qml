@@ -30,6 +30,7 @@ Rectangle {
         id: presentation
         sourceModel: root.conversationModel
         showWhenReady: root.controller.showWhenReady
+        activityMode: root.controller.activityDisplayMode
     }
 
     color: root.active ? "#1a1b26" : "#1a1b26"
@@ -239,6 +240,18 @@ Rectangle {
             }
 
             delegate: MessageDelegate {
+                required property var groupIds
+                required property string groupLabel
+                required property bool groupExpanded
+                required property bool activityInline
+                groupSummary: groupLabel
+                groupedExpanded: groupExpanded
+                forceActivityInline: activityInline
+                onToggleActivityGroup: {
+                    if (!groupExpanded) for (const id of groupIds)
+                        root.controller.loadMessageToolDetails(root.session, id);
+                    presentation.toggleGroup(messageId);
+                }
                 controller: root.controller
                 session: root.session
                 showTools: root.controller.toolsVisible
@@ -296,6 +309,7 @@ Rectangle {
     }
 
     onSessionChanged: {
+        presentation.beginVisit();
         if (session.length > 0 && controller.connected)
             controller.loadMedia(session);
     }

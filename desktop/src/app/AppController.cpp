@@ -99,6 +99,8 @@ AppController::AppController(QObject* parent)
     m_pauseMobilePush = settings.value(QStringLiteral("notifications/pauseMobileWhileDesktopActive"), true).toBool();
     m_showWhenReady = settings.value(QStringLiteral("conversation/showWhenReady"), false).toBool();
     m_toolsVisible = settings.value(QStringLiteral("conversation/toolsVisible"), false).toBool();
+    m_activityDisplayMode = std::clamp(settings.value(QStringLiteral("conversation/activityDisplayMode"), m_toolsVisible ? 1 : 0).toInt(), 0, 2);
+    m_toolsVisible = m_activityDisplayMode == 1;
     if (!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH"))
         m_toolNarrator.setDetailLevel(std::clamp(settings.value(QStringLiteral("experiments/toolLastTranslationLevel"), 3).toInt(), 1, 4));
     m_toolNarrator.setDetailLevel(qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH") ? 0
@@ -644,11 +646,15 @@ void AppController::setShowWhenReady(bool value) {
 }
 
 void AppController::setToolsVisible(bool visible) {
-    if (m_toolsVisible == visible) {
-        return;
-    }
-    m_toolsVisible = visible;
-    QSettings().setValue(QStringLiteral("conversation/toolsVisible"), visible);
+    setActivityDisplayMode(visible ? 1 : 0);
+}
+void AppController::setActivityDisplayMode(int mode) {
+    mode = std::clamp(mode, 0, 2);
+    if (m_activityDisplayMode == mode) return;
+    m_activityDisplayMode = mode;
+    m_toolsVisible = mode == 1;
+    QSettings().setValue(QStringLiteral("conversation/activityDisplayMode"), mode);
+    QSettings().setValue(QStringLiteral("conversation/toolsVisible"), m_toolsVisible);
     emit toolsVisibleChanged();
 }
 

@@ -157,7 +157,7 @@ def test_v63_adds_durable_oracle_delegations(tmp_path):
 
     assert "oracle_delegations" in _names(upgraded, "table")
     assert {
-        "delegation_id", "owner_principal", "trace_id", "client_msg_id",
+        "delegation_id", "owner_principal", "trace_id", "client_msg_id", "completion_trace_id",
         "agent_id", "session", "backend_session_id", "request_text", "status",
         "result_message_id", "result_text", "error", "created_at", "updated_at",
         "delivered_at",

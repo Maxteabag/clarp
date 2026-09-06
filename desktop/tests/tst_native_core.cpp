@@ -606,6 +606,7 @@ class NativeCoreTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void oldActivityGroupsAreLazyAndVisitScoped();
     void readyModePreservesActivityAndHidesOnlyProvisionalBody();
     void idleContactStartsFreshWithSavedDefaults();
     void redesignedRosterFiltersWithoutMutatingSource();
@@ -642,6 +643,41 @@ class NativeCoreTest final : public QObject {
     void backgroundTranscriptionsKeepTheirChatOwnership();
     void markdownParagraphsBecomeVisibleDisplayBlocks();
 };
+
+void NativeCoreTest::oldActivityGroupsAreLazyAndVisitScoped() {
+    QStandardItemModel source;
+    const auto append = [&source](const QString& id, const QString& time, const QString& kind) {
+        auto* row = new QStandardItem;
+        row->setData(id, ConversationModel::MessageIdRole);
+        row->setData(QStringLiteral("assistant"), ConversationModel::AuthorRole);
+        row->setData(QString{}, ConversationModel::BodyRole);
+        row->setData(time, ConversationModel::TimestampRole);
+        row->setData(kind, ConversationModel::KindRole);
+        row->setData(1, ConversationModel::ActivityCountRole);
+        row->setData(QVariantList{QVariantMap{{QStringLiteral("name"), QStringLiteral("Read")}}}, ConversationModel::ToolsRole);
+        source.appendRow(row);
+        return row;
+    };
+    append(QStringLiteral("a"), QStringLiteral("2020-01-01T00:00:00Z"), QString{});
+    append(QStringLiteral("b"), QStringLiteral("2020-01-01T01:32:23Z"), QString{});
+    ConversationPresentationModel view;
+    view.setSourceModel(&source);
+    view.setActivityMode(2);
+    QCOMPARE(view.rowCount(), 1);
+    QCOMPARE(view.data(view.index(0, 0), ConversationPresentationModel::GroupLabelRole).toString(), QStringLiteral("2 tool calls · 1h 32m 23s"));
+    QVERIFY(view.data(view.index(0, 0), ConversationModel::ToolsRole).toList().isEmpty());
+    view.toggleGroup(QStringLiteral("a"));
+    QCOMPARE(view.data(view.index(0, 0), ConversationModel::ToolsRole).toList().size(), 2);
+    auto* live = append(QStringLiteral("c"), QStringLiteral("2020-01-01T02:00:00Z"), QStringLiteral("live"));
+    QCOMPARE(view.rowCount(), 2);
+    live->setData(QStringLiteral("assistant"), ConversationModel::KindRole);
+    QCOMPARE(view.rowCount(), 2); // Completion must not collapse a witnessed live row.
+    view.beginVisit();
+    QCOMPARE(view.rowCount(), 1);
+    QVERIFY(view.data(view.index(0, 0), ConversationModel::ToolsRole).toList().isEmpty());
+    view.setActivityMode(1);
+    QCOMPARE(view.rowCount(), 3);
+}
 
 void NativeCoreTest::readyPresentationRetainsCanonicalStreamAndRevealsFinal() {
     ConversationModel source;
