@@ -5,6 +5,19 @@ from types import SimpleNamespace
 from lib.runtime_startup import recover_runtime
 
 
+def test_ephemeral_janitors_do_not_start_unused_chat_runtimes(tmp_path, monkeypatch):
+    from lib import agents, janitors, janitor_builtins, runtime_startup
+    agents.create_agent(persona="Sam", voice_id="", cwd=str(tmp_path), session="sam")
+    agents.create_agent(persona="Rivet", voice_id="", cwd=str(tmp_path), session="rivet")
+    janitors.create("rivet")
+    janitor_builtins.ensure_builtins(cwd=str(tmp_path))
+    restored = []
+    monkeypatch.setattr(runtime_startup, "resume_missing_sessions",
+        lambda rows, *args, **kwargs: restored.extend(rows) or [])
+    runtime_startup.restore_persisted_agents(SimpleNamespace(agents_path=tmp_path / "unused.json"))
+    assert set(restored) == {"sam", "rivet"}
+
+
 def test_runtime_recovery_marks_dead_work_before_reconcile_and_continuity():
     order = []
     dispatch = SimpleNamespace(

@@ -13,8 +13,13 @@ from .resume import resume_missing_sessions
 def restore_persisted_agents(ctx) -> None:
     """Restore backend bindings when the runtime process itself starts."""
     from .agent_store import load_agents
+    from .db import conn
 
     agents = load_agents(ctx.agents_path)
+    demand_sessions = {row[0] for row in conn().execute("""SELECT a.session
+        FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id
+        WHERE a.is_janitor=1 AND json_extract(j.execution_json,'$.executor')='ephemeral'""")}
+    agents = {session: row for session, row in agents.items() if session not in demand_sessions}
     if not agents:
         return
     results = resume_missing_sessions(
