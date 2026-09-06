@@ -27,8 +27,10 @@ exports.decisionAt=(d,t)=>{
 };
 
 // Boundary posts stand outside the right rim of the workshop, at most three.
-exports.posts=(region,boundaries)=>{
- const angles=[.08,.4,.72];
+// Boundary posts stand outside the rim on the side facing away from the rest
+// of the project, so a worktree's gates never land inside its neighbour.
+exports.posts=(region,boundaries,base=.4)=>{
+ const angles=[base,base+.34,base-.34];
  return boundaries.slice(0,3).map((boundary,i)=>({boundary,label:LABELS[boundary]||LABELS.unknown,region:region.id,
   x:region.x+Math.cos(angles[i])*(region.rx+38),y:region.y+Math.sin(angles[i])*(region.ry+30)}));
 };
