@@ -19,6 +19,7 @@ ideas, a task backlog, or an approval queue.
 | [0009](0009-overall-map-without-focus.md) | Accepted | Flow is an overall map; selection inspects. Uniform sizing superseded by 0011. |
 | [0010](0010-mobile-map-navigation.md) | Accepted | Support phone and desktop viewports with touch navigation; remove the desktop size gate. |
 | [0011](0011-interpretive-craft-and-logical-groups.md) | Accepted | Interpret the owner’s taste; craft logical groups, meaningful differences and visible workflows rather than literal file containers. |
+| [0012](0012-visible-work-objects.md) | Accepted direction | Make work itself visible: one persistent object per recorded plan, with intent, attributed evidence and recorded outcome kept separate and honest. |
 
 The combined current direction is **The Lantern Works with agent avatars**, plus
 an optional **Agent cabinets** view. Preserve workshops, harbor, hierarchy and
