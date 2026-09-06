@@ -659,10 +659,13 @@ void NativeCoreTest::redesignedRosterFiltersWithoutMutatingSource() {
     AgentFilterModel filtered;
     filtered.setSourceModel(&source);
     QCOMPARE(filtered.rowCount(), 2);
+    QCOMPARE(filtered.indexOfSession(QStringLiteral("beta")), 1);
     filtered.setQuery(QStringLiteral("WORK/TWO"));
     QCOMPARE(filtered.rowCount(), 1);
     QCOMPARE(filtered.index(0, 0).data(AgentListModel::SessionRole).toString(), QStringLiteral("beta"));
     QCOMPARE(source.rowCount(), 2);
+    QCOMPARE(filtered.indexOfSession(QStringLiteral("beta")), 0);
+    QCOMPARE(filtered.indexOfSession(QStringLiteral("alpha")), -1);
     filtered.setQuery({});
     filtered.setUnreadOnly(true);
     QCOMPARE(filtered.rowCount(), 0);

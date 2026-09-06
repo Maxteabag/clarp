@@ -12,6 +12,14 @@ AgentFilterModel::AgentFilterModel(QObject* parent) : QSortFilterProxyModel(pare
     connect(this, &QAbstractItemModel::modelReset, this, &AgentFilterModel::countChanged);
 }
 
+int AgentFilterModel::indexOfSession(const QString& session) const {
+    for (int row = 0; row < rowCount(); ++row) {
+        if (index(row, 0).data(AgentListModel::SessionRole).toString() == session)
+            return row;
+    }
+    return -1;
+}
+
 QString AgentFilterModel::query() const { return m_query; }
 
 bool AgentFilterModel::unreadOnly() const { return m_unreadOnly; }

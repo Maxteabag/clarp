@@ -20,6 +20,7 @@ ItemDelegate {
     required property bool muted
     property int unreadCount: 0
     required property int queueCount
+    readonly property bool keyboardCurrent: ListView.isCurrentItem && ListView.view !== null && ListView.view.activeFocus
     property bool collapsed: false
     property bool archived: false
     signal chatSelected
@@ -42,6 +43,8 @@ ItemDelegate {
     }
 
     background: Rectangle {
+        border.width: row.keyboardCurrent ? 1 : 0
+        border.color: "#bb9af7"
         color: row.current ? "#292b3a" : row.hovered ? "#211e27" : "transparent"
 
         Rectangle {
