@@ -13,7 +13,7 @@ Rectangle {
     signal closeRequested
     readonly property bool dialogOpen: ttsDialog.visible
     property int focusedIndex: 0
-    readonly property var actions: [timestampsRow, toolsRow, narrationRow, spokenRow,
+    readonly property var actions: [timestampsRow, readyRow, toolsRow, narrationRow, spokenRow,
         connectionRow, orchestratorRow, filesystemRow, routingRow]
     color: "#1a1b26"
     objectName: "settingsPanel"
@@ -124,6 +124,14 @@ Rectangle {
                     detail: "Show the date and time under each message"
                     checked: root.controller.timestampsVisible
                     onToggled: value => root.controller.timestampsVisible = value
+                }
+                SettingsToggle {
+                    id: readyRow
+                    objectName: "setting-show-when-ready"
+                    label: "Show when ready"
+                    detail: "Show a typing indicator, then the finished reply"
+                    checked: root.controller.showWhenReady
+                    onToggled: value => root.controller.showWhenReady = value
                 }
                 SettingsToggle {
                     id: toolsRow

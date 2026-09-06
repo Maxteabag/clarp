@@ -26,7 +26,7 @@ ItemDelegate {
     signal chatSelected
 
     readonly property bool current: !archived && controller.selectedSession === session
-    readonly property string activityLine: busy ? (statusText.length > 0 ? statusText : (agentState.length > 0 ? agentState : "Working")) : statusText
+    readonly property string activityLine: controller.showWhenReady && busy ? "Typing…" : busy ? (statusText.length > 0 ? statusText : (agentState.length > 0 ? agentState : "Working")) : statusText
 
     width: ListView.view ? ListView.view.width : 280
     leftPadding: collapsed ? 0 : 14
@@ -116,7 +116,7 @@ ItemDelegate {
                 Text {
                     Layout.fillWidth: true
                     textFormat: Text.PlainText
-                    text: row.lastMessage.length > 0 ? row.lastMessage : (row.workingDirectory.length > 0 ? row.workingDirectory : row.backend)
+                    text: (row.controller.showWhenReady ? "" : row.lastMessage).length > 0 ? (row.controller.showWhenReady ? "" : row.lastMessage) : (row.workingDirectory.length > 0 ? row.workingDirectory : row.backend)
                     color: row.unread ? "#b3aab9" : "#77717f"
                     font.pixelSize: 11
                     elide: Text.ElideRight

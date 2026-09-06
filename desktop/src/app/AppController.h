@@ -64,6 +64,7 @@ class AppController : public QObject {
     Q_PROPERTY(bool connecting READ connecting NOTIFY connectingChanged)
     Q_PROPERTY(bool sending READ sending NOTIFY sendingChanged)
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
+    Q_PROPERTY(bool showWhenReady READ showWhenReady WRITE setShowWhenReady NOTIFY showWhenReadyChanged)
     Q_PROPERTY(bool toolsVisible READ toolsVisible WRITE setToolsVisible NOTIFY toolsVisibleChanged)
     Q_PROPERTY(bool timestampsVisible READ timestampsVisible WRITE setTimestampsVisible
                    NOTIFY timestampsVisibleChanged)
@@ -152,6 +153,8 @@ class AppController : public QObject {
     [[nodiscard]] bool connecting() const;
     [[nodiscard]] bool sending() const;
     [[nodiscard]] bool muted() const;
+    [[nodiscard]] bool showWhenReady() const { return m_showWhenReady; }
+    void setShowWhenReady(bool value);
     [[nodiscard]] bool toolsVisible() const;
     [[nodiscard]] bool timestampsVisible() const;
     [[nodiscard]] bool sharedFilesystem() const;
@@ -319,6 +322,7 @@ class AppController : public QObject {
     void connectingChanged();
     void sendingChanged();
     void mutedChanged();
+    void showWhenReadyChanged();
     void toolsVisibleChanged();
     void timestampsVisibleChanged();
     void sharedFilesystemChanged();
@@ -456,6 +460,7 @@ class AppController : public QObject {
     bool m_connecting = false;
     bool m_sending = false;
     bool m_muted = false;
+    bool m_showWhenReady = false;
     bool m_toolsVisible = false;
     bool m_timestampsVisible = false;
     bool m_sharedFilesystem = false;

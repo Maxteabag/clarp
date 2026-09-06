@@ -1,3 +1,4 @@
+#include "models/ConversationPresentationModel.h"
 #include "app/AppController.h"
 #include "app/CredentialStore.h"
 #include "app/TranscriptCache.h"
@@ -610,6 +611,7 @@ class NativeCoreTest final : public QObject {
     void agentTerminalLaunchesNativeCliThroughDefaultTerminal();
     void sseParserHandlesChunksCommentsAndReplayIds();
     void nextAttentionCyclesWaitingUnreadAndPending();
+    void readyPresentationRetainsCanonicalStreamAndRevealsFinal();
     void sseCursorIsScopedToOneHost();
     void snapshotFiltersArchivedAgentsAndPatchesEvents();
     void agentSnapshotDiffsInPlaceAndRejectsStaleState();
@@ -637,6 +639,52 @@ class NativeCoreTest final : public QObject {
     void backgroundTranscriptionsKeepTheirChatOwnership();
     void markdownParagraphsBecomeVisibleDisplayBlocks();
 };
+
+void NativeCoreTest::readyPresentationRetainsCanonicalStreamAndRevealsFinal() {
+    ConversationModel source;
+    source.openSession(QStringLiteral("ready"));
+    ConversationPresentationModel view;
+    view.setSourceModel(&source);
+    const auto row = [](const QString& id, const QString& role, const QString& kind, const QString& text, int revision) {
+        return QJsonObject{{QStringLiteral("id"), id}, {QStringLiteral("role"), role},
+            {QStringLiteral("kind"), kind}, {QStringLiteral("text"), text}, {QStringLiteral("revision"), revision}};
+    };
+    source.applyLog({{QStringLiteral("conversation_id"), QStringLiteral("ready-thread")},
+        {QStringLiteral("turns"), QJsonArray{row(QStringLiteral("u"), QStringLiteral("user"), QString{}, QStringLiteral("Question"), 1),
+            row(QStringLiteral("live"), QStringLiteral("assistant"), QStringLiteral("live"), QStringLiteral("Partial"), 2)}},
+        {QStringLiteral("latest_revision"), 2}}, ConversationModel::LoadKind::Tail);
+    QCOMPARE(view.rowCount(), 2);
+    view.setShowWhenReady(true);
+    QCOMPARE(view.rowCount(), 1);
+    QCOMPARE(source.rowCount(), 2);
+    QCOMPARE(view.indexOfMessage(QStringLiteral("live")), -1);
+    QSignalSpy updates(&view, &QAbstractItemModel::dataChanged);
+    source.applyLog({{QStringLiteral("conversation_id"), QStringLiteral("ready-thread")},
+        {QStringLiteral("turns"), QJsonArray{row(QStringLiteral("live"), QStringLiteral("assistant"), QStringLiteral("live"), QStringLiteral("Partial updated"), 3)}},
+        {QStringLiteral("latest_revision"), 3}}, ConversationModel::LoadKind::Delta);
+    QCOMPARE(view.rowCount(), 1);
+    QCOMPARE(updates.count(), 0);
+    source.showTransientThinking(QStringLiteral("Agent"));
+    QCOMPARE(view.rowCount(), 1);
+    view.setShowWhenReady(false);
+    QCOMPARE(view.rowCount(), source.rowCount());
+    QCOMPARE(view.indexOfMessage(QStringLiteral("live")), 1);
+    view.setShowWhenReady(true);
+    source.applyLog({{QStringLiteral("conversation_id"), QStringLiteral("ready-thread")},
+        {QStringLiteral("turns"), QJsonArray{row(QStringLiteral("final"), QStringLiteral("assistant"), QStringLiteral("assistant"), QStringLiteral("Partial updated complete"), 4)}},
+        {QStringLiteral("latest_revision"), 4}}, ConversationModel::LoadKind::Delta);
+    QCOMPARE(view.rowCount(), 2);
+    QCOMPARE(view.data(view.index(1, 0), ConversationModel::BodyRole).toString(), QStringLiteral("Partial updated complete"));
+    QCOMPARE(view.data(view.index(1, 0), ConversationModel::DisplayCellsRole).toList().size(), 0);
+    const bool original = QSettings().value(QStringLiteral("conversation/showWhenReady"), false).toBool();
+    {
+        AppController controller;
+        controller.setShowWhenReady(true);
+        AppController restored;
+        QVERIFY(restored.showWhenReady());
+        controller.setShowWhenReady(original);
+    }
+}
 
 void NativeCoreTest::nextAttentionCyclesWaitingUnreadAndPending() {
     AgentListModel model;

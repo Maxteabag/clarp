@@ -1,3 +1,4 @@
+#include "app/ReadyReplySmokeCheck.h"
 #include "app/KeyboardSmokeCheck.h"
 #include "app/AppController.h"
 #include "app/DesktopPalette.h"
@@ -369,6 +370,8 @@ int main(int argc, char* argv[]) {
         });
     }
     if (!screenshotPath.isEmpty()) {
+        if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_READY_REPLY"))
+            startReadyReplySmokeCheck(application, rootWindow, controller, screenshotPath);
         if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_CONTEXT_KEYBOARD"))
             startKeyboardSmokeCheck(application, rootWindow, controller);
         if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SETTINGS_KEYBOARD") && rootWindow != nullptr) {
@@ -489,11 +492,17 @@ int main(int argc, char* argv[]) {
         }
         const int requestedDelay = qEnvironmentVariableIntValue("CLARP_SCREENSHOT_DELAY_MS");
         const int captureDelay = requestedDelay > 0 ? std::clamp(requestedDelay, 2'400, 60'000)
+            : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_READY_REPLY") ? 3'000
             : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_CONTEXT_KEYBOARD") ? 4'600
             : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SETTINGS_KEYBOARD") ? 3'300
             : screenshotScenario.isEmpty() ? 2'000 : 2'400;
         QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath, sidebarToggles, sidebarWidth] {
             if (rootWindow != nullptr) {
+                if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_READY_REPLY") &&
+                    !rootWindow->property("readyReplyVerified").toBool()) {
+                    qCritical("Ready reply verification did not complete");
+                    application.exit(EXIT_FAILURE); return;
+                }
                 if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_CONTEXT_KEYBOARD") &&
                     !rootWindow->property("contextKeyboardVerified").toBool()) {
                     qCritical("Context keyboard verification did not complete");
