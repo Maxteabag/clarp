@@ -1399,10 +1399,17 @@ def last_message_preview(*, agent_id: str, max_len: int = 80) -> str:
 
 
 def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
-    """Batch the dashboard projection; only 50 preview candidates per agent leave SQLite."""
+    """Batch the dashboard projection; at most 50 candidates per agent per preview mode leave SQLite."""
     routine = tuple(sorted(origins.ROUTINE_AUTOMATION_ORIGINS))
     marks = ','.join('?' for _ in routine)
-    rows = conn().execute(f"""
+    result: dict[str, dict[str, Any]] = {}
+    # Separate bounded projections keep the last final message available even
+    # when many newer provisional rows exist, without one query per agent.
+    for field, completed_filter in (
+        ('head', ''),
+        ('completed_head', "AND NOT (role = 'assistant' AND COALESCE(source_file, '') LIKE 'live:%')"),
+    ):
+        rows = conn().execute(f"""
         WITH candidates AS (
             SELECT m.agent_id, m.message_id, ROW_NUMBER() OVER (
                 PARTITION BY m.agent_id
@@ -1410,20 +1417,18 @@ def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
             ) AS rank FROM messages m
             WHERE m.agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
               AND COALESCE(text, '') != '' AND COALESCE(tool_name, '') = ''
+              {completed_filter}
               AND COALESCE(origin, 'user') NOT IN ({marks})
         )
         SELECT m.agent_id, m.message_id, m.backend_session_id, m.revision, m.role, m.text, m.origin
           FROM candidates c JOIN messages m ON m.message_id = c.message_id
          WHERE c.rank <= 50 ORDER BY c.agent_id, c.rank
     """, routine)
-    # Stream candidates instead of retaining every agent's full message text.
-    # The window sorts narrow identifiers; text is fetched only after limiting.
-    result: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        aid = row['agent_id']
-        if aid not in result and not _automation_kind(
-                role=row['role'], origin=row['origin'], text=row['text']):
-            result[aid] = {'head': _format_preview(row, max_len)}
+        for row in rows:
+            entry = result.setdefault(row['agent_id'], {})
+            if field not in entry and not _automation_kind(
+                    role=row['role'], origin=row['origin'], text=row['text']):
+                entry[field] = _format_preview(row, max_len)
     for row in conn().execute(f"""
         SELECT agent_id, MAX({_message_activity_sql()}) AS activity
           FROM messages WHERE COALESCE(origin, 'user') = 'user'

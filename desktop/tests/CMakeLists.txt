@@ -25,6 +25,8 @@ add_executable(clarp-desktop-tests
     ../src/media/WavEncoder.h
     ../src/models/AgentListModel.cpp
     ../src/models/AgentListModel.h
+    ../src/models/ConversationPresentationModel.cpp
+    ../src/models/ConversationPresentationModel.h
     ../src/models/ConversationModel.cpp
     ../src/models/ConversationModel.h
     ../src/models/ContactListModel.cpp
@@ -121,3 +123,13 @@ set_tests_properties(clarp-desktop-settings-keyboard PROPERTIES
     TIMEOUT 15
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=settings-keyboard-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/settings-keyboard/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_SETTINGS_KEYBOARD=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/settings-keyboard/capture.png"
 )
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config")
+add_test(NAME clarp-desktop-context-keyboard COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-context-keyboard PROPERTIES TIMEOUT 15
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=context-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_CONTEXT_KEYBOARD=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/capture.png")
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ready-reply/config")
+add_test(NAME clarp-desktop-ready-reply COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-ready-reply PROPERTIES TIMEOUT 15
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=ready-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/ready-reply/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_READY_REPLY=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/ready-reply/capture.png")

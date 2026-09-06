@@ -12,6 +12,8 @@ ItemDelegate {
     required property string workingDirectory
     required property string avatarUrl
     required property string lastMessage
+    required property string lastCompletedMessage
+    readonly property string messagePreview: controller.showWhenReady ? lastCompletedMessage : lastMessage
     required property string agentState
     required property string statusText
     required property real lastActivity
@@ -20,12 +22,13 @@ ItemDelegate {
     required property bool muted
     property int unreadCount: 0
     required property int queueCount
+    readonly property bool keyboardCurrent: ListView.isCurrentItem && ListView.view !== null && ListView.view.activeFocus
     property bool collapsed: false
     property bool archived: false
     signal chatSelected
 
     readonly property bool current: !archived && controller.selectedSession === session
-    readonly property string activityLine: busy ? (statusText.length > 0 ? statusText : (agentState.length > 0 ? agentState : "Working")) : statusText
+    readonly property string activityLine: controller.showWhenReady && busy ? "Typing…" : busy ? (statusText.length > 0 ? statusText : (agentState.length > 0 ? agentState : "Working")) : statusText
 
     width: ListView.view ? ListView.view.width : 280
     leftPadding: collapsed ? 0 : 14
@@ -42,6 +45,8 @@ ItemDelegate {
     }
 
     background: Rectangle {
+        border.width: row.keyboardCurrent ? 1 : 0
+        border.color: "#bb9af7"
         color: row.current ? "#292b3a" : row.hovered ? "#211e27" : "transparent"
 
         Rectangle {
@@ -113,7 +118,8 @@ ItemDelegate {
                 Text {
                     Layout.fillWidth: true
                     textFormat: Text.PlainText
-                    text: row.lastMessage.length > 0 ? row.lastMessage : (row.workingDirectory.length > 0 ? row.workingDirectory : row.backend)
+                    objectName: "sidebarMessagePreview"
+                    text: row.messagePreview.length > 0 ? row.messagePreview : (row.workingDirectory.length > 0 ? row.workingDirectory : row.backend)
                     color: row.unread ? "#b3aab9" : "#77717f"
                     font.pixelSize: 11
                     elide: Text.ElideRight

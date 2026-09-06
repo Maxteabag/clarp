@@ -61,7 +61,9 @@ Item {
     TextMetrics {
         id: bubbleMetrics
         font.pixelSize: 15
-        text: root.body
+        // Long messages already use the available width; do not shape the
+        // entire growing stream a second time just to measure the bubble.
+        text: root.body.length <= 160 ? root.body : ""
     }
 
     ActivityExplanation {
@@ -163,7 +165,7 @@ Item {
                 objectName: "userMessageBackground"
                 visible: !root.activity && root.body.length > 0
                 width: Math.min(parent.width * (root.userAuthored ? 0.78 : 0.95), 840,
-                    Math.max(140, bubbleMetrics.advanceWidth + 28))
+                    root.body.length > 160 ? 840 : Math.max(140, bubbleMetrics.advanceWidth + 28))
                 x: root.userAuthored ? parent.width - width : 0
                 implicitHeight: messageBlocks.implicitHeight + 24
                 radius: 14
@@ -180,12 +182,16 @@ Item {
                     spacing: 8
 
                     Repeater {
-                        model: root.renderedBlocks
+                        objectName: "messageBlockRepeater"
+                        // A string-array model resets the editors on every token.
+                        // Count-based delegates retain identity and update text in place.
+                        model: root.renderedBlocks.length
 
                         TextEdit {
-                            required property string modelData
+                            objectName: "messageTextBlock"
+                            required property int index
                             width: messageBlocks.width
-                            text: modelData
+                            text: root.renderedBlocks[index] || ""
                             readOnly: true
                             selectByMouse: true
                             persistentSelection: true
