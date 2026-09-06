@@ -15,13 +15,17 @@ inline void startReadyReplySmokeCheck(QGuiApplication& application, QQuickWindow
     QObject::connect(timer, &QTimer::timeout, &application,
         [&application, window, controller, screenshotPath, timer, step = 0]() mutable {
         const auto items = [window] {
-            QList<QQuickItem*> pending{window->contentItem()}, result;
+            QList<QQuickItem*> pending{window->contentItem()};
+            QList<QQuickItem*> result;
             while (!pending.isEmpty()) {
                 auto* item = pending.takeLast(); result.append(item); pending.append(item->childItems());
             }
             return result;
         }();
-        bool typing = false, partial = false, final = false, tool = false;
+        bool typing = false;
+        bool partial = false;
+        bool final = false;
+        bool tool = false;
         for (const auto* item : items) {
             if (item->objectName() == QStringLiteral("replyTypingIndicator") && item->isVisible()) typing = true;
             if (item->objectName() == QStringLiteral("toolCard") && item->isVisible()
