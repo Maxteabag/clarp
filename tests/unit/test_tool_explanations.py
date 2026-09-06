@@ -126,10 +126,11 @@ def test_viewport_release_respects_other_view_and_late_request():
         request('desktop-view')
         request('phone-view')
         service.request(3, [], release=['desktop-view'])
-        assert len(service._queue)==1
+        from lib.db import conn
+        assert conn().execute("SELECT count(*) FROM tool_explanation_jobs WHERE status='queued'").fetchone()[0]==1
         assert request('desktop-view')['items'][0]['status']=='cancelled'
         service.request(3, [], release=['phone-view'])
-        assert not service._queue
+        assert conn().execute("SELECT count(*) FROM tool_explanation_jobs WHERE status='queued'").fetchone()[0]==0
         assert request('new-view')['items'][0]['status']=='pending'
 
 
@@ -137,10 +138,12 @@ def test_expired_viewport_demand_drops_queued_not_legacy_work():
     with ToolExplanations(translate=lambda *_: {}, debounce=5) as service:
         service.request(3,[{'id':'1','demand_id':'view','activity':{'command':'ls'}}])
         service.request(3,[{'id':'2','activity':{'command':'pwd'}}])
-        with service._condition:
-            service._prune_demands(time.monotonic()+6)
-            assert len(service._queue)==1
-            assert next(iter(service._queue.values()))[1]['command']=='pwd'
+        from lib import tool_explanation_queue as queue, tool_explanation_cache as cache
+        with queue.transaction() as db:
+            queue._prune(db,cache.now_ms()+6000)
+            rows=db.execute("SELECT activity_json FROM tool_explanation_jobs WHERE status='queued'").fetchall()
+            assert len(rows)==1
+            assert 'pwd' in rows[0][0]
 
 
 def test_releasing_running_activity_keeps_completed_cache():
