@@ -1397,7 +1397,9 @@ def _migrate(con: sqlite3.Connection) -> None:
                 for statement in _HTML_FORMS_SCHEMA.split(";"):
                     if statement.strip(): con.execute(statement)
             if version < 75:
-                con.execute("ALTER TABLE oracle_delegations ADD COLUMN completion_trace_id TEXT NOT NULL DEFAULT ''")
+                columns = {row[1] for row in con.execute("PRAGMA table_info(oracle_delegations)")}
+                if "completion_trace_id" not in columns:
+                    con.execute("ALTER TABLE oracle_delegations ADD COLUMN completion_trace_id TEXT NOT NULL DEFAULT ''")
             if version < 76:
                 _migrate_to_v76(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
