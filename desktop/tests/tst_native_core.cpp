@@ -609,6 +609,7 @@ class NativeCoreTest final : public QObject {
     void circularPortraitsAreBoundedAndAntialiased();
     void agentTerminalLaunchesNativeCliThroughDefaultTerminal();
     void sseParserHandlesChunksCommentsAndReplayIds();
+    void nextAttentionCyclesWaitingUnreadAndPending();
     void sseCursorIsScopedToOneHost();
     void snapshotFiltersArchivedAgentsAndPatchesEvents();
     void agentSnapshotDiffsInPlaceAndRejectsStaleState();
@@ -636,6 +637,26 @@ class NativeCoreTest final : public QObject {
     void backgroundTranscriptionsKeepTheirChatOwnership();
     void markdownParagraphsBecomeVisibleDisplayBlocks();
 };
+
+void NativeCoreTest::nextAttentionCyclesWaitingUnreadAndPending() {
+    AgentListModel model;
+    QJsonArray rows;
+    for (const QString& name : {QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c"), QStringLiteral("d")})
+        rows.append(QJsonObject{{QStringLiteral("session"), name}, {QStringLiteral("persona"), name},
+            {QStringLiteral("latest_state"), name == QStringLiteral("c") ? QStringLiteral("waiting") : QStringLiteral("idle")}});
+    model.applySnapshot({{QStringLiteral("agents"), rows}});
+    model.applyNotificationEvent({{QStringLiteral("session"), QStringLiteral("b")}});
+    QCOMPARE(model.nextAttentionSession(QStringLiteral("a")), QStringLiteral("b"));
+    QCOMPARE(model.nextAttentionSession(QStringLiteral("b")), QStringLiteral("c"));
+    QCOMPARE(model.nextAttentionSession(QStringLiteral("c")), QStringLiteral("b"));
+    QCOMPARE(model.nextAttentionSession(QStringLiteral("c"), {QStringLiteral("d")}), QStringLiteral("d"));
+    model.clearUnread(QStringLiteral("b"));
+    QCOMPARE(model.nextAttentionSession(QStringLiteral("a")), QStringLiteral("c"));
+    QVERIFY(model.nextAttentionSession(QStringLiteral("c")).isEmpty());
+    QCOMPARE(model.nextAttentionSession(QString{}, {QStringLiteral("a")}), QStringLiteral("a"));
+    model.applySnapshot({{QStringLiteral("agents"), QJsonArray{}}});
+    QVERIFY(model.nextAttentionSession(QString{}, {QStringLiteral("missing")}).isEmpty());
+}
 
 void NativeCoreTest::sseParserHandlesChunksCommentsAndReplayIds() {
     SseParser parser;
@@ -1056,6 +1077,11 @@ void NativeCoreTest::streamingRowsUpdateInPlaceAndRetireWhenFinalized() {
     QCOMPARE(model.data(model.index(0, 0), ConversationModel::BodyRole).toString(),
              QStringLiteral("Hello world"));
     QCOMPARE(changes.count(), 1);
+    const auto roles = qvariant_cast<QList<int>>(changes.at(0).at(2));
+    QVERIFY(roles.contains(ConversationModel::BodyRole));
+    QVERIFY(roles.contains(ConversationModel::RevisionRole));
+    QVERIFY(!roles.contains(ConversationModel::ToolsRole));
+    QVERIFY(!roles.contains(ConversationModel::DisplayCellsRole));
     QCOMPARE(resets.count(), 0);
     QCOMPARE(layouts.count(), 0);
     QCOMPARE(inserts.count(), 0);

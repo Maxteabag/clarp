@@ -7,7 +7,7 @@ TestCase {
     KeyboardMap { id: map }
     function actions() { return map.activeBindings.map(entry => entry.action); }
     function keys() { return map.shortcuts.map(entry => entry.key); }
-    function init() { map.contextName = "pane"; map.hasAgent = true; map.hasRows = true; map.canSend = true; }
+    function init() { map.contextName = "pane"; map.hasAgent = true; map.hasRows = true; map.canSend = true; map.hasAttention = true; }
     function test_inheritanceAndOverrides() {
         verify(keys().includes("E"));
         verify(keys().includes("Ctrl+B"));
@@ -29,10 +29,15 @@ TestCase {
         }
         map.contextName = "modal";
         compare(keys(), ["Escape"]);
+        verify(!keys().includes("Ctrl+J"));
         map.contextName = "blocked";
         compare(keys(), []);
     }
     function test_guardsAndFooterUseSameResolution() {
+        verify(keys().includes("N"));
+        map.hasAttention = false;
+        verify(!keys().includes("N"));
+        verify(!map.hints.some(entry => entry.action === "next-attention"));
         map.hasAgent = false;
         verify(!actions().includes("release-agent"));
         verify(!actions().includes("focus-composer"));

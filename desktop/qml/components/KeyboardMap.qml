@@ -8,6 +8,7 @@ QtObject {
     property bool hasAgent: false
     property bool hasRows: false
     property bool canSend: false
+    property bool hasAttention: false
     readonly property var parents: ({main: "root", workspace: "main", navigation: "workspace",
         pane: "navigation", sidebar: "navigation", composer: "workspace", search: "workspace",
         settings: "main", updates: "main", teams: "main", modal: "root", blocked: "root"})
@@ -16,7 +17,8 @@ QtObject {
     }
     readonly property var states: ({
         root: [],
-        main: [binding("switcher", ["Ctrl+K"], "Commands"),
+        main: [binding("next-attention", ["Ctrl+J"], "Next attention", true, "attention"),
+            binding("switcher", ["Ctrl+K"], "Commands"),
             binding("sidebar", ["Ctrl+B"], "Show/hide sidebar", false),
             binding("new", ["Ctrl+N"], "New agent", false),
             binding("new-contact", ["Ctrl+Alt+N"], "Start contact", false),
@@ -41,7 +43,8 @@ QtObject {
             binding("release-agent", ["Ctrl+Shift+R"], "Release", false, "agent"),
             binding("stop-agent", ["Ctrl+."], "Stop", false, "agent"),
             binding("talk", ["Ctrl+Shift+Space"], "Talk", false, "agent")],
-        navigation: [binding("focus-sidebar", ["E"], "Agents"),
+        navigation: [binding("next-attention", ["N", "Ctrl+J"], "Next attention", true, "attention"),
+            binding("focus-sidebar", ["E"], "Agents"),
             binding("focus-pane", ["C"], "Conversation"),
             binding("focus-composer", ["I"], "Type", true, "agent"),
             binding("toggle-focus", ["Tab", "Shift+Tab"], "Switch focus"),
@@ -74,7 +77,7 @@ QtObject {
         blocked: []
     })
     function allowed(entry) {
-        return entry.guard === "agent" ? hasAgent : entry.guard === "rows" ? hasRows
+        return entry.guard === "attention" ? hasAttention : entry.guard === "agent" ? hasAgent : entry.guard === "rows" ? hasRows
             : entry.guard === "send" ? canSend : true;
     }
     function resolve(state) {

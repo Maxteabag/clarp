@@ -49,3 +49,14 @@ an isolated offscreen app with two fixture agents, checks draft preservation,
 current-agent anchoring, browse versus activation, Tab, picker return, hidden
 sidebar recovery, and a search that excludes the selected agent. It never
 injects keys into the visible desktop or sends/releases a live agent.
+
+`n` in navigation (or Ctrl+J while typing) opens the next other agent with an
+unread reply, a waiting state, or a pending attention item. It cycles in roster
+order and skips unknown/archived sessions. Visiting an unread agent clears its
+unread flag through the normal selection path; pending questions are not
+answered or dismissed. The footer hint disappears when no other target exists.
+
+The toolbar binds to AppController's notified `nextAttentionTarget` property.
+Its notifications cover roster changes, attention updates, and selection. Do
+not replace this with an opaque invokable call and assumed QML dependencies:
+the real-key fixture caught a stale availability hint with that approach.

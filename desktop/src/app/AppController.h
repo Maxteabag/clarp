@@ -81,6 +81,7 @@ class AppController : public QObject {
     Q_PROPERTY(bool updatesLoading READ updatesLoading NOTIFY updatesChanged)
     Q_PROPERTY(QString updatesError READ updatesError NOTIFY updatesChanged)
     Q_PROPERTY(int attentionCount READ attentionCount NOTIFY updatesChanged)
+    Q_PROPERTY(QString nextAttentionTarget READ nextAttentionSession NOTIFY nextAttentionChanged)
     Q_PROPERTY(QVariantList teams READ teams NOTIFY teamsChanged)
     Q_PROPERTY(QVariantList teamMessages READ teamMessages NOTIFY teamsChanged)
     Q_PROPERTY(QString selectedTeamId READ selectedTeamId NOTIFY teamsChanged)
@@ -242,6 +243,7 @@ class AppController : public QObject {
                                  const QString& effort, const QString& replaceSession = {},
                                  const QString& mode = {}, const QString& pastSessionId = {},
                                  const QVariantList& mcpServers = {});
+    Q_INVOKABLE QString nextAttentionSession() const;
     Q_INVOKABLE void releaseAgent(const QString& session);
     Q_INVOKABLE void setAgentHeartbeat(const QString& session, bool enabled);
     Q_INVOKABLE void setAgentDreaming(const QString& session, bool enabled);
@@ -330,6 +332,7 @@ class AppController : public QObject {
     void orchestratorChanged();
     void modelCatalogChanged();
     void agentRevisionChanged();
+    void nextAttentionChanged();
     void avatarRevisionChanged();
     void mediaChanged();
     void pastSessionsChanged();

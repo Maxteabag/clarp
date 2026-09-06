@@ -184,6 +184,9 @@ AppController::AppController(QObject* parent)
             requestComposerFocus(paneId);
         }
     });
+    connect(this, &AppController::agentRevisionChanged, this, &AppController::nextAttentionChanged);
+    connect(this, &AppController::selectedSessionChanged, this, &AppController::nextAttentionChanged);
+    connect(this, &AppController::updatesChanged, this, &AppController::nextAttentionChanged);
     const auto bumpAgentRevision = [this] {
         ++m_agentRevision;
         emit agentRevisionChanged();
@@ -199,6 +202,7 @@ AppController::AppController(QObject* parent)
                                              : QStringLiteral("reconnecting"));
         if (m_sse.connected()) {
             requestSnapshot();
+            loadUpdates();
         } else {
             m_agents.markTransportUnavailable();
             m_archivedAgents.markTransportUnavailable();
@@ -1147,6 +1151,15 @@ void AppController::createAgent(const QString& name, const QString& workingDirec
     }
     m_api.postJson(QStringLiteral("agent-create:") + replaceSession, QStringLiteral("/agents"),
                    body);
+}
+
+QString AppController::nextAttentionSession() const {
+    QStringList pending;
+    for (const QVariant& item : m_attentionItems) {
+        const QString session = item.toMap().value(QStringLiteral("session")).toString();
+        if (!session.isEmpty()) pending.append(session);
+    }
+    return m_agents.nextAttentionSession(m_selectedSession, pending);
 }
 
 void AppController::releaseAgent(const QString& session) {

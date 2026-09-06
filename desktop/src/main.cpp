@@ -489,7 +489,7 @@ int main(int argc, char* argv[]) {
         }
         const int requestedDelay = qEnvironmentVariableIntValue("CLARP_SCREENSHOT_DELAY_MS");
         const int captureDelay = requestedDelay > 0 ? std::clamp(requestedDelay, 2'400, 60'000)
-            : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_CONTEXT_KEYBOARD") ? 4'200
+            : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_CONTEXT_KEYBOARD") ? 4'600
             : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SETTINGS_KEYBOARD") ? 3'300
             : screenshotScenario.isEmpty() ? 2'000 : 2'400;
         QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath, sidebarToggles, sidebarWidth] {
