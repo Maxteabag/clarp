@@ -9,6 +9,9 @@ Use the pilot's `session.json`, generation-specific `event-watch-job.json`, exac
 systemd user service and exact legacy five-minute schedule ID. No process-name
 search or broad cron cleanup is permitted. The helper checks the Host identity,
 service command/working directory/PID, schedule owner and paused state.
+The catalog must explicitly report `runtime_available: true`: having the HTTP
+routes on an old runtime is insufficient. A dry run reports an unavailable
+runtime as blocked; apply and recovery refuse it before changing the pilot.
 
 ```bash
 clarp-admin janitor migrate-pilot --session SESSION --agent-id STABLE_ID \
@@ -35,6 +38,10 @@ rewrites a target's caption. The replacement remains paused after verification.
 
 Imports are bounded to 1 MiB, 1000 targets/receipts and 256 remembered trace IDs.
 The retained source journal stays untouched; only its bounded tail is imported.
+Pilot eligibility receipts (`busy`, `protected`, `unavailable`) become `skipped`
+with their exact reason, `source_outcome`, batch ID and observed state retained
+in the frozen payload/backup. Receipt fields and timestamps are validated before
+backup or service stop, so an unsupported outcome cannot strand a stopped pilot.
 No transcript, prompt, token, or command history is part of the imported payload.
 `import_id` is a stable content hash, so an ambiguous import response can be
 checked/retried against the same frozen payload. Repeat the exact migration
