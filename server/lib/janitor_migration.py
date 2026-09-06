@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+from datetime import datetime
 from pathlib import Path
 import re
 import subprocess
@@ -18,11 +20,47 @@ from urllib.parse import quote
 MAX_BYTES = 1_048_576
 MAX_TARGETS = 1000
 MAX_RECEIPTS = 1000
+_RECEIPT_OUTCOMES = {"changed", "same_task", "insufficient_context", "skipped", "error", "cancelled"}
+_ELIGIBILITY_OUTCOMES = {"busy", "protected", "unavailable"}
 
 
 def _identify(payload: dict) -> None:
     frozen = {key: payload[key] for key in ("progress", "ownership", "receipts")}
-    payload["import_id"] = hashlib.sha256(json.dumps(frozen, sort_keys=True).encode()).hexdigest()
+    payload["import_id"] = hashlib.sha256(json.dumps(frozen, sort_keys=True, allow_nan=False).encode()).hexdigest()
+
+
+def _validate_receipts(receipts) -> None:
+    """Reject wire-invalid history before touching the old listener or backup."""
+    if not isinstance(receipts, list) or len(receipts) > MAX_RECEIPTS:
+        raise ValueError("invalid or oversized pilot receipts")
+    for row in receipts:
+        if not isinstance(row, dict) or not isinstance(row.get("outcome"), str) \
+                or row["outcome"] not in _RECEIPT_OUTCOMES:
+            raise ValueError("unsupported pilot receipt outcome")
+        target = row.get("target_session")
+        if not isinstance(target, str) or not target.strip() or len(target) > 200:
+            raise ValueError("pilot receipt requires a target session")
+        for key, limit in (("before", 100), ("after", 100), ("reason", 500), ("batch_id", 200)):
+            if not isinstance(row.get(key, ""), str) or len(row.get(key, "")) > limit:
+                raise ValueError(f"invalid pilot receipt {key}")
+        source_outcome = row.get("source_outcome", row["outcome"])
+        if not isinstance(source_outcome, str) or source_outcome not in _RECEIPT_OUTCOMES | _ELIGIBILITY_OUTCOMES:
+            raise ValueError("invalid pilot receipt source outcome")
+        state_id = row.get("source_state_id", 0)
+        if isinstance(state_id, bool) or not isinstance(state_id, int) or not 0 <= state_id <= 9_223_372_036_854_775_807:
+            raise ValueError("invalid pilot receipt source state ID")
+        timestamp = row.get("at")
+        try:
+            if isinstance(timestamp, str):
+                normalized = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp() * 1000
+            elif isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool):
+                normalized = timestamp if timestamp > 100_000_000_000 else timestamp * 1000
+            else:
+                raise ValueError("invalid type")
+            if not math.isfinite(normalized) or not 0 <= normalized <= 9_223_372_036_854_775_807:
+                raise ValueError("timestamp out of range")
+        except (ValueError, OverflowError, OSError) as exc:
+            raise ValueError("invalid pilot receipt time") from exc
 
 
 def _read(path: Path, default=None):
@@ -86,14 +124,24 @@ def read_pilot(root: Path, session: str) -> dict:
             lines = source.read(MAX_BYTES).decode().splitlines()[-MAX_RECEIPTS:]
         for line in lines:
             row = json.loads(line)
-            outcome = row.get("outcome", "changed" if row.get("changed") else "same_task")
+            if not isinstance(row, dict):
+                raise ValueError("pilot receipt must be an object")
+            source_outcome = row.get("outcome", "changed" if row.get("changed") else "same_task")
+            if not isinstance(source_outcome, str):
+                raise ValueError("pilot receipt outcome must be a string")
+            outcome = "skipped" if source_outcome in _ELIGIBILITY_OUTCOMES else source_outcome
+            # Eligibility receipts describe the current label, never a write.
+            before = row.get("before", row.get("old", row.get("label", "")
+                              if source_outcome in _ELIGIBILITY_OUTCOMES else ""))
             receipts.append({"target_session": row.get("session"),
-                             "before": row.get("before", row.get("old", "")),
+                             "before": before,
                              "after": row.get("after", row.get("label", "")),
-                             "outcome": outcome, "reason": str(row.get("reason", ""))[:300],
-                             "source_state_id": row.get("state_id", row.get("source_state_id")),
+                             "outcome": outcome, "source_outcome": source_outcome,
+                             "reason": row.get("reason", ""),
+                             "source_state_id": row.get("state_id", row.get("source_state_id", 0)),
                              "at": row.get("at", row.get("reviewed_at")),
                              "batch_id": row.get("batch_id", "")})
+    _validate_receipts(receipts)
     result = {"progress": progress, "ownership": ownership, "receipts": receipts}
     encoded = json.dumps(result, sort_keys=True).encode()
     if len(encoded) > MAX_BYTES:
@@ -200,6 +248,7 @@ def _resume(args, request, current, service, schedule) -> dict:
             or service.get("MainPID") != "0" or schedule.get("enabled"):
         raise ValueError("resume requires the exact old service and cron off, and replacement paused")
     payload = saved.get("import", {})
+    _validate_receipts(payload.get("receipts"))
     expected_hash = payload.get("import_id")
     _identify(payload)
     if not expected_hash or payload["import_id"] != expected_hash:
@@ -211,6 +260,8 @@ def _resume(args, request, current, service, schedule) -> dict:
               "import_id": expected_hash, "expected_revision": revision, "result_state": "paused"}
     if not args.apply:
         return result
+    if request("GET", "/janitors").get("runtime_available") is not True:
+        raise ValueError("Janitor runtime became unavailable; the frozen import was not retried")
     path = "/janitors/" + quote(args.session, safe="")
     receipt = request("POST", path + "/import-pilot", {**payload,
                       "expected_revision": revision, "expected_agent_id": args.agent_id})
@@ -225,6 +276,12 @@ def migrate(args, request, *, runner=subprocess.run) -> dict:
     root = Path(args.pilot_dir).resolve(strict=True)
     args.pilot_dir = str(root)
     catalog = request("GET", "/janitors")  # Prove support before touching the old listener.
+    if catalog.get("runtime_available") is not True:
+        if args.apply:
+            raise ValueError("Janitor runtime is unavailable; upgrade/restore it before migrating or resuming")
+        return {"dry_run": True, "runtime_available": False, "ready": False,
+                "session": args.session, "agent_id": args.agent_id,
+                "blocked_reason": "Janitor runtime is unavailable; the pilot has not been changed."}
     current = next((j for j in catalog["janitors"] if j.get("session") == args.session), None)
     if current and (current.get("agent_id") != args.agent_id or current.get("enabled")):
         raise ValueError("replacement must be the same agent and paused before migration")
@@ -249,6 +306,7 @@ def migrate(args, request, *, runner=subprocess.run) -> dict:
     source = read_pilot(root, args.session)
     payload, omissions = prepare_import(source, snapshot, scope)
     summary = {"dry_run": not args.apply, "session": args.session, "agent_id": args.agent_id,
+               "runtime_available": True,
                "service": args.service, "service_state": service.get("ActiveState"),
                "cron_id": args.cron_id, "cron_enabled": bool(schedule.get("enabled")),
                "cursor": payload["progress"]["cursor"], "ownership_count": len(payload["ownership"]),
@@ -258,6 +316,8 @@ def migrate(args, request, *, runner=subprocess.run) -> dict:
         return summary
     if not args.backup:
         raise ValueError("--apply requires a new --backup path")
+    if request("GET", "/janitors").get("runtime_available") is not True:
+        raise ValueError("Janitor runtime became unavailable; the pilot has not been stopped")
     backup = Path(args.backup).expanduser()
     # Exclusive private backup before any mutations; never overwrite recovery evidence.
     descriptor = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -267,6 +327,8 @@ def migrate(args, request, *, runner=subprocess.run) -> dict:
         output.flush()
         os.fsync(output.fileno())
     _service(args, runner)  # Revalidate ownership immediately before stopping.
+    if request("GET", "/janitors").get("runtime_available") is not True:
+        raise ValueError("Janitor runtime became unavailable; the pilot has not been stopped")
     runner(["systemctl", "--user", "disable", "--now", args.service],
            capture_output=True, text=True, check=True)
     stopped = _service(args, runner)

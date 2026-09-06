@@ -38,6 +38,7 @@ class Host:
         self.service_active = True
         self.main_pid = 123
         self.service_extra = ""
+        self.runtime_available = True
         self.janitor = None
         self.cron = {"schedule_id": "old-cron", "session": "sam", "agent_id": "sam-id",
                      "cron_expression": "*/5 * * * *", "enabled": False}
@@ -50,7 +51,8 @@ class Host:
     def request(self, method, path, body=None):
         self.events.append((method, path, body))
         if path == "/janitors" and method == "GET":
-            return {"janitors": [self.janitor] if self.janitor else [], "templates": []}
+            return {"janitors": [self.janitor] if self.janitor else [], "templates": [],
+                    "runtime_available": self.runtime_available}
         if path == "/agents/snapshot":
             return {"agents": self.agents}
         if path.startswith("/agent-schedules?"):
@@ -258,3 +260,93 @@ def test_recovery_refuses_if_old_listener_was_restarted(pilot, tmp_path):
     with pytest.raises(ValueError, match="old service and cron off"):
         migration.migrate(args(pilot, apply=True, resume_backup=str(backup)), host.request, runner=host.systemctl)
     assert not any(e[0] == "POST" for e in host.events)
+
+
+@pytest.mark.parametrize("availability", [False, None, 1, "true"])
+def test_old_or_unavailable_runtime_previews_blocked_and_never_stops_pilot(pilot, tmp_path, availability):
+    host = Host(pilot)
+    host.runtime_available = availability
+    before = {p.name: p.read_bytes() for p in pilot.iterdir()}
+    preview = migration.migrate(args(pilot), host.request, runner=host.systemctl)
+    assert preview["runtime_available"] is False and preview["ready"] is False
+    assert preview["dry_run"] is True
+    backup = tmp_path / "must-not-exist"
+    with pytest.raises(ValueError, match="runtime is unavailable"):
+        migration.migrate(args(pilot, apply=True, backup=str(backup)), host.request, runner=host.systemctl)
+    assert not backup.exists() and host.service_active
+    assert all(e[0] == "GET" for e in host.events)
+    assert before == {p.name: p.read_bytes() for p in pilot.iterdir()}
+
+
+def test_resume_also_requires_available_runtime_before_mutation(pilot, tmp_path):
+    host = Host(pilot)
+    backup = tmp_path / "backup.json"
+    migration.migrate(args(pilot, apply=True, backup=str(backup)), host.request, runner=host.systemctl)
+    host.runtime_available = False
+    host.events.clear()
+    with pytest.raises(ValueError, match="runtime is unavailable"):
+        migration.migrate(args(pilot, apply=True, resume_backup=str(backup)), host.request, runner=host.systemctl)
+    assert all(e[0] == "GET" for e in host.events)
+
+
+def test_runtime_drops_during_preflight_before_backup_and_stop(pilot, tmp_path):
+    host = Host(pilot)
+    calls = 0
+
+    def request(method, path, body=None):
+        nonlocal calls
+        if method == "GET" and path == "/janitors":
+            calls += 1
+            if calls == 2:
+                host.runtime_available = False
+        return host.request(method, path, body)
+
+    backup = tmp_path / "must-not-exist"
+    with pytest.raises(ValueError, match="became unavailable"):
+        migration.migrate(args(pilot, apply=True, backup=str(backup)), request, runner=host.systemctl)
+    assert not backup.exists() and host.service_active
+    assert not any(e[0] == "POST" or (e[0] == "systemctl" and "disable" in e[1]) for e in host.events)
+
+
+@pytest.mark.parametrize("source_outcome", ["busy", "protected", "unavailable"])
+def test_actual_eligibility_receipt_shape_normalizes_and_preserves_provenance(pilot, source_outcome):
+    original = {"task_key": "task-fingerprint", "change_key": "phase-fingerprint",
+        "fingerprint": "context-fingerprint", "label": "Billing verification", "outcome": source_outcome,
+        "unchanged_streak": 0, "reviewed_at": 1788675560.8807795, "next_eligible_at": 1788675590.8807795,
+        "session": "hugo", "batch_id": "janitor-events-7929ddf449232caf93040af6", "state_id": 326004,
+        "reason": "Agent currently busy"}
+    (pilot / "review-results.jsonl").write_text(json.dumps(original) + "\n")
+    payload = migration.read_pilot(pilot, "sam")
+    receipt = payload["receipts"][0]
+    assert receipt["outcome"] == "skipped" and receipt["source_outcome"] == source_outcome
+    assert receipt["reason"] == original["reason"]
+    assert receipt["batch_id"] == original["batch_id"]
+    assert receipt["source_state_id"] == original["state_id"]
+    assert receipt["at"] == original["reviewed_at"]
+    assert receipt["before"] == receipt["after"] == original["label"]
+    from lib import agents, janitors
+    sam = agents.create_agent(persona="Sam", voice_id="", cwd="/tmp", session="sam", backend="codex")
+    hugo = agents.create_agent(persona="Hugo", voice_id="", cwd="/tmp", session="hugo", backend="codex")
+    agents.set_custom_status(hugo, "Car mode UX")
+    config = janitors.create("sam", attachments=[{"trigger_id": "agent-work-completed"}])
+    janitors.import_pilot("sam", config["revision"], sam, **payload)
+    assert janitors.export_migration("sam")["receipts"][0]["outcome"] == "skipped"
+    assert agents.get_by_agent_id(hugo)["custom_status"] == "Car mode UX"
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("outcome", "unknown"), ("outcome", []), ("session", ""), ("reason", 123),
+    ("reason", "x" * 501), ("label", "x" * 101), ("state_id", -1),
+    ("state_id", True), ("reviewed_at", None), ("reviewed_at", "bad-date"), ("reviewed_at", float("nan")),
+])
+def test_invalid_receipt_is_rejected_before_backup_or_service_stop(pilot, tmp_path, field, bad):
+    row = {"session": "hugo", "state_id": 40, "outcome": "same_task", "label": "Car mode UX",
+           "reason": "Still appropriate", "reviewed_at": 60.5}
+    row[field] = bad
+    (pilot / "review-results.jsonl").write_text(json.dumps(row) + "\n")
+    host = Host(pilot)
+    backup = tmp_path / "must-not-exist"
+    with pytest.raises(ValueError, match="pilot receipt"):
+        migration.migrate(args(pilot, apply=True, backup=str(backup)), host.request, runner=host.systemctl)
+    assert not backup.exists() and host.service_active
+    assert not any(e[0] == "POST" or (e[0] == "systemctl" and "disable" in e[1]) for e in host.events)
