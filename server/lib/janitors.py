@@ -502,7 +502,7 @@ def _handoff_labels(c, source: dict, source_config, successor_session: str, succ
         if agent["agent_id"] != source["agent_id"]:
             _release_idle(c, agent, configuration, runtime_busy)
         state = agents.latest_state(agent["agent_id"])
-        if not state or state["kind"] not in {AgentState.IDLE, AgentState.DONE, AgentState.SPAWNED, AgentState.STOPPED}:
+        if not state or state["kind"] not in {AgentState.IDLE, AgentState.DONE, AgentState.SPAWNED, AgentState.STOPPED, AgentState.INTERRUPTED}:
             raise JanitorError("Wait for both Janitors to finish before handing off maintenance", 409, "agent_busy")
     scope = _scope(_decode(source_config["scope_json"], {}))
     if scope != _scope(_decode(successor_config["scope_json"], {})):
