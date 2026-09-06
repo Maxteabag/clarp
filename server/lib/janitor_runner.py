@@ -56,6 +56,10 @@ def eligible_event(event: dict, attachment: dict) -> bool:
 class SQLiteSource:
     """Read-only bounded queries on the existing database; writes belong to store."""
 
+    def application_active(self, idle_timeout_seconds: int) -> bool:
+        from . import application_activity
+        return application_activity.active(idle_timeout_seconds)
+
     def bounds(self) -> tuple[int, int]:
         row = db.conn().execute("""SELECT COALESCE((SELECT state_id FROM state_log ORDER BY state_id LIMIT 1),0),
             COALESCE((SELECT state_id FROM state_log ORDER BY state_id DESC LIMIT 1),0)""").fetchone()
@@ -191,6 +195,7 @@ class JanitorRunner:
             "retry_count": previous.get("retry_count", 0)}
 
     def _attachment_tick(self, attachment: dict, now: int) -> int:
+        interval_due = True
         aid, generation = attachment["attachment_id"], attachment["generation"]
         state = copy.deepcopy(self.store.get_progress(aid) or {})
         low, high = self.source.bounds()
@@ -206,6 +211,19 @@ class JanitorRunner:
             self._reconcile_targets(attachment, state, now)
             state["cursor"] = high
             state["retention_reconciliations"] = state.get("retention_reconciliations", 0) + 1
+
+        if attachment["trigger_id"] == "active-interval":
+            from .janitor_active_interval import advance
+            config = attachment["config"]
+            application_active = self.source.application_active(config["idle_timeout_seconds"])
+            due = advance(state, config, now=now, active=application_active)
+            interval_due = due
+            state["cursor"] = high
+            if not application_active:
+                self._save(attachment, state)
+                return 0
+            if due:
+                self._reconcile_targets(attachment, state, now)
 
         if attachment["trigger_id"] == "agent-work-completed":
             for event in self.source.events(state["cursor"]):
@@ -238,6 +256,9 @@ class JanitorRunner:
                 self._save(attachment, state)
                 return 0
 
+        if not interval_due:
+            self._save(attachment, state)
+            return 0
         candidates = []
         config = attachment.get("config") or {}
         minimum_interval = max(0, min(int(config.get("min_interval_seconds", 0)), 3600)) * 1000
@@ -284,6 +305,8 @@ class JanitorRunner:
 
     def _dispatch(self, attachment: dict, state: dict, run: dict, now: int) -> int:
         if state.get("delivery_accepted") or now < state.get("next_delivery_at", 0):
+            return 0
+        if attachment["trigger_id"] == "active-interval" and not self.source.application_active(attachment["config"]["idle_timeout_seconds"]):
             return 0
         if not self.store.validate_dispatch(run["session"], run["run_id"], run["trace_id"]):
             return 0

@@ -14,6 +14,15 @@ voice recipients. An existing agent can be converted explicitly, preserving its
 identity, model and conversation. New and converted Janitors are always paused.
 Use `clarp-admin sessions` to resolve the exact session and stable agent ID first.
 
+## Visual identity
+
+Janitors are rusty metal maintenance robots, not ordinary human portraits.
+Use weathered iron, warm oxidized copper/rust, visible rivets and small practical
+sensor eyes; friendly, useful and slightly worn rather than threatening. Keep
+each robot distinguishable while retaining this shared visual family. Use the
+persona/avatar APIs for custom art, never overwrite existing conversation data.
+Native Janitor lists use a scalable rusty-robot badge for consistent recognition.
+
 ```bash
 clarp-admin janitor list
 clarp-admin janitor templates
@@ -26,6 +35,7 @@ clarp-admin janitor inspect SESSION
 clarp-admin janitor enable SESSION --expected-revision REVISION
 clarp-admin janitor runs SESSION --limit 30
 clarp-admin janitor pause SESSION --expected-revision REVISION
+clarp-admin janitor reset-defaults SESSION --expected-revision REVISION --dry-run
 ```
 
 Enable only within the user's existing authorization or explicit UI action.
@@ -51,6 +61,15 @@ attachments replace that configuration; `attach` retains existing attachments.
 Pin `trigger_id` and `trigger_version`. Scheduled attachments use `schedule@1`
 with `{ "cron": "30 8 * * 1-5", "timezone": "Europe/Oslo" }` in their config.
 Do not silently convert an existing ordinary-agent UTC schedule.
+
+`active-interval@1` accepts `interval_seconds` (default 900),
+`idle_timeout_seconds` (default 300), and `run_on_resume` (default true).
+Intervals/timeouts must be 60–86400 seconds. Foreground/input leases from the
+apps gate admission; no valid lease means no new maintenance. Missed intervals
+are not replayed. Returning checks once when due, not on every focus change.
+`reset-defaults` restores each attached trigger's parameters and compatible
+template model defaults, preserves watched scope/identity/history, and pauses.
+Review before deliberately enabling again; never retry a revision conflict.
 
 ## During an admitted maintenance run
 

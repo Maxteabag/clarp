@@ -82,7 +82,7 @@ def test_empty_list_auth_and_paused_conversion_preserve_identity_and_focus(host)
     assert request(host, "/janitors", auth=False)[0] == 401
     status, body = request(host, "/janitors")
     assert status == 200 and body["janitors"] == []
-    assert {t["trigger_id"] for t in body["triggers"]} == {"agent-work-completed", "schedule"}
+    assert {t["trigger_id"] for t in body["triggers"]} == {"agent-work-completed", "schedule", "active-interval"}
     row = create(host)
     assert row["agent_id"] == host.sam and row["enabled"] is False
     assert agents.get_focus() == host.theo

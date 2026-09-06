@@ -142,6 +142,9 @@ def _execute(args, request) -> int:
             _emit(request("GET", path + f"/runs?limit={args.limit}"))
         elif cmd == "export":
             _emit(request("GET", path + "/migration-state"))
+        elif cmd == "reset-defaults":
+            body = {"expected_revision": _revision(args, request, path)}
+            _emit(_send(args, request, "POST", path + "/reset-defaults", body))
         elif cmd == "configure":
             body = _configuration(args)
             body["expected_revision"] = _revision(args, request, path)
@@ -178,11 +181,11 @@ def add_parsers(sub, handler) -> None:
     trigger = sub.add_parser("trigger", help="Inspect reusable Janitor triggers")
     trigger.add_subparsers(dest="trigger_command", required=True).add_parser("list").set_defaults(
         func=handler, janitor_command="triggers")
-    for name in ("inspect", "runs", "configure", "attach", "enable", "pause", "remove", "export"):
+    for name in ("inspect", "runs", "configure", "attach", "enable", "pause", "remove", "export", "reset-defaults"):
         command = commands.add_parser(name)
         command.add_argument("session")
         command.set_defaults(func=handler)
-        if name in {"configure", "attach", "enable", "pause", "remove"}:
+        if name in {"configure", "attach", "enable", "pause", "remove", "reset-defaults"}:
             command.add_argument("--expected-revision", type=_positive)
             command.add_argument("--dry-run", action="store_true")
         if name == "runs":

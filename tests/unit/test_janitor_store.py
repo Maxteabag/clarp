@@ -58,6 +58,27 @@ def test_conversion_keeps_identity_runtime_history_and_model():
         "can_chat": False, "can_voice_target": False, "can_restart": False, "can_inspect": True}
 
 
+def test_active_interval_config_and_reset_preserve_scope_and_pause():
+    sam, worker = agent(), agent("worker")
+    cfg = janitors.create("sam", scope={"agent_ids": [worker]}, attachments=[{
+        "trigger_id": "active-interval", "config": {"interval_seconds": 120, "idle_timeout_seconds": 60, "run_on_resume": False}}])
+    cfg = janitors.set_enabled("sam", cfg["revision"], True)
+    reset = janitors.reset_defaults("sam", cfg["revision"])
+    assert reset["agent_id"] == sam and reset["scope"] == cfg["scope"]
+    assert not reset["enabled"] and reset["generation"] > cfg["generation"]
+    assert reset["attachments"][0]["config"]["interval_seconds"] == 900
+    assert reset["attachments"][0]["config"]["run_on_resume"] is True
+    with pytest.raises(janitors.JanitorError, match="changed"):
+        janitors.reset_defaults("sam", cfg["revision"])
+
+
+@pytest.mark.parametrize("config", [{"interval_seconds": 0}, {"idle_timeout_seconds": True}, {"run_on_resume": "true"}])
+def test_active_interval_rejects_invalid_parameters(config):
+    agent()
+    with pytest.raises(janitors.JanitorError):
+        janitors.create("sam", attachments=[{"trigger_id": "active-interval", "config": config}])
+
+
 def test_existing_ordinary_agents_and_cron_are_unchanged():
     worker = agent("josh")
     schedule = scheduler.create_schedule("josh", "Normal job", "@daily", "Work")
@@ -306,6 +327,7 @@ def test_v72_migration_preserves_all_existing_data():
     for table in new_tables:
         c.execute(f"DROP TABLE {table}")
     c.execute("ALTER TABLE agents DROP COLUMN is_janitor")
+    c.execute("ALTER TABLE oracle_delegations DROP COLUMN completion_trace_id")
     c.execute("PRAGMA user_version=72")
     tables = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
     original = {t: [tuple(r) for r in c.execute(f'SELECT * FROM "{t}"')] for t in tables}
