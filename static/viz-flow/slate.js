@@ -6,7 +6,7 @@ const {hash}=require('./model-util.js');
 exports.SIZES={intent:[84,58],evidence:[102,70],outcome:[124,86]};
 exports.size=o=>exports.SIZES[o.stage]||exports.SIZES.intent;
 const TYPE_COLORS={video:'#e6b96f',image:'#e6b96f',image_gallery:'#e6b96f',audio:'#e6b96f',document:'#d9d2a8',research:'#c9c2ea',file:'#d9d2a8',workflow_run:'#9dc4dc',release:'#9dc4dc',deployment:'#9dc4dc',code_change:'#9dc4dc'};
-exports.typeColor=type=>TYPE_COLORS[type]||'#cbdedc';
+exports.typeColor=type=>type==='html_form'?'#d9d2a8':TYPE_COLORS[type]||'#cbdedc';
 
 // A deterministic seal: three strokes chosen from eight compass points plus a
 // pivot. It is the object's face on the slate, on a traveling handoff and on a
@@ -37,7 +37,14 @@ const rail=(c,o,w,h,time,reduced)=>{
 
 const glyph=(c,o,x,y,s,time,reduced,age)=>{
  const type=o.outcome.type,color=exports.typeColor(type);c.save();c.translate(x,y);c.strokeStyle=color;c.fillStyle=color;c.lineWidth=1.6;
- if(type==='research'){
+ if(type==='html_form'){
+  // Empty fields identify a form, never an inferred answer or approval.
+  c.beginPath();c.roundRect(-s*.46,-s*.43,s*.92,s*.86,s*.07);c.stroke();
+  for(let i=0;i<2;i++){const yy=-s*.23+i*s*.35;
+   c.beginPath();c.moveTo(-s*.31,yy);c.lineTo(-s*.05,yy);c.stroke();
+   c.beginPath();c.roundRect(-s*.31,yy+s*.07,s*.62,s*.16,s*.025);c.stroke();
+  }
+ }else if(type==='research'){
   // Sources converge into the report: a constellation that culminates in one page.
   const n=Math.min(7,o.outcome.source_count||(o.outcome.sources||[]).length||3),t=reduced?1:Math.min(1,age/4000);
   for(let i=0;i<n;i++){const a=-2.9+i/(n-1||1)*2.6,r=(s*1.15)*(1.6-.6*t);const sx=Math.cos(a)*r,sy=Math.sin(a)*r*.7-s*.2;

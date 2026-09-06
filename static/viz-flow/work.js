@@ -100,7 +100,7 @@ exports.workspaceValidation=(events,t,groupFor)=>{
 // A project's character comes from what it actually produced, never a random skin.
 exports.character=(objects,orphanArtifacts,regionIds)=>{
  const score={media:0,docs:0,code:0};
- const bump=type=>{if(['video','image','image_gallery','audio'].includes(type))score.media++;else if(['document','research','file'].includes(type))score.docs++;else if(['workflow_run','release','deployment','code_change'].includes(type))score.code++;};
+ const bump=type=>{if(['video','image','image_gallery','audio'].includes(type))score.media++;else if(['document','research','file','html_form'].includes(type))score.docs++;else if(['workflow_run','release','deployment','code_change'].includes(type))score.code++;};
  for(const o of objects)if(regionIds.has(o.workspace)){if(o.outcome)bump(o.outcome.type);for(const r of o.remoteRuns)bump('workflow_run');}
  const best=Object.entries(score).sort((a,b)=>b[1]-a[1])[0];
  return best&&best[1]>0?best[0]:null;
