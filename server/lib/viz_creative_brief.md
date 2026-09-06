@@ -82,3 +82,13 @@ whose values are preloaded ImageBitmaps. Use the existing avatar helper to draw
 these portraits, with initials only when an image is unavailable. The host owns
 fetching, sizing and caching; source modules do not request image URLs. Preserve
 this explicit owner-requested representation in later expansions.
+
+
+Information economy (ADR 0008): prefer recognizable service marks and actual owner
+portraits when supplied by the asset pipeline. Avoid redundant text such as a JS
+badge beside a .js filename. Keep names, filenames, disambiguation and accessible
+labels when useful. Do not invent images or enable network access in source code.
+A focused object's larger display size is not evidence that it is intrinsically
+larger or more important. Preserve overview readability and do not silently hide
+relevant work in tiny context markers. These principles guide focused improvements,
+not an unrequested global layout change.

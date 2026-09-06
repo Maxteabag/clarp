@@ -44,3 +44,11 @@ move between meaningful contexts and interact with nearby targets through rays,
 beams or local effects rather than traveling for every tool call. Prefer fluid,
 legible motion while preserving spatial memory. These are goals for exploration,
 not a settled animation vocabulary or permission for another global theme reset.
+
+
+Use as little redundant text as practical (0008). Prefer a recognizable service
+logo and the actual owner's profile image where they explain identity directly.
+Keep useful filenames, names and clarifications; avoid repeating information such
+as a textual JS badge beside a .js filename. Text is welcome when it adds meaning.
+Focus-based scaling must not imply intrinsic importance or conceal other agents'
+work. The balance between focused detail and a complete overview remains exploratory.

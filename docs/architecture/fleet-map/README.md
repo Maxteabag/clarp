@@ -15,6 +15,7 @@ ideas, a task backlog, or an approval queue.
 | [0005](0005-evidence-and-runtime.md) | Accepted | Real evidence, stable identity, deterministic rendering, isolated generation. |
 | [0006](0006-work-at-real-destinations.md) | Accepted | Agents act at real files, directories and repositories; retire action-category stations. |
 | [0007](0007-workflow-relevance-and-living-relations.md) | Accepted direction; encodings exploratory | Emphasize meaningful work, compact ownership regions, fluid interactions and persistent relationships. |
+| [0008](0008-recognizable-identity-and-information-economy.md) | Accepted direction; sizing exploratory | Prefer recognizable identities and useful, nonredundant labels; make focus scaling understandable. |
 
 The combined current direction is **The Lantern Works with agent avatars**, plus
 an optional **Agent cabinets** view. Preserve workshops, harbor, hierarchy and
