@@ -302,7 +302,7 @@ def test_v72_migration_preserves_all_existing_data():
     worker = agent("josh", plan=True)
     schedule = scheduler.create_schedule("josh", "Existing cron", "@daily", "Keep working")
     c = db.conn()
-    new_tables = ["janitor_pilot_imports", "janitor_label_ownership", "janitor_effects", "janitor_runs", "janitor_progress", "janitor_attachments", "janitor_trigger_definitions", "janitor_configs"]
+    new_tables = ["janitor_creation_requests", "janitor_pilot_imports", "janitor_label_ownership", "janitor_effects", "janitor_runs", "janitor_progress", "janitor_attachments", "janitor_trigger_definitions", "janitor_configs"]
     for table in new_tables:
         c.execute(f"DROP TABLE {table}")
     c.execute("ALTER TABLE agents DROP COLUMN is_janitor")
@@ -318,3 +318,111 @@ def test_v72_migration_preserves_all_existing_data():
     assert agents.get_by_agent_id(worker)["is_janitor"] == 0
     assert scheduler.get_schedule(schedule["schedule_id"]) == schedule
     assert c.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+
+
+def creation_payload():
+    return {"name": "Sam", "backend": "codex", "cwd": "/tmp", "model": "gpt-5.3-codex-spark",
+            "effort": "low", "template_id": "task-labels", "scope": {},
+            "attachments": [{"trigger_id": "agent-work-completed"}]}
+
+
+def create_reserved(intent):
+    identity = dict(intent["identity"])
+    identity["persona"] = identity.pop("name")
+    return agents.create_agent(**identity, voice_id="", session=intent["session"],
+                               creation_request_id=intent["request_id"])
+
+
+def test_creation_reservation_retries_and_payload_conflicts():
+    payload = creation_payload()
+    intent = janitors.begin_creation("stable-creation", payload)
+    assert janitors.begin_creation("stable-creation", dict(reversed(list(payload.items())))) == intent
+    assert not intent["agent_id"] and not intent["completed"]
+    assert not agents.list_agents()
+    with pytest.raises(janitors.JanitorError, match="different settings"):
+        janitors.begin_creation("stable-creation", {**payload, "name": "Iris"})
+    assert db.conn().execute("SELECT COUNT(*) FROM janitor_creation_requests").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("invalid", [{"effort": "invalid"}, {"model": False}, {"backend": "unknown"},
+                                     {"attachments": [{"trigger_id": "unknown"}]}, {"name": ""}])
+def test_creation_validates_before_reserving_or_creating(invalid):
+    with pytest.raises(janitors.JanitorError):
+        janitors.begin_creation("bad-creation", {**creation_payload(), **invalid})
+    assert not db.conn().execute("SELECT 1 FROM janitor_creation_requests").fetchone()
+    assert not agents.list_agents()
+
+
+def test_creation_resume_after_identity_commit_keeps_one_identity_and_model():
+    payload = creation_payload()
+    intent = janitors.begin_creation("interrupted-creation", payload)
+    agent_id = create_reserved(intent)
+    # HTTP was interrupted before janitors.create / complete_creation.
+    assert agents.get_by_agent_id(agent_id)["is_janitor"]
+    assert agents.get_by_agent_id(agent_id)["model"] == payload["model"]
+    assert not db.conn().execute("SELECT 1 FROM janitor_configs").fetchone()
+    resumed = janitors.begin_creation("interrupted-creation", payload)
+    assert resumed["agent_id"] == agent_id and not resumed["completed"]
+    assert create_reserved(resumed) == agent_id
+    configured = janitors.create(resumed["session"])
+    completed = janitors.complete_creation("interrupted-creation", resumed["session"])
+    assert completed == configured and not completed["enabled"]
+    assert janitors.complete_creation("interrupted-creation", resumed["session"]) == completed
+    assert janitors.begin_creation("interrupted-creation", payload)["response"] == completed
+    assert len(agents.list_agents()) == 1
+    assert db.conn().execute("SELECT COUNT(*) FROM janitor_configs").fetchone()[0] == 1
+
+
+def test_creation_resume_after_config_commit_only_records_response():
+    payload = creation_payload()
+    intent = janitors.begin_creation("configured-creation", payload)
+    create_reserved(intent)
+    configured = janitors.create(intent["session"])
+    resumed = janitors.begin_creation("configured-creation", payload)
+    assert not resumed["completed"] and resumed["agent_id"] == configured["agent_id"]
+    assert janitors.create(resumed["session"]) == configured
+    assert janitors.complete_creation("configured-creation", resumed["session"])["revision"] == 1
+
+
+def test_creation_cannot_adopt_foreign_occupied_reserved_session():
+    payload = creation_payload()
+    intent = janitors.begin_creation("foreign-creation", payload)
+    foreign = agents.create_agent(persona="Sam", voice_id="", cwd="/tmp", session=intent["session"],
+                                  backend="codex", model=payload["model"], effort="low")
+    with pytest.raises(janitors.JanitorError, match="another creation"):
+        create_reserved(intent)
+    with pytest.raises(janitors.JanitorError, match="another creation"):
+        janitors.begin_creation("foreign-creation", payload)
+    assert not agents.get_by_agent_id(foreign)["is_janitor"]
+    assert db.conn().execute("SELECT agent_id FROM janitor_creation_requests").fetchone()[0] is None
+
+
+def test_creation_identity_and_provenance_roll_back_together():
+    intent = janitors.begin_creation("atomic-creation", creation_payload())
+    db.conn().execute("CREATE TRIGGER reject_creation_link BEFORE UPDATE OF agent_id ON janitor_creation_requests BEGIN SELECT RAISE(ABORT,'link unavailable'); END")
+    with pytest.raises(Exception, match="link unavailable"):
+        create_reserved(intent)
+    assert not agents.session_exists(intent["session"])
+    assert db.conn().execute("SELECT agent_id FROM janitor_creation_requests").fetchone()[0] is None
+
+
+def test_creation_cannot_bind_changed_identity_or_unconfigured_response():
+    intent = janitors.begin_creation("guarded-creation", creation_payload())
+    with pytest.raises(janitors.JanitorError, match="registered creation"):
+        agents.create_agent(persona="Other", voice_id="", cwd="/tmp", session=intent["session"],
+                            backend="codex", creation_request_id=intent["request_id"])
+    with pytest.raises(janitors.JanitorError, match="not been created"):
+        janitors.complete_creation(intent["request_id"], intent["session"])
+    create_reserved(intent)
+    with pytest.raises(janitors.JanitorError, match="not found"):
+        janitors.complete_creation(intent["request_id"], intent["session"])
+
+
+def test_cancellation_pending_distinguishes_effect_pause_from_stopping_runtime():
+    sam, hugo, cfg = setup()
+    agents.record_state(sam, "thinking", {"origin": "janitor", "trace_id": "maintenance"})
+    assert not janitors.get("sam")["cancellation_pending"]
+    paused = janitors.set_enabled("sam", cfg["revision"], False)
+    assert not paused["enabled"] and paused["cancellation_pending"]
+    agents.record_state(sam, "idle", {"origin": "janitor", "trace_id": "maintenance"})
+    assert not janitors.get("sam")["cancellation_pending"]

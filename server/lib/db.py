@@ -1811,6 +1811,17 @@ CREATE TABLE IF NOT EXISTS janitor_label_ownership (
     valid_until INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS janitor_creation_requests (
+    request_id TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    identity_json TEXT NOT NULL,
+    session TEXT NOT NULL UNIQUE,
+    agent_id TEXT REFERENCES agents(agent_id),
+    response_json TEXT,
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS janitor_pilot_imports (
     import_id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),

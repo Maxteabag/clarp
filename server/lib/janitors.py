@@ -210,6 +210,7 @@ def get(session: str) -> dict:
     current = c.execute("SELECT run_id FROM janitor_runs WHERE agent_id=? AND status IN ('queued','running')", (a["agent_id"],)).fetchone()
     return {"agent_id": a["agent_id"], "session": a["session"], "name": a["persona"],
             "is_janitor": True, "enabled": bool(row["enabled"]), "revision": row["revision"],
+            "cancellation_pending": not bool(row["enabled"]) and (agents.is_busy(a["agent_id"]) or bool(backends.active_handles(a["backend"], a["agent_id"]))),
             "generation": row["generation"], "template_id": row["template_id"],
             "model": a["model"], "effort": a["effort"], "backend": a["backend"],
             "scope": _decode(row["scope_json"], {}), "health": ("paused" if not row["enabled"] else "running" if current else "needs_attention" if row["last_error"] else "ready"),
@@ -702,3 +703,113 @@ def import_pilot(session: str, expected_revision: int, expected_agent_id: str,
                 valid_until=excluded.valid_until,updated_at=excluded.updated_at""", (target["agent_id"], a["agent_id"], import_run_id, value["label"], _task_signature(c, target["agent_id"]), valid_until, now))
         c.execute("INSERT INTO janitor_pilot_imports(import_id,agent_id,imported_at,payload_sha256) VALUES (?,?,?,?)", (import_id, a["agent_id"], now, digest))
     return get(session)
+
+
+def _creation_result(c, row) -> dict:
+    """Only a transactionally linked ID proves this request created an agent."""
+    occupant = c.execute("SELECT agent_id,deleted_at FROM agents WHERE session=?", (row["session"],)).fetchone()
+    if occupant and (not row["agent_id"] or occupant["agent_id"] != row["agent_id"]):
+        raise JanitorError("The reserved session belongs to another creation", 409, "creation_conflict")
+    if row["agent_id"] and (not occupant or occupant["deleted_at"] is not None):
+        raise JanitorError("This creation's agent was removed", 409, "creation_conflict")
+    return {"request_id": row["request_id"], "session": row["session"],
+            "agent_id": row["agent_id"], "completed": row["completed_at"] is not None,
+            "response": _decode(row["response_json"], None),
+            "identity": {("name" if k == "persona" else k): v for k, v in _decode(row["identity_json"], {}).items()}}
+
+
+def begin_creation(request_id: str, payload: dict) -> dict:
+    """Reserve one fresh identity before HTTP invokes the existing lifecycle.
+
+    Retried raw payloads compare independently of changing filesystem/catalog
+    state. The normalized identity is frozen once, before any identity mutation.
+    """
+    if not isinstance(request_id, str) or not 1 <= len(request_id) <= 160 or any(ord(ch) < 33 for ch in request_id):
+        raise JanitorError("A stable creation request_id is required")
+    if not isinstance(payload, dict):
+        raise JanitorError("Creation payload must be an object")
+    values = {key: value for key, value in payload.items() if key != "request_id"}
+    allowed = {"name", "backend", "cwd", "model", "effort", "template_id", "scope", "attachments"}
+    if set(values) - allowed:
+        raise JanitorError("Unsupported new Janitor configuration field")
+    encoded = _json(values)
+    digest = hashlib.sha256(encoded.encode()).hexdigest()
+    with _write() as c:
+        existing = c.execute("SELECT * FROM janitor_creation_requests WHERE request_id=?", (request_id,)).fetchone()
+        if existing:
+            if existing["payload_sha256"] != digest:
+                raise JanitorError("This creation request refers to different settings", 409, "creation_conflict")
+            return _creation_result(c, existing)
+        name = values.get("name")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
+            raise JanitorError("A short Janitor name is required")
+        if values.get("backend") is not None and (not isinstance(values["backend"], str) or not backends.is_valid(values["backend"])):
+            raise JanitorError("Choose an available agent backend")
+        if values.get("cwd") is not None and not isinstance(values["cwd"], str):
+            raise JanitorError("Workspace must be a path")
+        backend = backends.normalize(values.get("backend"))
+        if any(values.get(key) is not None and not isinstance(values[key], str) for key in ("model", "effort")):
+            raise JanitorError("Model and effort must be text")
+        model = values.get("model") or ""
+        effort = values.get("effort") or ""
+        if not isinstance(model, str) or not isinstance(effort, str):
+            raise JanitorError("Model and effort must be text")
+        model, effort = model.strip(), effort.strip().lower()
+        _model({"backend": backend}, model, effort)
+        if backend == backends.AGY and effort:
+            raise JanitorError("AGY model-specific effort compatibility is unknown")
+        validate_configuration(**{k: values[k] for k in ("template_id", "scope", "attachments") if k in values})
+        from .agent_lifecycle import _existing_cwd
+        identity = {"persona": name.strip(), "backend": backend, "cwd": _existing_cwd(values.get("cwd")),
+                    "model": model, "effort": effort}
+        slug = "".join(ch for ch in name.strip().lower() if ch.isalnum() or ch in "._-")[:40] or "janitor"
+        for _ in range(10):
+            session = f"{slug}-{uuid.uuid4().hex[:12]}"
+            if not agents.session_exists(session) and not c.execute("SELECT 1 FROM janitor_creation_requests WHERE session=?", (session,)).fetchone():
+                break
+        else:
+            raise JanitorError("Could not reserve a fresh session", 409, "creation_conflict")
+        c.execute("INSERT INTO janitor_creation_requests(request_id,payload_json,payload_sha256,identity_json,session,created_at) VALUES (?,?,?,?,?,?)", (request_id, encoded, digest, _json(identity), session, db.now_ms()))
+        return _creation_result(c, c.execute("SELECT * FROM janitor_creation_requests WHERE request_id=?", (request_id,)).fetchone())
+
+
+def create_reserved_agent(request_id: str, *, persona: str, voice_id: str, cwd: str,
+                          session: str, backend: str, model: str = "", effort: str = "") -> str:
+    """Called only by agents.create_agent for private registered creation.
+
+    The ordinary identity INSERT and request provenance link commit together.
+    A crash cannot leave an apparently matching but unowned session to adopt.
+    """
+    with _write() as c:
+        row = c.execute("SELECT * FROM janitor_creation_requests WHERE request_id=?", (request_id,)).fetchone()
+        if not row:
+            raise JanitorError("No registered creation request", 409, "creation_conflict")
+        identity = {"persona": persona, "backend": backend, "cwd": cwd, "model": model, "effort": effort}
+        if session != row["session"] or voice_id or identity != _decode(row["identity_json"], {}):
+            raise JanitorError("Identity does not match its registered creation", 409, "creation_conflict")
+        result = _creation_result(c, row)
+        if result["agent_id"]:
+            return result["agent_id"]
+        agent_id = agents.create_agent(persona=persona, voice_id="", cwd=cwd, session=session,
+                                       backend=backend, model=model, effort=effort)
+        c.execute("UPDATE agents SET is_janitor=1 WHERE agent_id=?", (agent_id,))
+        c.execute("UPDATE janitor_creation_requests SET agent_id=? WHERE request_id=? AND agent_id IS NULL", (agent_id, request_id))
+        return agent_id
+
+
+def complete_creation(request_id: str, session: str) -> dict:
+    """Save the response after paused configuration; retries never create again."""
+    with _write() as c:
+        row = c.execute("SELECT * FROM janitor_creation_requests WHERE request_id=?", (request_id,)).fetchone()
+        if not row or row["session"] != session:
+            raise JanitorError("Creation request does not own this session", 409, "creation_conflict")
+        result = _creation_result(c, row)
+        if result["completed"]:
+            return result["response"]
+        if not result["agent_id"]:
+            raise JanitorError("The registered identity has not been created", 409, "creation_incomplete")
+        configured = get(session)
+        if configured["agent_id"] != result["agent_id"]:
+            raise JanitorError("Creation identity changed", 409, "creation_conflict")
+        c.execute("UPDATE janitor_creation_requests SET response_json=?,completed_at=? WHERE request_id=?", (_json(configured), db.now_ms(), request_id))
+        return configured
