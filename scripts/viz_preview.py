@@ -82,6 +82,12 @@ def main():
                     ProductionHandler._handle_viz_events(self)
                 finally:
                     db.close_local()
+            elif urlsplit(self.path).path.startswith('/viz/owner-avatar/'):
+                from lib.viz_owner_avatar import portrait
+                login=unquote(urlsplit(self.path).path[len('/viz/owner-avatar/'):])
+                result=portrait(login)
+                if not result:return self.send_error(404)
+                self._send(200,*result)
             elif urlsplit(self.path).path.startswith('/avatars/'):
                 # Same exact-agent portrait resolution as the main app. Never
                 # accept a filesystem path from the URL.

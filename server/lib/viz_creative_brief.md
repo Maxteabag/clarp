@@ -88,7 +88,7 @@ Information economy (ADR 0008): prefer recognizable service marks and actual own
 portraits when supplied by the asset pipeline. Avoid redundant text such as a JS
 badge beside a .js filename. Keep names, filenames, disambiguation and accessible
 labels when useful. Do not invent images or enable network access in source code.
-A focused object's larger display size is not evidence that it is intrinsically
-larger or more important. Preserve overview readability and do not silently hide
-relevant work in tiny context markers. These principles guide focused improvements,
-not an unrequested global layout change.
+Flow overview (ADR 0009): show observed workspaces and agents at a common scale.
+Selection only inspects; never promote one workspace and miniaturize the rest.
+Keep pan and zoom. Focus expansion is deferred. Extend the established concepts
+without reintroducing focus-based layout or replacing other views.

@@ -32,8 +32,13 @@ it('has distinct successful and failed outcomes in the local demonstration',()=>
  expect(scene.events.filter(e=>e.action==='test').map(e=>e.outcome)).toEqual(['failed','succeeded']);
  expect(scene.events.find(e=>e.action==='push').remote_target).toBe('demo:remote');
 });
-it('initially focuses a workspace with an agent instead of a formerly busy empty one',()=>{
- const scene=flowDemo(0);scene.entities.push({id:'other',label:'Old busy',kind:'repository',path:'/other'});
- for(let i=0;i<50;i++)scene.events.unshift({...scene.events[0],id:'old'+i,ts:0,action:'edit',world_target:'other',workspace_target:'other'});
- const result=build(scene,null,7000);expect(result.chosen.id).toBe('demo:checkout');expect(result.actors.length).toBe(2);
+it('shows all workspaces and agents at common scale and ignores selection for layout',()=>{
+ const scene=flowDemo(0);scene.entities.push({id:'other',label:'Other',kind:'repository',path:'/other'});
+ for(let i=0;i<8;i++)scene.events.push({...scene.events[0],id:'extra'+i,agent_id:'agent'+i,agent:'Agent '+i,world_target:'other',workspace_target:'other'});
+ const a=build(scene,null,7000),b=build(scene,'other',7000);
+ expect(a.regions.map(r=>r.id)).toEqual(['demo:checkout','other']);
+ expect(a.actors.length).toBe(10);
+ expect(new Set(a.regions.map(r=>r.rx+':'+r.ry)).size).toBe(1);
+ expect(a.regions.map(r=>[r.x,r.y])).toEqual(b.regions.map(r=>[r.x,r.y]));
+ expect(a.actors.map(r=>[r.x,r.y])).toEqual(b.actors.map(r=>[r.x,r.y]));
 });

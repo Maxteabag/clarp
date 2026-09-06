@@ -15,7 +15,7 @@ export class AvatarCache {
       if(old?.url===url && (old.blob || Date.now()<old.retryAt))return;
       if(!url){if(old){this.entries.delete(actor.id);this.onchange(this.blobs());}return;}
       // The backend and bundled resolver own this route, not model output.
-      if(!url.startsWith('/avatars/')&&!url.startsWith('/static/avatars/'))return;
+      if(!url.startsWith('/avatars/')&&!url.startsWith('/static/avatars/')&&!url.startsWith('/viz/owner-avatar/'))return;
       const entry={url,blob:null,retryAt:Date.now()+60000};this.entries.set(actor.id,entry);
       try{
         const response=await this.fetcher(url,{credentials:'same-origin'});

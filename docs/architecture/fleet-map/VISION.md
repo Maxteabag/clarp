@@ -50,5 +50,6 @@ Use as little redundant text as practical (0008). Prefer a recognizable service
 logo and the actual owner's profile image where they explain identity directly.
 Keep useful filenames, names and clarifications; avoid repeating information such
 as a textual JS badge beside a .js filename. Text is welcome when it adds meaning.
-Focus-based scaling must not imply intrinsic importance or conceal other agents'
-work. The balance between focused detail and a complete overview remains exploratory.
+Flow is an overall map (0009): show observed workspaces and agents at a common
+scale, with pan and zoom. Selection inspects; it does not enlarge a workspace or
+shrink the rest. Expansion and focused interiors are deferred.

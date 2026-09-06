@@ -1,49 +1,59 @@
-// A compact focus lens over the full world, not a second inventory of its files.
+// One overall map. Selection never changes scale, coverage or placement.
 exports.hash=s=>{let h=2166136261;for(const c of String(s))h=Math.imul(h^c.charCodeAt(0),16777619);return h>>>0;};
 exports.stateAt=(e,t)=>e.finished_at!=null&&t>=e.finished_at?(e.outcome||'unknown'):(e.finished_at!=null||e.outcome==='running'?'running':'unknown');
-exports.build=(scene,focus,time)=>{
+const slots=new Map();
+exports.build=(scene,_selection,time)=>{
  const byId=new Map(scene.entities.map(e=>[e.id,e])),events=scene.events.filter(e=>e.ts<=time).sort((a,b)=>a.ts-b.ts);
- const repos=scene.entities.filter(e=>e.kind==='repository').sort((a,b)=>a.id.localeCompare(b.id));
  const ancestor=id=>{let e=byId.get(id);const seen=new Set();while(e&&!seen.has(e.id)){if(e.kind==='repository')return e.id;seen.add(e.id);e=byId.get(e.parent);}return null;};
- const scores=new Map();
- for(const e of events){const id=e.workspace_target||ancestor(e.world_target);if(!id)continue;
-  const age=Math.max(0,time-e.ts),weight=['edit','write','create','delete','commit','push','test'].includes(e.action)?5:1;
-  scores.set(id,(scores.get(id)||0)+weight*Math.exp(-age/180000));}
- const lastByAgent=new Map(events.map(e=>[e.agent_id,e]));
- const occupied=new Set([...lastByAgent.values()].map(e=>e.workspace_target||ancestor(e.world_target)));
- const current=repos.filter(r=>occupied.has(r.id));
- const concrete=current.filter(r=>scene.entities.some(e=>e.kind==='file'&&ancestor(e.id)===r.id));
- const chosen=byId.get(focus)||(concrete.length?concrete:current.length?current:repos).slice().sort((a,b)=>(scores.get(b.id)||0)-(scores.get(a.id)||0))[0];
- const inFocus=e=>chosen&&(e.workspace_target===chosen.id||ancestor(e.world_target)===chosen.id);
- const relevant=events.filter(inFocus),latest=new Map(),history=new Map();
- for(const e of events){const h=history.get(e.agent_id)||[];h.push(e);history.set(e.agent_id,h);}
- for(const e of relevant)for(const id of e.world_targets||[e.world_target])latest.set(id,e);
- const candidates=scene.entities.filter(e=>e.kind==='file'&&ancestor(e.id)===chosen?.id);
- candidates.sort((a,b)=>{
-  const ea=latest.get(a.id),eb=latest.get(b.id);return (eb?.ts||0)-(ea?.ts||0)||a.id.localeCompare(b.id);
- });
- const selected=candidates.slice(0,8).sort((a,b)=>String(a.parent).localeCompare(String(b.parent))||a.id.localeCompare(b.id));
- const sparse=[[760,390],[750,555],[710,660]],four=[[720,325],[880,420],[860,570],[700,655]],dense=[[650,290],[810,315],[925,420],[780,440],[925,565],[770,575],[800,695],[635,650]];
- const anchors=selected.length<4?sparse:selected.length===4?four:dense;
- const files=selected.map((e,i)=>({...e,x:anchors[i][0],y:anchors[i][1],w:106,h:70,event:latest.get(e.id)}));
- const fileMap=new Map(files.map(f=>[f.id,f]));
- const actors=[];
- for(const [id,h] of history){const last=h.at(-1);if(!inFocus(last))continue;
-  actors.push({id,name:last.agent,history:h,event:last});}
+ const history=new Map(),latest=new Map();
+ for(const e of events){const h=history.get(e.agent_id)||[];h.push(e);history.set(e.agent_id,h);for(const id of e.world_targets||[e.world_target])latest.set(id,e);}
+ const repos=scene.entities.filter(e=>e.kind==='repository').map(e=>({...e})).sort((a,b)=>a.id.localeCompare(b.id));
+ const groupFor=e=>e.workspace_target||ancestor(e.world_target)||(e.evidence?.cwd?'context:'+e.evidence.cwd:'unlocated');
+ for(const h of history.values()){
+  const e=h.at(-1),id=groupFor(e);if(repos.some(r=>r.id===id))continue;
+  repos.push({id,label:id==='unlocated'?'Location unknown':(e.evidence?.cwd||id).split('/').filter(Boolean).at(-1)||'/',path:e.evidence?.cwd,kind:id==='unlocated'?'unresolved':'workspace'});
+ }
+ // Equal elliptical regions pack around related checkouts; a stable slot is
+ // retained as new observations arrive, rather than promoting one workspace.
+ const regions=[];
+ for(const r of repos){
+  let p=slots.get(r.id);
+  if(!p){
+   const family=regions.find(x=>x.label===r.label);const anchor=family||{x:0,y:0};let best=null;
+   const extent=Math.ceil(Math.sqrt(repos.length))+2;
+   for(let row=-extent;row<=extent;row++)for(let col=-extent;col<=extent;col++){
+    const x=(col+(Math.abs(row)%2)*.5)*520,y=row*340;
+    if([...slots.values()].some(s=>((s.x-x)/520)**2+((s.y-y)/380)**2<.99))continue;
+    const score=((x-anchor.x)/520)**2+((y-anchor.y)/380)**2+Math.hypot(x,y)*.0001;
+    if(!best||score<best.score)best={x,y,score};
+   }
+   p=best||{x:regions.length*540,y:0};slots.set(r.id,p);
+  }
+  regions.push({...r,x:p.x,y:p.y,rx:235,ry:165});
+ }
+ const regionMap=new Map(regions.map(r=>[r.id,r]));const actors=[];
+ for(const [id,h] of history){const e=h.at(-1);actors.push({id,name:e.agent,event:e,history:h,workspace:groupFor(e)});}
  actors.sort((a,b)=>a.id.localeCompare(b.id));
- actors.slice(0,5).forEach((a,i)=>{a.x=selected.length?390+(i%2)*125:565+(i%2)*95;a.y=selected.length?345+Math.floor(i/2)*150:430+Math.floor(i/2)*95;});
+ const occupancy=new Map(),counts=new Map();for(const a of actors)counts.set(a.workspace,(counts.get(a.workspace)||0)+1);
+ for(const a of actors){const r=regionMap.get(a.workspace),i=occupancy.get(r.id)||0;occupancy.set(r.id,i+1);const n=counts.get(r.id);a.x=n>6?r.x-95+Math.cos(i/n*6.28)*95:r.x-150+(i%3)*65;a.y=n>6?r.y+Math.sin(i/n*6.28)*105:r.y-35+Math.floor(i/3)*78;}
+ const fileAnchors=[[65,-65],[160,-38],[65,58],[160,83]],files=[];
+ for(const region of regions){
+  const candidates=scene.entities.filter(e=>e.kind==='file'&&ancestor(e.id)===region.id);
+  candidates.sort((a,b)=>(latest.get(b.id)?.ts||0)-(latest.get(a.id)?.ts||0)||a.id.localeCompare(b.id));
+  region.totalFiles=candidates.length;
+  candidates.slice(0,4).sort((a,b)=>String(a.parent).localeCompare(String(b.parent))||a.id.localeCompare(b.id)).forEach((e,i)=>files.push({...e,workspace:region.id,x:region.x+fileAnchors[i][0],y:region.y+fileAnchors[i][1],event:latest.get(e.id)}));
+ }
+ const right=Math.max(0,...regions.map(r=>r.x+r.rx));
  const owners=scene.entities.filter(e=>e.kind==='organization'&&e.parent==='github').sort((a,b)=>a.id.localeCompare(b.id));
- let ownerY=260;
- const ownerGroups=owners.map(o=>{
-  const children=scene.entities.filter(e=>e.parent===o.id&&e.kind==='remote-repository').sort((a,b)=>a.id.localeCompare(b.id)).map(r=>({...r}));
-  const group={...o,x:1130,y:ownerY,w:340,h:Math.max(180,70+Math.ceil(children.length/3)*72),repos:children};
-  ownerY+=group.h+25;return group;
- });
- for(const group of ownerGroups)group.repos.forEach((r,i)=>{r.x=group.x+65+(i%3)*100;r.y=group.y+83+Math.floor(i/3)*72;});
+ let ownerY=-120;const ownerGroups=[];
+ for(const o of owners){const children=scene.entities.filter(e=>e.parent===o.id&&e.kind==='remote-repository').sort((a,b)=>a.id.localeCompare(b.id)).map(r=>({...r}));
+  const group={...o,x:right+170,y:ownerY,w:300,h:Math.max(170,65+Math.ceil(children.length/3)*75),repos:children};ownerY+=group.h+28;
+  children.forEach((r,i)=>{r.x=group.x+50+(i%3)*95;r.y=group.y+85+Math.floor(i/3)*75;});ownerGroups.push(group);
+ }
  const remoteMap=new Map(ownerGroups.flatMap(o=>o.repos.map(r=>[r.id,r])));
- const structural=(scene.relations||[]).filter(r=>r.from===chosen?.id&&remoteMap.has(r.to));
- const quiet=repos.filter(r=>r.id!==chosen?.id).slice(0,16).map((r,i)=>({...r,x:260+i%8*140,y:835+Math.floor(i/8)*70}));
- return {chosen,repos,files,fileMap,actors:actors.slice(0,5),hiddenAgents:Math.max(0,actors.length-5),
-  ownerGroups,remoteMap,structural,quiet,latest,relevant,history,totalFiles:candidates.length,region:{rx:!selected.length?210:selected.length<4?335:405,ry:!selected.length?160:selected.length<4?225:280},
-  bounds:{x:120,y:130,w:1430,h:Math.max(860,ownerY+40,quiet.length/8*70+790)}};
+ const structural=(scene.relations||[]).filter(r=>regionMap.has(r.from)&&remoteMap.has(r.to));
+ const minX=Math.min(-280,...regions.map(r=>r.x-r.rx-40)),minY=Math.min(-240,...regions.map(r=>r.y-r.ry-60));
+ const maxX=Math.max(right+60,...ownerGroups.map(o=>o.x+o.w+55)),maxY=Math.max(240,ownerY+20,...regions.map(r=>r.y+r.ry+65));
+ return {regions,regionMap,repos,actors,files,fileMap:new Map(files.map(f=>[f.id,f])),ownerGroups,remoteMap,structural,history,latest,
+  bounds:{x:minX,y:minY,w:maxX-minX,h:maxY-minY},github:{x:right+140,y:-205,w:360,h:ownerY+230}};
 };
