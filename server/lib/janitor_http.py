@@ -167,6 +167,8 @@ def handle(handler, method: str) -> None:
                     fields = {key: data[key] for key in
                               ("template_id", "scope", "attachments", "model", "effort") if key in data}
                     result = janitors.configure(session, revision, **fields)
+                elif action == "reset-defaults":
+                    result = janitors.reset_defaults(session, revision)
                 elif action == "enabled":
                     if not isinstance(data.get("enabled"), bool):
                         raise ValueError("enabled must be true or false")

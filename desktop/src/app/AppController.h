@@ -158,6 +158,7 @@ class AppController : public QObject {
     [[nodiscard]] bool pauseMobilePush() const { return m_pauseMobilePush; }
     void setPauseMobilePush(bool value);
     void reportDesktopPresence(const QString& instance, quint64 sequence, bool active);
+    void reportApplicationActivity(const QString& instance, quint64 sequence, bool foreground, qint64 inputAgeMs);
     [[nodiscard]] bool showWhenReady() const { return m_showWhenReady; }
     void setShowWhenReady(bool value);
     [[nodiscard]] bool toolsVisible() const;

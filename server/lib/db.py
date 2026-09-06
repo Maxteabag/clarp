@@ -34,7 +34,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 75
+_SCHEMA_VERSION = 76
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1398,6 +1398,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                     if statement.strip(): con.execute(statement)
             if version < 75:
                 con.execute("ALTER TABLE oracle_delegations ADD COLUMN completion_trace_id TEXT NOT NULL DEFAULT ''")
+            if version < 76:
+                con.execute(_ACTIVE_INTERVAL_TRIGGER)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1844,6 +1846,12 @@ INSERT OR IGNORE INTO janitor_trigger_definitions
      '{"cron":"0 9 * * *","timezone":"UTC","max_targets":3}');
 """
 _SCHEMA_SQL += _JANITOR_SCHEMA
+
+_ACTIVE_INTERVAL_TRIGGER = """INSERT OR IGNORE INTO janitor_trigger_definitions
+    (trigger_id,version,name,kind,defaults_json) VALUES
+    ('active-interval',1,'Periodically while using the app','interval',
+     '{"interval_seconds":900,"idle_timeout_seconds":300,"run_on_resume":true,"max_targets":3,"coalesce_seconds":0}')"""
+_SCHEMA_SQL += _ACTIVE_INTERVAL_TRIGGER + ";"
 
 
 def _migrate_to_v73(con: sqlite3.Connection) -> None:
