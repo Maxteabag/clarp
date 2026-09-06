@@ -76,7 +76,8 @@ def test_new_scene_reaches_astra_but_covered_scene_does_not(monkeypatch,tmp_path
     assert calls==[scene]
 
 
-def test_host_learning_flags_reach_preview_process(monkeypatch):
+@pytest.mark.parametrize('exit_code,expected',[(0,0),(-15,143)])
+def test_host_learning_flags_reach_preview_process(monkeypatch,exit_code,expected):
     import importlib.util
     import subprocess
     spec=importlib.util.spec_from_file_location('viz_host_test',Path(__file__).resolve().parents[2]/'scripts/viz_host.py')
@@ -87,10 +88,10 @@ def test_host_learning_flags_reach_preview_process(monkeypatch):
     monkeypatch.setattr(host.subprocess,'run',lambda *a,**k:subprocess.CompletedProcess(a,0,'job@g1\n',''))
     class Child:
         def __init__(self,command):commands.append(command)
-        def wait(self,timeout):return 0
-        def poll(self):return 0
+        def wait(self,timeout):return exit_code
+        def poll(self):return exit_code
     monkeypatch.setattr(host.subprocess,'Popen',Child)
-    assert host.main()==0
+    assert host.main()==expected
     assert commands[0][-3:]==['--library','/tmp/library.json','--learn']
 
 

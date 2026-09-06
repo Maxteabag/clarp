@@ -75,3 +75,10 @@ def test_validation_evidence_distinguishes_single_commands_chains_and_scripts():
     compound=viz_world.evidence('Bash',{'command':'npm run test:a && npm run build','cwd':'/tmp'},'', 'x','run')
     assert compound['action']=='execute' and compound['validation']=='test' and compound['validation_scope']=='chain'
     assert compound['validation_commands']==['npm run test:a','npm run build']
+
+
+def test_validation_does_not_invent_results_from_pipelines_or_printed_commands():
+    assert viz_world.validation_evidence('npm test | cat')['scope']=='script'
+    assert viz_world.validation_evidence('echo pytest')['kind'] is None
+    assert viz_world.validation_evidence("echo 'something && npm test'")['kind'] is None
+    assert viz_world.validation_evidence("npm test -- -k 'one || two'")['scope']=='single'

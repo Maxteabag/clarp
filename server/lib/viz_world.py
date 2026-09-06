@@ -127,15 +127,24 @@ def validation_evidence(raw):
     """
     none={'kind':None,'exact':False,'scope':None,'commands':[]}
     if '<<' in raw or '\n' in raw:return none
-    kinds=[];commands=[];segments=_SEGMENT.split(raw)
+    try:
+        lexer=shlex.shlex(raw,posix=True,punctuation_chars=';&|');lexer.whitespace_split=True
+        segments=[];current=[];operators=[]
+        for token in lexer:
+            if token and all(c in ';&|' for c in token):
+                segments.append(shlex.join(current));current=[];operators.append(token)
+            else:current.append(token)
+        segments.append(shlex.join(current))
+    except ValueError:return none
+    kinds=[];commands=[]
     for segment in segments:
         try:words=shlex.split(segment,comments=True)
         except ValueError:continue
         if not words:continue
         before=len(kinds)
         exe=os.path.basename(words[0]);args=[w for w in words[1:] if not w.startswith('-')]
-        named=[_VALIDATORS[os.path.basename(w)] for w in [exe,*args] if os.path.basename(w) in _VALIDATORS]
-        if named:kinds.append(named[0]);commands.append(' '.join([exe,*words[1:]])[:120]);continue
+        named=[_VALIDATORS[os.path.basename(w)] for w in ([exe,*args] if exe in _RUNNERS and '-c' not in words else [exe]) if os.path.basename(w) in _VALIDATORS]
+        if named:kinds.append(named[0]);commands.append(shlex.join([exe,*words[1:]]));continue
         script=re.compile(r'(^|/)[^/\s]*(check|test|verify)[^/\s]*\.(mjs|js|py|sh)$')
         if exe not in _RUNNERS:
             if script.search(words[0]):kinds.append('test')
@@ -144,10 +153,10 @@ def validation_evidence(raw):
         if re.search(r'(^|[\s:])(test|tests|check|verify|e2e|py|js)(\b|:)',head) or any(script.search(w) for w in args):kinds.append('test')
         elif re.search(r'(^|\s)(build|compile|typecheck)(\b|:)',head):kinds.append('build')
         elif re.search(r'(^|\s)(lint|fmt|format)(\b|:)',head) and 'run' in args[:1]+[exe]:kinds.append('lint')
-        if len(kinds)>before:commands.append(' '.join([exe,*words[1:]])[:120])
+        if len(kinds)>before:commands.append(shlex.join([exe,*words[1:]]))
     if not kinds:return none
     kind='test' if 'test' in kinds else 'build' if 'build' in kinds else 'lint'
-    scope='script' if re.search(r';|\|\|',raw) else 'chain' if len(segments)>1 else 'single'
+    scope='script' if any(op!='&&' for op in operators) else 'chain' if operators else 'single'
     return {'kind':kind,'exact':scope!='script','scope':scope,'commands':commands[:8]}
 
 
