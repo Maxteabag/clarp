@@ -110,13 +110,20 @@ def validate_result(result, count):
             and all(isinstance(v, str) and 0 < len(v.strip()) <= 160 for v in result.values()))
 
 
-def trial(prompt, cases, repetition, private_profile=False, detail_level=3):
+def trial(prompt, cases, repetition, private_profile=False, detail_level=3, effort="low"):
+    if effort not in {"low", "medium"}:
+        raise ValueError("lab supports low and medium only")
     record = {"transport": "exec", "prompt": prompt, "batch_size": len(cases),
               "repetition": repetition, "events": [], "model": shipping.MODEL,
-              "effort": "low", "detail_level": detail_level, "prompt_sha256": hashlib.sha256((PROMPTS[prompt] + shipping.POLICIES[detail_level]).encode()).hexdigest()}
+              "effort": effort, "detail_level": detail_level, "prompt_sha256": hashlib.sha256((PROMPTS[prompt] + shipping.POLICIES[detail_level]).encode()).hexdigest()}
     started = time.perf_counter()
     profile = tempfile.TemporaryDirectory(prefix="clarp-exec-profile-lab-")
     def factory(*args, **kwargs):
+        command = list(args[0])
+        setting = 'model_reasoning_effort="low"'
+        assert command.count(setting) == 1
+        command[command.index(setting)] = f'model_reasoning_effort="{effort}"'
+        args = (command, *args[1:])
         if private_profile:
             environment = kwargs["env"].copy()
             login_home = Path(environment.get("CODEX_HOME", str(Path.home() / ".codex")))

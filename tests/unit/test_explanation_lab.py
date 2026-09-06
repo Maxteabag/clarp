@@ -61,3 +61,16 @@ def test_fresh_refinement_uses_identical_source_for_read_and_run():
     assert module.CASES[0]['activity']['scripts'] == module.CASES[1]['activity']['scripts']
     assert module.CASES[0]['activity']['command'] != module.CASES[1]['activity']['command']
     assert set(module.REFINEMENTS) == {1, 2, 3, 4}
+
+
+def test_medium_changes_actual_cli_flag_not_just_report_label():
+    from unittest.mock import patch
+    captured=[]
+    def fake(command, **kwargs):
+        captured.append(command)
+        raise RuntimeError('No live model in test')
+    with patch.object(lab, 'TracedProcess', fake):
+        row=lab.trial('baseline', lab.fixtures()[:1], 0, effort='medium')
+    assert row['effort']=='medium'
+    assert 'model_reasoning_effort="medium"' in captured[0]
+    assert 'model_reasoning_effort="low"' not in captured[0]
