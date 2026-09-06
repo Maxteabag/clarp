@@ -318,7 +318,6 @@ Rectangle {
                                         onTriggered: root.controller.setAgentArchived(card.session, true)
                                     }
                                     MenuItem {
-                                        visible: card.name !== "Mike"
                                         text: root.confirmRelease === card.session ? "Confirm release" : "Release…"
                                         onTriggered: {
                                             if (root.confirmRelease === card.session) {
