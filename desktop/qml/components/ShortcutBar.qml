@@ -1,57 +1,50 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 
 Rectangle {
     id: root
-
-    required property var controller
-
-    implicitHeight: 22
-    color: "#11131a"
-    border.color: "#262938"
-    border.width: 1
-
+    required property var keymap
+    objectName: "contextShortcutBar"
+    implicitHeight: Math.max(30, hints.implicitHeight + 12)
+    color: "#171822"
+    Rectangle { width: parent.width; height: 1; color: "#303247" }
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 10
-        anchors.rightMargin: 10
-        spacing: 7
-
-        Rectangle {
-            implicitWidth: 6
-            implicitHeight: 6
-            radius: 3
-            color: root.controller.connected ? "#8aaa7a" : "#8b7868"
-        }
-
+        anchors.margins: 6
+        spacing: 16
         Text {
-            text: root.controller.panes.activeSession || "ready"
-            color: "#8e92aa"
-            font.family: "JetBrains Mono"
-            font.pixelSize: 9
+            text: root.keymap.contextName === "composer" ? "INSERT"
+                : root.keymap.contextName === "sidebar" ? "AGENTS"
+                : root.keymap.contextName === "pane" ? "CONVERSATION"
+                : root.keymap.contextName.toUpperCase()
+            color: "#bb9af7"
+            font.pixelSize: 10
             font.weight: Font.DemiBold
-            elide: Text.ElideRight
         }
-
-        Item {
+        Flow {
+            id: hints
             Layout.fillWidth: true
+            spacing: 16
+            Repeater {
+                model: root.keymap.hints
+                delegate: Row {
+                    id: hint
+                    required property var modelData
+                    spacing: 5
+                    Text {
+                        text: hint.modelData.label + ":"
+                        color: "#9ca1bd"
+                        font.pixelSize: 11
+                    }
+                    Text {
+                        text: hint.modelData.keys[0].replace("Return", "Enter").replace("Escape", "Esc")
+                        color: "#c7adf1"
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                    }
+                }
+            }
         }
-
-        Text {
-            text: root.controller.panes.zoomedPaneId.length > 0
-                ? "ZOOM" : root.controller.panes.paneCount + "P"
-            color: "#6e7289"
-            font.family: "JetBrains Mono"
-            font.pixelSize: 9
-        }
-
-        Text {
-            text: "⌃K"
-            color: "#575b70"
-            font.family: "JetBrains Mono"
-            font.pixelSize: 9
-        }
-
     }
-
 }

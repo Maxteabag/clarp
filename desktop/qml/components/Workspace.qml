@@ -12,6 +12,9 @@ Rectangle {
     readonly property real paneGap: 8
     color: "#10121a"
 
+    function focusNavigation() { navigationFocus.forceActiveFocus(); }
+    Item { id: navigationFocus; objectName: "conversationNavigationFocus" }
+
     Repeater {
         model: root.controller.panes.paneLayout
 

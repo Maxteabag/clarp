@@ -96,6 +96,7 @@ AppController::AppController(QObject* parent)
                                                           QStringLiteral("http://127.0.0.1:7682"))
                                                    .toString()));
     m_muted = settings.value(QStringLiteral("audio/muted"), false).toBool();
+    m_showWhenReady = settings.value(QStringLiteral("conversation/showWhenReady"), false).toBool();
     m_toolsVisible = settings.value(QStringLiteral("conversation/toolsVisible"), false).toBool();
     if (!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH"))
         m_toolNarrator.setDetailLevel(std::clamp(settings.value(QStringLiteral("experiments/toolLastTranslationLevel"), 3).toInt(), 1, 4));
@@ -184,6 +185,9 @@ AppController::AppController(QObject* parent)
             requestComposerFocus(paneId);
         }
     });
+    connect(this, &AppController::agentRevisionChanged, this, &AppController::nextAttentionChanged);
+    connect(this, &AppController::selectedSessionChanged, this, &AppController::nextAttentionChanged);
+    connect(this, &AppController::updatesChanged, this, &AppController::nextAttentionChanged);
     const auto bumpAgentRevision = [this] {
         ++m_agentRevision;
         emit agentRevisionChanged();
@@ -199,6 +203,7 @@ AppController::AppController(QObject* parent)
                                              : QStringLiteral("reconnecting"));
         if (m_sse.connected()) {
             requestSnapshot();
+            loadUpdates();
         } else {
             m_agents.markTransportUnavailable();
             m_archivedAgents.markTransportUnavailable();
@@ -615,6 +620,13 @@ void AppController::setMuted(bool muted) {
     m_audio.setMuted(muted);
     QSettings().setValue(QStringLiteral("audio/muted"), muted);
     emit mutedChanged();
+}
+
+void AppController::setShowWhenReady(bool value) {
+    if (m_showWhenReady == value) return;
+    m_showWhenReady = value;
+    QSettings().setValue(QStringLiteral("conversation/showWhenReady"), value);
+    emit showWhenReadyChanged();
 }
 
 void AppController::setToolsVisible(bool visible) {
@@ -1147,6 +1159,15 @@ void AppController::createAgent(const QString& name, const QString& workingDirec
     }
     m_api.postJson(QStringLiteral("agent-create:") + replaceSession, QStringLiteral("/agents"),
                    body);
+}
+
+QString AppController::nextAttentionSession() const {
+    QStringList pending;
+    for (const QVariant& item : m_attentionItems) {
+        const QString session = item.toMap().value(QStringLiteral("session")).toString();
+        if (!session.isEmpty()) pending.append(session);
+    }
+    return m_agents.nextAttentionSession(m_selectedSession, pending);
 }
 
 void AppController::releaseAgent(const QString& session) {
@@ -2802,6 +2823,7 @@ void AppController::handleSseEvent(const QJsonObject& event) {
             loadTurnQueue(session);
         }
     } else if (type == QStringLiteral("user-notification")) {
+        requestSnapshot(); // Refresh completed previews, including unopened chats.
         m_agents.applyNotificationEvent(event);
         if (session == m_selectedSession) {
             m_agents.clearUnread(session);
