@@ -24,9 +24,10 @@ GitHub harbor and actions shown at their real destinations (0006). Agent markers
 Clarp avatars, explicitly replacing the earlier boats. The side-by-side activity
 and nested cabinets from the Jacquard experiment remain a separate optional view.
 
-This is a desktop map with pan and zoom, not a diagram that must squeeze every
-item onto a phone screen. Off-screen places are normal. Familiar identities and
-navigation should remain recognizable as the world expands.
+The map now supports phones and desktops (0010). Adapt controls and touch
+navigation to the viewport; preserve world geometry, pan and zoom. Off-screen
+places are normal while exploring. Familiar identities should remain recognizable
+as the world expands. The former desktop minimum-size gate is superseded.
 
 The owner does not want to approve routine plans or compatible improvements.
 Proceed with authorized work and make sensible implementation choices. This
