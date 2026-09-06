@@ -41,6 +41,21 @@ python3 labs/explanations/analyze.py labs/explanations/results
 
 ### Across all audience levels
 
+For three contemporaneous columns (current-low/refined-low/refined-medium):
+
+```sh
+python3 labs/explanations/medium.py --output /tmp/medium.jsonl
+python3 labs/explanations/medium.py --live --output /tmp/medium.jsonl
+python3 labs/explanations/medium.py --render /tmp/medium.jsonl --output /tmp/medium.md
+```
+
+This explicitly bounded matrix uses 36 calls and rotates condition order.
+Use `--resume` only with its existing complete-line JSONL to append missing
+conditions without replacing failed or completed trials. Record any interruption
+in the report; it weakens contemporaneous timing comparisons.
+The actual CLI reasoning flag changes, not merely the report label. Group by
+effort as well as prompt hash and audience when aggregating results.
+
 For fresh invoice examples comparing CURRENT/REFINED across every audience:
 
 ```sh
