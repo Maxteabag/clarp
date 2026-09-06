@@ -1,7 +1,9 @@
 # 0001 — Develop visual software, not only icons
 
-Status: Accepted  
-Date: 2026-09-05  
+Status: Accepted
+
+Date: 2026-09-05
+
 Scope: Creative capability; constrained by the continuity decision in 0002.
 
 ## Context

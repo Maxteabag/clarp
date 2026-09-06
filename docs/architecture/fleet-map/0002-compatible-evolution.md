@@ -1,7 +1,9 @@
 # 0002 — Creative expansion must preserve established concepts
 
-Status: Accepted  
-Date: 2026-09-06  
+Status: Accepted
+
+Date: 2026-09-06
+
 Supersedes: The earlier interpretation that routine novelty authorizes whole-world reinvention.
 
 ## Context
