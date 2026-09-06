@@ -91,6 +91,7 @@ function use(next){
   let goodFrames=0;
   sandbox=new SourceSandbox(next,(bitmap,result,timings)=>{
     ctx.drawImage(bitmap,0,0);bitmap.close();meta=result;frames++;
+    if(selected&&!document.getElementById('inspector').hidden)inspectHit(meta.hits?.find(h=>h.id===selected));
     lastFrameTimings=timings;
     if(failure)learning.textContent='Rendering resumed';
     failure='';retryButton.hidden=true;
@@ -186,6 +187,13 @@ demoButton.onclick=()=>{
 labelsButton.onclick=()=>{actionLabels=!actionLabels;labelsButton.ariaPressed=String(actionLabels);};
 document.getElementById('fit').onclick=()=>fitView();
 
+function inspectHit(hit){
+ if(!hit){document.getElementById('inspector').hidden=true;return;}
+ const set=(id,value)=>{const el=document.getElementById(id);if(el.textContent!==value)el.textContent=value;};
+ set('node-title',hit.label||'');set('node-detail',[hit.purpose,hit.path,hit.sample].filter(Boolean).join('\n'));
+ const link=document.getElementById('node-link'),href=typeof hit.link==='string'&&/^(\/media\/|https:\/\/)/.test(hit.link)?hit.link:'';
+ link.hidden=!href;if(href){if(link.getAttribute('href')!==href)link.href=href;set('node-link',hit.linkLabel||'Open');}
+}
 const pointers=new Map();let gestureMoved=false;
 const point=e=>({x:e.clientX,y:e.clientY});
 const pinch=()=>{
@@ -213,10 +221,7 @@ canvas.onpointerup=e=>{
  if(pointers.size===1&&!gestureMoved){
   const x=(e.clientX-camera.x)/camera.k,y=(e.clientY-camera.y)/camera.k;
   const hit=[...(meta.hits||[])].reverse().find(b=>x>=b.x&&y>=b.y&&x<=b.x+b.w&&y<=b.y+b.h);
-  if(hit){selected=hit.id;document.getElementById('inspector').hidden=false;document.getElementById('node-title').textContent=hit.label;
-   document.getElementById('node-detail').textContent=[hit.purpose,hit.path,hit.sample].filter(Boolean).join('\n');
-   const link=document.getElementById('node-link'),href=typeof hit.link==='string'&&/^(\/media\/|https:\/\/)/.test(hit.link)?hit.link:'';
-   link.hidden=!href;if(href){link.href=href;link.textContent=hit.linkLabel||'Open';}}
+  if(hit){selected=hit.id;document.getElementById('inspector').hidden=false;inspectHit(hit);}
  }
  pointers.delete(e.pointerId);
 };

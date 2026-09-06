@@ -102,3 +102,9 @@ it('treats a message naming a plan as a reference unless an explicit handoff rec
  expect(m.threads.map(t=>t.link)).toEqual(['reference']);
  expect(m.slates.find(o=>o.id===scene.work.plans[0].id).handoffs.map(h=>h.link)).toEqual(['reference']);
 });
+
+it('keeps earlier unresolved failures when another check fails and recovers',()=>{
+ const run=(ts,outcome,cmd)=>({ts,finished_at:ts+1,outcome,action:'test',evidence:{validation_scope:'single',validation_commands:[cmd]}});
+ const result=work.validationState([run(1,'failed','a'),run(3,'failed','b'),run(5,'succeeded','b')],10);
+ expect(result.state).toBe('failed');expect(result.unresolved).toEqual(['a']);
+});

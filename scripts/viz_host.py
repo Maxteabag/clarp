@@ -40,7 +40,8 @@ def main():
             try:
                 code=child.wait(timeout=60)
                 job('job-finish',handle) if stopping or code==0 else job('job-fail',handle,'preview process exited')
-                return 0 if stopping else code
+                if code<0:print(f'Preview child terminated by signal {-code}',file=sys.stderr,flush=True)
+                return 0 if stopping else (128-code if code<0 else code)
             except subprocess.TimeoutExpired:
                 if job('job-active',handle).returncode:
                     stop()

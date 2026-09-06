@@ -99,7 +99,26 @@ def main():
                     path=pathlib.Path(str(row['storage_path'])).resolve() if row else None
                     root=(pathlib.Path.home()/'.local/share/clarp/media').resolve()
                     if not path or not path.is_file() or root not in path.parents:return self.send_error(404)
-                    self._send(200,path.read_bytes(),str(row['mime_type']))
+                    size=path.stat().st_size;start=0;end=size-1;status=200
+                    requested=self.headers.get('Range')
+                    if requested:
+                        match=re.fullmatch(r'bytes=(\d*)-(\d*)',requested)
+                        if not match or not any(match.groups()):return self.send_error(416)
+                        left,right=match.groups()
+                        if left:start=int(left);end=min(end,int(right)) if right else end
+                        else:start=max(0,size-int(right))
+                        if start>end or start>=size:return self.send_error(416)
+                        status=206
+                    self.send_response(status);self.send_header('Content-Type',str(row['mime_type']))
+                    self.send_header('Accept-Ranges','bytes');self.send_header('Content-Length',str(max(0,end-start+1)))
+                    if status==206:self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
+                    self.end_headers()
+                    with path.open('rb') as source:
+                        source.seek(start);remaining=end-start+1
+                        while remaining>0:
+                            chunk=source.read(min(65536,remaining))
+                            if not chunk:break
+                            self.wfile.write(chunk);remaining-=len(chunk)
                 finally:
                     db.close_local()
             elif urlsplit(self.path).path.startswith('/avatars/'):

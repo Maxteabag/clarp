@@ -16,7 +16,7 @@ exports.outcomeOf=(e,t)=>e.finished_at!=null&&t>=e.finished_at?(e.outcome||'unkn
 // whose failing component is unknown. Only a later exact success of the same
 // checks (every failed or interrupted command covered) resolves it; an unrelated
 // passing check never erases a failure.
-const commandsOf=r=>{const c=r.evidence?.validation_commands;return Array.isArray(c)&&c.length?c:[String(r.evidence?.raw||r.action).slice(0,120)];};
+const commandsOf=r=>{const c=r.evidence?.validation_commands;return Array.isArray(c)&&c.length?c:[String(r.evidence?.raw||r.action)];};
 exports.validationState=(runs,t)=>{
  const seen=runs.filter(r=>r.ts<=t).sort((a,b)=>a.ts-b.ts);
  if(!seen.length)return {state:'none',runs:0};
@@ -24,7 +24,7 @@ exports.validationState=(runs,t)=>{
  for(const r of seen){
   const outcome=exports.outcomeOf(r,t),scope=r.evidence?.validation_scope||(r.evidence?.validation_exact===false?'script':'single'),cmds=commandsOf(r);
   if(outcome==='running'){running=r;continue;}
-  if(outcome==='failed'){open={kind:scope==='single'?'failed':'interrupted',at:finishedAt(r),scope,pending:new Set(cmds)};recoveredAt=null;}
+  if(outcome==='failed'){open={kind:open?.kind==='failed'||scope==='single'?'failed':'interrupted',at:open?.at??finishedAt(r),scope,pending:new Set([...(open?.pending||[]),...cmds])};recoveredAt=null;}
   else if(outcome==='succeeded'&&scope!=='script'){
    if(open){for(const c of cmds)open.pending.delete(c);if(!open.pending.size){recoveredAt=finishedAt(r);open=null;}}
    else okAt=finishedAt(r);
