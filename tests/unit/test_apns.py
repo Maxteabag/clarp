@@ -752,3 +752,42 @@ def test_avatar_url_none_when_loopback(tmp_path):
     cfg = config.load(cfgfile)
     # Loopback isn't device-reachable → skip the avatar rather than send a bad URL.
     assert apns._avatar_url(cfg, "Mike") is None
+
+
+def test_active_desktop_suppresses_alert_without_marking_notification_read(tmp_path, monkeypatch):
+    import uuid
+    import httpx
+    from lib import db, desktop_presence
+    _apns_config(tmp_path)
+    apns.register_token('desktop-test-phone')
+    calls = []
+    monkeypatch.setattr(httpx, 'Client', lambda *a, **k: _FakeClient({'desktop-test-phone': _FakeResp(200)}, calls))
+    now = db.now_ms()
+    db.conn().execute('''INSERT INTO user_notifications
+        (notification_id, agent_id, session, persona, done_ts, notify, push, badge, unread, preview, reason, created_at, updated_at)
+        VALUES('presence-notification','a1','mike','Mike',?,1,1,1,1,'Reply','text-reply',?,?)''', (now, now, now))
+    notification = {'notification_id': 'presence-notification', 'session': 'mike', 'persona': 'Mike', 'preview': 'Reply', 'push': True}
+    instance = str(uuid.uuid4())
+    desktop_presence.update(principal='administrator', instance_id=instance, sequence=1, active=True, sent_at_ms=db.now_ms())
+    result = apns.send_user_notification(notification)
+    assert result['sent'] == 0 and result['reason'] == 'desktop-active'
+    assert calls == []
+    row = db.conn().execute("SELECT unread, push FROM user_notifications WHERE notification_id='presence-notification'").fetchone()
+    assert row['unread'] == 1 and row['push'] == 1
+    desktop_presence.update(principal='administrator', instance_id=instance, sequence=2, active=False, sent_at_ms=db.now_ms())
+    assert apns.send_user_notification({**notification, 'notification_id': 'future-reply'})['sent'] == 1
+    assert len(calls) == 1
+
+
+def test_desktop_presence_is_rechecked_after_transport_setup(tmp_path, monkeypatch):
+    import httpx
+    from lib import desktop_presence
+    _apns_config(tmp_path)
+    apns.register_token('desktop-race-phone')
+    calls = []
+    monkeypatch.setattr(httpx, 'Client', lambda *a, **k: _FakeClient({'desktop-race-phone': _FakeResp(200)}, calls))
+    activity = iter([False, True])
+    monkeypatch.setattr(desktop_presence, 'active', lambda: next(activity))
+    result = apns.send_user_notification({'session': 'mike', 'preview': 'Reply', 'push': True})
+    assert result['sent'] == 0 and result['suppressed']
+    assert calls == []

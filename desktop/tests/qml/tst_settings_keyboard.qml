@@ -13,6 +13,7 @@ TestCase {
     QtObject {
         id: stub
         property bool timestampsVisible: false
+        property bool pauseMobilePush: true
         property bool showWhenReady: false
         property bool toolsVisible: false
         property bool muted: false

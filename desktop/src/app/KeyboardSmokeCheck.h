@@ -45,6 +45,9 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             }
             controller->agents()->applySnapshot({{QStringLiteral("agents"), agents}});
             controller->selectSession(second);
+            // The screenshot fixture can change the pane under a signal blocker.
+            // Restore both identities even when selection was persisted as second.
+            controller->panes()->setActiveSession(second);
             controller->setPaneDraft(controller->panes()->activePaneId(), second, QString{});
             controller->requestComposerFocus(controller->panes()->activePaneId());
             break;

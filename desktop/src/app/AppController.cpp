@@ -96,6 +96,7 @@ AppController::AppController(QObject* parent)
                                                           QStringLiteral("http://127.0.0.1:7682"))
                                                    .toString()));
     m_muted = settings.value(QStringLiteral("audio/muted"), false).toBool();
+    m_pauseMobilePush = settings.value(QStringLiteral("notifications/pauseMobileWhileDesktopActive"), true).toBool();
     m_showWhenReady = settings.value(QStringLiteral("conversation/showWhenReady"), false).toBool();
     m_toolsVisible = settings.value(QStringLiteral("conversation/toolsVisible"), false).toBool();
     if (!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH"))
@@ -620,6 +621,19 @@ void AppController::setMuted(bool muted) {
     m_audio.setMuted(muted);
     QSettings().setValue(QStringLiteral("audio/muted"), muted);
     emit mutedChanged();
+}
+
+void AppController::setPauseMobilePush(bool value) {
+    if (m_pauseMobilePush == value) return;
+    m_pauseMobilePush = value;
+    QSettings().setValue(QStringLiteral("notifications/pauseMobileWhileDesktopActive"), value);
+    emit pauseMobilePushChanged();
+}
+void AppController::reportDesktopPresence(const QString& instance, quint64 sequence, bool active) {
+    if (m_bearerToken.isEmpty()) return;
+    m_api.postJson(QStringLiteral("desktop-presence"), QStringLiteral("/desktop-presence"),
+        {{QStringLiteral("instance_id"), instance}, {QStringLiteral("sequence"), static_cast<qint64>(sequence)},
+         {QStringLiteral("active"), active}, {QStringLiteral("sent_at_ms"), QDateTime::currentMSecsSinceEpoch()}}, 5'000);
 }
 
 void AppController::setShowWhenReady(bool value) {
@@ -2595,6 +2609,8 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
 
 void AppController::handleRequestFailure(const QString& tag, const QString& message,
                                          int statusCode) {
+    if (tag == QStringLiteral("desktop-presence")) return; // Lease expiry fails open on old/offline Hosts.
+
     if (tag == QStringLiteral("contact-create")) {
         m_startingContact.clear();
         emit contactLaunchChanged();

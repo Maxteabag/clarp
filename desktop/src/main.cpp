@@ -1,3 +1,4 @@
+#include "platform/DesktopPresence.h"
 #include "app/ReadyReplySmokeCheck.h"
 #include "app/KeyboardSmokeCheck.h"
 #include "app/AppController.h"
@@ -89,6 +90,7 @@ int main(int argc, char* argv[]) {
     engine.loadFromModule("Clarp.Desktop", "Main");
 
     std::unique_ptr<clarp::DesktopIntegration> desktopIntegration;
+    std::unique_ptr<clarp::DesktopPresence> desktopPresence;
     QQuickWindow* rootWindow = nullptr;
     clarp::AppController* controller = nullptr;
     if (!engine.rootObjects().isEmpty()) {
@@ -97,6 +99,17 @@ int main(int argc, char* argv[]) {
         if (rootWindow != nullptr && controller != nullptr) {
             desktopIntegration =
                 std::make_unique<clarp::DesktopIntegration>(rootWindow, controller, &application);
+            if (!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")) {
+                desktopPresence = std::make_unique<clarp::DesktopPresence>(rootWindow, &application);
+                auto* presence = desktopPresence.get();
+                QObject::connect(presence, &clarp::DesktopPresence::presenceReport, controller, &clarp::AppController::reportDesktopPresence);
+                QObject::connect(controller, &clarp::AppController::pauseMobilePushChanged, presence,
+                    [presence, controller] { presence->setEnabled(controller->pauseMobilePush()); });
+                QObject::connect(controller, &clarp::AppController::connectedChanged, presence,
+                    [presence, controller] { presence->setConnected(controller->connected()); });
+                presence->setEnabled(controller->pauseMobilePush());
+                presence->setConnected(controller->connected());
+            }
         }
     }
     QObject::connect(&activationServer, &QLocalServer::newConnection, &application,
