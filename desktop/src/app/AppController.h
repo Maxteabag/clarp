@@ -67,6 +67,7 @@ class AppController : public QObject {
     Q_PROPERTY(bool pauseMobilePush READ pauseMobilePush WRITE setPauseMobilePush NOTIFY pauseMobilePushChanged)
     Q_PROPERTY(bool showWhenReady READ showWhenReady WRITE setShowWhenReady NOTIFY showWhenReadyChanged)
     Q_PROPERTY(bool toolsVisible READ toolsVisible WRITE setToolsVisible NOTIFY toolsVisibleChanged)
+    Q_PROPERTY(int activityDisplayMode READ activityDisplayMode WRITE setActivityDisplayMode NOTIFY toolsVisibleChanged)
     Q_PROPERTY(bool timestampsVisible READ timestampsVisible WRITE setTimestampsVisible
                    NOTIFY timestampsVisibleChanged)
     Q_PROPERTY(bool sharedFilesystem READ sharedFilesystem WRITE setSharedFilesystem
@@ -160,6 +161,8 @@ class AppController : public QObject {
     [[nodiscard]] bool showWhenReady() const { return m_showWhenReady; }
     void setShowWhenReady(bool value);
     [[nodiscard]] bool toolsVisible() const;
+    [[nodiscard]] int activityDisplayMode() const { return m_activityDisplayMode; }
+    void setActivityDisplayMode(int mode);
     [[nodiscard]] bool timestampsVisible() const;
     [[nodiscard]] bool sharedFilesystem() const;
     [[nodiscard]] QString connectionState() const;
@@ -468,6 +471,7 @@ class AppController : public QObject {
     bool m_pauseMobilePush = true;
     bool m_showWhenReady = false;
     bool m_toolsVisible = false;
+    int m_activityDisplayMode = 0;
     bool m_timestampsVisible = false;
     bool m_sharedFilesystem = false;
     bool m_voicesLoading = false;

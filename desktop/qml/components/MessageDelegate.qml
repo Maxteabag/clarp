@@ -30,6 +30,21 @@ Item {
     required property bool showTools
     required property bool showTimestamp
     property bool activityExpanded: false
+    property string groupSummary: ""
+    property bool groupedExpanded: false
+    property bool forceActivityInline: false
+    signal toggleActivityGroup()
+    function loadInlineDetails() {
+        if ((root.forceActivityInline || root.showTools) && root.toolDetailsAvailable
+            && root.displayCells.length === 0 && root.tools.length === 0)
+            root.controller.loadMessageToolDetails(root.session, root.messageId);
+    }
+    onForceActivityInlineChanged: Qt.callLater(root.loadInlineDetails)
+    onToolDetailsAvailableChanged: Qt.callLater(root.loadInlineDetails)
+    onMessageIdChanged: {
+        root.activityExpanded = false;
+        Qt.callLater(root.loadInlineDetails);
+    }
     readonly property var narrator: controller.toolNarrator || null
     readonly property bool narrationEnabled: narrator !== null && narrator.enabled
     readonly property bool localFilesAllowed: Boolean(controller.sharedFilesystem)
@@ -39,8 +54,8 @@ Item {
     }
     readonly property int presentedActivityCount: Math.max(
         root.activityCount, root.displayCells.length + root.tools.length)
-    readonly property bool showActivityCards: root.showTools
-        || root.activityExpanded || root.presentedActivityCount === 1 || root.narrationEnabled
+    readonly property bool showActivityCards: root.groupSummary.length > 0 ? root.groupedExpanded
+        : root.showTools || root.forceActivityInline || root.activityExpanded
     readonly property bool userAuthored: root.authorRole === "user"
         && root.origin !== "agent" && root.origin !== "automation"
     readonly property int mediaRevision: controller.mediaRevision
@@ -214,8 +229,22 @@ Item {
         }
 
         Rectangle {
-            visible: !root.activity && root.presentedActivityCount > 1 && !root.showTools
-                && !root.narrationEnabled
+            id: groupToggle
+            visible: !root.activity && root.presentedActivityCount > 0 && !root.showTools && !root.forceActivityInline
+            activeFocusOnTab: visible
+            Accessible.role: Accessible.Button
+            Accessible.name: root.groupSummary.length > 0 ? root.groupSummary : root.presentedActivityCount + " tool calls"
+            function toggle() {
+                if (root.groupSummary.length > 0) { root.toggleActivityGroup(); return; }
+                if (!root.activityExpanded && root.toolDetailsAvailable)
+                    root.controller.loadMessageToolDetails(root.session, root.messageId);
+                root.activityExpanded = !root.activityExpanded;
+            }
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Return || event.key === Qt.Key_Space) {
+                    groupToggle.toggle(); event.accepted = true;
+                }
+            }
             Layout.fillWidth: true
             implicitHeight: visible ? 24 : 0
             radius: 3
@@ -224,7 +253,7 @@ Item {
             Text {
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.activityExpanded
+                text: root.groupSummary.length > 0 ? (root.groupedExpanded ? "▾ " : "▸ ") + root.groupSummary : root.activityExpanded
                     ? root.presentedActivityCount + " activities"
                     : "+" + root.presentedActivityCount + " more"
                 color: "#72778f"
@@ -234,11 +263,7 @@ Item {
 
             HoverHandler { id: activityTap }
             TapHandler {
-                onTapped: {
-                    if (!root.activityExpanded && root.toolDetailsAvailable)
-                        root.controller.loadMessageToolDetails(root.session, root.messageId);
-                    root.activityExpanded = !root.activityExpanded;
-                }
+                onTapped: groupToggle.toggle()
             }
         }
 
@@ -260,7 +285,7 @@ Item {
             }
 
             Repeater {
-                model: root.displayCells
+                model: root.showActivityCards ? root.displayCells : []
 
                 DisplayCellCard {
                     session: root.session
@@ -274,12 +299,12 @@ Item {
             }
 
             Repeater {
-                model: root.tools
+                model: root.showActivityCards ? root.tools : []
 
                 ToolCard {
                     session: root.session
                     required property var modelData
-                    visible: root.displayCells.length === 0
+                    visible: root.groupSummary.length > 0 || root.displayCells.length === 0
                         || ["Edit", "MultiEdit", "Write"].includes(
                             String(modelData.name || ""))
                     Layout.preferredHeight: visible ? implicitHeight : 0

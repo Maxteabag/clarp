@@ -16,6 +16,7 @@ TestCase {
         property bool pauseMobilePush: true
         property bool showWhenReady: false
         property bool toolsVisible: false
+        property int activityDisplayMode: 0
         property bool muted: false
         property bool sharedFilesystem: false
         property QtObject toolNarrator: QtObject {

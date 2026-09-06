@@ -55,7 +55,17 @@ inline void startReadyReplySmokeCheck(QGuiApplication& application, QQuickWindow
         };
         switch (step++) {
         case 0:
+            controller->setActivityDisplayMode(2);
             controller->setShowWhenReady(true);
+            model->applyLog({{QStringLiteral("conversation_id"), model->conversationId()},
+                {QStringLiteral("turns"), QJsonArray{
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("old-tools-a")}, {QStringLiteral("role"), QStringLiteral("assistant")},
+                        {QStringLiteral("timestamp"), QStringLiteral("2020-01-01T00:00:00Z")}, {QStringLiteral("text"), QString{}},
+                        {QStringLiteral("activity_count"), 3}, {QStringLiteral("revision"), 998}},
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("old-tools-b")}, {QStringLiteral("role"), QStringLiteral("assistant")},
+                        {QStringLiteral("timestamp"), QStringLiteral("2020-01-01T01:32:23Z")}, {QStringLiteral("text"), QString{}},
+                        {QStringLiteral("activity_count"), 2}, {QStringLiteral("revision"), 999}}}},
+                {QStringLiteral("latest_revision"), 999}}, clarp::ConversationModel::LoadKind::Delta);
             update(QStringLiteral("live"), QStringLiteral("Provisional secret reply"), 1000);
             controller->agents()->applyStateEvent({{QStringLiteral("session"), session}, {QStringLiteral("kind"), QStringLiteral("thinking")}, {QStringLiteral("ts"), 4'000'000'000'000LL}});
             break;
