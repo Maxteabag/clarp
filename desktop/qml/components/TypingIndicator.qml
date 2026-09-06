@@ -10,13 +10,14 @@ Rectangle {
     Accessible.role: Accessible.StaticText
     Accessible.name: "Agent is working"
     Row {
+        id: indicatorRow
         anchors.centerIn: parent
         spacing: 5
         Text {
             text: "Working…"
             color: "#9ea4c7"
             font.pixelSize: 12
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenter: indicatorRow.verticalCenter
         }
         Repeater {
             model: 3
@@ -24,7 +25,7 @@ Rectangle {
                 id: dot
                 required property int index
                 width: 6; height: 6; radius: 3
-                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenter: indicatorRow.verticalCenter
                 color: "#bb9af7"
                 opacity: 0.4
                 SequentialAnimation on opacity {
