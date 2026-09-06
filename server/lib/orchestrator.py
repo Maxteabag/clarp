@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import time
 import uuid
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
 from . import agents as agents_db
@@ -33,6 +33,7 @@ from .protocol import SSEType
 
 DEFAULT_PROVIDER = "openai"
 JANITOR_ROLE = "message-delegator"
+POLICY_OPTION_KEYS = ("fallback_only", "hands_free_only", "confidence_threshold", "timeout_ms", "voice_id")
 DEFAULT_MODEL = "gpt-5.4-mini"
 DEFAULT_EFFORT = "low"
 OPENAI_PROVIDER = "openai"
@@ -247,15 +248,21 @@ def get_legacy_settings() -> OrchestratorSettings:
     )
 
 
+def _settings_from_configuration(value: dict, *, enabled: bool, provider: str) -> OrchestratorSettings:
+    options = janitors.option_values(JANITOR_ROLE, value.get("options", {}))
+    return OrchestratorSettings(
+        enabled=enabled, provider=provider, model=value["model"], effort=value["effort"],
+        **{key: options[key] for key in POLICY_OPTION_KEYS},
+    )
+
+
 def get_settings() -> OrchestratorSettings:
-    """Legacy HTTP shape backed by the Janitor's identity and permission."""
-    settings = get_legacy_settings()
+    """Legacy HTTP shape backed entirely by the installed Janitor configuration."""
     owner = janitor_builtins.get_builtin(JANITOR_ROLE)
     if owner is None:
-        return settings
-    return replace(
-        settings, enabled=bool(owner["enabled"]), model=owner["model"],
-        effort=owner["effort"], provider=owner["execution"]["provider"],
+        return get_legacy_settings()
+    return _settings_from_configuration(
+        owner, enabled=bool(owner["enabled"]), provider=owner["execution"]["provider"],
     )
 
 
@@ -268,55 +275,46 @@ def _ensure_janitor() -> None:
         "enabled": legacy.enabled,
         "backend": OPENAI_CATALOG_BACKEND if provider == OPENAI_PROVIDER else provider,
         "provider": provider, "model": legacy.model, "effort": legacy.effort,
+        "options": {key: getattr(legacy, key) for key in POLICY_OPTION_KEYS},
     }})
 
 
 def update_settings(data: dict[str, Any]) -> OrchestratorSettings:
-    # Compatibility writes target the same model and enabled state shown by the
-    # Janitor editor. Routing policy and speech preferences remain router policy.
+    """Compatibility writes update the same Janitor settings as its native editor."""
+    supported = {"enabled", "provider", "model", "effort", *POLICY_OPTION_KEYS}
+    if not isinstance(data, dict) or data.keys() - supported:
+        raise ValueError("Unsupported orchestrator settings")
+    if not data:
+        return get_settings()
+    if "enabled" in data and not isinstance(data["enabled"], bool):
+        raise ValueError("Enabled must be a boolean")
     provider = None
     if "provider" in data:
         provider = normalize_provider(str(data.get("provider") or DEFAULT_PROVIDER))
         if not is_routing_provider(provider):
             raise ValueError(f"unsupported orchestrator provider: {provider}")
-    if {"provider", "model", "effort", "enabled"} & data.keys():
-        _ensure_janitor()
-        owner = janitor_builtins.get_builtin(JANITOR_ROLE)
-        if owner is None:
-            raise ValueError("The message delegator Janitor is unavailable")
-        enabled = bool(data.get("enabled", owner["enabled"]))
-        changes = {key: str(data.get(key) or "").strip()
-                   for key in ("model", "effort") if key in data}
-        if provider is not None:
-            if provider != owner["execution"]["provider"]:
-                # A provider-only legacy request selects that provider's
-                # defaults; a model from another catalogue may be invalid.
-                changes.setdefault("model", DEFAULT_MODEL if provider == OPENAI_PROVIDER else "")
-                changes.setdefault("effort", DEFAULT_EFFORT if provider == OPENAI_PROVIDER else "")
-            changes.update(execution={"executor": "ephemeral", "provider": provider},
-                           backend=OPENAI_CATALOG_BACKEND if provider == OPENAI_PROVIDER else provider)
-        if changes:
-            owner = janitors.configure(owner["session"], owner["revision"], **changes)
-        if enabled != owner["enabled"]:
-            janitors.set_enabled(owner["session"], owner["revision"], enabled)
-    if "hands_free_only" in data:
-        settings_store.set_bool(KEY_HANDS_FREE_ONLY, bool(data.get("hands_free_only")))
-    if "fallback_only" in data:
-        settings_store.set_bool(KEY_FALLBACK_ONLY, bool(data.get("fallback_only")))
-    if "confidence_threshold" in data:
-        try:
-            threshold = max(0.5, min(0.99, float(data.get("confidence_threshold"))))
-        except (TypeError, ValueError):
-            threshold = HIGH_CONFIDENCE
-        settings_store.set_text(KEY_CONFIDENCE_THRESHOLD, str(threshold))
-    if "timeout_ms" in data:
-        try:
-            timeout_ms = max(250, min(60000, int(data.get("timeout_ms"))))
-        except (TypeError, ValueError):
-            timeout_ms = DEFAULT_TIMEOUT_MS
-        settings_store.set_text(KEY_TIMEOUT_MS, str(timeout_ms))
-    if "voice_id" in data:
-        settings_store.set_text(KEY_VOICE_ID, str(data.get("voice_id") or "").strip())
+    _ensure_janitor()
+    owner = janitor_builtins.get_builtin(JANITOR_ROLE)
+    if owner is None:
+        raise ValueError("The message delegator Janitor is unavailable")
+    enabled = data.get("enabled", owner["enabled"])
+    changes = {key: str(data.get(key) or "").strip()
+               for key in ("model", "effort") if key in data}
+    options = {key: data[key] for key in POLICY_OPTION_KEYS if key in data}
+    if options:
+        changes["options"] = options
+    if provider is not None:
+        if provider != owner["execution"]["provider"]:
+            # A provider-only legacy request selects that provider's defaults;
+            # a model from another catalogue may be invalid.
+            changes.setdefault("model", DEFAULT_MODEL if provider == OPENAI_PROVIDER else "")
+            changes.setdefault("effort", DEFAULT_EFFORT if provider == OPENAI_PROVIDER else "")
+        changes.update(execution={"executor": "ephemeral", "provider": provider},
+                       backend=OPENAI_CATALOG_BACKEND if provider == OPENAI_PROVIDER else provider)
+    if changes:
+        owner = janitors.configure(owner["session"], owner["revision"], **changes)
+    if enabled != owner["enabled"]:
+        janitors.set_enabled(owner["session"], owner["revision"], enabled)
     return get_settings()
 
 
@@ -440,7 +438,6 @@ class OrchestratorService:
         dispatch: Callable[..., Any],
         fallback_request: bool = False,
     ) -> OrchestratorOutcome | None:
-        settings = get_settings()
         client_id = (prompt_admissions.message_id(prompt_admission.client_admission_id)
                      if prompt_admission else trace_id)
         request_id = "routing-" + hashlib.sha256(client_id.encode()).hexdigest()
@@ -464,7 +461,11 @@ class OrchestratorService:
                 )
             return self._replayed_run(prior["run_id"], requested_session, trace_id)
         owner = janitor_builtins.resolve(JANITOR_ROLE, target_agent_id=target_agent_id)
-        settings = replace(settings, enabled=owner is not None)
+        if owner is None:
+            return None
+        settings = _settings_from_configuration(
+            owner, enabled=owner["enabled"], provider=owner["execution"]["provider"],
+        )
         if not should_run(
             settings, hands_free=hands_free, fallback_request=fallback_request
         ):
@@ -498,9 +499,15 @@ class OrchestratorService:
         if not janitor_builtins.claim_run(run_id):
             return self._replayed_run(run_id, requested_session, trace_id)
         frozen = run["configuration"]
-        settings = replace(settings, provider=frozen["provider"],
-                           model=frozen["model"], effort=frozen["effort"])
+        settings = _settings_from_configuration(frozen, enabled=True, provider=frozen["provider"])
         packet["settings"] = asdict(settings)
+        packet["routing_policy"]["automatic_confidence_threshold"] = settings.confidence_threshold
+        if not should_run(settings, hands_free=hands_free, fallback_request=fallback_request):
+            janitor_builtins.complete_run(run_id, outcome="cancelled", result={
+                "summary": "Routing policy changed before execution", "status": FINAL_FALLBACK,
+            })
+            return self._unavailable(packet, settings, requested_session, trace_id,
+                                     hands_free, "Message delegator policy changed")
         try:
             self._require_current(run_id)
             raw = self.model_call(packet, settings)
