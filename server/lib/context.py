@@ -168,7 +168,8 @@ class ServerContext:
         try:
             from . import agents as agents_db  # local: avoid startup cycles
             for info in agents_db.list_agents():
-                add(info.get("persona"))
+                if agents_db.interaction_capabilities(info)["can_voice_target"]:
+                    add(info.get("persona"))
         except Exception as e:  # noqa: BLE001 - prompt bias must never break STT
             log_exception("vocabAgentsFail", e)
         return names

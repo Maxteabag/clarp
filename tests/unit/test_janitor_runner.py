@@ -7,6 +7,14 @@ import pytest
 from lib.janitor_runner import JanitorRunner, SQLiteSource, eligible_event, prompt_for_run
 
 
+def test_periodic_label_runner_does_not_dispatch_demand_worker_as_chat(monkeypatch):
+    store = Store()
+    store.rows[0].update(template_id="tool-explainer", trigger_id="tool-explanation-requested")
+    runner = JanitorRunner(lambda *_: pytest.fail("No demand worker chat dispatch"), store=store, source=Source())
+    monkeypatch.setattr(runner, "_attachment_tick", lambda *_: pytest.fail("Demand triggers are invoked by their caller"))
+    assert runner.tick() == 0
+
+
 def context(session="worker", **kwargs):
     result = dict(session=session, agent_id=session + "-id", state_id=1, state="done",
                   current_status="", task_key="task", change_key="phase", fingerprint="fp",

@@ -523,7 +523,9 @@ def test_get_snapshot_returns_seeded_data(running_server):
     status, body = _get(base + "/agents/snapshot")
     assert status == 200
     data = json.loads(body)
-    assert {a["session"] for a in data["agents"]} == {"claude", "rachel"}
+    assert {a["session"] for a in data["agents"] if not a["is_janitor"]} == {"claude", "rachel"}
+    assert {a["session"] for a in data["agents"] if a["is_janitor"]} == {
+        "clarp-message-delegator", "clarp-tool-explainer"}
     assert next(a for a in data["agents"] if a["session"] == "claude")["persona"] == "Mike"
 
 
@@ -1656,8 +1658,9 @@ def test_orchestrator_settings_round_trip(running_server):
         "enabled": False,
         "fallback_only": True,
         "confidence_threshold": 0.84,
-        "model": "gemini-flash-3.1",
-        "effort": "low_latency",
+        "provider": "codex",
+        "model": "gpt-5.3-codex-spark",
+        "effort": "low",
         "timeout_ms": 1250,
     })
 
@@ -1666,7 +1669,9 @@ def test_orchestrator_settings_round_trip(running_server):
     assert after["enabled"] is False
     assert after["fallback_only"] is True
     assert after["confidence_threshold"] == 0.84
-    assert after["model"] == "gemini-flash-3.1"
+    assert after["provider"] == "codex"
+    assert after["model"] == "gpt-5.3-codex-spark"
+    assert after["effort"] == "low"
     assert after["timeout_ms"] == 1250
 
 

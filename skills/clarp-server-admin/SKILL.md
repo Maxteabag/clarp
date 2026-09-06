@@ -40,6 +40,26 @@ It uses SQLite online backup, refuses to overwrite output, and checks every
 existing table's original columns and values after migration. Exit zero proves
 an additive upgrade on that snapshot, not a deployment. Intentional data
 transformations need their own validation; this helper reports them as changes.
+
+For a migration that intentionally inserts catalog or seed rows, opt in only
+the expected existing tables with repeatable `--allow-added-rows TABLE` flags:
+
+```bash
+python3 scripts/rehearse_state_upgrade.py \
+  --source /path/from/clarp-admin-paths/state.sqlite \
+  --server-root /candidate/checkout/server \
+  --output /private/backups/new-catalog-rehearsal.sqlite \
+  --allow-added-rows janitor_trigger_definitions
+```
+
+The default remains strict. Each allowed table retains a complete row multiset
+in memory across all original columns, including generated columns, and must
+preserve every original value, type and duplicate count. Only additional rows
+are accepted; changed/deleted rows and removed tables/columns still fail.
+Unknown table names fail before migration. The JSON `allowed_added_rows` field
+reports `before`, `after`, `added` and `missing` counts per allowed table, or a
+schema error if comparison is impossible. It never prints the row contents.
+
 Keep backups private. Release rollback does not automatically undo a database
 migration. Prefer the supported `clarp-admin update --ref FULL_SHA` once the
 candidate is verified; do not hand-edit generated releases.

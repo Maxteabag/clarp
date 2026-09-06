@@ -15,6 +15,7 @@ from lib.orchestrator import (
     call_model,
     get_settings,
     record_routing_message,
+    update_settings,
 )
 from lib.tts_engine import FakeTTSEngine
 
@@ -126,7 +127,7 @@ def test_fallback_only_router_skips_regular_hands_free_and_runs_failed_delegatio
             "addressing": True,
         },
     )
-    settings_store.set_bool("orchestrator.fallback_only", True)
+    update_settings({"fallback_only": True})
 
     regular = service.handle_send(
         text="Mike check this",
