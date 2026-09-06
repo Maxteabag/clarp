@@ -33,3 +33,15 @@ def test_unknown_session_and_bad_level(running_server):
         with pytest.raises(urllib.error.HTTPError) as error:
             _post(running_server, "/tool-explanations", payload)
         assert error.value.code == status
+
+
+def test_release_is_validated_and_fences_late_requests(running_server):
+    payload={"session":"rachel-7b4b", "detail_level":3, "items":[], "release":["released-view"]}
+    assert _post(running_server,"/tool-explanations",payload)[1]['items']==[]
+    payload.pop('release')
+    payload['items']=[{'id':'1','demand_id':'released-view','activity':{'command':'ls'}}]
+    assert _post(running_server,"/tool-explanations",payload)[1]['items'][0]['status']=='cancelled'
+    payload['release']="invalid"
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(running_server,"/tool-explanations",payload)
+    assert error.value.code==400

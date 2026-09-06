@@ -45,6 +45,8 @@ class ToolNarrator : public QObject {
     void setDetailLevel(int level);
     void reset();
     void setApiClient(ApiClient* api);
+    Q_INVOKABLE void acquireView(QObject* owner, const QVariantMap& activity);
+    Q_INVOKABLE void releaseView(QObject* owner);
     Q_INVOKABLE void request(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false);
     Q_INVOKABLE [[nodiscard]] QString explanation(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false) const;
 
@@ -69,6 +71,8 @@ class ToolNarrator : public QObject {
 
     QString m_program;
     ApiClient* m_api = nullptr;
+    QHash<QObject*, QString> m_viewKeys;
+    QHash<QString, QString> m_demandIds;
     QTimer m_remotePoll;
     QJsonArray m_remoteItems;
     QString m_remoteSession;

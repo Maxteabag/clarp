@@ -66,6 +66,7 @@ int fakeCodex(const QStringList& args) {
 class ToolNarratorTest : public QObject {
     Q_OBJECT
   private slots:
+    void viewportOwnersShareAndReleaseQueuedActivity();
     void sharedHostPollsWithoutStartingLocalCodex();
     void optInDeduplicatesBatchesAndPreservesCache();
     void disableCancelsAndRejectsLateReplies();
@@ -74,6 +75,21 @@ class ToolNarratorTest : public QObject {
     void scriptContextIsOptInBoundedAndInvalidatesCache();
     void detailLevelsChangeInstructionsAndDiscardPreviousTranslations();
 };
+
+void ToolNarratorTest::viewportOwnersShareAndReleaseQueuedActivity() {
+    ToolNarrator narrator(nullptr, QStringLiteral("must-not-run"));
+    narrator.setDetailLevel(3);
+    QObject first;
+    QObject second;
+    narrator.acquireView(&first, command());
+    narrator.acquireView(&second, command());
+    narrator.releaseView(&first);
+    QVERIFY(narrator.status().contains(QStringLiteral("1 queued")));
+    narrator.releaseView(&second);
+    QTest::qWait(300);
+    QVERIFY(!narrator.unavailable());
+    QVERIFY(!narrator.status().contains(QStringLiteral("queued")));
+}
 
 void ToolNarratorTest::sharedHostPollsWithoutStartingLocalCodex() {
     QTcpServer server;
