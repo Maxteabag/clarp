@@ -53,6 +53,8 @@ def _write():
 def templates() -> list[dict]:
     return [{"id": "task-labels", "name": "Task labels",
              "description": "Keep agents' current task labels clear and useful.",
+             "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
+             "recommended_effort": "low",
              "allowed_effects": ["task_label"]}]
 
 
@@ -679,6 +681,9 @@ def import_pilot(session: str, expected_revision: int, expected_agent_id: str,
         for value in receipts:
             if value.get("outcome") not in TERMINAL_OUTCOMES or any(not isinstance(value.get(k, ""), str) or len(value.get(k, "")) > limit for k, limit in (("before", 100), ("after", 100), ("reason", 500))):
                 raise JanitorError("Invalid imported effect receipt")
+            if value.get("source_outcome", "") not in (
+                    TERMINAL_OUTCOMES | {"", "busy", "protected", "unavailable"}):
+                raise JanitorError("Invalid pilot source outcome")
             _timestamp(value.get("at"))
         generation = config["generation"] + 1
         c.execute("UPDATE janitor_configs SET generation=?,revision=revision+1,updated_at=? WHERE agent_id=?", (generation, now, a["agent_id"]))
@@ -690,7 +695,7 @@ def import_pilot(session: str, expected_revision: int, expected_agent_id: str,
             receipt_run = f"{import_run_id}-{index}"
             timestamp = _timestamp(value["at"])
             c.execute("INSERT INTO janitor_runs(run_id,agent_id,session,attachment_id,generation,trace_id,status,outcome,candidates_json,created_at,finished_at) VALUES (?,?,?,?,?,?,'completed',?,'[]',?,?)", (receipt_run, a["agent_id"], a["session"], attachment["attachment_id"], generation, receipt_run, value["outcome"], timestamp, timestamp))
-            c.execute("UPDATE janitor_runs SET configuration_json=? WHERE run_id=?", (_json({"source": "pilot", "import_id": import_id, "source_batch_id": value.get("batch_id", "")}), receipt_run))
+            c.execute("UPDATE janitor_runs SET configuration_json=? WHERE run_id=?", (_json({"source": "pilot", "import_id": import_id, "source_batch_id": value.get("batch_id", ""), "source_outcome": value.get("source_outcome", value["outcome"])}), receipt_run))
             c.execute("INSERT INTO janitor_effects(run_id,target_agent_id,target_session,observed_state_id,outcome,before_label,after_label,reason,created_at) VALUES (?,?,?,?,?,?,?,?,?)", (receipt_run, target["agent_id"], target["session"], int(value.get("source_state_id") or 0), value["outcome"], value.get("before", ""), value.get("after", ""), value.get("reason", ""), timestamp))
         for value in ownership:
             target = targets[value["target_session"]]
@@ -747,11 +752,13 @@ def begin_creation(request_id: str, payload: dict) -> dict:
             raise JanitorError("Choose an available agent backend")
         if values.get("cwd") is not None and not isinstance(values["cwd"], str):
             raise JanitorError("Workspace must be a path")
-        backend = backends.normalize(values.get("backend"))
+        backend = backends.normalize(values.get("backend") or "codex")
         if any(values.get(key) is not None and not isinstance(values[key], str) for key in ("model", "effort")):
             raise JanitorError("Model and effort must be text")
-        model = values.get("model") or ""
-        effort = values.get("effort") or ""
+        model = (values.get("model") or "") if "model" in values else (
+            "gpt-5.3-codex-spark" if backend == backends.CODEX else "")
+        effort = (values.get("effort") or "") if "effort" in values else (
+            "low" if model == "gpt-5.3-codex-spark" else "")
         if not isinstance(model, str) or not isinstance(effort, str):
             raise JanitorError("Model and effort must be text")
         model, effort = model.strip(), effort.strip().lower()

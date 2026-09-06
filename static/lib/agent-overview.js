@@ -42,6 +42,7 @@ export function buildAgentOverview({
     const name = text(agent.name || agent.persona || session) || session;
     const persona = personaByName.get(personaKey(name)) || {};
     activeNames.add(personaKey(name));
+    if (agent.is_janitor || agent.interaction_capabilities?.can_chat === false) continue;
     const busy = !!agent.busy;
     const unread = !!isUnread(session);
     const statusText = text(agent.status_text);

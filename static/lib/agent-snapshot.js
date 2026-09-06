@@ -57,6 +57,8 @@ function normalizeAgent(row) {
     agent_id: row.agent_id || '',
     name: row.persona || row.name || sid,
     persona: row.persona || row.name || sid,
+    is_janitor: row.is_janitor === true,
+    interaction_capabilities: row.interaction_capabilities || {},
     voice_id: row.voice_id || '',
     avatar_symbol: row.avatar_symbol || '',
     avatar_url: row.avatar_url || '',

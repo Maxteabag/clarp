@@ -216,6 +216,7 @@ export function refreshSessions() {
 /** Open a chat: local state first, then tell the server where focus is. */
 export async function setSession(name) {
   if (!name) return;
+  if (!visibleSessions([name], agentSnapshot.asStatusMap()).length) return;
   const prev = app.session;
   app.session = name;
   try { localStorage.setItem('session', name); } catch (_) {}
@@ -241,6 +242,7 @@ export async function setSession(name) {
  * back, or two clients feed each other's broadcasts forever.
  */
 export function mirrorFocus(session, agentId) {
+  if (session && !visibleSessions([session], agentSnapshot.asStatusMap()).length) return;
   agentSnapshot.setFocus(session || '', agentId || '');
   if (session && session !== app.session) {
     app.session = session;

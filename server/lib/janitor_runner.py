@@ -117,13 +117,16 @@ def prompt_for_run(run: dict) -> str:
 
 class JanitorRunner:
     def __init__(self, dispatch_run: Callable[[dict, str], Any], *, store=None,
-                 source=None, check_interval_sec: float = 2.0, clock=None):
+                 source=None, check_interval_sec: float = 2.0, clock=None,
+                 admission_ready=None, after_tick=None):
         if store is None:
             from . import janitors
             store = janitors
         self.store, self.source = store, source or SQLiteSource()
         self.dispatch_run, self.clock = dispatch_run, clock or db.now_ms
         self.check_interval_sec = check_interval_sec
+        self.admission_ready = admission_ready or (lambda: True)
+        self.after_tick = after_tick or (lambda: None)
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -145,12 +148,15 @@ class JanitorRunner:
             while not self._stop.wait(self.check_interval_sec):
                 try:
                     self.tick()
+                    self.after_tick()
                 except Exception:
                     logger.exception("Janitor admission tick failed")
         finally:
             db.close_local()
 
     def tick(self) -> int:
+        if not self.admission_ready():
+            return 0
         # Serializes manual ticks and the Host lifecycle thread in one process.
         if not self._lock.acquire(blocking=False):
             return 0
