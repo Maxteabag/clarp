@@ -91,6 +91,17 @@ class SQLiteSource:
             (run["agent_id"], run["created_at"], run["trace_id"])).fetchone()
         if row:
             return dict(row)
+        # Some providers end with an untraced interruption (for example a
+        # usage limit), leaving the turn ledger open. Associate it only with
+        # the latest exact maintenance turn, never an unrelated later turn.
+        latest_turn = db.conn().execute("""SELECT trace_id,started_at FROM turns
+            WHERE agent_id=? ORDER BY turn_id DESC LIMIT 1""", (run["agent_id"],)).fetchone()
+        latest_state = db.conn().execute("""SELECT state_id,kind,ts,detail FROM state_log
+            WHERE agent_id=? ORDER BY state_id DESC LIMIT 1""", (run["agent_id"],)).fetchone()
+        if (latest_turn and latest_state and latest_turn["trace_id"] == run["trace_id"]
+                and latest_state["kind"] == "interrupted"
+                and latest_state["ts"] >= max(run["created_at"], latest_turn["started_at"])):
+            return {**dict(latest_state), "kind": "error"}
         # The turn ledger outlives diagnostic event retention. Its ended_at proves
         # termination, but not success; the store's effect receipts decide outcome.
         turn = db.conn().execute("""SELECT ended_at FROM turns WHERE agent_id=? AND trace_id=?
@@ -340,6 +351,11 @@ class JanitorRunner:
                        else "skipped")
             if terminal and terminal["kind"] == "error":
                 outcome = "error"
-            self.store.finish_run(run["run_id"], outcome, error="Review incomplete or runtime failed" if outcome == "error" else "")
+            error = ""
+            if outcome == "error":
+                from .janitor_context import redact
+                detail = _detail(terminal or {})
+                error = redact(str(detail.get("error") or detail.get("reason") or "Review incomplete or runtime failed"))[:500]
+            self.store.finish_run(run["run_id"], outcome, error=error)
         state.pop("active_run_id", None)
         state.pop("delivery_accepted", None)
