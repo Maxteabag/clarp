@@ -132,7 +132,14 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "alive":          True,
             "busy":           active or state.get('kind') in AgentState.busy_states(),
             "focused":        agent_id == focus,
-            "last_activity":  message.get('activity', 0),
+            # An agent with no user messages yet has no message activity, and
+            # a bare 0 sorted it below every idle chat — so an agent spawned by
+            # another agent was invisible in Chats while it was already working.
+            # Floor the value at creation time: a new agent enters the list at
+            # its own age and decays normally, and operational state still never
+            # reorders an established conversation.
+            "last_activity":  max(int(message.get('activity', 0) or 0),
+                                  int(a.get("created_at") or 0)),
             "last_turn_end":  int(state.get('last_turn_end') or 0),
             # Eager last-message preview for the agent-list overview, so the
             # client shows it without opening each chat.
