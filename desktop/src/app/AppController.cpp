@@ -2823,6 +2823,7 @@ void AppController::handleSseEvent(const QJsonObject& event) {
             loadTurnQueue(session);
         }
     } else if (type == QStringLiteral("user-notification")) {
+        requestSnapshot(); // Refresh completed previews, including unopened chats.
         m_agents.applyNotificationEvent(event);
         if (session == m_selectedSession) {
             m_agents.clearUnread(session);
