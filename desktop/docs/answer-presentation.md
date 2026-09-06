@@ -13,8 +13,12 @@ agent goes on to do more work. User messages remain immediate.
 The desktop quiet presentation additionally hides tool/activity rows and tool
 metadata and shows three animated typing dots while the agent is thinking,
 using a tool, or compacting. Waiting, interruption, completion, and disconnection
-stop that indicator. Unclassified sidebar snapshot previews are suppressed in
-this mode because they cannot distinguish partial from finalized text.
+stop that indicator. The sidebar uses the Host snapshot’s `last_completed_message`
+field in this mode and keeps it visible alongside the separate typing label.
+The batched projection excludes provisional assistant rows before ranking, so
+unopened chats and restarts retain their last completed preview. Normal streaming
+continues to use `last_message`. A missing completed preview falls back to the
+working directory; it never substitutes potentially unfinished text.
 
 `ConversationPresentationModel` is a proxy over the unchanged canonical model.
 It retains message-ID lookup for scroll anchoring and only signals visible
@@ -35,3 +39,8 @@ The isolated `clarp-desktop-ready-reply` lane checks actual TextEdit content,
 visible typing dots, and final reply arrival. It writes `capture.png.typing.png`
 before completion and `capture.png` afterward, under
 `desktop/build/release/tests/ready-reply/`. The fixture never contacts a real Host.
+
+Regression coverage: `tst_sidebar_preview.qml` verifies preview retention, typing
+separation, completion and switching modes. `test_dashboard_projection.py` checks
+unopened chats, final publication and a constant snapshot query count as the
+roster grows. Deploy matching Host and desktop versions for this field.

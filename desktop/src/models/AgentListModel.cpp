@@ -47,6 +47,8 @@ QVariant AgentListModel::data(const QModelIndex& index, int role) const {
         return m_transportAvailable ? agent.statusText : QString{};
     case LastActivityRole:
         return agent.lastActivity;
+    case LastCompletedMessageRole:
+        return agent.lastCompletedMessage;
     case LastMessageRole:
         return agent.lastMessage;
     case ConversationIdRole:
@@ -96,6 +98,7 @@ QHash<int, QByteArray> AgentListModel::roleNames() const {
         {StateRole, "agentState"},
         {StatusTextRole, "statusText"},
         {LastMessageRole, "lastMessage"},
+        {LastCompletedMessageRole, "lastCompletedMessage"},
         {LastActivityRole, "lastActivity"},
         {ConversationIdRole, "conversationId"},
         {HeadRevisionRole, "headRevision"},
@@ -140,6 +143,7 @@ void AgentListModel::applySnapshot(const QJsonObject& snapshot) {
                 agent.headRevision = old->headRevision;
                 agent.conversationId = old->conversationId;
                 agent.lastMessage = old->lastMessage;
+                agent.lastCompletedMessage = old->lastCompletedMessage;
             }
             if (agent.latestStateTimestamp < old->latestStateTimestamp) {
                 agent.latestStateTimestamp = old->latestStateTimestamp;

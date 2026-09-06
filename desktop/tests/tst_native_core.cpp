@@ -721,13 +721,15 @@ void NativeCoreTest::redesignedRosterFiltersWithoutMutatingSource() {
     source.applySnapshot({{QStringLiteral("agents"), QJsonArray{
         QJsonObject{{QStringLiteral("session"), QStringLiteral("alpha")}, {QStringLiteral("persona"), QStringLiteral("Alpha")},
             {QStringLiteral("backend"), QStringLiteral("codex")}, {QStringLiteral("cwd"), QStringLiteral("/work/one")},
-            {QStringLiteral("last_activity"), 1'788'000'000'000.0}},
+            {QStringLiteral("last_activity"), 1'788'000'000'000.0},
+            {QStringLiteral("last_completed_message"), QStringLiteral("Completed preview")}},
         QJsonObject{{QStringLiteral("session"), QStringLiteral("beta")}, {QStringLiteral("persona"), QStringLiteral("Beta")},
             {QStringLiteral("backend"), QStringLiteral("claude")}, {QStringLiteral("cwd"), QStringLiteral("/work/two")}}
     }}});
     AgentFilterModel filtered;
     filtered.setSourceModel(&source);
     QCOMPARE(filtered.rowCount(), 2);
+    QCOMPARE(filtered.index(0, 0).data(AgentListModel::LastCompletedMessageRole).toString(), QStringLiteral("Completed preview"));
     QCOMPARE(filtered.indexOfSession(QStringLiteral("beta")), 1);
     filtered.setQuery(QStringLiteral("WORK/TWO"));
     QCOMPARE(filtered.rowCount(), 1);
