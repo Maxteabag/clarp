@@ -199,6 +199,8 @@ class Config:
     openai_api_key: str = ""             # [openai] api_key or env OPENAI_API_KEY
     openai_realtime_model: str = "gpt-realtime-2.1"
     openai_realtime_voice: str = "cedar"
+    oracle_diagnostics: bool = False
+    openai_realtime_transcription_model: str = "gpt-4o-mini-transcribe"
     cartesia_model: str = "sonic-3.5"
     cartesia_voices: dict[str, str] = field(
         default_factory=lambda: dict(DEFAULT_CARTESIA_VOICES))
@@ -440,6 +442,9 @@ def load(path: pathlib.Path | None = None) -> Config:
         openai_realtime_voice = str(
             openai.get("realtime_voice", "cedar")
         ).strip() or "cedar",
+        oracle_diagnostics = bool(openai.get("oracle_diagnostics", False)),
+        openai_realtime_transcription_model = str(openai.get(
+            "realtime_transcription_model", "gpt-4o-mini-transcribe")).strip(),
         cartesia_model  = str(cartesia.get("model", "sonic-3.5")),
         local_tts_voice = str(
             (data.get("local_tts", {}) or {}).get("voice", "")).strip(),
