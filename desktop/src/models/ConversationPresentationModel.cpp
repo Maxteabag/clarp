@@ -16,24 +16,30 @@ void ConversationPresentationModel::setShowWhenReady(bool value) {
     beginFilterChange();
     endFilterChange(QSortFilterProxyModel::Direction::Rows);
     if (rowCount() > 0) emit dataChanged(index(0, 0), index(rowCount() - 1, 0),
-        {ConversationModel::ToolsRole, ConversationModel::DisplayCellsRole,
-         ConversationModel::ActivityCountRole, ConversationModel::ToolDetailsAvailableRole});
+        {ConversationModel::BodyRole});
     emit showWhenReadyChanged();
 }
 bool ConversationPresentationModel::filterAcceptsRow(int row, const QModelIndex& parent) const {
     if (!m_showWhenReady) return true;
     const QModelIndex item = sourceModel()->index(row, 0, parent);
-    if (item.data(ConversationModel::ActivityRole).toBool()) return false;
+    if (item.data(ConversationModel::ActivityRole).toBool()) {
+        const QString label = item.data(ConversationModel::ToolNameRole).toString();
+        // The typing indicator already represents these lifecycle placeholders.
+        return label != QStringLiteral("thinking") && label != QStringLiteral("compacting");
+    }
     if (item.data(ConversationModel::AuthorRole).toString() != QStringLiteral("assistant")) return true;
-    return item.data(ConversationModel::KindRole).toString() != QStringLiteral("live")
-        && !item.data(ConversationModel::BodyRole).toString().isEmpty();
+    const bool hasTools = !item.data(ConversationModel::ToolsRole).toList().isEmpty()
+        || !item.data(ConversationModel::DisplayCellsRole).toList().isEmpty()
+        || item.data(ConversationModel::ActivityCountRole).toInt() > 0;
+    return hasTools || (item.data(ConversationModel::KindRole).toString() != QStringLiteral("live")
+        && !item.data(ConversationModel::BodyRole).toString().isEmpty());
 }
 QVariant ConversationPresentationModel::data(const QModelIndex& item, int role) const {
-    if (m_showWhenReady) {
-        if (role == ConversationModel::ToolsRole || role == ConversationModel::DisplayCellsRole) return QVariantList{};
-        if (role == ConversationModel::ActivityCountRole) return 0;
-        if (role == ConversationModel::ToolDetailsAvailableRole) return false;
-    }
+    if (m_showWhenReady && role == ConversationModel::BodyRole
+        && !QSortFilterProxyModel::data(item, ConversationModel::ActivityRole).toBool()
+        && QSortFilterProxyModel::data(item, ConversationModel::AuthorRole).toString() == QStringLiteral("assistant")
+        && QSortFilterProxyModel::data(item, ConversationModel::KindRole).toString() == QStringLiteral("live"))
+        return QString{};
     return QSortFilterProxyModel::data(item, role);
 }
 int ConversationPresentationModel::indexOfMessage(const QString& id) const {
