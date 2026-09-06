@@ -366,11 +366,10 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
 
     until = until_ms if until_ms is not None else (1 << 62)
     con = db.conn()
-    names = {
-        r["agent_id"]: (r["persona"] or r["session"])
-        for r in con.execute(
-            "SELECT agent_id, persona, session FROM agents")
-    }
+    from .avatar_urls import versioned_avatar_url
+    agent_rows = {r["agent_id"]: r for r in con.execute(
+        "SELECT agent_id, persona, session, avatar_path FROM agents")}
+    names = {aid: (r["persona"] or r["session"]) for aid,r in agent_rows.items()}
     from . import viz_library
     library = viz_library.load()
     rows = viz_corpus.tool_rows(con, since_ms, until)
@@ -395,6 +394,10 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
         })
         n["events"] += 1
         n["agents"].add(ev["agent"])
+    for aid,actor in actors.items():
+        row=agent_rows.get(aid)
+        path=str(row["avatar_path"] or "") if row else ""
+        actor["avatar_url"] = versioned_avatar_url("/avatars", aid, path) if path and os.path.isfile(path) else ""
     for n in nodes.values():
         n.update({k: v for k, v in library["entities"].get(n["id"], {}).items()
                   if k in {"shape", "icon", "archetype", "logic"}})

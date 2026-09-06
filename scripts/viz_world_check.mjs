@@ -14,6 +14,10 @@ try{
  let s=await page.evaluate(()=>window.fleetWorldSnapshot());
  assert(!s.failure,s.failure);assert(s.meta.territories>1);assert(s.meta.files>0);assert(s.meta.agents.length>0);
  assert(s.scene.relations.some(r=>r.kind==='remote'));
+ await page.waitForFunction(()=>window.fleetWorldSnapshot().meta.loadedAvatars?.length>0);
+ const portraits=await page.evaluate(()=>window.fleetWorldSnapshot().meta.loadedAvatars);
+ assert(portraits.some(id=>s.meta.agents.some(a=>a.id===id)),'portraits must correspond to rendered agent identities');
+
  await page.screenshot({path:out+'/world.png'});
  const worldCamera={...s.camera};
  const startFrames=s.frames;
@@ -51,7 +55,7 @@ try{
  }
  assert.deepEqual(errors,[]);
  await fs.writeFile(out+'/verification.json',JSON.stringify({program:s.program,frames:after.frames,territories:s.meta.territories,
-   files:s.meta.files,agents:s.meta.agents.length,realEvents:s.scene.events.length,sourceRevision:s.revision,playback:true,cabinetsView:true,persistedView:true,errors},null,2));
+   files:s.meta.files,agents:s.meta.agents.length,realEvents:s.scene.events.length,sourceRevision:s.revision,portraitsLoaded:portraits.length,playback:true,cabinetsView:true,persistedView:true,errors},null,2));
 }finally{await context.close();await browser.close();}
 // Fault tests in a separate recording-free browser preserve the user's demo.
 const faultBrowser=await chromium.launch();const p=await faultBrowser.newPage({viewport:{width:1200,height:800}});

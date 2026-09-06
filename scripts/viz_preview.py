@@ -4,6 +4,7 @@ import argparse
 import functools
 import pathlib
 import json
+import mimetypes
 import threading
 import time
 import sqlite3
@@ -79,6 +80,17 @@ def main():
             if self.path.split('?')[0] == '/viz/events':
                 try:
                     ProductionHandler._handle_viz_events(self)
+                finally:
+                    db.close_local()
+            elif urlsplit(self.path).path.startswith('/avatars/'):
+                # Same exact-agent portrait resolution as the main app. Never
+                # accept a filesystem path from the URL.
+                identity=unquote(urlsplit(self.path).path[len('/avatars/'):])
+                try:
+                    row=db.conn().execute('SELECT avatar_path FROM agents WHERE agent_id=?',(identity,)).fetchone()
+                    path=pathlib.Path(str(row['avatar_path'] or '')) if row else None
+                    if not path or not path.is_file():return self.send_error(404)
+                    self._send(200,path.read_bytes(),mimetypes.guess_type(str(path))[0] or 'application/octet-stream')
                 finally:
                     db.close_local()
             elif self.path == '/viz':

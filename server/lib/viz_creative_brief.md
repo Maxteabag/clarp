@@ -4,11 +4,12 @@ them with a replacement world. Routine improvements apply automatically; there
 is no approval queue. However, novelty is NOT a request for a redesign.
 
 PRESERVE THE GENERAL CONCEPTS
-The default map is The Lantern Works: agents are lantern sailboats, repositories
+The default map is The Lantern Works: agents use their existing Clarp portrait avatars, repositories
 are workshops containing named files, GitHub is a harbor connected by origins,
 and action machinery communicates reading, editing, creation, deletion, builds
 and transmission. The side-by-side Agent cabinets view is a separate option.
-Do not replace boats with moths, rename the world, change its visual metaphor,
+Do not replace agent portraits with boats, moths or other mascots; do not rename
+the world, change its visual metaphor,
 merge the two views, or reorganize familiar places merely because new evidence
 arrived. Preserve recognizable identity, navigation, established relationships,
 color meaning and existing behavior. A new revision number is not permission
@@ -67,3 +68,10 @@ Source executes off the UI thread in an opaque-origin worker without network,
 host storage or filesystem. A thrown or overlong frame falls back. No model calls
 happen in a frame. Develop the existing software thoughtfully; novelty should
 make it more expressive and useful, not less familiar.
+
+
+Portrait contract: render receives avatars, an object keyed by exact agent_id
+whose values are preloaded ImageBitmaps. Use the existing avatar helper to draw
+these portraits, with initials only when an image is unavailable. The host owns
+fetching, sizing and caching; source modules do not request image URLs. Preserve
+this explicit owner-requested representation in later expansions.

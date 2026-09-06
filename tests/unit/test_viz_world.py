@@ -141,3 +141,34 @@ def test_unrequested_redesign_cannot_change_the_live_library(tmp_path,monkeypatc
     with pytest.raises(ValueError,match='strong explicit demand'):
         viz_rule_author.evolve_world({'events':[],'coverage_keys':['action:delete']},'ordinary novelty',model)
     assert viz_library.load()==before
+
+
+def test_avatar_upgrade_preserves_unrelated_learned_source():
+    from lib.viz_avatar_upgrade import avatar_edits
+    source="""const learned='message';
+function vessel(c,x,y,name,col,phase,active){return 'boat';}
+module.exports.render=({interaction={},reducedMotion=false})=>{
+vessel(c,p.x,p.y,ev.agent||id,col,reducedMotion?0:ambient%1,active);
+return learned;
+};"""
+    program={'title':'The Lantern Works','entry':'world.js','files':{'world.js':source,'model.js':'learned classification'}}
+    result=viz_library.evolution_program(avatar_edits(program,'exports.drawAgentAvatar=()=>{};'),program)
+    assert "const learned='message'" in result['files']['world.js']
+    assert result['files']['model.js']=='learned classification'
+    assert 'function vessel(' not in result['files']['world.js']
+    assert 'avatars[id]' in result['files']['world.js']
+    assert result['title']==program['title']
+
+
+def test_fleet_payload_uses_exact_agent_avatar_routes(tmp_path):
+    from lib import db,viz_normalize
+    con=db.conn()
+    for aid in ['portrait-a','portrait-b']:
+        portrait=tmp_path/(aid+'.png');portrait.write_bytes(b'portrait')
+        con.execute("INSERT INTO agents(agent_id,persona,voice_id,cwd,session,created_at,avatar_path) VALUES (?, 'Same name','','/tmp',?,1,?)",(aid,aid,str(portrait)))
+        con.execute("INSERT INTO state_log(agent_id,ts,kind,detail) VALUES (?,1,'tool',?)",(aid,json.dumps({'tool':'Read','input':{}})))
+    payload=viz_normalize.build_fleet_map(0)
+    actors={a['id']:a for a in payload['actors']}
+    assert actors['portrait-a']['avatar_url'].startswith('/avatars/portrait-a?v=')
+    assert actors['portrait-b']['avatar_url'].startswith('/avatars/portrait-b?v=')
+    assert actors['portrait-a']['avatar_url']!=actors['portrait-b']['avatar_url']

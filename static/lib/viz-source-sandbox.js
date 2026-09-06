@@ -3,6 +3,7 @@
 const bootstrap = `
 const workerSource = ${JSON.stringify(`
 let render, canvas, ctx, clock=0, seed=1234;
+let avatars={},avatarVersion=0;
 Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
 Date.now=()=>clock;
 self.Worker=undefined;self.SharedWorker=undefined;
@@ -19,15 +20,26 @@ function compile(program){
  }
  return load(program.entry).render;
 }
-self.onmessage=({data})=>{
+self.onmessage=async({data})=>{
  try{
   if(data.type==='init'){
    render=compile(data.program);if(typeof render!=='function')throw Error('Entry must export render');
    canvas=new OffscreenCanvas(1,1);ctx=canvas.getContext('2d');self.postMessage({type:'ready'});return;
   }
+  if(data.type==='avatars'){
+   const version=++avatarVersion;
+   const next={};
+   for(const [id,blob] of Object.entries(data.avatars||{})){
+    try{next[id]=await createImageBitmap(blob);}catch{}
+   }
+   if(version!==avatarVersion){for(const image of Object.values(next))image.close();return;}
+   for(const image of Object.values(avatars))image.close();
+   avatars=next;return;
+  }
   clock=data.playhead;seed=1234;
   canvas.width=data.width;canvas.height=data.height;
-  const meta=render({...data,ctx})||{};
+  const meta=render({...data,ctx,avatars})||{};
+  meta.loadedAvatars=Object.keys(avatars);
   const bitmap=canvas.transferToImageBitmap();
   self.postMessage({type:'frame',request:data.request,bitmap,meta},[bitmap]);
  }catch(e){self.postMessage({type:'error',error:String(e.message||e).slice(0,500)});}
@@ -50,12 +62,12 @@ export class SourceSandbox {
   constructor(program,onframe,onerror){
     this.frame=document.createElement('iframe');this.frame.hidden=true;
     this.frame.sandbox='allow-scripts';
-    this.ready=false;this.pending=false;this.stopped=false;this.sequence=0;
+    this.avatars={};this.ready=false;this.pending=false;this.stopped=false;this.sequence=0;
     const fail=error=>{if(this.stopped)return;this.destroy();onerror(error);};
     this.listener=e=>{
       if(e.source!==this.frame.contentWindow||this.stopped)return;
       if(e.data.type==='boot')this.frame.contentWindow.postMessage({type:'init',program},'*');
-      else if(e.data.type==='ready'){clearTimeout(this.timer);this.ready=true;}
+      else if(e.data.type==='ready'){clearTimeout(this.timer);this.ready=true;this.setAvatars(this.avatars);}
       else if(e.data.type==='error')fail(e.data.error);
       else if(e.data.type==='frame'&&e.data.request===this.sequence){
         clearTimeout(this.timer);this.pending=false;
@@ -69,6 +81,10 @@ export class SourceSandbox {
     document.body.append(this.frame);
     this.timer=setTimeout(()=>fail('Source initialization deadline exceeded'),2000);
     this.fail=fail;
+  }
+  setAvatars(avatars){
+    this.avatars=avatars;
+    if(this.ready&&!this.stopped)this.frame.contentWindow.postMessage({type:'avatars',avatars},'*');
   }
   draw(input){
     if(!this.ready||this.pending||this.stopped)return;

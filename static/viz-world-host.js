@@ -1,11 +1,13 @@
 // Small transport/camera shell. All visual semantics live in replaceable source.
 import {SourceSandbox} from '/static/lib/viz-source-sandbox.js';
+import {AvatarCache} from '/static/lib/viz-avatar-cache.js';
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
 const stat=document.getElementById('stat'),learning=document.getElementById('learning');
 const slider=document.getElementById('t'),liveButton=document.getElementById('live');
 let scene={entities:[],relations:[],events:[]},meta={},program=null,sandbox=null,base=null;
 let width=innerWidth,height=innerHeight,camera={x:20,y:70,k:.7},revision=0,live=true,playing=false,playhead=Date.now(),tmin=0,tmax=0;
 let frames=0,failure='',loading=false,last=performance.now(),signature='',drag=null,selected=null;
+const avatarCache=new AvatarCache(blobs=>sandbox?.setAvatars(blobs));
 let programHistory=[];
 const fittedViews=new Set();
 function fitView(){
@@ -52,6 +54,7 @@ function use(next){
     if(program!==base){const prior=programHistory.pop();use(prior||base);}
     else {ctx.fillStyle='#0b1422';ctx.fillRect(0,0,width,height);ctx.fillStyle='#b4c9d5';ctx.fillText('World unavailable: '+error,40,160);}
   });
+  sandbox.setAvatars(avatarCache.blobs());
 }
 async function init(){
   async function readProgram(root){
@@ -68,6 +71,7 @@ async function load(){
     const response=await fetch('/viz/events?window=3600');if(!response.ok)throw Error('Fleet data unavailable');
     const data=await response.json();scene=data.world;revision=data.library_revision;
     lastData=data;selectProgram(data);
+    avatarCache.update(data.actors||[]);
     tmin=scene.events[0]?.ts||Date.now();tmax=Math.max(Date.now(),scene.events.at(-1)?.ts||0);
     if(live)playhead=tmax;
     if(!failure){
