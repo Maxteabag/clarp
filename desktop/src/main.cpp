@@ -537,7 +537,7 @@ int main(int argc, char* argv[]) {
                         if (item->objectName() == QStringLiteral("activityExplanationText") &&
                             item->isVisible()) {
                             const QString text = item->property("text").toString();
-                            if (!text.isEmpty() && text != QStringLiteral("Explaining activity…")
+                            if (!text.isEmpty() && text != QStringLiteral(".") && text != QStringLiteral("..") && text != QStringLiteral("…")
                                 && text != QStringLiteral("Explanation unavailable")) ++translatedRows;
                         }
                     }
