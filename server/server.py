@@ -1929,7 +1929,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, b'{"error":"agent not found"}', "application/json")
         try:
             result = self.ctx.tool_explanations.request(
-                data.get("detail_level"), data.get("items"), cwd=agent.get("cwd"))
+                data.get("detail_level"), data.get("items"), cwd=agent.get("cwd"), release=data.get("release"))
         except ValueError as error:
             return self._send(400, json.dumps({"error": str(error)}).encode(), "application/json")
         self._send(200, json.dumps(result).encode(), "application/json")
