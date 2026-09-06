@@ -1,0 +1,12 @@
+{
+  "title": "Flow \u00b7 The Lantern Works",
+  "entry": "world.js",
+  "files": [
+    "avatar.js",
+    "effects.js",
+    "model.js",
+    "world.js"
+  ],
+  "source_digest": "835503dd7c2a374ed8c3cbbbf1a7067e9be725917d697583cf5497674e487ed8",
+  "notes": "Owner-approved compact workflow prototype alongside existing views; no automatic replacement of World."
+}
