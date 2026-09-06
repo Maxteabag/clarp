@@ -124,6 +124,8 @@ class ToolExplanations:
         self._failed_until = {}
         self._failure_ttl = failure_ttl
         self._queue = OrderedDict()
+        self._demands = {}
+        self._released = {}
         self._closed = False
         self._process = None
         self._thread = threading.Thread(target=self._work, name="tool-explanations", daemon=True)
@@ -144,27 +146,48 @@ class ToolExplanations:
                 self._kill(self._process)
         self._thread.join(timeout=5)
 
-    def request(self, level, items, *, cwd=None):
+    def request(self, level, items, *, cwd=None, release=None):
         if type(level) is not int or level not in range(5):
             raise ValueError("detail_level must be an integer from 0 to 4")
         if not isinstance(items, list) or len(items) > 8:
             raise ValueError("items must contain at most 8 activities")
+        release = [] if release is None else release
+        if not isinstance(release, list) or len(release) > 64 or any(not isinstance(v, str) or not 1 <= len(v) <= 128 for v in release):
+            raise ValueError("invalid released demand IDs")
         prepared = []
         ids = set()
         for item in items:
             if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not 1 <= len(item["id"]) <= 128 or item["id"] in ids:
                 raise ValueError("items need unique short string IDs")
             ids.add(item["id"])
+            demand = item.get("demand_id")
+            if demand is not None and (not isinstance(demand, str) or not 1 <= len(demand) <= 128):
+                raise ValueError("invalid demand ID")
             activity = normalize_activity(item.get("activity"))
             if level and cwd:
                 scripts = script_evidence(activity, cwd)
                 if scripts:
                     activity["scripts"] = scripts
             key = hashlib.sha256(json.dumps([MODEL, PROMPT_VERSION, level, activity], sort_keys=True).encode()).hexdigest()
-            prepared.append((item["id"], key, activity))
+            prepared.append((item["id"], key, activity, demand))
         response = []
         with self._condition:
-            for identity, key, activity in prepared:
+            now = time.monotonic()
+            self._released = {k:v for k,v in self._released.items() if v > now}
+            for demand in release:
+                self._released[demand] = now + 120
+                for owners in self._demands.values():
+                    owners.pop(demand, None)
+            while len(self._released) > 4096:
+                self._released.pop(next(iter(self._released)))
+            self._prune_demands(now)
+            for identity, key, activity, demand in prepared:
+                if demand in self._released:
+                    response.append({"id": identity, "status": "cancelled"})
+                    continue
+                if demand and demand not in self._demands.get(key, {}) and len(self._demands.get(key, {})) >= 256:
+                    response.append({"id": identity, "status": "busy", "reason": "too_many_views"})
+                    continue
                 if key in self._failed_until and time.monotonic() >= self._failed_until[key]:
                     self._cache.pop(key, None)
                     del self._failed_until[key]
@@ -182,8 +205,23 @@ class ToolExplanations:
                     self._cache[key] = value
                     self._queue[key] = (level, activity, time.monotonic())
                     self._condition.notify()
+                if value["status"] == "pending":
+                    # Older clients have no demand token and retain legacy work.
+                    self._demands.setdefault(key, {})[demand or "legacy"] = now + 5 if demand else float("inf")
                 response.append({"id": identity, **value})
         return {"model": MODEL, "detail_level": level, "items": response}
+
+    def _prune_demands(self, now):
+        for key in list(self._demands):
+            owners = {k:v for k,v in self._demands[key].items() if v > now}
+            if key not in self._queue:
+                self._demands.pop(key, None)
+            elif owners:
+                self._demands[key] = owners
+            else:
+                self._queue.pop(key, None)
+                self._cache.pop(key, None)
+                self._demands.pop(key, None)
 
     def _work(self):
         while True:
@@ -195,6 +233,9 @@ class ToolExplanations:
                 self._condition.wait_for(lambda: self._closed, timeout=self._debounce)
                 if self._closed:
                     return
+                self._prune_demands(time.monotonic())
+                if not self._queue:
+                    continue
                 level = next(iter(self._queue.values()))[0]
                 keys = [k for k, v in self._queue.items() if v[0] == level][:8]
                 batch = [self._queue.pop(k) for k in keys]
