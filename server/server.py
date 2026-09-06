@@ -2380,7 +2380,7 @@ class Handler(BaseHTTPRequestHandler):
                     return getattr(self, "_handle_decision_" + action)(decision_id)
         if path.startswith("/artifacts/"):
             from urllib.parse import unquote
-            for action in ("archive", "discard"):
+            for action in ("archive", "discard", "submit"):
                 suffix = "/" + action
                 if path.endswith(suffix):
                     artifact_id = unquote(path[len("/artifacts/"):-len(suffix)].strip("/"))
@@ -3634,6 +3634,17 @@ class Handler(BaseHTTPRequestHandler):
         )
         return self._send(200, json.dumps({"artifacts": rows}).encode(), "application/json")
 
+    def _handle_artifact_submit(self, artifact_id: str):
+        from lib import html_forms
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"JSON object required"}', "application/json")
+        try:
+            receipt = html_forms.submit(artifact_id, data)
+        except ValueError as exc:
+            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+        return self._send(200, json.dumps(receipt).encode(), "application/json")
+
     def _handle_artifact_get(self, artifact_id: str):
         from lib import artifacts
         row = artifacts.get(artifact_id)
@@ -4858,6 +4869,17 @@ def _decision_delivery_queues_if_busy(pending: dict) -> bool:
 
 def _deliver_decision_rows(ctx: ServerContext) -> None:
     from lib import artifacts
+    from lib import html_forms
+    for submission in html_forms.pending():
+        try:
+            TurnDispatchService(ctx).dispatch(
+                text=submission["prompt"], requested_session=submission["session"],
+                forced_session=submission["session"], trace_id=_trace.new_id(),
+                client_msg_id="html-form-" + submission["submission_id"],
+                synthesize_audio=False, origin="user", queue_if_busy=True)
+            html_forms.mark_delivered(submission["submission_id"])
+        except Exception as exc:
+            log_exception("htmlFormDeliveryFail", exc, detail=submission["submission_id"])
     for pending in artifacts.pending_deliveries():
         decision_id = pending["decision_id"]
         text = artifacts.format_delivery_prompt(pending)

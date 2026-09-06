@@ -41,7 +41,7 @@ an explicit blocked or cancelled plan, or when closing a plan without items.
 
 The durable checklist above remains the runtime source of task progress.
 **Always prefer interactive HTML forms for planning deliverables**, including
-finished proposals. Use `html-planning-forms` when available and `clarp-documents`
+finished proposals. Use `clarp-html-forms` when available and `clarp-documents`
 for the format guidance. Include controls for the choices, numbers, priorities
 and comments the plan needs; save/restore drafts and report submission truthfully.
 Preserve useful diagrams and clearly labeled UX concepts. PDF is only for an

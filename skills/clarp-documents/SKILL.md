@@ -5,7 +5,7 @@ description: Deliver plans as interactive HTML forms by default; generate and pu
 # Finished documents
 
 **Always prefer HTML forms for plans**, including detailed proposals and settled
-plans. Use the `html-planning-forms` skill when available. Include appropriate
+plans. Use the `clarp-html-forms` skill when available. Include appropriate
 choices, numeric inputs, priorities and free text for the answers the plan needs;
 do not invent unnecessary questions just to fill a form. Preserve useful diagrams
 and clearly label proposed UX examples.
