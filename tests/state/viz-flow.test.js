@@ -150,3 +150,17 @@ it('remembers repeated routes as bounded patterns without counting a record twic
  const second={...scene,events:scene.events.map(e=>({...e,id:e.id+':2'})),work:{...scene.work,messages:scene.work.messages.map(x=>({...x,id:x.id+':2'})),jobs:scene.work.jobs.map(j=>({...j,id:j.id+':2'}))}};
  expect(memory.update(second).flowMemory.routes.find(r=>r.kind==='delivery').count).toBe(2);
 });
+it('keeps optional decisions out of blocking waits and respects terminal decisions in replay',()=>{
+ const journey=load('journey.js'),d={id:'d',agent_id:'a',created_at:100,status:'cancelled',updated_at:400,resolved_at:null,blocks_progress:true};
+ expect(journey.decisionAt({...d,blocks_progress:false},200)).toBeNull();
+ expect(journey.decisionAt(d,200).state).toBe('waiting');
+ expect(journey.decisionAt(d,500).state).toBe('cancelled');
+ expect(journey.decisionAt({...d,status:'expired'},500).state).toBe('expired');
+});
+it('bounds route evidence and does not recount evicted observations on refresh',()=>{
+ const values=new Map(),storage={getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v)},memory=new FlowMemory(storage);
+ const scene=flowDemo(0);scene.work.messages=Array.from({length:260},(_,i)=>({id:'msg'+i,ts:i,from_agent_id:'a',to_agent_id:'b'}));
+ memory.update(scene);const route=memory.update(scene).flowMemory.routes.find(r=>r.kind==='message'&&r.from==='a');
+ expect(route.count).toBe(128);expect(route.observations).toHaveLength(128);
+ expect(route.observations.every(o=>o.at>=132)).toBe(true);
+});

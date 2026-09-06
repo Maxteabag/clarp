@@ -173,3 +173,10 @@ live; a route is never a dependency or a cause, and it is bounded. Keep these
 three distinguishable: moving live actions, unresolved waiting, and remembered
 history. Extend with new boundary kinds or wait sources in the same spirit;
 the gate silhouette, ring and mooring curve are revisable source choices.
+
+Stage-three evidence clarification: an open background job is an activity awaiting
+its recorded outcome, not proof that the whole workflow is blocked. Only decisions
+explicitly marked blocks_progress become owner waits. Expired/cancelled tracking
+has a slashed hollow ring, not a success fill or a failure cross. A generic release
+stays Release unless its recorded title/metadata identifies TestFlight. Route
+counts describe bounded retained observations; filter them at the replay playhead.

@@ -7,7 +7,7 @@
 // is never drawn as waiting. Repeated observed interactions may leave a
 // browser-remembered route: a faint dotted pattern, never a dependency.
 const {hash}=require('./model-util.js');
-const LABELS={github:'GitHub Actions',apple:'TestFlight',lane:'Test lane',host:'Host update',service:'Service',owner:'Owner decision',unknown:'External wait'};
+const LABELS={github:'GitHub Actions',apple:'TestFlight',release:'Release',lane:'Test lane',host:'Host update',service:'Service',owner:'Owner decision',unknown:'External wait'};
 exports.LABELS=LABELS;
 
 exports.waitAt=(j,t)=>{
@@ -20,10 +20,11 @@ exports.waitAt=(j,t)=>{
   agent_id:j.agent_id,agent:j.agent,session:j.session,state,stale,since:j.started_at,until:done?terminal:null,reason:done?(j.terminal_reason||''):'',link:j.link||null,seed:hash(j.id)};
 };
 exports.decisionAt=(d,t)=>{
- if(d.created_at>t)return null;
- const done=d.resolved_at!=null&&d.resolved_at<=t;
+ if(d.created_at>t||!d.blocks_progress)return null;
+ const ended=d.resolved_at??(['cancelled','expired'].includes(d.status)?d.updated_at:null)??(d.expires_at!=null&&d.expires_at<=t?d.expires_at:null);
+ const done=ended!=null&&ended<=t,expired=done&&(d.status==='expired'||(d.resolved_at==null&&d.expires_at===ended));
  return {id:'decision:'+d.id,kind:'decision',boundary:'owner',label:LABELS.owner,title:d.title,detail:d.blocks_progress?'blocks progress':'',agent_id:d.agent_id,agent:d.agent,session:d.session,
-  state:done?'released':'waiting',stale:false,since:d.created_at,until:done?d.resolved_at:null,reason:done?d.status:'',link:null,seed:hash(d.id),blocks:!!d.blocks_progress};
+  state:done?(expired?'expired':d.status==='cancelled'?'cancelled':'released'):'waiting',stale:false,since:d.created_at,until:done?ended:null,reason:done?d.status:'',link:null,seed:hash(d.id),blocks:!!d.blocks_progress};
 };
 
 // Boundary posts stand outside the right rim of the workshop, at most three.
@@ -47,8 +48,8 @@ const glyph=(c,boundary,x,y,s,color)=>{
  c.restore();
 };
 exports.drawPost=(c,post,waits,time,t,reduced,detail)=>{
- const waiting=waits.some(w=>w.state==='waiting'),failed=waits.some(w=>w.state==='failed'||w.state==='expired'),stale=waits.some(w=>w.state==='waiting'&&w.stale);
- const color=failed&&!waiting?'#e0705a':waiting?'#e9cc88':'#99e1b3';
+ const waiting=waits.some(w=>w.state==='waiting'),failed=waits.some(w=>w.state==='failed'),uncertain=waits.some(w=>['expired','cancelled'].includes(w.state)),stale=waits.some(w=>w.state==='waiting'&&w.stale);
+ const color=failed&&!waiting?'#e0705a':uncertain&&!waiting?'#b0b4ba':waiting?'#e9cc88':'#99e1b3';
  c.save();c.translate(post.x,post.y);
  // A gate: two posts and a crossbar, the boundary's mark hanging beneath.
  c.strokeStyle='#8fa7a6';c.lineWidth=1.6;c.lineCap='round';c.beginPath();c.moveTo(-12,14);c.lineTo(-12,-12);c.moveTo(12,14);c.lineTo(12,-12);c.moveTo(-15,-12);c.lineTo(15,-12);c.stroke();
@@ -57,6 +58,7 @@ exports.drawPost=(c,post,waits,time,t,reduced,detail)=>{
  c.beginPath();c.arc(0,-24,7,0,7);c.strokeStyle=color;c.lineWidth=1.8;
  if(waiting){if(stale)c.setLineDash([2,3]);const p=reduced?0:time/900;c.beginPath();c.arc(0,-24,7,p,p+4.6);c.stroke();c.setLineDash([]);}
  else if(failed){c.stroke();c.beginPath();c.moveTo(-4,-28);c.lineTo(4,-20);c.moveTo(4,-28);c.lineTo(-4,-20);c.stroke();}
+ else if(uncertain){c.stroke();c.beginPath();c.moveTo(-4,-20);c.lineTo(4,-28);c.stroke();}
  else {c.fillStyle=color;c.fill();}
  if(detail>=1){c.fillStyle='#b5c7c6';c.font='9px sans-serif';c.textAlign='center';c.textBaseline='alphabetic';c.fillText(post.label,0,28);}
  c.restore();
@@ -81,6 +83,6 @@ exports.drawRoute=(c,a,b,count,detail)=>{
  c.restore();
 };
 exports.describe=w=>{
- const s={waiting:'waiting'+(w.stale?' · heartbeat overdue':''),released:'released',failed:'failed',expired:'wait ended without evidence (heartbeat expired)',cancelled:'cancelled'}[w.state]||w.state;
- return (w.kind==='decision'?'Decision · ':'Wait · ')+w.label+' · '+w.title+' · '+s+(w.detail?' · '+w.detail:'')+' · '+w.agent+(w.attributed?' · attributed to “'+w.attributed+'” by agent and time window':'');
+ const s={waiting:(w.kind==='job'?'awaiting job outcome · dependency unconfirmed':'waiting for owner')+(w.stale?' · heartbeat overdue':''),released:w.kind==='job'?'job completed':'decision resolved',failed:'job reported failure',expired:'wait ended without evidence (heartbeat expired)',cancelled:'cancelled'}[w.state]||w.state;
+ return (w.kind==='decision'?'Decision · ':'Job · ')+w.label+' · '+w.title+' · '+s+(w.detail?' · '+w.detail:'')+' · '+w.agent+(w.attributed?' · attributed to “'+w.attributed+'” by agent and time window':'');
 };

@@ -121,8 +121,8 @@ exports.build=(scene,_selection,time)=>{
   const post=postMap.get(key);if(post.waits.length<4)post.waits.push(wt);else wt.anchor=null;wt.post=post;
  }
  const threads=assembled.threads.filter(th=>actorMap.has(th.from)&&actorMap.has(th.to)&&th.from!==th.to);
- const minX=Math.min(-280,...regions.map(r=>r.x-r.rx-40)),minY=Math.min(-240,...regions.map(r=>r.y-r.ry-60));
- const maxX=Math.max(right+60,...ownerGroups.map(o=>o.x+o.w+55)),maxY=Math.max(240,ownerY+20,...regions.map(r=>r.y+r.ry+65));
+ const minX=Math.min(-280,...regions.map(r=>r.x-r.rx-40),...posts.map(p=>p.x-30)),minY=Math.min(-240,...regions.map(r=>r.y-r.ry-60),...posts.map(p=>p.y-40));
+ const maxX=Math.max(right+60,...ownerGroups.map(o=>o.x+o.w+55),...posts.map(p=>p.x+30)),maxY=Math.max(240,ownerY+20,...regions.map(r=>r.y+r.ry+65),...posts.map(p=>p.y+40));
  return {projects,regions,regionMap,repos,actors,actorMap,files,fileMap:new Map(files.map(f=>[f.id,f])),ownerGroups,remoteMap,structural,history,latest,
   slates,slateMap,work:assembled,threads,posts,waits:assembled.waits.filter(w=>w.anchor),
   bounds:{x:minX,y:minY,w:maxX-minX,h:maxY-minY},github:{x:right+140,y:-205,w:360,h:ownerY+230}};

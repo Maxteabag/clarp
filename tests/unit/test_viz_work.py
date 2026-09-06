@@ -38,7 +38,8 @@ def _db():
 
 
 def test_work_objects_separate_intent_evidence_basis_and_outcome():
-    work=viz_work.build(_db(),0,10000,{'a':'Axel','n':'Nadia','m':'Mappy'})
+    con=_db()
+    work=viz_work.build(con,0,10000,{'a':'Axel','n':'Nadia','m':'Mappy'})
     plan=work['plans'][0]
     assert plan['title']=='Compare six pistol approaches' and plan['agent']=='Axel' and plan['completed_at']==5000
     assert [i['id'] for i in plan['items']]==['verify'] and plan['item_total']==2
@@ -60,6 +61,8 @@ def test_work_objects_separate_intent_evidence_basis_and_outcome():
     jobs={j['id']:j for j in work['jobs']}
     assert jobs['job-ci']['boundary']=='github' and jobs['job-ci']['boundary_label']=='GitHub Actions' and jobs['job-ci']['link'].startswith('https://')
     assert jobs['job-tf']['boundary']=='apple' and jobs['job-tf']['terminal_reason']=='heartbeat_expired' and jobs['job-tf']['terminal_at']==4600
+    con.execute("UPDATE background_jobs SET title='Publish Python package',metadata_json='{}' WHERE job_id='job-tf'")
+    assert next(j for j in viz_work.jobs(con,0,5000,{}) if j['id']=='job-tf')['boundary']=='release'
     assert [d['id'] for d in work['decisions']]==['dec-1'] and work['decisions'][0]['blocks_progress'] is True and work['decisions'][0]['status']=='pending'
 
 

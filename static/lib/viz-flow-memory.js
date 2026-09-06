@@ -24,10 +24,16 @@ export class FlowMemory {
     }
     // Routes: repeated observed interactions between two real ends. Each
     // record is counted once; a route is a pattern, never a dependency.
-    const route=(kind,from,to,at,id)=>{if(!from||!to||from===to||seen.has('route:'+id))return;seen.add('route:'+id);const key=kind+'\n'+from+'\n'+to;const old=state.routes[key];state.routes[key]={kind,from,to,count:(old?.count||0)+1,lastObserved:Math.max(old?.lastObserved||0,at)};};
+    const route=(kind,from,to,at,id)=>{
+      if(!from||!to||from===to||!Number.isFinite(at))return;
+      const key=kind+'\n'+from+'\n'+to,old=state.routes[key],observations=old?.observations||[];
+      if(observations.some(o=>o.id===id))return;
+      const kept=[...observations,{id,at}].sort((a,b)=>b.at-a.at||b.id.localeCompare(a.id)).slice(0,128);
+      state.routes[key]={kind,from,to,count:kept.length,lastObserved:kept[0].at,observations:kept};
+    };
     for(const e of scene.events)if(e.action==='push'&&e.remote_target&&e.workspace_target&&e.outcome==='succeeded')route('delivery',e.workspace_target,e.remote_target,e.finished_at??e.ts,String(e.id));
     for(const msg of scene.work?.messages||[])route('message',msg.from_agent_id,msg.to_agent_id,msg.ts,msg.id);
-    for(const job of scene.work?.jobs||[])if(['succeeded','failed','cancelled'].includes(job.status))route('wait',job.agent_id,job.boundary||'unknown',job.terminal_at||job.updated_at,job.id);
+    for(const job of scene.work?.jobs||[])if(['succeeded','failed','cancelled'].includes(job.status))route('wait',job.agent_id,job.boundary||'unknown',job.terminal_at||job.updated_at,job.agent_id+':'+job.id+':'+job.started_at);
     state.seen=[...seen].slice(-8000);
     const trim=(map,limit)=>Object.fromEntries(Object.entries(map).sort(([,a],[,b])=>b.lastObserved-a.lastObserved).slice(0,limit));
     state.entities=trim(state.entities,400);state.relations=trim(state.relations,400);state.touches=trim(state.touches,1000);state.routes=trim(state.routes,200);

@@ -46,11 +46,11 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhe
  // Remembered routes: repeated observed interactions, drawn still and faint
  // beneath everything live. A pattern is not a dependency.
  const routeHits=[];
- for(const route of (scene.flowMemory?.routes||[]).filter(r=>r.count>=2&&r.lastObserved<=playhead).slice(-80)){
-  const end=id=>m.regionMap.get(id)||m.remoteMap.get(id)||(m.actorMap.get(id)?{x:m.actorMap.get(id).x,y:m.actorMap.get(id).y}:null)||m.posts.find(p=>p.region+'\n'+p.boundary===id);
+ for(const route of (scene.flowMemory?.routes||[]).map(r=>r.observations?{...r,count:r.observations.filter(o=>o.at<=playhead).length,lastObserved:Math.max(0,...r.observations.filter(o=>o.at<=playhead).map(o=>o.at))}:r).filter(r=>r.count>=2&&r.lastObserved<=playhead).slice(-80)){
+  const end=id=>m.regionMap.get(id)||m.remoteMap.get(id)||(m.actorMap.get(id)?{x:m.actorMap.get(id).x,y:m.actorMap.get(id).y}:null)||m.posts.find(p=>p.region+'\n'+p.boundary===id)||(route.kind==='wait'&&id===route.to?m.posts.find(p=>p.boundary===id&&p.region===m.actorMap.get(route.from)?.workspace):null);
   const a=end(route.from),b=end(route.to);if(!a||!b)continue;relations.routes++;
   journey.drawRoute(c,a,b,route.count,detail);
-  routeHits.push({id:'route:'+route.kind+':'+route.from+'>'+route.to,label:'Remembered route',purpose:route.kind+' observed '+route.count+' times · a pattern in this browser\'s memory, not a dependency or a cause',x:(a.x+b.x)/2-12,y:(a.y+b.y)/2+3,w:24,h:24});
+  routeHits.push({id:'route:'+route.kind+':'+route.from+'>'+route.to,label:'Remembered route',purpose:route.kind+' observed in '+route.count+' retained records · a pattern in this browser\'s memory, not a dependency or a cause',x:(a.x+b.x)/2-12,y:(a.y+b.y)/2+3,w:24,h:24});
  }
  for(const project of m.projects){
   const seed=hash(project.id),children=m.regions.filter(r=>r.project===project.id);

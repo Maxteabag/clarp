@@ -20,10 +20,10 @@ CONTRACT={
     'outcome':'artifacts published by the same agent session inside the plan window; previews are host-loaded thumbnails of the recorded media asset, never fetched by generated source.',
     'handoff':'agent-origin prompt admissions that name a plan ID are references to that object, drawn as a knot on the thread; transfer is shown only for an explicit handoff record, which is not yet recorded.',
     'unknown':'a finished plan without a recorded artifact is shown closed without outcome; an event outside any plan window is ordinary activity.',
-    'waiting':'background_jobs are recorded dependencies on an external boundary (GitHub Actions, TestFlight, a test lane, a Host update, a service); a running job is waiting, a terminal record is its result, an expired heartbeat is a wait that ended without evidence. Pending decisions are waits on the owner. Quiet time is never drawn as waiting.',
+    'waiting':'background_jobs record activities awaiting an outcome, not proof of a blocked dependency; they are grouped by an evidenced boundary (GitHub Actions, TestFlight, a test lane, a Host update, a service); a running job is waiting, a terminal record is its result, an expired heartbeat is a wait that ended without evidence. Only decisions explicitly marked blocks_progress are displayed as owner waits. Quiet time is never drawn as waiting.',
     'routes':'repeated observed interactions may leave a browser-local historical route; a route is a pattern, never a dependency or a cause.'}
 
-BOUNDARIES={'github-workflow':('GitHub Actions','github'),'release':('TestFlight','apple'),'external_test_watch':('Test lane','lane'),
+BOUNDARIES={'github-workflow':('GitHub Actions','github'),'release':('Release','release'),'external_test_watch':('Test lane','lane'),
             'server-update':('Host update','host'),'service':('Service','service'),'build':('Build lane','lane'),'other':('External wait','unknown')}
 
 
@@ -45,6 +45,8 @@ def jobs(con,since,until,names,limit=60):
     for r in rows:
         label,boundary=BOUNDARIES.get(r['kind'],('External wait','unknown'))
         meta=_json_field(r['metadata_json'])
+        if r['kind']=='release' and (meta.get('provider')=='testflight' or re.search(r'\bTestFlight\b',r['title'] or '',re.I)):
+            label,boundary='TestFlight','apple'
         link=meta.get('run_url') or meta.get('url')
         result.append({'id':r['job_id'],'agent_id':r['agent_id'],'agent':names.get(r['agent_id'],r['agent_id'][:8]),'session':r['session'],'kind':r['kind'],
             'boundary':boundary,'boundary_label':label,'title':(r['title'] or '')[:90],'detail':(r['detail'] or '')[:160],'status':r['status'],
@@ -57,12 +59,12 @@ def jobs(con,since,until,names,limit=60):
 def decisions(con,since,until,names,limit=30):
     """Waits on the owner: pending or recently resolved decision artifacts."""
     try:
-        rows=con.execute('SELECT d.decision_id,d.status,d.resolved_at,d.blocks_progress,d.urgency,d.deadline_at,d.expires_at,a.agent_id,a.session,a.title,a.created_at '
+        rows=con.execute('SELECT d.decision_id,d.status,d.resolved_at,d.blocks_progress,d.urgency,d.deadline_at,d.expires_at,a.updated_at AS artifact_updated_at,a.agent_id,a.session,a.title,a.created_at '
             'FROM artifact_decisions d JOIN artifacts a USING(artifact_id) WHERE a.created_at<=? AND (d.resolved_at IS NULL OR d.resolved_at>=?) AND a.created_at>=? AND a.deleted_at IS NULL '
             'ORDER BY a.created_at DESC LIMIT ?',(until,since,since-86400000,limit)).fetchall()
     except Exception:return []
     return [{'id':r['decision_id'],'agent_id':r['agent_id'],'agent':names.get(r['agent_id'],r['agent_id'][:8]),'session':r['session'],'title':(r['title'] or '')[:90],
-             'status':r['status'],'created_at':r['created_at'],'resolved_at':r['resolved_at'],'blocks_progress':bool(r['blocks_progress']),'urgency':r['urgency'],
+             'status':r['status'],'created_at':r['created_at'],'resolved_at':r['resolved_at'],'updated_at':r['artifact_updated_at'],'blocks_progress':bool(r['blocks_progress']),'urgency':r['urgency'],
              'deadline_at':r['deadline_at'],'expires_at':r['expires_at']} for r in rows][::-1]
 
 
