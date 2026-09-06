@@ -60,3 +60,18 @@ The toolbar binds to AppController's notified `nextAttentionTarget` property.
 Its notifications cover roster changes, attention updates, and selection. Do
 not replace this with an opaque invokable call and assumed QML dependencies:
 the real-key fixture caught a stale availability hint with that approach.
+
+
+Ctrl+K also changes local settings directly. Search for timestamps, streaming,
+tool details, phone/iPhone notifications, shared filesystem, voice replies, or
+an explanation audience (Developer through Grandma), then press Enter. Boolean
+entries show the current and next state; audience entries mark the current
+level and whether AI is used. Existing controller setters persist the changes.
+Escape cancels and typing focus is restored after a direct setting action.
+Connection and orchestrator entries still open their dedicated configuration
+screens for fields that require more than a toggle.
+
+`tst_palette_settings.qml` covers actual Enter selection, query aliases, state
+labels, exact detail-level selection, Escape cancellation and focus return.
+For a screenshot, set `CLARP_SCREENSHOT_QUERY=streaming` and use the existing
+screenshot helper with `quickSwitcher` as its view argument.
