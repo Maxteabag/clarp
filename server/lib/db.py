@@ -1605,21 +1605,24 @@ def _migrate_to_v67(con: sqlite3.Connection) -> None:
     nights can be compared instead of merely read. `killed_reason` closes the
     other half - the ledger used to show only what survived.
     """
-    con.execute(
-        "ALTER TABLE dream_runs ADD COLUMN seed_strategy TEXT NOT NULL"
-        " DEFAULT 'control'")
-    con.execute(
-        "ALTER TABLE dream_runs ADD COLUMN context_dose TEXT NOT NULL"
-        " DEFAULT 'full'")
-    con.execute(
-        "ALTER TABLE dream_runs ADD COLUMN seed_material TEXT NOT NULL"
-        " DEFAULT ''")
-    con.execute(
-        "ALTER TABLE dream_threads ADD COLUMN killed_reason TEXT NOT NULL"
-        " DEFAULT ''")
-    con.execute(
-        "ALTER TABLE dream_threads ADD COLUMN origin_note TEXT NOT NULL"
-        " DEFAULT ''")
+    # Guarded, like every other migration here. A host can reach this point
+    # with the columns already present — from a fresh schema, or from a later
+    # repair migration — and re-running has to be a no-op, not a crash.
+    runs = {row[1] for row in con.execute("PRAGMA table_info(dream_runs)")}
+    for name, definition in (
+        ("seed_strategy", "TEXT NOT NULL DEFAULT 'control'"),
+        ("context_dose", "TEXT NOT NULL DEFAULT 'full'"),
+        ("seed_material", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if name not in runs:
+            con.execute(
+                f"ALTER TABLE dream_runs ADD COLUMN {name} {definition}")
+    threads = {row[1] for row in con.execute("PRAGMA table_info(dream_threads)")}
+    for name in ("killed_reason", "origin_note"):
+        if name not in threads:
+            con.execute(
+                f"ALTER TABLE dream_threads ADD COLUMN {name} TEXT NOT NULL"
+                " DEFAULT ''")
 
 
 _V64_SQL = """
