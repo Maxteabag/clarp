@@ -113,3 +113,66 @@ export function catalogBackendIds(catalogue, { current = '' } = {}) {
     .sort((a, b) => order(a.id) - order(b.id) || a.index - b.index)
     .map(item => item.id);
 }
+
+export const CONTACT_TIERS = {
+  // Claude Tier
+  claude: 'claude', 'claude default': 'claude', 'default claude': 'claude',
+  mike: 'claude', rachel: 'claude', domi: 'claude', bella: 'claude',
+  antoni: 'claude', elli: 'claude', josh: 'claude', arnold: 'claude',
+  adam: 'claude', sam: 'claude', marcus: 'claude', caleb: 'claude',
+  nadia: 'claude', priya: 'claude', diego: 'claude', lena: 'claude',
+  theo: 'claude', yuki: 'claude', omar: 'claude', freya: 'claude',
+
+  // Codex Tier
+  codex: 'codex', 'codex default': 'codex', 'default codex': 'codex',
+  axel: 'codex', iris: 'codex', felix: 'codex', gordon: 'codex',
+  quinn: 'codex', marsy: 'codex', silas: 'codex', tigo: 'codex',
+  wren: 'codex', kaelen: 'codex', lezo: 'codex', vesper: 'codex',
+  nyx: 'codex', avana: 'codex', aura: 'codex', orion: 'codex',
+  cipher: 'codex', solon: 'codex', spectra: 'codex', mirai: 'codex',
+  afria: 'codex', solu: 'codex', lyra: 'codex', echo: 'codex', nova: 'codex',
+
+  // Grok Tier
+  grok: 'grok', 'grok default': 'grok', 'default grok': 'grok',
+  margrok: 'grok', roxy: 'grok', vance: 'grok', fang: 'grok',
+  riot: 'grok', raven: 'grok', jax: 'grok', dagger: 'grok',
+  blaze: 'grok', spike: 'grok',
+
+  // Gemini Tier
+  gemini: 'gemini', 'gemini default': 'gemini', 'default gemini': 'gemini',
+  pip: 'gemini', bloop: 'gemini', noodle: 'gemini', ziggy: 'gemini', mochi: 'gemini',
+
+  // Janitor Tier
+  janitor: 'janitor', 'janitor default': 'janitor', 'default janitor': 'janitor',
+  rivet: 'janitor', 'paper cuts man': 'janitor', papercutsman: 'janitor',
+  clank: 'janitor', rusty: 'janitor', gearbox: 'janitor', sprocket: 'janitor',
+  scrappy: 'janitor', bolts: 'janitor', duster: 'janitor', valve: 'janitor',
+};
+
+export const TIER_BACKENDS = {
+  claude: AgentBackend.CLAUDE,
+  codex: AgentBackend.CODEX,
+  grok: AgentBackend.GROK,
+  gemini: AgentBackend.AGY,
+  janitor: AgentBackend.CODEX,
+  janitors: AgentBackend.CODEX,
+};
+
+export function tierForContact(name, persona = null) {
+  if (persona && persona.tier) return String(persona.tier).trim().toLowerCase();
+  const key = String(name || '').trim().toLowerCase();
+  return CONTACT_TIERS[key] || null;
+}
+
+export function allowedBackendForContact(name, persona = null) {
+  const tier = tierForContact(name, persona);
+  if (!tier) return null;
+  return TIER_BACKENDS[tier] || null;
+}
+
+export function isContactBackendAllowed(name, backend, persona = null) {
+  const allowed = allowedBackendForContact(name, persona);
+  if (!allowed) return true;
+  return normalizeBackend(backend) === normalizeBackend(allowed);
+}
+

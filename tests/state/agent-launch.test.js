@@ -3,6 +3,7 @@ import {
   normalizeBackend, resumableBackend, supportsForkBackend, catalogBackendIds,
   supportsResumeBackend, supportsCompactBackend, supportsMcpBackend,
   supportsSteerBackend, effortUI, backendLabel, backendDetail,
+  tierForContact, allowedBackendForContact, isContactBackendAllowed,
 } from '../../static/lib/agent-launch.js';
 
 describe('agent launch policy', () => {
@@ -104,3 +105,48 @@ describe('catalogue-driven chooser', () => {
     expect(backendDetail('grok')).toBe('Runs on Grok.');
   });
 });
+
+describe('contact tier-to-backend locking', () => {
+  it('correctly maps contact names to their respective tiers', () => {
+    expect(tierForContact('Claude')).toBe('claude');
+    expect(tierForContact('Rachel')).toBe('claude');
+    expect(tierForContact('Codex')).toBe('codex');
+    expect(tierForContact('Axel')).toBe('codex');
+    expect(tierForContact('Grok')).toBe('grok');
+    expect(tierForContact('Margrok')).toBe('grok');
+    expect(tierForContact('Gemini')).toBe('gemini');
+    expect(tierForContact('Pip')).toBe('gemini');
+    expect(tierForContact('Janitor')).toBe('janitor');
+    expect(tierForContact('Rivet')).toBe('janitor');
+    expect(tierForContact('Clarp')).toBe(null);
+    expect(tierForContact('UnknownAgent')).toBe(null);
+  });
+
+  it('correctly returns the required backend for each contact tier', () => {
+    expect(allowedBackendForContact('Claude')).toBe('claude');
+    expect(allowedBackendForContact('Rachel')).toBe('claude');
+    expect(allowedBackendForContact('Codex')).toBe('codex');
+    expect(allowedBackendForContact('Axel')).toBe('codex');
+    expect(allowedBackendForContact('Grok')).toBe('grok');
+    expect(allowedBackendForContact('Margrok')).toBe('grok');
+    expect(allowedBackendForContact('Gemini')).toBe('agy');
+    expect(allowedBackendForContact('Pip')).toBe('agy');
+    expect(allowedBackendForContact('Janitor')).toBe('codex');
+    expect(allowedBackendForContact('Rivet')).toBe('codex');
+    expect(allowedBackendForContact('Clarp')).toBe(null);
+  });
+
+  it('validates allowed backends and rejects mismatches', () => {
+    expect(isContactBackendAllowed('Rachel', 'claude')).toBe(true);
+    expect(isContactBackendAllowed('Rachel', 'codex')).toBe(false);
+    expect(isContactBackendAllowed('Axel', 'codex')).toBe(true);
+    expect(isContactBackendAllowed('Axel', 'claude')).toBe(false);
+    expect(isContactBackendAllowed('Margrok', 'grok')).toBe(true);
+    expect(isContactBackendAllowed('Margrok', 'claude')).toBe(false);
+    expect(isContactBackendAllowed('Pip', 'agy')).toBe(true);
+    expect(isContactBackendAllowed('Pip', 'codex')).toBe(false);
+    expect(isContactBackendAllowed('Clarp', 'claude')).toBe(true);
+    expect(isContactBackendAllowed('Clarp', 'codex')).toBe(true);
+  });
+});
+
