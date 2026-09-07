@@ -196,6 +196,62 @@ int main(int argc, char* argv[]) {
             }
         });
     }
+    // A report fixture whose HTML deliberately contains every remote-fetch
+    // vector Qt's rich text engine honours. CLARP_REPORT_TRACKER_ORIGIN lets a
+    // CTest point those references at a listener and assert nothing is fetched.
+    if (!screenshotPath.isEmpty() && controller != nullptr && rootWindow != nullptr
+        && screenshotScenario == QStringLiteral("report")) {
+        QTimer::singleShot(1'950, &application, [controller, rootWindow] {
+            const QString tracker = qEnvironmentVariable("CLARP_REPORT_TRACKER_ORIGIN",
+                                                         QStringLiteral("http://tracker.invalid"));
+            const QString body = QStringLiteral(
+                "<html><head><style>@import url(\"%1/imported.css\");"
+                "body{background-image:url('%1/bg.png')}"
+                ".card{background:url(%1/shorthand.png)}</style></head><body>"
+                "<h1>Deployment review</h1>"
+                "<p style=\"background-image:url(%1/inline.png)\">Three services were "
+                "redeployed. Latency returned to baseline within four minutes.</p>"
+                "<h2>Measured results</h2>"
+                "<table border=\"1\" background=\"%1/tablebg.png\">"
+                "<thead><tr><th>Service</th><th>p95 before</th><th>p95 after</th></tr></thead>"
+                "<tbody><tr><td>api</td><td>1.8 s</td><td>240 ms</td></tr>"
+                "<tr><td>worker</td><td>920 ms</td><td>310 ms</td></tr></tbody></table>"
+                "<h2>Follow-ups</h2><ul><li>Re-run the load test"
+                "<ul><li>include the cold-start path</li></ul></li>"
+                "<li>Delete the temporary index</li></ul>"
+                "<blockquote>The N+1 query was the whole regression.</blockquote>"
+                "<p>Full detail: <a href=\"https://example.com/deploy/report\">the run log</a>"
+                " and <img src=\"%1/pixel.png\" width=\"12\" height=\"12\"> a tracking pixel.</p>"
+                "<script>fetch('%1/beacon')</script>"
+                "</body></html>").arg(tracker);
+            controller->seedScreenshotArtifacts({QVariantMap{
+                {QStringLiteral("artifact_id"), QStringLiteral("report-fixture")},
+                {QStringLiteral("type"), QStringLiteral("document")},
+                {QStringLiteral("title"), QStringLiteral("Deployment review")},
+                {QStringLiteral("summary"), QStringLiteral("What changed and what it measured")},
+                {QStringLiteral("session"), controller->selectedSession()},
+                {QStringLiteral("content"), body}}});
+            if (QObject* view = rootWindow->findChild<QObject*>(QStringLiteral("reportView"))) {
+                QMetaObject::invokeMethod(view, "open",
+                                          Q_ARG(QVariant, QStringLiteral("report-fixture")));
+            } else {
+                qCritical("The report view is missing");
+                QCoreApplication::exit(EXIT_FAILURE);
+                return;
+            }
+            // A wrong reader parses the HTML into an empty document that still
+            // reports a valid width, so assert real rendered height and the
+            // absence of any reference that would leave this machine.
+            QTimer::singleShot(900, qApp, [rootWindow] {
+                auto* rendered = rootWindow->findChild<QQuickItem*>(QStringLiteral("reportBody"));
+                if (rendered == nullptr || rendered->height() < 120) {
+                    qCritical("The report body did not render (height %f)",
+                              rendered == nullptr ? -1.0 : rendered->height());
+                    QCoreApplication::exit(EXIT_FAILURE);
+                }
+            });
+        });
+    }
     if (!screenshotPath.isEmpty() && rootWindow != nullptr && !screenshotView.isEmpty()) {
         QTimer::singleShot(1'000, &application, [rootWindow, controller, screenshotView] {
             if (screenshotView == QStringLiteral("idleContacts")) {
@@ -258,6 +314,8 @@ int main(int argc, char* argv[]) {
                            [controller, screenshotScenario] {
             QString session = controller->selectedSession();
             if (session.isEmpty() && (screenshotScenario == QStringLiteral("markdown") ||
+                                      screenshotScenario == QStringLiteral("links") ||
+                                      screenshotScenario == QStringLiteral("report") ||
                                       screenshotScenario == QStringLiteral("tool-spacing") ||
                                       screenshotScenario == QStringLiteral("preview-versions") ||
                                       screenshotScenario == QStringLiteral("team-messages"))) {
@@ -404,6 +462,36 @@ int main(int argc, char* argv[]) {
                              "1. Lists remain structurally intact\n\n"
                              "2. Their numbering must not restart")},
                         {QStringLiteral("revision"), 2}},
+                };
+            } else if (screenshotScenario == QStringLiteral("links")) {
+                controller->clearError();
+                controller->setToolsVisible(true);
+                turns = {
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("links-user")},
+                                {QStringLiteral("role"), QStringLiteral("user")},
+                                {QStringLiteral("text"),
+                                 QStringLiteral("Where do I read the release notes?")},
+                                {QStringLiteral("revision"), 1}},
+                    QJsonObject{
+                        {QStringLiteral("id"), QStringLiteral("links-reply")},
+                        {QStringLiteral("role"), QStringLiteral("assistant")},
+                        {QStringLiteral("text"),
+                         QStringLiteral(
+                             "A bare URL autolinks: https://example.com/releases/v2?ref=chat\n\n"
+                             "A labelled link works too: [the changelog](https://example.com/changelog)\n\n"
+                             "So do host-only links (www.example.com) and mail (team@example.com).\n\n"
+                             "`https://example.com/in-code` inside code must stay literal text.\n\n"
+                             "Open: https://elitebook.tailf14237.ts.net:14443/final/")},
+                        {QStringLiteral("revision"), 2},
+                        {QStringLiteral("tools"), QJsonArray{QJsonObject{
+                            {QStringLiteral("name"), QStringLiteral("Bash")},
+                            {QStringLiteral("summary"), QStringLiteral("git push")},
+                            {QStringLiteral("command"), QStringLiteral("git push -u origin HEAD")},
+                            {QStringLiteral("status"), QStringLiteral("ok")},
+                            // Verbatim output keeps its indentation while the URL anchors.
+                            {QStringLiteral("result"), QStringLiteral(
+                                "  branch published\n\tPR: https://example.com/pr/7 (review it)\n"
+                                "  literal <tag> & \"quoted\" survive")}}}}},
                 };
             } else if (screenshotScenario == QStringLiteral("long")) {
                 for (int index = 0; index < 60; ++index) {

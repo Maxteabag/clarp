@@ -302,7 +302,48 @@ Item {
                             selectedTextColor: "#fff8ff"
                             selectionColor: "#6f527b"
                             font.pixelSize: 15
-                            onLinkActivated: link => Qt.openUrlExternally(link)
+                            // Routed through the controller so a non-web scheme in
+                            // model output cannot reach the desktop handler.
+                            onLinkActivated: link => root.controller.openExternalLink(link)
+
+                            // Without this the text just looks blue; the I-beam
+                            // gives no hint that the URL can be clicked.
+                            HoverHandler {
+                                objectName: "messageLinkHover"
+                                cursorShape: parent.hoveredLink.length > 0
+                                    ? Qt.PointingHandCursor : Qt.IBeamCursor
+                            }
+
+                            TapHandler {
+                                objectName: "messageLinkMenuTap"
+                                acceptedButtons: Qt.RightButton
+                                onSingleTapped: (eventPoint, button) => {
+                                    const link = parent.linkAt(eventPoint.position.x,
+                                                               eventPoint.position.y);
+                                    if (link.length === 0)
+                                        return;
+                                    linkMenu.link = link;
+                                    linkMenu.x = eventPoint.position.x;
+                                    linkMenu.y = eventPoint.position.y;
+                                    linkMenu.open();
+                                }
+                            }
+
+                            Menu {
+                                id: linkMenu
+                                objectName: "messageLinkMenu"
+                                property string link: ""
+                                MenuItem {
+                                    objectName: "messageLinkOpen"
+                                    text: qsTr("Open link")
+                                    onTriggered: root.controller.openExternalLink(linkMenu.link)
+                                }
+                                MenuItem {
+                                    objectName: "messageLinkCopy"
+                                    text: qsTr("Copy link")
+                                    onTriggered: root.controller.copyToClipboard(linkMenu.link)
+                                }
+                            }
                         }
                     }
                 }
@@ -393,6 +434,7 @@ Item {
                     Layout.preferredHeight: visible ? implicitHeight : 0
                     Layout.fillWidth: true
                     tool: modelData
+                    controller: root.controller
                     narrator: root.narrator
                     workingDirectory: root.workingDirectory
                     localFilesAllowed: root.localFilesAllowed

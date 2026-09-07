@@ -129,6 +129,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/PairRow.qml
         qml/components/AgentProfilePanel.qml
         qml/components/QuickSwitcher.qml
+        qml/components/ReportView.qml
         qml/components/QueueDialog.qml
         qml/components/KeyboardMap.qml
         qml/components/ShortcutBar.qml

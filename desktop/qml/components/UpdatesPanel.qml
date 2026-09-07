@@ -9,6 +9,7 @@ Rectangle {
 
     required property var controller
     signal openChat(string session)
+    signal openReport(string artifactId)
     color: "#1a1b26"
     objectName: "updatesPanel"
 
@@ -321,6 +322,15 @@ Rectangle {
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
+                            }
+                            Button {
+                                objectName: "artifactViewReport"
+                                // Reports open in the native viewer, not a browser.
+                                visible: root.controller.artifactIsViewableReport(artifact.modelData)
+                                text: "View"
+                                implicitHeight: 27
+                                onClicked: root.openReport(
+                                    String(artifact.modelData.artifact_id || ""))
                             }
                             Button {
                                 visible: String(artifact.modelData.session || "").length > 0

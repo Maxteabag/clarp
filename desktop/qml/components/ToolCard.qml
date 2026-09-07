@@ -8,6 +8,7 @@ Rectangle {
     objectName: "toolCard"
 
     required property var tool
+    property var controller: null
     property var narrator: null
     property string workingDirectory: ""
     property string session: ""
@@ -110,8 +111,17 @@ Rectangle {
                 id: detailText
                 anchors.fill: parent
                 anchors.margins: 3
-                text: (explanation.text.length > 0 ? root.toolName + " · " + root.summary + "\n\n" : "") + root.detail
-                textFormat: TextEdit.PlainText
+                readonly property string plainDetail:
+                    (explanation.text.length > 0 ? root.toolName + " · " + root.summary + "\n\n" : "")
+                    + root.detail
+                // URLs commonly arrive in verbatim output (a PR link from gh, a
+                // curl body). Anchor them without editing the text: every
+                // character is escaped and pre-wrap keeps the original layout.
+                // Long or URL-free output stays on the cheaper PlainText path.
+                readonly property bool linkified: root.controller !== null
+                    && root.controller.canLinkifyOutput(plainDetail)
+                text: linkified ? root.controller.linkifiedOutput(plainDetail) : plainDetail
+                textFormat: linkified ? TextEdit.RichText : TextEdit.PlainText
                 readOnly: true
                 selectByMouse: true
                 wrapMode: TextEdit.WrapAnywhere
@@ -119,6 +129,13 @@ Rectangle {
                 selectionColor: "#565d82"
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
+                onLinkActivated: link => root.controller.openExternalLink(link)
+
+                HoverHandler {
+                    objectName: "toolLinkHover"
+                    cursorShape: detailText.hoveredLink.length > 0
+                        ? Qt.PointingHandCursor : Qt.IBeamCursor
+                }
             }
         }
     }

@@ -1,4 +1,5 @@
 #include "models/ConversationPresentationModel.h"
+#include <QTextDocument>
 #include <QStandardItemModel>
 #include "app/AppController.h"
 #include "app/CredentialStore.h"
@@ -646,6 +647,12 @@ class NativeCoreTest final : public QObject {
     void markdownParagraphsBecomeVisibleDisplayBlocks();
     void agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent();
     void pairConversationRoomsAreReadOnlyProjections();
+    void onlyWebAndMailLinksAreOpenable();
+    void toolOutputLinksAreAnchoredWithoutChangingTheText();
+    void reportHtmlCannotFetchRemoteResources();
+    void reportHtmlKeepsStructureButNeverFetchesRemoteResources();
+    void reportForArtifactExposesSanitizedBody();
+    void portedUrlsBecomeLinksWithoutChangingVisibleText();
 };
 
 void NativeCoreTest::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender() {
@@ -1068,6 +1075,246 @@ void NativeCoreTest::agentTerminalLaunchesNativeCliThroughDefaultTerminal() {
     controller.setSharedFilesystem(false);
     controller.openAgentTerminal(QStringLiteral("agent"));
     QVERIFY(!QFileInfo::exists(capture));
+}
+
+void NativeCoreTest::onlyWebAndMailLinksAreOpenable() {
+    QVERIFY(isOpenableLink(QStringLiteral("https://example.com/a?b=1#c")));
+    QVERIFY(isOpenableLink(QStringLiteral("http://example.com")));
+    QVERIFY(isOpenableLink(QStringLiteral("  https://example.com/padded  ")));
+    QVERIFY(isOpenableLink(QStringLiteral("HTTPS://Example.com/upper")));
+    QVERIFY(isOpenableLink(QStringLiteral("mailto:team@example.com")));
+
+    // Transcript text is untrusted output; nothing else may reach the handler.
+    QVERIFY(!isOpenableLink(QStringLiteral("file:///etc/passwd")));
+    QVERIFY(!isOpenableLink(QStringLiteral("https:///etc/passwd")));
+    QVERIFY(!isOpenableLink(QStringLiteral("javascript:alert(1)")));
+    QVERIFY(!isOpenableLink(QStringLiteral("smb://host/share")));
+    QVERIFY(!isOpenableLink(QStringLiteral("ssh://box/repo")));
+    QVERIFY(!isOpenableLink(QStringLiteral("mailto:")));
+    QVERIFY(!isOpenableLink(QStringLiteral("/plain/path")));
+    QVERIFY(!isOpenableLink(QString{}));
+}
+
+void NativeCoreTest::toolOutputLinksAreAnchoredWithoutChangingTheText() {
+    const QString output =
+        QStringLiteral("  branch pushed\n\tsee https://example.com/pr/7 (open it)\n"
+                       "contact www.example.com now\n<not a tag> & \"quoted\"");
+    const QString rich = linkifiedPlainText(output);
+
+    // Anchors point at real targets; a bare host gains an https scheme.
+    QVERIFY(rich.contains(QStringLiteral("<a href=\"https://example.com/pr/7\">")));
+    QVERIFY(rich.contains(QStringLiteral("<a href=\"https://www.example.com\">")));
+    // Trailing prose punctuation stays outside the target.
+    QVERIFY(!rich.contains(QStringLiteral("pr/7(")));
+    QVERIFY(!rich.contains(QStringLiteral("href=\"https://example.com/pr/7(")));
+    // Original characters are escaped rather than interpreted as markup.
+    QVERIFY(rich.contains(QStringLiteral("&lt;not a tag&gt; &amp; &quot;quoted&quot;")));
+    // Whitespace fidelity depends on pre-wrap, not on a <pre> that would overflow.
+    QVERIFY(rich.startsWith(QStringLiteral("<div style=\"white-space: pre-wrap;\">")));
+
+    // The visible text must survive the round trip byte for byte.
+    QTextDocument document;
+    document.setHtml(rich);
+    QCOMPARE(document.toPlainText(), output);
+
+    // Output with no URL still round-trips, and oversized output opts out.
+    QCOMPARE(linkifiedPlainText(QStringLiteral("plain\n  text")),
+             QStringLiteral("<div style=\"white-space: pre-wrap;\">plain\n  text</div>"));
+    QVERIFY(maxLinkifiedTextLength > 0);
+}
+
+void NativeCoreTest::reportHtmlKeepsStructureButNeverFetchesRemoteResources() {
+    const QString host = QStringLiteral("https://host.example");
+    const QString report = QStringLiteral(
+        "<html><head><style>@import url(\"http://tracker.example/x.css\");"
+        "body{background-image:url('http://tracker.example/bg.png')}"
+        ".c{background:url(http://tracker.example/short.png)}</style></head><body>"
+        "<h1>Quarterly report</h1>"
+        "<p style=\"background-image:url(http://tracker.example/inline.png)\">Body</p>"
+        "<img src=\"http://tracker.example/pixel.png\">"
+        "<img src=\"data:image/gif;base64,R0lGODlh\">"
+        "<img src=\"https://host.example/static/chart.png\">"
+        "<table background=\"http://tracker.example/tablebg.png\"><tr><td>1</td></tr></table>"
+        "<script>fetch('http://tracker.example/beacon')</script>"
+        "<a href=\"https://example.com/source\">source</a>"
+        "</body></html>");
+
+    const QString safe = sanitizedReportHtml(report, host);
+
+    // Nothing that would reach the tracker may survive, in any vector.
+    QVERIFY(!safe.contains(QStringLiteral("tracker.example")));
+    QVERIFY(!safe.contains(QStringLiteral("@import"), Qt::CaseInsensitive));
+    QVERIFY(!safe.contains(QStringLiteral("<script"), Qt::CaseInsensitive));
+    QVERIFY(!safe.contains(QStringLiteral("beacon")));
+
+    // Self-contained and Host-served resources are preserved.
+    QVERIFY(safe.contains(QStringLiteral("data:image/gif;base64,R0lGODlh")));
+    QVERIFY(safe.contains(QStringLiteral("https://host.example/static/chart.png")));
+
+    // The readable report survives: headings, text, tables and outbound links.
+    QVERIFY(safe.contains(QStringLiteral("<h1>Quarterly report</h1>")));
+    QVERIFY(safe.contains(QStringLiteral("https://example.com/source")));
+    QTextDocument document;
+    document.setHtml(safe);
+    const QString plain = document.toPlainText();
+    QVERIFY(plain.contains(QStringLiteral("Quarterly report")));
+    QVERIFY(plain.contains(QStringLiteral("Body")));
+    QVERIFY(plain.contains(QStringLiteral("source")));
+
+    // An empty host origin must not turn into a prefix that matches everything.
+    const QString noHost = sanitizedReportHtml(report, QString{});
+    QVERIFY(!noHost.contains(QStringLiteral("tracker.example")));
+    QVERIFY(!noHost.contains(QStringLiteral("host.example/static")));
+    QVERIFY(noHost.contains(QStringLiteral("data:image/gif")));
+
+    // Markdown must not be pushed through the HTML renderer, and vice versa.
+    QVERIFY(looksLikeHtmlReport(QStringLiteral("<h1>Title</h1><p>x</p>")));
+    QVERIFY(looksLikeHtmlReport(QStringLiteral("<!DOCTYPE html><html><body>x</body></html>")));
+    QVERIFY(!looksLikeHtmlReport(QStringLiteral("# Title\n\nA paragraph with <not-a-tag>.")));
+    QVERIFY(!looksLikeHtmlReport(QStringLiteral("Plain text 1 < 2 and 3 > 2.")));
+}
+
+void NativeCoreTest::reportHtmlCannotFetchRemoteResources() {
+    // Every one of these was observed making a real request through Qt's rich
+    // text engine before sanitizing; see sanitizedReportHtml's comment.
+    const QString host = QStringLiteral("https://host.example");
+    const QString report = QStringLiteral(
+        "<html><head><style>"
+        "@import url(\"http://tracker.example/imported.css\");"
+        "body{background-image:url('http://tracker.example/bg.png')}"
+        ".x{background:url(http://tracker.example/shorthand.png)}"
+        "</style></head><body>"
+        "<p style=\"background-image:url(http://tracker.example/inline.png)\">styled</p>"
+        "<img src=\"http://tracker.example/pixel.png\">"
+        "<table background=\"http://tracker.example/tablebg.png\"><tr><td>c</td></tr></table>"
+        "<script>fetch('http://tracker.example/beacon')</script>"
+        "</body></html>");
+
+    const QString safe = sanitizedReportHtml(report, host);
+    QVERIFY(!safe.contains(QStringLiteral("tracker.example")));
+    QVERIFY(!safe.contains(QStringLiteral("@import"), Qt::CaseInsensitive));
+    QVERIFY(!safe.contains(QStringLiteral("<script"), Qt::CaseInsensitive));
+    QVERIFY(!safe.contains(QStringLiteral("beacon")));
+    // The readable report survives the rewrite.
+    QVERIFY(safe.contains(QStringLiteral("styled")));
+    QVERIFY(safe.contains(QStringLiteral("<table")));
+
+    // Self-contained and Host-served resources still resolve.
+    const QString kept = sanitizedReportHtml(
+        QStringLiteral("<img src=\"data:image/gif;base64,R0lGODlh\">"
+                       "<img src=\"https://host.example/static/avatars/a.png\">"
+                       "<p style=\"background-image:url('data:image/png;base64,AAA')\">x</p>"),
+        host);
+    QVERIFY(kept.contains(QStringLiteral("data:image/gif;base64,R0lGODlh")));
+    QVERIFY(kept.contains(QStringLiteral("https://host.example/static/avatars/a.png")));
+    QVERIFY(kept.contains(QStringLiteral("url('data:image/png;base64,AAA')")));
+
+    // With no Host origin known, only self-contained data URLs may load.
+    const QString noHost = sanitizedReportHtml(
+        QStringLiteral("<img src=\"https://host.example/x.png\">"), QString{});
+    QVERIFY(!noHost.contains(QStringLiteral("host.example")));
+
+    // A protocol-relative or scheme-confused reference must not slip through.
+    const QString tricky = sanitizedReportHtml(
+        QStringLiteral("<img src=\"//tracker.example/p.png\">"
+                       "<img src=' http://tracker.example/pad.png '>"
+                       "<IMG SRC=HTTP://TRACKER.EXAMPLE/UPPER.PNG>"), host);
+    QVERIFY(!tricky.contains(QStringLiteral("tracker"), Qt::CaseInsensitive));
+
+    QVERIFY(looksLikeHtmlReport(QStringLiteral("<html><body><h1>R</h1></body></html>")));
+    QVERIFY(looksLikeHtmlReport(QStringLiteral("<div class=\"card\">x</div>")));
+    QVERIFY(!looksLikeHtmlReport(QStringLiteral("# Heading\n\nPlain **markdown** only.")));
+}
+
+void NativeCoreTest::reportForArtifactExposesSanitizedBody() {
+    AppController controller;
+    qputenv("CLARP_SCREENSHOT_PATH", QByteArray("/dev/null"));
+    controller.seedScreenshotArtifacts({QVariantMap{
+        {QStringLiteral("artifact_id"), QStringLiteral("r1")},
+        {QStringLiteral("type"), QStringLiteral("document")},
+        {QStringLiteral("title"), QStringLiteral("Deployment review")},
+        {QStringLiteral("content"), QStringLiteral(
+            "<h1>Deployment review</h1><img src=\"http://tracker.example/p.png\">")}}});
+    qunsetenv("CLARP_SCREENSHOT_PATH");
+
+    const QVariantMap report = controller.reportForArtifact(QStringLiteral("r1"));
+    QCOMPARE(report.value(QStringLiteral("title")).toString(),
+             QStringLiteral("Deployment review"));
+    QVERIFY(report.value(QStringLiteral("isHtml")).toBool());
+    const QString body = report.value(QStringLiteral("body")).toString();
+    QVERIFY(!body.isEmpty());
+    QVERIFY(body.contains(QStringLiteral("<h1>Deployment review</h1>")));
+    QVERIFY(!body.contains(QStringLiteral("tracker.example")));
+
+    // A Markdown body is passed through untouched for the Markdown renderer.
+    qputenv("CLARP_SCREENSHOT_PATH", QByteArray("/dev/null"));
+    controller.seedScreenshotArtifacts({QVariantMap{
+        {QStringLiteral("artifact_id"), QStringLiteral("r2")},
+        {QStringLiteral("type"), QStringLiteral("research")},
+        {QStringLiteral("content"), QStringLiteral("# Findings\n\nOne thing.")}}});
+    qunsetenv("CLARP_SCREENSHOT_PATH");
+    const QVariantMap markdown = controller.reportForArtifact(QStringLiteral("r2"));
+    QVERIFY(!markdown.value(QStringLiteral("isHtml")).toBool());
+    QCOMPARE(markdown.value(QStringLiteral("body")).toString(),
+             QStringLiteral("# Findings\n\nOne thing."));
+
+    // Types without a readable body are not offered as reports.
+    QVERIFY(!controller.artifactIsViewableReport(QVariantMap{
+        {QStringLiteral("type"), QStringLiteral("countdown")},
+        {QStringLiteral("content"), QStringLiteral("<h1>x</h1>")}}));
+    QVERIFY(!controller.artifactIsViewableReport(QVariantMap{
+        {QStringLiteral("type"), QStringLiteral("document")},
+        {QStringLiteral("content"), QStringLiteral("   ")}}));
+    QVERIFY(controller.reportForArtifact(QStringLiteral("missing")).isEmpty());
+}
+
+void NativeCoreTest::portedUrlsBecomeLinksWithoutChangingVisibleText() {
+    // The reported case: md4c does not autolink a URL with an explicit port,
+    // so this rendered as inert text while the same URL without :14443 linked.
+    const QString reported =
+        QStringLiteral("Open: https://elitebook.tailf14237.ts.net:14443/final/");
+    const QString fixed = markdownWithExplicitAutolinks(reported);
+    QCOMPARE(fixed, QStringLiteral(
+        "Open: <https://elitebook.tailf14237.ts.net:14443/final/>"));
+
+    // Qt must now see a real link, and the reader must show the original text.
+    QTextDocument document;
+    document.setMarkdown(fixed);
+    QCOMPARE(document.toPlainText(),
+             QStringLiteral("Open: https://elitebook.tailf14237.ts.net:14443/final/"));
+    QVERIFY(document.toHtml().contains(
+        QStringLiteral("href=\"https://elitebook.tailf14237.ts.net:14443/final/\"")));
+
+    // Ports in every shape agents actually produce.
+    QVERIFY(markdownWithExplicitAutolinks(QStringLiteral("http://127.0.0.1:8080/x"))
+                .contains(QStringLiteral("<http://127.0.0.1:8080/x>")));
+    QVERIFY(markdownWithExplicitAutolinks(QStringLiteral("see https://host:7699 now"))
+                .contains(QStringLiteral("<https://host:7699>")));
+
+    // Unported URLs md4c already handles must not be rewritten.
+    QCOMPARE(markdownWithExplicitAutolinks(QStringLiteral("https://example.com/final/")),
+             QStringLiteral("https://example.com/final/"));
+
+    // Existing markdown links and autolinks must be left exactly as written.
+    const QString labelled =
+        QStringLiteral("[the lab](https://host:14443/final/) and <https://host:9/x>");
+    QCOMPARE(markdownWithExplicitAutolinks(labelled), labelled);
+
+    // Code must stay literal: an inline span, a fence, and an indented block.
+    QCOMPARE(markdownWithExplicitAutolinks(QStringLiteral("run `curl https://host:14443/x`")),
+             QStringLiteral("run `curl https://host:14443/x`"));
+    const QString fenced =
+        QStringLiteral("```\ncurl https://host:14443/x\n```\nthen https://host:14443/y");
+    const QString fencedFixed = markdownWithExplicitAutolinks(fenced);
+    QVERIFY(fencedFixed.contains(QStringLiteral("curl https://host:14443/x\n")));
+    QVERIFY(!fencedFixed.contains(QStringLiteral("<https://host:14443/x>")));
+    QVERIFY(fencedFixed.contains(QStringLiteral("then <https://host:14443/y>")));
+    QCOMPARE(markdownWithExplicitAutolinks(QStringLiteral("    https://host:14443/x")),
+             QStringLiteral("    https://host:14443/x"));
+
+    // Trailing prose punctuation must not be swallowed into the target.
+    QCOMPARE(markdownWithExplicitAutolinks(QStringLiteral("go to https://host:14443/x).")),
+             QStringLiteral("go to <https://host:14443/x>)."));
 }
 
 void NativeCoreTest::markdownParagraphsBecomeVisibleDisplayBlocks() {
