@@ -41,17 +41,29 @@ Item {
         narrator.revision;
         return narrator.explanation(requestActivity, workingDirectory, localFilesAllowed);
     }
+    // A translation that will not arrive — this row failed, or the narrator as a
+    // whole is in error. Either way the card has something better to show than a
+    // dead end: the tool call it was translating.
+    readonly property bool failed: {
+        if (!narrationEnabled) return false;
+        narrator.revision;
+        return narrator.unavailable || narrator.failed(requestActivity, workingDirectory, localFilesAllowed);
+    }
+    // What the card should actually render as narration. Consumers gate the
+    // original tool name, summary and detail on this rather than on
+    // narrationEnabled, so a failure falls back instead of blanking the row.
+    readonly property bool narrationShown: narrationEnabled && !failed
     property int dotPhase: 0
-    readonly property string displayText: !narrationEnabled ? "" : text ||
-        (narrator.unavailable ? "Explanation unavailable" : [".", "..", "…"][dotPhase])
+    readonly property string displayText: !narrationShown ? "" : text || [".", "..", "…"][dotPhase]
     Timer {
         interval: 400; repeat: true
-        running: root.narrationEnabled && root.active && root.inViewport
-            && root.text.length === 0 && !root.narrator.unavailable
+        running: root.narrationShown && root.active && root.inViewport && root.text.length === 0
         onTriggered: root.dotPhase = (root.dotPhase + 1) % 3
     }
     function request() {
-        if (narrationEnabled && active && inViewport && !settle.running) {
+        // A failed row keeps an empty text, so without this guard the retry
+        // below would re-request it on every narrator update, forever.
+        if (narrationShown && active && inViewport && !settle.running) {
             if (narrator.acquireView) {
                 narrator.acquireView(root, requestActivity);
                 requestedNarrator = narrator;
@@ -75,7 +87,7 @@ Item {
     property Connections updates: Connections {
         target: root.narrator
         function onChanged() {
-            if (root.text.length === 0) Qt.callLater(root.request);
+            if (root.text.length === 0 && !root.failed) Qt.callLater(root.request);
         }
     }
 }

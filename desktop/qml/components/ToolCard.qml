@@ -65,7 +65,7 @@ Rectangle {
                 color: root.statusColor
             }
             Text {
-                visible: !explanation.narrationEnabled
+                visible: !explanation.narrationShown
                 text: root.toolName
                 color: "#9ea4c7"
                 font.family: "JetBrains Mono"
@@ -73,7 +73,7 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
             Text {
-                visible: !explanation.narrationEnabled
+                visible: !explanation.narrationShown
                 Layout.fillWidth: true
                 text: root.summary
                 color: "#969bb5"
@@ -82,7 +82,7 @@ Rectangle {
             }
             Text {
                 objectName: "activityExplanationText"
-                visible: explanation.narrationEnabled
+                visible: explanation.narrationShown
                 Layout.fillWidth: true
                 text: explanation.displayText
                 textFormat: Text.PlainText
@@ -91,7 +91,7 @@ Rectangle {
                 wrapMode: Text.Wrap
             }
             Text {
-                visible: (!explanation.narrationEnabled && root.detail.length > 0) || explanation.text.length > 0
+                visible: (!explanation.narrationShown && root.detail.length > 0) || explanation.text.length > 0
                 text: root.expanded ? "−" : "+"
                 color: "#858aa7"
                 font.pixelSize: 13
@@ -99,7 +99,7 @@ Rectangle {
         }
 
         Rectangle {
-            visible: root.expanded && (!explanation.narrationEnabled || explanation.text.length > 0)
+            visible: root.expanded && (!explanation.narrationShown || explanation.text.length > 0)
                 && (root.detail.length > 0 || explanation.text.length > 0)
             Layout.fillWidth: true
             Layout.leftMargin: 15
@@ -124,7 +124,7 @@ Rectangle {
     }
 
     TapHandler {
-        enabled: (!explanation.narrationEnabled && root.detail.length > 0) || explanation.text.length > 0
+        enabled: (!explanation.narrationShown && root.detail.length > 0) || explanation.text.length > 0
         onTapped: root.expanded = !root.expanded
     }
 }

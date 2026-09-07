@@ -168,9 +168,11 @@ TestCase {
         property bool ready: false
         property bool unavailable: false
         property string responseText: "Build the desktop preview."
+        property bool rowFailed: false
         signal changed()
         function request(activity) {}
         function explanation(activity) { return ready ? responseText : ""; }
+        function failed(activity) { return rowFailed; }
     }
 
     function test_translationIsBlueOptionalAndKeepsRawDetails() {
@@ -189,11 +191,20 @@ TestCase {
         compare(explanation.color, "#82aaff");
         card.expanded = true;
         verify(card.detail.includes("cmake --build"));
+        // A translation that cannot arrive falls back to the tool call it was
+        // replacing, rather than leaving a dead-end message in its place.
         narratorStub.ready = false;
         narratorStub.unavailable = true;
         narratorStub.revision++;
-        tryCompare(explanation, "text", "Explanation unavailable");
-        verify(!visibleText(card).includes("cmake --build"));
+        tryCompare(explanation, "visible", false);
+        verify(visibleText(card).includes("cmake --build"));
+        verify(visibleText(card).includes("Bash"));
+        narratorStub.unavailable = false;
+        narratorStub.rowFailed = true;
+        narratorStub.revision++;
+        tryCompare(explanation, "visible", false);
+        verify(visibleText(card).includes("cmake --build"));
+        narratorStub.rowFailed = false;
         narratorStub.enabled = false;
         tryCompare(explanation, "visible", false);
     }
@@ -209,6 +220,7 @@ TestCase {
         stubController.toolNarrator = null;
         narratorStub.responseText = "Build the desktop preview.";
         narratorStub.unavailable = false;
+        narratorStub.rowFailed = false;
     }
 
     function test_liveActivityNeverLeaksRawCommandsWhileWaiting() {
