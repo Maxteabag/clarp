@@ -1,6 +1,17 @@
 #include "models/ConversationPresentationModel.h"
 #include "models/ConversationModel.h"
 namespace clarp {
+namespace {
+// The Host stamps every ordinary row "user" and uses a dispatcher name
+// ("agent", "heartbeat", "janitor", "automation", ...) for anything it sent on
+// someone else's behalf. Only an unstamped fixture row is ever empty, so
+// testing for emptiness alone treated the entire live transcript as foreign
+// and left every activity row in a group of its own.
+bool ownTurn(const QModelIndex& row) {
+    const auto origin = row.data(ConversationModel::OriginRole).toString();
+    return origin.isEmpty() || origin == QStringLiteral("user");
+}
+}
 ConversationPresentationModel::ConversationPresentationModel(QObject* parent) : QSortFilterProxyModel(parent) {
     connect(this, &QAbstractItemModel::modelReset, this, &ConversationPresentationModel::countChanged);
     connect(this, &QAbstractItemModel::rowsRemoved, this, &ConversationPresentationModel::countChanged);
@@ -105,7 +116,7 @@ QString ConversationPresentationModel::activityLabel(const QList<QModelIndex>& r
     // count time waiting for the next user or a teammate as tool execution.
     const auto next = sourceModel()->index(rows.last().row() + 1, 0);
     if (next.isValid() && next.data(ConversationModel::AuthorRole).toString() == QStringLiteral("assistant")
-        && next.data(ConversationModel::OriginRole).toString().isEmpty()
+        && ownTurn(next)
         && !next.data(ConversationModel::AutomatedRole).toBool()
         && next.data(ConversationModel::KindRole).toString() != QStringLiteral("live")
         && !next.data(ConversationModel::ActivityRole).toBool()) {
@@ -139,8 +150,7 @@ bool ConversationPresentationModel::groupedRow(int row) const {
         const auto label = item.data(ConversationModel::ToolNameRole).toString();
         return label != QStringLiteral("thinking") && label != QStringLiteral("compacting");
     }
-    if (!item.data(ConversationModel::OriginRole).toString().isEmpty()
-        || item.data(ConversationModel::AutomatedRole).toBool()) return false;
+    if (!ownTurn(item) || item.data(ConversationModel::AutomatedRole).toBool()) return false;
     return item.data(ConversationModel::AuthorRole).toString() == QStringLiteral("assistant")
         && item.data(ConversationModel::BodyRole).toString().isEmpty()
         && (item.data(ConversationModel::ActivityCountRole).toInt() > 0
