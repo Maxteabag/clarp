@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import pathlib
+import threading
 
 from lib import agents as agents_db
 from lib import db
@@ -80,3 +80,17 @@ def test_prune_hls_artifacts_removes_only_expired_complete_clips(tmp_path):
     assert removed == 1
     assert not old_dir.exists()
     assert live_dir.exists()
+
+
+def test_maintenance_worker_waits_before_first_prune(tmp_path):
+    started = threading.Event()
+    worker = maintenance.MaintenanceWorker(
+        audio_dir=tmp_path, interval_sec=60, startup_delay_sec=0.2,
+    )
+    worker.run_once = lambda: started.set() or {}
+    worker.start()
+    try:
+        assert not started.wait(0.05)
+        assert started.wait(1.0)
+    finally:
+        worker.stop(timeout=1.0)

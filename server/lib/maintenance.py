@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from . import db
 from .log import log, log_exception
 from .protocol import ClipProducerStatus
+from .timing import MAINTENANCE_STARTUP_DELAY_SEC
 
 HOUR_MS = 60 * 60 * 1000
 DAY_MS = 24 * HOUR_MS
@@ -105,10 +106,15 @@ class MaintenanceWorker:
     """Run conservative retention cleanup at startup and then hourly."""
 
     def __init__(self, *, audio_dir: pathlib.Path, policy: Policy = Policy(),
-                 interval_sec: float = 60 * 60):
+                 interval_sec: float = 60 * 60,
+                 startup_delay_sec: float | None = None):
         self.audio_dir = pathlib.Path(audio_dir)
         self.policy = policy
         self.interval_sec = interval_sec
+        self.startup_delay_sec = (
+            MAINTENANCE_STARTUP_DELAY_SEC if startup_delay_sec is None
+            else max(0.0, float(startup_delay_sec))
+        )
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -149,6 +155,10 @@ class MaintenanceWorker:
         return counts
 
     def _loop(self) -> None:
+        # Exclusive WAL truncation at t=0 races runtime interrupt recovery
+        # (SQLITE_BUSY → skipped INTERRUPTED marks → silent "thinking").
+        if self.startup_delay_sec and self._stop.wait(self.startup_delay_sec):
+            return
         while not self._stop.is_set():
             try:
                 self.run_once()
