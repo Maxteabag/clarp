@@ -59,7 +59,7 @@ ApplicationWindow {
     }
 
     function overlayVisible() {
-        return previewVersionPanel.visible || quickNewAgent.visible || quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
+        return previewVersionPanel.visible || quickNewAgent.visible || renameAgent.visible || quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
             || startAgent.visible || overview.visible || connection.visible
             || queueDialog.visible || profilePanel.visible || settingsPanel.dialogOpen;
     }
@@ -132,6 +132,9 @@ ApplicationWindow {
             previewVersionPanel.visible = true;
         } else if (action === "quick-new-agent") {
             quickNewAgent.visible = true;
+        } else if (action === "rename-agent") {
+            if (app.selectedSession.length > 0 && !app.isPairSession(app.selectedSession))
+                renameAgent.open(app.selectedSession, app.agentName(app.selectedSession));
         } else if (action === "new-contact") {
             quickSwitcher.openContacts(root.composerOwnsFocus());
         } else if (action.startsWith("move-")) {
@@ -244,6 +247,8 @@ ApplicationWindow {
             previewVersionPanel.close();
         else if (quickNewAgent.visible)
             quickNewAgent.closeRequested();
+        else if (renameAgent.visible)
+            renameAgent.closeRequested();
         else if (quickSwitcher.visible)
             quickSwitcher.close();
         else if (voiceDialog.visible)
@@ -498,6 +503,19 @@ ApplicationWindow {
         z: 95
         onCloseRequested: {
             if (submitting && app.errorMessage.length === 0) root.selectedSurface = "chats";
+            visible = false;
+            root.restoreSurfaceFocus();
+        }
+    }
+
+    RenameAgentDialog {
+        id: renameAgent
+        objectName: "renameAgent"
+        anchors.fill: parent
+        controller: app
+        visible: false
+        z: 95
+        onCloseRequested: {
             visible = false;
             root.restoreSurfaceFocus();
         }

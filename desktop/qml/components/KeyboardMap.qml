@@ -21,6 +21,7 @@ QtObject {
             binding("switcher", ["Ctrl+K"], "Commands"),
             binding("sidebar", ["Ctrl+B"], "Show/hide sidebar", false),
             binding("quick-new-agent", ["Ctrl+Shift+N"], "New contact & chat", false),
+            binding("rename-agent", ["F2"], "Rename contact", false),
             binding("new", ["Ctrl+N"], "New agent", false),
             binding("new-contact", ["Ctrl+Alt+N"], "Start contact", false),
             binding("settings", ["Ctrl+,", "Ctrl+4"], "Settings", false),

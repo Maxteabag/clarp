@@ -1370,6 +1370,15 @@ void AppController::setAgentPushMuted(const QString& session, bool muted) {
                    {{QStringLiteral("session"), session}, {QStringLiteral("muted"), muted}});
 }
 
+void AppController::renameAgent(const QString& session, const QString& name) {
+    const QString trimmed = name.trimmed();
+    if (session.isEmpty() || trimmed.isEmpty()) return;
+    // The agent-setting tag re-requests the snapshot and raises
+    // agentMutationSucceeded, so the new name lands without a manual refresh.
+    m_api.postJson(QStringLiteral("agent-setting:") + session, QStringLiteral("/agent-rename"),
+                   {{QStringLiteral("session"), session}, {QStringLiteral("name"), trimmed}});
+}
+
 void AppController::archiveAgent(const QString& session) { setAgentArchived(session, true); }
 
 void AppController::setAgentArchived(const QString& session, bool archived) {

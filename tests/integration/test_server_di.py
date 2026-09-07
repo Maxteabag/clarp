@@ -1307,6 +1307,67 @@ def test_agent_mute_endpoint_persists_server_flag(running_server):
     assert next(a for a in agents if a["session"] == "claude")["muted"] is True
 
 
+def test_agent_rename_changes_the_display_name_only(running_server):
+    base, _ctx, _srv = running_server
+    from lib import agents as agents_db
+
+    before = agents_db.get_by_session("claude")
+
+    status, body = _post(base + "/agent-rename", {
+        "session": "claude",
+        # Padding and internal runs of whitespace are a display detail, not a
+        # different contact.
+        "name": "  Mike   the   Second  ",
+    })
+
+    assert status == 200
+    assert json.loads(body)["name"] == "Mike the Second"
+
+    after = agents_db.get_by_session("claude")
+    assert after["persona"] == "Mike the Second"
+    # The identifiers everything else keys on must survive a rename.
+    assert after["agent_id"] == before["agent_id"]
+    assert after["session"] == "claude"
+
+    status, body = _get(base + "/agents/snapshot")
+    assert status == 200
+    agents = json.loads(body)["agents"]
+    assert next(a for a in agents if a["session"] == "claude")["persona"] == "Mike the Second"
+
+
+def test_agent_rename_rejects_empty_names_and_missing_agents(running_server):
+    base, _ctx, _srv = running_server
+
+    for payload, expected in (
+        ({"session": "claude", "name": "   "}, 400),
+        ({"session": "claude", "name": "x" * 61}, 400),
+        ({"session": "", "name": "Ada"}, 400),
+        ({"session": "nobody", "name": "Ada"}, 404),
+    ):
+        with pytest.raises(urllib.error.HTTPError) as rejected:
+            _post(base + "/agent-rename", payload)
+        assert rejected.value.code == expected, payload
+
+
+def test_agent_rename_refuses_a_name_another_session_already_holds(running_server):
+    base, _ctx, _srv = running_server
+    from lib import agents as agents_db
+
+    agents_db.create_agent(persona="Ada", voice_id="", cwd="/tmp", session="ada")
+
+    # Creation allows one live session per contact name; a rename that broke
+    # that would make the persona-to-session lookup ambiguous. Case and spacing
+    # do not buy a way around it.
+    with pytest.raises(urllib.error.HTTPError) as clash:
+        _post(base + "/agent-rename", {"session": "claude", "name": "  ada  "})
+
+    assert clash.value.code == 409
+    payload = json.loads(clash.value.read())
+    assert payload["error"] == "contact_occupied"
+    assert payload["session"] == "ada"
+    assert agents_db.get_by_session("claude")["persona"] != "ada"
+
+
 def test_team_nudging_endpoint_persists_server_flag(running_server):
     base, _ctx, _srv = running_server
     from lib import team_store

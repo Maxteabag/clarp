@@ -212,7 +212,7 @@ def test_empty_list_auth_and_paused_conversion_preserve_identity_and_focus(host)
 @pytest.mark.parametrize("route", [
     "/send", "/select", "/focus", "/stop", "/compact", "/agent-llm",
     "/agent-voice", "/agent-mcp", "/agent-heartbeat", "/agent-dreaming",
-    "/agent-mute", "/agent-archive", "/agent-portraits",
+    "/agent-mute", "/agent-rename", "/agent-archive", "/agent-portraits",
     "/agent-portrait-generation", "/agent-schedules",
 ])
 def test_old_client_chat_controls_cannot_operate_janitor(host, route):

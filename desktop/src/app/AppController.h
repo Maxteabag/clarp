@@ -272,6 +272,9 @@ class AppController : public QObject {
     Q_INVOKABLE void setAgentHeartbeat(const QString& session, bool enabled);
     Q_INVOKABLE void setAgentDreaming(const QString& session, bool enabled);
     Q_INVOKABLE void setAgentPushMuted(const QString& session, bool muted);
+    // Display name only. The session id and agent id are stable, so a
+    // rename keeps the chat, its history and every pairing intact.
+    Q_INVOKABLE void renameAgent(const QString& session, const QString& name);
     Q_INVOKABLE void archiveAgent(const QString& session);
     Q_INVOKABLE void setAgentArchived(const QString& session, bool archived);
     Q_INVOKABLE void setScheduleEnabled(const QString& scheduleId, bool enabled);
