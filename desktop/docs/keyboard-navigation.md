@@ -60,3 +60,11 @@ The toolbar binds to AppController's notified `nextAttentionTarget` property.
 Its notifications cover roster changes, attention updates, and selection. Do
 not replace this with an opaque invokable call and assumed QML dependencies:
 the real-key fixture caught a stale availability hint with that approach.
+
+Ctrl+Shift+N opens the name-only New contact & chat dialog. Enter a new name and
+press Enter to create a fresh agent using the saved workspace and quick-start
+backend. The dialog rejects empty/offline submissions, prevents duplicate
+submission while pending, and retains the name on error. Ctrl+N keeps the full
+configuration form; Ctrl+Alt+N selects an existing idle contact. These are distinct
+operations. `tst_quick_new_agent.qml` covers Enter, cancellation, failure/retry,
+saved defaults and pending submission.

@@ -139,8 +139,17 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             press(Qt::Key_Escape);
             press(Qt::Key_E);
             break;
-        default:
+        case 20:
             if (!require(state("sidebar") && selected())) return;
+            press(Qt::Key_N, Qt::ControlModifier | Qt::ShiftModifier);
+            break;
+        case 21:
+            if (!require(state("modal") && window->activeFocusItem() != nullptr
+                         && window->activeFocusItem()->objectName() == QStringLiteral("quickNewAgentName"))) return;
+            press(Qt::Key_Escape);
+            break;
+        default:
+            if (!require(state("composer") && controller->selectedSession() == second)) return;
             window->setProperty("contextKeyboardVerified", true);
             timer->stop();
         }
