@@ -468,13 +468,15 @@ def interrupt(backend: str, agent_id: str) -> int:
         return int(_RUNTIME_CLIENT.interrupt(normalize(backend), agent_id))
     adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
     runner = _mod(adapter.runner_module)
-    return int(runner.interrupt(agent_id) or 0)
+    from .turn_model_fallback import REGISTRY
+    return int(runner.interrupt(agent_id) or 0) + REGISTRY.interrupt(agent_id, event="fallbackInterruptFail")
 
 
 def interrupt_any(agent_id: str) -> int:
     if _RUNTIME_CLIENT is not None:
         return int(_RUNTIME_CLIENT.interrupt_any(agent_id))
-    total = 0
+    from .turn_model_fallback import REGISTRY
+    total = REGISTRY.interrupt(agent_id, event="fallbackInterruptFail")
     seen: set[str] = set()
     for adapter in _ADAPTERS:
         modules = (adapter.runner_module,) + adapter.extra_interrupt_modules
@@ -508,7 +510,8 @@ def active_handles(backend: str, agent_id: str) -> list:
         return []
     adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
     runner = _mod(adapter.runner_module)
-    return list(runner.active_handles(agent_id) or [])
+    from .turn_model_fallback import REGISTRY
+    return list(runner.active_handles(agent_id) or []) + REGISTRY.active_handles(agent_id)
 
 
 def steer_turn(backend: str, agent_id: str, text: str, *,

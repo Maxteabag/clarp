@@ -510,8 +510,7 @@ class OrchestratorService:
                                      hands_free, "Message delegator policy changed")
         try:
             self._require_current(run_id)
-            raw = self.model_call(packet, settings)
-            decision = parse_decision(raw)
+            decision = self._call_with_fallback(packet, settings, run_id, "initial")
             self._require_current(run_id)
             if _should_scan_broader(decision, packet, requested_session):
                 broad_packet = build_context_packet(
@@ -525,8 +524,7 @@ class OrchestratorService:
                 )
                 try:
                     self._require_current(run_id)
-                    raw = self.model_call(broad_packet, settings)
-                    decision = parse_decision(raw)
+                    decision = self._call_with_fallback(broad_packet, settings, run_id, "broad")
                     packet = broad_packet
                 except _StaleJanitorRun:
                     raise
@@ -571,6 +569,17 @@ class OrchestratorService:
             error="Message routing failed" if failed else "",
         )
         return result
+
+    def _call_with_fallback(self, packet, settings, run_id, phase):
+        from dataclasses import replace
+        from . import model_fallbacks
+        run = janitors.get_run(run_id)
+        primary = {"backend": settings.provider, "model": settings.model, "effort": settings.effort}
+        def invoke(model):
+            selected = replace(settings, provider=model["backend"], model=model["model"], effort=model.get("effort", ""))
+            return parse_decision(self.model_call(packet, selected))
+        return model_fallbacks.execute(run["agent_id"], run_id + ":" + phase, primary, invoke,
+            current=lambda: janitor_builtins.is_current(run_id))
 
     @staticmethod
     def _require_current(run_id: str) -> None:

@@ -400,3 +400,21 @@ def test_remove_archives_without_deleting_agent_or_history(host):
     assert agent["archived_at"] is not None
     assert db.conn().execute("SELECT deleted_at FROM agents WHERE agent_id=?", (host.sam,)).fetchone()[0] is None
     assert request(host, "/janitors")[1]["janitors"] == []
+
+
+def test_fallback_settings_work_for_normal_agents_and_janitors_without_client_changes(host):
+    from lib import settings_store
+    settings_store.set_text("provider.agy.last_observed_model_ids", '["gemini-3.8-flash-low"]')
+    create(host)
+    for session in ("sam", "theo"):
+        before=agents.get_by_session(session)
+        body={"session":session,"expected_revision":0,"models":[{"backend":"agy","model":"gemini-3.8-flash-low","effort":""}]}
+        assert request(host,"/agent-fallbacks",body,auth=False)[0]==401
+        status,result=request(host,"/agent-fallbacks",body)
+        assert status==200, result
+        assert result["models"]==body["models"]
+        assert request(host,"/agent-fallbacks",body)[0]==409
+        status,loaded=request(host,f"/agent-fallbacks?session={session}")
+        assert status==200 and loaded==result
+        after=agents.get_by_session(session)
+        assert (after["backend"],after["model"],after["effort"])==(before["backend"],before["model"],before["effort"])
