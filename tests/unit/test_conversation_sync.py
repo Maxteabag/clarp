@@ -246,3 +246,64 @@ def test_transcript_import_emits_phases_with_interaction_id(tmp_path):
     assert interaction in row["detail"]
     assert '"parse_ms":' in row["detail"]
     assert '"store_ms":' in row["detail"]
+
+
+def _fallback_answer(agent_id, text, finished_iso, request_id="rq"):
+    """A delivered fallback answer, as model_fallbacks records it."""
+    import json
+    from datetime import datetime, timezone
+    from lib import db
+    finished = int(datetime.fromisoformat(finished_iso).replace(
+        tzinfo=timezone.utc).timestamp() * 1000)
+    db.conn().execute(
+        """INSERT INTO model_fallback_attempts
+             (request_id, agent_id, runtime_id, attempt, backend, model, effort,
+              status, reason, started_at, finished_at, result_json)
+           VALUES (?, ?, ?, 0, 'agy', 'gemini-test', '', 'completed', 'limit',
+                   ?, ?, ?)""",
+        (request_id, agent_id, agents_db.current_runtime_id(agent_id),
+         finished - 1000, finished, json.dumps({"text": text})),
+    )
+
+
+def test_recovered_answers_merge_by_time_instead_of_landing_after_the_newest_turn(tmp_path):
+    """A fallback answer appended last stranded the agent's latest reply above it.
+
+    The bottom of the chat became an old recovered answer, so the user could
+    not see the most recent real message at all.
+    """
+    agent_id = _agent(tmp_path)
+    _store(agent_id, [
+        {"role": "user", "text": "early question", "timestamp": "2026-01-01T10:00:00Z"},
+        {"role": "assistant", "text": "early answer", "timestamp": "2026-01-01T10:00:05Z"},
+        {"role": "user", "text": "later question", "timestamp": "2026-01-01T12:00:00Z"},
+        {"role": "assistant", "text": "the newest real reply", "timestamp": "2026-01-01T12:00:05Z"},
+    ])
+    # Delivered while the primary model was unavailable, between the two turns.
+    _fallback_answer(agent_id, "recovered mid-conversation answer", "2026-01-01T11:00:00")
+
+    body = _load("reliable")
+    texts = [t["text"] for t in body["turns"]]
+    assert "recovered mid-conversation answer" in texts
+    # It belongs at its own time, not at the end.
+    assert texts[-1] == "the newest real reply"
+    assert texts.index("recovered mid-conversation answer") < texts.index("the newest real reply")
+    stamps = [t.get("timestamp") or "" for t in body["turns"]]
+    assert stamps == sorted(stamps)
+    # latest_ts followed the last element, so it moved backwards.
+    assert body["latest_ts"] == "2026-01-01T12:00:05Z"
+
+
+def test_merged_recovery_still_respects_the_requested_limit(tmp_path):
+    agent_id = _agent(tmp_path)
+    _store(agent_id, [
+        {"role": "assistant", "text": f"turn {i}",
+         "timestamp": f"2026-01-01T10:{i:02d}:00Z"} for i in range(5)
+    ])
+    _fallback_answer(agent_id, "recovered", "2026-01-01T10:02:30")
+
+    body = _load("reliable", limit=3)
+    assert len(body["turns"]) == 3
+    assert body["has_more"] is True
+    stamps = [t.get("timestamp") or "" for t in body["turns"]]
+    assert stamps == sorted(stamps)
