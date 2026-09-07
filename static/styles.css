@@ -1769,6 +1769,22 @@ details.tool.error { border-color: rgba(200, 65, 42, .45); }
   gap: 8px;
   color: var(--washi-dim);
 }
+.start-backends label.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.start-backends .locked-badge {
+  font-size: 10px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 5px;
+  border-radius: 2px;
+  background: var(--hanko-dim, rgba(224, 90, 58, 0.15));
+  color: var(--hanko, #e05a3a);
+  border: 1px solid var(--hanko, #e05a3a);
+}
 .start-modes input[type="radio"],
 .start-backends input[type="radio"] {
   -webkit-appearance: none;

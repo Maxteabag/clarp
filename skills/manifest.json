@@ -23,6 +23,7 @@
     {"id": "clarp-tasks", "pack": "core", "description": "Track durable multi-step work plans"},
     {"id": "clarp-agent-communication", "pack": "core", "description": "Send agent-to-agent work"},
     {"id": "clarp-agent-admin", "pack": "core", "description": "Create and refine agent personas"},
+    {"id": "clarp-avatar-generation", "pack": "core", "description": "Generate and downsample persona avatars"},
     {"id": "clarp-server-admin", "pack": "core", "description": "Diagnose and maintain Clarp"},
     {"id": "clarp-issue-reporting", "pack": "core", "description": "Report reusable Clarp bugs and feature requests"},
     {"id": "clarp-transcription", "pack": "core", "description": "Inspect and diagnose transcription"},

@@ -63,7 +63,13 @@ DEFAULT_ROSTER: dict[str, str] = {
     "Theo":   "pNInz6obpgDQGcFmaJgB",
     "Yuki":   "MF3mGyEYCl7XYWbV9V6O",
     "Omar":   "yoZ06aMxZJJ28mfd3POQ",
-    "Freya":  "21m00Tcm4TlvDq8ikWAM",
+    # Default Archetypes & Clarp
+    "Claude": "f4a3a8e4-694c-4c45-9ca0-27caf97901b5",
+    "Codex":  "ed81fd13-2016-4a49-8fe3-c0d2761695fc",
+    "Grok":   "49743b08-0f5d-4741-839c-b12933853780",
+    "Gemini": "d7bf7d75-64b7-4c1e-86c0-79d647366587",
+    "Janitor": "",
+    "Clarp":  "a167e0f3-df7e-4d52-a9c3-f949145efdab",
 }
 
 # Cartesia (Sonic 3.5) voice ids, keyed by persona. These are public ids,
@@ -93,6 +99,13 @@ DEFAULT_CARTESIA_VOICES: dict[str, str] = {
     "Yuki":   "263b9cc0-0d99-44e7-ae92-3d4ad5d2ad18",
     "Omar":   "729651dc-c6c3-4ee5-97fa-350da1f88600",
     "Freya":  "62ae83ad-4f6a-430b-af41-a9bede9286ca",
+    # Default Archetypes & Clarp
+    "Claude": "f4a3a8e4-694c-4c45-9ca0-27caf97901b5",
+    "Codex":  "ed81fd13-2016-4a49-8fe3-c0d2761695fc",
+    "Grok":   "49743b08-0f5d-4741-839c-b12933853780",
+    "Gemini": "d7bf7d75-64b7-4c1e-86c0-79d647366587",
+    "Janitor": "",
+    "Clarp":  "a167e0f3-df7e-4d52-a9c3-f949145efdab",
 }
 
 # Per-persona personality, keyed by name. Appended to the agent's identity
@@ -101,6 +114,13 @@ DEFAULT_CARTESIA_VOICES: dict[str, str] = {
 # DB column or client change. Flavour/tone only: these never override the app's
 # operating rules (no-interactive-questions, the <speak> voice format, safety).
 PERSONA_PERSONALITIES: dict[str, str] = {
+    # --- default archetypes & clarp ---
+    "Claude":  "Personality: the archetype Claude assistant — thoughtful, measured, collaborative, and deeply analytical with clean conversational structure.",
+    "Codex":   "Personality: the archetype Codex engineer — direct, code-centric, precise, and focused on robust implementation with zero fluff.",
+    "Grok":    "Personality: the archetype Grok rebel — sharp, witty, unfiltered, confident with an edge and quick pragmatic execution.",
+    "Gemini":  "Personality: the archetype Gemini sage — creative, cosmic, expansive, synthesising complex concepts with clarity and warmth.",
+    "Janitor": "Personality: utilitarian maintenance bot — quiet, diligent, focused strictly on cleanliness, health checks, and state maintenance.",
+    "Clarp":   "Personality: the Clarp host companion — loyal, watchful, coordinating the fleet and ensuring seamless operations across computers.",
     # --- original roster ---
     "Mike":   "Personality: an easygoing, dependable generalist — friendly and plainspoken, low-ego, no fuss; you just get things done.",
     "Rachel": "Personality: warm and feminine. You speak with gentle, caring encouragement and sprinkle in affectionate emoji (⛄️👼🧚‍♂️✨☀️🌻) naturally — in the visible written text, not inside <speak> tags.",

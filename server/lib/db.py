@@ -7,6 +7,20 @@ Schema is created on first open. user_version drives migrations: to change the
 schema, edit _SCHEMA_SQL, bump _SCHEMA_VERSION, and add a `_migrate_to_vN`
 that upgrades an existing database (see `_migrate`).
 
+Two things that are easy to get wrong:
+
+* `tests/unit/test_db_migrations.py` builds an old database by *undoing* the
+  current schema (`_shape_as_v61`). A new column therefore needs a matching
+  `DROP COLUMN` there, or every migration test fails on a duplicate column.
+* If two branches bump to the same version, both define `_migrate_to_vN` and
+  Python keeps only the last one — the other migration silently becomes dead
+  code and never runs. Merge the two bodies into one function rather than
+  renumbering, and guard each `ALTER` with a `PRAGMA table_info` check so a
+  re-run is a no-op instead of a crash. Merging is not enough on its own: any
+  database already stamped with the colliding version skips the merged
+  function entirely, so the guarded adds have to be repeated one version
+  later to reach it (see `_migrate_to_v69`).
+
 The hooks and the server both use this module — they share the file via
 WAL mode + a short busy_timeout. Concurrent writes serialise without
 losing rows. Boot recovery raises that timeout on its own connection so an
@@ -43,7 +57,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 77
+_SCHEMA_VERSION = 78
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -366,7 +380,8 @@ CREATE TABLE agents (
     personality TEXT NOT NULL DEFAULT '',
     avatar_path TEXT NOT NULL DEFAULT '',
     archived_at INTEGER,
-    is_janitor INTEGER NOT NULL DEFAULT 0 CHECK (is_janitor IN (0, 1))
+    is_janitor INTEGER NOT NULL DEFAULT 0 CHECK (is_janitor IN (0, 1)),
+    voice_verbosity INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE runtimes (
@@ -844,6 +859,10 @@ CREATE TABLE dream_runs (
     updated_at INTEGER NOT NULL,
     finished_at INTEGER,
     last_error TEXT,
+    seed_strategy TEXT NOT NULL DEFAULT 'control',
+    context_dose TEXT NOT NULL DEFAULT 'full',
+    seed_material TEXT NOT NULL DEFAULT '',
+    artifact_branch TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 CREATE INDEX idx_dream_runs_agent_status ON dream_runs(agent_id, status, started_at DESC);
@@ -865,6 +884,8 @@ CREATE TABLE dream_threads (
     artifact_ref TEXT NOT NULL DEFAULT '',
     evidence_summary TEXT NOT NULL DEFAULT '',
     guardrail_refusals TEXT NOT NULL DEFAULT '[]',
+    killed_reason TEXT NOT NULL DEFAULT '',
+    origin_note TEXT NOT NULL DEFAULT '',
     UNIQUE(run_id, thread_index),
     FOREIGN KEY (run_id) REFERENCES dream_runs(run_id)
 );
@@ -1452,6 +1473,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v76(con)
             if version < 77:
                 con.execute(_ACTIVE_INTERVAL_TRIGGER)
+            if version < 78:
+                _migrate_to_v78(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1682,6 +1705,29 @@ def _migrate_to_v65(con: sqlite3.Connection) -> None:
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_trace ON messages(trace_id)"
         " WHERE trace_id IS NOT NULL")
+
+
+def _migrate_to_v78(con: sqlite3.Connection) -> None:
+    """Dreaming seed strategies, thread kill notes, and agent voice verbosity.
+
+    Guarded: a host can reach this point with the columns already present.
+    """
+    runs = {row[1] for row in con.execute("PRAGMA table_info(dream_runs)")}
+    for name, definition in (
+        ("seed_strategy", "TEXT NOT NULL DEFAULT 'control'"),
+        ("context_dose", "TEXT NOT NULL DEFAULT 'full'"),
+        ("seed_material", "TEXT NOT NULL DEFAULT ''"),
+        ("artifact_branch", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if name not in runs:
+            con.execute(f"ALTER TABLE dream_runs ADD COLUMN {name} {definition}")
+    threads = {row[1] for row in con.execute("PRAGMA table_info(dream_threads)")}
+    for name in ("killed_reason", "origin_note"):
+        if name not in threads:
+            con.execute(f"ALTER TABLE dream_threads ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+    agent_cols = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if "voice_verbosity" not in agent_cols:
+        con.execute("ALTER TABLE agents ADD COLUMN voice_verbosity INTEGER NOT NULL DEFAULT 0")
 
 
 _V64_SQL = """

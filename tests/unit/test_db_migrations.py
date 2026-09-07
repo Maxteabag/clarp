@@ -84,6 +84,13 @@ def _shape_as_v61(con: sqlite3.Connection) -> None:
         ALTER TABLE decision_deliveries DROP COLUMN answer_json;
         DROP INDEX idx_messages_trace;
         ALTER TABLE messages DROP COLUMN trace_id;
+        ALTER TABLE dream_runs DROP COLUMN artifact_branch;
+        ALTER TABLE dream_runs DROP COLUMN seed_strategy;
+        ALTER TABLE dream_runs DROP COLUMN context_dose;
+        ALTER TABLE dream_runs DROP COLUMN seed_material;
+        ALTER TABLE agents DROP COLUMN voice_verbosity;
+        ALTER TABLE dream_threads DROP COLUMN killed_reason;
+        ALTER TABLE dream_threads DROP COLUMN origin_note;
         DROP TABLE vocab_runs;
         DROP TABLE vocab_assignments;
         DROP TABLE vocab_profile_packs;
@@ -180,3 +187,34 @@ def test_upgraded_database_matches_fresh_schema(tmp_path):
         assert _names(upgraded, kind) == _names(fresh, kind), kind
     for table in _names(fresh, "table"):
         assert _columns(upgraded, table) == _columns(fresh, table), table
+
+
+def test_v78_adds_dreaming_columns_and_voice_verbosity(tmp_path):
+    """v78 adds dreaming seed strategies, kill notes, and agent voice verbosity."""
+    path = tmp_path / "v77.sqlite"
+    con = _fresh(path)
+    con.executescript("""
+        ALTER TABLE dream_runs DROP COLUMN artifact_branch;
+        ALTER TABLE dream_runs DROP COLUMN seed_strategy;
+        ALTER TABLE dream_runs DROP COLUMN context_dose;
+        ALTER TABLE dream_runs DROP COLUMN seed_material;
+        ALTER TABLE dream_threads DROP COLUMN killed_reason;
+        ALTER TABLE dream_threads DROP COLUMN origin_note;
+        ALTER TABLE agents DROP COLUMN voice_verbosity;
+        PRAGMA user_version = 77;
+    """)
+    con.close()
+
+    upgraded = _connect(path)
+    db._migrate(upgraded)
+
+    assert "artifact_branch" in _columns(upgraded, "dream_runs")
+    assert "seed_strategy" in _columns(upgraded, "dream_runs")
+    assert "context_dose" in _columns(upgraded, "dream_runs")
+    assert "seed_material" in _columns(upgraded, "dream_runs")
+    assert "killed_reason" in _columns(upgraded, "dream_threads")
+    assert "origin_note" in _columns(upgraded, "dream_threads")
+    assert "voice_verbosity" in _columns(upgraded, "agents")
+    assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+    # Idempotent: a second pass over an already-repaired database is a no-op.
+    db._migrate(upgraded)

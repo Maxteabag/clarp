@@ -16,6 +16,7 @@ from .fork import fork_session
 from .log import log, log_exception
 from .mcp_selection import encode as encode_mcp_selection
 from .protocol import SSEType
+from . import roster
 from .roster import lookup_persona
 from . import personas as persona_store
 
@@ -144,6 +145,27 @@ class AgentLifecycleService:
                     "effort" not in data and bool(retained_effort)
                     and retained_effort not in backends.valid_efforts(backend)
                 )
+
+        # Enforce tier-to-backend locking: contacts can only run on their matching backend
+        persona_tier = persona_definition.get("tier") if persona_definition else ""
+        is_valid_tier, required_backend = roster.validate_contact_backend(persona, backend, persona_tier)
+        if not is_valid_tier and required_backend:
+            tier_name = persona_tier or roster.tier_for_contact(persona) or "locked"
+            raise AgentLifecycleError(
+                400,
+                "tier_backend_mismatch",
+                message=(
+                    f"Contact '{persona}' ({tier_name.title()} tier) can only run on "
+                    f"the '{required_backend}' backend (received: '{backend}')."
+                ),
+                extra={
+                    "contact": persona,
+                    "tier": tier_name,
+                    "allowed_backend": required_backend,
+                    "backend": backend,
+                },
+            )
+
         occupied = next((
             (sid, info) for sid, info in agents.items()
             if sid != replace_sid
