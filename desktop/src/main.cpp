@@ -1,4 +1,5 @@
 #include "platform/DesktopPresence.h"
+#include "app/PairSidebarSmokeCheck.h"
 #include "app/ReadyReplySmokeCheck.h"
 #include "app/KeyboardSmokeCheck.h"
 #include "app/AppController.h"
@@ -198,6 +199,12 @@ int main(int argc, char* argv[]) {
             if (screenshotView == QStringLiteral("idleContacts")) {
                 if (QObject* picker = rootWindow->findChild<QObject*>(QStringLiteral("quickSwitcher"))) {
                     QMetaObject::invokeMethod(picker, "openContacts", Q_ARG(QVariant, false));
+                }
+                return;
+            }
+            if (screenshotView == QStringLiteral("pairConversations")) {
+                if (QObject* list = rootWindow->findChild<QObject*>(QStringLiteral("chatList"))) {
+                    list->setProperty("showingPairs", true);
                 }
                 return;
             }
@@ -421,6 +428,8 @@ int main(int argc, char* argv[]) {
             startReadyReplySmokeCheck(application, rootWindow, controller, screenshotPath);
         if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_CONTEXT_KEYBOARD"))
             startKeyboardSmokeCheck(application, rootWindow, controller);
+        if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PAIR_SIDEBAR"))
+            startPairSidebarSmokeCheck(application, rootWindow, controller);
         if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SETTINGS_KEYBOARD") && rootWindow != nullptr) {
             // Deliver keys only to this isolated offscreen Qt window, never the desktop.
             if (QGuiApplication::platformName() != QStringLiteral("offscreen")) return EXIT_FAILURE;

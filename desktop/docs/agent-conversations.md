@@ -17,10 +17,16 @@ attributable, but the answer is authored by the recipient.
 ## Pair rooms
 
 `GET /agent-conversations` lists one room per pair of agents that have
-exchanged at least one delivered prompt. Rooms are keyed by
+exchanged at least one delivered prompt. Aggregates, the newest row per pair
+and all participants resolve in three statements; a per-room query loop cost
+~1.8 s on a real transcript store (25 rooms), against ~240 ms now. Rooms are keyed by
 `pair:<lower agent_id>:<higher agent_id>`, so direction, retries and renames
-never create a second room. The sidebar shows them under "Agent conversations"
-with both avatars, a preview and an unread dot. Unread is device-local: the
+never create a second room. The sidebar keeps them behind one compact "Agent conversations" row, the same
+shape as "Archived": the row carries the room count and an unread badge, and
+opening it swaps the agent list for the room list rather than stacking them.
+A real store had 25 rooms, which pushed every one of the user's own chats
+off-screen when the section rendered inline. Each room row shows both avatars,
+a preview and an unread dot. Unread is device-local: the
 last seen `latest_revision` per Host and room is stored in QSettings.
 
 Selecting a room calls `selectSession("pair:…")`. The controller treats pair
@@ -44,4 +50,8 @@ ctest --test-dir desktop/build/release -R 'core|activity-layout' --output-on-fai
 `tst_native_core` covers reply provenance roles, cache round-trips and the
 pair-room controller flow against the fake Host. `tst_message_attribution.qml`
 covers incoming versus reply rendering and the group view; `tst_pair_rows.qml`
-covers the sidebar row, unread dot and selection.
+covers the sidebar row, unread dot and selection. `clarp-desktop-pair-sidebar`
+drives the real window offscreen and asserts the two sidebar lists swap instead
+of stacking. ChatList cannot be instantiated by `qmltestrunner` because its
+C++ types live in the executable's QML module, which is why that check is a
+smoke lane rather than a QML fixture.

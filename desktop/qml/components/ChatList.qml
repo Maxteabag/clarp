@@ -7,9 +7,11 @@ import QtQuick.Layouts
 Rectangle {
     id: root
 
+    objectName: "chatList"
     required property var controller
     property bool collapsed: false
     property bool showingArchive: false
+    property bool showingPairs: false
     property string scope: "all"
     signal openOverview
     signal openConnection
@@ -27,6 +29,7 @@ Rectangle {
     }
     function focusCurrentAgent() {
         showingArchive = false;
+        showingPairs = false;
         if (root.controller.isPairSession(controller.selectedSession)) {
             Qt.callLater(() => { chats.currentIndex = chats.count > 0 ? 0 : -1; chats.forceActiveFocus(); });
             return;
@@ -129,7 +132,7 @@ Rectangle {
         }
 
         Item {
-            visible: !root.collapsed && !root.showingArchive
+            visible: !root.collapsed && !root.showingArchive && !root.showingPairs
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 46 : 0
 
@@ -184,7 +187,7 @@ Rectangle {
         }
 
         RowLayout {
-            visible: !root.collapsed && !root.showingArchive
+            visible: !root.collapsed && !root.showingArchive && !root.showingPairs
             Layout.fillWidth: true
             Layout.leftMargin: 12
             Layout.rightMargin: 12
@@ -243,49 +246,115 @@ Rectangle {
             color: "#221f29"
         }
 
-        ColumnLayout {
-            id: pairSection
-            objectName: "pairConversationSection"
-            visible: !root.collapsed && !root.showingArchive && root.pairRooms.length > 0
+        ItemDelegate {
+            id: pairEntryRow
+            objectName: "pairConversationsRow"
+
+            // One compact row, like Archived: agent-to-agent rooms never push
+            // the user's own conversations down the sidebar.
+            visible: !root.collapsed && !root.showingArchive
+                && (root.pairRooms.length > 0 || root.showingPairs)
             Layout.fillWidth: true
-            spacing: 0
-            Text {
-                Layout.leftMargin: 20
-                Layout.topMargin: 8
-                Layout.bottomMargin: 4
-                text: "AGENT CONVERSATIONS"
-                color: "#77717f"
-                font.family: "JetBrains Mono"
-                font.pixelSize: 10
-                font.weight: Font.DemiBold
-                font.letterSpacing: 1
+            Layout.preferredHeight: visible ? 48 : 0
+            leftPadding: 20
+            rightPadding: 18
+            onClicked: root.showingPairs = !root.showingPairs
+
+            background: Rectangle {
+                color: root.showingPairs ? "#232030" : pairEntryRow.hovered ? "#1d1a23" : "transparent"
             }
-            Repeater {
-                model: root.pairRooms
-                PairRow {
-                    required property var modelData
-                    room: modelData
-                    controller: root.controller
+            contentItem: RowLayout {
+                spacing: 12
+
+                Text {
+                    text: root.showingPairs ? "‹" : "⇄"
+                    color: "#8d93b0"
+                    font.pixelSize: 14
+                }
+                Text {
+                    objectName: "pairConversationsLabel"
                     Layout.fillWidth: true
-                    onChatSelected: root.chatSelected()
+                    text: root.showingPairs ? "Back to chats" : "Agent conversations"
+                    color: "#c6bfcc"
+                    font.pixelSize: 12
+                }
+                Rectangle {
+                    objectName: "pairConversationsUnread"
+                    visible: !root.showingPairs && root.controller.unreadAgentConversations > 0
+                    Layout.preferredWidth: visible ? Math.max(16, unreadLabel.implicitWidth + 8) : 0
+                    Layout.preferredHeight: 16
+                    radius: height / 2
+                    color: "#bb9af7"
+                    Text {
+                        id: unreadLabel
+                        anchors.centerIn: parent
+                        text: root.controller.unreadAgentConversations
+                        color: "#1a1b26"
+                        font.pixelSize: 9
+                        font.weight: Font.Bold
+                    }
+                }
+                Text {
+                    visible: !root.showingPairs
+                    text: root.pairRooms.length
+                    color: "#77717f"
+                    font.pixelSize: 11
                 }
             }
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 1
-                color: "#221f29"
+        }
+
+        Rectangle {
+            visible: pairEntryRow.visible
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? 1 : 0
+            color: "#221f29"
+        }
+
+        ListView {
+            id: pairList
+            objectName: "pairConversationList"
+            visible: root.showingPairs && !root.collapsed && !root.showingArchive
+            Layout.fillWidth: true
+            Layout.fillHeight: visible
+            Layout.preferredHeight: visible ? -1 : 0
+            clip: true
+            model: visible ? root.pairRooms : []
+            spacing: 1
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar {}
+
+            delegate: PairRow {
+                required property var modelData
+                room: modelData
+                controller: root.controller
+                width: pairList.width
+                onChatSelected: root.chatSelected()
+            }
+
+            Label {
+                anchors.centerIn: parent
+                width: parent.width - 40
+                visible: pairList.count === 0
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                text: "No agent-to-agent conversations yet."
+                color: "#6f6976"
+                font.pixelSize: 12
             }
         }
 
         ItemDelegate {
             id: archiveRow
 
-            visible: root.controller.archivedAgents.count > 0 && !root.collapsed
+            visible: root.controller.archivedAgents.count > 0 && !root.collapsed && !root.showingPairs
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 48 : 0
             leftPadding: 20
             rightPadding: 18
-            onClicked: root.showingArchive = !root.showingArchive
+            onClicked: {
+            root.showingPairs = false;
+            root.showingArchive = !root.showingArchive;
+        }
 
             background: Rectangle {
                 color: archiveRow.hovered ? "#1d1a23" : "transparent"
@@ -325,8 +394,10 @@ Rectangle {
             objectName: "sidebarAgentList"
             keyNavigationEnabled: true
 
+            visible: !root.showingPairs
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.fillHeight: visible
+            Layout.preferredHeight: visible ? -1 : 0
             clip: true
             model: roster
             reuseItems: true

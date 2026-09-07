@@ -63,6 +63,7 @@ target_sources(clarp-desktop PRIVATE
     src/app/CredentialStore.h
     src/app/TranscriptCache.cpp
     src/app/TranscriptCache.h
+    src/app/PairSidebarSmokeCheck.h
     src/app/ToolNarrator.cpp
     src/app/ToolNarrator.h
     src/app/TimeFormat.cpp
