@@ -899,7 +899,7 @@ void AppController::markAgentConversationSeen(const QString& conversationId, qin
 
 void AppController::applyAgentConversations(const QJsonArray& conversations) {
     QVariantList rooms;
-    for (const QJsonValue& value : conversations) {
+    for (const auto& value : conversations) {
         QVariantMap room = value.toObject().toVariantMap();
         const QString id = room.value(QStringLiteral("conversation_id")).toString();
         if (!isPairSession(id)) {
