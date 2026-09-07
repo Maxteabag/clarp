@@ -27,10 +27,14 @@ Rectangle {
         const rows = [
             settingToggle("timestampsVisible", "Timestamps", "date time messages"),
             settingToggle("showWhenReady", "Show when ready", "stream streaming answers typing"),
-            settingToggle("toolsVisible", "Expanded tool details", "tools calls collapse expand"),
             settingToggle("pauseMobilePush", "Pause phone alerts on desktop", "push notifications mobile iphone"),
             settingToggle("sharedFilesystem", "Shared filesystem access (trusted Host)", "files local folders")
         ];
+        ["Grouped", "Always visible", "Group old"].forEach((label, mode) => {
+            rows.push({kind: "command", action: "setting:activity:" + mode,
+                label: "Tool activity: " + label + (root.controller.activityDisplayMode === mode ? " (current)" : ""),
+                key: "", group: "settings", keywords: "tool calls collapse expand grouping"});
+        });
         const narrator = root.controller.toolNarrator;
         if (narrator) {
             for (let level = 0; level < narrator.detailLevels.length; ++level) {
@@ -43,7 +47,10 @@ Rectangle {
         return rows;
     }
     function applySetting(action) {
-        if (action.startsWith("setting:detail:")) {
+        if (action.startsWith("setting:activity:")) {
+            const mode = Number(action.slice("setting:activity:".length));
+            if (Number.isInteger(mode) && mode >= 0 && mode <= 2) root.controller.activityDisplayMode = mode;
+        } else if (action.startsWith("setting:detail:")) {
             const level = Number(action.slice("setting:detail:".length));
             const narrator = root.controller.toolNarrator;
             if (narrator && Number.isInteger(level) && level >= 0 && level < narrator.detailLevels.length)

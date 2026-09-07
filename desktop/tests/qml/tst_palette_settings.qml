@@ -9,6 +9,7 @@ TestCase {
     width: 720; height: 540
     QtObject {
         id: stub
+        property int activityDisplayMode: 0
         property int agentRevision: 0
         property string lastBackend: "codex"
         property string lastWorkingDirectory: "/tmp"
@@ -36,6 +37,20 @@ TestCase {
     }
     Component { id: factory; Clarp.QuickSwitcher { width: testCase.width; height: testCase.height; controller: stub } }
     SignalSpy { id: commands; signalName: "commandRequested" }
+    function test_toolActivitySearchOffersAllThreeModes() {
+        stub.activityDisplayMode = 0;
+        const picker = createTemporaryObject(factory, testCase);
+        picker.open(true); picker.query = "tool activity";
+        compare(picker.results.length, 3);
+        verify(picker.results[0].label.includes("Grouped"));
+        verify(picker.results[1].label.includes("Always visible"));
+        verify(picker.results[2].label.includes("Group old"));
+        picker.choose(2);
+        compare(stub.activityDisplayMode, 2);
+        picker.open(false); picker.query = "group old";
+        compare(picker.results.length, 1);
+        verify(picker.results[0].label.includes("current"));
+    }
     function test_enterChangesSettingAndRestoresComposer() {
         stub.showWhenReady = false;
         stub.focusRequests = 0;
