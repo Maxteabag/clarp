@@ -1324,15 +1324,32 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                 display_cells if isinstance(display_cells, list) else []
             ),
             "origin": (row["origin"] or "user"),
-            "sender_agent_id": (row["sender_agent_id"] or ""),
             "trace_id": (row["trace_id"] or ""),
-            "sender_name": (row["sender_name"] or ""),
-            "sender_session": (row["sender_session"] or ""),
+            **provenance_fields(row),
             "revision": int(row["revision"]),
             "automated": bool(automation_kind),
             "automation_kind": automation_kind,
         })
     return out
+
+
+def provenance_fields(row) -> dict[str, str]:
+    """Split stored provenance into author versus answered sender.
+
+    A user row written by another agent names that agent as its sender. The
+    assistant row that answers it stores the same ``sender_agent_id`` so the
+    trigger stays attributable, but its author is the transcript owner. Never
+    project the trigger as the reply's sender: clients rendered the current
+    agent's answer as if the other agent had written it.
+    """
+    stored = row["sender_agent_id"] or ""
+    name = row["sender_name"] or ""
+    session = row["sender_session"] or ""
+    if (row["role"] or "") == "user":
+        return {"sender_agent_id": stored, "sender_name": name, "sender_session": session,
+                "reply_to_agent_id": "", "reply_to_name": "", "reply_to_session": ""}
+    return {"sender_agent_id": "", "sender_name": "", "sender_session": "",
+            "reply_to_agent_id": stored, "reply_to_name": name, "reply_to_session": session}
 
 
 def last_message_head(*, agent_id: str, max_len: int = 80) -> dict[str, Any]:
