@@ -1,6 +1,8 @@
 {
   "title": "clip source precedence: playlist beats stream beats file",
   "area": "audio",
+  "clients": ["web"],
+  "client_scope_reason": "Web media-source preference; native raw PCM/HLS preference depends on its playback settings.",
   "steps": [
     {"clip": {"type": "audio", "url": "/audio/a.mp3"}},
     {"clip": {"type": "audio", "url": "/audio/b.mp3", "stream_url": "/clips/2/stream"}},

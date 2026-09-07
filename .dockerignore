@@ -4,6 +4,9 @@
 .pytest_cache
 .swiftpm
 .build
+.venv
+.qa
+.tools
 ios-native
 node_modules
 tests

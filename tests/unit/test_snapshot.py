@@ -180,3 +180,115 @@ def test_snapshot_head_revision_is_zero_without_bound_session(tmp_path):
     snap = build_agent_snapshot(ctx)
     row = next(a for a in snap["agents"] if a["session"] == "diego")
     assert row.get("head_revision") == 0
+
+
+def test_snapshot_floors_last_activity_at_creation_for_a_spawned_agent(tmp_path):
+    """An agent spawned by another agent has no user messages yet, so its
+    message activity is 0. Chats sorts on last_activity, so a bare 0 buried a
+    brand-new agent under every idle conversation while it was already working.
+    Its creation time is the floor."""
+    spawned = agents_db.create_agent(
+        persona="Hugo", voice_id="V", cwd=str(tmp_path), session="hugo")
+    agents_db.start_runtime(spawned, "hugo")
+    agents_db.record_state(spawned, "tool")
+    ctx = ServerContext(
+        root=tmp_path,
+        static=tmp_path,
+        audio_dir=tmp_path / "audio",
+        agents_path=tmp_path / "agents.json",
+        default_session="hugo",
+        tts=FakeTTSEngine(tmp_path / "audio"),
+        stream=AudioStream(tmp_path / "audio"),
+        stt=StubSTT(),
+        roster_names=("Hugo",),
+    )
+    row = next(a for a in build_agent_snapshot(ctx)["agents"]
+               if a["session"] == "hugo")
+    created = next(a for a in agents_db.list_agents()
+                   if a["agent_id"] == spawned)["created_at"]
+    assert created > 0
+    assert row["last_activity"] == created
+
+
+def _model_avatar_ctx(tmp_path, static_root):
+    return ServerContext(
+        root=tmp_path, static=static_root, audio_dir=tmp_path / "audio",
+        agents_path=tmp_path / "agents.json",
+        default_session="rachel", tts=FakeTTSEngine(tmp_path / "audio"),
+        stream=AudioStream(tmp_path / "audio"), stt=StubSTT(),
+        roster_names=("Rachel",),
+    )
+
+
+def _bundle_model_avatar(static_root, name):
+    folder = static_root / "avatars" / "models"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / name).write_bytes(b"\x89PNG\r\n\x1a\nvariant")
+
+
+def test_snapshot_offers_the_portrait_drawn_for_the_agent_model(tmp_path):
+    static_root = tmp_path / "static"
+    _bundle_model_avatar(static_root, "rachel.opus.png")
+    agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel",
+        backend="claude", model="claude-opus-5")
+
+    snap = build_agent_snapshot(_model_avatar_ctx(tmp_path, static_root))
+
+    row = snap["agents"][0]
+    assert row["model_avatar_url"].startswith(
+        "/static/avatars/models/rachel.opus.png?v=")
+    # The ordinary portrait is still served; the preference decides which wins.
+    assert row["avatar_url"] == ""
+    assert snap["model_avatars"] is False
+
+
+def test_snapshot_never_swaps_out_a_portrait_the_user_chose(tmp_path):
+    static_root = tmp_path / "static"
+    _bundle_model_avatar(static_root, "rachel.opus.png")
+    portrait = tmp_path / "chosen.png"
+    portrait.write_bytes(b"\x89PNG\r\n\x1a\nchosen")
+    agent_id = agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel",
+        backend="claude", model="claude-opus-5")
+    db.conn().execute("UPDATE agents SET avatar_path=? WHERE agent_id=?",
+                      (str(portrait), agent_id))
+
+    snap = build_agent_snapshot(_model_avatar_ctx(tmp_path, static_root))
+
+    assert snap["agents"][0]["model_avatar_url"] == ""
+    assert snap["agents"][0]["avatar_url"].startswith("/avatars/")
+
+
+def test_snapshot_carries_the_computer_preference(tmp_path):
+    from lib import avatar_settings
+
+    agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
+    avatar_settings.update(True)
+
+    snap = build_agent_snapshot(_model_avatar_ctx(tmp_path, tmp_path / "static"))
+
+    assert snap["model_avatars"] is True
+    assert snap["agents"][0]["model_avatar_url"] == ""
+
+
+def test_janitor_personas_stay_out_of_the_switchable_roster(tmp_path, monkeypatch):
+    """Janitors cannot be chatted with, so clients must not offer them.
+
+    Built-in Janitor identities leaked into the roster clients use for
+    switching and starting agents, which also broke the browser suite.
+    """
+    from lib import backends, janitor_builtins
+
+    monkeypatch.setattr(backends, "active_handles", lambda *args: [])
+    agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
+    janitor_builtins.ensure_builtins(cwd=str(tmp_path))
+
+    snap = build_agent_snapshot(_model_avatar_ctx(tmp_path, tmp_path / "static"))
+
+    assert "Rachel" in snap["roster"]
+    janitors = {row["persona"] for row in snap["agents"] if row["is_janitor"]}
+    assert janitors, "expected the built-in Janitors in the agent rows"
+    assert not janitors & set(snap["roster"])

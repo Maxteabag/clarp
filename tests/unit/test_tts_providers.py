@@ -11,10 +11,9 @@ def test_provider_catalog_reports_remote_client_and_disabled(monkeypatch):
         cartesia_api_key="key"))
     value = tts_providers.status()
     rows = {row["id"]: row for row in value["providers"]}
-    assert set(rows) == {"clarp", "cartesia", "elevenlabs", "deepgram", "none"}
+    assert set(rows) == {"cartesia", "elevenlabs", "deepgram", "none"}
     assert rows["cartesia"]["selected"] is True
     assert rows["cartesia"]["available"] is True
-    assert rows["clarp"]["available"] is False
 
 
 def test_local_wav_is_encoded_as_playable_mp3(tmp_path):

@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from . import origins
+from . import voice_verbosity as voice_verbosity_lib
 from .db import conn, now_ms
 from .protocol import AgentBackend, AgentState, ClipStatus, TurnSource
 
@@ -31,7 +32,8 @@ def list_agents() -> list[dict[str, Any]]:
         SELECT agent_id, persona, voice_id, cwd, session, backend, created_at,
                model, effort, mcp_servers, heartbeat_enabled,
                dreaming_enabled, dreaming_last_local_date, muted,
-               custom_status, avatar_symbol, avatar_path, personality, archived_at
+               custom_status, avatar_symbol, avatar_path, personality,
+               archived_at, is_janitor, voice_verbosity
           FROM agents
          WHERE deleted_at IS NULL
          ORDER BY created_at
@@ -45,7 +47,8 @@ def get_by_session(session: str) -> dict[str, Any] | None:
         SELECT agent_id, persona, voice_id, cwd, session, backend, created_at,
                model, effort, mcp_servers, heartbeat_enabled,
                dreaming_enabled, dreaming_last_local_date, muted,
-               custom_status, avatar_symbol, avatar_path, personality, archived_at
+               custom_status, avatar_symbol, avatar_path, personality,
+               archived_at, is_janitor, voice_verbosity
           FROM agents
          WHERE session = ? AND deleted_at IS NULL
     """, (session,)).fetchone()
@@ -72,7 +75,8 @@ def get_by_backend_session(backend_session_id: str) -> dict[str, Any] | None:
                a.backend, a.created_at, a.model, a.effort, a.mcp_servers,
                a.heartbeat_enabled, a.dreaming_enabled,
                a.dreaming_last_local_date, a.muted, a.custom_status,
-               a.avatar_symbol, a.avatar_path, a.personality, a.archived_at
+               a.avatar_symbol, a.avatar_path, a.personality, a.archived_at,
+               a.is_janitor, a.voice_verbosity
           FROM agents a
           JOIN runtimes r ON r.agent_id = a.agent_id
          WHERE r.backend_session_id = ?
@@ -109,11 +113,19 @@ def get_by_agent_id(agent_id: str) -> dict[str, Any] | None:
         SELECT agent_id, persona, voice_id, cwd, session, backend, created_at,
                model, effort, mcp_servers, heartbeat_enabled,
                dreaming_enabled, dreaming_last_local_date, muted,
-               custom_status, avatar_symbol, avatar_path, personality, archived_at
+               custom_status, avatar_symbol, avatar_path, personality,
+               archived_at, is_janitor, voice_verbosity
           FROM agents
          WHERE agent_id = ? AND deleted_at IS NULL
     """, (agent_id,)).fetchone()
     return dict(row) if row else None
+
+
+def interaction_capabilities(agent: dict[str, Any]) -> dict[str, bool]:
+    """One product capability policy shared by admission and clients."""
+    ordinary = not bool(agent.get("is_janitor"))
+    return {"can_chat": ordinary, "can_voice_target": ordinary,
+            "can_restart": ordinary, "can_inspect": True}
 
 
 def favorite_paths(limit: int = 5) -> list[dict[str, Any]]:
@@ -131,7 +143,8 @@ def favorite_paths(limit: int = 5) -> list[dict[str, Any]]:
 
 def create_agent(*, persona: str, voice_id: str, cwd: str,
                  session: str, backend: str = AgentBackend.CLAUDE,
-                 model: str = "", effort: str = "") -> str:
+                 model: str = "", effort: str = "",
+                 creation_request_id: str = "") -> str:
     """Insert or resurrect an agent row. Returns the agent_id.
 
     If a soft-deleted row exists with the same `session`, it's
@@ -145,6 +158,11 @@ def create_agent(*, persona: str, voice_id: str, cwd: str,
     Raises sqlite3.IntegrityError only if a LIVE agent already owns the
     name — caller should relaunch or pick a different session.
     """
+    if creation_request_id:
+        from .janitors import create_reserved_agent
+        return create_reserved_agent(
+            creation_request_id, persona=persona, voice_id=voice_id, cwd=cwd,
+            session=session, backend=backend, model=model, effort=effort)
     c = conn()
     ghost = c.execute(
         "SELECT agent_id FROM agents "
@@ -183,10 +201,19 @@ def update_voice(agent_id: str, voice_id: str) -> None:
 
 def set_custom_status(agent_id: str, status: str | None) -> None:
     """Persist free-text agent status shown while the agent is not busy."""
-    conn().execute(
-        "UPDATE agents SET custom_status = ? WHERE agent_id = ?",
-        ((status or "").strip(), agent_id),
-    )
+    c = conn()
+    # A deliberate manual/legacy write owns the field, even if it repeats the
+    # same text. A Janitor cannot reclaim it by comparing the visible string.
+    c.execute("SAVEPOINT manual_custom_status")
+    try:
+        c.execute("DELETE FROM janitor_label_ownership WHERE target_agent_id=?", (agent_id,))
+        c.execute("UPDATE agents SET custom_status = ? WHERE agent_id = ?",
+                  ((status or "").strip(), agent_id))
+        c.execute("RELEASE SAVEPOINT manual_custom_status")
+    except BaseException:
+        c.execute("ROLLBACK TO SAVEPOINT manual_custom_status")
+        c.execute("RELEASE SAVEPOINT manual_custom_status")
+        raise
 
 
 def set_archived(agent_id: str, archived: bool) -> None:
@@ -206,6 +233,7 @@ def update_agent(agent_id: str, *, persona: str | None = None,
                  muted: bool | int | None = None,
                  avatar_symbol: str | None = None,
                  personality: str | None = None,
+                 voice_verbosity: int | None = None,
                  avatar_path: str | None = None,
                  dreaming_last_local_date: str | None = None) -> None:
     """Update mutable agent metadata without changing its stable agent_id.
@@ -251,6 +279,9 @@ def update_agent(agent_id: str, *, persona: str | None = None,
     if personality is not None:
         fields.append("personality = ?")
         values.append(personality)
+    if voice_verbosity is not None:
+        fields.append("voice_verbosity = ?")
+        values.append(voice_verbosity_lib.clamp(voice_verbosity))
     if avatar_path is not None:
         fields.append("avatar_path = ?")
         values.append(avatar_path)
@@ -511,6 +542,55 @@ def is_busy(agent_id: str) -> bool:
     return bool(s) and s["kind"] in AgentState.busy_states()
 
 
+def dashboard_states() -> dict[str, dict[str, Any]]:
+    """Read state clocks together, preserving state-id ordering for tied times."""
+    rows = conn().execute("""
+        WITH history AS (
+            SELECT s.*, ROW_NUMBER() OVER (
+                       PARTITION BY s.agent_id ORDER BY ts DESC, state_id DESC) AS rank,
+                   LAG(kind) OVER (
+                       PARTITION BY s.agent_id ORDER BY ts, state_id) AS previous,
+                   MAX(CASE WHEN kind IN ('done', 'idle', 'stopped') THEN ts END)
+                       OVER (PARTITION BY s.agent_id) AS last_end
+              FROM state_log s JOIN agents a USING (agent_id)
+             WHERE a.deleted_at IS NULL
+        )
+        SELECT agent_id,
+               MAX(CASE WHEN rank = 1 THEN kind END) AS kind,
+               MAX(CASE WHEN rank = 1 THEN ts END) AS ts,
+               MAX(CASE WHEN rank = 1 THEN detail END) AS detail,
+               MIN(CASE WHEN kind IN ('thinking', 'tool', 'compacting')
+                         AND ts > COALESCE(last_end, 0) THEN ts END) AS turn_started_at,
+               MAX(CASE WHEN kind = 'done' OR
+                         (kind = 'idle' AND previous IN ('thinking', 'tool'))
+                        THEN ts END) AS last_turn_end
+          FROM history GROUP BY agent_id
+    """).fetchall()
+    result = {}
+    for row in rows:
+        state = dict(row)
+        try:
+            state['detail'] = json.loads(state['detail'] or '{}')
+        except json.JSONDecodeError:
+            state['detail'] = {}
+        result[row['agent_id']] = state
+    return result
+
+
+def dashboard_runtimes() -> dict[str, dict[str, Any]]:
+    rows = conn().execute("""
+        SELECT a.agent_id,
+               (SELECT backend_session_id FROM runtimes r
+                 WHERE r.agent_id = a.agent_id AND ended_at IS NULL
+                 ORDER BY started_at DESC LIMIT 1) AS backend_session_id,
+               (SELECT started_at FROM turns t
+                 WHERE t.agent_id = a.agent_id AND ended_at IS NULL
+                 ORDER BY started_at DESC LIMIT 1) AS open_turn_started_at
+          FROM agents a WHERE a.deleted_at IS NULL
+    """).fetchall()
+    return {row['agent_id']: dict(row) for row in rows}
+
+
 def last_activity(agent_id: str) -> int:
     """Epoch ms of the most recent real conversation message for this agent.
 
@@ -606,25 +686,6 @@ def record_clip(*, agent_id: str, path: str, voice_id: str | None = None,
         byte_count=byte_count, turn_id=turn_id, producer_status=producer_status,
         status=status, runtime_id=current_runtime_id,
     )
-
-
-def mark_clip_producer_status(*, clip_id: int,
-                              producer_status: str,
-                              byte_count: int | None = None,
-                              error: str | None = None) -> bool:
-    from .clip_store import mark_clip_producer_status as _mark
-    return _mark(
-        clip_id=clip_id, producer_status=producer_status,
-        byte_count=byte_count, error=error,
-    )
-
-
-def mark_clip_status(*, clip_id: int | None = None,
-                     url: str | None = None,
-                     status: str,
-                     error: str | None = None) -> bool:
-    from .clip_store import mark_clip_status as _mark
-    return _mark(clip_id=clip_id, url=url, status=status, error=error)
 
 
 # ---- focus + trace markers --------------------------------------------
@@ -792,13 +853,14 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                         origin: str = "user",
                         sender_agent_id: str | None = None,
                         prompt_admission_id: str = "",
+                        trace_id: str = "",
                         ) -> dict[str, Any] | None:
     from .message_store import record_user_message as _record
     return _record(
         agent_id=agent_id, backend_session_id=backend_session_id,
         client_msg_id=client_msg_id, text=text,
         origin=origin, sender_agent_id=sender_agent_id,
-        prompt_admission_id=prompt_admission_id,
+        prompt_admission_id=prompt_admission_id, trace_id=trace_id,
     )
 
 
@@ -922,6 +984,8 @@ def session_dict() -> dict[str, dict[str, Any]]:
             # the map key.
             "session": a["session"],
             "persona": a["persona"],
+            "is_janitor": bool(a.get("is_janitor")),
+            "interaction_capabilities": interaction_capabilities(a),
             "backend": a.get("backend") or AgentBackend.CLAUDE,
         }
     return out

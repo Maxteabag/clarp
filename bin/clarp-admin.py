@@ -46,11 +46,23 @@ def run(*args: str, cwd: Path | None = None, check: bool = True,
     return subprocess.run(args, cwd=cwd, check=check, text=True, env=env)
 
 
+# Where every install ultimately came from. install.sh falls back to this when
+# the source has no git metadata (the curl | bash quick start unpacks a
+# tarball), and so must the updater, or a quick-start install can never update
+# itself (issue #12).
+CANONICAL_SOURCE_REMOTE = "https://github.com/Maxteabag/clarp.git"
+
+
 def git_origin(repo: Path) -> str:
     result = subprocess.run(
         ["git", "remote", "get-url", "origin"], cwd=repo,
         text=True, capture_output=True, check=False)
-    value = result.stdout.strip()
+    return sanitize_remote(result.stdout.strip())
+
+
+def sanitize_remote(value: str) -> str:
+    """Drop embedded credentials, query and fragment from an http(s) remote."""
+    value = (value or "").strip()
     parsed = urllib.parse.urlsplit(value)
     if parsed.scheme in {"http", "https"}:
         host = parsed.netloc
@@ -63,6 +75,27 @@ def git_origin(repo: Path) -> str:
         value = urllib.parse.urlunsplit(
             (parsed.scheme, host, parsed.path, "", ""))
     return value
+
+
+def resolve_update_remote(state: dict) -> str:
+    """The remote to fetch updates from, never empty.
+
+    install.json records what git reported at setup time, which is nothing for
+    a tarball. install.sh always resolves a remote and writes it next to the
+    release, so that file is the second source, and the canonical repository
+    is the last, exactly as install.sh itself falls back.
+    """
+    candidates = [str(state.get("source_remote") or "")]
+    for path in (SHARE / "current/SOURCE_REMOTE", SHARE / "SOURCE_REMOTE"):
+        try:
+            candidates.append(path.read_text())
+        except OSError:
+            continue
+    for candidate in candidates:
+        remote = sanitize_remote(candidate)
+        if remote:
+            return remote
+    return CANONICAL_SOURCE_REMOTE
 
 
 def stable_release_tags(tags: list[str]) -> list[str]:
@@ -645,7 +678,7 @@ def _execute_setup(backend: str, transcription: str, bind: str | None,
             for skill_id in chosen: link_skill(skill_id)
             write_json(INSTALL_STATE, {
                 "source_repo": str(REPO), "skills": chosen,
-                "source_remote": git_origin(REPO),
+                "source_remote": git_origin(REPO) or resolve_update_remote({}),
                 "channel": channel, "backend": backend,
                 "transcription": transcription, "python": sys.executable,
                 "toolchain": toolchain,
@@ -687,7 +720,46 @@ def _execute_setup(backend: str, transcription: str, bind: str | None,
                     except SystemExit:
                         pass
         raise
-    print("\nClarp setup complete. Run `clarp-admin doctor` for diagnostics.")
+    print(setup_complete_message())
+    return 0
+
+
+def pwa_access_url() -> str:
+    """The link that provisions a browser with the auth token in one open.
+
+    The PWA reads `?token=` on first visit and stores it; without this link a
+    user has to find the token in config.toml by hand, and a browser holding a
+    stale token can only recover by opening a fresh one (issue #10).
+    """
+    cfg = _network_config()
+    token = str(cfg.get("server", {}).get("auth_token") or "").strip()
+    base = _pairing_public_url() + "/"
+    if not token:
+        return base
+    return base + "?" + urllib.parse.urlencode({"token": token})
+
+
+def setup_complete_message() -> str:
+    return (
+        "\nClarp setup complete. Run `clarp-admin doctor` for diagnostics."
+        f"\n\nOpen the PWA with this link (it carries the auth token):"
+        f"\n  {pwa_access_url()}"
+        "\nPrint it again any time with `clarp-admin url` (add --qr for a phone)."
+    )
+
+
+def cmd_url(args) -> int:
+    url = pwa_access_url()
+    if args.json:
+        print(json.dumps({"url": url}, indent=2))
+        return 0
+    if args.qr:
+        import qrcode
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(url)
+        qr.make(fit=True)
+        qr.print_ascii(invert=True)
+    print(url)
     return 0
 
 
@@ -797,6 +869,31 @@ def cmd_doctor(_args) -> int:
         ok = service_manager.is_active()
         failures += not ok
         print(f"{'OK' if ok else 'FAIL':<5} service: {'active' if ok else 'inactive'}")
+        runtime_ok = service_manager.is_runtime_active()
+        failures += not runtime_ok
+        print(f"{'OK' if runtime_ok else 'FAIL':<5} "
+              f"agent runtime: {'active' if runtime_ok else 'inactive'}")
+    try:
+        from lib import config as config_module
+
+        config_module.reset_cache()
+        cfg = config_module.load(CONFIG_FILE)
+        raw_key = cfg.apns_key_path or os.environ.get("APNS_KEY_PATH", "")
+        credential_parts = (raw_key, cfg.apns_key_id, cfg.apns_team_id)
+        if not any(credential_parts):
+            print("OK    APNs push: not configured (optional)")
+        elif not all(credential_parts):
+            failures += 1
+            print("FAIL  APNs push: incomplete key path, key id, or team id")
+        else:
+            key_file = Path(cfg.apns_key_file())
+            ok = cfg.apns_enabled()
+            failures += not ok
+            suffix = "" if ok else " (missing or unreadable)"
+            print(f"{'OK' if ok else 'FAIL':<5} APNs signing key: {key_file}{suffix}")
+    except Exception as exc:  # noqa: BLE001 - doctor reports rather than crashes
+        failures += 1
+        print(f"FAIL  APNs push: {exc}")
     try:
         server_root = SHARE if (SHARE / "lib").is_dir() else REPO / "server"
         sys.path.insert(0, str(server_root))
@@ -835,8 +932,10 @@ def cmd_doctor(_args) -> int:
 
 def cmd_paths(_args) -> int:
     from lib.deployment import DeploymentLayout
+    from lib.paths import RuntimePaths
 
     layout = DeploymentLayout.from_environment()
+    runtime_paths = RuntimePaths.from_home(HOME)
     print(json.dumps({
         "platform": service_manager.platform_kind(),
         "share": str(layout.share),
@@ -848,6 +947,8 @@ def cmd_paths(_args) -> int:
             if service_manager.platform_kind() == "macos"
             else layout.cache_dir / "logs"),
         "service": str(service_manager.definition_path(HOME)),
+        "runtime_service": str(service_manager.runtime_definition_path(HOME)),
+        "runtime_socket": str(runtime_paths.runtime_socket),
         "toolchain": str((layout.share / "toolchain").resolve(strict=False)),
     }, indent=2))
     return 0
@@ -1559,10 +1660,7 @@ def cmd_update(args) -> int:
     if not (source / ".git").exists() and not (source / ".git").is_file():
         source = SHARE / "update-source"
         if not (source / ".git").exists():
-            remote = str(state.get("source_remote") or "").strip()
-            if not remote:
-                raise SystemExit(
-                    "source repository unavailable and no update remote was recorded")
+            remote = resolve_update_remote(state)
             source.parent.mkdir(parents=True, exist_ok=True)
             run("git", "clone", "--filter=blob:none", remote, str(source))
     # Quick-start clones are shallow. Refresh remote branch heads explicitly as
@@ -1658,9 +1756,65 @@ def cmd_uninstall(args) -> int:
     return 0
 
 
+def cmd_schedule(args) -> int:
+    cmd = args.schedule_command
+    if cmd == "list":
+        query = f"?session={urllib.parse.quote(args.session)}" if getattr(args, "session", None) else ""
+        res = api_request("GET", f"/agent-schedules{query}")
+        schedules = res.get("schedules", [])
+        if not schedules:
+            print("No scheduled jobs found.")
+            return 0
+        for s in schedules:
+            status = "ENABLED" if s.get("enabled") else "DISABLED"
+            print(f"• [{status}] {s.get('name')} (ID: {s.get('schedule_id')})")
+            print(f"   Session: {s.get('session')} | Cron: {s.get('cron_expression')}")
+            print(f"   Prompt:  {s.get('prompt')}")
+            if s.get("next_run_at"):
+                dt = datetime.fromtimestamp(s["next_run_at"] / 1000.0, tz=timezone.utc)
+                print(f"   Next:    {dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            print("")
+        return 0
+    elif cmd == "add":
+        payload = {
+            "session": args.session,
+            "name": args.name,
+            "cron_expression": args.cron,
+            "prompt": args.prompt,
+            "enabled": not args.disabled,
+        }
+        res = api_request("POST", "/agent-schedules", payload)
+        sched = res.get("schedule", {})
+        print(f"✓ Created schedule '{sched.get('name')}' ({sched.get('schedule_id')}) for {args.session}")
+        return 0
+    elif cmd == "toggle":
+        if not args.enable and not args.disable:
+            raise SystemExit("Must specify --enable or --disable")
+        payload = {
+            "schedule_id": args.schedule_id,
+            "enabled": True if args.enable else False,
+        }
+        api_request("POST", "/agent-schedules/toggle", payload)
+        print(f"✓ Schedule {args.schedule_id} {'enabled' if args.enable else 'disabled'}")
+        return 0
+    elif cmd == "remove":
+        payload = {"schedule_id": args.schedule_id}
+        api_request("POST", "/agent-schedules/delete", payload)
+        print(f"✓ Schedule {args.schedule_id} removed")
+        return 0
+    return 0
+
+
+def cmd_janitor(args) -> int:
+    from lib.janitor_cli import execute
+    return execute(args, api_request)
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="clarp-admin", description=__doc__)
     sub = result.add_subparsers(dest="command", required=True)
+    from lib.janitor_cli import add_parsers as add_janitor_parsers
+    add_janitor_parsers(sub, cmd_janitor)
     setup = sub.add_parser(
         "setup",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1783,6 +1937,11 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     stt_remove.set_defaults(func=cmd_transcription)
 
     sub.add_parser("doctor").set_defaults(func=cmd_doctor)
+    url = sub.add_parser(
+        "url", help="print the PWA link that carries the auth token")
+    url.add_argument("--qr", action="store_true", help="also print a QR code")
+    url.add_argument("--json", action="store_true")
+    url.set_defaults(func=cmd_url)
     sub.add_parser("paths").set_defaults(func=cmd_paths)
     sub.add_parser("sessions").set_defaults(func=cmd_sessions)
     onboard = sub.add_parser("onboard")
@@ -1912,6 +2071,31 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     calendar.add_argument("--calendar", default="")
     calendar.add_argument("--all-day", action="store_true")
     calendar.set_defaults(func=cmd_calendar)
+
+    schedule = sub.add_parser("schedule").add_subparsers(
+        dest="schedule_command", required=True)
+    sched_list = schedule.add_parser("list")
+    sched_list.add_argument("--session", "-s", default=None, help="filter by session")
+    sched_list.set_defaults(func=cmd_schedule)
+
+    sched_add = schedule.add_parser("add")
+    sched_add.add_argument("session", help="agent session name")
+    sched_add.add_argument("--name", "-n", required=True, help="name for the scheduled job")
+    sched_add.add_argument("--cron", "-c", required=True, help="cron expression (e.g. '0 8:30 * * 1-5' or '@daily')")
+    sched_add.add_argument("--prompt", "-p", required=True, help="prompt to dispatch on schedule")
+    sched_add.add_argument("--disabled", action="store_true", help="create initially disabled")
+    sched_add.set_defaults(func=cmd_schedule)
+
+    sched_toggle = schedule.add_parser("toggle")
+    sched_toggle.add_argument("schedule_id", help="schedule ID")
+    sched_toggle.add_argument("--enable", action="store_true", help="enable schedule")
+    sched_toggle.add_argument("--disable", action="store_true", help="disable schedule")
+    sched_toggle.set_defaults(func=cmd_schedule)
+
+    sched_rm = schedule.add_parser("remove")
+    sched_rm.add_argument("schedule_id", help="schedule ID to remove")
+    sched_rm.set_defaults(func=cmd_schedule)
+
     return result
 
 

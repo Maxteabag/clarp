@@ -1,0 +1,407 @@
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Rectangle {
+    id: root
+
+    required property var controller
+    required property string session
+    required property string paneId
+    required property var conversationModel
+    required property bool active
+    readonly property int agentRevision: controller.agentRevision
+    // Agent-to-agent pair rooms are read-only Host projections.
+    readonly property bool pairRoom: root.controller.isPairSession(root.session)
+    readonly property var pairRoomInfo: {
+        root.controller.agentConversations;
+        return root.pairRoom ? root.controller.agentConversation(root.session) : ({});
+    }
+    readonly property var pairParticipants: (root.pairRoomInfo && root.pairRoomInfo.participants) || []
+    signal openConnection
+    signal queueRequested(string session)
+    signal profileRequested(string session)
+
+    readonly property bool working: root.controller.showWhenReady
+        && ["thinking", "tool", "compacting", "running"].includes(root.currentAgentState)
+    readonly property string currentAgentState: root.agentRevision >= 0
+        ? root.controller.agentState(root.session) : ""
+    onConversationModelChanged: Qt.callLater(() => transcript.scrollToLatest())
+    Connections {
+        target: root.conversationModel
+        function onConversationIdChanged() { transcript.scrollToLatest(); }
+    }
+    ConversationPresentationModel {
+        id: presentation
+        sourceModel: root.conversationModel
+        showWhenReady: root.controller.showWhenReady
+        activityMode: root.controller.activityDisplayMode
+    }
+
+    color: root.active ? "#1a1b26" : "#1a1b26"
+
+    Behavior on color {
+        ColorAnimation { duration: 120 }
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 0
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 58
+            color: "#1a1b26"
+
+            HoverHandler { id: headerHover }
+
+            Behavior on color {
+                ColorAnimation { duration: 120 }
+            }
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 11
+                anchors.rightMargin: 8
+                spacing: 9
+
+                AgentAvatar {
+                    visible: !root.pairRoom
+                    Layout.preferredWidth: visible ? 38 : 0
+                    Layout.preferredHeight: 38
+                    controller: root.controller
+                    session: root.session
+                    name: root.controller.agentName(root.session)
+                    avatarSize: 38
+                    cornerRadius: 19
+                    fallbackColor: root.active ? "#555970" : "#3b3e50"
+                }
+                Item {
+                    objectName: "pairHeaderAvatars"
+                    visible: root.pairRoom
+                    Layout.preferredWidth: visible ? 56 : 0
+                    Layout.preferredHeight: 38
+                    Repeater {
+                        model: root.pairRoom ? root.pairParticipants.slice(0, 2) : []
+                        AgentAvatar {
+                            required property var modelData
+                            required property int index
+                            x: index * 22
+                            y: index * 6
+                            z: 2 - index
+                            controller: root.controller
+                            session: String(modelData.session || "")
+                            name: String(modelData.name || "Agent")
+                            avatarSize: 32
+                            cornerRadius: 16
+                            fallbackColor: index === 0 ? "#555970" : "#3b3e50"
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 1
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: {
+                            root.agentRevision;
+                            return root.controller.agentName(root.session) || "No agent selected";
+                        }
+                        color: root.active ? "#f0ebe6" : "#8b8491"
+                        font.pixelSize: 16
+                        font.weight: Font.DemiBold
+                        horizontalAlignment: Text.AlignLeft
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        text: {
+                            root.agentRevision;
+                            if (root.pairRoom) return "Agent-to-agent conversation";
+                            return root.session.length > 0
+                                ? root.controller.agentBackend(root.session)
+                                : root.controller.baseUrl;
+                        }
+                        visible: root.active && root.width > 520
+                        color: "#82788e"
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: 12
+                        elide: Text.ElideRight
+                    }
+                }
+
+                StatusPill {
+                    status: {
+                        root.agentRevision;
+                        if (root.pairRoom) return "idle";
+                        return root.controller.agentState(root.session) || root.controller.connectionState;
+                    }
+                }
+
+                ToolButton {
+                    id: paneMenuButton
+                    visible: root.active && root.session.length > 0 && !root.pairRoom
+                        && (headerHover.hovered || paneMenu.visible)
+                    text: "···"
+                    implicitWidth: 28
+                    implicitHeight: 26
+                    onClicked: paneMenu.open()
+                    Menu {
+                        id: paneMenu
+                        MenuItem {
+                            text: "Show when ready"
+                            checkable: true
+                            checked: root.controller.showWhenReady
+                            onTriggered: root.controller.showWhenReady = !root.controller.showWhenReady
+                        }
+                        MenuItem {
+                            text: "Queued messages"
+                            onTriggered: root.queueRequested(root.session)
+                        }
+                        MenuItem {
+                            text: root.controller.timestampsVisible
+                                ? "Hide timestamps" : "Show timestamps"
+                            onTriggered: root.controller.timestampsVisible =
+                                !root.controller.timestampsVisible
+                        }
+                        MenuItem {
+                            text: root.controller.toolsVisible
+                                ? "Collapse tool details" : "Expand tool details"
+                            onTriggered: root.controller.toolsVisible =
+                                !root.controller.toolsVisible
+                        }
+                        MenuSeparator {}
+                        MenuItem {
+                            text: "Open files"
+                            onTriggered: root.controller.openAgentFiles(root.session)
+                        }
+                        MenuItem {
+                            text: "Open agent in terminal"
+                            onTriggered: root.controller.openAgentTerminal(root.session)
+                        }
+                        MenuItem {
+                            text: "Agent profile"
+                            onTriggered: root.profileRequested(root.session)
+                        }
+                    }
+                }
+
+            }
+        }
+
+        Rectangle {
+            visible: root.active && (root.controller.errorMessage.length > 0
+                || root.conversationModel.error.length > 0)
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? 38 : 0
+            color: "#2b2028"
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 16
+                anchors.rightMargin: 8
+
+                Text {
+                    Layout.fillWidth: true
+                    text: root.controller.errorMessage || root.conversationModel.error
+                    color: "#c9959e"
+                    font.family: "JetBrains Mono"
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                }
+                Button {
+                    visible: root.conversationModel.error.length > 0
+                    text: "Retry"
+                    implicitHeight: 26
+                    onClicked: root.controller.refreshSession(root.session)
+                }
+                ToolButton {
+                    text: "×"
+                    onClicked: {
+                        root.controller.clearError();
+                        root.conversationModel.error = "";
+                    }
+                }
+            }
+        }
+
+        TranscriptList {
+            id: transcript
+
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            model: presentation
+            clip: true
+            spacing: 2
+            leftMargin: 14
+            rightMargin: 14
+            topMargin: 10
+            bottomMargin: 10
+            reuseItems: true
+            section.property: "dayLabel"
+            section.delegate: Item {
+                required property string section
+                width: transcript.width
+                height: section.length > 0 ? 32 : 0
+                Text {
+                    anchors.centerIn: parent
+                    text: parent.section
+                    color: "#8d93b0"
+                    font.pixelSize: 11
+                }
+            }
+            boundsBehavior: Flickable.StopAtBounds
+
+            header: Item {
+                width: transcript.width
+                height: root.conversationModel.hasMore ? 32 : 4
+
+                Button {
+                    visible: root.conversationModel.hasMore
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: root.conversationModel.loading ? "Loading…" : "Load earlier messages"
+                    enabled: !root.conversationModel.loading
+                    onClicked: {
+                        transcript.pauseFollowing();
+                        root.controller.loadOlderSession(root.session);
+                    }
+                }
+            }
+
+            delegate: MessageDelegate {
+                required property var model
+                senderAgentId: String(model.senderAgentId || "")
+                senderSession: String(model.senderSession || "")
+                replyToAgentId: String(model.replyToAgentId || "")
+                replyToName: String(model.replyToName || "")
+                replyToSession: String(model.replyToSession || "")
+                delivery: String(model.delivery || "")
+                groupView: root.pairRoom
+                activitySummary: String(model.activityLabel || "")
+                required property var groupIds
+                required property string groupLabel
+                required property bool groupExpanded
+                required property bool activityInline
+                groupSummary: groupLabel
+                groupedExpanded: groupExpanded
+                forceActivityInline: activityInline
+                onToggleActivityGroup: {
+                    if (!groupExpanded) for (const id of groupIds)
+                        root.controller.loadMessageToolDetails(root.session, id);
+                    presentation.toggleGroup(messageId);
+                }
+                controller: root.controller
+                session: root.session
+                showTools: root.controller.toolsVisible
+                showTimestamp: root.controller.timestampsVisible
+            }
+
+            footer: Item {
+                width: transcript.width
+                height: root.working ? 46 : root.conversationModel.loading ? 34 : 6
+
+                TypingIndicator {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.working
+                }
+                BusyIndicator {
+                    anchors.centerIn: parent
+                    running: root.conversationModel.loading && !root.working
+                    visible: running
+                    implicitWidth: 22
+                    implicitHeight: 22
+                }
+            }
+
+            Connections {
+                target: presentation
+                function onRowsAppended(fromCurrentUser) {
+                    if (fromCurrentUser || (transcript.followLatest && !transcript.userInteracting)) {
+                        transcript.scrollToLatest();
+                    } else {
+                        transcript.newMessagesBelow = true;
+                    }
+                }
+            }
+
+            Label {
+                anchors.centerIn: parent
+                visible: transcript.count === 0 && !root.conversationModel.loading
+                text: root.session.length > 0 ? "No messages yet. Start the conversation below." : "Choose an agent from the sidebar."
+                color: "#5e6176"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 11
+            }
+        }
+
+        Composer {
+            visible: !root.pairRoom
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? implicitHeight : 0
+            controller: root.controller
+            session: root.session
+            paneId: root.paneId
+            active: root.active
+            onOpenConnection: root.openConnection()
+        }
+
+        Rectangle {
+            objectName: "pairRoomFooter"
+            visible: root.pairRoom
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? 44 : 0
+            color: "#171822"
+            Text {
+                anchors.centerIn: parent
+                width: parent.width - 32
+                horizontalAlignment: Text.AlignHCenter
+                text: "Agents talk here. To reply, open one of them and message it directly."
+                color: "#8d93b0"
+                font.pixelSize: 12
+                elide: Text.ElideRight
+            }
+        }
+    }
+
+    onSessionChanged: {
+        presentation.beginVisit();
+        if (session.length > 0 && controller.connected && !root.pairRoom)
+            controller.loadMedia(session);
+    }
+    Component.onCompleted: {
+        if (session.length > 0 && controller.connected)
+            controller.loadMedia(session);
+    }
+    Connections {
+        target: root.controller
+        function onConnectedChanged() {
+            if (root.controller.connected && root.session.length > 0)
+                root.controller.loadMedia(root.session);
+        }
+    }
+
+    ToolButton {
+        visible: !transcript.followLatest
+            && (transcript.newMessagesBelow || transcript.distanceFromBottom >= 180)
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 12
+        anchors.bottomMargin: 64
+        width: 34
+        height: 34
+        z: 30
+        text: transcript.newMessagesBelow ? "↓•" : "↓"
+        onClicked: transcript.scrollToLatest()
+        ToolTip.visible: hovered
+        ToolTip.text: transcript.newMessagesBelow ? "Jump to new messages" : "Jump to latest"
+        background: Rectangle {
+            radius: 17
+            color: "#30354f"
+            border.color: "#777fae"
+        }
+    }
+}

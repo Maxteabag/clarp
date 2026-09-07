@@ -40,8 +40,8 @@ IMPORTANT OPTIONS
   --backend claude|codex|both
   --toolchain managed|existing|none
   --transcription recommended|none|MODEL_ID
-  --tts cartesia|elevenlabs|deepgram|kokoro|piper|iphone|none
-  --tts-fallback cartesia|elevenlabs|deepgram|kokoro|piper|none
+  --tts clarp|cartesia|elevenlabs|deepgram|none
+  --tts-fallback clarp|cartesia|elevenlabs|deepgram|none
   --network tailscale|lan|manual|off
   --public-url https://HOST       Required with --network manual
   --optional-skill SKILL_ID       Repeat once per optional skill

@@ -7,9 +7,24 @@ Schema is created on first open. user_version drives migrations: to change the
 schema, edit _SCHEMA_SQL, bump _SCHEMA_VERSION, and add a `_migrate_to_vN`
 that upgrades an existing database (see `_migrate`).
 
+Two things that are easy to get wrong:
+
+* `tests/unit/test_db_migrations.py` builds an old database by *undoing* the
+  current schema (`_shape_as_v61`). A new column therefore needs a matching
+  `DROP COLUMN` there, or every migration test fails on a duplicate column.
+* If two branches bump to the same version, both define `_migrate_to_vN` and
+  Python keeps only the last one — the other migration silently becomes dead
+  code and never runs. Merge the two bodies into one function rather than
+  renumbering, and guard each `ALTER` with a `PRAGMA table_info` check so a
+  re-run is a no-op instead of a crash. Merging is not enough on its own: any
+  database already stamped with the colliding version skips the merged
+  function entirely, so the guarded adds have to be repeated one version
+  later to reach it (see `_migrate_to_v69`).
+
 The hooks and the server both use this module — they share the file via
 WAL mode + a short busy_timeout. Concurrent writes serialise without
-losing rows.
+losing rows. Boot recovery raises that timeout on its own connection so an
+exclusive WAL checkpoint in the HTTP process cannot skip INTERRUPTED marks.
 """
 from __future__ import annotations
 
@@ -20,9 +35,17 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import TypeVar
 
-from .timing import SQLITE_BUSY_TIMEOUT_MS, SQLITE_CONNECT_TIMEOUT_SEC
+from .timing import (
+    SQLITE_BUSY_TIMEOUT_MS,
+    SQLITE_CONNECT_TIMEOUT_SEC,
+    SQLITE_LOCK_RETRIES,
+    SQLITE_LOCK_RETRY_SLEEP_SEC,
+)
 from . import xdg
 
 
@@ -34,7 +57,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 64
+_SCHEMA_VERSION = 80
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -263,15 +286,54 @@ def conn() -> sqlite3.Connection:
     c = getattr(_LOCAL, "conn", None)
     if c is not None:
         return c
-    c = _open_connection()
     # Migrate exactly once per process (idempotent + serialized). WAL means
     # every per-thread connection sees the migrated schema on the shared file.
     with _CONN_LOCK:
+        c = _open_connection()
         if not _MIGRATED:
             _migrate(c)
             _MIGRATED = True
     _LOCAL.conn = c
     return c
+
+
+def is_locked_error(exc: BaseException) -> bool:
+    """True for SQLITE_BUSY / 'database is locked' from this or another process."""
+    return isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc).lower()
+
+
+@contextmanager
+def busy_timeout(timeout_ms: int) -> Iterator[sqlite3.Connection]:
+    """Temporarily raise this thread's SQLite busy timeout, then restore it."""
+    connection = conn()
+    connection.execute(f"PRAGMA busy_timeout = {int(timeout_ms)}")
+    try:
+        yield connection
+    finally:
+        connection.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+
+
+_T = TypeVar("_T")
+
+
+def retry_locked(
+    operation: Callable[[], _T],
+    *,
+    retries: int | None = None,
+    sleep_sec: float | None = None,
+) -> _T:
+    """Run *operation*, retrying SQLITE_BUSY a bounded number of times."""
+    attempts = SQLITE_LOCK_RETRIES if retries is None else max(1, int(retries))
+    delay = SQLITE_LOCK_RETRY_SLEEP_SEC if sleep_sec is None else max(0.0, float(sleep_sec))
+    for attempt in range(attempts):
+        try:
+            return operation()
+        except sqlite3.OperationalError as exc:
+            if not is_locked_error(exc) or attempt + 1 >= attempts:
+                raise
+            if delay:
+                time.sleep(delay * (attempt + 1))
+    raise RuntimeError("retry_locked exhausted without returning")
 
 
 def close_local() -> None:
@@ -317,7 +379,9 @@ CREATE TABLE agents (
     avatar_symbol TEXT NOT NULL DEFAULT '',
     personality TEXT NOT NULL DEFAULT '',
     avatar_path TEXT NOT NULL DEFAULT '',
-    archived_at INTEGER
+    archived_at INTEGER,
+    is_janitor INTEGER NOT NULL DEFAULT 0 CHECK (is_janitor IN (0, 1)),
+    voice_verbosity INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE runtimes (
@@ -454,9 +518,11 @@ CREATE TABLE messages (
     origin TEXT NOT NULL DEFAULT 'user',
     sender_agent_id TEXT,
     prompt_admission_id TEXT,
+    trace_id TEXT,
     UNIQUE(agent_id, backend_session_id, seq)
 );
 CREATE INDEX idx_messages_agent_seq ON messages(agent_id, backend_session_id, seq);
+CREATE INDEX idx_messages_trace ON messages(trace_id) WHERE trace_id IS NOT NULL;
 CREATE INDEX idx_messages_agent_timestamp ON messages(agent_id, timestamp);
 CREATE INDEX idx_messages_agent_revision ON messages(agent_id, backend_session_id, revision);
 
@@ -610,7 +676,10 @@ CREATE TABLE teams (
     updated_at INTEGER NOT NULL,
     archived_at INTEGER,
     nudge_enabled INTEGER NOT NULL DEFAULT 1,
-    leader_agent_id TEXT
+    leader_agent_id TEXT,
+    parent_team_id TEXT,
+    leader_enabled INTEGER NOT NULL DEFAULT 0,
+    communication_enabled INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_teams_active ON teams(archived_at, updated_at DESC);
 
@@ -790,6 +859,10 @@ CREATE TABLE dream_runs (
     updated_at INTEGER NOT NULL,
     finished_at INTEGER,
     last_error TEXT,
+    seed_strategy TEXT NOT NULL DEFAULT 'control',
+    context_dose TEXT NOT NULL DEFAULT 'full',
+    seed_material TEXT NOT NULL DEFAULT '',
+    artifact_branch TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 CREATE INDEX idx_dream_runs_agent_status ON dream_runs(agent_id, status, started_at DESC);
@@ -811,6 +884,8 @@ CREATE TABLE dream_threads (
     artifact_ref TEXT NOT NULL DEFAULT '',
     evidence_summary TEXT NOT NULL DEFAULT '',
     guardrail_refusals TEXT NOT NULL DEFAULT '[]',
+    killed_reason TEXT NOT NULL DEFAULT '',
+    origin_note TEXT NOT NULL DEFAULT '',
     UNIQUE(run_id, thread_index),
     FOREIGN KEY (run_id) REFERENCES dream_runs(run_id)
 );
@@ -975,7 +1050,8 @@ CREATE TABLE artifacts (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     completed_at INTEGER,
-    deleted_at INTEGER
+    deleted_at INTEGER,
+    archived_at INTEGER
 );
 CREATE INDEX idx_artifacts_agent_updated ON artifacts(agent_id, updated_at DESC);
 CREATE INDEX idx_artifacts_session_updated ON artifacts(session, updated_at DESC);
@@ -993,7 +1069,17 @@ CREATE TABLE artifact_decisions (
     resolved_at INTEGER,
     resolved_by TEXT NOT NULL DEFAULT '',
     revision INTEGER NOT NULL DEFAULT 1,
-    expires_at INTEGER
+    expires_at INTEGER,
+    response_type TEXT NOT NULL DEFAULT 'approval',
+    options_json TEXT NOT NULL DEFAULT '[]',
+    allow_custom_text INTEGER NOT NULL DEFAULT 0,
+    recommended_option_id TEXT,
+    blocks_progress INTEGER NOT NULL DEFAULT 0,
+    priority_reason TEXT NOT NULL DEFAULT '',
+    urgency TEXT NOT NULL DEFAULT 'normal',
+    response_effort TEXT NOT NULL DEFAULT 'review',
+    deadline_at INTEGER,
+    answer_json TEXT
 );
 CREATE INDEX idx_artifact_decisions_status ON artifact_decisions(status, decision_id);
 
@@ -1008,7 +1094,9 @@ CREATE TABLE decision_deliveries (
     choice TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at INTEGER NOT NULL,
-    delivered_at INTEGER
+    delivered_at INTEGER,
+    response_type TEXT NOT NULL DEFAULT 'approval',
+    answer_json TEXT
 );
 CREATE INDEX idx_decision_deliveries_pending ON decision_deliveries(status, created_at);
 
@@ -1142,6 +1230,7 @@ CREATE TABLE paired_devices (
 CREATE INDEX idx_paired_devices_active ON paired_devices(revoked_at, created_at DESC);
 
 CREATE TABLE oracle_delegations (
+    completion_trace_id TEXT NOT NULL DEFAULT '',
     delegation_id      TEXT PRIMARY KEY,
     owner_principal    TEXT NOT NULL,
     trace_id           TEXT NOT NULL UNIQUE,
@@ -1165,6 +1254,24 @@ CREATE INDEX idx_oracle_delegations_delivery
     ON oracle_delegations(owner_principal, delivered_at, updated_at DESC);
 CREATE INDEX idx_oracle_delegations_agent
     ON oracle_delegations(agent_id, created_at DESC);
+
+CREATE TABLE agent_schedules (
+    schedule_id     TEXT PRIMARY KEY,
+    agent_id        TEXT NOT NULL REFERENCES agents(agent_id),
+    session         TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    cron_expression TEXT NOT NULL,
+    prompt          TEXT NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    last_run_at     INTEGER,
+    next_run_at     INTEGER,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_agent_schedules_session
+    ON agent_schedules(session);
+CREATE INDEX idx_agent_schedules_next
+    ON agent_schedules(enabled, next_run_at);
 
 CREATE TABLE voice_events (
     event_id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1206,7 +1313,134 @@ CREATE VIEW clip_lifecycle AS
     c.completed_at,
     c.error
     FROM clips c;
+
+CREATE TABLE vocab_packs (
+    pack_id    TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'static'
+               CHECK(kind IN ('static', 'dynamic')),
+    generator  TEXT NOT NULL DEFAULT '',
+    priority   REAL NOT NULL DEFAULT 1.0,
+    floor      INTEGER NOT NULL DEFAULT 0,
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vocab_packs_name ON vocab_packs(name);
+
+CREATE TABLE vocab_terms (
+    term_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    pack_id         TEXT NOT NULL REFERENCES vocab_packs(pack_id)
+                    ON DELETE CASCADE,
+    text            TEXT NOT NULL,
+    say_as          TEXT NOT NULL DEFAULT '',
+    often_heard_as  TEXT NOT NULL DEFAULT '',
+    rarity          REAL NOT NULL DEFAULT 0.5,
+    source          TEXT NOT NULL DEFAULT 'manual',
+    created_at      INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vocab_terms_pack_text
+    ON vocab_terms(pack_id, text COLLATE NOCASE);
+
+CREATE TABLE vocab_profiles (
+    profile_id TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vocab_profiles_name ON vocab_profiles(name);
+
+CREATE TABLE vocab_profile_packs (
+    profile_id TEXT NOT NULL REFERENCES vocab_profiles(profile_id)
+               ON DELETE CASCADE,
+    pack_id    TEXT NOT NULL REFERENCES vocab_packs(pack_id)
+               ON DELETE CASCADE,
+    position   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (profile_id, pack_id)
+);
+
+-- A profile binds to an agent or a team, never both; the CHECK keeps the
+-- "exactly one owner" rule in the database rather than in every caller.
+CREATE TABLE vocab_assignments (
+    assignment_id TEXT PRIMARY KEY,
+    profile_id    TEXT NOT NULL REFERENCES vocab_profiles(profile_id)
+                  ON DELETE CASCADE,
+    agent_id      TEXT REFERENCES agents(agent_id) ON DELETE CASCADE,
+    team_id       TEXT,
+    created_at    INTEGER NOT NULL,
+    CHECK ((agent_id IS NULL) <> (team_id IS NULL))
+);
+CREATE UNIQUE INDEX vocab_assignments_agent
+    ON vocab_assignments(agent_id) WHERE agent_id IS NOT NULL;
+CREATE UNIQUE INDEX vocab_assignments_team
+    ON vocab_assignments(team_id) WHERE team_id IS NOT NULL;
+
+-- One row per compile. This is the transparency contract: it must always be
+-- possible to answer "what exactly did we send to the model, and what did we
+-- leave out?" for any transcript the user is looking at.
+CREATE TABLE vocab_runs (
+    run_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id      TEXT REFERENCES agents(agent_id) ON DELETE SET NULL,
+    session       TEXT NOT NULL DEFAULT '',
+    trace_id      TEXT NOT NULL DEFAULT '',
+    profile_id    TEXT,
+    provider      TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    unit          TEXT NOT NULL,
+    capacity      INTEGER NOT NULL,
+    used          INTEGER NOT NULL,
+    form          TEXT NOT NULL,
+    rarity_floor  REAL NOT NULL DEFAULT 0,
+    payload       TEXT NOT NULL DEFAULT '',
+    included_json TEXT NOT NULL DEFAULT '[]',
+    dropped_json  TEXT NOT NULL DEFAULT '[]',
+    transcript    TEXT NOT NULL DEFAULT '',
+    latency_ms    INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL
+);
+CREATE INDEX vocab_runs_recent ON vocab_runs(created_at DESC);
+CREATE INDEX vocab_runs_trace ON vocab_runs(trace_id)
+    WHERE trace_id <> '';
 """
+
+
+_EXPLANATION_CACHE_SCHEMA = """
+CREATE TABLE tool_explanation_cache (
+    cache_key TEXT PRIMARY KEY,
+    explanation TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX tool_explanation_cache_expiry ON tool_explanation_cache(expires_at);
+CREATE TABLE tool_explanation_jobs (
+    cache_key TEXT PRIMARY KEY,
+    detail_level INTEGER NOT NULL,
+    activity_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    available_at INTEGER NOT NULL,
+    owner TEXT NOT NULL DEFAULT '',
+    lease_until INTEGER NOT NULL DEFAULT 0,
+    failure_reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX tool_explanation_jobs_queue ON tool_explanation_jobs(status, available_at, created_at);
+CREATE TABLE tool_explanation_demands (
+    cache_key TEXT NOT NULL REFERENCES tool_explanation_jobs(cache_key) ON DELETE CASCADE,
+    demand_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY(cache_key, demand_id)
+);
+CREATE INDEX tool_explanation_demands_owner ON tool_explanation_demands(demand_id);
+CREATE TABLE tool_explanation_releases (
+    demand_id TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
+"""
+_SCHEMA_SQL += _EXPLANATION_CACHE_SCHEMA
+from .html_forms import SCHEMA as _HTML_FORMS_SCHEMA
+_SCHEMA_SQL += _HTML_FORMS_SCHEMA
+from .model_fallbacks import SCHEMA as _MODEL_FALLBACK_SCHEMA
+_SCHEMA_SQL += _MODEL_FALLBACK_SCHEMA
 
 
 def _migrate(con: sqlite3.Connection) -> None:
@@ -1240,6 +1474,37 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v63(con)
             if version < 64:
                 _migrate_to_v64(con)
+            if version < 65:
+                _migrate_to_v65(con)
+            if version < 66:
+                _migrate_to_v66(con)
+            if version < 70:
+                _migrate_to_v70(con)
+            if version < 71:
+                _migrate_to_v71(con)
+            if version < 72:
+                for statement in _EXPLANATION_CACHE_SCHEMA.split(";"):
+                    if statement.strip():
+                        con.execute(statement)
+            if version < 73:
+                _migrate_to_v73(con)
+            if version < 74:
+                for statement in _HTML_FORMS_SCHEMA.split(";"):
+                    if statement.strip(): con.execute(statement)
+            if version < 75:
+                columns = {row[1] for row in con.execute("PRAGMA table_info(oracle_delegations)")}
+                if "completion_trace_id" not in columns:
+                    con.execute("ALTER TABLE oracle_delegations ADD COLUMN completion_trace_id TEXT NOT NULL DEFAULT ''")
+            if version < 76:
+                _migrate_to_v76(con)
+            if version < 77:
+                con.execute(_ACTIVE_INTERVAL_TRIGGER)
+            if version < 78:
+                _migrate_to_v78(con)
+            if version < 79:
+                _migrate_to_v79(con)
+            if version < 80:
+                _migrate_to_v80(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1352,7 +1617,74 @@ def _migrate_to_v63(con: sqlite3.Connection) -> None:
     )
 
 
-def _migrate_to_v64(con: sqlite3.Connection) -> None:
+def _migrate_to_v66(con: sqlite3.Connection) -> None:
+    """Agent scheduled jobs for recurring autonomous session turns."""
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS agent_schedules (
+            schedule_id     TEXT PRIMARY KEY,
+            agent_id        TEXT NOT NULL REFERENCES agents(agent_id),
+            session         TEXT NOT NULL,
+            name            TEXT NOT NULL,
+            cron_expression TEXT NOT NULL,
+            prompt          TEXT NOT NULL,
+            enabled         INTEGER NOT NULL DEFAULT 1,
+            last_run_at     INTEGER,
+            next_run_at     INTEGER,
+            created_at      INTEGER NOT NULL,
+            updated_at      INTEGER NOT NULL
+        )
+    """)
+    con.execute(
+        """CREATE INDEX IF NOT EXISTS idx_agent_schedules_session
+             ON agent_schedules(session)"""
+    )
+    con.execute(
+        """CREATE INDEX IF NOT EXISTS idx_agent_schedules_next
+             ON agent_schedules(enabled, next_run_at)"""
+    )
+
+
+def _migrate_to_v70(con: sqlite3.Connection) -> None:
+    """Reconcile attention columns across the historical v67-v69 schema overlap.
+
+    Some Hosts reached v69 through unrelated experimental migrations before
+    attention shipped as v67. Reconcile the actual columns rather than assuming
+    any of those version stamps proves attention exists. All changes are
+    additive; unrelated columns, tables and existing answer snapshots stay put.
+    """
+    additions = {
+        "artifacts": ("archived_at INTEGER",),
+        "artifact_decisions": (
+            "response_type TEXT NOT NULL DEFAULT 'approval'",
+            "options_json TEXT NOT NULL DEFAULT '[]'",
+            "allow_custom_text INTEGER NOT NULL DEFAULT 0",
+            "recommended_option_id TEXT",
+            "blocks_progress INTEGER NOT NULL DEFAULT 0",
+            "priority_reason TEXT NOT NULL DEFAULT ''",
+            "urgency TEXT NOT NULL DEFAULT 'normal'",
+            "response_effort TEXT NOT NULL DEFAULT 'review'",
+            "deadline_at INTEGER",
+            "answer_json TEXT",
+        ),
+        "decision_deliveries": (
+            "response_type TEXT NOT NULL DEFAULT 'approval'",
+            "answer_json TEXT",
+        ),
+    }
+    for table, definitions in additions.items():
+        columns = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+        for definition in definitions:
+            if definition.split()[0] not in columns:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+    con.execute("""UPDATE artifact_decisions SET answer_json=json_object('choice',resolved_choice)
+                    WHERE response_type='approval' AND answer_json IS NULL
+                      AND status IN ('accepted','rejected')""")
+    con.execute("""UPDATE decision_deliveries SET answer_json=json_object('choice',choice)
+                    WHERE response_type='approval' AND answer_json IS NULL
+                      AND choice IN ('accepted','rejected')""")
+
+
+def _migrate_to_v80(con: sqlite3.Connection) -> None:
     """Permanent voice timeline (lib/voice_events.py).
 
     One row per moment of a voice exchange, on a server-corrected clock.
@@ -1398,10 +1730,364 @@ def now_ms() -> int:
 def reset_for_tests(path: pathlib.Path | None = None) -> None:
     """Test helper: close cached connection so a new path takes effect."""
     global DB_PATH, _MIGRATED, _LAST_LOCK_REPORT_AT
-    if path is not None:
-        DB_PATH = path
-    _MIGRATED = False
-    close_local()
+    # Opening and migrating a connection form one operation. A worker that
+    # opens the previous test's file must not mark the next file migrated.
+    with _CONN_LOCK:
+        if path is not None:
+            DB_PATH = path
+        _MIGRATED = False
+        close_local()
     with _TRANSACTION_LOCK:
         _TRANSACTION_OWNERS.clear()
         _LAST_LOCK_REPORT_AT = 0.0
+
+
+def _migrate_to_v64(con: sqlite3.Connection) -> None:
+    """Transcription context packs: terms, packs, profiles, runs.
+
+    Packs are ranked sources rather than fixed lists, so nothing here stores a
+    length - how deep a pack is drawn is decided at compile time against the
+    active model's budget. `vocab_runs` records every compile so a transcript
+    can always be traced back to the exact prompt that produced it.
+    """
+    # Comments are stripped before splitting because prose in a `--` line may
+    # itself contain a semicolon, which would otherwise cut a statement in two.
+    # `executescript` is not an option - it issues its own COMMIT, which would
+    # break the transaction `_migrate` opened around all upgrades.
+    stripped = "\n".join(
+        line.split("--", 1)[0] for line in _V64_SQL.splitlines())
+    for statement in stripped.split(";"):
+        text = statement.strip()
+        if text:
+            con.execute(text)
+
+
+def _migrate_to_v65(con: sqlite3.Connection) -> None:
+    """A user message remembers the trace of the turn that carried it.
+
+    That is the link from a transcript bubble back to the vocabulary run and
+    the retained audio behind it - the "what was sent" the app can now show
+    for one message rather than for the agent as a whole.
+    """
+    con.execute("ALTER TABLE messages ADD COLUMN trace_id TEXT")
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_trace ON messages(trace_id)"
+        " WHERE trace_id IS NOT NULL")
+
+
+def _migrate_to_v79(con: sqlite3.Connection) -> None:
+    """Per-agent fallback models and their once-only invocation receipts.
+
+    Purely additive: every statement is CREATE TABLE IF NOT EXISTS, so a host
+    that already ran this branch re-applies it without touching stored rows.
+    """
+    for statement in _MODEL_FALLBACK_SCHEMA.split(";"):
+        if statement.strip():
+            con.execute(statement)
+
+
+def _migrate_to_v78(con: sqlite3.Connection) -> None:
+    """Dreaming seed strategies, thread kill notes, and agent voice verbosity.
+
+    Guarded: a host can reach this point with the columns already present.
+    """
+    runs = {row[1] for row in con.execute("PRAGMA table_info(dream_runs)")}
+    for name, definition in (
+        ("seed_strategy", "TEXT NOT NULL DEFAULT 'control'"),
+        ("context_dose", "TEXT NOT NULL DEFAULT 'full'"),
+        ("seed_material", "TEXT NOT NULL DEFAULT ''"),
+        ("artifact_branch", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if name not in runs:
+            con.execute(f"ALTER TABLE dream_runs ADD COLUMN {name} {definition}")
+    threads = {row[1] for row in con.execute("PRAGMA table_info(dream_threads)")}
+    for name in ("killed_reason", "origin_note"):
+        if name not in threads:
+            con.execute(f"ALTER TABLE dream_threads ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+    agent_cols = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if "voice_verbosity" not in agent_cols:
+        con.execute("ALTER TABLE agents ADD COLUMN voice_verbosity INTEGER NOT NULL DEFAULT 0")
+
+
+_V64_SQL = """
+CREATE TABLE vocab_packs (
+    pack_id    TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'static'
+               CHECK(kind IN ('static', 'dynamic')),
+    generator  TEXT NOT NULL DEFAULT '',
+    priority   REAL NOT NULL DEFAULT 1.0,
+    floor      INTEGER NOT NULL DEFAULT 0,
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vocab_packs_name ON vocab_packs(name);
+
+CREATE TABLE vocab_terms (
+    term_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    pack_id         TEXT NOT NULL REFERENCES vocab_packs(pack_id)
+                    ON DELETE CASCADE,
+    text            TEXT NOT NULL,
+    say_as          TEXT NOT NULL DEFAULT '',
+    often_heard_as  TEXT NOT NULL DEFAULT '',
+    rarity          REAL NOT NULL DEFAULT 0.5,
+    source          TEXT NOT NULL DEFAULT 'manual',
+    created_at      INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vocab_terms_pack_text
+    ON vocab_terms(pack_id, text COLLATE NOCASE);
+
+CREATE TABLE vocab_profiles (
+    profile_id TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vocab_profiles_name ON vocab_profiles(name);
+
+CREATE TABLE vocab_profile_packs (
+    profile_id TEXT NOT NULL REFERENCES vocab_profiles(profile_id)
+               ON DELETE CASCADE,
+    pack_id    TEXT NOT NULL REFERENCES vocab_packs(pack_id)
+               ON DELETE CASCADE,
+    position   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (profile_id, pack_id)
+);
+
+-- A profile binds to an agent or a team, never both; the CHECK keeps the
+-- "exactly one owner" rule in the database rather than in every caller.
+CREATE TABLE vocab_assignments (
+    assignment_id TEXT PRIMARY KEY,
+    profile_id    TEXT NOT NULL REFERENCES vocab_profiles(profile_id)
+                  ON DELETE CASCADE,
+    agent_id      TEXT REFERENCES agents(agent_id) ON DELETE CASCADE,
+    team_id       TEXT,
+    created_at    INTEGER NOT NULL,
+    CHECK ((agent_id IS NULL) <> (team_id IS NULL))
+);
+CREATE UNIQUE INDEX vocab_assignments_agent
+    ON vocab_assignments(agent_id) WHERE agent_id IS NOT NULL;
+CREATE UNIQUE INDEX vocab_assignments_team
+    ON vocab_assignments(team_id) WHERE team_id IS NOT NULL;
+
+-- One row per compile. This is the transparency contract: it must always be
+-- possible to answer "what exactly did we send to the model, and what did we
+-- leave out?" for any transcript the user is looking at.
+CREATE TABLE vocab_runs (
+    run_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id      TEXT REFERENCES agents(agent_id) ON DELETE SET NULL,
+    session       TEXT NOT NULL DEFAULT '',
+    trace_id      TEXT NOT NULL DEFAULT '',
+    profile_id    TEXT,
+    provider      TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    unit          TEXT NOT NULL,
+    capacity      INTEGER NOT NULL,
+    used          INTEGER NOT NULL,
+    form          TEXT NOT NULL,
+    rarity_floor  REAL NOT NULL DEFAULT 0,
+    payload       TEXT NOT NULL DEFAULT '',
+    included_json TEXT NOT NULL DEFAULT '[]',
+    dropped_json  TEXT NOT NULL DEFAULT '[]',
+    transcript    TEXT NOT NULL DEFAULT '',
+    latency_ms    INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL
+);
+CREATE INDEX vocab_runs_recent ON vocab_runs(created_at DESC);
+CREATE INDEX vocab_runs_trace ON vocab_runs(trace_id)
+    WHERE trace_id <> '';
+"""
+
+
+def _migrate_to_v71(con: sqlite3.Connection) -> None:
+    """Preserve existing coordination; newly created teams are passive groups."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(teams)")}
+    for definition in ("parent_team_id TEXT", "leader_enabled INTEGER NOT NULL DEFAULT 0",
+                       "communication_enabled INTEGER NOT NULL DEFAULT 0"):
+        if definition.split()[0] not in columns:
+            con.execute(f"ALTER TABLE teams ADD COLUMN {definition}")
+    if "communication_enabled" not in columns:
+        con.execute("UPDATE teams SET communication_enabled = 1")
+    if "leader_enabled" not in columns:
+        con.execute("UPDATE teams SET leader_enabled = CASE WHEN COALESCE(leader_agent_id, '') != '' THEN 1 ELSE 0 END")
+
+
+_JANITOR_SCHEMA = """
+CREATE TABLE IF NOT EXISTS janitor_configs (
+    agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
+    template_id TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    revision INTEGER NOT NULL DEFAULT 1,
+    generation INTEGER NOT NULL DEFAULT 1,
+    scope_json TEXT NOT NULL DEFAULT '{}',
+    execution_json TEXT NOT NULL DEFAULT '{}',
+    options_json TEXT NOT NULL DEFAULT '{}',
+    last_error TEXT NOT NULL DEFAULT '',
+    last_run_at INTEGER,
+    last_change_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_trigger_definitions (
+    trigger_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    defaults_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (trigger_id, version)
+);
+CREATE TABLE IF NOT EXISTS janitor_attachments (
+    attachment_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),
+    trigger_id TEXT NOT NULL,
+    trigger_version INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    next_run_at INTEGER,
+    retired_at INTEGER,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(trigger_id, trigger_version)
+        REFERENCES janitor_trigger_definitions(trigger_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_janitor_attachments_agent
+    ON janitor_attachments(agent_id, retired_at);
+CREATE TABLE IF NOT EXISTS janitor_progress (
+    attachment_id TEXT PRIMARY KEY REFERENCES janitor_attachments(attachment_id),
+    generation INTEGER NOT NULL,
+    state_json TEXT NOT NULL DEFAULT '{}',
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_runs (
+    run_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),
+    session TEXT NOT NULL,
+    attachment_id TEXT NOT NULL REFERENCES janitor_attachments(attachment_id),
+    generation INTEGER NOT NULL,
+    trace_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'queued',
+    outcome TEXT NOT NULL DEFAULT '',
+    candidates_json TEXT NOT NULL,
+    configuration_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    finished_at INTEGER,
+    error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_janitor_runs_agent
+    ON janitor_runs(agent_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_janitor_runs_one_active
+    ON janitor_runs(agent_id) WHERE status IN ('queued', 'running');
+CREATE TABLE IF NOT EXISTS janitor_effects (
+    run_id TEXT NOT NULL REFERENCES janitor_runs(run_id),
+    target_agent_id TEXT NOT NULL REFERENCES agents(agent_id),
+    target_session TEXT NOT NULL,
+    observed_state_id INTEGER NOT NULL,
+    outcome TEXT NOT NULL,
+    before_label TEXT NOT NULL,
+    after_label TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(run_id, target_agent_id)
+);
+CREATE TABLE IF NOT EXISTS janitor_label_ownership (
+    target_agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
+    owner_agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),
+    run_id TEXT NOT NULL REFERENCES janitor_runs(run_id),
+    label TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1,
+    task_signature TEXT NOT NULL,
+    valid_until INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_creation_requests (
+    request_id TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    identity_json TEXT NOT NULL,
+    session TEXT NOT NULL UNIQUE,
+    agent_id TEXT REFERENCES agents(agent_id),
+    response_json TEXT,
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS janitor_pilot_imports (
+    import_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),
+    imported_at INTEGER NOT NULL,
+    payload_sha256 TEXT NOT NULL
+);
+INSERT OR IGNORE INTO janitor_trigger_definitions
+    (trigger_id, version, name, kind, defaults_json) VALUES
+    ('agent-work-completed', 1, 'After an agent finishes a turn', 'event',
+     '{"coalesce_seconds":8,"max_targets":3}'),
+    ('schedule', 1, 'On a schedule', 'schedule',
+     '{"cron":"0 9 * * *","timezone":"UTC","max_targets":3}');
+"""
+_SCHEMA_SQL += _JANITOR_SCHEMA
+
+_ACTIVE_INTERVAL_TRIGGER = """INSERT OR IGNORE INTO janitor_trigger_definitions
+    (trigger_id,version,name,kind,defaults_json) VALUES
+    ('active-interval',1,'Periodically while using the app','interval',
+     '{"interval_seconds":900,"idle_timeout_seconds":300,"run_on_resume":true,"max_targets":3,"coalesce_seconds":0}')"""
+_SCHEMA_SQL += _ACTIVE_INTERVAL_TRIGGER + ";"
+
+
+def _migrate_to_v73(con: sqlite3.Connection) -> None:
+    """Add optional maintenance without rewriting existing identities/history."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if "is_janitor" not in columns:
+        con.execute("ALTER TABLE agents ADD COLUMN is_janitor INTEGER NOT NULL "
+                    "DEFAULT 0 CHECK (is_janitor IN (0, 1))")
+    for statement in _JANITOR_SCHEMA.split(";"):
+        if statement.strip():
+            con.execute(statement)
+
+
+_BUILTIN_JANITOR_SCHEMA = """
+CREATE TABLE IF NOT EXISTS janitor_builtins (
+    role TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL UNIQUE REFERENCES agents(agent_id),
+    seed_version INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_demand_results (
+    run_id TEXT PRIMARY KEY REFERENCES janitor_runs(run_id),
+    result_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_demand_claims (
+    run_id TEXT PRIMARY KEY REFERENCES janitor_runs(run_id),
+    claimed_at INTEGER NOT NULL,
+    finished_at INTEGER
+);
+INSERT OR IGNORE INTO janitor_trigger_definitions
+    (trigger_id,version,name,kind,defaults_json) VALUES
+    ('routing-requested',1,'When a message needs a recipient','demand','{}'),
+    ('tool-explanation-requested',1,'When a tool explanation is requested','demand','{}');
+CREATE TRIGGER IF NOT EXISTS janitor_demand_trigger_no_update
+BEFORE UPDATE ON janitor_trigger_definitions
+WHEN OLD.kind='demand'
+BEGIN SELECT RAISE(ABORT,'Demand trigger versions are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS janitor_demand_trigger_no_delete
+BEFORE DELETE ON janitor_trigger_definitions
+WHEN OLD.kind='demand'
+BEGIN SELECT RAISE(ABORT,'Demand trigger versions are immutable'); END;
+"""
+_SCHEMA_SQL += _BUILTIN_JANITOR_SCHEMA
+
+
+def _migrate_to_v76(con: sqlite3.Connection) -> None:
+    """Add demand execution contracts without enabling or converting agents."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(janitor_configs)")}
+    if "execution_json" not in columns:
+        con.execute("ALTER TABLE janitor_configs ADD COLUMN execution_json TEXT NOT NULL DEFAULT '{}'")
+    if "options_json" not in columns:
+        con.execute("ALTER TABLE janitor_configs ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'")
+    statement = ""
+    for line in _BUILTIN_JANITOR_SCHEMA.splitlines(keepends=True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            con.execute(statement)
+            statement = ""
+    assert not statement.strip()

@@ -76,3 +76,14 @@ def test_claude_cli_provider_can_use_clarp(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PWA_CLAUDE_CLI", "claude")
     loaded = config.load(path)
     assert loaded.claude_cli == "claude"
+
+
+@pytest.mark.parametrize("value,expected", [
+    ('["python3", "/path with spaces/selector.py"]', ("python3", "/path with spaces/selector.py")),
+    ('"shell command"', ()), ('[123]', ()), ('[""]', ()), ('[]', ()),
+])
+def test_claude_account_switch_command_requires_explicit_argv(tmp_path, value, expected):
+    path = tmp_path / "config.toml"
+    path.write_text(f'[agents]\nclaude_account_switch_command = {value}\n')
+    config.reset_cache_for_tests()
+    assert config.load(path).claude_account_switch_command == expected

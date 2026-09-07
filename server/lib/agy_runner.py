@@ -163,6 +163,10 @@ def spawn_turn(
     )
     cmd = build_cmd(backend_session_id, is_new_session=is_new_session,
                     model=model, effort=effort)
+    if isolated:
+        # AGY otherwise chooses its global scratch project for a non-Git cwd.
+        # Explicitly expose the caller's workspace for an isolated continuation.
+        cmd += ["--add-dir", str(cwd)]
     fd, log_path = tempfile.mkstemp(prefix="agy-", suffix=".log")
     os.close(fd)
     # Prompt is --print's value (the `=` form keeps a prompt that starts with
@@ -186,7 +190,7 @@ def spawn_turn(
                           {"dispatch": "agy", "trace_id": trace_id})
         process.append(subprocess.Popen(
             cmd, cwd=str(cwd), stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, start_new_session=(os.name == "posix"),
             env={**os.environ, "CLAUDE_PWA_SESSION": session},
         ))
     try:
@@ -201,7 +205,9 @@ def spawn_turn(
             pass
         raise
     attach_stderr_drain(proc)
-    handle = TurnHandle(proc=proc, drain_thread=None)   # type: ignore[arg-type]
+    handle = TurnHandle(
+        proc=proc, drain_thread=None,
+        process_group=proc.pid if os.name == "posix" else None)   # type: ignore[arg-type]
     if runtime_agent_id:
         _register(runtime_agent_id, handle)
     drain = threading.Thread(
@@ -299,11 +305,11 @@ def _drain_stream(
         log_exception("agyDrainFail", error, detail=trace_id)
         if proc.poll() is None:
             try:
-                proc.terminate()
+                handle.terminate()
                 proc.wait(timeout=2)
             except Exception:  # noqa: BLE001
                 try:
-                    proc.kill()
+                    handle.kill()
                 except Exception:  # noqa: BLE001
                     pass
         if st.terminal == "result":
@@ -500,6 +506,10 @@ def _finalize_success(st: _TurnState, *, agent_id: str, session: str,
                       trace_id: str, stream: Any, enqueue) -> None:
     response = str((st.pending_result or {}).get("last_agent_message") or "")
     st.live_text = response
+    # Isolated callers own persistence and delivery. Their provider UUID must
+    # never claim the primary agent's conversation or durable turn baseline.
+    if not agent_id:
+        return
     if st.baseline_snapshot is None:
         raise RuntimeError("AGY turn authority baseline missing")
     status = "success" if response.strip() else "empty"

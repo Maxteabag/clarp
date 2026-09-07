@@ -18,6 +18,120 @@ Never hand-edit the active generated release. Use `clarp-admin paths` to find
 the platform-native release, configuration, database, cache, log, service, and
 toolchain paths.
 
+## Rehearse an additive state upgrade
+
+Before deploying a migration, compare the candidate's `_SCHEMA_VERSION` with
+the actual database's `PRAGMA user_version` and required columns. A database
+previously opened by another feature branch can have a higher marker without
+the new feature's columns. Do not lower the marker or assume version order alone
+proves compatibility. Fix and test the candidate migration first.
+
+### Choose the version number against every source, not just main
+
+`_migrate` returns early when `PRAGMA user_version >= _SCHEMA_VERSION`, so a
+number another branch already used means your migration **silently never runs**
+on that host: the deploy succeeds, the tables are missing, and the feature fails
+at runtime. Several agents work this repo in parallel and deploy feature
+branches to the live host, so `origin/main` alone does not tell you what is
+taken. Read all four before picking:
+
+```bash
+git fetch origin
+grep -n '_SCHEMA_VERSION = ' server/lib/db.py                       # your branch
+git show origin/main:server/lib/db.py | grep -n '_SCHEMA_VERSION = ' # merged
+grep -n '_SCHEMA_VERSION = ' ~/.local/share/clarp/current/lib/db.py  # deployed
+sqlite3 ~/.local/share/clarp/state.sqlite 'pragma user_version;'     # live DB
+```
+
+Take `max(all four) + 1`, add a `_migrate_to_vNN` guarded by
+`if version < NN:`, and keep every statement `CREATE TABLE IF NOT EXISTS` so
+re-applying is harmless whichever branch lands first. Re-check after every
+rebase: a merge that lands mid-task can take your number. Verify after
+deploying that `pragma user_version` advanced *and* the new tables exist --
+a matching version number alone does not prove the migration ran.
+
+Use the helper from this skill to migrate a new private backup, never the live
+database. Choose an existing private directory for the output:
+
+```bash
+python3 scripts/rehearse_state_upgrade.py \
+  --source /path/from/clarp-admin-paths/state.sqlite \
+  --server-root /candidate/checkout/server \
+  --output /private/backups/new-rehearsal.sqlite
+```
+
+It uses SQLite online backup, refuses to overwrite output, and checks every
+existing table's original columns and values after migration. Exit zero proves
+an additive upgrade on that snapshot, not a deployment. Intentional data
+transformations need their own validation; this helper reports them as changes.
+
+For a migration that intentionally inserts catalog or seed rows, opt in only
+the expected existing tables with repeatable `--allow-added-rows TABLE` flags:
+
+```bash
+python3 scripts/rehearse_state_upgrade.py \
+  --source /path/from/clarp-admin-paths/state.sqlite \
+  --server-root /candidate/checkout/server \
+  --output /private/backups/new-catalog-rehearsal.sqlite \
+  --allow-added-rows janitor_trigger_definitions
+```
+
+The default remains strict. Each allowed table retains a complete row multiset
+in memory across all original columns, including generated columns, and must
+preserve every original value, type and duplicate count. Only additional rows
+are accepted; changed/deleted rows and removed tables/columns still fail.
+Unknown table names fail before migration. The JSON `allowed_added_rows` field
+reports `before`, `after`, `added` and `missing` counts per allowed table, or a
+schema error if comparison is impossible. It never prints the row contents.
+
+Keep backups private. Release rollback does not automatically undo a database
+migration. Prefer the supported `clarp-admin update --ref FULL_SHA` once the
+candidate is verified; do not hand-edit generated releases.
+
+For an authorized update that must survive the HTTP connection restarting, run
+`bash scripts/update_with_job.sh SESSION FULL_SHA PRIVATE_STATE_DIR` in an owned
+`systemd-run --user` unit with a private append log and the normal CLI PATH.
+Use `--dry-run` first to inspect its target without starting a job. Keep the
+script in a permanent location outside the generated release being switched.
+Invoke it with `/usr/bin/bash` in the unit too: managed copies may not have an
+executable bit. Resolve symlinks before choosing the helper path; a dotfiles
+skill link can still point into the generated release.
+It heartbeats a process-fenced job and records `installer-exit`; job completion
+means the installer finished, not that phone/runtime verification is complete.
+Once installation starts, the installer owns rollback; cancelling the tracking
+job is not an emergency stop for the installer. Verify the deployed SHA, schema,
+runtime availability, and `clarp-admin doctor` afterwards.
+
+## Installing does not deploy runner code
+
+`install_and_restart` runs `systemctl --user enable --now
+clarp-runtime.service` and `restart clarp.service`. `enable --now` does not
+restart an already-running runtime, and nothing in the server automatically
+adopts a new release, so **the runtime keeps its old code until someone
+restarts it**. Verified on 2026-09-07: no drain-to-new-release mechanism exists
+in `runtime.py` or `service_manager.py`.
+
+That split decides whether your change is actually live:
+
+| Where the code lives | Live after `install.sh`? |
+|---|---|
+| HTTP endpoints (`server.py`), schema migrations | yes |
+| Runner/turn code (`turn_dispatch.py`, `*_runner.py`) | **no** |
+
+Confirm which side you changed, then check whether the runtime predates the
+deploy:
+
+```bash
+ps -o lstart= -p $(systemctl --user show clarp-runtime.service -p MainPID --value)
+stat -c %y ~/.local/share/clarp/current
+```
+
+Restarting the runtime interrupts **every in-flight turn on the host**,
+including the calling agent's own turn, so it cannot be done silently from
+inside a turn that still needs to report. Check `/agents/snapshot` for `busy`
+agents and queued turns, then ask for explicit approval with `clarp-decisions`
+rather than restarting unannounced.
+
 ## Docker Container Administration
 
 When diagnosing or managing Clarp inside a Docker container:
@@ -39,4 +153,3 @@ When diagnosing or managing Clarp inside a Docker container:
 - Tailscale and phone connectivity:
   * Prefer the `compose.tailscale.yaml` sidecar mode for isolated Tailnet identity, auto-HTTPS, and zero host firewall conflicts.
   * If publishing ports on the host directly (`CLARP_PORT=...`), ensure host firewalls (`ufw` / `DOCKER-USER`) allow Tailscale CGNAT traffic (`100.64.0.0/10` / `tailscale0`) to forward to Docker bridge networks.
-

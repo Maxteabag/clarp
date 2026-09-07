@@ -62,3 +62,48 @@ def test_compact_command_map_per_backend():
     assert compaction._COMPACT[backends.CODEX][1] == "/compact"
     assert compaction._COMPACT[backends.AGY][1] == "/compress"
     assert compaction._COMPACT[backends.GROK][1] == "/compact"
+
+
+def test_server_process_delegates_compaction_to_runtime_owner():
+    class RuntimeOwner:
+        def __init__(self):
+            self.sessions = []
+
+        def compact(self, session):
+            self.sessions.append(session)
+            return {"ok": True, "status": "started", "backend": "codex"}
+
+        def status(self):
+            return {"compactions": ["theo"]}
+
+    runtime = RuntimeOwner()
+    compaction.configure_runtime_client(runtime)
+    try:
+        assert compaction.compact_session("theo")["status"] == "started"
+        assert compaction.is_compacting("theo") is True
+        assert compaction.is_compacting("other") is False
+    finally:
+        compaction.configure_runtime_client(None)
+
+    assert runtime.sessions == ["theo"]
+
+
+def test_runtime_status_outage_preserves_persisted_compacting_state(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        compaction.agents_db, "get_by_session",
+        lambda _session: {"agent_id": "agent-1"})
+    monkeypatch.setattr(
+        compaction.agents_db, "latest_state",
+        lambda _agent_id: {"kind": "compacting"})
+
+    class OfflineRuntime:
+        def status(self):
+            raise RuntimeError("runtime restarting")
+
+    compaction.configure_runtime_client(OfflineRuntime())
+    try:
+        assert compaction.is_compacting("theo") is True
+    finally:
+        compaction.configure_runtime_client(None)

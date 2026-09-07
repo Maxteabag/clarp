@@ -24,6 +24,32 @@ def test_recent_replays_in_order(tmp_path):
     assert types == ["a", "b"]
 
 
+def test_ephemeral_broadcast_reaches_live_subscriber_but_never_replays(tmp_path):
+    s = AudioStream(tmp_path)
+    q = s.subscribe()
+
+    s.broadcast_ephemeral({"type": "remote-action", "action": "record-toggle"})
+
+    assert "remote-action" in q.get(timeout=1)
+    assert not any(ev["type"] == "remote-action" for ev in s.recent())
+
+
+def test_recent_filters_remote_actions_persisted_by_an_older_release(tmp_path):
+    from lib import agents as agents_db
+
+    legacy_id = agents_db.record_sse_event({
+        "type": "remote-action",
+        "action": "record-toggle",
+    })
+    agents_db.record_sse_event({"type": "server-version", "version": "new"})
+
+    s = AudioStream(tmp_path)
+    replay = s.recent(since_event_id=legacy_id - 1)
+
+    assert not any(ev["type"] == "remote-action" for ev in replay)
+    assert any(ev["type"] == "server-version" for ev in replay)
+
+
 def test_transcript_update_bursts_are_throttled_per_session(tmp_path):
     now = [10.0]
     s = AudioStream(tmp_path, transcript_event_min_interval_sec=0.25,

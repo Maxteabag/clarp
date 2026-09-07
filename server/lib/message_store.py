@@ -197,6 +197,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                         client_msg_id: str, text: str,
                         origin: str = "user", sender_agent_id: str | None = None,
                         prompt_admission_id: str = "",
+                        trace_id: str = "",
                         ) -> dict[str, Any] | None:
     """Record a user message the moment /send accepts it, keyed by the
     client-authored `client_msg_id` (idempotency key).
@@ -224,7 +225,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
             agent_id=agent_id, client_admission_id=client_msg_id,
         )
     existing = database.execute(
-        """SELECT timestamp, text, revision, origin, sender_agent_id
+        """SELECT timestamp, text, revision, origin, sender_agent_id, trace_id
              FROM messages WHERE message_id = ?""",
         (msg_id,),
     ).fetchone()
@@ -235,6 +236,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
             "tools": [], "display_cells": [],
             "origin": existing["origin"] or "user",
             "sender_agent_id": existing["sender_agent_id"] or "",
+            "trace_id": existing["trace_id"] or "",
             "revision": int(existing["revision"]),
             "created": False,
         }
@@ -253,14 +255,14 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                message_id, agent_id, backend_session_id, source_file, seq,
                role, timestamp, text, kind, tool_name, tools_json,
                display_cells_json, updated_at, revision, origin,
-               sender_agent_id, prompt_admission_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               sender_agent_id, prompt_admission_id, trace_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(message_id) DO NOTHING""",
         (
             msg_id, agent_id, backend_session_id, f"client:{client_msg_id}", seq,
             "user", timestamp, text, None, None, "[]", "[]",
             timestamp_ms, revision, origin, sender_agent_id,
-            prompt_admission_id or None,
+            prompt_admission_id or None, (trace_id or "").strip() or None,
         ),
     )
     if inserted.rowcount != 1:
@@ -275,6 +277,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
             origin=origin,
             sender_agent_id=sender_agent_id,
             prompt_admission_id=prompt_admission_id,
+            trace_id=trace_id,
         )
     database.execute(
         """INSERT INTO conversation_heads (
@@ -295,8 +298,165 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
         "display_cells": [],
         "origin": origin,
         "sender_agent_id": sender_agent_id or "",
+        "trace_id": (trace_id or "").strip(),
         "revision": revision,
         "created": True,
+    }
+
+
+MARKER_ORIGIN = origins.MARKER_ORIGIN
+
+
+def marker_message_id(cause_message_id: str) -> str:
+    return f"marker-{cause_message_id}"
+
+
+def has_interruption_marker(cause_message_id: str) -> bool:
+    if not cause_message_id:
+        return False
+    return conn().execute(
+        "SELECT 1 FROM messages WHERE message_id = ? LIMIT 1",
+        (marker_message_id(cause_message_id),),
+    ).fetchone() is not None
+
+
+def record_interruption_marker(*, agent_id: str, backend_session_id: str,
+                               cause_message_id: str, text: str,
+                               ) -> dict[str, Any] | None:
+    """Write the visible "this turn was cut short" row under a user message.
+
+    A turn the server killed (restart, crash) never writes an assistant row,
+    so the user's message would sit unanswered with nothing to say why. The
+    marker is an assistant-role row with origin ``system``: it renders as a
+    normal reply, survives the automated-row filter, and is keyed by the
+    causing message so a second boot cannot add a second one. Returns the new
+    row, or None when the marker already exists.
+    """
+    if not agent_id or not cause_message_id:
+        return None
+    database = conn()
+    msg_id = marker_message_id(cause_message_id)
+    if database.execute(
+            "SELECT 1 FROM messages WHERE message_id = ?", (msg_id,)).fetchone():
+        return None
+    row = database.execute(
+        """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
+             FROM messages
+            WHERE agent_id = ? AND backend_session_id = ?""",
+        (agent_id, backend_session_id),
+    ).fetchone()
+    seq = min(int(row["next_seq"]), -1)
+    cause = database.execute(
+        f"""SELECT {_message_activity_sql()} AS ts_ms, updated_at
+              FROM messages WHERE message_id = ?""",
+        (cause_message_id,),
+    ).fetchone()
+    # Display order is timestamp then seq, and the marker's seq is below the
+    # user row's, so its timestamp must be strictly later to sit under it.
+    timestamp_ms = now_ms()
+    if cause is not None and cause["ts_ms"] is not None:
+        # SQLite's julianday conversion can round a millisecond timestamp down
+        # by one. Include the durable write clock so a fast restart cannot give
+        # the marker the same display timestamp and sort it above its user row.
+        timestamp_ms = max(
+            timestamp_ms,
+            int(cause["ts_ms"]) + 1,
+            int(cause["updated_at"] or 0) + 1,
+        )
+    timestamp = _iso_from_ms(timestamp_ms)
+    revision = _next_revision(database)
+    inserted = database.execute(
+        """INSERT INTO messages (
+               message_id, agent_id, backend_session_id, source_file, seq,
+               role, timestamp, text, kind, tool_name, tools_json,
+               display_cells_json, updated_at, revision, origin,
+               sender_agent_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(message_id) DO NOTHING""",
+        (
+            msg_id, agent_id, backend_session_id, f"marker:{cause_message_id}",
+            seq, "assistant", timestamp, text, None, None, "[]", "[]",
+            timestamp_ms, revision, MARKER_ORIGIN, None,
+        ),
+    )
+    if inserted.rowcount != 1:
+        return None
+    database.execute(
+        """INSERT INTO conversation_heads (
+               agent_id, backend_session_id, revision, replace_revision
+           ) VALUES (?, ?, ?, 0)
+           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+               revision = MAX(conversation_heads.revision, excluded.revision)""",
+        (agent_id, backend_session_id, revision),
+    )
+    return {
+        "id": msg_id, "role": "assistant", "timestamp": timestamp,
+        "text": text, "kind": None, "tool_name": None, "tools": [],
+        "display_cells": [], "origin": MARKER_ORIGIN, "sender_agent_id": "",
+        "revision": revision, "created": True,
+    }
+
+
+def record_dream_digest(*, agent_id: str, backend_session_id: str,
+                        run_id: str, text: str) -> dict[str, Any] | None:
+    """Put a finished Dream Digest into the conversation.
+
+    Dreams run in an isolated backend session that is deliberately never
+    written to the chat read model, which meant a completed digest landed in
+    the dream ledger and nowhere the user would ever look. This is the one
+    row a night is allowed to add: keyed by run id, so a retried import or a
+    second completion cannot post it twice.
+    """
+    if not agent_id or not run_id or not str(text or "").strip():
+        return None
+    database = conn()
+    msg_id = f"dream:{run_id}"
+    if database.execute(
+            "SELECT 1 FROM messages WHERE message_id = ?", (msg_id,)).fetchone():
+        return None
+    row = database.execute(
+        """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
+             FROM messages
+            WHERE agent_id = ? AND backend_session_id = ?""",
+        (agent_id, backend_session_id),
+    ).fetchone()
+    # Below the transcript's numbering, like the interruption marker. seq is
+    # unique per (agent, session) and the rebuild assigns its own values from
+    # the transcript, so a server-authored row sitting inside that range
+    # collides the moment the agent takes its next turn. Display order is
+    # timestamp first, so a negative seq costs nothing: the digest still lands
+    # at the end of the conversation by its own clock.
+    seq = min(int(row["next_seq"]), -1)
+    timestamp_ms = now_ms()
+    timestamp = _iso_from_ms(timestamp_ms)
+    revision = _next_revision(database)
+    inserted = database.execute(
+        """INSERT INTO messages (
+               message_id, agent_id, backend_session_id, source_file, seq,
+               role, timestamp, text, kind, tool_name, tools_json,
+               display_cells_json, updated_at, revision, origin,
+               sender_agent_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(message_id) DO NOTHING""",
+        (
+            msg_id, agent_id, backend_session_id, f"dream:{run_id}",
+            seq, "assistant", timestamp, str(text), None, None, "[]", "[]",
+            timestamp_ms, revision, "dreaming", None,
+        ),
+    )
+    if inserted.rowcount != 1:
+        return None
+    database.execute(
+        """INSERT INTO conversation_heads (
+               agent_id, backend_session_id, revision, replace_revision
+           ) VALUES (?, ?, ?, 0)
+           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+               revision = MAX(conversation_heads.revision, excluded.revision)""",
+        (agent_id, backend_session_id, revision),
+    )
+    return {
+        "id": msg_id, "role": "assistant", "timestamp": timestamp,
+        "text": text, "origin": "dreaming", "revision": revision,
     }
 
 
@@ -694,9 +854,15 @@ def _restore_assistant_state_txn(database, *, agent_id: str,
                 database.execute(
                     f"DELETE FROM team_messages WHERE team_message_id IN ({team_marks})",
                     doomed_team_ids)
+        # Server-authored assistant rows are exempt. The transcript is the
+        # source of truth for anything the CLI said, so the rebuild clears and
+        # re-derives it — but a dream digest was written by an isolated
+        # backend session that appears in no transcript, so deleting it here
+        # would erase it permanently on the agent's very next turn.
         database.execute(
             "DELETE FROM messages WHERE agent_id=? AND backend_session_id=? "
-            "AND role='assistant'", (agent_id, backend_session_id))
+            "AND role='assistant' AND source_file NOT LIKE 'dream:%'",
+            (agent_id, backend_session_id))
         message_columns = (
             "message_id", "agent_id", "backend_session_id", "source_file", "seq",
             "role", "timestamp", "text", "kind", "tool_name", "tools_json",
@@ -1171,7 +1337,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         order = "m.revision ASC, COALESCE(m.timestamp, '') ASC, m.seq ASC"
         query = f"""SELECT m.message_id, m.role, m.timestamp, m.text, m.kind,
                            m.tool_name, m.tools_json, m.display_cells_json,
-                           m.revision, m.origin, m.sender_agent_id,
+                           m.revision, m.origin, m.sender_agent_id, m.trace_id,
                            sender.persona AS sender_name,
                            sender.session AS sender_session
                       FROM messages m
@@ -1183,13 +1349,13 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
     else:
         query = f"""SELECT m.message_id, m.role, m.timestamp, m.text, m.kind,
                            m.tool_name, m.tools_json, m.display_cells_json,
-                           m.revision, m.origin, m.sender_agent_id,
+                           m.revision, m.origin, m.sender_agent_id, m.trace_id,
                            sender.persona AS sender_name,
                            sender.session AS sender_session
                       FROM (
                             SELECT message_id, role, timestamp, text, kind,
                                    tool_name, tools_json, display_cells_json,
-                                   seq, revision, origin, sender_agent_id
+                                   seq, revision, origin, sender_agent_id, trace_id
                               FROM messages m
                              WHERE {where}
                              ORDER BY COALESCE(timestamp, '') DESC, seq DESC
@@ -1227,14 +1393,32 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                 display_cells if isinstance(display_cells, list) else []
             ),
             "origin": (row["origin"] or "user"),
-            "sender_agent_id": (row["sender_agent_id"] or ""),
-            "sender_name": (row["sender_name"] or ""),
-            "sender_session": (row["sender_session"] or ""),
+            "trace_id": (row["trace_id"] or ""),
+            **provenance_fields(row),
             "revision": int(row["revision"]),
             "automated": bool(automation_kind),
             "automation_kind": automation_kind,
         })
     return out
+
+
+def provenance_fields(row) -> dict[str, str]:
+    """Split stored provenance into author versus answered sender.
+
+    A user row written by another agent names that agent as its sender. The
+    assistant row that answers it stores the same ``sender_agent_id`` so the
+    trigger stays attributable, but its author is the transcript owner. Never
+    project the trigger as the reply's sender: clients rendered the current
+    agent's answer as if the other agent had written it.
+    """
+    stored = row["sender_agent_id"] or ""
+    name = row["sender_name"] or ""
+    session = row["sender_session"] or ""
+    if (row["role"] or "") == "user":
+        return {"sender_agent_id": stored, "sender_name": name, "sender_session": session,
+                "reply_to_agent_id": "", "reply_to_name": "", "reply_to_session": ""}
+    return {"sender_agent_id": "", "sender_name": "", "sender_session": "",
+            "reply_to_agent_id": stored, "reply_to_name": name, "reply_to_session": session}
 
 
 def last_message_head(*, agent_id: str, max_len: int = 80) -> dict[str, Any]:
@@ -1256,6 +1440,10 @@ def last_message_head(*, agent_id: str, max_len: int = 80) -> dict[str, Any]:
              LIMIT 50""",
         (agent_id, *routine_origins),
     ).fetchall()
+    return _preview_head(rows, max_len)
+
+
+def _preview_head(rows, max_len: int) -> dict[str, Any]:
     row = next(
         (
             candidate for candidate in rows
@@ -1267,6 +1455,10 @@ def last_message_head(*, agent_id: str, max_len: int = 80) -> dict[str, Any]:
         ),
         None,
     )
+    return _format_preview(row, max_len)
+
+
+def _format_preview(row, max_len: int) -> dict[str, Any]:
     if not row:
         return {"preview": "", "message_id": "", "revision": 0,
                 "conversation_id": ""}
@@ -1290,6 +1482,57 @@ def last_message_head(*, agent_id: str, max_len: int = 80) -> dict[str, Any]:
 
 def last_message_preview(*, agent_id: str, max_len: int = 80) -> str:
     return str(last_message_head(agent_id=agent_id, max_len=max_len)["preview"])
+
+
+def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
+    """Batch the dashboard projection; at most 50 candidates per agent per preview mode leave SQLite."""
+    routine = tuple(sorted(origins.ROUTINE_AUTOMATION_ORIGINS))
+    marks = ','.join('?' for _ in routine)
+    result: dict[str, dict[str, Any]] = {}
+    # Separate bounded projections keep the last final message available even
+    # when many newer provisional rows exist, without one query per agent.
+    for field, completed_filter in (
+        ('head', ''),
+        ('completed_head', "AND NOT (role = 'assistant' AND COALESCE(source_file, '') LIKE 'live:%')"),
+    ):
+        rows = conn().execute(f"""
+        WITH candidates AS (
+            SELECT m.agent_id, m.message_id, ROW_NUMBER() OVER (
+                PARTITION BY m.agent_id
+                ORDER BY {_message_activity_sql()} DESC, seq DESC, updated_at DESC
+            ) AS rank FROM messages m
+            WHERE m.agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
+              AND COALESCE(text, '') != '' AND COALESCE(tool_name, '') = ''
+              {completed_filter}
+              AND COALESCE(origin, 'user') NOT IN ({marks})
+        )
+        SELECT m.agent_id, m.message_id, m.backend_session_id, m.revision, m.role, m.text, m.origin
+          FROM candidates c JOIN messages m ON m.message_id = c.message_id
+         WHERE c.rank <= 50 ORDER BY c.agent_id, c.rank
+    """, routine)
+        for row in rows:
+            entry = result.setdefault(row['agent_id'], {})
+            if field not in entry and not _automation_kind(
+                    role=row['role'], origin=row['origin'], text=row['text']):
+                entry[field] = _format_preview(row, max_len)
+    for row in conn().execute(f"""
+        SELECT agent_id, MAX({_message_activity_sql()}) AS activity
+          FROM messages WHERE COALESCE(origin, 'user') = 'user'
+           AND agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
+         GROUP BY agent_id
+    """):
+        result.setdefault(row['agent_id'], {})['activity'] = int(row['activity'] or 0)
+    for row in conn().execute("""
+        SELECT agent_id, backend_session_id, MAX(revision) AS revision FROM (
+            SELECT agent_id, backend_session_id, revision FROM messages
+            UNION ALL
+            SELECT agent_id, backend_session_id, revision FROM conversation_heads
+        ) WHERE agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
+        GROUP BY agent_id, backend_session_id
+    """):
+        result.setdefault(row['agent_id'], {}).setdefault('revisions', {})[
+            row['backend_session_id']] = int(row['revision'] or 0)
+    return result
 
 
 def last_message_activity(*, agent_id: str) -> int:

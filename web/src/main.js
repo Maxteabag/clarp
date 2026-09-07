@@ -1,6 +1,6 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
-import { bootstrapAuth, installAuthFetch, setClogFlushInterval } from './lib/net.js';
+import { bootstrapAuth, installAuthFetch, onAuthChange, setClogFlushInterval } from './lib/net.js';
 import { Timing } from '@core/protocol.js';
 import { removeServiceWorker } from './lib/sw.js';
 
@@ -14,6 +14,7 @@ import { composerRef } from './stores/composer.svelte.js';
 // wrapper installed before any component mounts and starts making requests.
 bootstrapAuth();
 installAuthFetch();
+onAuthChange((rejected) => { app.authRejected = rejected; });
 setClogFlushInterval(Timing.CLIENT_LOG_FLUSH_MS);
 removeServiceWorker();
 

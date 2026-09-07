@@ -169,14 +169,42 @@
       "type": "object",
       "additionalProperties": true,
       "required": ["type", "action"],
+      "allOf": [
+        {
+          "if": {
+            "properties": {"action": {"const": "controller-event"}},
+            "required": ["action"]
+          },
+          "then": {
+            "required": [
+              "controller_event_id", "button", "controller_event",
+              "duration_ms", "age_ms", "queued", "ts"
+            ]
+          }
+        }
+      ],
       "properties": {
         "type": {"const": "remote-action"},
-        "action": {"$ref": "#/$defs/client-action"}
+        "action": {"$ref": "#/$defs/client-action"},
+        "controller_event_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "controller_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "button": {"enum": ["primary", "secondary"]},
+        "controller_event": {
+          "enum": [
+            "down", "up", "single-click", "double-click", "hold",
+            "swipe-left", "swipe-right", "swipe-up", "swipe-down",
+            "rotate-clockwise", "rotate-counterclockwise"
+          ]
+        },
+        "duration_ms": {"type": "integer", "minimum": 0, "maximum": 120000},
+        "age_ms": {"type": "integer", "minimum": 0, "maximum": 120000},
+        "queued": {"type": "boolean"},
+        "ts": {"type": "integer"}
       }
     },
     "client-action": {
       "type": "string",
-      "enum": ["record", "record-toggle", "stop-agent"]
+      "enum": ["record", "record-toggle", "stop-agent", "controller-event"]
     }
   }
 }

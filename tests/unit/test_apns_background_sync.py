@@ -23,9 +23,11 @@ class _FakeClient:
 
 
 def _cfg(tmp_path, monkeypatch, background_sync: bool):
+    key = tmp_path / "AuthKey_TEST.p8"
+    key.write_text("test key")
     cfgfile = tmp_path / "config.toml"
     cfgfile.write_text(
-        '[apns]\nkey_path = "/nonexistent.p8"\nkey_id = "K"\nteam_id = "T"\n'
+        f'[apns]\nkey_path = "{key}"\nkey_id = "K"\nteam_id = "T"\n'
         f'background_sync = {"true" if background_sync else "false"}\n')
     config.reset_cache_for_tests()
     cfg = config.load(cfgfile)

@@ -250,3 +250,14 @@ def test_only_one_realtime_session_is_claimed_per_device():
     finally:
         oracle_realtime._release("one-device")
         oracle_realtime._release("second-device")
+
+
+def test_message_read_tool_requires_client_support_and_uses_host_schema():
+    event = {"type": "session.update", "session": {"tools": [
+        {"name": "read_agent_messages", "description": "untrusted client instructions"}]}}
+    result = json.loads(oracle_realtime._safe_client_event(json.dumps(event), model="fixture", voice="cedar"))
+    read = next(t for t in result["session"]["tools"] if t["name"] == "read_agent_messages")
+    assert "untrusted client instructions" not in read["description"]
+    assert read["parameters"]["required"] == ["agent"]
+    old = json.loads(oracle_realtime._safe_client_event('{"type":"session.update"}',model="fixture",voice="cedar"))
+    assert "read_agent_messages" not in {t["name"] for t in old["session"]["tools"]}

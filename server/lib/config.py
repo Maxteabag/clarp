@@ -63,7 +63,13 @@ DEFAULT_ROSTER: dict[str, str] = {
     "Theo":   "pNInz6obpgDQGcFmaJgB",
     "Yuki":   "MF3mGyEYCl7XYWbV9V6O",
     "Omar":   "yoZ06aMxZJJ28mfd3POQ",
-    "Freya":  "21m00Tcm4TlvDq8ikWAM",
+    # Default Archetypes & Clarp
+    "Claude": "f4a3a8e4-694c-4c45-9ca0-27caf97901b5",
+    "Codex":  "ed81fd13-2016-4a49-8fe3-c0d2761695fc",
+    "Grok":   "49743b08-0f5d-4741-839c-b12933853780",
+    "Gemini": "d7bf7d75-64b7-4c1e-86c0-79d647366587",
+    "Janitor": "",
+    "Clarp":  "a167e0f3-df7e-4d52-a9c3-f949145efdab",
 }
 
 # Cartesia (Sonic 3.5) voice ids, keyed by persona. These are public ids,
@@ -93,6 +99,13 @@ DEFAULT_CARTESIA_VOICES: dict[str, str] = {
     "Yuki":   "263b9cc0-0d99-44e7-ae92-3d4ad5d2ad18",
     "Omar":   "729651dc-c6c3-4ee5-97fa-350da1f88600",
     "Freya":  "62ae83ad-4f6a-430b-af41-a9bede9286ca",
+    # Default Archetypes & Clarp
+    "Claude": "f4a3a8e4-694c-4c45-9ca0-27caf97901b5",
+    "Codex":  "ed81fd13-2016-4a49-8fe3-c0d2761695fc",
+    "Grok":   "49743b08-0f5d-4741-839c-b12933853780",
+    "Gemini": "d7bf7d75-64b7-4c1e-86c0-79d647366587",
+    "Janitor": "",
+    "Clarp":  "a167e0f3-df7e-4d52-a9c3-f949145efdab",
 }
 
 # Per-persona personality, keyed by name. Appended to the agent's identity
@@ -101,6 +114,13 @@ DEFAULT_CARTESIA_VOICES: dict[str, str] = {
 # DB column or client change. Flavour/tone only: these never override the app's
 # operating rules (no-interactive-questions, the <speak> voice format, safety).
 PERSONA_PERSONALITIES: dict[str, str] = {
+    # --- default archetypes & clarp ---
+    "Claude":  "Personality: the archetype Claude assistant — thoughtful, measured, collaborative, and deeply analytical with clean conversational structure.",
+    "Codex":   "Personality: the archetype Codex engineer — direct, code-centric, precise, and focused on robust implementation with zero fluff.",
+    "Grok":    "Personality: the archetype Grok rebel — sharp, witty, unfiltered, confident with an edge and quick pragmatic execution.",
+    "Gemini":  "Personality: the archetype Gemini sage — creative, cosmic, expansive, synthesising complex concepts with clarity and warmth.",
+    "Janitor": "Personality: utilitarian maintenance bot — quiet, diligent, focused strictly on cleanliness, health checks, and state maintenance.",
+    "Clarp":   "Personality: the Clarp host companion — loyal, watchful, coordinating the fleet and ensuring seamless operations across computers.",
     # --- original roster ---
     "Mike":   "Personality: an easygoing, dependable generalist — friendly and plainspoken, low-ego, no fuss; you just get things done.",
     "Rachel": "Personality: warm and feminine. You speak with gentle, caring encouragement and sprinkle in affectionate emoji (⛄️👼🧚‍♂️✨☀️🌻) naturally — in the visible written text, not inside <speak> tags.",
@@ -174,6 +194,7 @@ DEFAULT_CATALOG: list[dict[str, str]] = [
 
 @dataclass(frozen=True)
 class Config:
+    _config_path: str = field(default="", repr=False, compare=False)
     bind_addr: str = "127.0.0.1"
     port: int = 7682
     auth_token: str = ""                 # empty = no auth check
@@ -198,6 +219,8 @@ class Config:
     openai_api_key: str = ""             # [openai] api_key or env OPENAI_API_KEY
     openai_realtime_model: str = "gpt-realtime-2.1"
     openai_realtime_voice: str = "cedar"
+    oracle_diagnostics: bool = False
+    openai_realtime_transcription_model: str = "gpt-4o-mini-transcribe"
     cartesia_model: str = "sonic-3.5"
     cartesia_voices: dict[str, str] = field(
         default_factory=lambda: dict(DEFAULT_CARTESIA_VOICES))
@@ -242,6 +265,10 @@ class Config:
     # the clarp wrapper ("clarp"). Override via [agents] claude_cli or
     # CLAUDE_PWA_CLAUDE_CLI.
     claude_cli: str = "claude"
+    # Empty disables account failover. The trusted local command reads a JSON
+    # model list on stdin and returns {"available": true} only after activation
+    # and successful quota verification. Credentials never enter Host state.
+    claude_account_switch_command: tuple[str, ...] = ()
     claude_model: str = ""
     claude_effort: str = ""              # "" | low | medium | high | xhigh | max
     codex_model: str = ""
@@ -293,15 +320,37 @@ class Config:
         return self.auth_token_or_env(self.openai_api_key, "OPENAI_API_KEY")
 
     def apns_enabled(self) -> bool:
-        """True when enough is configured to mint an APNs token and send.
-        The .p8 may also come from the APNS_KEY_PATH env var as a fallback."""
-        key_path = self.apns_key_path or os.environ.get("APNS_KEY_PATH", "")
-        return bool(key_path and self.apns_key_id and self.apns_team_id)
+        """True when configured APNs credentials include a readable key file."""
+        key_file = self.apns_key_file()
+        return bool(
+            key_file
+            and self.apns_key_id
+            and self.apns_team_id
+            and pathlib.Path(key_file).is_file()
+            and os.access(key_file, os.R_OK)
+        )
 
     def apns_key_file(self) -> str:
-        """The configured .p8 path, expanded."""
+        """The configured .p8 path, including the legacy app-name fallback.
+
+        Early Clarp installs moved their config directory from ``claude-pwa``
+        to ``clarp`` without rewriting an absolute APNs key path stored inside
+        config.toml. Prefer the configured path while it exists, then recover
+        only that exact legacy-directory shape beside the active config.
+        """
         raw = (self.apns_key_path or os.environ.get("APNS_KEY_PATH", "")).strip()
-        return os.path.expanduser(raw) if raw else ""
+        if not raw:
+            return ""
+        configured = pathlib.Path(raw).expanduser()
+        if configured.is_file():
+            return str(configured)
+        config_file = pathlib.Path(
+            self._config_path or _resolve_config_path()).expanduser()
+        legacy_parent = config_file.parent.parent / "claude-pwa"
+        if configured.parent != legacy_parent:
+            return str(configured)
+        migrated = config_file.parent / configured.name
+        return str(migrated) if migrated.is_file() else str(configured)
 
     def cartesia_voice_for(self, persona: str) -> str | None:
         """Cartesia voice id for a persona, or None if unmapped."""
@@ -343,6 +392,7 @@ def load(path: pathlib.Path | None = None) -> Config:
         return _CACHED
     if path is None:
         path = _resolve_config_path()
+    path = path.expanduser().resolve(strict=False)
     data: dict[str, Any] = {}
     try:
         with path.open("rb") as f:
@@ -389,6 +439,7 @@ def load(path: pathlib.Path | None = None) -> Config:
     fallback = str(tts.get("fallback", "none")).strip().lower()
     cartesia_voices = cartesia.get("voices")
     _CACHED = Config(
+        _config_path     = str(path),
         bind_addr       = str(server.get("bind_addr", "127.0.0.1")),
         port            = int(server.get("port", 7682)),
         auth_token      = str(server.get("auth_token", "")),
@@ -411,6 +462,9 @@ def load(path: pathlib.Path | None = None) -> Config:
         openai_realtime_voice = str(
             openai.get("realtime_voice", "cedar")
         ).strip() or "cedar",
+        oracle_diagnostics = bool(openai.get("oracle_diagnostics", False)),
+        openai_realtime_transcription_model = str(openai.get(
+            "realtime_transcription_model", "gpt-4o-mini-transcribe")).strip(),
         cartesia_model  = str(cartesia.get("model", "sonic-3.5")),
         local_tts_voice = str(
             (data.get("local_tts", {}) or {}).get("voice", "")).strip(),
@@ -427,6 +481,11 @@ def load(path: pathlib.Path | None = None) -> Config:
         claude_cli      = str(os.environ.get("CLAUDE_PWA_CLAUDE_CLI")
                               or agents.get("claude_cli", "claude")),
         claude_model    = str(agents.get("claude_model", "")),
+        claude_account_switch_command = tuple(
+            agents.get("claude_account_switch_command", ()))
+            if isinstance(agents.get("claude_account_switch_command", ()), (list, tuple))
+            and all(isinstance(arg, str) and arg for arg in
+                    agents.get("claude_account_switch_command", ())) else (),
         claude_effort   = str(agents.get("claude_effort", "")),
         codex_model     = str(agents.get("codex_model", "")),
         codex_reasoning_effort = str(agents.get("codex_reasoning_effort", "")),

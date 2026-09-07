@@ -368,11 +368,12 @@ def turn_done_payload(persona: str, session: str | None,
             # speech before Clarp is opened again. APNs may throttle/drop the
             # wake, so foreground cursor recovery remains authoritative.
             "content-available": 1,
-            # iOS 15+: time-sensitive breaks through Focus / idle batching so the
-            # "your turn" alert lands immediately instead of up to a minute late.
-            # Requires the matching app entitlement; iOS silently downgrades it to
-            # "active" if that entitlement is missing.
-            "interruption-level": "time-sensitive",
+            # Deliberately "active", the ordinary messaging level. Clarp is a
+            # chat app, so a reply is no more urgent than a WhatsApp message:
+            # it respects Focus and Do Not Disturb rather than breaking through
+            # them. "time-sensitive" is for alerts the user has asked to be
+            # interrupted for, not for every finished turn.
+            "interruption-level": "active",
             # Lets a Notification Service Extension rewrite the notification to
             # show the agent's avatar (WhatsApp-style). Ignored when no
             # extension is installed, so it's safe to send unconditionally.
@@ -462,6 +463,12 @@ def send_user_notification(notification: dict) -> dict:
         )
         return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
 
+    from . import desktop_presence
+    if desktop_presence.active():
+        log("apnsUserNotificationSuppressed", "reason=desktop-active")
+        return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0,
+                "suppressed": True, "reason": "desktop-active"}
+
     body = str(notification.get("preview") or "").strip()
     if not body:
         log(
@@ -474,6 +481,7 @@ def send_user_notification(notification: dict) -> dict:
     persona = str(notification.get("persona") or "Clarp")
     session = str(notification.get("session") or "")
     sent = failed = disabled = 0
+    suppressed = False
     notification_id = str(notification.get("notification_id") or "")
     source_message_id = str(notification.get("source_message_id") or "")
     preview_hash = _preview_fingerprint(body)
@@ -483,6 +491,12 @@ def send_user_notification(notification: dict) -> dict:
             auth = _auth_jwt(cfg)
             client = _pooled_client()
             for row in tokens:
+                # A desktop may become active while this transport waited for
+                # another send. Recheck immediately before each phone alert.
+                if desktop_presence.active():
+                    suppressed = True
+                    log("apnsUserNotificationSuppressed", "reason=desktop-active")
+                    break
                 tok = row["token"]
                 env = row.get("environment") or cfg.apns_environment
                 avatar_url, avatar_custom = _avatar_details(
@@ -529,7 +543,10 @@ def send_user_notification(notification: dict) -> dict:
         f"{persona} notification={notification_id} source={source_message_id} "
         f"preview={preview_hash} session={session} sent={sent} failed={failed} "
         f"disabled={disabled} duration_ms={int((time.monotonic() - started) * 1000)}")
-    return {"enabled": True, "sent": sent, "failed": failed, "disabled": disabled}
+    result = {"enabled": True, "sent": sent, "failed": failed, "disabled": disabled}
+    if suppressed:
+        result.update(suppressed=True, reason="desktop-active")
+    return result
 
 
 # Background ("silent") sync pushes are hints, never delivery: iOS holds only

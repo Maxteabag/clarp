@@ -28,18 +28,18 @@ def test_lifecycle_service_creates_agent_without_http(tmp_path):
     ctx = _ctx(tmp_path)
 
     result = AgentLifecycleService(ctx).create({
-        "name": "Rachel",
-        "session": "rachel",
+        "name": "Axel",
+        "session": "axel",
         "cwd": str(tmp_path),
-        "voice_id": "V_RACHEL",
+        "voice_id": "V_AXEL",
         "backend": "codex",
     })
 
-    assert result.session == "rachel"
+    assert result.session == "axel"
     assert result.backend == "codex"
-    assert agents_db.get_by_session("rachel")["voice_id"] == "V_RACHEL"
-    assert agents_db.current_runtime_id(agents_db.get_by_session("rachel")["agent_id"])
-    assert ctx.announcements == [("Rachel is ready.", "V_RACHEL")]
+    assert agents_db.get_by_session("axel")["voice_id"] == "V_AXEL"
+    assert agents_db.current_runtime_id(agents_db.get_by_session("axel")["agent_id"])
+    assert ctx.announcements == [("Axel is ready.", "V_AXEL")]
     assert ctx.stream.events[-1]["kind"] == "created"
     assert agents_db.favorite_paths()[0]["path"] == str(tmp_path)
 
@@ -76,12 +76,31 @@ def test_lifecycle_service_rejects_unknown_mcp_at_creation(tmp_path, monkeypatch
     assert agents_db.get_by_session("rachel") is None
 
 
+def test_lifecycle_delete_releases_processes_in_external_runtime(tmp_path):
+    agent_id = agents_db.create_agent(
+        persona="Rachel", voice_id="voice", cwd=str(tmp_path), session="rachel")
+    calls = []
+    ctx = _ctx(tmp_path)
+
+    def release(value):
+        calls.append(value)
+        agents_db.soft_delete(value)
+        return 1
+
+    ctx.runtime_client = SimpleNamespace(release_agent=release)
+
+    AgentLifecycleService(ctx).delete("rachel")
+
+    assert calls == [agent_id]
+    assert agents_db.get_by_session("rachel") is None
+
+
 def test_lifecycle_service_rejects_mcp_for_non_claude_backend(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "read_global_mcp_servers", lambda: {"files": {}})
     with pytest.raises(AgentLifecycleError) as error:
         AgentLifecycleService(_ctx(tmp_path)).create({
-            "name": "Rachel", "session": "rachel", "cwd": str(tmp_path),
-            "voice_id": "V_RACHEL", "backend": "codex",
+            "name": "Axel", "session": "axel", "cwd": str(tmp_path),
+            "voice_id": "V_AXEL", "backend": "codex",
             "mcp_servers": ["files"],
         })
     assert error.value.code == "mcp servers unsupported for backend"
@@ -152,6 +171,27 @@ def test_lifecycle_service_preserves_voice_when_relaunch_omits_one(tmp_path):
     assert agents_db.favorite_paths()[0]["path"] == str(other)
 
 
+def test_lifecycle_service_preserves_cwd_when_relaunch_omits_one(tmp_path):
+    """A relaunch inherits the directory, like it inherits voice and backend.
+
+    Without this an omitted cwd falls back to $HOME, which silently moves the
+    agent out of its repo on a host and is refused outright in a container.
+    """
+    ctx = _ctx(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(repo), session="rachel",
+    )
+
+    AgentLifecycleService(ctx).create({
+        "name": "Rachel",
+        "replace_sid": "rachel",
+    })
+
+    assert agents_db.get_by_session("rachel")["cwd"] == str(repo)
+
+
 def test_path_usage_ranks_by_count_then_recency(tmp_path):
     first = tmp_path / "first"
     second = tmp_path / "second"
@@ -170,8 +210,8 @@ def test_path_usage_ranks_by_count_then_recency(tmp_path):
 def test_lifecycle_service_rejects_fork_for_backend_without_copy_semantics(tmp_path):
     with pytest.raises(AgentLifecycleError) as error:
         AgentLifecycleService(_ctx(tmp_path)).create({
-            "name": "Arnold",
-            "session": "arnold",
+            "name": "Pip",
+            "session": "pip",
             "cwd": str(tmp_path),
             "backend": "agy",
             "fork_session_id": "conversation-1",
@@ -184,28 +224,28 @@ def test_lifecycle_service_rejects_fork_for_backend_without_copy_semantics(tmp_p
 def test_lifecycle_service_rejects_invalid_agy_model_slug(tmp_path):
     with pytest.raises(AgentLifecycleError) as error:
         AgentLifecycleService(_ctx(tmp_path)).create({
-            "name": "Arnold", "session": "arnold", "cwd": str(tmp_path),
+            "name": "Pip", "session": "pip", "cwd": str(tmp_path),
             "backend": "agy", "model": "4.8",
         })
     assert error.value.status == 400
     assert "invalid model" in error.value.message
-    assert agents_db.get_by_session("arnold") is None
+    assert agents_db.get_by_session("pip") is None
 
 
 def test_lifecycle_service_rejects_invalid_agy_effort(tmp_path):
     with pytest.raises(AgentLifecycleError) as error:
         AgentLifecycleService(_ctx(tmp_path)).create({
-            "name": "Arnold", "session": "arnold", "cwd": str(tmp_path),
+            "name": "Pip", "session": "pip", "cwd": str(tmp_path),
             "backend": "agy", "effort": "ultra",
         })
     assert error.value.status == 400
-    assert agents_db.get_by_session("arnold") is None
+    assert agents_db.get_by_session("pip") is None
 
 
 def test_lifecycle_service_rejects_agy_model_effort_pair(tmp_path):
     with pytest.raises(AgentLifecycleError) as error:
         AgentLifecycleService(_ctx(tmp_path)).create({
-            "name": "Arnold", "session": "arnold", "cwd": str(tmp_path),
+            "name": "Pip", "session": "pip", "cwd": str(tmp_path),
             "backend": "agy", "model": "gemini-3.7-flash-low",
             "effort": "high",
         })
@@ -218,22 +258,22 @@ def test_lifecycle_rejects_effort_against_global_agy_model(tmp_path, monkeypatch
         config.Config(agy_model="gemini-3.7-flash-low"))
     with pytest.raises(AgentLifecycleError) as error:
         AgentLifecycleService(_ctx(tmp_path)).create({
-            "name": "Arnold", "session": "arnold", "cwd": str(tmp_path),
+            "name": "Pip", "session": "pip", "cwd": str(tmp_path),
             "backend": "agy", "effort": "high",
         })
     assert error.value.status == 400
-    assert agents_db.get_by_session("arnold") is None
+    assert agents_db.get_by_session("pip") is None
 
 
 def test_relaunch_rejects_partial_override_that_pairs_with_retained_agy_pin(tmp_path):
     service = AgentLifecycleService(_ctx(tmp_path))
     service.create({
-        "name": "Arnold", "session": "arnold", "cwd": str(tmp_path),
+        "name": "Pip", "session": "pip", "cwd": str(tmp_path),
         "backend": "agy", "model": "gemini-3.7-flash-low",
     })
     with pytest.raises(AgentLifecycleError) as error:
         service.create({
-            "name": "Arnold", "replace_sid": "arnold", "cwd": str(tmp_path),
+            "name": "Pip", "replace_sid": "pip", "cwd": str(tmp_path),
             "backend": "agy", "effort": "high",
         })
     assert error.value.status == 400
@@ -243,11 +283,11 @@ def test_relaunch_rejects_partial_override_that_pairs_with_retained_agy_pin(tmp_
 def test_lifecycle_service_rejects_non_string_llm_values(tmp_path, field, value):
     with pytest.raises(AgentLifecycleError) as error:
         AgentLifecycleService(_ctx(tmp_path)).create({
-            "name": "Arnold", "session": "arnold", "cwd": str(tmp_path),
+            "name": "Pip", "session": "pip", "cwd": str(tmp_path),
             "backend": "agy", field: value,
         })
     assert error.value.status == 400
-    assert agents_db.get_by_session("arnold") is None
+    assert agents_db.get_by_session("pip") is None
 
 
 def test_lifecycle_service_allows_deleting_last_agent_for_server_move(tmp_path):
@@ -280,10 +320,76 @@ def test_lifecycle_service_releases_session_without_deleting_contact(tmp_path):
 
     replacement = AgentLifecycleService(ctx).create({
         "name": "Nova", "session": "nova-chat", "cwd": str(tmp_path),
-        "synthesize_audio": False,
+        "synthesize_audio": False, "backend": "codex",
     })
     assert replacement.session != "nova-chat"
     assert agents_db.get_by_session(replacement.session)["persona"] == "Nova"
+
+
+def test_lifecycle_service_enforces_tier_backend_locking(tmp_path):
+    ctx = _ctx(tmp_path)
+    service = AgentLifecycleService(ctx)
+
+    # 1. Claude contact rejects non-Claude backend
+    with pytest.raises(AgentLifecycleError) as exc:
+        service.create({
+            "name": "Rachel", "session": "rachel-test", "cwd": str(tmp_path),
+            "backend": "codex",
+        })
+    assert exc.value.code == "tier_backend_mismatch"
+    assert exc.value.status == 400
+
+    # 2. Codex contact rejects non-Codex backend
+    with pytest.raises(AgentLifecycleError) as exc:
+        service.create({
+            "name": "Axel", "session": "axel-test", "cwd": str(tmp_path),
+            "backend": "claude",
+        })
+    assert exc.value.code == "tier_backend_mismatch"
+
+    # 3. Grok contact rejects non-Grok backend
+    with pytest.raises(AgentLifecycleError) as exc:
+        service.create({
+            "name": "Margrok", "session": "margrok-test", "cwd": str(tmp_path),
+            "backend": "claude",
+        })
+    assert exc.value.code == "tier_backend_mismatch"
+
+    # 4. Gemini contact rejects non-AGY backend
+    with pytest.raises(AgentLifecycleError) as exc:
+        service.create({
+            "name": "Pip", "session": "pip-test", "cwd": str(tmp_path),
+            "backend": "claude",
+        })
+    assert exc.value.code == "tier_backend_mismatch"
+
+    # 5. Janitor contact rejects non-Codex backend
+    with pytest.raises(AgentLifecycleError) as exc:
+        service.create({
+            "name": "Rivet", "session": "rivet-test", "cwd": str(tmp_path),
+            "backend": "claude",
+        })
+    assert exc.value.code == "tier_backend_mismatch"
+
+    # 6. Default contacts with matching backends succeed
+    claude_res = service.create({
+        "name": "Claude", "session": "claude-default", "cwd": str(tmp_path),
+        "backend": "claude",
+    })
+    assert claude_res.backend == "claude"
+
+    grok_res = service.create({
+        "name": "Grok", "session": "grok-default", "cwd": str(tmp_path),
+        "backend": "grok",
+    })
+    assert grok_res.backend == "grok"
+
+    # 7. Untiered contact (e.g. Clarp) accepts any backend
+    clarp_res = service.create({
+        "name": "Clarp", "session": "clarp-host", "cwd": str(tmp_path),
+        "backend": "claude",
+    })
+    assert clarp_res.backend == "claude"
 
 
 def test_lifecycle_service_suppresses_launch_announcement_for_silent_client(tmp_path):

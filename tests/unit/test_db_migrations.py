@@ -65,6 +65,38 @@ def test_pre_release_databases_are_refused(tmp_path):
 def _shape_as_v61(con: sqlite3.Connection) -> None:
     """Rebuild the pre-v62 shape on top of a current database."""
     con.executescript("""
+        DROP TABLE tool_explanation_demands;
+        DROP TABLE tool_explanation_jobs;
+        DROP TABLE tool_explanation_releases;
+        DROP TABLE tool_explanation_cache;
+        ALTER TABLE artifacts DROP COLUMN archived_at;
+        ALTER TABLE artifact_decisions DROP COLUMN response_type;
+        ALTER TABLE artifact_decisions DROP COLUMN options_json;
+        ALTER TABLE artifact_decisions DROP COLUMN allow_custom_text;
+        ALTER TABLE artifact_decisions DROP COLUMN recommended_option_id;
+        ALTER TABLE artifact_decisions DROP COLUMN blocks_progress;
+        ALTER TABLE artifact_decisions DROP COLUMN priority_reason;
+        ALTER TABLE artifact_decisions DROP COLUMN urgency;
+        ALTER TABLE artifact_decisions DROP COLUMN response_effort;
+        ALTER TABLE artifact_decisions DROP COLUMN deadline_at;
+        ALTER TABLE artifact_decisions DROP COLUMN answer_json;
+        ALTER TABLE decision_deliveries DROP COLUMN response_type;
+        ALTER TABLE decision_deliveries DROP COLUMN answer_json;
+        DROP INDEX idx_messages_trace;
+        ALTER TABLE messages DROP COLUMN trace_id;
+        ALTER TABLE dream_runs DROP COLUMN artifact_branch;
+        ALTER TABLE dream_runs DROP COLUMN seed_strategy;
+        ALTER TABLE dream_runs DROP COLUMN context_dose;
+        ALTER TABLE dream_runs DROP COLUMN seed_material;
+        ALTER TABLE agents DROP COLUMN voice_verbosity;
+        ALTER TABLE dream_threads DROP COLUMN killed_reason;
+        ALTER TABLE dream_threads DROP COLUMN origin_note;
+        DROP TABLE vocab_runs;
+        DROP TABLE vocab_assignments;
+        DROP TABLE vocab_profile_packs;
+        DROP TABLE vocab_profiles;
+        DROP TABLE vocab_terms;
+        DROP TABLE vocab_packs;
         DROP TABLE oracle_delegations;
         ALTER TABLE tts_queue ADD COLUMN mode TEXT NOT NULL DEFAULT 'pwa';
         ALTER TABLE agents ADD COLUMN heartbeat_interval_sec INTEGER NOT NULL DEFAULT 1800;
@@ -132,7 +164,7 @@ def test_v63_adds_durable_oracle_delegations(tmp_path):
 
     assert "oracle_delegations" in _names(upgraded, "table")
     assert {
-        "delegation_id", "owner_principal", "trace_id", "client_msg_id",
+        "delegation_id", "owner_principal", "trace_id", "client_msg_id", "completion_trace_id",
         "agent_id", "session", "backend_session_id", "request_text", "status",
         "result_message_id", "result_text", "error", "created_at", "updated_at",
         "delivered_at",
@@ -177,3 +209,34 @@ def test_upgraded_database_matches_fresh_schema(tmp_path):
         assert _names(upgraded, kind) == _names(fresh, kind), kind
     for table in _names(fresh, "table"):
         assert _columns(upgraded, table) == _columns(fresh, table), table
+
+
+def test_v78_adds_dreaming_columns_and_voice_verbosity(tmp_path):
+    """v78 adds dreaming seed strategies, kill notes, and agent voice verbosity."""
+    path = tmp_path / "v77.sqlite"
+    con = _fresh(path)
+    con.executescript("""
+        ALTER TABLE dream_runs DROP COLUMN artifact_branch;
+        ALTER TABLE dream_runs DROP COLUMN seed_strategy;
+        ALTER TABLE dream_runs DROP COLUMN context_dose;
+        ALTER TABLE dream_runs DROP COLUMN seed_material;
+        ALTER TABLE dream_threads DROP COLUMN killed_reason;
+        ALTER TABLE dream_threads DROP COLUMN origin_note;
+        ALTER TABLE agents DROP COLUMN voice_verbosity;
+        PRAGMA user_version = 77;
+    """)
+    con.close()
+
+    upgraded = _connect(path)
+    db._migrate(upgraded)
+
+    assert "artifact_branch" in _columns(upgraded, "dream_runs")
+    assert "seed_strategy" in _columns(upgraded, "dream_runs")
+    assert "context_dose" in _columns(upgraded, "dream_runs")
+    assert "seed_material" in _columns(upgraded, "dream_runs")
+    assert "killed_reason" in _columns(upgraded, "dream_threads")
+    assert "origin_note" in _columns(upgraded, "dream_threads")
+    assert "voice_verbosity" in _columns(upgraded, "agents")
+    assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+    # Idempotent: a second pass over an already-repaired database is a no-op.
+    db._migrate(upgraded)

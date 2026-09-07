@@ -10,12 +10,12 @@ design is in [ARCHITECTURE.md](ARCHITECTURE.md) and the client contract in
 git clone https://github.com/Maxteabag/clarp
 cd clarp
 uv sync --frozen          # Python 3.12+, locked environment in .venv
-npm install               # Svelte, Vite, vitest, Playwright
+npm ci                   # Svelte, Vite, vitest, Playwright from the lockfile
 ```
 
-Run the server from the checkout with `uv run python server/server.py`; the
-PWA hot-reloads with `npm run dev`, which proxies API calls to a server on
-`127.0.0.1:7682` (override with `CLARP_UPSTREAM`).
+Run `uv run python server/runtime.py` and `uv run python server/server.py` in
+separate terminals. The PWA hot-reloads with `npm run dev`, which proxies API
+calls to the server on `127.0.0.1:7682` (override with `CLARP_UPSTREAM`).
 
 ## Tests
 
@@ -46,8 +46,35 @@ to a disposable container; never point it at a server you care about.
   call it.
 - **The PWA bundle** (`static/app/`) is committed. Run `npm run build` and
   include the result when you change anything under `web/src` or `static/lib`.
-- **No compatibility shims.** Server and clients ship together. When a shape
-  changes, change the producer and every consumer; do not keep the old path.
+- **Runtime compatibility is deliberate.** The private runtime RPC must remain
+  compatible while an older runtime finishes turns beside a newer HTTP server.
+  Add protocol fields; do not repurpose them. Host and native clients also
+  release independently: the external core contract is additive, unknown
+  response fields are ignored, and optional features use capabilities.
+  Breaking changes require a protocol version and an explicit upgrade path.
+  Internal implementation details do not need compatibility wrappers.
+
+## When a new model ships
+
+The container pins the agent CLIs (`CLAUDE_CODE_VERSION`, `CODEX_VERSION` in the
+`Dockerfile`). A model refuses a CLI older than its own minimum — every turn
+comes back `400 ... does not support this model; version X or newer is
+required` — and a container user cannot fix that from inside: `stable` only
+publishes on a `v*` tag, so the pin is what they are stuck with until the next
+release.
+
+So a model release means a release here:
+
+1. Bump `CLAUDE_CODE_VERSION` (and `CODEX_VERSION` while you are there) in the
+   `Dockerfile`.
+2. Tag it — `git tag vX.Y.Z && git push origin vX.Y.Z`. A push to `main` only
+   publishes `edge`; `stable` needs the tag.
+3. On each deployment: `docker compose pull && docker compose up -d`.
+4. **Relaunch the running agents.** A live agent keeps the CLI process it
+   started with, so it keeps failing until it is relaunched — updating the
+   package alone does nothing for it. Pass `resume_session_id` when you
+   relaunch, or the agent comes back with its chat history on screen and no
+   memory of it.
 
 ## Commits and pull requests
 

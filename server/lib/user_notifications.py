@@ -136,8 +136,12 @@ def _assistant_candidates(agent_id: str, backend_session_id: str, floor_ms: int,
     where = (
         "agent_id = ? AND role = 'assistant' "
         "AND updated_at >= ? AND updated_at <= ? "
-        "AND TRIM(COALESCE(text, '')) != ''"
+        "AND TRIM(COALESCE(text, '')) != '' "
+        # Server-written markers ("turn interrupted by restart") sit in the
+        # assistant role so they render as a reply, but they are not one.
+        "AND COALESCE(origin, 'user') != ?"
     )
+    params.append(origins.MARKER_ORIGIN)
     if backend_session_id:
         where += " AND backend_session_id = ?"
         params.append(backend_session_id)
@@ -178,6 +182,13 @@ def _select_content_source(rows) -> tuple[Any | None, str, str]:
     return None, "", ""
 
 
+def _turn_was_interrupted(cause_message_id: str) -> bool:
+    if not cause_message_id:
+        return False
+    from . import message_store
+    return message_store.has_interruption_marker(cause_message_id)
+
+
 def _is_team_leader(agent_id: str) -> bool:
     if not agent_id:
         return False
@@ -185,7 +196,7 @@ def _is_team_leader(agent_id: str) -> bool:
         from . import team_store
 
         return any(
-            (team.get("leader_agent_id") or "") == agent_id
+            team.get("leader_enabled") and (team.get("leader_agent_id") or "") == agent_id
             for team in team_store.teams_for_agent(agent_id)
         )
     except Exception as exc:  # pragma: no cover - defensive around notification path
@@ -330,7 +341,10 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
     source_message_id = source["message_id"] if source is not None else ""
     special_automation = settings_store.get_bool(
         "automation_special_treatment", default=False)
-    if not agent_id:
+    agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
+    if origin == "janitor" or (agent and not agents_db.interaction_capabilities(agent)["can_chat"]):
+        reason = "janitor-maintenance"
+    elif not agent_id:
         reason = "missing-agent"
     elif cause is None:
         reason = "missing-causing-row"
@@ -341,6 +355,10 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
         reason = "leader-tick-non-leader"
     elif content_reason:
         reason = content_reason
+    elif _turn_was_interrupted(cause_message_id):
+        # The turn was killed before it could say anything; that is not the
+        # same event as an agent that had nothing to say.
+        reason = "turn-interrupted"
     else:
         reason = "no-user-facing-content"
     notify = reason in {"speak", "text-reply"}

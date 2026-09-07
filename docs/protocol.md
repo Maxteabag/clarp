@@ -30,6 +30,12 @@ they drift.
 | **clip** | One synthesized voice reply, identified by `clip_id`. |
 | **focus** | The server-wide "current agent" used for hands-free voice routing. Shared by every client of one server. |
 
+The HTTP service and agent runtime have separate lifetimes. A planned HTTP
+restart closes client connections, but the active backend turn continues in
+`clarp-runtime`; clients reconnect SSE and resume reading the durable message
+cursor. Interruption markers are reserved for a runtime or host failure that
+actually terminated work.
+
 ## Authentication
 
 The server reads `auth_token` from `config.toml`. When it is empty, every
@@ -41,9 +47,15 @@ request is accepted. When it is set, every request must carry one of:
 
 The token is either the administrator token from `config.toml` or a paired
 device credential from `POST /pairing/exchange`. A paired device may have
-`limited` scope, which allows every `GET` and the core `POST`s (`/send`,
-`/transcribe`, `/upload`, `/select`, `/focus`, `/clips/ack`, `/clog`,
-`/location`, `/calendar/response`) and nothing else.
+`limited` scope, which allows conversation reads and the core `POST`s
+(`/send`, `/transcribe`, `/upload`, `/select`, `/focus`, `/clips/ack`, `/clog`,
+`/location`, `/calendar/response`, `/remote-action`). Administrative routes and
+Oracle require full scope. Host filesystem browsing (`/agent-file` and
+`/agent-files`) also requires full scope: a caller-selected root can contain
+configuration credentials, even though the operation is read-only.
+
+Limited scope is an API permission boundary, not an agent sandbox. It still
+allows sending work to agents that run with the host user's permissions.
 
 `GET /` and the static assets are public so a browser can load the shell
 before it has a token.
@@ -63,6 +75,7 @@ event arrives.
       "agent_id": "…", "session": "rachel", "persona": "Rachel",
       "backend": "claude", "cwd": "/home/me/proj", "model": "", "effort": "",
       "voice_id": "…", "avatar_symbol": "", "avatar_url": "/avatars/<agent_id>?v=<hash>",
+      "model_avatar_url": "/static/avatars/models/rachel.opus.png?v=<hash>",
       "mcp_servers": [], "heartbeat_enabled": false, "dreaming_enabled": false,
       "muted": false, "archived_at": null,
 
@@ -81,7 +94,8 @@ event arrives.
   "focus": "<agent_id or null>",
   "roster": ["Rachel", "Mike", "…"],
   "personas": [ { "…": "saved contact definitions" } ],
-  "available_mcp_servers": ["…"]
+  "available_mcp_servers": ["…"],
+  "model_avatars": false
 }
 ```
 
@@ -96,6 +110,12 @@ Rules:
 - The snapshot is read-only: calling it never changes server state, so it is
   safe to call as often as needed (the server reconciles stale state on the
   way out).
+- `model_avatar_url` is the bundled portrait drawn for the model this agent
+  runs on, empty when none is bundled for that persona and family. It is
+  offered whether or not the user wants it; `model_avatars` is the Computer's
+  preference, so a client can honour a toggle without refetching. The server
+  leaves it empty for an agent with a portrait the user chose, so preferring
+  it can never replace an uploaded or generated picture.
 - There is no `/sessions` in this layer. The list of chats is
   `agents[].session` filtered by `archived_at == null`.
 
@@ -136,6 +156,7 @@ Response:
       "display_cells": [ … ],
       "origin": "user | agent | heartbeat | leader_tick | dreaming | watcher | schedule",
       "sender_agent_id": null, "sender_name": null, "sender_session": null,
+      "reply_to_agent_id": null, "reply_to_name": null, "reply_to_session": null,
       "automation_kind": null
     }
   ],
@@ -173,6 +194,38 @@ Rules:
 - A growing assistant reply appears as one message whose `text` and `revision`
   change on successive deltas. Replace it in place.
 
+Provenance. `origin` says what triggered the row. `sender_*` names the
+**author** of an incoming `user` row written by another agent (`origin: agent`);
+the assistant row that answers it keeps `sender_*` empty and carries the answered
+agent in `reply_to_*`. Render that as a compact "Replying to …" marker, never as
+the other agent's message: the current agent wrote it, and nothing forwarded it
+onward unless the agent itself sent a message.
+
+#### Pair conversations: `GET /agent-conversations`
+
+Agent-to-agent exchanges are also readable as one conversation per pair,
+independent of direction, retries or renames. Grouping uses stable agent IDs:
+`conversation_id` is `pair:<lower agent_id>:<higher agent_id>`.
+
+```
+GET /agent-conversations
+→ {"conversations": [{"conversation_id": "pair:…:…", "agent_ids": ["…", "…"],
+    "participants": [{"agent_id", "session", "name", "avatar_url", "archived"}],
+    "title": "C++ Agent & Hugo", "message_count": 4, "latest_revision": 812,
+    "latest_activity": 1788750466681,
+    "latest_message": {"message_id", "text", "timestamp", "sender_agent_id",
+                       "sender_name", "delivery", "revision"}}]}
+GET /log?session=pair:…:…&limit=100[&after_revision=N|&before=<message_id>]
+```
+
+The pair `/log` shares the ordinary response shape and revision clock. Each turn
+carries `sender_*` = the author. A delivered prompt is `role: user`,
+`delivery: "sent"`, with `recipient_agent_id`. The recipient's answer is
+`role: assistant`, `delivery: "private"`, with `reply_to_*` naming the agent it
+answers; it lived only in that agent's own chat. Private user chats with either
+agent are never included, and the projection never moves or relays transcript
+rows. Sending into a pair conversation is not supported.
+
 ### 3. Stay in sync: `GET /events` (SSE)
 
 One `text/event-stream` per client. Every event is a JSON object with a
@@ -205,8 +258,24 @@ Event types and payloads:
 | `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview` | A voice clip is ready. See §6. |
 | `tts-error` | `session`, `agent_id`, `persona`, `message`, `error` | Synthesis failed; tell the user instead of playing silence. |
 | `server-version` | `version` | Server restarted on a new version; reload the client when it differs from the last one seen. |
-| `remote-action` | `action` ∈ record, record-toggle, stop-agent | A shortcut asked the client to act (native and PWA both honour it). |
+| `remote-action` | `action` ∈ record, record-toggle, stop-agent, controller-event | A live shortcut/controller asked the client to act. These input events are never replayed after reconnect. |
 | `provider-limit`, `artifact-updated`, `attention-updated`, `background-job-updated`, `location-request`, `calendar-request` | see extension surfaces | Ignore if the client does not implement the surface. |
+
+`controller-event` is the simulation/relay form of a physical controller
+input. `POST /remote-action` with `action=controller-event` also carries
+`controller_event_id`, `button` (`primary` or `secondary`),
+`controller_event`, `duration_ms`, `age_ms`, `queued`, and optionally
+`controller_id`. Controller events are live input, never durable state: the
+Host deliberately excludes every `remote-action` from SSE reconnect replay.
+Clients must additionally reject `queued=true` or `age_ms>0` to prevent an old
+press from acting after a Bluetooth reconnect.
+
+Valid `controller_event` values are `down`, `up`, `single-click`,
+`double-click`, `hold`, four `swipe-*` directions, and the reserved
+`rotate-clockwise` / `rotate-counterclockwise` pair. Phone-direct Flic Duo
+integration supports the button and swipe events. Flic officially requires a
+Hub for Hold & Twist, so rotation remains a separately negotiated experimental
+input rather than a production-critical command.
 
 Agent states (`kind` / `latest_state`): `thinking`, `tool`, `compacting` are
 **busy**; `idle`, `done`, `stopped`, `interrupted`, `waiting`, `background`,
@@ -371,7 +440,7 @@ any subset. Payload shapes are documented in the handler docstrings in
 | Provider sign-in and usage | `/backend-auth`, `/backend-auth/login`, `/backend-auth/login-code`, `/backend-auth/logout`, `/backend-usage` | `backend_auth.py`, `backend_usage.py` |
 | Files and media | `POST /upload` (headers `X-Session`, `X-File-Name`, `X-Upload-ID`), `/media`, `/agent-files`, `/agent-file` | `upload_results.py`, `media_store.py`, `agent_files.py` |
 | Artifacts and decisions | `/artifacts`, `/artifacts/<id>`, `/decisions`, `/decisions/<id>/resolve`, `/task-plan` | `artifacts.py`, `task_plans.py` |
-| Portraits and personas | `/agent-portraits`, `/agent-portrait-generation`, `/personas`, `/personas/update`, `/personalities/settings` | `agent_portraits.py`, `portrait_generation.py`, `personas.py` |
+| Portraits and personas | `/agent-portraits`, `/agent-portrait-generation`, `/personas`, `/personas/update`, `/personalities/settings`, `/avatar-settings` | `agent_portraits.py`, `portrait_generation.py`, `personas.py`, `model_avatars.py` |
 | Teams | `/teams`, `/teams/<id>`, `/teams/<id>/members`, `/teams/<id>/messages`, `/team-nudging` | `team_store.py`, `team_leader.py` |
 | Autonomy | `/heartbeat/settings`, `/agent-heartbeat/status`, `/dreaming/settings`, `/dreaming/runs`, `/automation-settings`, `/herald/settings`, `/orchestrator/settings`, `/orchestrator/route-delegation` | `heartbeat.py`, `dreaming.py`, `herald.py`, `orchestrator.py` |
 | Transcription | `/transcription-capabilities`, `/transcription-guidance`, `/transcription-models/install`, `/transcription-models/remove` | `transcription_models.py`, `vocab.py` |

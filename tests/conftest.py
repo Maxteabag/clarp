@@ -227,6 +227,8 @@ def _forbid_network(monkeypatch):
     real_connect = socket.socket.connect
 
     def guarded_connect(self, address):
+        if self.family == socket.AF_UNIX:
+            return real_connect(self, address)
         host = address[0] if isinstance(address, tuple) else address
         if isinstance(host, str) and host not in {
             "127.0.0.1", "::1", "localhost", "0.0.0.0", "::",

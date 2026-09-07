@@ -4,6 +4,8 @@ minted from a throwaway P-256 key so the real crypto path is still exercised.
 """
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from lib import apns, config
@@ -107,6 +109,83 @@ def test_apns_config_parses(tmp_path):
     assert cfg.apns_environment == "production"
 
 
+def test_apns_legacy_config_directory_falls_back_to_current_key(tmp_path):
+    current = tmp_path / "clarp"
+    current.mkdir()
+    key = current / "AuthKey_TEST123.p8"
+    key.write_text("key")
+    cfgfile = current / "config.toml"
+    legacy_key = tmp_path / "claude-pwa" / key.name
+    cfgfile.write_text(
+        "[apns]\n"
+        f'key_path = "{legacy_key}"\n'
+        'key_id = "ABC123KEYID"\n'
+        'team_id = "TEAMID1234"\n'
+    )
+    config.reset_cache_for_tests()
+
+    cfg = config.load(cfgfile)
+
+    assert cfg.apns_key_file() == str(key)
+    assert cfg.apns_enabled() is True
+
+
+def test_apns_legacy_fallback_anchors_relative_config_path(tmp_path, monkeypatch):
+    current = tmp_path / "config" / "clarp"
+    current.mkdir(parents=True)
+    key = current / "AuthKey_TEST123.p8"
+    key.write_text("key")
+    legacy_key = current.parent / "claude-pwa" / key.name
+    cfgfile = current / "config.toml"
+    cfgfile.write_text(
+        "[apns]\n"
+        f'key_path = "{legacy_key}"\n'
+        'key_id = "ABC123KEYID"\n'
+        'team_id = "TEAMID1234"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    config.reset_cache_for_tests()
+
+    cfg = config.load(pathlib.Path("config/clarp/config.toml"))
+
+    assert cfg.apns_key_file() == str(key)
+    assert cfg.apns_enabled() is True
+
+
+def test_apns_unrelated_legacy_named_directory_does_not_redirect(tmp_path):
+    current = tmp_path / "config" / "clarp"
+    current.mkdir(parents=True)
+    key = current / "AuthKey_TEST123.p8"
+    key.write_text("key")
+    configured = tmp_path / "backup" / "claude-pwa" / key.name
+    cfgfile = current / "config.toml"
+    cfgfile.write_text(
+        "[apns]\n"
+        f'key_path = "{configured}"\n'
+        'key_id = "ABC123KEYID"\n'
+        'team_id = "TEAMID1234"\n'
+    )
+    config.reset_cache_for_tests()
+
+    cfg = config.load(cfgfile)
+
+    assert cfg.apns_key_file() == str(configured)
+    assert cfg.apns_enabled() is False
+
+
+def test_apns_missing_key_file_is_disabled(tmp_path):
+    cfgfile = tmp_path / "config.toml"
+    cfgfile.write_text(
+        "[apns]\n"
+        f'key_path = "{tmp_path / "missing.p8"}"\n'
+        'key_id = "ABC123KEYID"\n'
+        'team_id = "TEAMID1234"\n'
+    )
+    config.reset_cache_for_tests()
+
+    assert config.load(cfgfile).apns_enabled() is False
+
+
 # --------------------------------------------------------------------------
 # device-token store
 # --------------------------------------------------------------------------
@@ -170,6 +249,13 @@ def test_turn_done_payload():
         "Nova", "nova", avatar_url="https://example/avatar",
         avatar_custom=True)
     assert custom["avatar_custom"] is True
+
+
+def test_turn_done_alerts_are_ordinary_messages_not_time_sensitive():
+    """A finished turn is a chat message, so it must not break through Focus
+    or Do Not Disturb the way a time-sensitive alert does."""
+    p = apns.turn_done_payload("Mike", "mike")
+    assert p["aps"]["interruption-level"] == "active"
 
 
 # --------------------------------------------------------------------------
@@ -673,3 +759,42 @@ def test_avatar_url_none_when_loopback(tmp_path):
     cfg = config.load(cfgfile)
     # Loopback isn't device-reachable → skip the avatar rather than send a bad URL.
     assert apns._avatar_url(cfg, "Mike") is None
+
+
+def test_active_desktop_suppresses_alert_without_marking_notification_read(tmp_path, monkeypatch):
+    import uuid
+    import httpx
+    from lib import db, desktop_presence
+    _apns_config(tmp_path)
+    apns.register_token('desktop-test-phone')
+    calls = []
+    monkeypatch.setattr(httpx, 'Client', lambda *a, **k: _FakeClient({'desktop-test-phone': _FakeResp(200)}, calls))
+    now = db.now_ms()
+    db.conn().execute('''INSERT INTO user_notifications
+        (notification_id, agent_id, session, persona, done_ts, notify, push, badge, unread, preview, reason, created_at, updated_at)
+        VALUES('presence-notification','a1','mike','Mike',?,1,1,1,1,'Reply','text-reply',?,?)''', (now, now, now))
+    notification = {'notification_id': 'presence-notification', 'session': 'mike', 'persona': 'Mike', 'preview': 'Reply', 'push': True}
+    instance = str(uuid.uuid4())
+    desktop_presence.update(principal='administrator', instance_id=instance, sequence=1, active=True, sent_at_ms=db.now_ms())
+    result = apns.send_user_notification(notification)
+    assert result['sent'] == 0 and result['reason'] == 'desktop-active'
+    assert calls == []
+    row = db.conn().execute("SELECT unread, push FROM user_notifications WHERE notification_id='presence-notification'").fetchone()
+    assert row['unread'] == 1 and row['push'] == 1
+    desktop_presence.update(principal='administrator', instance_id=instance, sequence=2, active=False, sent_at_ms=db.now_ms())
+    assert apns.send_user_notification({**notification, 'notification_id': 'future-reply'})['sent'] == 1
+    assert len(calls) == 1
+
+
+def test_desktop_presence_is_rechecked_after_transport_setup(tmp_path, monkeypatch):
+    import httpx
+    from lib import desktop_presence
+    _apns_config(tmp_path)
+    apns.register_token('desktop-race-phone')
+    calls = []
+    monkeypatch.setattr(httpx, 'Client', lambda *a, **k: _FakeClient({'desktop-race-phone': _FakeResp(200)}, calls))
+    activity = iter([False, True])
+    monkeypatch.setattr(desktop_presence, 'active', lambda: next(activity))
+    result = apns.send_user_notification({'session': 'mike', 'preview': 'Reply', 'push': True})
+    assert result['sent'] == 0 and result['suppressed']
+    assert calls == []

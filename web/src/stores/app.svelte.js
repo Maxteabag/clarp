@@ -35,10 +35,14 @@ export const app = $state({
   status: {},
   conn: 'connecting',
   showReconnect: false,
+  /** The server is answering 401: the saved token is wrong (issue #10). */
+  authRejected: false,
   toast: '',
   version: '',
   /** Bumped on every snapshot patch so time-dependent views re-derive. */
   tick: 0,
+  /** Computer preference: wear the portrait drawn for the model, when bundled. */
+  modelAvatars: false,
 });
 
 export const isDesktop = document.documentElement.classList.contains('desktop');
@@ -76,6 +80,7 @@ export function syncStatus() {
   const next = agentSnapshot.asStatusMap();
   app.status = { ...next };
   app.agentsBySession = { ...next };
+  app.modelAvatars = agentSnapshot.modelAvatars;
   app.tick++;
 }
 
@@ -84,7 +89,8 @@ export function chipLabel(sid) {
 }
 
 export function avatarUrl(name, sid = '') {
-  return resolveAvatarUrl(app.agentsBySession, name, sid);
+  return resolveAvatarUrl(app.agentsBySession, name, sid,
+                          { preferModel: app.modelAvatars });
 }
 
 export function statusFor(sid) {
@@ -210,6 +216,7 @@ export function refreshSessions() {
 /** Open a chat: local state first, then tell the server where focus is. */
 export async function setSession(name) {
   if (!name) return;
+  if (!visibleSessions([name], agentSnapshot.asStatusMap()).length) return;
   const prev = app.session;
   app.session = name;
   try { localStorage.setItem('session', name); } catch (_) {}
@@ -235,6 +242,7 @@ export async function setSession(name) {
  * back, or two clients feed each other's broadcasts forever.
  */
 export function mirrorFocus(session, agentId) {
+  if (session && !visibleSessions([session], agentSnapshot.asStatusMap()).length) return;
   agentSnapshot.setFocus(session || '', agentId || '');
   if (session && session !== app.session) {
     app.session = session;

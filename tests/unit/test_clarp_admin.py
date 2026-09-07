@@ -138,6 +138,8 @@ def test_paths_reports_platform_runtime_locations(tmp_path, monkeypatch, capsys)
     assert value["share"] == str(tmp_path / "share")
     assert value["config"] == str(tmp_path / "config/config.toml")
     assert value["toolchain"] == str(tmp_path / "share/toolchain")
+    assert value["runtime_socket"] == str(tmp_path / "cache/runtime.sock")
+    assert value["runtime_service"].endswith("clarp-runtime.service")
 
 
 def test_sessions_returns_platform_independent_agent_inventory(capsys):
@@ -766,10 +768,40 @@ def test_doctor_uses_recorded_locked_python(tmp_path, monkeypatch, capsys):
     config_module.reset_cache()
     monkeypatch.setattr(admin, "installed_command", lambda _name: "/tool")
     monkeypatch.setattr(admin.service_manager, "is_active", lambda: True)
+    monkeypatch.setattr(admin.service_manager, "is_runtime_active", lambda: True)
     monkeypatch.setattr(admin.shutil, "which", lambda _name: None)
 
     assert admin.cmd_doctor(None) == 0
-    assert "locked python" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "locked python" in output
+    assert "agent runtime: active" in output
+
+
+def test_doctor_fails_for_missing_configured_apns_key(tmp_path, monkeypatch, capsys):
+    share = tmp_path / "share"
+    current = share / "current"
+    current.mkdir(parents=True)
+    runtime = tmp_path / "environment/bin/python"
+    runtime.parent.mkdir(parents=True)
+    runtime.write_text("")
+    (current / "SERVICE_PYTHON").write_text(str(runtime) + "\n")
+    config = tmp_path / "config.toml"
+    config.write_text(
+        '[tts]\nprovider = "none"\nfallback = "none"\n\n'
+        '[apns]\nkey_path = "/missing/AuthKey_TEST.p8"\n'
+        'key_id = "TEST"\nteam_id = "TEAM"\n'
+    )
+    monkeypatch.setattr(admin, "SHARE", share)
+    monkeypatch.setattr(admin, "CONFIG_FILE", config)
+    monkeypatch.setattr(admin, "INSTALL_STATE", tmp_path / "install.json")
+    from lib import config as config_module
+    config_module.reset_cache()
+    monkeypatch.setattr(admin, "installed_command", lambda _name: "/tool")
+    monkeypatch.setattr(admin.service_manager, "is_active", lambda: True)
+    monkeypatch.setattr(admin.service_manager, "is_runtime_active", lambda: True)
+
+    assert admin.cmd_doctor(None) == 1
+    assert "FAIL  APNs signing key" in capsys.readouterr().out
 
 
 def test_releases_only_returns_completed_installs(tmp_path, monkeypatch):
@@ -1066,3 +1098,128 @@ def test_setup_honours_an_explicit_bind_over_the_configured_one(tmp_path, monkey
     ])
     assert args.bind == "0.0.0.0"
     assert args.port == 7682
+
+
+# ---- issue #12: quick-start installs must be able to find their remote -----
+
+def test_update_remote_prefers_install_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(admin, "SHARE", tmp_path / "share")
+    (tmp_path / "share/current").mkdir(parents=True)
+    (tmp_path / "share/current/SOURCE_REMOTE").write_text("https://file.test/x.git\n")
+    assert admin.resolve_update_remote(
+        {"source_remote": "https://state.test/clarp.git"}) == "https://state.test/clarp.git"
+
+
+def test_update_remote_falls_back_to_recorded_source_remote_file(tmp_path, monkeypatch):
+    share = tmp_path / "share"
+    monkeypatch.setattr(admin, "SHARE", share)
+    (share / "current").mkdir(parents=True)
+    (share / "current/SOURCE_REMOTE").write_text("https://example.test/clarp.git\n")
+    assert admin.resolve_update_remote({"source_remote": ""}) == "https://example.test/clarp.git"
+
+    (share / "current/SOURCE_REMOTE").unlink()
+    (share / "SOURCE_REMOTE").write_text("https://share.test/clarp.git\n")
+    assert admin.resolve_update_remote({}) == "https://share.test/clarp.git"
+
+
+def test_update_remote_falls_back_to_canonical_repository(tmp_path, monkeypatch):
+    monkeypatch.setattr(admin, "SHARE", tmp_path / "share")
+    assert admin.resolve_update_remote({}) == admin.CANONICAL_SOURCE_REMOTE
+    assert admin.CANONICAL_SOURCE_REMOTE.startswith("https://github.com/")
+
+
+def test_update_remote_strips_credentials(tmp_path, monkeypatch):
+    monkeypatch.setattr(admin, "SHARE", tmp_path / "share")
+    assert admin.resolve_update_remote(
+        {"source_remote": "https://user:secret@example.test/clarp.git"}
+    ) == "https://example.test/clarp.git"
+
+
+def test_cmd_update_clones_recorded_remote_for_tarball_install(tmp_path, monkeypatch):
+    share = tmp_path / "share"
+    (share / "current").mkdir(parents=True)
+    (share / "current/SOURCE_REMOTE").write_text("https://example.test/clarp.git\n")
+    tarball = tmp_path / "clarp-src.abc123"  # unpacked archive, no .git
+    tarball.mkdir()
+    state_file = tmp_path / "install.json"
+    state_file.write_text(json.dumps({
+        "source_repo": str(tarball), "source_remote": "", "channel": "stable"}))
+    monkeypatch.setattr(admin, "SHARE", share)
+    monkeypatch.setattr(admin, "INSTALL_STATE", state_file)
+
+    calls: list[tuple] = []
+
+    class Stop(Exception):
+        pass
+
+    def fake_run(*cmd, **kwargs):
+        calls.append(cmd)
+        raise Stop()  # the clone is the assertion; do not go further
+
+    monkeypatch.setattr(admin, "run", fake_run)
+    with pytest.raises(Stop):
+        admin.cmd_update(argparse.Namespace(ref=""))
+    assert calls[0][:2] == ("git", "clone")
+    assert "https://example.test/clarp.git" in calls[0]
+    assert calls[0][-1] == str(share / "update-source")
+
+
+def test_cmd_update_never_refuses_for_missing_remote_record(tmp_path, monkeypatch):
+    share = tmp_path / "share"
+    share.mkdir()
+    state_file = tmp_path / "install.json"
+    state_file.write_text(json.dumps({"source_repo": str(tmp_path / "gone")}))
+    monkeypatch.setattr(admin, "SHARE", share)
+    monkeypatch.setattr(admin, "INSTALL_STATE", state_file)
+    calls: list[tuple] = []
+
+    class Stop(Exception):
+        pass
+
+    def fake_run(*cmd, **kwargs):
+        calls.append(cmd)
+        raise Stop()
+
+    monkeypatch.setattr(admin, "run", fake_run)
+    with pytest.raises(Stop):
+        admin.cmd_update(argparse.Namespace(ref=""))
+    assert admin.CANONICAL_SOURCE_REMOTE in calls[0]
+
+
+# ---- issue #10: setup must hand the user a PWA link that carries the token --
+
+def _config(tmp_path, monkeypatch, body: str):
+    config = tmp_path / "config.toml"
+    config.write_text(body)
+    monkeypatch.setattr(admin, "CONFIG_FILE", config)
+    return config
+
+
+def test_pwa_access_url_carries_the_token(tmp_path, monkeypatch):
+    _config(tmp_path, monkeypatch,
+            '[server]\nport = 7682\nbind_addr = "127.0.0.1"\nauth_token = "abc/def+1"\n')
+    assert admin.pwa_access_url() == "http://127.0.0.1:7682/?token=abc%2Fdef%2B1"
+
+
+def test_pwa_access_url_uses_public_base_url(tmp_path, monkeypatch):
+    _config(tmp_path, monkeypatch,
+            '[server]\npublic_base_url = "https://mac.tail.ts.net/"\nauth_token = "tok"\n')
+    assert admin.pwa_access_url() == "https://mac.tail.ts.net/?token=tok"
+
+
+def test_pwa_access_url_without_auth_is_plain(tmp_path, monkeypatch):
+    _config(tmp_path, monkeypatch, '[server]\nport = 7000\n')
+    assert admin.pwa_access_url() == "http://127.0.0.1:7000/"
+
+
+def test_url_command_prints_the_link(tmp_path, monkeypatch, capsys):
+    _config(tmp_path, monkeypatch, '[server]\nauth_token = "tok"\n')
+    assert admin.cmd_url(argparse.Namespace(qr=False, json=False)) == 0
+    assert capsys.readouterr().out.strip() == "http://127.0.0.1:7682/?token=tok"
+
+
+def test_setup_summary_names_the_pwa_link(tmp_path, monkeypatch):
+    _config(tmp_path, monkeypatch, '[server]\nauth_token = "tok"\n')
+    text = admin.setup_complete_message()
+    assert "http://127.0.0.1:7682/?token=tok" in text
+    assert "clarp-admin url" in text

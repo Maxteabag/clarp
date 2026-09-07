@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Clarp
+Comment=Native desktop client for Clarp agents
+Exec=clarp-desktop
+Icon=com.maxteabag.Clarp
+Terminal=false
+Categories=Development;
+Keywords=AI;Agent;Claude;Codex;
+StartupNotify=true

@@ -23,7 +23,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
 from . import agents as agents_db
-from . import backends, config, eventlog, settings_store
+from . import backends, config, eventlog, janitor_builtins, janitors, settings_store
 from .db import conn, now_ms
 from .log import log_exception
 from .prompt_admissions import PromptAdmission
@@ -32,6 +32,8 @@ from .protocol import SSEType
 
 
 DEFAULT_PROVIDER = "openai"
+JANITOR_ROLE = "message-delegator"
+POLICY_OPTION_KEYS = ("fallback_only", "hands_free_only", "confidence_threshold", "timeout_ms", "voice_id")
 DEFAULT_MODEL = "gpt-5.4-mini"
 DEFAULT_EFFORT = "low"
 OPENAI_PROVIDER = "openai"
@@ -134,6 +136,10 @@ class OrchestratorOutcome:
     status: int = 200
 
 
+class _StaleJanitorRun(RuntimeError):
+    pass
+
+
 def normalize_provider(raw: str | None) -> str:
     """Canonical routing provider id: a registry backend id or "openai".
 
@@ -193,7 +199,14 @@ def is_routing_provider(raw: str | None) -> bool:
     return adapter is not None and adapter.supports_routing
 
 
-def get_settings() -> OrchestratorSettings:
+def addressing_status() -> dict:
+    """Current mode plus the catalogue, so the app can draw the picker."""
+    from . import addressing
+    return {"mode": addressing.mode(), "modes": list(addressing.MODES)}
+
+
+def get_legacy_settings() -> OrchestratorSettings:
+    """Read the pre-Janitor settings once for migration; never overwrite an owner."""
     cfg = config.load()
     provider_default = DEFAULT_PROVIDER
     provider = settings_store.get_text(KEY_PROVIDER, default=provider_default).strip()
@@ -235,36 +248,73 @@ def get_settings() -> OrchestratorSettings:
     )
 
 
+def _settings_from_configuration(value: dict, *, enabled: bool, provider: str) -> OrchestratorSettings:
+    options = janitors.option_values(JANITOR_ROLE, value.get("options", {}))
+    return OrchestratorSettings(
+        enabled=enabled, provider=provider, model=value["model"], effort=value["effort"],
+        **{key: options[key] for key in POLICY_OPTION_KEYS},
+    )
+
+
+def get_settings() -> OrchestratorSettings:
+    """Legacy HTTP shape backed entirely by the installed Janitor configuration."""
+    owner = janitor_builtins.get_builtin(JANITOR_ROLE)
+    if owner is None:
+        return get_legacy_settings()
+    return _settings_from_configuration(
+        owner, enabled=bool(owner["enabled"]), provider=owner["execution"]["provider"],
+    )
+
+
+def _ensure_janitor() -> None:
+    if janitor_builtins.get_builtin(JANITOR_ROLE) is not None:
+        return
+    legacy = get_legacy_settings()
+    provider = normalize_provider(legacy.provider)
+    janitor_builtins.ensure_builtins(initial={JANITOR_ROLE: {
+        "enabled": legacy.enabled,
+        "backend": OPENAI_CATALOG_BACKEND if provider == OPENAI_PROVIDER else provider,
+        "provider": provider, "model": legacy.model, "effort": legacy.effort,
+        "options": {key: getattr(legacy, key) for key in POLICY_OPTION_KEYS},
+    }})
+
+
 def update_settings(data: dict[str, Any]) -> OrchestratorSettings:
-    if "enabled" in data:
-        settings_store.set_bool(KEY_ENABLED, bool(data.get("enabled")))
-    if "hands_free_only" in data:
-        settings_store.set_bool(KEY_HANDS_FREE_ONLY, bool(data.get("hands_free_only")))
-    if "fallback_only" in data:
-        settings_store.set_bool(KEY_FALLBACK_ONLY, bool(data.get("fallback_only")))
-    if "confidence_threshold" in data:
-        try:
-            threshold = max(0.5, min(0.99, float(data.get("confidence_threshold"))))
-        except (TypeError, ValueError):
-            threshold = HIGH_CONFIDENCE
-        settings_store.set_text(KEY_CONFIDENCE_THRESHOLD, str(threshold))
+    """Compatibility writes update the same Janitor settings as its native editor."""
+    supported = {"enabled", "provider", "model", "effort", *POLICY_OPTION_KEYS}
+    if not isinstance(data, dict) or data.keys() - supported:
+        raise ValueError("Unsupported orchestrator settings")
+    if not data:
+        return get_settings()
+    if "enabled" in data and not isinstance(data["enabled"], bool):
+        raise ValueError("Enabled must be a boolean")
+    provider = None
     if "provider" in data:
-        provider = str(data.get("provider") or DEFAULT_PROVIDER).strip() or DEFAULT_PROVIDER
+        provider = normalize_provider(str(data.get("provider") or DEFAULT_PROVIDER))
         if not is_routing_provider(provider):
             raise ValueError(f"unsupported orchestrator provider: {provider}")
-        settings_store.set_text(KEY_PROVIDER, normalize_provider(provider))
-    if "model" in data:
-        settings_store.set_text(KEY_MODEL, str(data.get("model") or "").strip())
-    if "effort" in data:
-        settings_store.set_text(KEY_EFFORT, str(data.get("effort") or "").strip())
-    if "timeout_ms" in data:
-        try:
-            timeout_ms = max(250, min(60000, int(data.get("timeout_ms"))))
-        except (TypeError, ValueError):
-            timeout_ms = DEFAULT_TIMEOUT_MS
-        settings_store.set_text(KEY_TIMEOUT_MS, str(timeout_ms))
-    if "voice_id" in data:
-        settings_store.set_text(KEY_VOICE_ID, str(data.get("voice_id") or "").strip())
+    _ensure_janitor()
+    owner = janitor_builtins.get_builtin(JANITOR_ROLE)
+    if owner is None:
+        raise ValueError("The message delegator Janitor is unavailable")
+    enabled = data.get("enabled", owner["enabled"])
+    changes = {key: str(data.get(key) or "").strip()
+               for key in ("model", "effort") if key in data}
+    options = {key: data[key] for key in POLICY_OPTION_KEYS if key in data}
+    if options:
+        changes["options"] = options
+    if provider is not None:
+        if provider != owner["execution"]["provider"]:
+            # A provider-only legacy request selects that provider's defaults;
+            # a model from another catalogue may be invalid.
+            changes.setdefault("model", DEFAULT_MODEL if provider == OPENAI_PROVIDER else "")
+            changes.setdefault("effort", DEFAULT_EFFORT if provider == OPENAI_PROVIDER else "")
+        changes.update(execution={"executor": "ephemeral", "provider": provider},
+                       backend=OPENAI_CATALOG_BACKEND if provider == OPENAI_PROVIDER else provider)
+    if changes:
+        owner = janitors.configure(owner["session"], owner["revision"], **changes)
+    if enabled != owner["enabled"]:
+        janitors.set_enabled(owner["session"], owner["revision"], enabled)
     return get_settings()
 
 
@@ -373,6 +423,7 @@ class OrchestratorService:
         self.ctx = ctx
         self.model_call = model_call or call_model
         self.now = now
+        _ensure_janitor()
 
     def handle_send(
         self,
@@ -387,7 +438,34 @@ class OrchestratorService:
         dispatch: Callable[..., Any],
         fallback_request: bool = False,
     ) -> OrchestratorOutcome | None:
-        settings = get_settings()
+        client_id = (prompt_admissions.message_id(prompt_admission.client_admission_id)
+                     if prompt_admission else trace_id)
+        request_id = "routing-" + hashlib.sha256(client_id.encode()).hexdigest()
+        target_agent = agents_db.get_by_session(requested_session)
+        target_agent_id = (target_agent or {}).get("agent_id")
+        request_hash = hashlib.sha256(json.dumps({
+            "utterance": text, "requested_session": requested_session,
+            "hands_free": hands_free, "fallback_request": fallback_request,
+            "origin": prompt_admission.origin if prompt_admission else "user",
+            "sender_agent_id": prompt_admission.sender_agent_id if prompt_admission else "",
+        }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        prior = janitor_builtins.get_request_run(JANITOR_ROLE, request_id)
+        if prior is not None:
+            frozen = prior["configuration"]
+            if (frozen.get("context") != {"input_hash": request_hash}
+                    or frozen.get("target_agent_id") != target_agent_id):
+                return OrchestratorOutcome(
+                    handled=True, ok=False, session=requested_session,
+                    trace_id=trace_id, action=FINAL_ERROR, status=409,
+                    error="Request identity already refers to different work",
+                )
+            return self._replayed_run(prior["run_id"], requested_session, trace_id)
+        owner = janitor_builtins.resolve(JANITOR_ROLE, target_agent_id=target_agent_id)
+        if owner is None:
+            return None
+        settings = _settings_from_configuration(
+            owner, enabled=owner["enabled"], provider=owner["execution"]["provider"],
+        )
         if not should_run(
             settings, hands_free=hands_free, fallback_request=fallback_request
         ):
@@ -403,8 +481,37 @@ class OrchestratorService:
             fallback_request=fallback_request,
         )
         try:
-            raw = self.model_call(packet, settings)
-            decision = parse_decision(raw)
+            run = janitor_builtins.begin_run(
+                JANITOR_ROLE, request_id, context={"input_hash": request_hash},
+                target_agent_id=target_agent_id,
+            )
+        except janitors.JanitorError as exc:
+            # Reusing a request ID with different content is an admission
+            # conflict, never a reason to dispatch that content by fallback.
+            return OrchestratorOutcome(
+                handled=True, ok=False, session=requested_session,
+                trace_id=trace_id, action=FINAL_ERROR, error=str(exc), status=exc.status,
+            )
+        if run is None:
+            return self._unavailable(packet, settings, requested_session, trace_id,
+                                     hands_free, "Message delegator is busy or paused")
+        run_id = run["run_id"]
+        if not janitor_builtins.claim_run(run_id):
+            return self._replayed_run(run_id, requested_session, trace_id)
+        frozen = run["configuration"]
+        settings = _settings_from_configuration(frozen, enabled=True, provider=frozen["provider"])
+        packet["settings"] = asdict(settings)
+        packet["routing_policy"]["automatic_confidence_threshold"] = settings.confidence_threshold
+        if not should_run(settings, hands_free=hands_free, fallback_request=fallback_request):
+            janitor_builtins.complete_run(run_id, outcome="cancelled", result={
+                "summary": "Routing policy changed before execution", "status": FINAL_FALLBACK,
+            })
+            return self._unavailable(packet, settings, requested_session, trace_id,
+                                     hands_free, "Message delegator policy changed")
+        try:
+            self._require_current(run_id)
+            decision = self._call_with_fallback(packet, settings, run_id, "initial")
+            self._require_current(run_id)
             if _should_scan_broader(decision, packet, requested_session):
                 broad_packet = build_context_packet(
                     utterance=text,
@@ -416,12 +523,18 @@ class OrchestratorService:
                     fallback_request=fallback_request,
                 )
                 try:
-                    raw = self.model_call(broad_packet, settings)
-                    decision = parse_decision(raw)
+                    self._require_current(run_id)
+                    decision = self._call_with_fallback(broad_packet, settings, run_id, "broad")
                     packet = broad_packet
+                except _StaleJanitorRun:
+                    raise
                 except Exception as e:  # noqa: BLE001
                     log_exception("orchestratorBroadModelFail", e, detail=trace_id)
             latency_ms = int((time.time() - started) * 1000)
+        except _StaleJanitorRun:
+            janitor_builtins.complete_run(run_id, outcome="cancelled")
+            return self._unavailable(packet, settings, requested_session, trace_id,
+                                     hands_free, "Message delegator configuration changed")
         except Exception as e:  # noqa: BLE001
             log_exception("orchestratorModelFail", e, detail=trace_id)
             decision = OrchestratorDecision(
@@ -431,7 +544,7 @@ class OrchestratorService:
                 error=str(e),
             )
             latency_ms = int((time.time() - started) * 1000)
-        return self._apply_decision(
+        result = self._apply_decision(
             decision=decision,
             packet=packet,
             settings=settings,
@@ -444,6 +557,77 @@ class OrchestratorService:
             latency_ms=latency_ms,
             dispatch=dispatch,
             fallback_request=fallback_request,
+            janitor_run_id=run_id,
+        )
+        recipient = agents_db.get_by_session(result.session)
+        failed = decision.kind == DECISION_ERROR or result.action == FINAL_ERROR
+        janitor_builtins.complete_run(
+            run_id, outcome="failed" if failed else "completed",
+            result={"summary": f"Message routing finished: {result.action}",
+                    "status": result.action,
+                    "target_agent_id": (recipient or {}).get("agent_id", "")},
+            error="Message routing failed" if failed else "",
+        )
+        return result
+
+    def _call_with_fallback(self, packet, settings, run_id, phase):
+        from dataclasses import replace
+        from . import model_fallbacks
+        run = janitors.get_run(run_id)
+        primary = {"backend": settings.provider, "model": settings.model, "effort": settings.effort}
+        def invoke(model):
+            selected = replace(settings, provider=model["backend"], model=model["model"], effort=model.get("effort", ""))
+            return parse_decision(self.model_call(packet, selected))
+        return model_fallbacks.execute(run["agent_id"], run_id + ":" + phase, primary, invoke,
+            current=lambda: janitor_builtins.is_current(run_id))
+
+    @staticmethod
+    def _require_current(run_id: str) -> None:
+        if run_id and not janitor_builtins.is_current(run_id):
+            raise _StaleJanitorRun("Message delegator configuration changed")
+
+    def _unavailable(self, packet, settings, requested_session, trace_id,
+                     hands_free, reason) -> OrchestratorOutcome:
+        decision = OrchestratorDecision(kind=DECISION_ERROR, reason=reason)
+        decision_id = self._log_decision(
+            decision=decision, packet=packet, settings=settings,
+            requested_session=requested_session, trace_id=trace_id,
+            hands_free=hands_free, latency_ms=0, target_session=requested_session,
+            final_action=FINAL_FALLBACK, fallback_used=True, error="",
+        )
+        return OrchestratorOutcome(
+            handled=True, ok=True, session=requested_session, trace_id=trace_id,
+            action=FINAL_FALLBACK, decision_id=decision_id,
+            decision=_public_decision(decision),
+        )
+
+    @staticmethod
+    def _replayed_run(run_id, requested_session, trace_id) -> OrchestratorOutcome:
+        """A durable execution claim survives retries and Host restarts."""
+        run = janitors.get_run(run_id) or {}
+        if run.get("status") in {"queued", "running"}:
+            # Retries bypass begin_run, which normally retires expired claims.
+            # Reconcile here too so an interrupted request cannot stay pending
+            # forever merely because every retry uses its original client ID.
+            janitor_builtins.recover_expired_runs()
+            run = janitors.get_run(run_id) or {}
+        receipt = run.get("demand_result") or {}
+        if run.get("status") == "cancelled" and not receipt:
+            return OrchestratorOutcome(
+                handled=True, ok=False, session=requested_session,
+                trace_id=trace_id, action="cancelled", status=409,
+                error=run.get("error") or "Message routing was cancelled before completion",
+            )
+        recipient = agents_db.get_by_agent_id(receipt.get("target_agent_id", "")) or {}
+        pending = run.get("status") in {"queued", "running"}
+        action = "pending" if pending else receipt.get("status", FINAL_CLARIFY)
+        return OrchestratorOutcome(
+            handled=True, ok=action != FINAL_ERROR,
+            session=recipient.get("session", requested_session),
+            dispatch=recipient.get("backend", "") if action == FINAL_ROUTE else "",
+            trace_id=trace_id, action=action,
+            error="Message routing failed" if action == FINAL_ERROR else "",
+            status=202 if pending else 500 if action == FINAL_ERROR else 200,
         )
 
     def transcribe_should_skip_herald(self, *, hands_free: bool) -> bool:
@@ -465,6 +649,7 @@ class OrchestratorService:
         latency_ms: int,
         dispatch: Callable[..., Any],
         fallback_request: bool,
+        janitor_run_id: str = "",
     ) -> OrchestratorOutcome:
         sessions = {a["session"] for a in packet.get("agents", [])}
         final_action = FINAL_ERROR
@@ -474,6 +659,12 @@ class OrchestratorService:
         dispatch_result = None
 
         try:
+            self._require_current(janitor_run_id)
+            control_target = agents_db.get_by_session(decision.target_session)
+            if (decision.kind in {DECISION_CONTROL, DECISION_AGENT_CONTROL}
+                    and control_target is not None
+                    and not agents_db.interaction_capabilities(control_target)["can_voice_target"]):
+                decision = self._as_clarify(decision, "That agent does not accept voice commands.")
             if fallback_request and decision.kind not in {
                 DECISION_AGENT_MESSAGE,
                 DECISION_CORRECTION,
@@ -514,6 +705,7 @@ class OrchestratorService:
                             prompt_admission=prompt_admission,
                         )
                 else:
+                    self._require_current(janitor_run_id)
                     held = self._claim_pending(decision.pending_id)
                     routed_admission = prompt_admission
                     if held is not None:
@@ -525,6 +717,7 @@ class OrchestratorService:
                         or decision.text_to_send.strip()
                         or packet["utterance"]
                     )
+                    self._require_current(janitor_run_id)
                     dispatch_result = dispatch(
                         text=text_to_send,
                         requested_session=requested_session,
@@ -565,14 +758,17 @@ class OrchestratorService:
                         prompt_admission=prompt_admission,
                     )
             if final_action == FINAL_ERROR and decision.kind == DECISION_STATUS:
+                self._require_current(janitor_run_id)
                 final_action = FINAL_STATUS
                 target = self._valid_target(decision.target_session, sessions) or requested_session
                 spoken = decision.status_text.strip() or self._status_text(target)
                 self._speak_orchestrator(spoken, settings)
             if final_action == FINAL_ERROR and decision.kind == DECISION_CONTROL:
+                self._require_current(janitor_run_id)
                 final_action = FINAL_CONTROL
                 self._run_control(decision, requested_session, settings)
             if final_action == FINAL_ERROR and decision.kind == DECISION_AGENT_CONTROL:
+                self._require_current(janitor_run_id)
                 final_action = FINAL_CONTROL
                 target = self._run_agent_control(decision, requested_session)
             if final_action == FINAL_ERROR and decision.kind == DECISION_IGNORED:
@@ -581,6 +777,11 @@ class OrchestratorService:
             if final_action == FINAL_ERROR:
                 fallback_used = True
                 final_action = FINAL_FALLBACK
+        except _StaleJanitorRun as e:
+            decision = OrchestratorDecision(kind=DECISION_ERROR, reason=str(e))
+            target = requested_session
+            fallback_used = True
+            final_action = FINAL_FALLBACK
         except Exception as e:  # noqa: BLE001
             log_exception("orchestratorApplyFail", e, detail=trace_id)
             error = str(e)
@@ -893,7 +1094,9 @@ class OrchestratorService:
         return True
 
     def _valid_target(self, session: str, sessions: set[str]) -> str:
-        return session if session in sessions else ""
+        target = agents_db.get_by_session(session) if session in sessions else None
+        return session if (target and not target.get("archived_at")
+                           and agents_db.interaction_capabilities(target)["can_voice_target"]) else ""
 
     def _persona_for_session(self, session: str) -> str:
         agent = agents_db.get_by_session(session)
@@ -993,7 +1196,8 @@ def build_context_packet(
     agents = []
     message_count = 0
     all_agents = [agent for agent in agents_db.list_agents()
-                  if not agent.get("archived_at")]
+                  if not agent.get("archived_at")
+                  and agents_db.interaction_capabilities(agent)["can_voice_target"]]
     if fallback_request:
         cutoff = now_ms() - RECENT_AGENT_WINDOW_MS
         all_agents = [
@@ -1268,7 +1472,12 @@ def _model_prompt(packet: dict[str, Any]) -> str:
         "addressing from referring. Account for STT mistakes, for example Mark "
         "may mean Mike only if the context supports it. Wrong-agent routing is "
         "worse than asking a short clarification. Bias toward the sticky focus "
-        "only when context is compatible. In active hands-free dictation, if the "
+        "only when context is compatible. Where two agents remain genuinely "
+        "indistinguishable after weighing the content - and only then, as a "
+        "last resort rather than a shortcut - lean slightly toward the one "
+        "most recently spoken to. This is a tiebreak, not a preference: it "
+        "must never outweigh what the utterance is actually about. "
+        "In active hands-free dictation, if the "
         "utterance is complete nonsense, accidental background speech, an "
         "unrelated fragment, or language/content that has no plausible relation "
         "to any active agent, return ignored instead of routing or clarifying.\n"

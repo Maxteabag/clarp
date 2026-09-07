@@ -8,12 +8,16 @@
   import { reset } from '../stores/conversations.svelte.js';
   import {
     normalizeBackend, resumableBackend, supportsForkBackend, supportsResumeBackend,
-    backendLabel, catalogBackendIds,
+    backendLabel, catalogBackendIds, allowedBackendForContact,
   } from '@core/agent-launch.js';
   import { AgentBackend } from '@core/protocol.js';
   import { pathTail } from './render.js';
 
   let { open = $bindable(), name = '', replaceSid = '', onDone } = $props();
+
+  let lockedBackend = $derived.by(() => {
+    return allowedBackendForContact(name);
+  });
 
   // The server's live capability catalogue (/agent-model-options), with a
   // static fallback so the dialog still offers sensible choices when it is down.
@@ -87,9 +91,14 @@
     resumeItems = [];
     resumeState = '';
     suggestions = [];
-    backend = normalizeBackend(
-      (replaceSid && existing.backend)
-      || localStorage.getItem('lastAgentBackend') || AgentBackend.CLAUDE);
+    const targetLocked = allowedBackendForContact(name);
+    if (targetLocked) {
+      backend = targetLocked;
+    } else {
+      backend = normalizeBackend(
+        (replaceSid && existing.backend)
+        || localStorage.getItem('lastAgentBackend') || AgentBackend.CLAUDE);
+    }
     loadCatalogue();
     fetchFavorites();
   });
@@ -189,6 +198,7 @@
   }
 
   function onBackendChange(next) {
+    if (lockedBackend && next !== lockedBackend) return;
     backend = next;
     chosen = '';
     if (mode === 'resume' || mode === 'fork') fetchResume();
@@ -197,7 +207,7 @@
   async function submit() {
     const dir = cwd.trim().replace(/\/+$/, '') || '~';
     localStorage.setItem('lastAgentCwd', dir);
-    const chosenBackend = resumableBackend(backend);
+    const chosenBackend = lockedBackend || resumableBackend(backend);
     localStorage.setItem('lastAgentBackend', chosenBackend);
     const selectedModel = (modelCustom || '').trim() || (modelPreset || '').trim();
     const payload = {
@@ -276,10 +286,15 @@
 
       <div class="start-backends">
         {#each backendIds as b (b)}
-          <label>
+          {@const isLocked = !!lockedBackend && lockedBackend !== b}
+          <label class:disabled={isLocked} title={isLocked ? `${name} is locked to ${backendLabel(lockedBackend, catalogue)}` : ''}>
             <input type="radio" value={b} checked={backend === b}
+                   disabled={isLocked}
                    onchange={() => onBackendChange(b)} />
             {backendLabel(b, catalogue)}
+            {#if lockedBackend === b}
+              <span class="locked-badge">Required</span>
+            {/if}
           </label>
         {/each}
       </div>

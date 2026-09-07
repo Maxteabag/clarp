@@ -11,13 +11,19 @@ export const Health = {
   QUIET: 'quiet',   // nothing recently, but nothing is expected either
   STALE: 'stale',   // should have heard something by now
   WEDGED: 'wedged', // long past due; the client is not talking to anyone
+  // The server answers every request and refuses every one. That is not a
+  // network problem: the saved token is wrong (issue #10).
+  UNAUTHORIZED: 'unauthorized',
 };
 
 export function createHealth(now = Date.now()) {
   return {
     startedAt: now,
-    lastFetchAt: 0,
+    lastFetchAt: 0,       // last response that was ok
     lastFetchPath: '',
+    lastResponseAt: 0,    // last response of any status, 4xx/5xx included
+    lastStatus: 0,
+    rejected: 0,          // consecutive 401s; reset by any other response
     lastSseAt: 0,
     lastSseType: '',
     fetches: 0,
@@ -26,10 +32,18 @@ export function createHealth(now = Date.now()) {
   };
 }
 
-export function noteFetch(health, { path = '', ok = true, at = Date.now() } = {}) {
+// `status` is the HTTP status when the server answered at all; leave it out
+// for a transport failure, which is the only case that counts as no contact.
+export function noteFetch(health, { path = '', ok = true, status = 0, at = Date.now() } = {}) {
   if (!health) return health;
   health.fetches += 1;
   if (!ok) health.fetchErrors += 1;
+  const answered = status > 0 || ok;
+  if (answered) {
+    health.lastResponseAt = at;
+    health.lastStatus = status || (ok ? 200 : 0);
+    health.rejected = status === 401 ? health.rejected + 1 : 0;
+  }
   if (ok) {
     health.lastFetchAt = at;
     health.lastFetchPath = path;
@@ -50,12 +64,23 @@ export function noteSse(health, { type = '', at = Date.now() } = {}) {
 export function assess(health, { now = Date.now(), staleMs = 45000, wedgedMs = 120000 } = {}) {
   if (!health) return { state: Health.QUIET, sinceMs: 0, reason: 'no health record' };
 
+  // A refusal is a verdict on its own, not a shade of silence: the server is
+  // right there, and no amount of waiting or reconnecting will change its mind.
+  if (health.rejected > 0 && health.lastStatus === 401) {
+    return { state: Health.UNAUTHORIZED, sinceMs: now - health.lastResponseAt, reason: 'server rejected the token' };
+  }
+
   const last = Math.max(health.lastFetchAt, health.lastSseAt);
   if (!last) {
-    // Nothing has ever come back. Before that is damning, allow for boot.
+    // Nothing useful has ever come back. Before that is damning, allow for
+    // boot, and say whether the server answered at all: an error reply is
+    // proof of a server, and blaming the network for it wastes the reader.
     const age = now - health.startedAt;
-    if (age >= wedgedMs) return { state: Health.WEDGED, sinceMs: age, reason: 'never reached the server' };
-    if (age >= staleMs) return { state: Health.STALE, sinceMs: age, reason: 'no response since load' };
+    const reason = health.lastResponseAt
+      ? `server answering with errors (last ${health.lastStatus})`
+      : 'never reached the server';
+    if (age >= wedgedMs) return { state: Health.WEDGED, sinceMs: age, reason };
+    if (age >= staleMs) return { state: Health.STALE, sinceMs: age, reason: health.lastResponseAt ? reason : 'no response since load' };
     return { state: Health.QUIET, sinceMs: age, reason: 'starting up' };
   }
 

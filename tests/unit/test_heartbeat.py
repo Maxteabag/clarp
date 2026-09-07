@@ -55,8 +55,9 @@ def test_prompt_mirrors_openclaw_contract():
     assert "Do not infer or repeat old tasks from prior chats." in prompt
     assert "HEARTBEAT_OK" in prompt
     assert "take no action" in prompt
-    assert "Audit your visible custom status and durable background jobs" in prompt
-    assert "Do not clear genuine active work" in prompt
+    assert "Audit durable background jobs and update any job whose displayed state is stale" in prompt
+    assert "Preserve genuine active work" in prompt
+    assert "custom status" not in prompt
 
 
 def test_prompt_includes_current_durable_plan_and_requires_continuation():
@@ -419,7 +420,7 @@ def test_team_action_wakes_dormant_heartbeat(monkeypatch):
     _heartbeat_test_env(monkeypatch, dormant_after=3)
     aid = _agent("domi")
     teammate = _agent("lena")
-    team = team_store.create_team("iOS Development")
+    team = team_store.create_team("iOS Development", communication_enabled=True)
     assert team_store.add_member(team["team_id"], aid)
     assert team_store.add_member(team["team_id"], teammate)
     sent: list[tuple[str, str]] = []
@@ -445,7 +446,7 @@ def test_peer_tool_chatter_does_not_wake_dormant_heartbeat(monkeypatch):
     aid = _agent("domi")
     teammate = _agent("lena")
     teammate_backend = f"bs-{teammate}"
-    team = team_store.create_team("iOS Development")
+    team = team_store.create_team("iOS Development", communication_enabled=True)
     assert team_store.add_member(team["team_id"], aid)
     assert team_store.add_member(team["team_id"], teammate)
     sent: list[tuple[str, str]] = []
@@ -650,3 +651,95 @@ def test_heartbeat_prompt_and_noop_are_tagged_in_messages():
     ]
     assert [m["origin"] for m in visible] == ["heartbeat", "heartbeat"]
     assert heartbeat._state_for(aid).noop_streak == 0  # noqa: SLF001
+
+
+def test_interrupted_agent_with_usage_limit_revives_after_interval(monkeypatch):
+    _heartbeat_test_env(monkeypatch, base=40, cap=160)
+    aid = _agent("revive_test")
+    agents_db.record_state(aid, AgentState.INTERRUPTED, {
+        "reason": "usage_limit",
+        "message": "Usage limit reached",
+    })
+    db.conn().execute(
+        "UPDATE state_log SET ts = 1000000 WHERE agent_id = ?",
+        (aid,),
+    )
+    assert heartbeat.pending_heartbeat_agents(now=1010.0) == []
+
+    due = heartbeat.pending_heartbeat_agents(now=1041.0)
+    assert [a["agent_id"] for a in due] == [aid]
+
+    agent_row = agents_db.get_by_agent_id(aid)
+    prompt = heartbeat.heartbeat_prompt_text(agent_row)
+    assert prompt.startswith(heartbeat.INTERRUPTED_HEARTBEAT_PREFIX)
+    assert heartbeat.should_skip_heartbeat_prompt(prompt)
+
+
+def test_user_stopped_agent_never_revives(monkeypatch):
+    _heartbeat_test_env(monkeypatch, base=40, cap=160)
+    aid = _agent("user_stopped_test")
+    agents_db.record_state(aid, AgentState.INTERRUPTED, {
+        "source": "user_stop",
+        "message": "Turn stopped",
+    })
+    db.conn().execute(
+        "UPDATE state_log SET ts = 1000000 WHERE agent_id = ?",
+        (aid,),
+    )
+    assert heartbeat.pending_heartbeat_agents(now=2000.0) == []
+    agent_row = agents_db.get_by_agent_id(aid)
+    assert heartbeat.agent_schedule(agent_row, now=2000.0)["next_heartbeat_at"] is None
+
+
+def test_interrupted_agent_fixed_interval_and_dormancy_after_11_hours(monkeypatch):
+    _heartbeat_test_env(monkeypatch, base=40, cap=160)
+    aid = _agent("interrupted_fixed")
+    agents_db.record_state(aid, AgentState.INTERRUPTED, {
+        "reason": "usage_limit",
+        "message": "Usage limit reached",
+    })
+    db.conn().execute(
+        "UPDATE state_log SET ts = 10000000 WHERE agent_id = ?",
+        (aid,),
+    )
+    for _ in range(8):
+        heartbeat.record_heartbeat_noop(aid)
+
+    state = heartbeat._state_for(aid)  # noqa: SLF001
+    assert state.noop_streak == 8
+    assert state.dormant is False
+
+    agent_row = agents_db.get_by_agent_id(aid)
+    schedule = heartbeat.agent_schedule(agent_row, now=10_100.0)
+    assert schedule["effective_interval_sec"] == 40
+    assert schedule["dormant"] is False
+
+    heartbeat.pending_heartbeat_agents(now=10_000.0 + 11 * 3600 + 10)
+    assert state.dormant is True
+    assert heartbeat.agent_schedule(agent_row, now=10_000.0 + 11 * 3600 + 10)["next_heartbeat_at"] is None
+
+
+def test_default_backoff_cap_is_one_hour(monkeypatch):
+    for name in (
+        "CLAUDE_PWA_HEARTBEAT_INTERVAL_SEC",
+        "CLAUDE_PWA_HEARTBEAT_BACKOFF_CAP_SEC",
+        "CLAUDE_PWA_HEARTBEAT_DORMANT_AFTER_NOOPS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    settings = heartbeat.get_settings()
+    assert settings.backoff_cap_sec == 3600
+
+
+def test_record_heartbeat_noop_with_explicit_is_interrupted_prevents_dormancy(monkeypatch):
+    _heartbeat_test_env(monkeypatch, base=40, cap=160)
+    aid = _agent("interrupted_explicit")
+    # Even if database state is still THINKING, passing is_interrupted=True protects the agent
+    agents_db.record_state(aid, AgentState.THINKING, {})
+    for _ in range(10):
+        heartbeat.record_heartbeat_noop(aid, is_interrupted=True)
+
+    state = heartbeat._state_for(aid)  # noqa: SLF001
+    assert state.noop_streak == 10
+    assert state.dormant is False
+
+

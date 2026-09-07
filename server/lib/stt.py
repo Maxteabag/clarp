@@ -82,6 +82,30 @@ def inference_cpu_threads(cpu_count: int | None = None) -> int:
     return max(1, min(4, cores // 2))
 
 
+# Greedy decoding (beam_size=1) commits to the first plausible token and cannot
+# back out, which is precisely how a coined name becomes a common word. Beam
+# search keeps alternatives alive long enough for the biasing prompt to pull
+# the right one through. 5 is the usual default; 1 restores the old behaviour.
+DEFAULT_BEAM_SIZE = 5
+_BEAM_SIZE_KEY = "transcription.decode.beam_size"
+
+
+def inference_beam_size() -> int:
+    """Beam width for local Whisper decoding.
+
+    Bounded rather than free-form: beams above ~8 cost latency out of
+    proportion to any accuracy gain, and a mistyped setting should degrade
+    gracefully instead of stalling a turn.
+    """
+    try:
+        from . import settings_store
+        return settings_store.get_int(
+            _BEAM_SIZE_KEY, default=DEFAULT_BEAM_SIZE, minimum=1, maximum=8)
+    except Exception as e:  # noqa: BLE001 - decoding must never fail on config
+        log_exception("beamSizeSettingFail", e)
+        return DEFAULT_BEAM_SIZE
+
+
 class WhisperSTT:
     """Loads a faster-whisper model in the background; transcribes on demand."""
 
@@ -121,10 +145,17 @@ class WhisperSTT:
                 "provider": self.provider, "model": self.model_name,
                 "weight": _model_weight(self.model_name),
             })
+        from . import stt_providers
+        known = {item["id"] for item in models}
+        models.extend(
+            item for item in stt_providers.cloud_models(available_only=True)
+            if item["id"] not in known)
         from .transcription_models import catalog_status
         return {
             "available": True,
             "default_model": default_id,
+            "engine": stt_providers.selected_engine(),
+            "turn_taking": stt_providers.selected_turn_taking(),
             "models": models,
             "catalog": catalog_status(),
             "adapters": inventory(),
@@ -143,6 +174,12 @@ class WhisperSTT:
             return self.transcribe_bytes(
                 audio_bytes, content_type, vocab_prompt, wait=wait)
         provider = selected.split(":", 1)[0] if ":" in selected else ""
+        from . import stt_providers
+        if stt_providers.is_cloud_model(selected):
+            # Cloud engines need no warm-up and no inference lock: the
+            # provider serialises nothing on our side.
+            return stt_providers.transcribe(
+                selected, audio_bytes, content_type, vocab_prompt)
         from .custom_stt_adapters import get as custom_adapter, models as custom_models
         manifest = custom_adapter(provider)
         with self._variants_lock:
@@ -241,7 +278,12 @@ class WhisperSTT:
         segments_iter, _info = self._model.transcribe(
             path,
             language=self.language,
-            beam_size=1,
+            # Beam search rather than greedy. Costs a little latency and buys
+            # accuracy on exactly the material that was failing: proper nouns
+            # and coined product names, where the greedy path commits to a
+            # common word early and cannot recover. Tunable because the right
+            # trade differs between a phone in a car and a desktop.
+            beam_size=inference_beam_size(),
             condition_on_previous_text=False,
             initial_prompt=vocab_prompt,
             no_speech_threshold=0.7,
