@@ -26,6 +26,7 @@ Rectangle {
     }
     readonly property var settingCommands: {
         const rows = [
+            settingToggle("minimalUi", "Minimal UI", "hide sidebar chevron button minimalistic"),
             settingToggle("timestampsVisible", "Timestamps", "date time messages"),
             settingToggle("showWhenReady", "Show when ready", "stream streaming answers typing"),
             settingToggle("pauseMobilePush", "Pause phone alerts on desktop", "push notifications mobile iphone"),
@@ -58,7 +59,7 @@ Rectangle {
                 narrator.detailLevel = level;
         } else {
             const property = action.slice("setting:".length);
-            if (["timestampsVisible", "showWhenReady", "toolsVisible", "pauseMobilePush", "sharedFilesystem"].includes(property))
+            if (["minimalUi", "timestampsVisible", "showWhenReady", "toolsVisible", "pauseMobilePush", "sharedFilesystem"].includes(property))
                 root.controller[property] = !root.controller[property];
         }
     }

@@ -13,6 +13,7 @@ TestCase {
     QtObject {
         id: stub
         property bool timestampsVisible: false
+        property bool minimalUi: false
         property bool pauseMobilePush: true
         property bool showWhenReady: false
         property bool toolsVisible: false
@@ -87,6 +88,17 @@ TestCase {
         closeSpy.clear();
         keyClick(Qt.Key_Escape);
         compare(closeSpy.count, 1);
+    }
+    function test_minimalUiCanBeToggledWithKeyboard() {
+        stub.minimalUi = false;
+        const panel = openPanel();
+        const row = findChild(panel, "setting-minimal-ui");
+        verify(row !== null);
+        row.forceActiveFocus();
+        keyClick(Qt.Key_Return);
+        compare(stub.minimalUi, true);
+        keyClick(Qt.Key_Return);
+        compare(stub.minimalUi, false);
     }
 
     function test_lastRowScrollsIntoViewAndTabWraps() {
@@ -179,6 +191,6 @@ TestCase {
         mouseClick(dial, dial.leftPadding + 1, dial.height / 2);
         compare(stub.toolNarrator.detailLevel, 0);
         keyClick(Qt.Key_Down);
-        tryCompare(findChild(panel, "setting-spoken-replies"), "activeFocus", true);
+        tryCompare(findChild(panel, "setting-minimal-ui"), "activeFocus", true);
     }
 }
