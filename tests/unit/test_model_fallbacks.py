@@ -1,3 +1,4 @@
+import json
 import time
 from types import SimpleNamespace
 
@@ -443,3 +444,81 @@ def test_structured_fallback_rejects_a_non_routing_provider():
         fallback.json_call(
             {"backend": "nonesuch", "model": "m", "effort": ""}, "x", ANSWER_SCHEMA
         )
+
+
+def _fallback_row(agent_id, *, text="fallback already did this", finished_ms=1_000_000):
+    from lib import agents as agents_db, db
+    runtime = agents_db.current_runtime_id(agent_id)
+    db.conn().execute(
+        """INSERT INTO model_fallback_attempts
+             (request_id, agent_id, runtime_id, attempt, backend, model, effort,
+              status, reason, started_at, finished_at, result_json)
+           VALUES ('req-1', ?, ?, 0, 'gemini', 'gemini-test', '',
+                   'completed', 'limit', ?, ?, ?)""",
+        (agent_id, runtime, finished_ms - 10, finished_ms,
+         json.dumps({"text": text})),
+    )
+
+
+def test_continuation_context_is_delimited_so_the_importer_can_strip_it(tmp_path):
+    from lib import agents as agents_db, message_store, model_fallbacks
+
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="v", cwd=str(tmp_path), session="mike")
+    agents_db.start_runtime(agent_id, "claude")
+    agents_db.bind_backend_session(agent_id, "bs1")
+    _fallback_row(agent_id)
+
+    context = model_fallbacks.continuation_context(agent_id)
+    assert "fallback already did this" in context
+    assert context.count(message_store.FALLBACK_CONTEXT_OPEN) == 1
+    assert context.count(message_store.FALLBACK_CONTEXT_CLOSE) == 1
+
+    # The importer sees the augmented prompt and must keep only what was typed.
+    assert message_store.strip_injected_context("do the thing" + context) == "do the thing"
+
+
+def test_augmented_prompt_does_not_duplicate_the_user_turn(tmp_path):
+    """The reported bug: every turn appeared twice, once several kilobytes long."""
+    from lib import agents as agents_db, message_store, model_fallbacks
+
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="v", cwd=str(tmp_path), session="mike")
+    agents_db.start_runtime(agent_id, "claude")
+    agents_db.bind_backend_session(agent_id, "bs1")
+    _fallback_row(agent_id)
+    message_store.record_user_message(
+        agent_id=agent_id, backend_session_id="bs1",
+        client_msg_id="c1", text="why is it doing that")
+
+    augmented = "why is it doing that" + model_fallbacks.continuation_context(agent_id)
+    message_store.store_transcript_turns(
+        agent_id=agent_id, backend_session_id="bs1", source_file="f",
+        turns=[{"role": "user", "text": augmented},
+               {"role": "assistant", "text": "because of the injection"}])
+
+    rows = [m for m in message_store.list_messages(
+        agent_id=agent_id, backend_session_id="bs1") if m["role"] == "user"]
+    assert len(rows) == 1, [r["text"][:60] for r in rows]
+    assert rows[0]["text"] == "why is it doing that"
+    assert "fallback" not in rows[0]["text"].lower()
+
+
+def test_context_stops_once_the_agents_own_model_answers_again(tmp_path):
+    """It was re-appended to every prompt for the life of the runtime."""
+    from lib import agents as agents_db, message_store, model_fallbacks
+
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="v", cwd=str(tmp_path), session="mike")
+    agents_db.start_runtime(agent_id, "claude")
+    agents_db.bind_backend_session(agent_id, "bs1")
+    _fallback_row(agent_id, finished_ms=1_000_000)
+
+    assert model_fallbacks.continuation_context(agent_id) != ""
+
+    message_store.store_transcript_turns(
+        agent_id=agent_id, backend_session_id="bs1", source_file="f",
+        turns=[{"role": "assistant", "text": "my own answer",
+                "timestamp": "2026-09-07T12:00:00Z"}])
+
+    assert model_fallbacks.continuation_context(agent_id) == ""
