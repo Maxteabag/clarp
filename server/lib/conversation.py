@@ -198,8 +198,17 @@ def load_conversation(*, session: str, after_revision: int = 0,
         after_revision=after_revision,
     )
     represented = {(t.get("trace_id"), t.get("text")) for t in turns if t.get("role") == "assistant"}
-    turns += [row for row in recovered if (row["trace_id"], row["text"]) not in represented]
-    latest_ts = turns[-1].get("timestamp") if turns else ""
+    extra = [row for row in recovered if (row["trace_id"], row["text"]) not in represented]
+    if extra:
+        # Merge by time rather than append. Appending put fallback answers
+        # after the newest real turn, so the bottom of the chat was an old
+        # recovered answer and the agent's latest reply was stranded above it —
+        # and latest_ts, read from the last element, moved backwards.
+        turns = sorted(turns + extra, key=lambda row: row.get("timestamp") or "")
+        if len(turns) > limit:
+            turns = turns[-limit:]
+            has_more = True
+    latest_ts = max((row.get("timestamp") or "" for row in turns), default="")
     return {
         "cwd": str(cwd),
         "file": latest.name if latest is not None else None,
