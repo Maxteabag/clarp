@@ -240,6 +240,10 @@ Rectangle {
             }
 
             delegate: MessageDelegate {
+                required property var model
+                senderAgentId: String(model.senderAgentId || "")
+                senderSession: String(model.senderSession || "")
+                activitySummary: String(model.activityLabel || "")
                 required property var groupIds
                 required property string groupLabel
                 required property bool groupExpanded

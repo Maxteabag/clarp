@@ -14,6 +14,10 @@ TestCase {
         id: stubController
         property int mediaRevision: 0
         property var toolNarrator: null
+        property int avatarRevision: 0
+        property int agentRevision: 0
+        function avatarSource(session) { return ""; }
+        function agentSessionById(id) { return id === "sender-id" ? "sender-now" : ""; }
         function resolveMediaMarkdown(text) { return text; }
         function markdownDisplayBlocks(text) { return text.split("\n\n"); }
     }
@@ -125,6 +129,36 @@ TestCase {
         verify(background.x > 0, "Outgoing bubbles align right in the combined redesign");
         for (const child of background.children)
             verify(!(child.visible && child.width === 2), "User messages must not retain the left accent line");
+    }
+
+    function test_agentMessageHasRightAlignedDistinctBubbleAndSenderAvatar() {
+        const message = createTemporaryObject(toolOnlyMessage, testCase, {
+            authorRole: "user", origin: "agent", senderName: "C++ Agent",
+            senderAgentId: "sender-id", senderSession: "sender-before",
+            body: "The combined client is tested.", displayCells: [], activityCount: 0
+        });
+        verify(message !== null);
+        waitForRendering(message);
+        const bubble = findChild(message, "userMessageBackground");
+        verify(bubble.x > 0);
+        compare(bubble.color, "#293b52");
+        const avatar = findChild(message, "teamMessageAvatar");
+        verify(avatar.visible);
+        compare(avatar.name, "C++ Agent");
+        compare(avatar.session, "sender-now");
+        verify(avatar.x >= bubble.x + bubble.width);
+        compare(findChild(message, "messageProvenance").visible, false);
+    }
+
+    function test_attachedToolSummaryShowsElapsedTimeWithoutLoadingCards() {
+        const message = createTemporaryObject(toolOnlyMessage, testCase, {
+            body: "Working on the fix.", showTools: false,
+            activityCount: 21, activitySummary: "21 tool calls · 1m 23s elapsed"
+        });
+        verify(message !== null);
+        waitForRendering(message);
+        compare(findChild(message, "activitySummaryText").text, "▸ 21 tool calls · 1m 23s elapsed");
+        compare(findChild(message, "displayCellCard"), null);
     }
 
     QtObject {

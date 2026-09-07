@@ -15,8 +15,24 @@ or acquire explanation demand. Expanding fetches available lazy details and
 mounts the cards; their existing viewport/dwell policy controls explanation work.
 
 Tool-only runs are separated by messages. Their count uses available activity
-metadata and their optional elapsed span is first-to-last timestamp, not summed
-tool durations. Missing or zero spans are omitted rather than invented.
+metadata and their optional elapsed span uses transcript timestamps, not summed
+tool durations (see below). Missing or zero spans are omitted rather than invented.
 
 Checks: `oldActivityGroupsAreLazyAndVisitScoped`, the lazy-card QML regression,
 and `clarp-desktop-ready-reply` (historical group beside observed live activity).
+
+## Sender identity and elapsed labels
+
+Cross-agent messages use right-aligned blue bubbles with the sender's portrait,
+not a TEAM heading. Resolve the stable sender agent ID to its current session;
+older messages without an ID may use their recorded sender session. Missing
+portraits retain an initial, and hovering the avatar identifies the sender.
+Human messages remain purple; automation retains its separate provenance label.
+
+Collapsed activity, including tools attached to a prose message, shows its count
+and available elapsed wall-clock time. The interval starts at the first activity
+message timestamp and ends at the next assistant message, or the last grouped
+activity timestamp if no closing reply exists. Never include the wait for a user
+or teammate. This is not summed per-tool runtime: parallel calls and thinking
+may overlap the interval. Invalid/missing timestamps omit timing, not invent it.
+Timing does not fetch tool details or explanations. Expansion remains lazy.

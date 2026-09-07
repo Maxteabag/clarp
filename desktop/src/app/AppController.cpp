@@ -989,6 +989,15 @@ QString AppController::agentNameById(const QString& agentId) const {
     return agentId;
 }
 
+QString AppController::agentSessionById(const QString& agentId) const {
+    if (agentId.isEmpty()) return {};
+    for (const QString& session : m_agents.sessions()) {
+        if (const Agent* agent = m_agents.find(session); agent != nullptr && agent->agentId == agentId)
+            return session;
+    }
+    return {};
+}
+
 QString AppController::teamNameById(const QString& teamId) const {
     for (const QVariant& value : m_teams) {
         const QVariantMap team = value.toMap();
