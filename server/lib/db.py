@@ -57,7 +57,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 78
+_SCHEMA_VERSION = 79
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1415,6 +1415,8 @@ CREATE TABLE tool_explanation_releases (
 _SCHEMA_SQL += _EXPLANATION_CACHE_SCHEMA
 from .html_forms import SCHEMA as _HTML_FORMS_SCHEMA
 _SCHEMA_SQL += _HTML_FORMS_SCHEMA
+from .model_fallbacks import SCHEMA as _MODEL_FALLBACK_SCHEMA
+_SCHEMA_SQL += _MODEL_FALLBACK_SCHEMA
 
 
 def _migrate(con: sqlite3.Connection) -> None:
@@ -1475,6 +1477,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 con.execute(_ACTIVE_INTERVAL_TRIGGER)
             if version < 78:
                 _migrate_to_v78(con)
+            if version < 79:
+                _migrate_to_v79(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1705,6 +1709,17 @@ def _migrate_to_v65(con: sqlite3.Connection) -> None:
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_trace ON messages(trace_id)"
         " WHERE trace_id IS NOT NULL")
+
+
+def _migrate_to_v79(con: sqlite3.Connection) -> None:
+    """Per-agent fallback models and their once-only invocation receipts.
+
+    Purely additive: every statement is CREATE TABLE IF NOT EXISTS, so a host
+    that already ran this branch re-applies it without touching stored rows.
+    """
+    for statement in _MODEL_FALLBACK_SCHEMA.split(";"):
+        if statement.strip():
+            con.execute(statement)
 
 
 def _migrate_to_v78(con: sqlite3.Connection) -> None:

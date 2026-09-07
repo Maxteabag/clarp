@@ -299,6 +299,7 @@ class Handler(BaseHTTPRequestHandler):
         "/automation-settings": "_handle_automation_settings_get",
         "/avatar-settings": "_handle_avatar_settings_get",
         "/agent-model-options": "_handle_agent_model_options",
+        "/agent-fallbacks": "_handle_agent_fallbacks_get",
         "/favorite-paths": "_handle_favorite_paths",
         "/orchestrator/decisions": "_handle_orchestrator_decisions",
         "/dirs": "_handle_dirs",
@@ -364,6 +365,7 @@ class Handler(BaseHTTPRequestHandler):
         "/personas/update": "_handle_update_persona",
         "/agent-voice": "_handle_agent_voice",
         "/agent-llm": "_handle_agent_llm",
+        "/agent-fallbacks": "_handle_agent_fallbacks_post",
         "/agent-mcp": "_handle_agent_mcp",
         "/agent-heartbeat": "_handle_agent_heartbeat",
         "/agent-archive": "_handle_agent_archive",
@@ -2788,6 +2790,32 @@ class Handler(BaseHTTPRequestHandler):
             if provider else voice_id)
         save_agents(agents, self.ctx.agents_path)
         return self._send(200, b'{"ok":true}', "application/json")
+
+    def _handle_agent_fallbacks_get(self):
+        from urllib.parse import parse_qs, urlparse
+        from lib import agents, model_fallbacks
+        session = parse_qs(urlparse(self.path).query).get("session", [""])[0]
+        agent = agents.get_by_session(session)
+        if not agent:
+            return self._send(404, b'{"error":"agent not found"}', "application/json")
+        result = {"session": session, **model_fallbacks.get(agent["agent_id"])}
+        return self._send(200, json.dumps(result).encode(), "application/json")
+
+    def _handle_agent_fallbacks_post(self):
+        from lib import agents, model_fallbacks
+        data = self._read_json()
+        try:
+            if not isinstance(data, dict) or not isinstance(data.get("session"), str):
+                raise ValueError("session required")
+            agent = agents.get_by_session(data["session"])
+            if not agent:
+                return self._send(404, b'{"error":"agent not found"}', "application/json")
+            result = model_fallbacks.configure(agent["agent_id"], data.get("models"),
+                expected_revision=data.get("expected_revision"))
+            return self._send(200, json.dumps({"session": agent["session"], **result}).encode(), "application/json")
+        except ValueError as error:
+            return self._send(409 if isinstance(error, model_fallbacks.Conflict) else 400,
+                json.dumps({"error": str(error)}).encode(), "application/json")
 
     def _handle_agent_llm(self):
         """Set a running agent's model and/or reasoning effort. Read fresh on

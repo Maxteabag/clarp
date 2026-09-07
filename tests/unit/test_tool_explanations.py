@@ -182,3 +182,23 @@ def test_failure_can_be_retried_after_cooldown():
         assert wait_ready(service)["status"] == "failed"
         time.sleep(.03)
         assert wait_ready(service)["status"] == "ready"
+
+
+def test_provider_failure_uses_configured_fallback_and_caches_only_final_text(monkeypatch):
+    from lib import janitor_builtins, model_fallbacks, settings_store
+    settings_store.set_text("provider.agy.last_observed_model_ids", '["gemini-3.8-flash-low"]')
+    owner=janitor_builtins.get_builtin("tool-explainer")
+    model_fallbacks.configure(owner["agent_id"],[{"backend":"agy","model":"gemini-3.8-flash-low","effort":""}],expected_revision=0)
+    calls=[]
+    def primary(*args,**kwargs):
+        calls.append("primary")
+        raise RuntimeError("usage limit reached")
+    def secondary(self,level,items,model,run):
+        calls.append(model["model"])
+        return {item["id"]:"List the files." for item in items}
+    monkeypatch.setattr(ToolExplanations,"_run_codex",primary)
+    monkeypatch.setattr(ToolExplanations,"_run_fallback",secondary)
+    with ToolExplanations(debounce=.001) as service:
+        assert wait_ready(service)["text"]=="List the files."
+        assert wait_ready(service)["status"]=="ready"
+    assert calls==["primary","gemini-3.8-flash-low"]

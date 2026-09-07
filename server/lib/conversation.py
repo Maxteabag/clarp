@@ -79,6 +79,8 @@ def load_conversation(*, session: str, after_revision: int = 0,
     agent_id = agent["agent_id"]
     backend = backends.normalize(agent.get("backend"))
     backend_session_id = _live_backend_session(agent_id)
+    from . import model_fallbacks
+    recovered = model_fallbacks.conversation_rows(agent_id)
 
     # No live UUID yet — the agent was just (re)launched and hasn't fired
     # its first hook, so the runtime row's backend_session_id is still NULL.
@@ -88,9 +90,9 @@ def load_conversation(*, session: str, after_revision: int = 0,
     # the *previous* conversation's turns until the first response stamps
     # the new UUID in.
     if not backend_session_id:
-        return {"cwd": str(cwd), "file": None, "turns": [],
-                "missing": True, "latest_ts": "", "latest_revision": 0,
-                "replace_required": False, "conversation_id": "",
+        return {"cwd": str(cwd), "file": None, "turns": recovered,
+                "missing": not recovered, "latest_ts": "", "latest_revision": 0,
+                "replace_required": False, "conversation_id": "fallback" if recovered else "",
                 "has_more": False,
                 "includes_automated": include_automated}
 
@@ -195,6 +197,8 @@ def load_conversation(*, session: str, after_revision: int = 0,
         backend_session_id=backend_session_id,
         after_revision=after_revision,
     )
+    represented = {(t.get("trace_id"), t.get("text")) for t in turns if t.get("role") == "assistant"}
+    turns += [row for row in recovered if (row["trace_id"], row["text"]) not in represented]
     latest_ts = turns[-1].get("timestamp") if turns else ""
     return {
         "cwd": str(cwd),
