@@ -17,12 +17,12 @@ class PreviewVersions : public QObject {
     Q_PROPERTY(QString notice READ notice NOTIFY changed)
 public:
     explicit PreviewVersions(QObject* parent = nullptr);
-    bool enabled() const { return m_enabled; }
-    bool busy() const { return m_process.state() != QProcess::NotRunning; }
-    QString runningHash() const { return m_runningHash; }
-    QVariantMap catalog() const { return m_catalog; }
-    QString error() const { return m_error; }
-    QString notice() const { return m_notice; }
+    [[nodiscard]] bool enabled() const { return m_enabled; }
+    [[nodiscard]] bool busy() const { return m_process.state() != QProcess::NotRunning; }
+    [[nodiscard]] QString runningHash() const { return m_runningHash; }
+    [[nodiscard]] QVariantMap catalog() const { return m_catalog; }
+    [[nodiscard]] QString error() const { return m_error; }
+    [[nodiscard]] QString notice() const { return m_notice; }
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void selectVersion(const QString& hash);
 signals:

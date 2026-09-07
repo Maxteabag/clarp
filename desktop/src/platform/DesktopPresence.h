@@ -22,12 +22,15 @@ class DesktopPresence final : public QObject {
     void presenceReport(const QString& instance, quint64 sequence, bool active);
   protected:
     bool eventFilter(QObject* receiver, QEvent* event) override;
-  private slots:
-    void refresh();
-    void querySession();
-    void sessionChanged(const QString& interface, const QVariantMap& changed, const QStringList& invalidated);
-    void prepareForSleep(bool sleeping);
   private:
+    // Per-function Q_SLOT instead of a second `private slots:` label: logind
+    // connects sessionChanged/prepareForSleep through the SLOT() string macro,
+    // so they must stay registered slots, and one access section keeps
+    // readability-redundant-access-specifiers satisfied.
+    Q_SLOT void refresh();
+    Q_SLOT void querySession();
+    Q_SLOT void sessionChanged(const QString& interface, const QVariantMap& changed, const QStringList& invalidated);
+    Q_SLOT void prepareForSleep(bool sleeping);
     void discoverSession();
     void watchSession(const QString& path);
     QQuickWindow* m_window;
