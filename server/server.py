@@ -4565,6 +4565,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(e.status, str(e).encode(), "text/plain")
         if transcription_id:
             transcription_results.delete(transcription_id)
+        # File the timeline row before answering: a client that reads
+        # /voice-events straight after its 200 must already see this turn.
+        if voice_utterance_id:
+            self._record_voice(
+                "send", session=result.session, trace_id=trace_id,
+                utterance_id=voice_utterance_id, text=text,
+                detail={"dispatch": result.backend, "queued": result.queued,
+                        "client_msg_id": client_msg_id, "hands_free": hands_free})
         self._send(200, json.dumps({"ok": True, "session": result.session,
                                     "dispatch": result.backend,
                                     "queued": result.queued,
@@ -4572,12 +4580,6 @@ class Handler(BaseHTTPRequestHandler):
                                     "queue_revision": result.queue_revision,
                                     "trace_id": trace_id}).encode(),
                    "application/json")
-        if voice_utterance_id:
-            self._record_voice(
-                "send", session=result.session, trace_id=trace_id,
-                utterance_id=voice_utterance_id, text=text,
-                detail={"dispatch": result.backend, "queued": result.queued,
-                        "client_msg_id": client_msg_id, "hands_free": hands_free})
 
     def _handle_clip_ack(self):
         data = self._read_json()
