@@ -156,6 +156,7 @@ Response:
       "display_cells": [ … ],
       "origin": "user | agent | heartbeat | leader_tick | dreaming | watcher | schedule",
       "sender_agent_id": null, "sender_name": null, "sender_session": null,
+      "reply_to_agent_id": null, "reply_to_name": null, "reply_to_session": null,
       "automation_kind": null
     }
   ],
@@ -192,6 +193,38 @@ Rules:
   conversation yet. Render it as empty, not as an error.
 - A growing assistant reply appears as one message whose `text` and `revision`
   change on successive deltas. Replace it in place.
+
+Provenance. `origin` says what triggered the row. `sender_*` names the
+**author** of an incoming `user` row written by another agent (`origin: agent`);
+the assistant row that answers it keeps `sender_*` empty and carries the answered
+agent in `reply_to_*`. Render that as a compact "Replying to …" marker, never as
+the other agent's message: the current agent wrote it, and nothing forwarded it
+onward unless the agent itself sent a message.
+
+#### Pair conversations: `GET /agent-conversations`
+
+Agent-to-agent exchanges are also readable as one conversation per pair,
+independent of direction, retries or renames. Grouping uses stable agent IDs:
+`conversation_id` is `pair:<lower agent_id>:<higher agent_id>`.
+
+```
+GET /agent-conversations
+→ {"conversations": [{"conversation_id": "pair:…:…", "agent_ids": ["…", "…"],
+    "participants": [{"agent_id", "session", "name", "avatar_url", "archived"}],
+    "title": "C++ Agent & Hugo", "message_count": 4, "latest_revision": 812,
+    "latest_activity": 1788750466681,
+    "latest_message": {"message_id", "text", "timestamp", "sender_agent_id",
+                       "sender_name", "delivery", "revision"}}]}
+GET /log?session=pair:…:…&limit=100[&after_revision=N|&before=<message_id>]
+```
+
+The pair `/log` shares the ordinary response shape and revision clock. Each turn
+carries `sender_*` = the author. A delivered prompt is `role: user`,
+`delivery: "sent"`, with `recipient_agent_id`. The recipient's answer is
+`role: assistant`, `delivery: "private"`, with `reply_to_*` naming the agent it
+answers; it lived only in that agent's own chat. Private user chats with either
+agent are never included, and the projection never moves or relays transcript
+rows. Sending into a pair conversation is not supported.
 
 ### 3. Stay in sync: `GET /events` (SSE)
 

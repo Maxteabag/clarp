@@ -24,6 +24,10 @@ QJsonObject messageToJson(const Message& message) {
             {QStringLiteral("sender_name"), message.senderName},
             {QStringLiteral("sender_agent_id"), message.senderAgentId},
             {QStringLiteral("sender_session"), message.senderSession},
+            {QStringLiteral("reply_to_agent_id"), message.replyToAgentId},
+            {QStringLiteral("reply_to_name"), message.replyToName},
+            {QStringLiteral("reply_to_session"), message.replyToSession},
+            {QStringLiteral("delivery"), message.delivery},
             {QStringLiteral("trace_id"), message.traceId},
             {QStringLiteral("category"), message.category},
             {QStringLiteral("automated"), message.automated},
@@ -75,6 +79,14 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const {
         return message.senderAgentId;
     case SenderSessionRole:
         return message.senderSession;
+    case ReplyToAgentIdRole:
+        return message.replyToAgentId;
+    case ReplyToNameRole:
+        return message.replyToName;
+    case ReplyToSessionRole:
+        return message.replyToSession;
+    case DeliveryRole:
+        return message.delivery;
     case PendingRole:
         return message.pending;
     case DeliveryFailedRole:
@@ -114,6 +126,10 @@ QHash<int, QByteArray> ConversationModel::roleNames() const {
         {SenderNameRole, "senderName"},
         {SenderAgentIdRole, "senderAgentId"},
         {SenderSessionRole, "senderSession"},
+        {ReplyToAgentIdRole, "replyToAgentId"},
+        {ReplyToNameRole, "replyToName"},
+        {ReplyToSessionRole, "replyToSession"},
+        {DeliveryRole, "delivery"},
         {PendingRole, "pending"},
         {DeliveryFailedRole, "deliveryFailed"},
         {ActivityRole, "activity"},
@@ -516,6 +532,10 @@ void ConversationModel::mergeRows(const QJsonArray& rows) {
             if (previous.senderName != incoming.senderName) changedRoles.append(SenderNameRole);
             if (previous.senderAgentId != incoming.senderAgentId) changedRoles.append(SenderAgentIdRole);
             if (previous.senderSession != incoming.senderSession) changedRoles.append(SenderSessionRole);
+            if (previous.replyToAgentId != incoming.replyToAgentId) changedRoles.append(ReplyToAgentIdRole);
+            if (previous.replyToName != incoming.replyToName) changedRoles.append(ReplyToNameRole);
+            if (previous.replyToSession != incoming.replyToSession) changedRoles.append(ReplyToSessionRole);
+            if (previous.delivery != incoming.delivery) changedRoles.append(DeliveryRole);
             if (previous.pending != incoming.pending) changedRoles.append(PendingRole);
             if (previous.deliveryFailed != incoming.deliveryFailed) changedRoles.append(DeliveryFailedRole);
             if (previous.activity != incoming.activity) changedRoles.append(ActivityRole);

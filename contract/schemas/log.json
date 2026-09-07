@@ -28,6 +28,10 @@
           "sender_agent_id": {"type": ["string", "null"]},
           "sender_name": {"type": ["string", "null"]},
           "sender_session": {"type": ["string", "null"]},
+          "reply_to_agent_id": {"type": ["string", "null"]},
+          "reply_to_name": {"type": ["string", "null"]},
+          "reply_to_session": {"type": ["string", "null"]},
+          "delivery": {"type": "string"},
           "automation_kind": {"type": ["string", "null"]}
         }
       }

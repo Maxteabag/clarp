@@ -19,9 +19,21 @@ Item {
     required property string senderName
     property string senderAgentId: ""
     property string senderSession: ""
+    property string replyToAgentId: ""
+    property string replyToName: ""
+    property string replyToSession: ""
+    property string delivery: ""
+    // Pair rooms show every row as an authored group message with its avatar.
+    property bool groupView: false
     property string activitySummary: ""
-    readonly property bool teamAuthored: root.origin === "agent"
-    readonly property bool rightAligned: root.userAuthored || root.teamAuthored
+    // Only an incoming prompt written by another agent is that agent's message.
+    // The current agent's answer to it stays the current agent's own row.
+    readonly property bool teamAuthored: root.origin === "agent" && root.authorRole === "user" && !root.groupView
+    readonly property bool replyMarkerVisible: !root.activity && root.body.length > 0
+        && root.replyToName.length > 0 && !root.teamAuthored
+    readonly property string replyMarkerText: "↩ Replying to " + root.replyToName
+        + (root.delivery === "private" ? " · private reply" : "")
+    readonly property bool rightAligned: !root.groupView && (root.userAuthored || root.teamAuthored)
     readonly property string senderAvatarSession: {
         root.controller.agentRevision;
         return root.senderAgentId.length > 0
@@ -66,7 +78,7 @@ Item {
         root.activityCount, root.displayCells.length + root.tools.length)
     readonly property bool showActivityCards: root.groupSummary.length > 0 ? root.groupedExpanded
         : root.showTools || root.forceActivityInline || root.activityExpanded
-    readonly property bool userAuthored: root.authorRole === "user"
+    readonly property bool userAuthored: !root.groupView && root.authorRole === "user"
         && root.origin !== "agent" && root.origin !== "automation"
     readonly property int mediaRevision: controller.mediaRevision
     readonly property string renderedBody: {
@@ -119,21 +131,63 @@ Item {
             font.letterSpacing: 0.7
         }
 
+        RowLayout {
+            objectName: "groupAuthorLine"
+            visible: root.groupView && !root.activity && root.body.length > 0
+            Layout.fillWidth: true
+            Layout.leftMargin: 46
+            spacing: 6
+            Text {
+                objectName: "groupAuthorName"
+                text: root.senderName || "Agent"
+                color: "#c7adf1"
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+                elide: Text.ElideRight
+                Layout.maximumWidth: parent.width * 0.5
+            }
+            Text {
+                objectName: "groupReplyMarker"
+                visible: root.replyToName.length > 0
+                text: root.replyMarkerText
+                color: "#8f96bc"
+                font.pixelSize: 11
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+                HoverHandler { id: privateHover }
+                ToolTip.visible: privateHover.hovered && root.delivery === "private"
+                ToolTip.delay: 400
+                ToolTip.text: "Answered in " + (root.senderName || "this agent") + "'s own chat. It was not sent to "
+                    + root.replyToName + " unless " + (root.senderName || "the agent") + " messaged them."
+            }
+        }
+
+        Text {
+            objectName: "replyMarker"
+            visible: root.replyMarkerVisible && !root.groupView
+            Layout.leftMargin: 2
+            text: root.replyMarkerText
+            color: "#8f96bc"
+            font.pixelSize: 11
+            elide: Text.ElideRight
+            Layout.fillWidth: true
+        }
+
         Item {
             visible: root.activity || root.body.length > 0
             Layout.fillWidth: true
             implicitHeight: root.activity ? activityCard.implicitHeight : messageBubble.visible
-                ? Math.max(messageBubble.implicitHeight, root.teamAuthored ? 36 : 0) : 0
+                ? Math.max(messageBubble.implicitHeight, root.teamAuthored || root.groupView ? 36 : 0) : 0
 
             AgentAvatar {
                 objectName: "teamMessageAvatar"
-                visible: root.teamAuthored && !root.activity && root.body.length > 0
+                visible: (root.teamAuthored || root.groupView) && !root.activity && root.body.length > 0
                 controller: root.controller
                 session: root.senderAvatarSession
                 name: root.senderName || "Agent"
                 avatarSize: 36
                 cornerRadius: 18
-                x: parent.width - width
+                x: root.groupView ? 0 : parent.width - width
                 y: 4
                 Accessible.name: name
                 HoverHandler { id: senderHover }
@@ -205,13 +259,13 @@ Item {
                 id: messageBubble
                 objectName: "userMessageBackground"
                 visible: !root.activity && root.body.length > 0
-                width: Math.min(Math.max(0, parent.width - (root.teamAuthored ? 46 : 0)),
+                width: Math.min(Math.max(0, parent.width - (root.teamAuthored || root.groupView ? 46 : 0)),
                     parent.width * (root.rightAligned ? 0.78 : 0.95), 840,
                     root.body.length > 160 ? 840 : Math.max(140, bubbleMetrics.advanceWidth + 28))
-                x: root.rightAligned ? parent.width - width - (root.teamAuthored ? 46 : 0) : 0
+                x: root.groupView ? 46 : root.rightAligned ? parent.width - width - (root.teamAuthored ? 46 : 0) : 0
                 implicitHeight: messageBlocks.implicitHeight + 24
                 radius: 14
-                color: root.teamAuthored ? "#293b52" : root.userAuthored ? "#493651" : "#1b191f"
+                color: root.teamAuthored || root.groupView ? "#293b52" : root.userAuthored ? "#493651" : "#1b191f"
                 border.width: root.deliveryFailed ? 1 : 0
                 border.color: "#8d5763"
                 opacity: root.pending ? 0.68 : 1

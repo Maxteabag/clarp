@@ -63,6 +63,7 @@ target_sources(clarp-desktop PRIVATE
     src/app/CredentialStore.h
     src/app/TranscriptCache.cpp
     src/app/TranscriptCache.h
+    src/app/PairSidebarSmokeCheck.h
     src/app/ToolNarrator.cpp
     src/app/ToolNarrator.h
     src/app/TimeFormat.cpp
@@ -125,6 +126,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/OrchestratorDialog.qml
         qml/components/ThemedComboBox.qml
         qml/components/PaneLeaf.qml
+        qml/components/PairRow.qml
         qml/components/AgentProfilePanel.qml
         qml/components/QuickSwitcher.qml
         qml/components/QueueDialog.qml

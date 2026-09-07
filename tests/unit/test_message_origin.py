@@ -67,7 +67,18 @@ def test_agent_prompt_provenance_carries_to_assistant_rows(tmp_path):
     assistant = next(m for m in message_store.list_messages(
         agent_id=target, backend_session_id=bs) if m["text"] == "Done.")
     assert assistant["origin"] == "agent"
-    assert assistant["sender_agent_id"] == sender
+    # The answer is authored by Omar. The trigger is exposed as reply_to, never
+    # as the reply's sender, so clients cannot attribute Omar's words to Lena.
+    assert assistant["sender_agent_id"] == ""
+    assert assistant["sender_name"] == ""
+    assert assistant["sender_session"] == ""
+    assert assistant["reply_to_agent_id"] == sender
+    assert assistant["reply_to_name"] == "Lena"
+    assert assistant["reply_to_session"] == "lena"
+    prompt = next(m for m in message_store.list_messages(
+        agent_id=target, backend_session_id=bs) if m["text"] == "please check this")
+    assert prompt["sender_agent_id"] == sender and prompt["sender_name"] == "Lena"
+    assert prompt["reply_to_agent_id"] == ""
 
 
 def test_strip_injected_team_context():

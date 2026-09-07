@@ -279,6 +279,7 @@ class Handler(BaseHTTPRequestHandler):
         "/server-update": "_handle_server_update_status",
         "/turn-queue": "_handle_turn_queue",
         "/agents/snapshot": "_handle_snapshot",
+        "/agent-conversations": "_handle_agent_conversations",
         "/identity/prompt-history": "_handle_prompt_history",
         "/background-jobs": "_handle_background_jobs",
         "/task-plan": "_handle_task_plan",
@@ -1158,6 +1159,12 @@ class Handler(BaseHTTPRequestHandler):
             json.dumps({"decisions": recent_orchestrator_decisions(limit)}).encode(),
             "application/json",
         )
+
+    def _handle_agent_conversations(self):
+        """Pair conversations between agents, grouped by stable agent IDs."""
+        from lib import agent_conversations
+        body = json.dumps({"conversations": agent_conversations.list_conversations()}).encode()
+        self._send(200, body, "application/json")
 
     def _handle_snapshot(self):
         """Unified per-agent read model for the dashboard."""
@@ -2217,6 +2224,12 @@ class Handler(BaseHTTPRequestHandler):
         include_tool_details = str(
             qs.get("include_tool_details", ["1"])[0]
         ).lower() not in {"0", "false", "no"}
+        from lib import agent_conversations
+        if agent_conversations.is_pair_session(session):
+            body_obj = agent_conversations.load_timeline(
+                session, after_revision=after_revision,
+                before_message_id=before_message_id, limit=limit)
+            return self._send(200, json.dumps(body_obj).encode(), "application/json")
         try:
             body_obj = load_conversation(
                 session=session,

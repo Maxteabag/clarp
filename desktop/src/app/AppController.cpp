@@ -66,6 +66,12 @@ QString draftScopeSettingsKey(const QString& baseUrl, const QString& session) {
     return QStringLiteral("composerDrafts/%1").arg(digest);
 }
 
+QString agentConversationSeenKey(const QString& baseUrl, const QString& conversationId) {
+    return QStringLiteral("agentConversations/%1/%2/seenRevision")
+        .arg(QString::fromLatin1(QCryptographicHash::hash(baseUrl.toUtf8(), QCryptographicHash::Sha1).toHex().left(16)),
+             QString::fromLatin1(QCryptographicHash::hash(conversationId.toUtf8(), QCryptographicHash::Sha1).toHex().left(16)));
+}
+
 QString draftSettingsKey(const QString& baseUrl, const QString& session) {
     return draftScopeSettingsKey(baseUrl, session) + QStringLiteral("/text");
 }
@@ -89,6 +95,9 @@ AppController::AppController(QObject* parent)
       m_emptyConversation(this), m_conversation(&m_emptyConversation),
       m_composerFocusPane(m_panes.activePaneId()),
       m_cacheEnabled(!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SCENARIO")) {
+    m_agentConversationsRefresh.setSingleShot(true);
+    m_agentConversationsRefresh.setInterval(400);
+    connect(&m_agentConversationsRefresh, &QTimer::timeout, this, &AppController::loadAgentConversations);
     QSettings settings;
     m_baseUrl = normalizedBaseUrl(
         qEnvironmentVariable("CLARP_BASE_URL", settings
@@ -425,6 +434,9 @@ QString AppController::baseUrl() const { return m_baseUrl; }
 QString AppController::selectedSession() const { return m_selectedSession; }
 
 QString AppController::selectedName() const {
+    if (isPairSession(m_selectedSession)) {
+        return agentName(m_selectedSession);
+    }
     const Agent* agent = m_agents.find(m_selectedSession);
     return agent == nullptr ? QString{} : displayName(*agent);
 }
@@ -822,10 +834,124 @@ void AppController::selectSession(const QString& session) {
         emit conversationChanged();
         refreshSelectedProperties();
     }
+    if (isPairSession(session)) {
+        // A pair room is a projection, not an agent: no Host focus, no clips.
+        markAgentConversationSeen(session, agentConversation(session).value(QStringLiteral("latest_revision")).toLongLong());
+        requestTail(session);
+        return;
+    }
     m_api.postJson(QStringLiteral("select:") + session, QStringLiteral("/select"),
                    {{QStringLiteral("session"), session}});
     requestTail(session);
     requestRecoverableClips(session);
+}
+
+bool AppController::isPairSession(const QString& session) {
+    return session.startsWith(QStringLiteral("pair:"));
+}
+
+QVariantMap AppController::agentConversation(const QString& conversationId) const {
+    for (const QVariant& value : m_agentConversations) {
+        const QVariantMap room = value.toMap();
+        if (room.value(QStringLiteral("conversation_id")).toString() == conversationId) {
+            return room;
+        }
+    }
+    return {};
+}
+
+int AppController::unreadAgentConversations() const {
+    int count = 0;
+    for (const QVariant& value : m_agentConversations) {
+        if (value.toMap().value(QStringLiteral("unread")).toBool()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+void AppController::loadAgentConversations() {
+    if (m_bearerToken.isEmpty()) {
+        return;
+    }
+    m_api.get(QStringLiteral("agent-conversations"), QStringLiteral("/agent-conversations"));
+}
+
+qint64 AppController::agentConversationSeenRevision(const QString& conversationId) const {
+    return QSettings().value(agentConversationSeenKey(m_baseUrl, conversationId), 0).toLongLong();
+}
+
+void AppController::markAgentConversationSeen(const QString& conversationId, qint64 revision) {
+    if (conversationId.isEmpty() || revision <= 0) {
+        return;
+    }
+    if (revision > agentConversationSeenRevision(conversationId)) {
+        QSettings().setValue(agentConversationSeenKey(m_baseUrl, conversationId), revision);
+    }
+    bool changed = false;
+    for (QVariant& value : m_agentConversations) {
+        QVariantMap room = value.toMap();
+        if (room.value(QStringLiteral("conversation_id")).toString() != conversationId) {
+            continue;
+        }
+        if (room.value(QStringLiteral("unread")).toBool()) {
+            room.insert(QStringLiteral("unread"), false);
+            value = room;
+            changed = true;
+        }
+    }
+    if (changed) {
+        emit agentConversationsChanged();
+    }
+}
+
+void AppController::applyAgentConversations(const QJsonArray& conversations) {
+    QVariantList rooms;
+    for (const auto& value : conversations) {
+        QVariantMap room = value.toObject().toVariantMap();
+        const QString id = room.value(QStringLiteral("conversation_id")).toString();
+        if (!isPairSession(id)) {
+            continue;
+        }
+        const qint64 latest = room.value(QStringLiteral("latest_revision")).toLongLong();
+        if (id == m_selectedSession) {
+            markAgentConversationSeen(id, latest);
+        }
+        room.insert(QStringLiteral("unread"), latest > agentConversationSeenRevision(id));
+        room.insert(QStringLiteral("session"), id);
+        rooms.append(room);
+        if (ConversationModel* model = m_conversations.value(id, nullptr);
+            model != nullptr && model->latestRevision() < latest) {
+            requestDelta(id);
+        }
+    }
+    m_agentConversations = rooms;
+    emit agentConversationsChanged();
+    emit selectedAgentChanged();
+}
+
+void AppController::refreshPairConversationsFor(const QString& session) {
+    const Agent* agent = m_agents.find(session);
+    const QString agentId = agent == nullptr ? QString{} : agent->agentId;
+    bool related = false;
+    for (auto it = m_conversations.cbegin(); it != m_conversations.cend(); ++it) {
+        if (isPairSession(it.key()) && !agentId.isEmpty() && it.key().contains(agentId)) {
+            requestDelta(it.key());
+            related = true;
+        }
+    }
+    if (!related) {
+        for (const QVariant& value : m_agentConversations) {
+            if (!agentId.isEmpty() && value.toMap().value(QStringLiteral("conversation_id")).toString().contains(agentId)) {
+                related = true;
+                break;
+            }
+        }
+    }
+    // Any agent may start a new pair at any time; refresh the list cheaply
+    // after a short debounce instead of on every streamed token.
+    Q_UNUSED(related);
+    m_agentConversationsRefresh.start();
 }
 
 void AppController::refreshConversation() { requestTail(m_selectedSession); }
@@ -930,6 +1056,10 @@ void AppController::loadOlderSession(const QString& session) {
 }
 
 QString AppController::agentName(const QString& session) const {
+    if (isPairSession(session)) {
+        const QString title = agentConversation(session).value(QStringLiteral("title")).toString();
+        return title.isEmpty() ? QStringLiteral("Agent conversation") : title;
+    }
     const Agent* agent = m_agents.find(session);
     return agent == nullptr ? session : displayName(*agent);
 }
@@ -2365,7 +2495,9 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
             }
         }
         m_contacts.applySnapshot(object, activeNames);
-        if (m_selectedSession.isEmpty() || m_agents.find(m_selectedSession) == nullptr) {
+        loadAgentConversations();
+        if (m_selectedSession.isEmpty() ||
+            (m_agents.find(m_selectedSession) == nullptr && !isPairSession(m_selectedSession))) {
             const QString first = m_agents.firstSession();
             if (!first.isEmpty()) {
                 selectSession(first);
@@ -2393,6 +2525,10 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
                 requestDelta(it.key());
             }
         }
+        return;
+    }
+    if (tag == QStringLiteral("agent-conversations")) {
+        applyAgentConversations(object.value(QStringLiteral("conversations")).toArray());
         return;
     }
     if (tag.startsWith(QStringLiteral("updates:"))) {
@@ -2464,6 +2600,9 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         const QString session = tag.sliced(9);
         m_logRequestsInFlight.remove(session);
         ensureConversation(session)->applyLog(object, ConversationModel::LoadKind::Tail);
+        if (isPairSession(session) && session == m_selectedSession) {
+            markAgentConversationSeen(session, object.value(QStringLiteral("latest_revision")).toVariant().toLongLong());
+        }
         continuePendingLogRequest(session);
         return;
     }
@@ -2478,6 +2617,9 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         const QString session = tag.sliced(10);
         m_logRequestsInFlight.remove(session);
         ensureConversation(session)->applyLog(object, ConversationModel::LoadKind::Delta);
+        if (isPairSession(session) && session == m_selectedSession) {
+            markAgentConversationSeen(session, object.value(QStringLiteral("latest_revision")).toVariant().toLongLong());
+        }
         if (object.value(QStringLiteral("has_more")).toBool()) {
             requestDelta(session);
         }
@@ -2786,6 +2928,15 @@ void AppController::handleRequestFailure(const QString& tag, const QString& mess
     if (tag.startsWith(QStringLiteral("recoverable:"))) {
         return;
     }
+    if (tag == QStringLiteral("agent-conversations")) {
+        // A Host without this route simply has no pair conversations to show.
+        // Never turn an optional projection into a chat error banner.
+        if (!m_agentConversations.isEmpty()) {
+            m_agentConversations.clear();
+            emit agentConversationsChanged();
+        }
+        return;
+    }
     const QString detail =
         statusCode > 0 ? QStringLiteral("%1 (HTTP %2)").arg(message).arg(statusCode) : message;
     setErrorMessage(detail);
@@ -2835,6 +2986,7 @@ void AppController::handleSseEvent(const QJsonObject& event) {
         if (m_conversations.contains(session)) {
             requestDelta(session);
         }
+        refreshPairConversationsFor(session);
     } else if (type == QStringLiteral("agent-state")) {
         m_agents.applyStateEvent(event);
         if (ConversationModel* model = m_conversations.value(session, nullptr)) {
