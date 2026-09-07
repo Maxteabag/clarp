@@ -104,6 +104,7 @@ def capability() -> dict:
         "model": cfg.openai_realtime_model,
         "voice": cfg.openai_realtime_voice,
         "transport": "clarp-websocket-proxy",
+        "webrtc": True,
     }
 
 
