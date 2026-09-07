@@ -197,6 +197,12 @@ def load_conversation(*, session: str, after_revision: int = 0,
         backend_session_id=backend_session_id,
         after_revision=after_revision,
     )
+    # Recovered answers carry no revision of their own, so they can never
+    # satisfy "revision > after_revision". Including them in a delta returned
+    # the same rows on every poll, and the client re-applied them forever
+    # instead of converging on the newest turn. They belong to a full load.
+    if after_revision:
+        recovered = []
     represented = {(t.get("trace_id"), t.get("text")) for t in turns if t.get("role") == "assistant"}
     extra = [row for row in recovered if (row["trace_id"], row["text"]) not in represented]
     if extra:
