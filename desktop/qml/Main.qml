@@ -241,7 +241,7 @@ ApplicationWindow {
 
     function escapeFocus() {
         if (previewVersionPanel.visible)
-            previewVersionPanel.visible = false;
+            previewVersionPanel.close();
         else if (quickNewAgent.visible)
             quickNewAgent.closeRequested();
         else if (quickSwitcher.visible)
@@ -547,6 +547,7 @@ ApplicationWindow {
         z: 200
         switcher: previewVersions
         canRestart: root.previewCanRestart
+        onClosed: Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId))
     }
 
     QuickSwitcher {

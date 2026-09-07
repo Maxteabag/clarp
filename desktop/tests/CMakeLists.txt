@@ -83,13 +83,14 @@ add_test(
 )
 
 # Exercise the actual window command and SplitView layout with an offline fixture.
+string(MD5 clarp_test_instance "${CMAKE_CURRENT_BINARY_DIR}")
 foreach(sidebar_toggles IN ITEMS 1 2)
     set(sidebar_test "clarp-desktop-sidebar-${sidebar_toggles}")
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/config")
     add_test(NAME ${sidebar_test} COMMAND clarp-desktop)
     set_tests_properties(${sidebar_test} PROPERTIES
         TIMEOUT 15
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=${sidebar_test};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_SIDEBAR_TOGGLES=${sidebar_toggles};CLARP_SCREENSHOT_REQUIRE_COMPOSER_FOCUS=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/capture.png"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=${sidebar_test}-${clarp_test_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_SIDEBAR_TOGGLES=${sidebar_toggles};CLARP_SCREENSHOT_REQUIRE_COMPOSER_FOCUS=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/capture.png"
     )
 endforeach()
 set_property(TEST clarp-desktop-sidebar-2 APPEND PROPERTY ENVIRONMENT
@@ -113,7 +114,7 @@ file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/config")
 add_test(NAME clarp-desktop-tool-presentation COMMAND clarp-desktop)
 set_tests_properties(clarp-desktop-tool-presentation PROPERTIES
     TIMEOUT 15
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=clarp-desktop-tool-presentation;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/config;CLARP_SCREENSHOT_SCENARIO=tool-spacing;CLARP_SCREENSHOT_EXPAND_TOOLS=1;CLARP_SCREENSHOT_REQUIRE_COMPOSER_FOCUS=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/capture.png"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=clarp-desktop-tool-presentation-${clarp_test_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/config;CLARP_SCREENSHOT_SCENARIO=tool-spacing;CLARP_SCREENSHOT_EXPAND_TOOLS=1;CLARP_SCREENSHOT_REQUIRE_COMPOSER_FOCUS=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/capture.png"
 )
 
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/settings-keyboard/config")
