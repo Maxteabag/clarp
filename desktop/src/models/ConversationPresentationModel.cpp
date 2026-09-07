@@ -132,7 +132,7 @@ bool ConversationPresentationModel::inlineRow(const QModelIndex& row) const {
     return m_observedLive.contains(id);
 }
 bool ConversationPresentationModel::groupedRow(int row) const {
-    if (!sourceModel() || row < 0 || row >= sourceModel()->rowCount()) return false;
+    if (sourceModel() == nullptr || row < 0 || row >= sourceModel()->rowCount()) return false;
     const auto item = sourceModel()->index(row, 0);
     if (inlineRow(item)) return false;
     if (item.data(ConversationModel::ActivityRole).toBool()) {
@@ -154,7 +154,7 @@ QList<QModelIndex> ConversationPresentationModel::groupRows(int row) const {
 }
 void ConversationPresentationModel::refreshGroups() {
     beginFilterChange(); endFilterChange(QSortFilterProxyModel::Direction::Rows);
-    if (rowCount()) emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+    if (rowCount() > 0) emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
 }
 void ConversationPresentationModel::setActivityMode(int mode) {
     if (m_activityMode == mode) return;
@@ -164,9 +164,9 @@ void ConversationPresentationModel::beginVisit() {
     m_visitStarted = QDateTime::currentDateTimeUtc(); m_expanded.clear(); m_observedLive.clear(); refreshGroups();
 }
 void ConversationPresentationModel::setSourceModel(QAbstractItemModel* model) {
-    if (sourceModel()) disconnect(sourceModel(), nullptr, this, nullptr);
+    if (sourceModel() != nullptr) disconnect(sourceModel(), nullptr, this, nullptr);
     QSortFilterProxyModel::setSourceModel(model);
-    if (model) {
+    if (model != nullptr) {
         connect(model, &QAbstractItemModel::dataChanged, this, [this](const QModelIndex& first, const QModelIndex& last) {
             if (m_activityMode == 1) return;
             for (int row = first.row(); row <= last.row(); ++row)
@@ -189,7 +189,7 @@ void ConversationPresentationModel::toggleGroup(const QString& id) {
 }
 int ConversationPresentationModel::indexOfMessage(const QString& id) const {
     const auto* source = qobject_cast<const ConversationModel*>(sourceModel());
-    if (!source) return -1;
+    if (source == nullptr) return -1;
     int row = source->indexOfMessage(id);
     if (groupedRow(row)) while (row > 0 && groupedRow(row - 1)) --row;
     return row < 0 ? -1 : mapFromSource(source->index(row, 0)).row();
