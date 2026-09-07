@@ -79,6 +79,7 @@ Rectangle {
 
                 ToolButton {
                     objectName: "sidebarHideButton"
+                    visible: !root.controller.minimalUi
                     text: "‹"
                     implicitWidth: 24
                     onClicked: root.hideRequested()

@@ -15,6 +15,7 @@ TestCase {
         property string lastWorkingDirectory: "/tmp"
         property string selectedSession: "fixture"
         property bool timestampsVisible: false
+        property bool minimalUi: false
         property bool showWhenReady: false
         property bool toolsVisible: false
         property bool pauseMobilePush: true
@@ -37,6 +38,18 @@ TestCase {
     }
     Component { id: factory; Clarp.QuickSwitcher { width: testCase.width; height: testCase.height; controller: stub } }
     SignalSpy { id: commands; signalName: "commandRequested" }
+    function test_minimalUiIsAnIndependentToggle() {
+        stub.minimalUi = false;
+        const picker = createTemporaryObject(factory, testCase);
+        picker.open(true); picker.query = "minimal ui";
+        compare(picker.results.length, 1);
+        picker.choose(0);
+        compare(stub.minimalUi, true);
+        picker.open(false); picker.query = "minimal ui";
+        verify(picker.results[0].label.includes("On → Off"));
+        picker.choose(0);
+        compare(stub.minimalUi, false);
+    }
     function test_toolActivitySearchOffersAllThreeModes() {
         stub.activityDisplayMode = 0;
         const picker = createTemporaryObject(factory, testCase);

@@ -71,6 +71,11 @@ Escape cancels and typing focus is restored after a direct setting action.
 Connection and orchestrator entries still open their dedicated configuration
 screens for fields that require more than a toggle.
 
+Minimal UI (Settings → Appearance, or Ctrl+K → Minimal UI) only hides the sidebar
+chevron. It defaults off and persists independently of sidebar visibility; Ctrl+B
+still works. Headless screenshots with `CLARP_SCREENSHOT_MINIMAL_UI=0` or `1`
+assert the chevron's visibility without changing the user's saved setting.
+
 `tst_palette_settings.qml` covers actual Enter selection, query aliases, state
 labels, exact detail-level selection, Escape cancellation and focus return.
 For a screenshot, set `CLARP_SCREENSHOT_QUERY=streaming` and use the existing
