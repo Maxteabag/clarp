@@ -70,6 +70,7 @@ class AppController : public QObject {
     Q_PROPERTY(int activityDisplayMode READ activityDisplayMode WRITE setActivityDisplayMode NOTIFY toolsVisibleChanged)
     Q_PROPERTY(bool timestampsVisible READ timestampsVisible WRITE setTimestampsVisible
                    NOTIFY timestampsVisibleChanged)
+    Q_PROPERTY(bool minimalUi READ minimalUi WRITE setMinimalUi NOTIFY minimalUiChanged)
     Q_PROPERTY(bool sharedFilesystem READ sharedFilesystem WRITE setSharedFilesystem
                    NOTIFY sharedFilesystemChanged)
     Q_PROPERTY(QString connectionState READ connectionState NOTIFY connectionStateChanged)
@@ -167,6 +168,8 @@ class AppController : public QObject {
     [[nodiscard]] int activityDisplayMode() const { return m_activityDisplayMode; }
     void setActivityDisplayMode(int mode);
     [[nodiscard]] bool timestampsVisible() const;
+    [[nodiscard]] bool minimalUi() const { return m_minimalUi; }
+    void setMinimalUi(bool minimal);
     [[nodiscard]] bool sharedFilesystem() const;
     [[nodiscard]] QString connectionState() const;
     [[nodiscard]] QString errorMessage() const;
@@ -344,6 +347,7 @@ class AppController : public QObject {
     void showWhenReadyChanged();
     void toolsVisibleChanged();
     void timestampsVisibleChanged();
+    void minimalUiChanged();
     void sharedFilesystemChanged();
     void connectionStateChanged();
     void errorMessageChanged();
@@ -491,6 +495,7 @@ class AppController : public QObject {
     bool m_toolsVisible = false;
     int m_activityDisplayMode = 0;
     bool m_timestampsVisible = false;
+    bool m_minimalUi = false;
     bool m_sharedFilesystem = false;
     bool m_voicesLoading = false;
     bool m_orchestratorLoading = false;

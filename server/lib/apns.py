@@ -368,11 +368,12 @@ def turn_done_payload(persona: str, session: str | None,
             # speech before Clarp is opened again. APNs may throttle/drop the
             # wake, so foreground cursor recovery remains authoritative.
             "content-available": 1,
-            # iOS 15+: time-sensitive breaks through Focus / idle batching so the
-            # "your turn" alert lands immediately instead of up to a minute late.
-            # Requires the matching app entitlement; iOS silently downgrades it to
-            # "active" if that entitlement is missing.
-            "interruption-level": "time-sensitive",
+            # Deliberately "active", the ordinary messaging level. Clarp is a
+            # chat app, so a reply is no more urgent than a WhatsApp message:
+            # it respects Focus and Do Not Disturb rather than breaking through
+            # them. "time-sensitive" is for alerts the user has asked to be
+            # interrupted for, not for every finished turn.
+            "interruption-level": "active",
             # Lets a Notification Service Extension rewrite the notification to
             # show the agent's avatar (WhatsApp-style). Ignored when no
             # extension is installed, so it's safe to send unconditionally.

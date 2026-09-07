@@ -111,3 +111,31 @@ def test_identical_lock_reports_are_rate_limited(tmp_path, capsys):
     owner.rollback()
     owner.close()
     waiter.close()
+
+
+def test_retry_locked_succeeds_after_a_busy_error():
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise sqlite3.OperationalError("database is locked")
+        return "ok"
+
+    assert db.retry_locked(flaky, retries=3, sleep_sec=0) == "ok"
+    assert calls["n"] == 3
+
+
+def test_retry_locked_reraises_when_still_busy():
+    def always_locked():
+        raise sqlite3.OperationalError("database is locked")
+
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        db.retry_locked(always_locked, retries=2, sleep_sec=0)
+
+
+def test_busy_timeout_restores_the_request_path_budget():
+    db.conn()
+    with db.busy_timeout(30_000):
+        assert db.conn().execute("PRAGMA busy_timeout").fetchone()[0] == 30_000
+    assert db.conn().execute("PRAGMA busy_timeout").fetchone()[0] == 5000

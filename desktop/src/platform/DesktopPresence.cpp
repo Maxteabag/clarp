@@ -65,7 +65,7 @@ bool DesktopPresence::eventFilter(QObject* receiver, QEvent* event) {
     case QEvent::KeyPress: case QEvent::MouseButtonPress: case QEvent::MouseMove:
     case QEvent::Wheel: case QEvent::TouchBegin: case QEvent::TouchUpdate: {
         const auto* item = qobject_cast<QQuickItem*>(receiver);
-        if (receiver == m_window || (item && item->window() == m_window)) noteInteraction();
+        if (receiver == m_window || (item != nullptr && item->window() == m_window)) noteInteraction();
         break;
     }
     default: break;
@@ -74,7 +74,7 @@ bool DesktopPresence::eventFilter(QObject* receiver, QEvent* event) {
 }
 void DesktopPresence::refresh() {
     const qint64 now = m_clock.elapsed();
-    const bool foreground = m_window && m_window->isActive() && m_window->isVisible()
+    const bool foreground = m_window != nullptr && m_window->isActive() && m_window->isVisible()
         && m_window->visibility() != QWindow::Minimized;
     const bool usable = foreground && m_connected && m_sessionAvailable && m_unlocked && !m_sleeping;
     if (usable != m_reportedForeground || (usable && now - m_lastActivityReport >= 10'000)) {
@@ -141,6 +141,11 @@ void DesktopPresence::sessionChanged(const QString& interface, const QVariantMap
         setSessionState(false, false);
     querySession();
 }
+// The watcher is parented to this and deleteLater()s itself once the reply
+// arrives, so it cannot leak; the analyzer does not model Qt parent ownership
+// and reports the escape at the closing brace. Same suppression as
+// CredentialStore.cpp.
+// NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks)
 void DesktopPresence::querySession() {
     if (!m_monitorSystem) return;
     const quint64 generation = ++m_queryGeneration;
@@ -157,4 +162,5 @@ void DesktopPresence::querySession() {
             values.value(QStringLiteral("Active")).toBool() && !values.value(QStringLiteral("LockedHint")).toBool());
     });
 }
+// NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
 }

@@ -134,6 +134,8 @@ int main(int argc, char* argv[]) {
                     });
 
     const QString screenshotPath = qEnvironmentVariable("CLARP_SCREENSHOT_PATH");
+    if (!screenshotPath.isEmpty() && controller != nullptr && qEnvironmentVariableIsSet("CLARP_SCREENSHOT_MINIMAL_UI"))
+        controller->setMinimalUi(qEnvironmentVariableIntValue("CLARP_SCREENSHOT_MINIMAL_UI") != 0);
     const QString screenshotLayout = qEnvironmentVariable("CLARP_SCREENSHOT_LAYOUT");
     const QString screenshotView = qEnvironmentVariable("CLARP_SCREENSHOT_VIEW");
     const QString screenshotScenario = qEnvironmentVariable("CLARP_SCREENSHOT_SCENARIO");
@@ -554,6 +556,14 @@ int main(int argc, char* argv[]) {
             : screenshotScenario.isEmpty() ? 2'000 : 2'400;
         QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath, sidebarToggles, sidebarWidth] {
             if (rootWindow != nullptr) {
+                if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_MINIMAL_UI")) {
+                    auto* button = rootWindow->findChild<QQuickItem*>(QStringLiteral("sidebarHideButton"));
+                    const bool minimal = qEnvironmentVariableIntValue("CLARP_SCREENSHOT_MINIMAL_UI") != 0;
+                    if (button == nullptr || button->isVisible() == minimal) {
+                        qCritical("Minimal UI did not control the sidebar chevron");
+                        application.exit(EXIT_FAILURE); return;
+                    }
+                }
                 if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_READY_REPLY") &&
                     !rootWindow->property("readyReplyVerified").toBool()) {
                     qCritical("Ready reply verification did not complete");

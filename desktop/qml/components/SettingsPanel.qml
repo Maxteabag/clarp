@@ -13,7 +13,7 @@ Rectangle {
     signal closeRequested
     readonly property bool dialogOpen: ttsDialog.visible
     property int focusedIndex: 0
-    readonly property var actions: [timestampsRow, readyRow, toolsRow, narrationRow, spokenRow, mobilePushRow,
+    readonly property var actions: [timestampsRow, readyRow, toolsRow, narrationRow, minimalUiRow, spokenRow, mobilePushRow,
         connectionRow, orchestratorRow, filesystemRow, routingRow]
     color: "#1a1b26"
     objectName: "settingsPanel"
@@ -240,6 +240,18 @@ Rectangle {
                     color: "#82aaff"
                     font.pixelSize: 12
                     wrapMode: Text.Wrap
+                }
+            }
+
+            SettingsGroup {
+                title: "APPEARANCE"
+                SettingsToggle {
+                    id: minimalUiRow
+                    objectName: "setting-minimal-ui"
+                    label: "Minimal UI"
+                    detail: "Hide only the sidebar chevron button. Ctrl+B still toggles the sidebar."
+                    checked: root.controller.minimalUi
+                    onToggled: value => root.controller.minimalUi = value
                 }
             }
 

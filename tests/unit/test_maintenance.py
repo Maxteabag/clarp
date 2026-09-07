@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import pathlib
+import threading
 
 from lib import agents as agents_db
 from lib import db
@@ -80,3 +80,35 @@ def test_prune_hls_artifacts_removes_only_expired_complete_clips(tmp_path):
     assert removed == 1
     assert not old_dir.exists()
     assert live_dir.exists()
+
+
+def test_maintenance_worker_defers_only_the_exclusive_checkpoint(tmp_path):
+    """Retention runs at boot; the WAL truncation waits out interrupt recovery.
+
+    Deferring the entire sweep also deferred the telemetry rollup, so
+    telemetry.sqlite did not exist until the first hourly pass.
+    """
+    calls: list[bool] = []
+    first = threading.Event()
+    checkpointed = threading.Event()
+    worker = maintenance.MaintenanceWorker(
+        audio_dir=tmp_path, interval_sec=60, startup_delay_sec=0.2,
+    )
+
+    def record(*, checkpoint: bool = True):
+        calls.append(checkpoint)
+        (checkpointed if checkpoint else first).set()
+        return {}
+
+    worker.run_once = record
+    worker.start()
+    try:
+        # The boot sweep happens immediately, without the exclusive lock.
+        assert first.wait(1.0)
+        assert calls[0] is False
+        assert not checkpointed.wait(0.05)
+        # The checkpointing sweep only follows the startup delay.
+        assert checkpointed.wait(2.0)
+        assert calls[1] is True
+    finally:
+        worker.stop(timeout=1.0)

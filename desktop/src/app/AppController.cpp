@@ -125,6 +125,7 @@ AppController::AppController(QObject* parent)
     });
     m_timestampsVisible =
         settings.value(QStringLiteral("conversation/timestampsVisible"), false).toBool();
+    m_minimalUi = settings.value(QStringLiteral("appearance/minimalUi"), false).toBool();
     const QString sharedFilesystemHost =
         qEnvironmentVariable("CLARP_SHARED_FILESYSTEM_HOST").trimmed();
     m_sharedFilesystemHostOverride =
@@ -684,6 +685,13 @@ void AppController::setTimestampsVisible(bool visible) {
     m_timestampsVisible = visible;
     QSettings().setValue(QStringLiteral("conversation/timestampsVisible"), visible);
     emit timestampsVisibleChanged();
+}
+
+void AppController::setMinimalUi(bool minimal) {
+    if (m_minimalUi == minimal) return;
+    m_minimalUi = minimal;
+    QSettings().setValue(QStringLiteral("appearance/minimalUi"), minimal);
+    emit minimalUiChanged();
 }
 
 void AppController::setSharedFilesystem(bool shared) {
