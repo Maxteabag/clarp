@@ -703,6 +703,9 @@ void NativeCoreTest::oldActivityGroupsAreLazyAndVisitScoped() {
         row->setData(QString{}, ConversationModel::BodyRole);
         row->setData(time, ConversationModel::TimestampRole);
         row->setData(kind, ConversationModel::KindRole);
+        // The Host stamps ordinary rows "user"; grouping must not read that as
+        // a foreign dispatcher and split every activity into its own group.
+        row->setData(QStringLiteral("user"), ConversationModel::OriginRole);
         row->setData(1, ConversationModel::ActivityCountRole);
         row->setData(QVariantList{QVariantMap{{QStringLiteral("name"), QStringLiteral("Read")}}}, ConversationModel::ToolsRole);
         source.appendRow(row);
@@ -727,6 +730,15 @@ void NativeCoreTest::oldActivityGroupsAreLazyAndVisitScoped() {
     QVERIFY(view.data(view.index(0, 0), ConversationModel::ToolsRole).toList().isEmpty());
     view.setActivityMode(1);
     QCOMPARE(view.rowCount(), 3);
+    // A row dispatched by a teammate or a scheduler is not part of this turn's
+    // activity and must stay outside the group.
+    view.setActivityMode(2);
+    view.beginVisit();
+    QCOMPARE(view.rowCount(), 1);
+    append(QStringLiteral("teammate"), QStringLiteral("2020-01-01T03:00:00Z"), QString{})
+        ->setData(QStringLiteral("agent"), ConversationModel::OriginRole);
+    QCOMPARE(view.rowCount(), 2);
+    QVERIFY(view.data(view.index(1, 0), ConversationPresentationModel::GroupLabelRole).toString().isEmpty());
 }
 
 void NativeCoreTest::readyPresentationRetainsCanonicalStreamAndRevealsFinal() {
