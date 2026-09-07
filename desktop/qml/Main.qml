@@ -59,7 +59,7 @@ ApplicationWindow {
     }
 
     function overlayVisible() {
-        return quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
+        return quickNewAgent.visible || quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
             || startAgent.visible || overview.visible || connection.visible
             || queueDialog.visible || profilePanel.visible || settingsPanel.dialogOpen;
     }
@@ -128,6 +128,8 @@ ApplicationWindow {
             rail.focusSearch();
         } else if (action === "switcher") {
             quickSwitcher.open(root.composerOwnsFocus());
+        } else if (action === "quick-new-agent") {
+            quickNewAgent.visible = true;
         } else if (action === "new-contact") {
             quickSwitcher.openContacts(root.composerOwnsFocus());
         } else if (action.startsWith("move-")) {
@@ -228,7 +230,9 @@ ApplicationWindow {
     }
 
     function escapeFocus() {
-        if (quickSwitcher.visible)
+        if (quickNewAgent.visible)
+            quickNewAgent.closeRequested();
+        else if (quickSwitcher.visible)
             quickSwitcher.close();
         else if (voiceDialog.visible)
             voiceDialog.visible = false;
@@ -449,6 +453,20 @@ ApplicationWindow {
         onOrchestratorRequested: {
             orchestrator.visible = true;
             app.loadOrchestrator();
+        }
+    }
+
+    QuickNewAgentDialog {
+        id: quickNewAgent
+        objectName: "quickNewAgent"
+        anchors.fill: parent
+        controller: app
+        visible: false
+        z: 95
+        onCloseRequested: {
+            if (submitting && app.errorMessage.length === 0) root.selectedSurface = "chats";
+            visible = false;
+            root.restoreSurfaceFocus();
         }
     }
 

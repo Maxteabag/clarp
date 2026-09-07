@@ -75,3 +75,11 @@ screens for fields that require more than a toggle.
 labels, exact detail-level selection, Escape cancellation and focus return.
 For a screenshot, set `CLARP_SCREENSHOT_QUERY=streaming` and use the existing
 screenshot helper with `quickSwitcher` as its view argument.
+
+Ctrl+Shift+N opens the name-only New contact & chat dialog. Enter a new name and
+press Enter to create a fresh agent using the saved workspace and quick-start
+backend. The dialog rejects empty/offline submissions, prevents duplicate
+submission while pending, and retains the name on error. Ctrl+N keeps the full
+configuration form; Ctrl+Alt+N selects an existing idle contact. These are distinct
+operations. `tst_quick_new_agent.qml` covers Enter, cancellation, failure/retry,
+saved defaults and pending submission.
