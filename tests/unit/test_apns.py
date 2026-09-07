@@ -251,6 +251,13 @@ def test_turn_done_payload():
     assert custom["avatar_custom"] is True
 
 
+def test_turn_done_alerts_are_ordinary_messages_not_time_sensitive():
+    """A finished turn is a chat message, so it must not break through Focus
+    or Do Not Disturb the way a time-sensitive alert does."""
+    p = apns.turn_done_payload("Mike", "mike")
+    assert p["aps"]["interruption-level"] == "active"
+
+
 # --------------------------------------------------------------------------
 # sender
 # --------------------------------------------------------------------------

@@ -26,4 +26,13 @@ class HookTiming:
 SERVER_TIMING = ServerTiming()
 HOOK_TIMING = HookTiming()
 SQLITE_CONNECT_TIMEOUT_SEC = 5.0
+# Request threads must fail fast; five seconds is the interactive budget.
 SQLITE_BUSY_TIMEOUT_MS = 5000
+# Runtime boot has to wait out an exclusive WAL checkpoint from the HTTP
+# process's maintenance worker. That worker used to run on the same second
+# as interrupt recovery and skip the INTERRUPTED mark (SQLITE_BUSY).
+SQLITE_RECOVERY_BUSY_TIMEOUT_MS = 30_000
+SQLITE_LOCK_RETRIES = 3
+SQLITE_LOCK_RETRY_SLEEP_SEC = 0.05
+# Let recover_runtime finish before taking PRAGMA wal_checkpoint(TRUNCATE).
+MAINTENANCE_STARTUP_DELAY_SEC = 45.0
