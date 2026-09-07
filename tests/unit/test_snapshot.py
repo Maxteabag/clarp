@@ -271,3 +271,24 @@ def test_snapshot_carries_the_computer_preference(tmp_path):
 
     assert snap["model_avatars"] is True
     assert snap["agents"][0]["model_avatar_url"] == ""
+
+
+def test_janitor_personas_stay_out_of_the_switchable_roster(tmp_path, monkeypatch):
+    """Janitors cannot be chatted with, so clients must not offer them.
+
+    Built-in Janitor identities leaked into the roster clients use for
+    switching and starting agents, which also broke the browser suite.
+    """
+    from lib import backends, janitor_builtins
+
+    monkeypatch.setattr(backends, "active_handles", lambda *args: [])
+    agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
+    janitor_builtins.ensure_builtins(cwd=str(tmp_path))
+
+    snap = build_agent_snapshot(_model_avatar_ctx(tmp_path, tmp_path / "static"))
+
+    assert "Rachel" in snap["roster"]
+    janitors = {row["persona"] for row in snap["agents"] if row["is_janitor"]}
+    assert janitors, "expected the built-in Janitors in the agent rows"
+    assert not janitors & set(snap["roster"])
