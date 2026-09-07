@@ -1,5 +1,5 @@
 """Offline traces of the actual sideband policy; never creates a provider call."""
-from lib.oracle_webrtc import ConversationController
+from lib.oracle_webrtc import ConversationController, conversational_finding
 
 
 def controller():
@@ -105,6 +105,55 @@ def test_audio_stop_before_generation_done_still_acknowledges():
     assert ack == []
     c.event({'type': 'response.done', 'response': {'id': 'summary', 'status': 'completed'}})
     assert ack == ['d1']
+
+
+def test_injected_result_asks_for_finding_not_attribution():
+    c, sent, ack = controller()
+    result(c)
+    text = sent[0]['item']['content'][0]['text']
+    assert 'attributed summary' not in text
+    assert 'Agent:' not in text
+    assert 'now purple' in text
+    assert 'single color word' in text
+
+
+def test_conversational_finding_expands_logs_not_who_did_it():
+    assert conversational_finding('Blue.') == 'The accent is blue.'
+    assert conversational_finding('Checked site.css first and changed the accent color to purple.') == 'It’s now purple.'
+    assert conversational_finding(
+        'Fixed the missing title in preview.html by setting it to Quiet Harbor.'
+    ) == 'The title is Quiet Harbor now.'
+    who = 'Mira changed the accent from gray to blue in site.css.'
+    assert conversational_finding(who) == who
+
+
+def test_drop_agent_forgets_unheard_result():
+    c, sent, ack = controller()
+    c.event({'type': 'input_audio_buffer.speech_started'})
+    result(c)
+    assert sent == []
+    c.drop_agent('Marcus')
+    c.event({'type': 'input_audio_buffer.speech_stopped'})
+    c.event({'type': 'response.created', 'response': {'id': 'user'}})
+    c.event({'type': 'response.done', 'response': {'id': 'user', 'status': 'completed'}})
+    c.event({'type': 'output_audio_buffer.stopped', 'response_id': 'user'})
+    assert [x['type'] for x in sent] == []
+    assert ack == ['d1']
+
+
+def test_delegate_receipt_does_not_create_speech():
+    c, sent, ack = controller()
+    c.tool_started()
+    c.tool_finished('call', '{"status":"accepted","note":"Stay silent."}', speak=False)
+    assert [r['type'] for r in sent] == ['conversation.item.create']
+    assert c.tool_ready is False
+
+
+def test_read_tool_still_asks_for_a_spoken_answer():
+    c, sent, ack = controller()
+    c.tool_started()
+    c.tool_finished('call', '{"messages":[]}', speak=True)
+    assert [r['type'] for r in sent] == ['conversation.item.create', 'response.create']
 
 
 def test_user_response_consumes_tool_output_without_duplicate_continuation():
