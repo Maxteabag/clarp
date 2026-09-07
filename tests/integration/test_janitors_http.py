@@ -20,6 +20,30 @@ _spec.loader.exec_module(server)
 TOKEN = "isolated-janitor-http-test"
 
 
+def test_builtin_scope_is_complete_on_wire_without_changing_stored_scope(host):
+    from lib import janitor_builtins
+    row = janitor_builtins.ensure_builtins(cwd=str(host.path))["tool-explainer"]
+    before = db.conn().execute("SELECT scope_json,revision,generation FROM janitor_configs WHERE agent_id=?", (row["agent_id"],)).fetchone()
+    assert before["scope_json"] == "{}"
+    _, catalog = request(host, "/janitors")
+    expected = {"agent_ids": [], "exclude_agent_ids": []}
+    assert next(j for j in catalog["janitors"] if j["agent_id"] == row["agent_id"])["scope"] == expected
+    _, response = request(host, f'/janitors/{row["session"]}')
+    assert response["janitor"]["scope"] == expected
+    after = db.conn().execute("SELECT scope_json,revision,generation FROM janitor_configs WHERE agent_id=?", (row["agent_id"],)).fetchone()
+    assert tuple(after) == tuple(before)
+    _, response = request(host, f'/janitors/{row["session"]}/reset-defaults', {"expected_revision": row["revision"]})
+    assert response["janitor"]["scope"] == expected
+
+
+def test_scope_wire_defaults_preserve_existing_exclusions(host):
+    from lib import janitor_builtins
+    row = janitor_builtins.ensure_builtins(cwd=str(host.path))["tool-explainer"]
+    db.conn().execute("UPDATE janitor_configs SET scope_json=? WHERE agent_id=?", (json.dumps({"exclude_agent_ids": [host.theo]}), row["agent_id"]))
+    _, response = request(host, f'/janitors/{row["session"]}')
+    assert response["janitor"]["scope"] == {"agent_ids": [], "exclude_agent_ids": [host.theo]}
+
+
 def test_release_returns_sam_to_chat_without_archiving_or_losing_identity(host):
     before = agents.get_by_agent_id(host.sam)
     row = create(host)
