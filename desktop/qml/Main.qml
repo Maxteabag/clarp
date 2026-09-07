@@ -281,7 +281,7 @@ ApplicationWindow {
             : root.composerOwnsFocus() ? "composer"
             : rail.ownsFocus(root.activeFocusItem) ? "sidebar" : "pane"
         hasAttention: app.nextAttentionTarget.length > 0
-        hasAgent: app.selectedSession.length > 0
+        hasAgent: app.selectedSession.length > 0 && !app.isPairSession(app.selectedSession)
         hasRows: rail.rowCount > 0
         canSend: {
             app.composerRevision;

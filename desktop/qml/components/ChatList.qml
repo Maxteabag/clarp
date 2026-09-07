@@ -19,8 +19,18 @@ Rectangle {
     readonly property bool searchOwnsFocus: search.activeFocus
     readonly property string keyboardSession: chats.currentItem ? chats.currentItem.session : ""
     readonly property int rowCount: chats.count
+    readonly property var pairRooms: {
+        const rooms = root.controller.agentConversations || [];
+        const needle = search.text.trim().toLowerCase();
+        return rooms.filter(room => (root.scope !== "unread" || Boolean(room.unread))
+            && (needle.length === 0 || String(room.title || "").toLowerCase().includes(needle)));
+    }
     function focusCurrentAgent() {
         showingArchive = false;
+        if (root.controller.isPairSession(controller.selectedSession)) {
+            Qt.callLater(() => { chats.currentIndex = chats.count > 0 ? 0 : -1; chats.forceActiveFocus(); });
+            return;
+        }
         if (roster.indexOfSession(controller.selectedSession) < 0) {
             scope = "all";
             search.clear();
@@ -231,6 +241,40 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 1
             color: "#221f29"
+        }
+
+        ColumnLayout {
+            id: pairSection
+            objectName: "pairConversationSection"
+            visible: !root.collapsed && !root.showingArchive && root.pairRooms.length > 0
+            Layout.fillWidth: true
+            spacing: 0
+            Text {
+                Layout.leftMargin: 20
+                Layout.topMargin: 8
+                Layout.bottomMargin: 4
+                text: "AGENT CONVERSATIONS"
+                color: "#77717f"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 10
+                font.weight: Font.DemiBold
+                font.letterSpacing: 1
+            }
+            Repeater {
+                model: root.pairRooms
+                PairRow {
+                    required property var modelData
+                    room: modelData
+                    controller: root.controller
+                    Layout.fillWidth: true
+                    onChatSelected: root.chatSelected()
+                }
+            }
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: "#221f29"
+            }
         }
 
         ItemDelegate {

@@ -108,6 +108,8 @@ class AppController : public QObject {
                    NOTIFY settingsStatusChanged)
     Q_PROPERTY(QVariantMap ttsProviderStatus READ ttsProviderStatus NOTIFY settingsStatusChanged)
     Q_PROPERTY(bool settingsStatusLoading READ settingsStatusLoading NOTIFY settingsStatusChanged)
+    Q_PROPERTY(QVariantList agentConversations READ agentConversations NOTIFY agentConversationsChanged)
+    Q_PROPERTY(int unreadAgentConversations READ unreadAgentConversations NOTIFY agentConversationsChanged)
 
   public:
     explicit AppController(QObject* parent = nullptr);
@@ -200,6 +202,13 @@ class AppController : public QObject {
     [[nodiscard]] QVariantMap transcriptionCapabilities() const;
     [[nodiscard]] QVariantMap ttsProviderStatus() const;
     [[nodiscard]] bool settingsStatusLoading() const;
+    [[nodiscard]] QVariantList agentConversations() const { return m_agentConversations; }
+    [[nodiscard]] int unreadAgentConversations() const;
+    // Agent-to-agent pair conversations are read-only Host projections keyed
+    // by stable agent ids; they never resolve to an agent record.
+    Q_INVOKABLE [[nodiscard]] static bool isPairSession(const QString& session);
+    Q_INVOKABLE [[nodiscard]] QVariantMap agentConversation(const QString& conversationId) const;
+    Q_INVOKABLE void loadAgentConversations();
 
     void setBaseUrl(const QString& value);
     void setMuted(bool muted);
@@ -363,8 +372,13 @@ class AppController : public QObject {
     void turnQueueChanged();
     void profileChanged();
     void settingsStatusChanged();
+    void agentConversationsChanged();
 
   private:
+    void applyAgentConversations(const QJsonArray& conversations);
+    void markAgentConversationSeen(const QString& conversationId, qint64 revision);
+    [[nodiscard]] qint64 agentConversationSeenRevision(const QString& conversationId) const;
+    void refreshPairConversationsFor(const QString& session);
     void requestSnapshot();
     void requestAvatars();
     void clearAvatarCache();
@@ -467,6 +481,8 @@ class AppController : public QObject {
     QString m_profilePromptCursor;
     QHash<QString, QVariantMap> m_promptHistoryRequests;
     QHash<QString, QVariantMap> m_toolDetailRequests;
+    QVariantList m_agentConversations;
+    QTimer m_agentConversationsRefresh;
     bool m_connecting = false;
     bool m_sending = false;
     bool m_muted = false;

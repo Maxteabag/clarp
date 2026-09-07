@@ -58,6 +58,10 @@ struct Message {
     QString senderName;
     QString senderAgentId;
     QString senderSession;
+    QString replyToAgentId;
+    QString replyToName;
+    QString replyToSession;
+    QString delivery;
     QString traceId;
     QString category;
     QString activityStatus;

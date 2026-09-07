@@ -22,6 +22,7 @@
 #include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSettings>
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -643,6 +644,8 @@ class NativeCoreTest final : public QObject {
     void microphoneCanCaptureNativePcm();
     void backgroundTranscriptionsKeepTheirChatOwnership();
     void markdownParagraphsBecomeVisibleDisplayBlocks();
+    void agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent();
+    void pairConversationRoomsAreReadOnlyProjections();
 };
 
 void NativeCoreTest::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender() {
@@ -2426,6 +2429,151 @@ void NativeCoreTest::backgroundTranscriptionsKeepTheirChatOwnership() {
     QTRY_COMPARE_WITH_TIMEOUT(cancelled.transcriptionsInFlight(), 0, 3'000);
     QTest::qWait(50);
     QCOMPARE(cancelledReady.count(), 0);
+}
+
+void NativeCoreTest::agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent() {
+    ConversationModel model;
+    model.openSession(QStringLiteral("hugo"));
+    // Wire shape from the Host: the incoming prompt names its author; the
+    // answering row names the agent it answers instead of claiming a sender.
+    const QJsonObject prompt{
+        {QStringLiteral("id"), QStringLiteral("u-1")},
+        {QStringLiteral("role"), QStringLiteral("user")},
+        {QStringLiteral("text"), QStringLiteral("Status: survey done")},
+        {QStringLiteral("revision"), 1},
+        {QStringLiteral("origin"), QStringLiteral("agent")},
+        {QStringLiteral("sender_agent_id"), QStringLiteral("agent-cpp")},
+        {QStringLiteral("sender_name"), QStringLiteral("C++ Junior")},
+        {QStringLiteral("sender_session"), QStringLiteral("cjunior-0940")},
+        {QStringLiteral("reply_to_agent_id"), QString{}},
+        {QStringLiteral("delivery"), QStringLiteral("sent")},
+    };
+    const QJsonObject reply{
+        {QStringLiteral("id"), QStringLiteral("m-1")},
+        {QStringLiteral("role"), QStringLiteral("assistant")},
+        {QStringLiteral("text"), QStringLiteral("Good, that matches the agreed scope.")},
+        {QStringLiteral("revision"), 2},
+        {QStringLiteral("origin"), QStringLiteral("agent")},
+        {QStringLiteral("sender_agent_id"), QString{}},
+        {QStringLiteral("sender_name"), QString{}},
+        {QStringLiteral("reply_to_agent_id"), QStringLiteral("agent-cpp")},
+        {QStringLiteral("reply_to_name"), QStringLiteral("C++ Junior")},
+        {QStringLiteral("reply_to_session"), QStringLiteral("cjunior-0940")},
+        {QStringLiteral("delivery"), QStringLiteral("private")},
+    };
+    model.applyLog({{QStringLiteral("turns"), QJsonArray{prompt, reply}}},
+                   ConversationModel::LoadKind::Tail);
+    QCOMPARE(model.rowCount(), 2);
+    const QModelIndex incoming = model.index(0, 0);
+    QCOMPARE(incoming.data(ConversationModel::SenderNameRole).toString(), QStringLiteral("C++ Junior"));
+    QCOMPARE(incoming.data(ConversationModel::ReplyToNameRole).toString(), QString{});
+    QCOMPARE(incoming.data(ConversationModel::DeliveryRole).toString(), QStringLiteral("sent"));
+    const QModelIndex answer = model.index(1, 0);
+    QCOMPARE(answer.data(ConversationModel::SenderNameRole).toString(), QString{});
+    QCOMPARE(answer.data(ConversationModel::SenderAgentIdRole).toString(), QString{});
+    QCOMPARE(answer.data(ConversationModel::ReplyToAgentIdRole).toString(), QStringLiteral("agent-cpp"));
+    QCOMPARE(answer.data(ConversationModel::ReplyToNameRole).toString(), QStringLiteral("C++ Junior"));
+    QCOMPARE(answer.data(ConversationModel::ReplyToSessionRole).toString(), QStringLiteral("cjunior-0940"));
+    QCOMPARE(answer.data(ConversationModel::DeliveryRole).toString(), QStringLiteral("private"));
+
+    // A delta that only changes the marker still notifies the reply roles.
+    QSignalSpy changes(&model, &QAbstractItemModel::dataChanged);
+    QJsonObject renamed = reply;
+    renamed.insert(QStringLiteral("reply_to_name"), QStringLiteral("C++ Renamed"));
+    renamed.insert(QStringLiteral("revision"), 3);
+    model.applyLog({{QStringLiteral("turns"), QJsonArray{renamed}}}, ConversationModel::LoadKind::Delta);
+    QCOMPARE(model.index(1, 0).data(ConversationModel::ReplyToNameRole).toString(), QStringLiteral("C++ Renamed"));
+    bool notified = false;
+    for (const auto& signal : changes) {
+        if (signal.at(2).value<QList<int>>().contains(ConversationModel::ReplyToNameRole)) notified = true;
+    }
+    QVERIFY(notified);
+
+    ConversationModel restored;
+    QVERIFY(restored.restoreCacheSnapshot(model.cacheSnapshot()));
+    QCOMPARE(restored.index(1, 0).data(ConversationModel::ReplyToAgentIdRole).toString(), QStringLiteral("agent-cpp"));
+    QCOMPARE(restored.index(1, 0).data(ConversationModel::DeliveryRole).toString(), QStringLiteral("private"));
+}
+
+void NativeCoreTest::pairConversationRoomsAreReadOnlyProjections() {
+    QVERIFY(AppController::isPairSession(QStringLiteral("pair:a:b")));
+    QVERIFY(!AppController::isPairSession(QStringLiteral("hugo")));
+
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    const QString room = QStringLiteral("pair:agent-cpp:agent-rachel");
+    const auto participant = [](const QString& id, const QString& session, const QString& name) {
+        QJsonObject value;
+        value.insert(QStringLiteral("agent_id"), id);
+        value.insert(QStringLiteral("session"), session);
+        value.insert(QStringLiteral("name"), name);
+        return value;
+    };
+    QJsonObject preview;
+    preview.insert(QStringLiteral("text"), QStringLiteral("Good, that matches."));
+    preview.insert(QStringLiteral("sender_name"), QStringLiteral("Rachel"));
+    preview.insert(QStringLiteral("delivery"), QStringLiteral("private"));
+    QJsonObject listedRoom;
+    listedRoom.insert(QStringLiteral("conversation_id"), room);
+    listedRoom.insert(QStringLiteral("agent_ids"),
+                      QJsonArray{QStringLiteral("agent-cpp"), QStringLiteral("agent-rachel")});
+    listedRoom.insert(QStringLiteral("title"), QStringLiteral("C++ Junior & Rachel"));
+    listedRoom.insert(QStringLiteral("latest_revision"), 7);
+    listedRoom.insert(QStringLiteral("latest_activity"), Q_INT64_C(1788750466681));
+    listedRoom.insert(QStringLiteral("participants"),
+        QJsonArray{participant(QStringLiteral("agent-cpp"), QStringLiteral("cjunior-0940"),
+                               QStringLiteral("C++ Junior")),
+                   participant(QStringLiteral("agent-rachel"), QStringLiteral("rachel"),
+                               QStringLiteral("Rachel"))});
+    listedRoom.insert(QStringLiteral("latest_message"), preview);
+    QJsonObject roomsResponse;
+    roomsResponse.insert(QStringLiteral("conversations"), QJsonArray{listedRoom});
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agent-conversations"), 200,
+                           roomsResponse);
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
+    qputenv("CLARP_TOKEN", "test-token");
+    // A device that has never opened this room must see it as unread.
+    QSettings settings;
+    for (const QString& key : settings.allKeys()) {
+        if (key.startsWith(QStringLiteral("agentConversations/"))) settings.remove(key);
+    }
+    settings.sync();
+
+    AppController controller;
+    QTRY_COMPARE_WITH_TIMEOUT(controller.agentConversations().size(), 1, 3'000);
+    const QVariantMap listed = controller.agentConversations().first().toMap();
+    QCOMPARE(listed.value(QStringLiteral("conversation_id")).toString(), room);
+    QCOMPARE(listed.value(QStringLiteral("session")).toString(), room);
+    QVERIFY(listed.value(QStringLiteral("unread")).toBool());
+    QCOMPARE(controller.unreadAgentConversations(), 1);
+    QCOMPARE(controller.agentConversation(room).value(QStringLiteral("title")).toString(),
+             QStringLiteral("C++ Junior & Rachel"));
+    QCOMPARE(controller.agentName(room), QStringLiteral("C++ Junior & Rachel"));
+    QVERIFY(controller.agentConversation(QStringLiteral("pair:nope:nada")).isEmpty());
+
+    // Opening a room reads its timeline but never claims Host focus for it,
+    // and never resolves it to an agent record.
+    const qsizetype selectsBefore = server.requestCount(QStringLiteral("POST"), QStringLiteral("/select"));
+    // Startup selects a real agent, which legitimately loads its clips. Only
+    // additional traffic caused by opening the pair room matters here.
+    const qsizetype clipsBefore = server.requestCount(QStringLiteral("GET"), QStringLiteral("/clips/recoverable"));
+    controller.selectSession(room);
+    QCOMPARE(controller.selectedSession(), room);
+    QCOMPARE(controller.selectedName(), QStringLiteral("C++ Junior & Rachel"));
+    QCOMPARE(controller.agentBackend(room), QString{});
+    QTRY_VERIFY_WITH_TIMEOUT(server.receivedRequest(QStringLiteral("GET"), QStringLiteral("/log")), 3'000);
+    QTest::qWait(60);
+    QCOMPARE(server.requestCount(QStringLiteral("POST"), QStringLiteral("/select")), selectsBefore);
+    QCOMPARE(server.requestCount(QStringLiteral("GET"), QStringLiteral("/clips/recoverable")), clipsBefore);
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.agentConversations().isEmpty()
+        && !controller.agentConversations().first().toMap().value(QStringLiteral("unread")).toBool(), 3'000);
+    QCOMPARE(controller.unreadAgentConversations(), 0);
+
+    // Another agent's turn refreshes open rooms without a second selection.
+    server.sendEvent({{QStringLiteral("type"), QStringLiteral("transcript-updated")},
+                      {QStringLiteral("session"), QStringLiteral("rachel")}});
+    QTRY_VERIFY_WITH_TIMEOUT(server.requestCount(QStringLiteral("GET"), QStringLiteral("/agent-conversations")) >= 2, 3'000);
+    QCOMPARE(controller.selectedSession(), room);
 }
 
 QTEST_MAIN(NativeCoreTest)

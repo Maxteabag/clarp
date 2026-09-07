@@ -125,6 +125,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/OrchestratorDialog.qml
         qml/components/ThemedComboBox.qml
         qml/components/PaneLeaf.qml
+        qml/components/PairRow.qml
         qml/components/AgentProfilePanel.qml
         qml/components/QuickSwitcher.qml
         qml/components/QueueDialog.qml
