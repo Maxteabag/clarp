@@ -59,7 +59,7 @@ ApplicationWindow {
     }
 
     function overlayVisible() {
-        return quickNewAgent.visible || quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
+        return previewVersionPanel.visible || quickNewAgent.visible || quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
             || startAgent.visible || overview.visible || connection.visible
             || queueDialog.visible || profilePanel.visible || settingsPanel.dialogOpen;
     }
@@ -128,6 +128,8 @@ ApplicationWindow {
             rail.focusSearch();
         } else if (action === "switcher") {
             quickSwitcher.open(root.composerOwnsFocus());
+        } else if (action === "preview-versions") {
+            previewVersionPanel.visible = true;
         } else if (action === "quick-new-agent") {
             quickNewAgent.visible = true;
         } else if (action === "new-contact") {
@@ -207,6 +209,14 @@ ApplicationWindow {
     AppController {
         id: app
     }
+    PreviewVersions { id: previewVersions }
+    readonly property bool previewCanRestart: !app.sending && !app.audio.recording && !app.audio.transcribing
+    readonly property string previewUpdateLabel: {
+        const catalog = previewVersions.catalog;
+        if (!catalog.current || catalog.current === previewVersions.runningHash) return "";
+        const version = (catalog.versions || []).find(v => v.hash === catalog.current);
+        return version ? String(version.label) : "new build";
+    }
 
     Core.Settings {
         category: "appearance"
@@ -230,7 +240,9 @@ ApplicationWindow {
     }
 
     function escapeFocus() {
-        if (quickNewAgent.visible)
+        if (previewVersionPanel.visible)
+            previewVersionPanel.visible = false;
+        else if (quickNewAgent.visible)
             quickNewAgent.closeRequested();
         else if (quickSwitcher.visible)
             quickSwitcher.close();
@@ -298,6 +310,27 @@ ApplicationWindow {
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
+
+        RowLayout {
+            visible: previewVersions.enabled && (root.previewUpdateLabel.length > 0
+                || Boolean(previewVersions.catalog.pinned) || previewVersions.error.length > 0)
+            Layout.fillWidth: true
+            Layout.leftMargin: 14
+            Layout.rightMargin: 14
+            Label {
+                text: previewVersions.error || (root.previewUpdateLabel.length > 0 ? "New update available" : "Preview pinned · automatic updates paused")
+                color: previewVersions.error.length > 0 ? "#e79aa4" : "#aeb6d8"
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+            Button {
+                visible: root.previewUpdateLabel.length > 0
+                text: "Update " + root.previewUpdateLabel
+                enabled: root.previewCanRestart && !previewVersions.busy
+                onClicked: previewVersions.selectVersion(String(previewVersions.catalog.current))
+            }
+            Button { text: "Versions…"; onClicked: previewVersionPanel.visible = true }
+        }
 
         SplitView {
             id: mainSplit
@@ -507,8 +540,18 @@ ApplicationWindow {
         onCloseRequested: visible = false
     }
 
+    PreviewVersionPanel {
+        id: previewVersionPanel
+        objectName: "previewVersionPanel"
+        anchors.fill: parent
+        z: 200
+        switcher: previewVersions
+        canRestart: root.previewCanRestart
+    }
+
     QuickSwitcher {
         id: quickSwitcher
+        previewVersionsAvailable: previewVersions.enabled
 
         objectName: "quickSwitcher"
         anchors.fill: parent

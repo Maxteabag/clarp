@@ -57,6 +57,8 @@ target_sources(clarp-desktop PRIVATE
     src/terminal/TerminalLaunch.h
     src/app/AppController.cpp
     src/app/AppController.h
+    src/app/PreviewVersions.cpp
+    src/app/PreviewVersions.h
     src/app/CredentialStore.cpp
     src/app/CredentialStore.h
     src/app/TranscriptCache.cpp
@@ -103,6 +105,8 @@ qt_add_qml_module(clarp-desktop
     URI Clarp.Desktop
     VERSION 1.0
     QML_FILES
+        qml/PreviewVersionWindow.qml
+        qml/components/PreviewVersionPanel.qml
         qml/Main.qml
         qml/components/AgentRail.qml
         qml/components/NavRail.qml

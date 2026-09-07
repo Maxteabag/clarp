@@ -87,7 +87,9 @@ int main(int argc, char* argv[]) {
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &application,
         [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
-    engine.loadFromModule("Clarp.Desktop", "Main");
+    const bool versionManager = application.arguments().contains(QStringLiteral("--preview-versions"));
+    if (versionManager) application.setApplicationName(QStringLiteral("ClarpPreviewVersionManager"));
+    engine.loadFromModule("Clarp.Desktop", versionManager ? "PreviewVersionWindow" : "Main");
 
     std::unique_ptr<clarp::DesktopIntegration> desktopIntegration;
     std::unique_ptr<clarp::DesktopPresence> desktopPresence;
