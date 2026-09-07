@@ -10,7 +10,18 @@ def test_webrtc_contract_has_no_pcm_pipeline_or_literal_agent_examples():
     assert cfg['audio']['input']['turn_detection']['create_response'] is True
     assert cfg['audio']['input']['turn_detection']['interrupt_response'] is True
     assert 'Marcus' not in cfg['instructions'] and 'Theo' not in cfg['instructions']
-    assert 'investigate_with_oracle' in [t['name'] for t in cfg['tools']]
+    names = [t['name'] for t in cfg['tools']]
+    assert 'investigate_with_oracle' in names
+    assert 'get_agent_status' not in names
+    assert 'let me check' in cfg['instructions']
+    assert 'only for unknown ownership' in cfg['instructions']
+    assert 'who investigates' in cfg['instructions']
+    assert 'Do not\ndelegate_to_agent until they choose' in cfg['instructions'] or 'until they choose' in cfg['instructions']
+    assert 'now purple' in cfg['instructions']
+    assert 'single color word' in cfg['instructions']
+    assert 'Quiet Harbor' in cfg['instructions']
+    assert 'sent to' not in cfg['instructions']
+    assert 'in progress' in cfg['instructions']  # forbidden phrase, listed as never-say
 
 
 def test_offer_rejects_oversized_and_non_audio_input():
@@ -30,10 +41,21 @@ def test_unknown_owner_uses_configured_contact_not_guessed_agent(tmp_path, monke
     monkeypatch.setattr(oracle_delegations,'dispatch',dispatch)
     tools=oracle_calls.AgentTools(SimpleNamespace(),'owner','sage',lambda _:None)
     out=tools.execute('investigate_with_oracle',{'request':'Who made it blue?'},'one-call')
-    assert out['agent']=='Sage'
+    assert 'agent' not in out
+    assert out['note'].startswith('Receipt only')
     assert captured[0]['session']=='sage'
     assert captured[0]['request_text']=='Who made it blue?'
     assert captured[0]['owner_principal']=='owner'
+
+
+def test_vague_preview_bug_asks_instead_of_dispatching(tmp_path, monkeypatch):
+    from lib import agents, oracle_calls, oracle_delegations
+    from types import SimpleNamespace
+    agents.create_agent(persona='Sage', voice_id='v', cwd=str(tmp_path), session='sage')
+    monkeypatch.setattr(oracle_delegations, 'dispatch', lambda **kwargs: (_ for _ in ()).throw(AssertionError('dispatched')))
+    tools = oracle_calls.AgentTools(SimpleNamespace(), 'owner', 'sage', lambda _: None)
+    out = tools.execute('delegate_to_agent', {'agent': 'Sage', 'request': 'Fix the preview bug.'}, 'x')
+    assert out.get('need_choice') is True
 
 
 def test_missing_contact_returns_actionable_error_without_work():
