@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import random
 import re
 import shutil
 import subprocess
@@ -23,7 +24,7 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from . import agents as agents_db
-from . import backends, compaction, config, db, location, origins
+from . import backends, compaction, config, db, dream_seeds, location, origins
 from . import settings_store
 from .log import log, log_exception
 from .protocol import AgentState
@@ -57,6 +58,7 @@ DREAM_PRIOR_CONTEXT_MAX_CHARS = 7_000
 DREAM_PRIOR_ROUND_EXCERPT_CHARS = 1_000
 
 _STAGE_TARGET_TOKENS = {
+    "roleplay_day": 8_000,
     "seed": 10_000,
     "fanout": 10_000,
     "iterate": 12_000,
@@ -67,6 +69,12 @@ _STAGE_TARGET_TOKENS = {
 KEY_DREAMS_PER_NIGHT = "dreaming.dreams_per_night"
 KEY_DIRECTION_COUNT = "dreaming.direction_count"
 KEY_TOKEN_BUDGET = "dreaming.target_token_budget"
+# Dreaming runs on its own provider. A user may want a cheap, chatty model for
+# the live conversation and a slow expensive one for the night, or the reverse;
+# inheriting the agent's backend made that impossible to express.
+KEY_DREAM_BACKEND = "dreaming.backend"
+KEY_DREAM_MODEL = "dreaming.model"
+KEY_DREAM_EFFORT = "dreaming.effort"
 
 
 @dataclass(frozen=True)
@@ -74,6 +82,10 @@ class DreamingSettings:
     dreams_per_night: int = DREAMS_PER_NIGHT_DEFAULT
     direction_count: int = DREAM_DIRECTION_COUNT
     target_token_budget: int = DREAM_TARGET_TOKEN_BUDGET
+    # Empty means "inherit the agent's own backend/model/effort".
+    backend: str = ""
+    model: str = ""
+    effort: str = ""
 
     @property
     def min_directions(self) -> int:
@@ -94,7 +106,7 @@ class DreamingSettings:
             for stage, tokens in _STAGE_TARGET_TOKENS.items()
         }
 
-    def as_dict(self) -> dict[str, int]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "dreams_per_night": self.dreams_per_night,
             "direction_count": self.direction_count,
@@ -106,6 +118,9 @@ class DreamingSettings:
             "target_minutes": self.target_minutes,
             "target_hour": DREAM_TARGET_HOUR,
             "window_minutes": DREAM_WINDOW_MINUTES,
+            "backend": self.backend,
+            "model": self.model,
+            "effort": self.effort,
         }
 
 
@@ -137,6 +152,9 @@ def get_settings() -> DreamingSettings:
             minimum=DREAM_TOKEN_BUDGET_MIN,
             maximum=DREAM_TOKEN_BUDGET_MAX,
         ),
+        backend=settings_store.get_text(KEY_DREAM_BACKEND, default=""),
+        model=settings_store.get_text(KEY_DREAM_MODEL, default=""),
+        effort=settings_store.get_text(KEY_DREAM_EFFORT, default=""),
     )
 
 
@@ -172,6 +190,22 @@ def update_settings(data: dict[str, Any]) -> DreamingSettings:
                 maximum=DREAM_TOKEN_BUDGET_MAX,
             ),
         )
+    if "backend" in data:
+        raw = str(data.get("backend") or "").strip()
+        # Empty clears the override; anything else must name a real adapter,
+        # otherwise a typo would silently strand every dream on Claude.
+        settings_store.set_text(
+            KEY_DREAM_BACKEND, backends.normalize(raw) if raw else "")
+    if "model" in data:
+        settings_store.set_text(
+            KEY_DREAM_MODEL, str(data.get("model") or "").strip()[:120])
+    if "effort" in data:
+        raw_effort = str(data.get("effort") or "").strip()
+        target = str(data.get("backend") or get_settings().backend or "").strip()
+        settings_store.set_text(
+            KEY_DREAM_EFFORT,
+            backends.clean_effort(backends.normalize(target), raw_effort)
+            if raw_effort else "")
     return get_settings()
 
 
@@ -215,30 +249,47 @@ _DIGEST_DONE_RE = re.compile(
     r"round_id=(?P<round_id>dround_[A-Za-z0-9_]+)\s*$",
     re.I,
 )
+# Markdown decoration a model puts in front of a line it considers a heading:
+# blockquote, ATX heading, list bullet, then emphasis. Every one of these was
+# rejected by the original pattern, so a perfectly-formed `### D1 [new]: ...`
+# slate parsed as zero directions and the run branched on fallback prose.
+_MD_PREFIX = r"[ \t]*(?:>[ \t]*)*(?:#{1,6}[ \t]*)?(?:[-*+][ \t]+)?[*_`~]{0,3}[ \t]*"
+
 _SLATE_LINE_RE = re.compile(
-    r"^\s*(?:[-*]\s*)?`?(?:D|Direction)\s*(?P<idx>\d+)"
-    r"\s*(?P<tag>\[[^\]]+\])?\s*[:.)-]\s*(?P<title>.+?)\s*$",
+    rf"^{_MD_PREFIX}(?:D|Direction)[ \t]*(?P<idx>\d+)"
+    r"[ \t]*(?P<tag>\[[^\]]+\])?[*_`]{0,3}[ \t]*[:.)-][*_`~ \t]*"
+    r"(?P<title>.+?)\s*$",
     re.I | re.M,
+)
+_FALLBACK_LINE_RE = re.compile(
+    r"^[ \t]*(?:#{1,6}[ \t]+|[-*+][ \t]+|\d+[.)][ \t]+|\*\*)"
+    r"(?P<title>.+?)\s*$",
+    re.M,
 )
 _RUN_ID_RE = re.compile(r"run_id=(dream_[A-Za-z0-9_]+)")
 _EVIDENCE_STATUS_RE = re.compile(
-    r"^\s*(?:Evidence status|Status)\s*:\s*(confirmed|refuted|speculative)\b",
+    rf"^{_MD_PREFIX}(?:Evidence status|Status)[*_`]{{0,2}}[ \t]*:[*_ \t]*"
+    r"(confirmed|refuted|speculative)\b",
     re.I | re.M,
 )
 _ALTITUDE_RE = re.compile(
-    r"^\s*Altitude\s*:\s*(idea|brainstorm|verified(?: finding)?|worktree|pr|pull request)\b",
+    rf"^{_MD_PREFIX}Altitude[*_`]{{0,2}}[ \t]*:[*_ \t]*"
+    r"(idea|brainstorm|verified(?: finding)?|worktree|pr|pull request)\b",
     re.I | re.M,
 )
 _ARTIFACT_RE = re.compile(
-    r"^\s*(?:Artifact|Worktree|PR)\s*:\s*(?P<value>.+?)\s*$",
+    rf"^{_MD_PREFIX}(?:Artifact|Worktree|PR)[*_`]{{0,2}}[ \t]*:[*_ \t]*"
+    r"(?P<value>.+?)\s*$",
     re.I | re.M,
 )
 _EVIDENCE_SUMMARY_RE = re.compile(
-    r"^\s*Evidence summary\s*:\s*(?P<value>.+?)\s*$",
+    rf"^{_MD_PREFIX}Evidence summary[*_`]{{0,2}}[ \t]*:[*_ \t]*"
+    r"(?P<value>.+?)\s*$",
     re.I | re.M,
 )
 _GUARDRAIL_REFUSAL_RE = re.compile(
-    r"^\s*(?:Guardrail refused|Refused forbidden op)\s*:\s*(?P<value>.+?)\s*$",
+    rf"^{_MD_PREFIX}(?:Guardrail refused|Refused forbidden op)[*_`]{{0,2}}"
+    r"[ \t]*:[*_ \t]*(?P<value>.+?)\s*$",
     re.I | re.M,
 )
 _FORBIDDEN_OPERATION_RE = re.compile(
@@ -425,18 +476,32 @@ def active_runs() -> list[dict[str, Any]]:
 
 def create_dream_run(agent: dict, *, local_date: str, timezone_name: str,
                      timezone_source: str,
-                     settings: DreamingSettings | None = None) -> dict[str, Any]:
+                     settings: DreamingSettings | None = None,
+                     seed_strategy: str = "",
+                     context_dose: str = "") -> dict[str, Any]:
     settings = settings or agent.get("dreaming_settings") or get_settings()
     stage_tokens = settings.stage_target_tokens()
     now = db.now_ms()
     run_id = f"dream_{uuid.uuid4().hex}"
+    # An unspecified recipe is the control arm, not a random one: callers that
+    # want variety ask for it explicitly (the nightly scheduler does), and
+    # everything else stays deterministic.
+    strategy = seed_strategy or dream_seeds.CONTROL
+    if strategy not in dream_seeds.STRATEGIES:
+        strategy = dream_seeds.CONTROL
+    dose = context_dose or dream_seeds.choose_dose(strategy)
+    if dose not in dream_seeds.CONTEXT_DOSES:
+        dose = dream_seeds.DOSE_FULL
+    material = _gather_seed_material(agent, strategy)
+    first_stage = "roleplay_day" if strategy == dream_seeds.ROLEPLAY else "seed"
     db.conn().execute(
         """INSERT INTO dream_runs (
                run_id, agent_id, session, local_date, timezone, timezone_source,
                status, stage, min_directions, planned_directions,
                planned_rounds, target_tokens, target_minutes, started_at,
-               updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, 'active', 'seed', ?, ?, ?, ?, ?, ?, ?)""",
+               updated_at, seed_strategy, context_dose, seed_material
+           ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?,
+                     ?, ?, ?)""",
         (
             run_id,
             agent["agent_id"],
@@ -444,6 +509,7 @@ def create_dream_run(agent: dict, *, local_date: str, timezone_name: str,
             local_date,
             timezone_name,
             timezone_source,
+            first_stage,
             settings.min_directions,
             settings.direction_count,
             settings.planned_rounds,
@@ -451,11 +517,80 @@ def create_dream_run(agent: dict, *, local_date: str, timezone_name: str,
             settings.target_minutes,
             now,
             now,
+            strategy,
+            dose,
+            material,
         ),
     )
-    _insert_round(run_id=run_id, stage="seed", round_index=1,
+    _insert_round(run_id=run_id, stage=first_stage, round_index=1,
                   target_tokens=stage_tokens["seed"])
     return get_run(run_id) or {}
+
+
+def _gather_seed_material(agent: dict, strategy: str) -> str:
+    """Collect the outside material a strategy needs, once, at run creation.
+
+    Done here rather than per-round so the material is recorded on the run and
+    the same collision is available to every later round. Network failure is
+    not fatal: `dream_seeds` falls back to an offline pool, because a dream
+    that produces nothing because Wikipedia was down is a worse outcome than a
+    dream seeded from a fixed list.
+    """
+    try:
+        if strategy == dream_seeds.FOREIGN:
+            snapshot = _recent_real_context_snapshot(agent, limit=40)
+            keywords = dream_seeds.session_keywords(snapshot)
+            foreign = dream_seeds.random_foreign_material()
+            joined = ", ".join(keywords) if keywords else "(no session terms)"
+            return f"{foreign}\n\nSESSION TERMS TO COLLIDE WITH: {joined}"
+        if strategy == dream_seeds.LENSES:
+            picked = random.sample(list(dream_seeds.LENS_BANK),
+                                   min(2, len(dream_seeds.LENS_BANK)))
+            return "\n".join(f"- {q}" for q in picked)
+        if strategy == dream_seeds.ROLEPLAY:
+            return random.choice(list(dream_seeds.ROLEPLAY_PERSONAS))
+    except Exception as e:  # noqa: BLE001
+        log_exception("dreamSeedMaterialFail", e, detail=strategy)
+    return ""
+
+
+def start_manual_run(session: str, *, seed_strategy: str = "",
+                     context_dose: str = "") -> dict[str, Any]:
+    """Begin a dream now, outside the nightly window.
+
+    The scheduled path depends on resolving the user's local 03:00 from their
+    phone's last known position, which is the right default and the wrong
+    thing to rely on when you want a specific experiment to run tonight. This
+    bypasses the window and the once-per-day guard; everything downstream (the
+    round chain, the ledger, delivery) is identical.
+    """
+    agent = agents_db.get_by_session(session.strip())
+    if not agent:
+        raise ValueError(f"unknown session {session!r}")
+    existing = active_run_for_agent(agent["agent_id"])
+    if existing:
+        raise ValueError(
+            f"{session} already has an active dream run {existing['run_id']}")
+    resolved = resolve_user_timezone(agent.get("session") or "")
+    local_date = datetime.now(resolved.tz).strftime("%Y-%m-%d")
+    run = create_dream_run(
+        agent,
+        local_date=local_date,
+        timezone_name=resolved.name,
+        timezone_source=resolved.source,
+        seed_strategy=seed_strategy,
+        context_dose=context_dose,
+    )
+    # Count a manual run against the night's quota. Without this the nightly
+    # scheduler can fire a second, randomly-seeded run for the same agent once
+    # the phone's local 03:00 comes round, which doubles the spend and muddies
+    # a pinned experiment.
+    mark_dream_started(agent["agent_id"], local_date)
+    log("dreamingManualStart",
+        f"run={run.get('run_id')} session={session} "
+        f"strategy={run.get('seed_strategy')} dose={run.get('context_dose')}")
+    _request_advance(str(run.get("run_id") or ""))
+    return run
 
 
 def get_run(run_id: str) -> dict[str, Any] | None:
@@ -489,6 +624,7 @@ def list_dream_runs(*, session: str = "", limit: int = 10) -> list[dict[str, Any
                           selected_for_iterate, fanout_chars, iterate_chars,
                           evidence_status, altitude, artifact_ref,
                           evidence_summary, guardrail_refusals,
+                          killed_reason, origin_note,
                           created_at, updated_at
                      FROM dream_threads
                     WHERE run_id = ?
@@ -646,6 +782,111 @@ def record_final_digest(*, agent_id: str, run_id: str, round_id: str,
     )
     log("dreamingDigestComplete",
         f"run={run_id} round={round_id} chars={len(digest or '')}")
+    _deliver_digest(run_id=run_id, agent_id=agent_id, digest=digest)
+    try:
+        harvest_worktree(run_id)
+    except Exception as e:  # noqa: BLE001
+        log_exception("dreamHarvestUnexpected", e, detail=run_id)
+
+
+class _AlreadyPublished(Exception):
+    """This run's digest artifact exists; skip without logging a failure."""
+
+
+def _deliver_digest(*, run_id: str, agent_id: str, digest: str) -> None:
+    """Get the night's one visible output in front of the user.
+
+    Delivery is best-effort and deliberately independent of the run's own
+    bookkeeping: the digest is already durable in the ledger by this point, so
+    a failure to publish must not roll back a completed dream. Both surfaces
+    are attempted separately for the same reason.
+    """
+    run = get_run(run_id) or {}
+    session = str(run.get("session") or "")
+    strategy = str(run.get("seed_strategy") or "control")
+    dose = str(run.get("context_dose") or "full")
+    title = f"Dream Digest — {run.get('local_date') or ''}".strip(" —")
+    summary = _preview(
+        digest.replace("Dream Digest", "", 1).strip(), 400
+    ) or "Overnight investigation."
+    try:
+        from . import artifacts
+        # One artifact per run. The unique index on
+        # (agent_id, type, reference_id) already enforces this, but hitting it
+        # logs an exception on every re-delivery, which makes an idempotent
+        # retry look like a failure.
+        if any(a.get("reference_id") == run_id
+               for a in artifacts.list_artifacts(session=session,
+                                                 type="document")):
+            log("dreamingDigestArtifactExists", f"run={run_id}")
+            raise _AlreadyPublished
+        artifacts.create(
+            session=session,
+            type="document",
+            title=title,
+            summary=summary,
+            reference_id=run_id,
+            payload={
+                "content": digest,
+                "seed_strategy": strategy,
+                "context_dose": dose,
+                "seed_material": str(run.get("seed_material") or ""),
+                "run_id": run_id,
+            },
+        )
+    except _AlreadyPublished:
+        pass
+    except Exception as e:  # noqa: BLE001
+        log_exception("dreamingDigestArtifactFail", e, detail=run_id)
+    try:
+        from . import message_store
+        backend_session_id = agents_db.live_backend_session(agent_id)
+        if backend_session_id:
+            message_store.record_dream_digest(
+                agent_id=agent_id,
+                backend_session_id=backend_session_id,
+                run_id=run_id,
+                text=digest,
+            )
+        else:
+            log("dreamingDigestNoSession", f"run={run_id} agent={agent_id}")
+    except Exception as e:  # noqa: BLE001
+        log_exception("dreamingDigestMessageFail", e, detail=run_id)
+
+
+def abandon_run(run_id: str) -> None:
+    """End a run whose agent is no longer opted in, keeping what it built.
+
+    Called when dreaming is switched off while a run is in flight. The run is
+    closed rather than left active, and its worktree goes through the ordinary
+    harvest so anything already written survives as a branch instead of
+    leaking a directory nobody owns.
+    """
+    run = get_run(run_id)
+    if not run or run.get("status") != "active":
+        return
+    now = db.now_ms()
+    db.conn().execute(
+        """UPDATE dream_runs
+              SET status = 'abandoned', stage = 'abandoned',
+                  finished_at = ?, updated_at = ?,
+                  last_error = COALESCE(NULLIF(last_error, ''),
+                                        'dreaming disabled while in flight')
+            WHERE run_id = ?""",
+        (now, now, run_id),
+    )
+    db.conn().execute(
+        """UPDATE dream_rounds SET status = 'abandoned', updated_at = ?
+            WHERE run_id = ? AND status IN ('queued', 'sent')""",
+        (now, run_id),
+    )
+    log("dreamingAbandoned",
+        f"run={run_id} session={run.get('session')} "
+        f"rounds={run.get('completed_rounds')}")
+    try:
+        harvest_worktree(run_id)
+    except Exception as e:  # noqa: BLE001
+        log_exception("dreamAbandonHarvestFail", e, detail=run_id)
 
 
 def mark_active_noop(agent_id: str) -> None:
@@ -931,11 +1172,15 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
     session = str(agent.get("session") or "")
     if not agent_id or not session:
         return False
-    backend = backends.normalize(agent.get("backend"))
+    backend = backends.normalize(
+        get_settings().backend or agent.get("backend"))
     backend_session_id = str(uuid.uuid4())
     trace_id = f"dream-{uuid.uuid4().hex[:16]}"
     model, effort = _resolve_dream_llm(agent, backend)
-    text = _with_isolated_context_snapshot(agent, prompt)
+    run_id = _run_id_from_prompt(prompt)
+    run = get_run(run_id) if run_id else None
+    dose = str((run or {}).get("context_dose") or dream_seeds.DOSE_FULL)
+    text = _with_isolated_context_snapshot(agent, prompt, dose)
     cwd = _dream_scratch_cwd(agent, prompt)
 
     def on_result(event: dict) -> None:
@@ -1026,6 +1271,102 @@ def _dream_scratch_cwd(agent: dict, prompt: str) -> pathlib.Path:
         return _dream_fallback_cwd(root, run_id)
 
 
+def harvest_worktree(run_id: str) -> str:
+    """Commit whatever a dream built, then take its worktree away.
+
+    A dream worktree is disposable, but what it contains often is not: a run
+    at `worktree` altitude writes real code and real tests there, and the only
+    record of it was prose in a digest pointing at a directory nothing owned.
+
+    Committing before removing is what makes removal safe. Nothing dirty is
+    ever discarded — the work becomes a branch that survives the cleanup and
+    can be diffed, cherry-picked or deleted later on its own merits. Returns
+    the branch name, or "" when there was nothing to keep.
+    """
+    run = get_run(run_id) or {}
+    cwd = _dream_worktree_path(run_id)
+    if cwd is None:
+        return ""
+    git = shutil.which("git")
+    if not git:
+        log("dreamHarvestNoGit", f"run={run_id}")
+        return ""
+
+    def _git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [git, "-C", str(cwd), *args], check=check, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+
+    branch = ""
+    try:
+        dirty = bool(_git("status", "--porcelain").stdout.strip())
+        if dirty:
+            strategy = str(run.get("seed_strategy") or "dream")
+            local_date = str(run.get("local_date") or "")
+            branch = f"dream/{local_date}-{strategy}-{run_id[6:14]}"
+            _git("checkout", "-b", branch)
+            _git("add", "-A")
+            _git(
+                "-c", "user.name=Clarp Dreaming",
+                "-c", "user.email=dreaming@clarp.invalid",
+                "commit", "-m",
+                f"dream({strategy}): work built during {local_date}\n\n"
+                f"Committed by the dreaming harvester so the worktree could be\n"
+                f"removed without discarding it. Unreviewed: written by one\n"
+                f"overnight run, verified only by whatever that run chose to\n"
+                f"execute.\n\nrun_id={run_id}",
+            )
+            db.conn().execute(
+                "UPDATE dream_runs SET artifact_branch = ?, updated_at = ?"
+                " WHERE run_id = ?",
+                (branch, db.now_ms(), run_id))
+            log("dreamHarvestCommitted", f"run={run_id} branch={branch}")
+        else:
+            log("dreamHarvestClean", f"run={run_id}")
+    except (subprocess.SubprocessError, OSError) as e:
+        # A harvest that fails must leave the worktree alone. Losing the disk
+        # is a smaller problem than losing the only copy of the work.
+        log_exception("dreamHarvestFail", e, detail=run_id)
+        return branch
+
+    try:
+        source = _existing_cwd(run.get("cwd")) if run.get("cwd") else None
+        top = _repo_toplevel(git, source or cwd)
+        if top:
+            subprocess.run(
+                [git, "-C", top, "worktree", "remove", str(cwd)],
+                check=True, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, timeout=120)
+            subprocess.run(
+                [git, "-C", top, "worktree", "prune"], check=False,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=60)
+            log("dreamHarvestRemoved", f"run={run_id} path={cwd}")
+    except (subprocess.SubprocessError, OSError) as e:
+        log_exception("dreamHarvestRemoveFail", e, detail=run_id)
+    return branch
+
+
+def _dream_worktree_path(run_id: str) -> pathlib.Path | None:
+    """The disposable worktree for one run, if it is still on disk."""
+    from .launch_paths import workspace_root
+    workspace = workspace_root()
+    root = ((workspace / ".clarp/dream-worktrees") if workspace is not None
+            else pathlib.Path("/var/tmp/clarp-dream-worktrees"))
+    target = root / run_id
+    return target if target.is_dir() else None
+
+
+def _repo_toplevel(git: str, path: pathlib.Path) -> str:
+    try:
+        return subprocess.run(
+            [git, "-C", str(path), "rev-parse", "--show-toplevel"],
+            check=True, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=15).stdout.strip()
+    except (subprocess.SubprocessError, OSError):
+        return ""
+
+
 def _dream_fallback_cwd(root: pathlib.Path, run_id: str) -> pathlib.Path:
     from .launch_paths import validate_workspace_path, workspace_root
     path = validate_workspace_path(root / f"{run_id}-scratch")
@@ -1048,8 +1389,18 @@ def _existing_cwd(raw: Any) -> pathlib.Path:
 
 def _resolve_dream_llm(agent: dict, backend: str) -> tuple[str, str]:
     cfg = config.load()
-    model = str(agent.get("model") or "").strip()
-    effort = str(agent.get("effort") or "").strip()
+    dream_settings = get_settings()
+    if dream_settings.backend and backends.normalize(dream_settings.backend) == backend:
+        # Only honour the pinned model when the pinned backend is the one
+        # actually running: a Codex model id handed to Claude is worse than
+        # falling through to the agent's own settings.
+        model = dream_settings.model.strip()
+        effort = dream_settings.effort.strip()
+    else:
+        model = ""
+        effort = ""
+    model = model or str(agent.get("model") or "").strip()
+    effort = effort or str(agent.get("effort") or "").strip()
     if backend == backends.CODEX:
         model = model or cfg.codex_model
         effort = effort or cfg.codex_reasoning_effort
@@ -1071,10 +1422,39 @@ def _assistant_text_from_result(event: dict) -> str:
     )
 
 
-def _with_isolated_context_snapshot(agent: dict, prompt: str) -> str:
+def _dose_snapshot(agent: dict, dose: str) -> str:
+    """How much of the live session this round is allowed to see.
+
+    The full snapshot is what anchors a dream to whatever the user was doing
+    at dinner time. Recording the dose per run means a strategy's output is
+    never silently confounded with how much context it was handed.
+    """
+    if dose == dream_seeds.DOSE_NONE:
+        return (
+            "Recent real conversation snapshot: withheld for this run "
+            "(context dose = none). Work from the project itself."
+        )
+    if dose == dream_seeds.DOSE_FRAGMENTS:
+        full = _recent_real_context_snapshot(agent, limit=40)
+        lines = [line for line in full.splitlines() if line.startswith("- ")]
+        if not lines:
+            return full
+        sample = random.sample(lines, min(5, len(lines)))
+        # Chronology is deliberately not restored: these are fragments to
+        # orient on, not a conversation to continue.
+        body = "\n".join(f"- {' '.join(line[2:].split())[:400]}" for line in sample)
+        return (
+            "Session fragments (context dose = fragments; a few disconnected "
+            "excerpts, not the conversation):\n" + body
+        )
+    return _recent_real_context_snapshot(agent)
+
+
+def _with_isolated_context_snapshot(agent: dict, prompt: str,
+                                    dose: str = dream_seeds.DOSE_FULL) -> str:
     persona = str(agent.get("persona") or agent.get("session") or "Agent").strip()
     session = str(agent.get("session") or "").strip()
-    snapshot = _recent_real_context_snapshot(agent)
+    snapshot = _dose_snapshot(agent, dose)
     return "\n".join([
         "[[CLARP_DREAM_ISOLATED_CONTEXT]]",
         (
@@ -1189,6 +1569,16 @@ def _ensure_next_rounds(run_id: str) -> None:
     if any(r["status"] in {"queued", "sent"} for r in rounds):
         return
     completed = {r["stage"] for r in rounds if r["status"] == "completed"}
+    # Role-play runs open with a blind day; the seed slate is only produced
+    # once that day exists, so the persona never sees the product first.
+    if "roleplay_day" in completed and not _stage_exists(run_id, "seed"):
+        _insert_round(
+            run_id=run_id,
+            stage="seed",
+            round_index=_next_round_index(run_id),
+            target_tokens=stage_tokens["seed"],
+        )
+        return
     if "seed" not in completed:
         return
     if not _threads(run_id):
@@ -1271,7 +1661,12 @@ def _create_threads_from_seed(run_id: str) -> None:
     ).fetchone()
     items = _parse_slate_items(seed["response"] if seed else "", settings=settings)
     planned_items = [item for item in items if not item["anti_promoted"]]
+    degraded = ""
     if len(planned_items) < settings.min_directions:
+        degraded = (
+            f"seed slate parsed {len(planned_items)} directions, "
+            f"below the minimum of {settings.min_directions}"
+        )
         log("dreamingSlateParseFallback",
             f"run={run_id} parsed={len(planned_items)} min={settings.min_directions}")
     while len(planned_items) < settings.direction_count:
@@ -1280,7 +1675,17 @@ def _create_threads_from_seed(run_id: str) -> None:
             "anti_promoted": False,
             "evidence_status": "speculative",
             "evidence_summary": "Fallback direction because the grounded seed slate was underspecified.",
+            "origin_note": "padded: seed produced too few parseable directions",
         })
+        degraded = degraded or "seed slate was padded to reach the direction count"
+    if degraded:
+        # Surfaced on the run rather than only in the log, so a night that
+        # branched on a bad parse is visible next to its digest instead of
+        # looking identical to a healthy one.
+        db.conn().execute(
+            "UPDATE dream_runs SET last_error = ?, updated_at = ? WHERE run_id = ?",
+            (degraded[:500], db.now_ms(), run_id),
+        )
     now = db.now_ms()
     selected = planned_items[:settings.direction_count]
     anti_promoted = [item for item in items if item["anti_promoted"]]
@@ -1291,8 +1696,8 @@ def _create_threads_from_seed(run_id: str) -> None:
             """INSERT OR IGNORE INTO dream_threads (
                    thread_id, run_id, thread_index, title, status,
                    evidence_status, altitude, evidence_summary,
-                   guardrail_refusals, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, 'idea', ?, '[]', ?, ?)""",
+                   guardrail_refusals, origin_note, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, 'idea', ?, '[]', ?, ?, ?)""",
             (
                 f"dthread_{uuid.uuid4().hex}",
                 run_id,
@@ -1301,6 +1706,7 @@ def _create_threads_from_seed(run_id: str) -> None:
                 status,
                 evidence,
                 item.get("evidence_summary", "")[:1000],
+                str(item.get("origin_note") or "")[:300],
                 now,
                 now,
             ),
@@ -1331,26 +1737,37 @@ def _parse_slate_items(text: str,
                     "Seed grounded this direction as already fixed."
                     if anti else ""
                 ),
+                "origin_note": "",
             })
             seen.add(title)
     if len([item for item in items if not item["anti_promoted"]]) >= settings.min_directions:
         return items
-    for line in (text or "").splitlines():
-        stripped = line.strip(" -\t")
-        if len(stripped) >= 20 and stripped not in seen:
-            lower = stripped.lower()
-            anti = "already-fixed" in lower or "already fixed" in lower
-            anti = anti or "anti-promoted" in lower or "anti promoted" in lower
-            items.append({
-                "title": _clean_slate_title(stripped),
-                "anti_promoted": anti,
-                "evidence_status": "refuted" if anti else "speculative",
-                "evidence_summary": (
-                    "Seed grounded this direction as already fixed."
-                    if anti else ""
-                ),
-            })
-            seen.add(stripped)
+    # Degraded path. The old fallback accepted *any* line of 20+ characters,
+    # so a failed parse silently branched on section headers and stray prose
+    # while looking exactly like a healthy run. Only structured lines are
+    # eligible now, and everything produced here is tagged so the ledger shows
+    # that the strict parse missed.
+    for match in _FALLBACK_LINE_RE.finditer(text or ""):
+        stripped = " ".join(match.group("title").split())
+        if len(stripped) < 20 or stripped in seen:
+            continue
+        lower = stripped.lower()
+        anti = any(
+            marker in lower
+            for marker in ("already-fixed", "already fixed",
+                           "anti-promoted", "anti promoted")
+        )
+        items.append({
+            "title": _clean_slate_title(stripped),
+            "anti_promoted": anti,
+            "evidence_status": "refuted" if anti else "speculative",
+            "evidence_summary": (
+                "Seed grounded this direction as already fixed."
+                if anti else ""
+            ),
+            "origin_note": "fallback-parse: seed did not emit a D<n> slate",
+        })
+        seen.add(stripped)
         if len(items) >= settings.direction_count * 2:
             break
     return items
@@ -1444,6 +1861,7 @@ def _build_prompt(*, run_id: str, round_id: str, stage: str, round_index: int,
                   thread_id: str | None) -> str:
     run = get_run(run_id) or {}
     settings = _settings_for_run(run_id)
+    strategy = str(run.get("seed_strategy") or dream_seeds.CONTROL)
     thread = _thread(thread_id) if thread_id else None
     prior_context = _prior_round_context(
         run_id=run_id,
@@ -1472,6 +1890,79 @@ def _build_prompt(*, run_id: str, round_id: str, stage: str, round_index: int,
         f"DREAM_STAGE_OUTPUT run_id={run_id} round_id={round_id} "
         f"stage={stage.upper()}"
     )
+    if stage == "roleplay_day":
+        persona = str(run.get("seed_material") or "someone with a demanding job")
+        return "\n".join([
+            header,
+            "Deep Dreaming ROLE-PLAY round, stage one of two.",
+            budget,
+            guardrails,
+            f"You are {persona}. That is all you are for this round.",
+            "Do NOT think about software, this repository, or any product. You do not know what this machine is for. Ignore any code you can see.",
+            "Walk through one realistic working day, hour by hour, from waking to finishing.",
+            "For each part of the day record: where information lives, what you must hold in your head, where you wait or repeat yourself, what your hands are doing, and what you work around.",
+            "Then list the concrete friction moments — the specific instants where something cost you time, attention, accuracy, or patience. Be specific about the situation, not the wish.",
+            "Do not propose solutions. Do not mention software. Just the day and where it hurt.",
+            "Your response MUST begin with this exact marker line:",
+            marker,
+        ])
+    if stage == "seed" and strategy == dream_seeds.ROLEPLAY:
+        persona = str(run.get("seed_material") or "the persona from the prior round")
+        return "\n".join([
+            header,
+            "Deep Dreaming SEED round (role-play reveal, stage two of two).",
+            budget,
+            guardrails,
+            prior_context,
+            f"The prior round recorded a working day as {persona}, written without any knowledge of this project. Those friction moments are in the ledger context above.",
+            "Now read the actual project in this worktree — its README, its architecture, what it does.",
+            f"Generate exactly {settings.direction_count} candidate directions that come from the COLLISION between that lived friction and this project.",
+            "For each: which friction moment it answers, whether this project could serve it today, what would have to change, and whether the gap is worth closing.",
+            "Prefer directions that this project's authors would not have thought of from inside the code. Do not force a fit — if a friction moment is simply outside this product, saying so is a valid direction.",
+            "Use labels like `D1 [new]: ...`, `D2 [uncertain]: ...`, or `D3 [already-fixed]: ...`.",
+            f"If there is genuinely nothing useful to investigate, reply {DREAMING_OK} run_id={run_id} and take no action.",
+            "Your response MUST begin with this exact marker line:",
+            marker,
+        ])
+    if stage == "seed" and strategy == dream_seeds.FOREIGN:
+        return "\n".join([
+            header,
+            "Deep Dreaming SEED round (foreign-collision seeding).",
+            budget,
+            guardrails,
+            "Below is a subject with no relationship to this project, and an arbitrary constraint. They were chosen at random.",
+            "",
+            str(run.get("seed_material") or ""),
+            "",
+            "Ground yourself in the CURRENT code/state of this worktree. Do not re-dream work that is already fixed.",
+            f"Now force a collision. Generate exactly {settings.direction_count} candidate directions for THIS project that only become visible when you hold it next to that unrelated subject or accept that constraint.",
+            "Look for structural analogy, not decoration: how the unrelated system handles growth, failure, repair, coordination, or scarcity, and what that suggests here.",
+            "A direction that could have been produced without the foreign material is a failed direction. Reach.",
+            "For each active direction include: the analogy or constraint it came from, why it may matter here, current evidence inspected, and what a next experiment would prove.",
+            "Use labels like `D1 [new]: ...`, `D2 [uncertain]: ...`, or `D3 [already-fixed]: ...`.",
+            f"If there is genuinely nothing useful to investigate, reply {DREAMING_OK} run_id={run_id} and take no action.",
+            "Your response MUST begin with this exact marker line:",
+            marker,
+        ])
+    if stage == "seed" and strategy == dream_seeds.LENSES:
+        return "\n".join([
+            header,
+            "Deep Dreaming SEED round (lens seeding).",
+            budget,
+            guardrails,
+            "Answer these questions about this project specifically, with evidence from the current code:",
+            "",
+            str(run.get("seed_material") or ""),
+            "",
+            "Ground yourself against CURRENT code/state. Do not re-dream work that is already fixed.",
+            f"From your answers, generate exactly {settings.direction_count} candidate directions, plus any anti-promoted already-fixed directions you found.",
+            "The question is the lens, not the answer — a direction should be something you found by looking through it, not a restatement of the question.",
+            "For each active direction include: why it may matter, current evidence inspected, what could go wrong, and what a next experiment would prove.",
+            "Use labels like `D1 [new]: ...`, `D2 [uncertain]: ...`, or `D3 [already-fixed]: ...`.",
+            f"If there is genuinely nothing useful to investigate, reply {DREAMING_OK} run_id={run_id} and take no action.",
+            "Your response MUST begin with this exact marker line:",
+            marker,
+        ])
     if stage == "seed":
         return "\n".join([
             header,
@@ -1654,6 +2145,11 @@ def _preview(text: str, limit: int) -> str:
     return compact[:limit]
 
 
+def _random_recipe() -> tuple[str, str]:
+    strategy = dream_seeds.choose_strategy()
+    return strategy, dream_seeds.choose_dose(strategy)
+
+
 class DreamingScheduler:
     """Polls for local-night dream windows and advances active investigations."""
 
@@ -1666,8 +2162,10 @@ class DreamingScheduler:
         chain_delay_sec: float = 1.0,
         chain_retry_sec: float = 1.0,
         chain_attempts: int = 30,
+        recipe_chooser: Callable[[], tuple[str, str]] | None = None,
     ):
         self._send_dream = send_dream
+        self.recipe_chooser = recipe_chooser or _random_recipe
         self.poll_interval_sec = poll_interval_sec
         self.now = now
         self.chain_delay_sec = max(0.0, float(chain_delay_sec))
@@ -1699,11 +2197,14 @@ class DreamingScheduler:
         for run in active_runs():
             sent += self._advance_run(run)
         for agent in pending_dreaming_agents(now=self.now()):
+            strategy, dose = self.recipe_chooser()
             run = create_dream_run(
                 agent,
                 local_date=agent["dreaming_local_date"],
                 timezone_name=agent["dreaming_timezone"],
                 timezone_source=agent["dreaming_timezone_source"],
+                seed_strategy=strategy,
+                context_dose=dose,
             )
             sent += self._advance_run(run)
         return sent
@@ -1711,6 +2212,12 @@ class DreamingScheduler:
     def _advance_run(self, run: dict[str, Any]) -> int:
         agent = agents_db.get_by_agent_id(run["agent_id"])
         if not agent or not dreaming_enabled(agent):
+            # Turning dreaming off used to strand whatever was in flight: the
+            # run could no longer advance, and because recovery lived below
+            # this check it could not be reaped either, so it sat active
+            # forever holding an untracked worktree. Opting out ends the run
+            # instead of abandoning it.
+            abandon_run(run["run_id"])
             return 0
         _recover_stale_sent_round(run["run_id"])
         reason = _skip_busy_reason(agent)

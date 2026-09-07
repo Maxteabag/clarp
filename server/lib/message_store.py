@@ -397,6 +397,69 @@ def record_interruption_marker(*, agent_id: str, backend_session_id: str,
     }
 
 
+def record_dream_digest(*, agent_id: str, backend_session_id: str,
+                        run_id: str, text: str) -> dict[str, Any] | None:
+    """Put a finished Dream Digest into the conversation.
+
+    Dreams run in an isolated backend session that is deliberately never
+    written to the chat read model, which meant a completed digest landed in
+    the dream ledger and nowhere the user would ever look. This is the one
+    row a night is allowed to add: keyed by run id, so a retried import or a
+    second completion cannot post it twice.
+    """
+    if not agent_id or not run_id or not str(text or "").strip():
+        return None
+    database = conn()
+    msg_id = f"dream:{run_id}"
+    if database.execute(
+            "SELECT 1 FROM messages WHERE message_id = ?", (msg_id,)).fetchone():
+        return None
+    row = database.execute(
+        """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
+             FROM messages
+            WHERE agent_id = ? AND backend_session_id = ?""",
+        (agent_id, backend_session_id),
+    ).fetchone()
+    # Below the transcript's numbering, like the interruption marker. seq is
+    # unique per (agent, session) and the rebuild assigns its own values from
+    # the transcript, so a server-authored row sitting inside that range
+    # collides the moment the agent takes its next turn. Display order is
+    # timestamp first, so a negative seq costs nothing: the digest still lands
+    # at the end of the conversation by its own clock.
+    seq = min(int(row["next_seq"]), -1)
+    timestamp_ms = now_ms()
+    timestamp = _iso_from_ms(timestamp_ms)
+    revision = _next_revision(database)
+    inserted = database.execute(
+        """INSERT INTO messages (
+               message_id, agent_id, backend_session_id, source_file, seq,
+               role, timestamp, text, kind, tool_name, tools_json,
+               display_cells_json, updated_at, revision, origin,
+               sender_agent_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(message_id) DO NOTHING""",
+        (
+            msg_id, agent_id, backend_session_id, f"dream:{run_id}",
+            seq, "assistant", timestamp, str(text), None, None, "[]", "[]",
+            timestamp_ms, revision, "dreaming", None,
+        ),
+    )
+    if inserted.rowcount != 1:
+        return None
+    database.execute(
+        """INSERT INTO conversation_heads (
+               agent_id, backend_session_id, revision, replace_revision
+           ) VALUES (?, ?, ?, 0)
+           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+               revision = MAX(conversation_heads.revision, excluded.revision)""",
+        (agent_id, backend_session_id, revision),
+    )
+    return {
+        "id": msg_id, "role": "assistant", "timestamp": timestamp,
+        "text": text, "origin": "dreaming", "revision": revision,
+    }
+
+
 def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
                                   trace_id: str = "", text: str
                                   ) -> dict[str, Any] | None:
@@ -791,9 +854,15 @@ def _restore_assistant_state_txn(database, *, agent_id: str,
                 database.execute(
                     f"DELETE FROM team_messages WHERE team_message_id IN ({team_marks})",
                     doomed_team_ids)
+        # Server-authored assistant rows are exempt. The transcript is the
+        # source of truth for anything the CLI said, so the rebuild clears and
+        # re-derives it — but a dream digest was written by an isolated
+        # backend session that appears in no transcript, so deleting it here
+        # would erase it permanently on the agent's very next turn.
         database.execute(
             "DELETE FROM messages WHERE agent_id=? AND backend_session_id=? "
-            "AND role='assistant'", (agent_id, backend_session_id))
+            "AND role='assistant' AND source_file NOT LIKE 'dream:%'",
+            (agent_id, backend_session_id))
         message_columns = (
             "message_id", "agent_id", "backend_session_id", "source_file", "seq",
             "role", "timestamp", "text", "kind", "tool_name", "tools_json",

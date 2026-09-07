@@ -319,7 +319,7 @@ class _Client:
                 # contract probe is part of this transport's integration test.
                 "additionalContext": {"clarp-app": {
                     "kind": "application",
-                    "value": app_turn_instructions(voice=voice),
+                    "value": app_turn_instructions(voice=voice, session=session),
                 }},
                 "cwd": str(cwd), "approvalPolicy": "never",
                 "sandboxPolicy": {"type": "dangerFullAccess"},
@@ -354,7 +354,7 @@ class _Client:
         if synthesize_audio and not active.voice:
             params["additionalContext"] = {"clarp-voice-followup": {
                 "kind": "application",
-                "value": app_turn_instructions(voice=True),
+                "value": app_turn_instructions(voice=True, session=active.session),
             }}
             active.voice = True
             agents_db.enable_latest_turn_audio(active.agent_id)

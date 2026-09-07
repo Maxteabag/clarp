@@ -28,7 +28,6 @@ TURN_TAKING_KEY = "transcription.turn_taking"
 # model than the one that would otherwise run. Empty model id disables it.
 LONG_FORM_MODEL_KEY = "transcription.long_form_model"
 LONG_FORM_THRESHOLD_KEY = "transcription.long_form_threshold_sec"
-
 DEFAULT_LONG_FORM_THRESHOLD_SEC = 30
 MIN_LONG_FORM_THRESHOLD_SEC = 1
 MAX_LONG_FORM_THRESHOLD_SEC = 3600
