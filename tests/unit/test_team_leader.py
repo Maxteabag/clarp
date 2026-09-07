@@ -17,10 +17,11 @@ def _team_with_leader(tmp_path):
         persona="Lena", voice_id="V", cwd=str(tmp_path), session="lena")
     worker = agents_db.create_agent(
         persona="Omar", voice_id="V", cwd=str(tmp_path), session="omar")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], leader)
     team_store.add_member(team["team_id"], worker)
     team_store.set_leader(team["team_id"], leader)
+    team_store.set_nudge_enabled(team["team_id"], True)
     return team, leader, worker
 
 
@@ -128,7 +129,7 @@ def test_no_tick_without_a_leader(tmp_path):
         persona="Lena", voice_id="V", cwd=str(tmp_path), session="lena")
     worker = agents_db.create_agent(
         persona="Omar", voice_id="V", cwd=str(tmp_path), session="omar")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], leader)
     team_store.add_member(team["team_id"], worker)
     agents_db.record_state(worker, AgentState.INTERRUPTED)

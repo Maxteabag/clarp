@@ -203,6 +203,7 @@ def profile_detail(profile_id: str) -> dict | None:
                    "kind": r[3], "enabled": bool(r[4])} for r in packs],
         "assignments": [{"agent_id": r[0] or "", "team_id": r[1] or ""}
                         for r in assigned],
+        "harvests_workspace": profile_harvests_workspace(row[0]),
     }
 
 
@@ -411,3 +412,49 @@ def run_for_trace(trace_id: str) -> dict | None:
         "dropped": json.loads(row[10] or "[]"),
         "transcript": row[11], "created_at": row[12],
     }
+
+# --- workspace harvesting -------------------------------------------------
+#
+# Whether a profile scrapes its agents' working directories. Stored as a
+# setting rather than a column deliberately: `main` is at schema 66 while the
+# open dreaming branch already carries 67-69, so adding a migration here would
+# collide with it on merge. A column is the better long-term home and this
+# moves there once the branches converge.
+
+_HARVEST_KEY = "vocab.profile.{profile_id}.harvest_workspace"
+
+
+def profile_harvests_workspace(profile_id: str) -> bool:
+    """Whether `profile_id` opted into reading its agents' folders.
+
+    Off unless asked. Scraping someone's directories is a choice, and the
+    default that produced hundreds of library names was the absence of one.
+    """
+    if not profile_id:
+        return False
+    from . import settings_store
+    return settings_store.get_bool(
+        _HARVEST_KEY.format(profile_id=profile_id), default=False)
+
+
+def set_profile_harvests_workspace(profile_id: str, enabled: bool) -> None:
+    if not profile_id:
+        return
+    from . import settings_store
+    settings_store.set_bool(
+        _HARVEST_KEY.format(profile_id=profile_id), bool(enabled))
+
+
+def agent_harvests_workspace(agent_id: str) -> bool:
+    """Whether this agent's assigned profile opted in. No profile means no."""
+    if not agent_id:
+        return False
+    try:
+        return profile_harvests_workspace(profile_for_agent(agent_id) or "")
+    except Exception:  # noqa: BLE001 - biasing never fails a turn
+        return False
+
+
+def assign(*, profile_id: str, agent_id: str = "", team_id: str = "") -> str:
+    """Readable alias for assign_profile, matching unassign's shape."""
+    return assign_profile(profile_id, agent_id=agent_id, team_id=team_id)

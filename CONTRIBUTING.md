@@ -10,12 +10,12 @@ design is in [ARCHITECTURE.md](ARCHITECTURE.md) and the client contract in
 git clone https://github.com/Maxteabag/clarp
 cd clarp
 uv sync --frozen          # Python 3.12+, locked environment in .venv
-npm install               # Svelte, Vite, vitest, Playwright
+npm ci                   # Svelte, Vite, vitest, Playwright from the lockfile
 ```
 
-Run the server from the checkout with `uv run python server/server.py`; the
-PWA hot-reloads with `npm run dev`, which proxies API calls to a server on
-`127.0.0.1:7682` (override with `CLARP_UPSTREAM`).
+Run `uv run python server/runtime.py` and `uv run python server/server.py` in
+separate terminals. The PWA hot-reloads with `npm run dev`, which proxies API
+calls to the server on `127.0.0.1:7682` (override with `CLARP_UPSTREAM`).
 
 ## Tests
 
@@ -46,8 +46,13 @@ to a disposable container; never point it at a server you care about.
   call it.
 - **The PWA bundle** (`static/app/`) is committed. Run `npm run build` and
   include the result when you change anything under `web/src` or `static/lib`.
-- **No compatibility shims.** Server and clients ship together. When a shape
-  changes, change the producer and every consumer; do not keep the old path.
+- **Runtime compatibility is deliberate.** The private runtime RPC must remain
+  compatible while an older runtime finishes turns beside a newer HTTP server.
+  Add protocol fields; do not repurpose them. Host and native clients also
+  release independently: the external core contract is additive, unknown
+  response fields are ignored, and optional features use capabilities.
+  Breaking changes require a protocol version and an explicit upgrade path.
+  Internal implementation details do not need compatibility wrappers.
 
 ## When a new model ships
 

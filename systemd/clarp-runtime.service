@@ -1,0 +1,21 @@
+[Unit]
+Description=Clarp agent runtime (restart-independent agent execution)
+
+[Service]
+Environment="PATH=@@SERVICE_PATH@@"
+Environment="CLARP_SHARE_DIR=@@SHARE_ENV@@"
+Environment="CLARP_CONFIG_DIR=@@CONFIG_ENV@@"
+Environment="CLARP_CACHE_DIR=@@CACHE_ENV@@"
+Environment="CLAUDE_PWA_CONFIG=@@CONFIG_FILE_ENV@@"
+Environment="CLAUDE_PWA_DB=@@DATABASE_ENV@@"
+Environment="CLAUDE_PWA_LOG_DIR=@@LOG_ENV@@"
+@@EXTRA_ENVIRONMENT@@
+UMask=0077
+ExecStart=@@RUNTIME_LAUNCHER@@
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

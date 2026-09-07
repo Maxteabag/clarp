@@ -5,32 +5,31 @@ Rectangle {
 
     required property string status
     property string label: status.length > 0 ? status : "offline"
+    readonly property bool quiet: status === "live" || status === "done" || status === "idle"
     property color tone: {
         if (status === "thinking" || status === "tool" || status === "compacting")
-            return "#e5a769";
+            return "#91a67f";
         if (status === "waiting" || status === "interrupted")
-            return "#e27d72";
+            return "#c47d8d";
         if (status === "live" || status === "done" || status === "idle")
-            return "#77c7a3";
-        return "#77717f";
+            return "#7e9573";
+        return "#6b6e84";
     }
 
-    implicitWidth: labelText.implicitWidth + 20
-    implicitHeight: 24
-    radius: 12
-    color: Qt.rgba(tone.r, tone.g, tone.b, 0.12)
-    border.color: Qt.rgba(tone.r, tone.g, tone.b, 0.34)
-    border.width: 1
+    visible: !quiet
+    implicitWidth: visible ? labelText.implicitWidth + 15 : 0
+    implicitHeight: visible ? 18 : 0
+    color: "transparent"
 
     Row {
         anchors.centerIn: parent
-        spacing: 6
+        spacing: 5
 
         Rectangle {
             anchors.verticalCenter: parent.verticalCenter
-            width: 6
-            height: 6
-            radius: 3
+            width: 5
+            height: 5
+            radius: 2.5
             color: root.tone
         }
 
@@ -39,9 +38,10 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             text: root.label.toUpperCase()
             color: root.tone
-            font.pixelSize: 10
+            font.family: "JetBrains Mono"
+            font.pixelSize: 8
             font.weight: Font.DemiBold
-            font.letterSpacing: 0.7
+            font.letterSpacing: 0.5
         }
     }
 }

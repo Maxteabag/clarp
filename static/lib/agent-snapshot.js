@@ -57,9 +57,12 @@ function normalizeAgent(row) {
     agent_id: row.agent_id || '',
     name: row.persona || row.name || sid,
     persona: row.persona || row.name || sid,
+    is_janitor: row.is_janitor === true,
+    interaction_capabilities: row.interaction_capabilities || {},
     voice_id: row.voice_id || '',
     avatar_symbol: row.avatar_symbol || '',
     avatar_url: row.avatar_url || '',
+    model_avatar_url: row.model_avatar_url || '',
     cwd: row.cwd || '',
     session: sid,
     backend: row.backend || '',
@@ -113,6 +116,7 @@ export function createAgentSnapshotStore() {
   let roster = [];
   let personas = [];
   let availableMcpServers = [];
+  let modelAvatars = false;
 
   function rememberActivity(activity) {
     if (!activity || !activity.session || !activity.ts) return;
@@ -135,6 +139,9 @@ export function createAgentSnapshotStore() {
       ? snapshot.personas.map(row => ({ ...row })) : personas;
     availableMcpServers = Array.isArray(snapshot && snapshot.available_mcp_servers)
       ? [...snapshot.available_mcp_servers] : availableMcpServers;
+    if (snapshot && typeof snapshot.model_avatars === 'boolean') {
+      modelAvatars = snapshot.model_avatars;
+    }
     for (const row of (snapshot && snapshot.agents || [])) {
       const agent = normalizeAgent(row);
       if (agent.activity) rememberActivity(agent.activity);
@@ -295,5 +302,6 @@ export function createAgentSnapshotStore() {
     get roster() { return [...roster]; },
     get personas() { return personas.map(row => ({ ...row })); },
     get availableMcpServers() { return [...availableMcpServers]; },
+    get modelAvatars() { return modelAvatars; },
   };
 }

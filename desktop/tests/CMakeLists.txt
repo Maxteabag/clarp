@@ -1,15 +1,32 @@
+add_executable(clarp-palette-tests tst_palette.cpp)
+target_include_directories(clarp-palette-tests PRIVATE ../src)
+target_link_libraries(clarp-palette-tests PRIVATE Qt6::Gui Qt6::Test)
+clarp_apply_quality_settings(clarp-palette-tests)
+add_test(NAME clarp-desktop-palette COMMAND clarp-palette-tests)
+
 add_executable(clarp-desktop-tests
     tst_native_core.cpp
+    ../src/terminal/TerminalLaunch.cpp
     ../src/app/CredentialStore.cpp
     ../src/app/CredentialStore.h
     ../src/app/AppController.cpp
     ../src/app/AppController.h
+    ../src/app/TranscriptCache.cpp
+    ../src/app/TranscriptCache.h
+    ../src/app/ToolNarrator.cpp
+    ../src/app/ToolNarrator.h
+    ../src/app/TimeFormat.cpp
+    ../src/models/AgentFilterModel.cpp
+    ../src/models/AgentFilterModel.h
+    ../src/media/PortraitImage.cpp
     ../src/media/AudioController.cpp
     ../src/media/AudioController.h
     ../src/media/WavEncoder.cpp
     ../src/media/WavEncoder.h
     ../src/models/AgentListModel.cpp
     ../src/models/AgentListModel.h
+    ../src/models/ConversationPresentationModel.cpp
+    ../src/models/ConversationPresentationModel.h
     ../src/models/ConversationModel.cpp
     ../src/models/ConversationModel.h
     ../src/models/ContactListModel.cpp
@@ -34,6 +51,7 @@ target_compile_definitions(clarp-desktop-tests PRIVATE
 )
 target_link_libraries(clarp-desktop-tests PRIVATE
     Qt6::Core
+    Qt6::Gui
     Qt6::DBus
     Qt6::Multimedia
     Qt6::Network
@@ -42,7 +60,19 @@ target_link_libraries(clarp-desktop-tests PRIVATE
 )
 clarp_apply_quality_settings(clarp-desktop-tests)
 
+add_executable(clarp-tool-narrator-tests tst_tool_narrator.cpp
+    ../src/network/ApiClient.cpp ../src/network/ApiClient.h
+    ../src/app/ToolNarrator.cpp ../src/app/ToolNarrator.h)
+target_include_directories(clarp-tool-narrator-tests PRIVATE ../src)
+target_link_libraries(clarp-tool-narrator-tests PRIVATE Qt6::Core Qt6::Test Qt6::Qml Qt6::Network)
+clarp_apply_quality_settings(clarp-tool-narrator-tests)
+add_test(NAME clarp-desktop-tool-narrator COMMAND clarp-tool-narrator-tests)
+set_tests_properties(clarp-desktop-tool-narrator PROPERTIES TIMEOUT 20)
+
 add_test(NAME clarp-desktop-core COMMAND clarp-desktop-tests)
+set_tests_properties(clarp-desktop-core PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose"
+)
 
 add_test(
     NAME clarp-desktop-native-only
@@ -51,3 +81,65 @@ add_test(
         -DCLARP_DESKTOP_SOURCE=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_SOURCE_DIR}/cmake/VerifyNativeOnly.cmake
 )
+
+# Exercise the actual window command and SplitView layout with an offline fixture.
+string(MD5 clarp_test_instance "${CMAKE_CURRENT_BINARY_DIR}")
+foreach(sidebar_toggles IN ITEMS 1 2)
+    set(sidebar_test "clarp-desktop-sidebar-${sidebar_toggles}")
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/config")
+    add_test(NAME ${sidebar_test} COMMAND clarp-desktop)
+    set_tests_properties(${sidebar_test} PROPERTIES
+        TIMEOUT 15
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=${sidebar_test}-${clarp_test_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_SIDEBAR_TOGGLES=${sidebar_toggles};CLARP_SCREENSHOT_REQUIRE_COMPOSER_FOCUS=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/${sidebar_test}/capture.png"
+    )
+endforeach()
+set_property(TEST clarp-desktop-sidebar-2 APPEND PROPERTY ENVIRONMENT
+    "CLARP_SCREENSHOT_SIDEBAR_WIDTH=310")
+
+find_program(CLARP_QML_TEST_RUNNER qmltestrunner HINTS "${QT6_INSTALL_PREFIX}/lib/qt6/bin" REQUIRED)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/palette-popup/config")
+string(MD5 clarp_palette_instance "${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME clarp-desktop-palette-popup COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-palette-popup PROPERTIES
+    TIMEOUT 15
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=palette-${clarp_palette_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/palette-popup/config;CLARP_SCREENSHOT_SCENARIO=tool-spacing;CLARP_SCREENSHOT_VIEW=orchestrator;CLARP_SCREENSHOT_OPEN_POPUP=orchestratorProvider;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/palette-popup/capture.png"
+)
+add_test(NAME clarp-desktop-activity-layout
+    COMMAND ${CLARP_QML_TEST_RUNNER} -input "${CMAKE_CURRENT_SOURCE_DIR}/qml")
+set_tests_properties(clarp-desktop-activity-layout PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose"
+    TIMEOUT 20)
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/config")
+add_test(NAME clarp-desktop-tool-presentation COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-tool-presentation PROPERTIES
+    TIMEOUT 15
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=clarp-desktop-tool-presentation-${clarp_test_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/config;CLARP_SCREENSHOT_SCENARIO=tool-spacing;CLARP_SCREENSHOT_EXPAND_TOOLS=1;CLARP_SCREENSHOT_REQUIRE_COMPOSER_FOCUS=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/tool-presentation/capture.png"
+)
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/settings-keyboard/config")
+string(MD5 clarp_settings_keyboard_instance "${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME clarp-desktop-settings-keyboard COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-settings-keyboard PROPERTIES
+    TIMEOUT 15
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=settings-keyboard-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/settings-keyboard/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_SETTINGS_KEYBOARD=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/settings-keyboard/capture.png"
+)
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config")
+add_test(NAME clarp-desktop-context-keyboard COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-context-keyboard PROPERTIES TIMEOUT 15
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=context-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_CONTEXT_KEYBOARD=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/capture.png")
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ready-reply/config")
+add_test(NAME clarp-desktop-ready-reply COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-ready-reply PROPERTIES TIMEOUT 15
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=ready-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/ready-reply/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_READY_REPLY=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/ready-reply/capture.png")
+
+add_executable(clarp-desktop-presence-tests tst_desktop_presence.cpp
+    ../src/platform/DesktopPresence.cpp ../src/platform/DesktopPresence.h)
+target_include_directories(clarp-desktop-presence-tests PRIVATE ../src)
+target_link_libraries(clarp-desktop-presence-tests PRIVATE Qt6::Quick Qt6::DBus Qt6::Test)
+clarp_apply_quality_settings(clarp-desktop-presence-tests)
+add_test(NAME clarp-desktop-presence COMMAND clarp-desktop-presence-tests)
+set_tests_properties(clarp-desktop-presence PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_FORCE_STDERR_LOGGING=1" TIMEOUT 15)

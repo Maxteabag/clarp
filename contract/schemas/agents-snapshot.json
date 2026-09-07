@@ -24,6 +24,7 @@
           "voice_id": {"type": "string"},
           "avatar_symbol": {"type": "string"},
           "avatar_url": {"type": "string"},
+          "model_avatar_url": {"type": "string"},
           "backend_session_id": {"type": "string"},
           "conversation_id": {"type": "string"},
           "head_revision": {"type": "integer"},

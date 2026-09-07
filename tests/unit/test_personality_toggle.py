@@ -19,7 +19,7 @@ def test_persona_identity_instruction_respects_personality_toggle():
     assert "Personality: bold and assertive" not in disabled
     assert "clarp-background-jobs" in disabled
     assert "continues after your final response" in disabled
-    assert "Never set a visible status for foreground analysis" in disabled
-    assert "2-3 words and under 20 characters" in disabled
+    assert "Never set a visible status for foreground analysis" not in disabled
+    assert "2-3 words and under 20 characters" not in disabled
     assert "job-upsert" not in disabled
     assert "agent_bg.py" not in disabled

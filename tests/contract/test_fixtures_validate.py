@@ -51,6 +51,9 @@ def test_fixture_files_are_well_formed():
         body = json.loads(path.read_text())
         assert isinstance(body.get("title"), str) and body["title"], path
         assert body.get("area") in AREAS, f"{path}: bad area"
+        if 'clients' in body:
+            assert body['clients'] and set(body['clients']) <= {'web', 'ios'}, path
+            assert body.get('client_scope_reason'), path
         assert path.parent.name == body["area"], f"{path}: area/dir mismatch"
         assert isinstance(body.get("steps"), list), path
         assert isinstance(body.get("expect"), dict), path

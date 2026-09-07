@@ -34,7 +34,19 @@ _NOISE = frozenset({
     "static", "public", "assets", "dist", "build", "node_modules", "vendor",
     "init", "setup", "package", "requirements", "makefile", "dockerfile",
 })
-_SKIP_DIRS = ("node_modules/", ".git/", "dist/", "build/", "vendor/", ".venv/")
+# Project build output, plus the package and cache trees an agent rooted at
+# a home directory will otherwise walk. `/home/linuxbrew` alone contributed
+# hundreds of `lib*` names to one agent's vocabulary.
+_SKIP_DIRS = (
+    "node_modules/", ".git/", "dist/", "build/", "vendor/", ".venv/",
+    # No bare "lib/" here: a project's own lib/ is exactly where its domain
+    # nouns live. Library *names* are rejected by shape below instead, which
+    # is precise where a path prefix is blunt.
+    "linuxbrew/", ".linuxbrew/", "site-packages/", "dist-packages/",
+    ".cache/", ".local/share/", ".rustup/", ".cargo/registry/",
+    "toolchains/", "DerivedData/", ".build/", "target/debug/",
+    "target/release/",
+)
 _SPLIT_RE = re.compile(r"[^A-Za-z0-9]+")
 _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
@@ -90,11 +102,31 @@ def _tokens(stem: str) -> list[str]:
     return out
 
 
+# A shared-library stem: `libmp3lame`, `libkadm5srv`, `libaribb24`. Nobody
+# dictates these, and a package tree holds hundreds of them.
+_LIBRARY_RE = re.compile(r"^lib[a-z0-9_]{2,}$", re.IGNORECASE)
+# A digit buried inside or trailing a word: `aribb24`, `fftw3l`, `pcre2`.
+# Real spoken terms rarely carry them; version-stamped filenames always do.
+_VERSIONED_RE = re.compile(r"[A-Za-z][0-9]")
+
+
 def _worth_saying(token: str) -> bool:
+    """Whether a human would ever say this out loud.
+
+    The ranking below rewards a name that recurs across many files, which is
+    sound for a codebase and exactly backwards for a package tree: a library
+    ships as `.a`, `.so`, `.so.0` and `.so.0.0.0`, so duplication is a linking
+    convention rather than a signal of importance. Rejecting these by shape
+    stops that from promoting them above the words actually worth biasing.
+    """
     low = token.lower()
     if len(token) < 4 or low in _NOISE:
         return False
     if token.isdigit():
+        return False
+    if _LIBRARY_RE.match(token):
+        return False
+    if _VERSIONED_RE.search(token):
         return False
     return True
 

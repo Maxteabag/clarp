@@ -4,6 +4,19 @@ import {
 } from '../../static/lib/agent-overview.js';
 
 describe('agent overview view model', () => {
+  it('does not expose Janitors as chats or unused contacts', () => {
+    const result = buildAgentOverview({
+      agentsBySession: {
+        sam: { agent_id: 'sam-id', name: 'Sam', is_janitor: true, busy: true },
+        theo: { agent_id: 'theo-id', name: 'Theo' },
+      },
+      personas: [{ id: 'sam-contact', name: 'Sam' }],
+      isUnread: () => true,
+    });
+    expect(result.chats.map(row => row.session)).toEqual(['theo']);
+    expect(result.contacts).toEqual([]);
+    expect(result.counts.working).toBe(0);
+  });
   it('keeps duplicate Contact names as separate session-addressed chats', () => {
     const result = buildAgentOverview({
       agentsBySession: {

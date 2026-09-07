@@ -43,10 +43,13 @@ _BUDGETS: dict[str, Budget] = {
     # 50 terms keeps every term's weight meaningful.
     "deepgram": Budget(
         provider="deepgram", model="nova-3", unit=Unit.TERMS, capacity=50),
-    # Cartesia's batch endpoint takes no biasing at all. A zero budget is the
-    # honest declaration; the app shows it and the compiler spends nothing.
+    # Ink-2 accepts 100 keyterms totalling 1200 characters, but only over the
+    # socket. Ink-Whisper's batch endpoint takes no biasing at all, which is
+    # why it scored zero on domain words while every other engine was told
+    # the answers.
     "cartesia": Budget(
-        provider="cartesia", model="ink-whisper", unit=Unit.TERMS, capacity=0),
+        provider="cartesia", model="ink-2", unit=Unit.TERMS,
+        capacity=100, max_term_chars=49),
     # Scribe v2 accepts up to 1000 keyterms under 50 characters; 100 is where
     # ElevenLabs' own billing minimum kicks in, and plenty for one turn.
     "elevenlabs": Budget(
@@ -58,6 +61,9 @@ _BUDGETS: dict[str, Budget] = {
 }
 
 
+_MODEL_BUDGETS: dict[tuple[str, str], "Budget"] = {}
+
+
 def budget_for(provider: str, model: str = "") -> Budget:
     """The active budget, or a conservative Whisper-shaped default.
 
@@ -66,14 +72,28 @@ def budget_for(provider: str, model: str = "") -> Budget:
     at the far end, which is the failure mode this whole module exists to
     avoid.
     """
-    base = _BUDGETS.get(provider.strip().lower())
+    key = provider.strip().lower()
+    base = _BUDGETS.get(key)
     if base is None:
         base = _BUDGETS["faster-whisper"]
+    # Two Cartesia models, two capabilities: Ink-2 takes keyterms over the
+    # socket, Ink-Whisper's batch endpoint takes none. Reporting the provider
+    # budget for both would have the compiler spend effort on terms
+    # Ink-Whisper discards.
+    override = _MODEL_BUDGETS.get((key, (model or base.model).strip().lower()))
+    if override is not None:
+        base = override
     return Budget(
         provider=base.provider, model=(model or base.model),
         unit=base.unit, capacity=base.capacity,
         max_term_chars=base.max_term_chars,
         supports_prose=base.supports_prose)
+
+
+_MODEL_BUDGETS.update({
+    ("cartesia", "ink-whisper"): Budget(
+        provider="cartesia", model="ink-whisper", unit=Unit.TERMS, capacity=0),
+})
 
 
 def describe_budgets() -> list[dict]:

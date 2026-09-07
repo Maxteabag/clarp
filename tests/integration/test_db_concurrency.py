@@ -63,3 +63,42 @@ def test_concurrent_transcript_store_and_read_has_no_connection_race(tmp_path):
         f"sqlite connection race under concurrent requests: "
         f"{type(errors[0]).__name__}: {errors[0]} ({len(errors)} threads failed)"
     )
+
+
+def test_reset_cannot_mark_another_database_migrated(tmp_path, monkeypatch):
+    from lib import db
+    db.reset_for_tests(tmp_path / 'first.sqlite')
+    opened, release, reset_done = threading.Event(), threading.Event(), threading.Event()
+    original = db._open_connection
+    errors = []
+    def delayed_open():
+        connection = original()
+        if threading.current_thread().name == 'opening-database':
+            opened.set()
+            assert release.wait(3)
+        return connection
+    monkeypatch.setattr(db, '_open_connection', delayed_open)
+    def open_first():
+        try:
+            db.conn()
+        except Exception as error:
+            errors.append(error)
+        finally:
+            db.close_local()
+    def reset_second():
+        db.reset_for_tests(tmp_path / 'second.sqlite')
+        reset_done.set()
+    opener = threading.Thread(target=open_first, name='opening-database')
+    resetter = threading.Thread(target=reset_second)
+    opener.start()
+    try:
+        assert opened.wait(3)
+        resetter.start()
+        assert not reset_done.wait(.05), 'reset must wait for the open/migrate operation'
+    finally:
+        release.set()
+        opener.join(3)
+        if resetter.ident is not None: resetter.join(3)
+    assert not errors
+    assert reset_done.is_set()
+    assert db.conn().execute('SELECT count(*) FROM settings').fetchone()[0] >= 0

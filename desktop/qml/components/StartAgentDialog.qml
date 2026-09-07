@@ -12,9 +12,10 @@ Rectangle {
     property string initialName: ""
     property string launchMode: "fresh"
     property string pastSessionId: ""
+    property var selectedMcpServers: []
     signal closeRequested
 
-    color: "#e6121116"
+    color: "#e61a1b26"
 
     function selectValue(combo, value) {
         const index = combo.indexOfValue(value);
@@ -47,6 +48,8 @@ Rectangle {
         if (!visible)
             return;
         nameField.text = initialName;
+        selectedMcpServers = replaceSession.length > 0
+            ? Array.from(root.controller.agentDetails(replaceSession).mcp_servers || []) : [];
         setLaunchMode("fresh");
         workspaceField.text = replaceSession.length > 0 ? root.controller.agentWorkingDirectory(replaceSession) : root.controller.lastWorkingDirectory;
         if (workspaceField.text.length === 0)
@@ -90,8 +93,8 @@ Rectangle {
         height: Math.min(760, parent.height - 48)
         anchors.centerIn: parent
         radius: 20
-        color: "#1b1820"
-        border.color: "#403648"
+        color: "#20212e"
+        border.color: "#41445a"
 
         ColumnLayout {
             anchors.fill: parent
@@ -111,14 +114,14 @@ Rectangle {
 
                 Text {
                     text: root.replaceSession.length > 0 ? "Relaunch agent" : "Start an agent"
-                    color: "#f1ebe6"
+                    color: "#c0caf5"
                     font.pixelSize: 21
                     font.weight: Font.DemiBold
                 }
 
                 Label {
                     text: "Name"
-                    color: "#918997"
+                    color: "#8d93b0"
                 }
                 TextField {
                     id: nameField
@@ -129,7 +132,7 @@ Rectangle {
 
                 Label {
                     text: "Workspace"
-                    color: "#918997"
+                    color: "#8d93b0"
                 }
                 TextField {
                     id: workspaceField
@@ -185,9 +188,9 @@ Rectangle {
                         Layout.fillWidth: true
                         Label {
                             text: "Backend"
-                            color: "#918997"
+                            color: "#8d93b0"
                         }
-                        ComboBox {
+                        ThemedComboBox {
                             id: backendField
                             Layout.fillWidth: true
                             model: root.controller.backendOptions
@@ -200,9 +203,9 @@ Rectangle {
                         Layout.fillWidth: true
                         Label {
                             text: "Effort"
-                            color: "#918997"
+                            color: "#8d93b0"
                         }
-                        ComboBox {
+                        ThemedComboBox {
                             id: effortField
                             Layout.fillWidth: true
                             model: root.controller.effortsForModel(String(backendField.currentValue), String(modelField.currentValue))
@@ -214,9 +217,9 @@ Rectangle {
 
                 Label {
                     text: "Model"
-                    color: "#918997"
+                    color: "#8d93b0"
                 }
-                ComboBox {
+                ThemedComboBox {
                     id: modelField
                     Layout.fillWidth: true
                     model: root.controller.modelsForBackend(String(backendField.currentValue))
@@ -224,9 +227,42 @@ Rectangle {
                     valueRole: "id"
                 }
 
+                ColumnLayout {
+                    visible: String(backendField.currentValue) === "claude"
+                        && root.controller.availableMcpServers.length > 0
+                    Layout.fillWidth: true
+                    spacing: 4
+                    Label {
+                        text: "MCP servers"
+                        color: "#8d93b0"
+                    }
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        Repeater {
+                            model: root.controller.availableMcpServers
+                            delegate: CheckBox {
+                                id: mcpServer
+                                required property string modelData
+                                text: modelData
+                                checked: root.selectedMcpServers.includes(modelData)
+                                onToggled: {
+                                    const selected = Array.from(root.selectedMcpServers);
+                                    const index = selected.indexOf(modelData);
+                                    if (checked && index < 0)
+                                        selected.push(modelData);
+                                    else if (!checked && index >= 0)
+                                        selected.splice(index, 1);
+                                    root.selectedMcpServers = selected;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Label {
                     text: "Conversation"
-                    color: "#918997"
+                    color: "#8d93b0"
                 }
                 RowLayout {
                     Layout.fillWidth: true
@@ -303,7 +339,7 @@ Rectangle {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 1
-                color: "#332d3a"
+                color: "#292b3a"
             }
 
             RowLayout {
@@ -318,7 +354,13 @@ Rectangle {
                 Button {
                     text: root.replaceSession.length > 0 ? "Relaunch" : "Start"
                     enabled: nameField.text.trim().length > 0 && workspaceField.text.trim().length > 0 && (root.launchMode === "fresh" || root.pastSessionId.length > 0)
-                    onClicked: root.controller.createAgent(nameField.text, workspaceField.text, String(backendField.currentValue), String(modelField.currentValue), String(effortField.currentValue), root.replaceSession, root.launchMode, root.pastSessionId)
+                    onClicked: root.controller.createAgent(
+                        nameField.text, workspaceField.text,
+                        String(backendField.currentValue), String(modelField.currentValue),
+                        String(effortField.currentValue), root.replaceSession,
+                        root.launchMode, root.pastSessionId,
+                        String(backendField.currentValue) === "claude"
+                            ? root.selectedMcpServers : [])
                 }
             }
         }

@@ -13,6 +13,7 @@
 #include <QRegularExpression>
 #include <QTimer>
 #include <QUuid>
+#include <algorithm>
 
 namespace clarp {
 
@@ -94,7 +95,13 @@ void AudioController::enqueueClip(const QJsonObject& event) {
 
 bool AudioController::recording() const { return m_recording; }
 
-bool AudioController::transcribing() const { return m_transcribing; }
+bool AudioController::transcribing() const { return m_transcriptionsInFlight > 0; }
+
+int AudioController::transcriptionsInFlight() const { return m_transcriptionsInFlight; }
+
+int AudioController::transcriptionsForSession(const QString& session) const {
+    return m_transcriptionsBySession.value(session);
+}
 
 bool AudioController::playing() const {
     return (m_player != nullptr && m_player->playbackState() == QMediaPlayer::PlayingState) ||
@@ -116,8 +123,17 @@ void AudioController::toggleRecording() {
     }
 }
 
+void AudioController::toggleRecordingForSession(const QString& session) {
+    if (m_recording) {
+        stopRecording();
+        return;
+    }
+    m_recordingSession = session;
+    startRecording();
+}
+
 void AudioController::startRecording() {
-    if (m_recording || m_transcribing) {
+    if (m_recording) {
         return;
     }
     const QAudioDevice device = QMediaDevices::defaultAudioInput();
@@ -165,7 +181,9 @@ void AudioController::stopRecording() {
         emit mediaError(QStringLiteral("Recording was too short"));
         return;
     }
-    uploadRecording(wav);
+    const QString targetSession = m_recordingSession;
+    m_recordingSession.clear();
+    transcribeRecording(wav, targetSession);
 }
 
 void AudioController::cancelRecording() {
@@ -175,7 +193,17 @@ void AudioController::cancelRecording() {
     }
     m_captureDevice = nullptr;
     m_capturePcm.clear();
+    m_recordingSession.clear();
     setRecording(false);
+}
+
+void AudioController::cancelTranscriptionsForSession(const QString& session) {
+    for (auto it = m_transcriptionSessions.cbegin(); it != m_transcriptionSessions.cend(); ++it) {
+        if (it.value() == session && it.key() != nullptr) {
+            m_cancelledTranscriptions.insert(it.key());
+            it.key()->abort();
+        }
+    }
 }
 
 void AudioController::silence() {
@@ -244,11 +272,14 @@ void AudioController::setRecording(bool recording) {
     emit recordingChanged();
 }
 
-void AudioController::setTranscribing(bool transcribing) {
-    if (m_transcribing == transcribing) {
-        return;
+void AudioController::changeTranscriptionCount(const QString& session, int delta) {
+    m_transcriptionsInFlight = std::max(0, m_transcriptionsInFlight + delta);
+    const int sessionCount = std::max(0, m_transcriptionsBySession.value(session) + delta);
+    if (sessionCount == 0) {
+        m_transcriptionsBySession.remove(session);
+    } else {
+        m_transcriptionsBySession.insert(session, sessionCount);
     }
-    m_transcribing = transcribing;
     emit transcribingChanged();
 }
 
@@ -523,18 +554,25 @@ void AudioController::acknowledge(const AudioClip& clip, const QString& status,
     connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
 }
 
-void AudioController::uploadRecording(const QByteArray& wav) {
-    setTranscribing(true);
+void AudioController::transcribeRecording(const QByteArray& wav, const QString& targetSession) {
+    changeTranscriptionCount(targetSession, 1);
     const QString transcriptionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     QNetworkRequest networkRequest = request(resolve(QStringLiteral("/transcribe")));
     networkRequest.setRawHeader("Content-Type", "audio/wav");
     networkRequest.setRawHeader("X-Hands-Free", "0");
     networkRequest.setRawHeader("X-Transcription-ID", transcriptionId.toUtf8());
     QNetworkReply* reply = m_network.post(networkRequest, wav);
+    m_transcriptionSessions.insert(reply, targetSession);
     connect(reply, &QNetworkReply::finished, this, [this, reply, transcriptionId] {
-        setTranscribing(false);
-        const QByteArray response = reply->readAll();
+        const QString capturedSession = m_transcriptionSessions.take(reply);
+        const bool cancelled = m_cancelledTranscriptions.remove(reply);
+        changeTranscriptionCount(capturedSession, -1);
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (cancelled || reply->error() == QNetworkReply::OperationCanceledError) {
+            reply->deleteLater();
+            return;
+        }
+        const QByteArray response = reply->readAll();
         if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300) {
             emit mediaError(reply->errorString());
             reply->deleteLater();
@@ -553,7 +591,7 @@ void AudioController::uploadRecording(const QByteArray& wav) {
             emit transcriptionReady(
                 text, result.value(QStringLiteral("trace_id")).toString(),
                 result.value(QStringLiteral("transcription_id")).toString(transcriptionId),
-                result.value(QStringLiteral("hands_free")).toBool());
+                result.value(QStringLiteral("hands_free")).toBool(), capturedSession);
         }
     });
 }

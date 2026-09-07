@@ -19,6 +19,10 @@ these files are the parts a computer can verify.
   exist.
 - `ios/` — `sync-fixtures.sh` copies the fixtures into the clarp-ios
   CoreBehaviorTests target (separate repo, separate PR).
+  `--check DEST` compares content hashes and provenance. Fixtures may declare
+  `clients` plus a `client_scope_reason` for platform-specific UI policy; other
+  fixtures are shared. Native consumers must reject unsupported expectations,
+  not count an ignored scenario as verified.
 - `reference-client/` — `clarp-client.mjs`, a minimal working client
   (under 250 lines, no dependencies beyond global fetch).
   `tests/contract/test_reference_client.py` runs it through one turn

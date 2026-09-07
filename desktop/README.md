@@ -10,7 +10,25 @@ microphone transcription, authenticated audio playback, system notifications,
 tray controls, MPRIS media-key integration, a single-instance guard, and
 native Secret Service credential storage.
 
-## Requirements
+## Install a bundled release
+
+Download `Clarp-<version>-x86_64.AppImage` from the
+[latest GitHub release](https://github.com/Maxteabag/clarp/releases/latest),
+make it executable, and run it:
+
+```bash
+chmod +x Clarp-*-x86_64.AppImage
+./Clarp-*-x86_64.AppImage
+```
+
+The AppImage includes Qt, QML, and multimedia libraries. If FUSE is not
+available, run it with `APPIMAGE_EXTRACT_AND_RUN=1`. A `.flatpak` bundle is
+also attached to tagged releases and can be installed with
+`flatpak install ./Clarp-*-x86_64.flatpak`.
+
+## Building from source
+
+Requirements:
 
 - CMake 3.22+
 - Ninja
@@ -49,6 +67,99 @@ CLARP_BASE_URL=https://computer.example.ts.net CLARP_TOKEN=cld_… \
   ./build/dev/clarp-desktop
 ```
 
+`Ctrl+B` switches between the full sidebar with agent names and no sidebar.
+This preference is remembered between launches. The header hide button and
+the command palette's **Hide sidebar** / **Show sidebar** use the same toggle.
+The expanded sidebar starts at 354 logical pixels, including the narrow navigation
+strip and searchable conversation list. Dragging its divider saves your preferred
+width; Ctrl+B hides/restores both parts together. Older default-width preferences
+migrate once, while custom widths remain subject to the new 298-pixel minimum.
+
+The messenger-style redesign is integrated on top of the keyboard workspace:
+search and All/Unread filtering, archive access, conversation previews and dates,
+round antialiased portraits, right-aligned user bubbles, and a softer composer.
+It retains the native streaming/Markdown renderer, semantic tool cells, Spark
+explanations and audience dial, pane drafts, Settings, and the existing shortcuts.
+Portrait rounding uses bounded native image processing, including under the
+software renderer, rather than depending on a GPU-only mask.
+
+`Ctrl+Alt+T` opens the active agent in the OS's default terminal window, using
+its working directory and exact native conversation ID. Claude, Codex, AGY,
+and Grok run their own interactive interfaces. This requires a local/shared
+filesystem Host and the corresponding CLI installed on the desktop. Chat
+continues independently; reopening the terminal picks up later chat changes.
+
+To start an idle contact, press `Ctrl+Alt+N` for the idle-contact picker, or
+press `Ctrl+K`, type their name, and select **Start
+<name>**. The row shows the saved backend and folder. **Start** in the ready
+contacts view does the same one-step fresh launch; use `Ctrl+N` to change launch
+options. The new chat receives typing focus after creation.
+
+Your own chat messages use a lighter background instead of a left accent line.
+
+Settings is keyboard-first: `Ctrl+,` opens it and focuses the last-used setting.
+Use `↑`/`↓`, `J`/`K`, or `Tab`/`Shift+Tab` to move through actionable rows;
+`Home`/`End` jump to the first/last. `Space`/`Enter` toggles a value or opens a
+link; `←`/`→` explicitly turns a toggle off/on. The focused row is highlighted
+and automatically scrolled into view. `Esc` closes a settings dialog first,
+then returns to the chat input. Closing the command palette restores the same
+setting, and UI zoom keeps keyboard focus in Settings.
+
+### Experimental plain-English tools
+
+Use **Settings → Experiments → Tool detail**, a five-stop keyboard-friendly dial:
+
+- **Developer:** original tool calls; no translation requests.
+- **Technical:** precise commands, paths and terminology with an explanation of their effect.
+- **Balanced:** useful technical context without shell syntax.
+- **Plain English:** everyday task descriptions without implementation jargon.
+- **Grandma:** short, concrete descriptions with no assumed technical background.
+
+Focus the dial and use `←`/`→`, or click/drag it. Each translated level has unique
+audience instructions. The selection is saved; existing enabled installations
+migrate to Plain English, while disabled installations stay at Developer. A level
+change cancels in-flight work and discards cached translations from another style.
+The **plain-English** command in `Ctrl+K` toggles Developer/the last translated level.
+When translation is enabled, visible
+activity is explained in blue by a local background worker running
+`codex exec --model gpt-5.3-codex-spark` with low reasoning effort. This uses the desktop's
+Codex login and consumes additional Codex usage; no Host deployment is required.
+
+The worker sends bounded tool-command snippets, not the chat transcript or command
+results. For a shared-filesystem Host it also reads bounded excerpts of directly
+referenced local scripts so explanations describe their purpose, not just their
+filename or programming language. It does not execute scripts, follow imports,
+or read hidden paths, symlinks, binaries, or files larger than 64 KiB. Missing
+source is treated as missing evidence, not permission to guess. Common inline credentials are redacted on a best-effort basis; do not
+enable it for tool inputs that must not be sent to OpenAI. Explanations describe
+operations, not guaranteed intent or success. The original status stays visible;
+expand the row (hover for live activity) to read the original details.
+
+Requests are batched, deduplicated, and cached in memory (512 entries). Only one
+Codex process runs at a time. Raw commands stay hidden while waiting: rows show
+cycling `.`, `..`, `…` until ready, or “Explanation unavailable” on failure.
+Failures pause new requests until you toggle off/on; disabling
+cancels the worker and restores the normal view immediately. Switching Hosts
+clears the cache. Translations are not written into the conversation transcript.
+
+The invocation uses a private temporary working directory, read-only sandbox,
+disabled shell/browser/plugin integrations, no personal hooks or project
+instructions, an ephemeral session, and structured output. See the official
+[non-interactive Codex documentation](https://learn.chatgpt.com/docs/non-interactive-mode)
+and [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+`clarp-tool-narrator-tests --live-smoke` is a separate, opt-in real-model check.
+The regular test suite uses a fake subprocess and never consumes model usage.
+
+The translator status shows elapsed seconds and queued activity count. Metadata-only
+timings are recorded in `diagnostics/tool-narrator.jsonl` under the desktop's local
+application-data directory, capped at 256 KiB. Events distinguish queue wait,
+process startup, Codex thread/turn events, process completion, cancellation and
+failure; no command, script, prompt, or generated explanation is logged. This
+measures latency; it does not remove the current serial-batch/full-response delay.
+Use `clarp-tool-narrator-tests --live-script-smoke` for an explicit real-model
+script-purpose check without executing the fixture script.
+
 ## Quality gates
 
 ```bash
@@ -77,6 +188,12 @@ backend is a useful low-memory fallback when GPU throughput matters less.
 
 ## Distribution
 
+Every `v*` tag whose version matches `pyproject.toml` runs the native quality
+gates and publishes a versioned AppImage, `.zsync`, SHA-256 checksum, and
+sideloadable Flatpak to the corresponding GitHub Release. The release builder
+uses `packaging/appimage/build-in-flatpak.sh`, pinned packaging tools, and the
+KDE 6.11 SDK.
+
 - Flatpak is the primary sandboxed channel:
 
   ```bash
@@ -90,8 +207,9 @@ backend is a useful low-memory fallback when GPU throughput matters less.
   not against an accidentally partial rolling-distribution upgrade. Set
   `CLARP_APPIMAGE_RUNTIME_FILE=/path/to/runtime-x86_64` for a fully offline
   build; otherwise `appimagetool` downloads its runtime.
-- `packaging/aur/PKGBUILD` and `.SRCINFO` are ready for AUR publication once a
-  matching `v0.1.0` source tag exists. Replace `SKIP` with the release archive
+- `packaging/aur/PKGBUILD` and `.SRCINFO` follow Clarp's repository version and
+  are ready for AUR publication once the matching source tag exists. Replace
+  `SKIP` with the release archive
   checksum before publishing.
 
 AppImage releases must include a checksum and the dependency-license inventory

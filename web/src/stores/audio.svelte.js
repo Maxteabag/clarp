@@ -32,6 +32,7 @@ export let player = null;
 export let playerAdapter = null;
 export let scheduler = null;
 export let faultMonitor = null;
+let unlockInFlight = false;
 
 // ---- conditions around a fault ------------------------------------------
 //
@@ -133,28 +134,34 @@ export function initAudio(el) {
 export { PLAYER_ADAPTER_VERSION };
 
 export function unlockAudio() {
-  if (audio.unlocked || !player) return;
+  if (audio.unlocked || unlockInFlight || !player) return;
+  unlockInFlight = true;
   const prevSrc = player.src;
   const wasMuted = player.muted;
   player.muted = true;
   player.src = SILENT_MP3_DATA_URL;
   const p = player.play();
-  if (p && p.then) {
-    p.then(() => {
-      audio.unlocked = true;
-      player.pause();
-      player.currentTime = 0;
-      player.muted = wasMuted;
-      // Leaving the silent source in place keeps the element warm; the
-      // adapter overwrites src when the first real clip arrives.
-      if (prevSrc && prevSrc !== window.location.href) player.src = prevSrc;
-      clog('audioUnlocked', 'ok');
-    }).catch((err) => {
-      audio.unlocked = false;
-      player.muted = wasMuted;
-      clog('audioUnlockFail', (err && err.name) || String(err));
-    });
+  if (!p || typeof p.then !== 'function') {
+    unlockInFlight = false;
+    player.muted = wasMuted;
+    return;
   }
+  p.then(() => {
+    unlockInFlight = false;
+    audio.unlocked = true;
+    player.pause();
+    player.currentTime = 0;
+    player.muted = wasMuted;
+    // Leaving the silent source in place keeps the element warm; the
+    // adapter overwrites src when the first real clip arrives.
+    if (prevSrc && prevSrc !== window.location.href) player.src = prevSrc;
+    clog('audioUnlocked', 'ok');
+  }).catch((err) => {
+    unlockInFlight = false;
+    audio.unlocked = false;
+    player.muted = wasMuted;
+    clog('audioUnlockFail', (err && err.name) || String(err));
+  });
 }
 
 // Mute is a client preference. Each send carries the synthesis policy, so one

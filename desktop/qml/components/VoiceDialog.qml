@@ -11,7 +11,7 @@ Rectangle {
     required property string session
     required property string agentName
     signal closeRequested
-    color: "#e6121116"
+    color: "#e61a1b26"
 
     MouseArea {
         anchors.fill: parent
@@ -23,8 +23,8 @@ Rectangle {
         height: Math.min(680, parent.height - 48)
         anchors.centerIn: parent
         radius: 20
-        color: "#1b1820"
-        border.color: "#403648"
+        color: "#20212e"
+        border.color: "#41445a"
 
         ColumnLayout {
             anchors.fill: parent
@@ -36,7 +36,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text: root.agentName + "’s voice"
-                    color: "#f1ebe6"
+                    color: "#c0caf5"
                     font.pixelSize: 21
                     font.weight: Font.DemiBold
                 }
@@ -50,7 +50,7 @@ Rectangle {
                 visible: text.length > 0
                 Layout.fillWidth: true
                 text: root.controller.voiceBio
-                color: "#928a98"
+                color: "#8d93b0"
                 wrapMode: Text.Wrap
                 font.pixelSize: 12
             }

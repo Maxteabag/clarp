@@ -3,10 +3,10 @@
 test: py js
 
 py:
-	uv run --frozen pytest
+	uv run --frozen --group dev python -m pytest
 
 js:
-	npx vitest run
+	uv run --frozen --group dev npm test
 
 # Browser suite against a throwaway Docker node (never a live install).
 e2e:

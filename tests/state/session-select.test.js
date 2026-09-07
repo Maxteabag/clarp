@@ -51,6 +51,12 @@ describe('chooseSession', () => {
 });
 
 describe('visibleSessions', () => {
+  it('keeps maintenance identities out of conversation bootstrap', () => {
+    expect(visibleSessions(['sam', 'theo', 'restricted'], {
+      sam: { is_janitor: true }, theo: {},
+      restricted: { interaction_capabilities: { can_chat: false } },
+    })).toEqual(['theo']);
+  });
   it('keeps archived chats in the snapshot but out of daily navigation', () => {
     expect(visibleSessions(['mike', 'old'], {
       mike: { archived_at: 0 }, old: { archived_at: 1_788_000_000 },

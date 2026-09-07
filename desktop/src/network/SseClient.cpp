@@ -36,6 +36,11 @@ void SseClient::setEndpoint(QUrl baseUrl, QString bearerToken) {
     baseUrl.setPath(path);
     baseUrl.setQuery(QString{});
     baseUrl.setFragment(QString{});
+    if (!m_baseUrl.isEmpty() && m_baseUrl != baseUrl) {
+        // Event IDs are scoped to one Host. Reusing another Host's cursor can
+        // make the new stream skip its initial state or reject the request.
+        m_lastEventId.clear();
+    }
     m_baseUrl = std::move(baseUrl);
     m_bearerToken = std::move(bearerToken);
 }
