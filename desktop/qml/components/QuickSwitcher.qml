@@ -62,6 +62,7 @@ Rectangle {
         }
     }
     readonly property var commands: [
+        { kind: "command", label: "New contact & chat", action: "quick-new-agent", key: "Ctrl+Shift+N", group: "agent" },
         { kind: "command", label: "New agent", action: "new", key: "Ctrl+N", group: "agent" },
         { kind: "command", label: "Start an idle contact", action: "new-contact", key: "Ctrl+Alt+N", group: "agent" },
         { kind: "command", label: "Open agent in terminal", action: "agent-terminal", key: "Ctrl+Alt+T", group: "agent" },
@@ -155,7 +156,7 @@ Rectangle {
             }
             if (String(item.action).startsWith("setting:")) root.applySetting(String(item.action));
             else root.commandRequested(String(item.action));
-            if (["new", "overview", "connection", "orchestrator", "updates", "teams", "settings"].includes(String(item.action)))
+            if (["quick-new-agent", "new", "overview", "connection", "orchestrator", "updates", "teams", "settings"].includes(String(item.action)))
                 shouldRestore = false;
         } else if (String(item.kind) === "contact") {
             root.contactRequested(String(item.name));
