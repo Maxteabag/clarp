@@ -9,7 +9,8 @@ that upgrades an existing database (see `_migrate`).
 
 The hooks and the server both use this module — they share the file via
 WAL mode + a short busy_timeout. Concurrent writes serialise without
-losing rows.
+losing rows. Boot recovery raises that timeout on its own connection so an
+exclusive WAL checkpoint in the HTTP process cannot skip INTERRUPTED marks.
 """
 from __future__ import annotations
 
@@ -20,9 +21,17 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import TypeVar
 
-from .timing import SQLITE_BUSY_TIMEOUT_MS, SQLITE_CONNECT_TIMEOUT_SEC
+from .timing import (
+    SQLITE_BUSY_TIMEOUT_MS,
+    SQLITE_CONNECT_TIMEOUT_SEC,
+    SQLITE_LOCK_RETRIES,
+    SQLITE_LOCK_RETRY_SLEEP_SEC,
+)
 from . import xdg
 
 
@@ -272,6 +281,45 @@ def conn() -> sqlite3.Connection:
             _MIGRATED = True
     _LOCAL.conn = c
     return c
+
+
+def is_locked_error(exc: BaseException) -> bool:
+    """True for SQLITE_BUSY / 'database is locked' from this or another process."""
+    return isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc).lower()
+
+
+@contextmanager
+def busy_timeout(timeout_ms: int) -> Iterator[sqlite3.Connection]:
+    """Temporarily raise this thread's SQLite busy timeout, then restore it."""
+    connection = conn()
+    connection.execute(f"PRAGMA busy_timeout = {int(timeout_ms)}")
+    try:
+        yield connection
+    finally:
+        connection.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+
+
+_T = TypeVar("_T")
+
+
+def retry_locked(
+    operation: Callable[[], _T],
+    *,
+    retries: int | None = None,
+    sleep_sec: float | None = None,
+) -> _T:
+    """Run *operation*, retrying SQLITE_BUSY a bounded number of times."""
+    attempts = SQLITE_LOCK_RETRIES if retries is None else max(1, int(retries))
+    delay = SQLITE_LOCK_RETRY_SLEEP_SEC if sleep_sec is None else max(0.0, float(sleep_sec))
+    for attempt in range(attempts):
+        try:
+            return operation()
+        except sqlite3.OperationalError as exc:
+            if not is_locked_error(exc) or attempt + 1 >= attempts:
+                raise
+            if delay:
+                time.sleep(delay * (attempt + 1))
+    raise RuntimeError("retry_locked exhausted without returning")
 
 
 def close_local() -> None:
