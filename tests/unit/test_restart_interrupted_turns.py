@@ -8,6 +8,7 @@ and writes a visible marker against the orphaned message, for every backend.
 from __future__ import annotations
 
 import itertools
+import sqlite3
 
 import pytest
 
@@ -210,3 +211,49 @@ def test_marker_never_becomes_the_next_turns_reply():
     assert result["notify"] is False
     assert result["preview"] == ""
     assert result["reason"] != "text-reply"
+
+
+def test_locked_interrupt_mark_is_retried(monkeypatch):
+    aid, _session, bs = _agent(backends.CLAUDE)
+    _dispatch(aid, bs, backends.CLAUDE)
+    calls = {"n": 0}
+    real_mark = interrupted_turns._mark
+
+    def flaky(turn, stream):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise sqlite3.OperationalError("database is locked")
+        return real_mark(turn, stream)
+
+    monkeypatch.setattr(interrupted_turns, "_mark", flaky)
+    monkeypatch.setattr(db, "SQLITE_LOCK_RETRY_SLEEP_SEC", 0)
+
+    recovered = interrupted_turns.recover_after_restart()
+
+    assert [row["agent_id"] for row in recovered] == [aid]
+    assert calls["n"] == 3
+    assert agents_db.latest_state(aid)["kind"] == AgentState.INTERRUPTED
+    assert [row["role"] for row in _visible(aid, bs)] == ["user", "assistant"]
+
+
+def test_persistent_lock_still_leaves_other_agents_recoverable(monkeypatch):
+    stalled, _s1, bs1 = _agent(backends.CLAUDE)
+    other, _s2, bs2 = _agent(backends.CLAUDE)
+    _dispatch(stalled, bs1, backends.CLAUDE)
+    _dispatch(other, bs2, backends.CLAUDE)
+    real_mark = interrupted_turns._mark
+
+    def lock_stalled(turn, stream):
+        if turn["agent_id"] == stalled:
+            raise sqlite3.OperationalError("database is locked")
+        return real_mark(turn, stream)
+
+    monkeypatch.setattr(interrupted_turns, "_mark", lock_stalled)
+    monkeypatch.setattr(db, "SQLITE_LOCK_RETRIES", 2)
+    monkeypatch.setattr(db, "SQLITE_LOCK_RETRY_SLEEP_SEC", 0)
+
+    recovered = interrupted_turns.recover_after_restart()
+
+    assert [row["agent_id"] for row in recovered] == [other]
+    assert agents_db.latest_state(stalled)["kind"] == AgentState.THINKING
+    assert agents_db.latest_state(other)["kind"] == AgentState.INTERRUPTED

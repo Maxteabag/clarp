@@ -14,7 +14,7 @@ class ConversationPresentationModel : public QSortFilterProxyModel {
     explicit ConversationPresentationModel(QObject* parent = nullptr);
     bool showWhenReady() const { return m_showWhenReady; }
     void setShowWhenReady(bool value);
-    QVariant data(const QModelIndex& index, int role) const override;
+    QVariant data(const QModelIndex& item, int role) const override;
     Q_INVOKABLE int indexOfMessage(const QString& id) const;
     enum GroupRole { GroupIdsRole = Qt::UserRole + 100, GroupLabelRole, GroupExpandedRole, ActivityInlineRole, ActivityLabelRole };
     QHash<int, QByteArray> roleNames() const override;

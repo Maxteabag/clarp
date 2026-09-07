@@ -95,3 +95,29 @@ def test_clean_runtime_handoff_does_not_invent_an_interruption():
     assert order == ["restore", "reconcile", "queues"]
     assert result["interrupted"] == 0
     assert result["restart_heartbeats"] == 0
+
+
+def test_runtime_recovery_raises_sqlite_busy_timeout_during_boot(monkeypatch):
+    from contextlib import contextmanager
+
+    from lib import runtime_startup
+    from lib.timing import SQLITE_RECOVERY_BUSY_TIMEOUT_MS
+
+    seen: list[int] = []
+
+    @contextmanager
+    def fake_timeout(timeout_ms):
+        seen.append(timeout_ms)
+        yield
+
+    monkeypatch.setattr(runtime_startup.db, "busy_timeout", fake_timeout)
+    recover_runtime(
+        SimpleNamespace(stream=None),
+        SimpleNamespace(recover_queued=lambda: 0),
+        restore_agents=lambda _ctx: None,
+        mark_interrupted=lambda stream=None: [],
+        reconcile=lambda: 0,
+        restart_agents=lambda: [],
+        restart_prompt=lambda _agent: "unused",
+    )
+    assert seen == [SQLITE_RECOVERY_BUSY_TIMEOUT_MS]

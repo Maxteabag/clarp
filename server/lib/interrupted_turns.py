@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import agents as agents_db
-from . import message_store, origins
+from . import db, message_store, origins
 from .db import conn
 from .log import log, log_exception
 from .protocol import AgentState, SSEType
@@ -104,10 +104,10 @@ def recover_after_restart(stream=None) -> list[dict[str, Any]]:
         if agents_db.current_runtime_id(agent["agent_id"]) is None:
             continue
         try:
-            turn = orphaned_turn(agent)
+            turn = db.retry_locked(lambda current=agent: orphaned_turn(current))
             if turn is None:
                 continue
-            _mark(turn, stream)
+            db.retry_locked(lambda marked=turn: _mark(marked, stream))
             recovered.append(turn)
         except Exception as e:  # noqa: BLE001 — one bad row must not block boot
             log_exception("restartInterruptFail", e, detail=agent.get("session"))

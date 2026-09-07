@@ -15,8 +15,14 @@ def seed_defaults(backend: str, *, cwd: Path | None = None) -> int:
     created = 0
     try:
         database.execute("BEGIN IMMEDIATE")
-        # Any row, including a soft-deleted one, proves this is not a fresh DB.
-        if database.execute("SELECT 1 FROM agents WHERE is_janitor = 0 LIMIT 1").fetchone() is not None:
+        # Any ordinary row, including a soft-deleted one, proves this is not a
+        # fresh install. Built-in Janitor identities are installed by Host
+        # startup rather than by the user, so they must not count: when they
+        # were created first, a brand-new install kept its whole default roster
+        # unseeded and the user was left with no agents at all.
+        if database.execute(
+            "SELECT 1 FROM agents WHERE COALESCE(is_janitor, 0) = 0 LIMIT 1"
+        ).fetchone() is not None:
             database.execute("COMMIT")
             return 0
         first_agent_id = None
