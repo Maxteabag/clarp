@@ -17,6 +17,19 @@ def handles(path: str) -> bool:
 
 
 def _send(handler, status: int, value: dict) -> None:
+    # An empty stored scope means all eligible agents. Emit the complete wire
+    # shape expected by installed clients, without changing stored scopes or
+    # the frozen configuration used by an in-flight maintenance run.
+    def wire_janitor(row):
+        if not isinstance(row, dict) or not isinstance(row.get("scope"), dict):
+            return row
+        return {**row, "scope": {"agent_ids": [], "exclude_agent_ids": [], **row["scope"]}}
+
+    value = dict(value)
+    if "janitor" in value:
+        value["janitor"] = wire_janitor(value["janitor"])
+    if isinstance(value.get("janitors"), list):
+        value["janitors"] = [wire_janitor(row) for row in value["janitors"]]
     handler._send(status, json.dumps(value).encode(), "application/json")
 
 
