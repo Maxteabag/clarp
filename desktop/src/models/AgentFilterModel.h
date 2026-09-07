@@ -21,7 +21,7 @@ class AgentFilterModel : public QSortFilterProxyModel {
     [[nodiscard]] QString query() const;
     [[nodiscard]] bool unreadOnly() const;
 
-    Q_INVOKABLE int indexOfSession(const QString& session) const;
+    Q_INVOKABLE [[nodiscard]] int indexOfSession(const QString& session) const;
 
     void setQuery(const QString& query);
     void setUnreadOnly(bool unreadOnly);
