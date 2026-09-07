@@ -12,6 +12,7 @@ Rectangle {
     property bool restoreComposer: false
     property bool sidebarVisible: true
     property bool contactsOnly: false
+    property bool previewVersionsAvailable: false
     readonly property bool narrationEnabled: controller.toolNarrator !== undefined
         && controller.toolNarrator !== null && controller.toolNarrator.enabled
     signal commandRequested(string action)
@@ -63,6 +64,7 @@ Rectangle {
     }
     readonly property var commands: [
         { kind: "command", label: "New contact & chat", action: "quick-new-agent", key: "Ctrl+Shift+N", group: "agent" },
+        { kind: "command", label: "Preview versions · update or roll back", action: "preview-versions", key: "", group: "settings", keywords: "previous installs rollback downgrade" },
         { kind: "command", label: "New agent", action: "new", key: "Ctrl+N", group: "agent" },
         { kind: "command", label: "Start an idle contact", action: "new-contact", key: "Ctrl+Alt+N", group: "agent" },
         { kind: "command", label: "Open agent in terminal", action: "agent-terminal", key: "Ctrl+Alt+T", group: "agent" },
@@ -89,7 +91,7 @@ Rectangle {
         { kind: "command", label: "Stop agent", action: "stop-agent", key: "Ctrl+.", group: "agent" },
         { kind: "command", label: root.controller.muted ? "Enable voice replies" : "Mute voice replies", action: "mute", key: "Ctrl+M", group: "settings" },
         { kind: "command", label: "Talk", action: "talk", key: "Ctrl+Shift+Space", group: "audio" }
-    ]
+    ].filter(command => command.action !== "preview-versions" || root.previewVersionsAvailable)
     readonly property var results: {
         controller.agentRevision;
         controller.contacts.count;
@@ -156,7 +158,7 @@ Rectangle {
             }
             if (String(item.action).startsWith("setting:")) root.applySetting(String(item.action));
             else root.commandRequested(String(item.action));
-            if (["quick-new-agent", "new", "overview", "connection", "orchestrator", "updates", "teams", "settings"].includes(String(item.action)))
+            if (["preview-versions", "quick-new-agent", "new", "overview", "connection", "orchestrator", "updates", "teams", "settings"].includes(String(item.action)))
                 shouldRestore = false;
         } else if (String(item.kind) === "contact") {
             root.contactRequested(String(item.name));
