@@ -4,6 +4,22 @@ This repository is the Clarp server, PWA, and Tauri desktop shell.
 The iOS app is a separate private repo (`clarp-ios`). Do not document
 or duplicate iOS build/signing steps here.
 
+## Agent instruction files
+
+`AGENTS.md` is the only real file. `CLAUDE.md` and `GEMINI.md` are symlinks to
+it, because the CLIs that work in this repo look for different names: codex,
+grok and opencode read `AGENTS.md`, claude reads `CLAUDE.md`, gemini reads
+`GEMINI.md`, and agy reads either `AGENTS.md` or `GEMINI.md`. Keeping one file
+under three names means every backend sees the same rules and none of them can
+drift.
+
+Edit `AGENTS.md`. If a tool rewrites `CLAUDE.md` or `GEMINI.md` as a regular
+file, the copies have forked — restore the symlink rather than syncing by hand:
+
+```bash
+ln -sf AGENTS.md CLAUDE.md && ln -sf AGENTS.md GEMINI.md
+```
+
 ## Worktree closeout
 
 After a pull request or branch is merged, remove its worktree as part of the
@@ -31,3 +47,36 @@ when safe so `.build` and similar caches do not accumulate indefinitely.
 Check for uncommitted changes before running `git checkout` on a path. This is a
 shared working tree; if the file is dirty, the checkout destroys work that
 exists nowhere else.
+
+## Uncommitted work needs a decision artifact
+
+Never end a turn by silently leaving the work you produced uncommitted. If your
+changes are still only in the working tree when you are ready to report, raise a
+native question with the `clarp-decisions` skill's question helper and let the
+user choose what happens to them:
+
+```bash
+clarp-agent-artifacts question "$CLAUDE_PWA_SESSION" \
+  "Uncommitted: <short description>" \
+  "<files changed> are still uncommitted on <branch>. What should I do with them?" \
+  '[{"id":"commit","label":"Commit on this branch"},{"id":"branch_pr","label":"New branch and open a PR"},{"id":"leave","label":"Leave them uncommitted"}]' \
+  --recommend commit --effort quick \
+  --context "<what the change does and how it was verified>"
+```
+
+The helper accepts two or three options only, so offer the ones that actually
+fit the situation; anything else (reverting, stashing, splitting the diff) is
+reachable through the card's **Write my own answer**.
+
+Scope it to the work of this turn. A shared working tree often carries unrelated
+dirty files; name only what you touched, and say so in the context rather than
+proposing to commit somebody else's work-in-progress. Report the change in your
+answer as usual — the question rides alongside it and does not replace telling
+the user what you did.
+
+Do not block on the answer, do not resolve it yourself, and do not treat
+silence, an expiry, or a discard as permission to commit or to revert. One
+question per batch of related changes; check `clarp-agent-artifacts attention`
+before adding another so you do not stack duplicates. Committing and pushing
+still follow the usual rule that they happen when the user asks — the answer to
+this question is that ask.
