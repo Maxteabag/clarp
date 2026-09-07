@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from . import db
 from .log import log, log_exception
 from .protocol import ClipProducerStatus
+from .timing import MAINTENANCE_STARTUP_DELAY_SEC
 
 HOUR_MS = 60 * 60 * 1000
 DAY_MS = 24 * HOUR_MS
@@ -105,10 +106,15 @@ class MaintenanceWorker:
     """Run conservative retention cleanup at startup and then hourly."""
 
     def __init__(self, *, audio_dir: pathlib.Path, policy: Policy = Policy(),
-                 interval_sec: float = 60 * 60):
+                 interval_sec: float = 60 * 60,
+                 startup_delay_sec: float | None = None):
         self.audio_dir = pathlib.Path(audio_dir)
         self.policy = policy
         self.interval_sec = interval_sec
+        self.startup_delay_sec = (
+            MAINTENANCE_STARTUP_DELAY_SEC if startup_delay_sec is None
+            else max(0.0, float(startup_delay_sec))
+        )
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -126,7 +132,7 @@ class MaintenanceWorker:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
 
-    def run_once(self) -> dict[str, int]:
+    def run_once(self, *, checkpoint: bool = True) -> dict[str, int]:
         counts = {"hls_artifacts": prune_hls_artifacts(
             self.audio_dir, max_age_ms=self.policy.hls_artifact_max_age_ms,
         )}
@@ -142,13 +148,25 @@ class MaintenanceWorker:
         # WAL grows without bound (it once reached 3 GB and stalled writes
         # for minutes). TRUNCATE here keeps it capped; busy_timeout bounds
         # how long it may wait, and a busy result just defers to next hour.
-        try:
-            db.conn().execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        except Exception as e:  # noqa: BLE001
-            log_exception("maintenanceCheckpointFail", e)
+        if checkpoint:
+            try:
+                db.conn().execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception as e:  # noqa: BLE001
+                log_exception("maintenanceCheckpointFail", e)
         return counts
 
     def _loop(self) -> None:
+        # Retention and the telemetry rollup are ordinary short writes, so they
+        # still run at boot; deferring the whole sweep left telemetry.sqlite
+        # missing until the first hourly pass. Only the exclusive WAL
+        # truncation races runtime interrupt recovery (SQLITE_BUSY → skipped
+        # INTERRUPTED marks → silent "thinking"), so only it waits.
+        try:
+            self.run_once(checkpoint=False)
+        except Exception as e:  # noqa: BLE001
+            log_exception("maintenanceFail", e)
+        if self.startup_delay_sec and self._stop.wait(self.startup_delay_sec):
+            return
         while not self._stop.is_set():
             try:
                 self.run_once()

@@ -6,8 +6,10 @@ import uuid
 from typing import Callable
 
 from . import agents as agents_db
+from . import db
 from .log import log, log_exception
 from .resume import resume_missing_sessions
+from .timing import SQLITE_RECOVERY_BUSY_TIMEOUT_MS
 
 
 def restore_persisted_agents(ctx) -> None:
@@ -75,10 +77,11 @@ def recover_runtime(
         restart_agents = restart_agents or restart_heartbeat_agents
         restart_prompt = restart_prompt or restart_heartbeat_prompt_text
 
-    restore_agents(ctx)
-    interrupted = ([] if clean_handoff else
-                   mark_interrupted(stream=getattr(ctx, "stream", None)))
-    reconciled = int(reconcile() or 0)
+    with db.busy_timeout(SQLITE_RECOVERY_BUSY_TIMEOUT_MS):
+        restore_agents(ctx)
+        interrupted = ([] if clean_handoff else
+                       mark_interrupted(stream=getattr(ctx, "stream", None)))
+        reconciled = int(reconcile() or 0)
     sent = 0
     trace_ids: list[str] = []
     for agent in ([] if clean_handoff else restart_agents()):

@@ -27,7 +27,7 @@ import pathlib
 from typing import Any
 
 from . import agents as agents_db
-from . import backends
+from . import backends, db
 from .log import log, log_exception
 from .protocol import AgentState
 
@@ -120,7 +120,11 @@ def reconcile_all(*, home: pathlib.Path | None = None) -> int:
     count = 0
     for a in agents_db.list_agents():
         try:
-            if reconcile_agent(a["agent_id"], a.get("backend"), home=home):
+            repaired = db.retry_locked(
+                lambda aid=a["agent_id"], backend=a.get("backend"):
+                    reconcile_agent(aid, backend, home=home)
+            )
+            if repaired:
                 count += 1
         except Exception as e:  # noqa: BLE001
             log_exception("reconcileAgentFail", e, detail=a.get("agent_id"))
