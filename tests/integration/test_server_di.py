@@ -3142,3 +3142,129 @@ def test_recursive_team_api_defaults_settings_and_atomic_cycle_rejection(running
     with pytest.raises(urllib.error.HTTPError) as error:
         _post(base + '/teams', {'name': 'Bad', 'parent_team_id': ['wrong type']})
     assert error.value.code == 400
+
+
+def test_scribe_session_requires_real_authentication(running_server, monkeypatch):
+    from lib import scribe_session
+    calls = []
+    monkeypatch.setattr(scribe_session, 'create_session', lambda **kw: calls.append(kw))
+    base, ctx, _ = running_server
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + '/transcription/realtime-session', {})
+    assert error.value.code == 401
+    assert calls == []
+
+
+def test_scribe_session_authenticated_response_is_not_cacheable(running_server, monkeypatch):
+    from lib import scribe_session
+    base, ctx, _ = running_server
+    ctx.auth_token = 'device-test-secret'
+    expected = {'token': 'single-use', 'model_id': 'scribe_v2_realtime',
+                'audio_format': 'pcm_16000', 'commit_strategy': 'manual'}
+    monkeypatch.setattr(scribe_session, 'create_session', lambda **kw: expected)
+    req = urllib.request.Request(base + '/transcription/realtime-session', data=b'{}',
+                                 headers={'Authorization': 'Bearer device-test-secret',
+                                          'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req, timeout=2) as response:
+        assert json.load(response) == expected
+        assert 'no-store' in response.headers['Cache-Control']
+
+
+@pytest.mark.parametrize('body', [[], {'model': 'something-else'}])
+def test_scribe_session_rejects_unsupported_body(running_server, monkeypatch, body):
+    from lib import scribe_session
+    from unittest.mock import Mock
+    base, ctx, _ = running_server
+    ctx.auth_token = 'device-test-secret'
+    mint = Mock()
+    monkeypatch.setattr(scribe_session, 'create_session', mint)
+    req = urllib.request.Request(base + '/transcription/realtime-session',
+                                 data=json.dumps(body).encode(),
+                                 headers={'Authorization': 'Bearer device-test-secret',
+                                          'Content-Type': 'application/json'})
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(req, timeout=2)
+    assert error.value.code == 400
+    mint.assert_not_called()
+
+
+def test_scribe_session_provider_failure_does_not_leak_secrets(running_server, monkeypatch):
+    from lib import scribe_session
+    base, ctx, _ = running_server
+    ctx.auth_token = 'device-test-secret'
+    def fail(**kwargs):
+        raise scribe_session.ScribeSessionError('Could not create realtime transcription session')
+    monkeypatch.setattr(scribe_session, 'create_session', fail)
+    req = urllib.request.Request(base + '/transcription/realtime-session', data=b'{}',
+                                 headers={'Authorization': 'Bearer device-test-secret',
+                                          'Content-Type': 'application/json'})
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(req, timeout=2)
+    assert error.value.code == 503
+    assert json.load(error.value) == {'error': 'Could not create realtime transcription session'}
+
+
+def test_live_scribe_result_uses_normal_processing_and_idempotency(running_server, monkeypatch):
+    import base64
+    base, ctx, _ = running_server
+    ctx.auth_token = 'device-test-secret'
+    from lib import stt_providers
+    monkeypatch.setattr(stt_providers, 'long_form_model_for', lambda duration: '')
+    # Any second provider call would fail this test.
+    def unwanted(*args, **kwargs): raise AssertionError('must not retranscribe live result')
+    ctx.stt.transcribe_bytes = unwanted
+    ctx.stt.transcribe_model_bytes = unwanted
+    payload = {'audio_base64': base64.b64encode(b'WAV').decode(), 'text': 'live words',
+               'transcription_id': 'live-result-test', 'hands_free': False}
+    def post(data):
+        req = urllib.request.Request(base + '/transcription/live-result', data=json.dumps(data).encode(),
+                                     headers={'Authorization': 'Bearer device-test-secret',
+                                              'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=2) as response: return json.load(response)
+    first = post(payload)
+    assert first['text'] == 'live words'
+    assert first['trace_id']
+    assert first['cached'] is False
+    retry = post(payload)
+    assert retry['cached'] is True
+    assert retry['trace_id'] == first['trace_id']
+    with pytest.raises(urllib.error.HTTPError) as error:
+        post(dict(payload, text='different'))
+    assert error.value.code == 409
+
+
+def test_live_scribe_preserves_configured_long_form_escalation(running_server, monkeypatch):
+    import base64
+    from lib import stt_providers, audio_duration
+    base, ctx, _ = running_server
+    ctx.auth_token = 'device-test-secret'
+    monkeypatch.setattr(audio_duration, 'seconds', lambda audio: 92.8)
+    monkeypatch.setattr(stt_providers, 'long_form_model_for', lambda seconds: 'elevenlabs:scribe_v2')
+    calls = []
+    def transcribe(model, *args, **kwargs):
+        calls.append(model)
+        return ('escalated text', True, 92.8)
+    ctx.stt.transcribe_model_bytes = transcribe
+    req = urllib.request.Request(base + '/transcription/live-result',
+        data=json.dumps({'audio_base64': base64.b64encode(b'WAV').decode(), 'text': 'live text',
+                         'transcription_id': 'live-escalation', 'hands_free': False}).encode(),
+        headers={'Authorization': 'Bearer device-test-secret', 'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req, timeout=2) as response:
+        assert json.load(response)['text'] == 'escalated text'
+    assert calls == ['elevenlabs:scribe_v2']
+
+
+def test_old_client_live_model_selection_falls_back_to_batch_scribe(running_server, monkeypatch):
+    from lib import stt_providers
+    base, ctx, _ = running_server
+    monkeypatch.setattr(stt_providers, 'long_form_model_for', lambda seconds: '')
+    calls = []
+    def transcribe(model, *args, **kwargs):
+        calls.append(model)
+        return ('batch fallback', True, 1.0)
+    ctx.stt.transcribe_model_bytes = transcribe
+    request = urllib.request.Request(base + '/transcribe', data=b'WAV',
+        headers={'Content-Type': 'audio/wav', 'X-Transcription-Model': 'elevenlabs:scribe_v2_realtime'})
+    with urllib.request.urlopen(request, timeout=2) as response:
+        assert json.load(response)['text'] == 'batch fallback'
+    assert calls == ['elevenlabs:scribe_v2']

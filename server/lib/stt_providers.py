@@ -57,6 +57,8 @@ CATALOG: tuple[dict, ...] = (
      "models": (
          {"id": "elevenlabs:scribe_v2", "model": "scribe_v2",
           "name": "ElevenLabs Scribe v2", "biasing": "keyterms"},
+         {"id": "elevenlabs:scribe_v2_realtime", "model": "scribe_v2_realtime",
+          "name": "ElevenLabs Scribe Live", "biasing": "none"},
      )},
     # Cartesia's realtime socket transcribes but relies on the client's
     # `finalize` for turn ends - no end-of-turn detection of its own.
