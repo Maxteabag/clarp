@@ -186,7 +186,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     roster_keys = set()
     for name in [
         *(row["name"] for row in persona_rows),
-        *(str(row["persona"]) for row in rows if row.get("persona")),
+        *(str(row["persona"]) for row in rows if row.get("persona") and not row.get("is_janitor")),
     ]:
         key = name.strip().casefold()
         if key and key not in roster_keys:
