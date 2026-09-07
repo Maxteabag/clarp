@@ -532,10 +532,17 @@ def test_sse_replay_and_event_shapes(core_server):
         time.sleep(1.0)  # let the roster terminator land
     finally:
         replay.close()
-        kinds = replay.kinds()
-        assert "audio" in kinds, f"replay missed audio; got {sorted(kinds)}"
-        assert any(ev == {"type": "agent-roster"} for _, ev in replay.events), (
-            "replay must include its bare agent-roster terminator")
+    kinds = replay.kinds()
+    assert "audio" in kinds, f"replay missed audio; got {sorted(kinds)}"
+    # The bare roster nudge terminates the replay. Live events (a late
+    # agent-activity from the fake turn) may follow it, so assert order, not
+    # position: the nudge lands after the replayed audio.
+    types = [ev.get("type") for _, ev in replay.events]
+    assert {"type": "agent-roster"} in [ev for _, ev in replay.events], types
+    audio_at = types.index("audio")
+    nudge_at = next(i for i, (_, ev) in enumerate(replay.events)
+                    if ev == {"type": "agent-roster"} and i > audio_at)
+    assert nudge_at > audio_at
     for _, ev in replay.events:
         check_event(ev)
 
