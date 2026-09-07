@@ -57,7 +57,10 @@ NOTIFY = frozenset({CONNECTION, TRANSIENT, INTERRUPTED, USAGE_LIMIT, RUNNER_EXIT
 # turn often *also* prints a broken-pipe message as it dies, and we must not
 # auto-retry something the user deliberately stopped.
 _TIMEOUT_RE = re.compile(
-    r"turn timed out|watchdog|idle timeout|no output for",
+    # "timeout waiting for response" is agy print mode giving up on its own
+    # --print-timeout cap; report it as a timeout, not a bare runner exit.
+    r"turn timed out|watchdog|idle timeout|no output for|"
+    r"timeout waiting for response",
     re.I,
 )
 _INTERRUPTED_RE = re.compile(
