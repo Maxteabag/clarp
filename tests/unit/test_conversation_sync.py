@@ -307,3 +307,65 @@ def test_merged_recovery_still_respects_the_requested_limit(tmp_path):
     assert body["has_more"] is True
     stamps = [t.get("timestamp") or "" for t in body["turns"]]
     assert stamps == sorted(stamps)
+
+
+def _fallback_answer(agent_id, text, finished_iso, request_id="rq"):
+    """A delivered fallback answer, as model_fallbacks records it."""
+    import json
+    from datetime import datetime, timezone
+    from lib import db
+    finished = int(datetime.fromisoformat(finished_iso).replace(
+        tzinfo=timezone.utc).timestamp() * 1000)
+    db.conn().execute(
+        """INSERT INTO model_fallback_attempts
+             (request_id, agent_id, runtime_id, attempt, backend, model, effort,
+              status, reason, started_at, finished_at, result_json)
+           VALUES (?, ?, ?, 0, 'agy', 'gemini-test', '', 'completed', 'limit',
+                   ?, ?, ?)""",
+        (request_id, agent_id, agents_db.current_runtime_id(agent_id),
+         finished - 1000, finished, json.dumps({"text": text})),
+    )
+
+
+def test_recovered_answers_appear_in_a_full_load_in_time_order(tmp_path):
+    agent_id = _agent(tmp_path)
+    _store(agent_id, [
+        {"role": "user", "text": "early question", "timestamp": "2026-01-01T10:00:00Z"},
+        {"role": "assistant", "text": "the newest real reply", "timestamp": "2026-01-01T12:00:05Z"},
+    ])
+    _fallback_answer(agent_id, "recovered answer", "2026-01-01T11:00:00")
+
+    body = _load("reliable")
+    texts = [t["text"] for t in body["turns"]]
+    assert "recovered answer" in texts
+    assert texts[-1] == "the newest real reply"
+    stamps = [t.get("timestamp") or "" for t in body["turns"]]
+    assert stamps == sorted(stamps)
+
+
+def test_a_delta_returns_only_rows_newer_than_the_cursor(tmp_path):
+    """Recovered rows have no revision, so a delta repeated them forever.
+
+    The client re-applied the same rows on every poll and never converged on
+    the newest turn, leaving the pane stuck on an old recovered answer.
+    """
+    agent_id = _agent(tmp_path)
+    _store(agent_id, [
+        {"role": "user", "text": "early question", "timestamp": "2026-01-01T10:00:00Z"},
+        {"role": "assistant", "text": "early answer", "timestamp": "2026-01-01T10:00:05Z"},
+    ])
+    _fallback_answer(agent_id, "recovered answer", "2026-01-01T11:00:00")
+    cursor = _load("reliable")["latest_revision"]
+
+    _store(agent_id, [
+        {"role": "user", "text": "early question", "timestamp": "2026-01-01T10:00:00Z"},
+        {"role": "assistant", "text": "early answer", "timestamp": "2026-01-01T10:00:05Z"},
+        {"role": "assistant", "text": "brand new reply", "timestamp": "2026-01-01T12:00:00Z"},
+    ])
+
+    delta = _load("reliable", after_revision=cursor)
+    texts = [t["text"] for t in delta["turns"]]
+    assert "brand new reply" in texts
+    assert "recovered answer" not in texts
+    assert all(int(t.get("revision") or 0) > cursor for t in delta["turns"]), \
+        [(t.get("revision"), t["text"][:24]) for t in delta["turns"]]
