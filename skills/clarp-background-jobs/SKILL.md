@@ -21,4 +21,3 @@ instead of remaining Running forever.
 Cancellation is sticky for a stable ID; use explicit `job-restart` only when
 the user intentionally starts a new run of that previously cancelled target,
 then use the new handle it prints.
-Set the short header status only while detached work genuinely continues.

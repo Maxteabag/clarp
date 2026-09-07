@@ -1,6 +1,8 @@
 {
   "title": "a preempted send never confirms and goes stale",
   "area": "delivery",
+  "clients": ["web"],
+  "client_scope_reason": "Includes the web-specific stale-delivery timeout after preemption; native identity is covered by the optimistic and retry fixtures.",
   "steps": [
     {"open": true},
     {"log": {"mode": "tail", "response": {"conversation_id": "c1", "turns": [], "latest_revision": 0, "has_more": false, "missing": false}}},

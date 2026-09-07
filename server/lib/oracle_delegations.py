@@ -116,6 +116,8 @@ def dispatch(*, ctx, delegation_id: str, session: str,
     agent = agents_db.get_by_session(session)
     if not agent:
         raise LookupError("unknown agent")
+    if not agents_db.interaction_capabilities(agent)["can_voice_target"]:
+        raise ValueError("Janitors cannot receive Oracle delegations")
     trace_id = f"oracle-{delegation_id}"
     client_msg_id = trace_id
     record, created = begin(
@@ -223,8 +225,8 @@ def complete_for_trace(*, trace_id: str, message_id: str, text: str) -> bool:
         """UPDATE oracle_delegations
               SET status = 'completed', result_message_id = ?,
                   result_text = ?, error = '', updated_at = ?
-            WHERE trace_id = ? AND status IN ('accepted', 'queued')""",
-        (message_id, clean, db.now_ms(), trace_id.strip()),
+            WHERE (trace_id = ? OR completion_trace_id = ?) AND status IN ('accepted', 'queued')""",
+        (message_id, clean, db.now_ms(), trace_id.strip(), trace_id.strip()),
     ).rowcount
     return changed > 0
 
@@ -244,8 +246,8 @@ def fail_for_trace(trace_id: str, reason: str) -> bool:
     return db.conn().execute(
         """UPDATE oracle_delegations
               SET status = 'failed', error = ?, updated_at = ?
-            WHERE trace_id = ? AND status IN ('accepted', 'queued')""",
-        ((reason or "Agent turn failed")[:500], db.now_ms(), trace_id.strip()),
+            WHERE (trace_id = ? OR completion_trace_id = ?) AND status IN ('accepted', 'queued')""",
+        ((reason or "Agent turn failed")[:500], db.now_ms(), trace_id.strip(), trace_id.strip()),
     ).rowcount > 0
 
 
@@ -257,7 +259,7 @@ def reconcile_orphans(*, is_live) -> int:
     untouched for normal queue recovery.
     """
     rows = db.conn().execute(
-        """SELECT delegation_id, agent_id, trace_id, client_msg_id
+        """SELECT delegation_id, agent_id, trace_id, completion_trace_id, client_msg_id
              FROM oracle_delegations
             WHERE status IN ('accepted', 'queued')"""
     ).fetchall()
@@ -266,9 +268,9 @@ def reconcile_orphans(*, is_live) -> int:
     for row in rows:
         if not message_store.has_client_message(str(row["client_msg_id"] or "")):
             continue
-        if is_live(str(row["agent_id"]), str(row["trace_id"] or "")):
+        trace_id = str(row["completion_trace_id"] or row["trace_id"] or "")
+        if is_live(str(row["agent_id"]), trace_id):
             continue
-        trace_id = str(row["trace_id"] or "")
         committed = db.conn().execute(
             """SELECT message_id, text
                  FROM messages
@@ -413,3 +415,23 @@ def recent(
         (owner_principal, max(1, min(int(limit), 200))),
     ).fetchall()
     return [_row(row) or {} for row in rows]
+
+
+def attach_steered_trace(trace_id: str, active_trace: str) -> None:
+    """Keep request identity while following the turn that accepted its text."""
+    db.conn().execute(
+        "UPDATE oracle_delegations SET completion_trace_id = ? WHERE trace_id = ? AND status IN ('accepted', 'queued')",
+        (active_trace, trace_id),
+    )
+    # Completion can arrive while the backend acknowledges turn/steer.
+    # Reconcile an already committed answer instead of waiting for an event
+    # that has already happened.
+    committed = db.conn().execute(
+        """SELECT message_id, text FROM messages
+           WHERE role = 'assistant' AND source_file = ?
+             AND TRIM(text) <> '' ORDER BY revision DESC LIMIT 1""",
+        (f"final:{active_trace}",),
+    ).fetchone()
+    if committed is not None:
+        complete_for_trace(trace_id=active_trace,
+                           message_id=committed["message_id"], text=committed["text"])

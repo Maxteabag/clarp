@@ -266,7 +266,7 @@ def spawn_turn(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        bufsize=1,
+        bufsize=1, start_new_session=(os.name == "posix"),
         env=env,
     )
     attach_stderr_drain(proc)
@@ -280,7 +280,9 @@ def spawn_turn(
             proc.stdin.close()
     except (BrokenPipeError, OSError) as e:
         log_exception("clarpStdinWriteFail", e, detail=trace_id)
-    handle = TurnHandle(proc=proc, drain_thread=None)   # type: ignore[arg-type]
+    handle = TurnHandle(
+        proc=proc, drain_thread=None,
+        process_group=proc.pid if os.name == "posix" else None)   # type: ignore[arg-type]
     if agent_id and not isolated:
         _register(agent_id, handle)
     drain = threading.Thread(
@@ -323,6 +325,7 @@ def _drain_stdout(
     ends the read loop below."""
     saw_init = False
     saw_result = False
+    saw_usage_limit = False
     live_text = ""
     isolated_texts: list[str] = []
     live_backend_session_id = backend_session_id
@@ -341,7 +344,15 @@ def _drain_stdout(
                 continue
             typ = ev.get("type")
             sub = ev.get("subtype")
-            if typ == "system" and sub == "init":
+            if typ == "rate_limit_event":
+                info = ev.get("rate_limit_info")
+                if (isinstance(info, dict)
+                        and info.get("status") in {"rejected", "blocked"}
+                        and not saw_usage_limit):
+                    saw_usage_limit = True
+                    if on_error is not None:
+                        on_error("Claude usage limit reached")
+            elif typ == "system" and sub == "init":
                 sid = (ev.get("session_id") or "").strip()
                 if sid:
                     saw_init = True
@@ -352,7 +363,7 @@ def _drain_stdout(
                             accepted = on_session_init(sid)
                             if accepted is False:
                                 if proc.poll() is None:
-                                    proc.terminate()
+                                    handle.terminate() if handle else proc.terminate()
                                 if on_error is not None:
                                     on_error("backend session binding rejected")
                                 return
@@ -402,7 +413,7 @@ def _drain_stdout(
                                       detail=trace_id)
         rc = proc.wait()
         err = stderr_text(proc)
-        if rc != 0:
+        if rc != 0 and not saw_usage_limit:
             log("clarpExitErr", f"rc={rc} trace={trace_id or '∅'} "
                                 f"stderr={(err or '')[:500]!r}")
             if on_error is not None:
@@ -410,7 +421,7 @@ def _drain_stdout(
                     on_error(err or f"clarp exited rc={rc}")
                 except Exception as e:                # noqa: BLE001
                     log_exception("clarpRunnerErrCbFail", e, detail=trace_id)
-        elif not saw_result:
+        elif not saw_result and not saw_usage_limit:
             msg = err or (
                 f"clarp exited rc={rc} without stream-json result or system.init"
             )

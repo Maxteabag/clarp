@@ -1,7 +1,10 @@
 #include "protocol/ProtocolTypes.h"
 
 #include <QJsonValue>
+#include <QRegularExpression>
 #include <QSet>
+#include <algorithm>
+#include <ranges>
 
 namespace clarp {
 namespace {
@@ -21,6 +24,47 @@ bool boolValue(const QJsonObject& object, const char* key) {
     return value.isBool() && value.toBool();
 }
 
+QString cleanedDisplayText(QString text, bool streaming) {
+    static const QRegularExpression voxBlock(QStringLiteral(R"(<vox\b[^>]*>.*?</vox>)"),
+                                             QRegularExpression::CaseInsensitiveOption |
+                                                 QRegularExpression::DotMatchesEverythingOption);
+    static const QRegularExpression speakTag(QStringLiteral(R"(</?speak\b[^>]*>)"),
+                                             QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression audioTag(
+        QStringLiteral(R"(</?(?:break|speed|volume|emotion)\b[^>]*/?>)"),
+        QRegularExpression::CaseInsensitiveOption);
+    text.remove(voxBlock);
+    text.remove(speakTag);
+    text.remove(audioTag);
+    if (streaming) {
+        const qsizetype openVox = text.lastIndexOf(QStringLiteral("<vox"), -1, Qt::CaseInsensitive);
+        const qsizetype closeVox =
+            text.lastIndexOf(QStringLiteral("</vox>"), -1, Qt::CaseInsensitive);
+        if (openVox >= 0 && openVox > closeVox) {
+            text.truncate(openVox);
+        }
+        const qsizetype marker = text.lastIndexOf(u'<');
+        if (marker >= 0) {
+            const QString tail = text.sliced(marker).toLower();
+            static const QStringList prefixes{
+                QStringLiteral("<speak"),   QStringLiteral("</speak"),  QStringLiteral("<vox"),
+                QStringLiteral("</vox"),    QStringLiteral("<break"),   QStringLiteral("</break"),
+                QStringLiteral("<speed"),   QStringLiteral("</speed"),  QStringLiteral("<volume"),
+                QStringLiteral("</volume"), QStringLiteral("<emotion"), QStringLiteral("</emotion"),
+            };
+            const bool incompleteVoiceTag =
+                !tail.contains(u'>') &&
+                std::ranges::any_of(prefixes, [&tail](const QString& prefix) {
+                    return prefix.startsWith(tail) || tail.startsWith(prefix);
+                });
+            if (incompleteVoiceTag) {
+                text.truncate(marker);
+            }
+        }
+    }
+    return text.trimmed();
+}
+
 } // namespace
 
 Agent Agent::fromJson(const QJsonObject& object) {
@@ -37,10 +81,17 @@ Agent Agent::fromJson(const QJsonObject& object) {
     agent.latestState = stringValue(object, "latest_state");
     agent.statusText = stringValue(object, "status_text");
     agent.lastMessage = stringValue(object, "last_message");
+    agent.lastCompletedMessage = stringValue(object, "last_completed_message");
     agent.conversationId = stringValue(object, "conversation_id");
     agent.voiceId = stringValue(object, "voice_id");
     if (object.value(QStringLiteral("schedules")).isArray()) {
         agent.schedules = object.value(QStringLiteral("schedules")).toArray();
+    }
+    if (object.value(QStringLiteral("mcp_servers")).isArray()) {
+        agent.mcpServers = object.value(QStringLiteral("mcp_servers")).toArray();
+    }
+    if (object.value(QStringLiteral("team_ids")).isArray()) {
+        agent.teamIds = object.value(QStringLiteral("team_ids")).toArray();
     }
     agent.latestStateTimestamp = integerValue(object, "latest_state_ts");
     agent.lastActivity = integerValue(object, "last_activity");
@@ -48,6 +99,7 @@ Agent Agent::fromJson(const QJsonObject& object) {
     agent.contextTokens = integerValue(object, "context_tokens");
     agent.contextWindow = integerValue(object, "context_window");
     agent.queuedTurnCount = static_cast<int>(integerValue(object, "queued_turn_count"));
+    agent.queueRevision = integerValue(object, "queue_revision");
     agent.alive = boolValue(object, "alive");
     agent.busy = boolValue(object, "busy") || isBusyState(agent.latestState);
     agent.focused = boolValue(object, "focused");
@@ -66,10 +118,22 @@ Message Message::fromJson(const QJsonObject& object) {
     message.text = stringValue(object, "text");
     message.timestamp = stringValue(object, "timestamp");
     message.kind = stringValue(object, "kind");
+    message.displayText = cleanedDisplayText(message.text, message.kind == QStringLiteral("live"));
     message.toolName = stringValue(object, "tool_name");
     message.origin = stringValue(object, "origin");
     message.senderName = stringValue(object, "sender_name");
+    message.senderAgentId = stringValue(object, "sender_agent_id");
+    message.senderSession = stringValue(object, "sender_session");
+    message.traceId = stringValue(object, "trace_id");
+    message.category = stringValue(object, "category");
+    if (message.category.isEmpty()) {
+        message.category = stringValue(object, "automated_category");
+    }
     message.revision = integerValue(object, "revision");
+    message.activityCount = static_cast<int>(integerValue(object, "activity_count"));
+    message.automated = boolValue(object, "automated") || boolValue(object, "is_automated");
+    message.toolDetailsAvailable = boolValue(object, "tool_details_available");
+    message.deliveryFailed = boolValue(object, "delivery_failed");
     if (object.value(QStringLiteral("tools")).isArray()) {
         message.tools = object.value(QStringLiteral("tools")).toArray();
     }
@@ -117,6 +181,86 @@ bool isBusyState(const QString& state) {
 
 QString displayName(const Agent& agent) {
     return agent.persona.isEmpty() ? agent.session : agent.persona;
+}
+
+QString voiceDeliverySession(const QString& captureSession, const QString& currentSession) {
+    return captureSession.isEmpty() ? currentSession : captureSession;
+}
+
+QStringList markdownDisplayBlocks(const QString& markdown) {
+    QString normalized = markdown;
+    normalized.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    normalized.replace(u'\r', u'\n');
+    if (normalized.trimmed().isEmpty()) {
+        return {};
+    }
+
+    const QStringList lines = normalized.split(u'\n');
+    QStringList blocks;
+    QStringList current;
+    QString fence;
+
+    const auto listKind = [](const QString& line) -> int {
+        static const QRegularExpression bullet(QStringLiteral(R"(^\s*[-+*]\s+\S)"));
+        static const QRegularExpression ordered(QStringLiteral(R"(^\s*\d+[.)]\s+\S)"));
+        if (bullet.match(line).hasMatch()) {
+            return 1;
+        }
+        return ordered.match(line).hasMatch() ? 2 : 0;
+    };
+    const auto flush = [&blocks, &current] {
+        while (!current.isEmpty() && current.constLast().trimmed().isEmpty()) {
+            current.removeLast();
+        }
+        if (!current.isEmpty()) {
+            blocks.append(current.join(u'\n'));
+            current.clear();
+        }
+    };
+
+    for (qsizetype index = 0; index < lines.size(); ++index) {
+        const QString& line = lines.at(index);
+        const QString trimmed = line.trimmed();
+        if (!fence.isEmpty()) {
+            current.append(line);
+            if (trimmed.startsWith(fence)) {
+                fence.clear();
+            }
+            continue;
+        }
+        if (trimmed.startsWith(QStringLiteral("```")) ||
+            trimmed.startsWith(QStringLiteral("~~~"))) {
+            fence = trimmed.first(3);
+            current.append(line);
+            continue;
+        }
+        if (!trimmed.isEmpty()) {
+            current.append(line);
+            continue;
+        }
+
+        qsizetype nextIndex = index + 1;
+        while (nextIndex < lines.size() && lines.at(nextIndex).trimmed().isEmpty()) {
+            ++nextIndex;
+        }
+        int previousKind = 0;
+        for (const auto& previous : std::views::reverse(current)) {
+            if (!previous.trimmed().isEmpty()) {
+                previousKind = listKind(previous);
+                break;
+            }
+        }
+        const int nextKind = nextIndex < lines.size() ? listKind(lines.at(nextIndex)) : 0;
+        if (previousKind != 0 && previousKind == nextKind) {
+            if (!current.constLast().isEmpty()) {
+                current.append(QString{});
+            }
+        } else {
+            flush();
+        }
+    }
+    flush();
+    return blocks;
 }
 
 } // namespace clarp

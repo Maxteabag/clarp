@@ -28,11 +28,11 @@ TURN_TAKING_KEY = "transcription.turn_taking"
 # model than the one that would otherwise run. Empty model id disables it.
 LONG_FORM_MODEL_KEY = "transcription.long_form_model"
 LONG_FORM_THRESHOLD_KEY = "transcription.long_form_threshold_sec"
-
 DEFAULT_LONG_FORM_THRESHOLD_SEC = 30
 MIN_LONG_FORM_THRESHOLD_SEC = 1
 MAX_LONG_FORM_THRESHOLD_SEC = 3600
 
+_CARTESIA_SOCKET_MODELS = frozenset({"ink-2", "ink-preview"})
 LOCAL_ENGINE = "local"
 TURN_NATIVE = "native"
 TURN_PROVIDER = "provider"
@@ -63,6 +63,11 @@ CATALOG: tuple[dict, ...] = (
      "credential": "CARTESIA_API_KEY", "streaming": True,
      "turn_detection": "native", "turn_detection_model": "",
      "models": (
+         # Ink-2 is the current model and the only Cartesia one that accepts
+         # vocabulary, over the socket. Ink-Whisper stays for latency: it was
+         # the fastest engine measured, it simply transcribes blind.
+         {"id": "cartesia:ink-2", "model": "ink-2",
+          "name": "Cartesia Ink-2", "biasing": "keyterms"},
          {"id": "cartesia:ink-whisper", "model": "ink-whisper",
           "name": "Cartesia Ink-Whisper", "biasing": "none"},
      )},
@@ -285,6 +290,9 @@ def transcribe(model_id: str, audio_bytes: bytes, content_type: str,
         from .deepgram_stt import transcribe as run
     elif provider == "elevenlabs":
         from .eleven_stt import transcribe as run
+    elif provider == "cartesia" and row["model"] in _CARTESIA_SOCKET_MODELS:
+        # Keyterms only exist on the socket, so the biasing models go there.
+        from .cartesia_stt_ws import transcribe as run
     else:
         from .cartesia_stt import transcribe as run
     text, duration = run(

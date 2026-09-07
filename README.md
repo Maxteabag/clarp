@@ -1,5 +1,30 @@
 # Clarp
 
+## Why this exists
+
+Clarp exists to give people back their dignity — to free them from the desk,
+from the screen, from the office, and to close the distance between new
+information and the source of their own creativity.
+
+A human body should not be a meat proxy between an idea and the world. We
+should not spend our lives doing repetitive manual work with our thumbs and
+our hands just to make a machine understand us. Clarp is an attempt to
+decouple our limbs from the part of human existence that actually matters:
+information, creativity, joy, excitement, emotion — the interface through
+which we express our intentions and reach for what we want.
+
+Nobody should need their eyes and their fingers to make a computer do
+something. Intention should become action with as little friction as is
+physically possible, and the goal is to close that distance as far as a
+machine will allow.
+
+That means removing the need for a desk. For a keyboard. For a mouse. It also
+means removing the repetitive junk we are forced to filter out by hand — the
+noise we have to look at and listen to before we reach anything real. We
+should be exposed to as much novel information as possible and as little
+repetition as we can manage, so that our intentions are fulfilled with the
+least friction there is.
+
 Clarp is source-available under the [PolyForm Shield License
 1.0.0](LICENSE.md). It may not be used to provide a competing agent-control
 product or service. Separate [commercial licensing](COMMERCIAL_LICENSE.md) is
@@ -24,6 +49,15 @@ backends run on the host you install the server on. Designed for use over
 [Tailscale](https://tailscale.com/) so your phone and the host can talk to
 each other without exposing anything to the public internet, but nothing
 about it is Tailscale-specific.
+
+Linux users can download the native Qt desktop client as a self-contained
+AppImage from the [latest GitHub release](https://github.com/Maxteabag/clarp/releases/latest).
+It does not require Qt development packages:
+
+```bash
+chmod +x Clarp-*-x86_64.AppImage
+./Clarp-*-x86_64.AppImage
+```
 
 ## Quick start
 
@@ -138,13 +172,11 @@ target still runs the normal `make deploy`, so it copies the generated server
 and static files into `~/.local/share/clarp/` and restarts
 `clarp.service`; it only changes how the deploy process is launched.
 
-Before restart, `make deploy-detached` snapshots agents whose latest SQLite
-state is `thinking`, `tool`, or `compacting`, and also maps any live child CLI
-processes back to their agent sessions by backend session id. After the service
-comes back, it posts a forced-session `continue` to each snapshot session
-through `/send`, so sticky focus or orchestrator routing cannot steal the
-resume prompt and deploy can restart the server without permanently cutting off
-active work.
+`make deploy-detached` only detaches the updater. Agent turns run in the
+separate `clarp-runtime` service, so restarting `clarp.service` does not stop,
+resume, or inject another prompt into them. Runtime-affecting releases are
+adopted automatically at the next idle boundary; existing turns finish on the
+runtime version that started them.
 
 If you only changed static assets and don't want to bounce the
 service, you can sync just the static dir:
@@ -177,7 +209,7 @@ make js           # vitest only
 make e2e          # Playwright against a throwaway Docker node
 make docker-test  # build the image; exercise install, restart, backup
 make deploy       # sync the locked environment and install a new release
-make deploy-detached        # detached deploy; resumes active agents after restart
+make deploy-detached        # detached deploy; active agent turns continue
 make deploy-status
 ```
 
@@ -185,7 +217,7 @@ Typical loop after editing server or static code:
 
 ```bash
 make test                                      # confirm nothing broke
-make deploy-detached                           # detached deploy + restart/resume
+make deploy-detached                           # detached server deploy; runtime continues
 make deploy-status                             # confirm the detached unit exited cleanly
 ```
 
@@ -220,14 +252,7 @@ Once you have the session ID, you can resume it using one of the following metho
 2. Choose **Resume** from the dialog options.
 3. Select the target session ID from the list and confirm.
 
-#### Method B: Via CLI Helper
-You can resume active sessions by calling:
-```bash
-./scripts/deploy_detached.sh resume
-```
-*(This reads from `~/.cache/clarp/deploy-resume-agents.txt` and sends a "continue" POST request to the server).*
-
-#### Method C: Via Direct HTTP cURL Request
+#### Method B: Via Direct HTTP cURL Request
 You can POST a resume payload directly to the server's `/send` endpoint:
 ```bash
 curl -X POST -H "Content-Type: application/json" \

@@ -1,6 +1,24 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(ClarpDesktop VERSION 0.1.0 LANGUAGES CXX)
+set(CLARP_DESKTOP_VERSION "" CACHE STRING "Clarp release version")
+if(CLARP_DESKTOP_VERSION STREQUAL "")
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../pyproject.toml"
+        clarp_project_version_line
+        REGEX "^version = \"[0-9]+\\.[0-9]+\\.[0-9]+\"$"
+        LIMIT_COUNT 1
+    )
+    string(REGEX REPLACE
+        "^version = \"([0-9]+\\.[0-9]+\\.[0-9]+)\"$"
+        "\\1"
+        CLARP_DESKTOP_VERSION
+        "${clarp_project_version_line}"
+    )
+endif()
+if(NOT CLARP_DESKTOP_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "CLARP_DESKTOP_VERSION must be a semantic version")
+endif()
+
+project(ClarpDesktop VERSION ${CLARP_DESKTOP_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,17 +50,35 @@ include(cmake/ClarpQuality.cmake)
 add_executable(clarp-desktop)
 
 target_sources(clarp-desktop PRIVATE
+    src/platform/DesktopPresence.cpp
+    src/platform/DesktopPresence.h
     src/main.cpp
+    src/terminal/TerminalLaunch.cpp
+    src/terminal/TerminalLaunch.h
     src/app/AppController.cpp
     src/app/AppController.h
+    src/app/PreviewVersions.cpp
+    src/app/PreviewVersions.h
     src/app/CredentialStore.cpp
     src/app/CredentialStore.h
+    src/app/TranscriptCache.cpp
+    src/app/TranscriptCache.h
+    src/app/ToolNarrator.cpp
+    src/app/ToolNarrator.h
+    src/app/TimeFormat.cpp
+    src/app/TimeFormat.h
+    src/models/AgentFilterModel.cpp
+    src/models/AgentFilterModel.h
+    src/media/PortraitImage.cpp
+    src/media/PortraitImage.h
     src/media/AudioController.cpp
     src/media/AudioController.h
     src/media/WavEncoder.cpp
     src/media/WavEncoder.h
     src/models/AgentListModel.cpp
     src/models/AgentListModel.h
+    src/models/ConversationPresentationModel.cpp
+    src/models/ConversationPresentationModel.h
     src/models/ConversationModel.cpp
     src/models/ConversationModel.h
     src/models/ContactListModel.cpp
@@ -69,27 +105,49 @@ qt_add_qml_module(clarp-desktop
     URI Clarp.Desktop
     VERSION 1.0
     QML_FILES
+        qml/PreviewVersionWindow.qml
+        qml/components/PreviewVersionPanel.qml
         qml/Main.qml
         qml/components/AgentRail.qml
+        qml/components/NavRail.qml
+        qml/components/ChatList.qml
+        qml/components/ChatRow.qml
         qml/components/AgentOverview.qml
+        qml/components/AgentAvatar.qml
+        qml/components/TypingIndicator.qml
         qml/components/Composer.qml
         qml/components/ConnectionPage.qml
         qml/components/ConversationPane.qml
+        qml/components/TranscriptList.qml
+        qml/components/DisplayCellCard.qml
         qml/components/MessageDelegate.qml
+        qml/components/MediaGallery.qml
         qml/components/OrchestratorDialog.qml
+        qml/components/ThemedComboBox.qml
         qml/components/PaneLeaf.qml
+        qml/components/AgentProfilePanel.qml
         qml/components/QuickSwitcher.qml
+        qml/components/QueueDialog.qml
+        qml/components/KeyboardMap.qml
         qml/components/ShortcutBar.qml
+        qml/components/SettingsPanel.qml
         qml/components/StatusPill.qml
+        qml/components/QuickNewAgentDialog.qml
         qml/components/StartAgentDialog.qml
         qml/components/ToolCard.qml
+        qml/components/ActivityExplanation.qml
+        qml/components/TeamsPanel.qml
+        qml/components/UpdatesPanel.qml
         qml/components/VoiceDialog.qml
         qml/components/Workspace.qml
     RESOURCES
         resources/clarp.svg
 )
 
-target_include_directories(clarp-desktop PRIVATE src src/app)
+target_include_directories(clarp-desktop PRIVATE src src/app src/models)
+target_compile_definitions(clarp-desktop PRIVATE
+    CLARP_DESKTOP_VERSION="${PROJECT_VERSION}"
+)
 
 target_link_libraries(clarp-desktop PRIVATE
     Qt6::Core

@@ -21,6 +21,7 @@ def test_runtime_paths_are_derived_from_home(monkeypatch):
     assert paths.config_dir == home / ".config" / "clarp"
     assert paths.data_dir == home / ".local" / "share" / "clarp"
     assert paths.app_session == home / ".cache" / "clarp" / "current-session"
+    assert paths.runtime_socket == home / ".cache" / "clarp" / "runtime.sock"
     assert paths.source_markers_dir == home / ".cache" / "clarp" / "source-markers"
     assert paths.source_marker("rachel/../x") == (
         home / ".cache" / "clarp" / "source-markers" / "rachel..x"

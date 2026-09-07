@@ -22,7 +22,7 @@ def test_team_block_fans_out_to_teammates(tmp_path):
     adam = agents_db.create_agent(
         persona="Adam", voice_id="V", cwd=str(tmp_path), session="adam"
     )
-    team = team_store.create_team("Ops", color="moss")
+    team = team_store.create_team("Ops", color="moss", communication_enabled=True)
     assert team_store.add_member(team["team_id"], mike)
     assert team_store.add_member(team["team_id"], rachel)
     assert team_store.add_member(team["team_id"], adam)
@@ -56,7 +56,7 @@ def test_team_feed_is_decoupled_from_speak(tmp_path):
         persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike")
     rachel = agents_db.create_agent(
         persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], mike)
     team_store.add_member(team["team_id"], rachel)
 
@@ -81,7 +81,7 @@ def test_team_protocol_instruction_only_for_members(tmp_path):
         persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike")
     loner = agents_db.create_agent(
         persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], member)
 
     brief = team_store.team_protocol_instruction(member)
@@ -102,7 +102,7 @@ def test_set_leader_requires_membership_and_round_trips(tmp_path):
         persona="Lena", voice_id="V", cwd=str(tmp_path), session="lena")
     outsider = agents_db.create_agent(
         persona="Omar", voice_id="V", cwd=str(tmp_path), session="omar")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], leader)
 
     import pytest
@@ -117,11 +117,11 @@ def test_set_leader_requires_membership_and_round_trips(tmp_path):
     assert team_store.get_leader(team["team_id"]) == ""
 
 
-def test_team_nudging_defaults_on_and_round_trips(tmp_path):
-    team = team_store.create_team("Ops")
+def test_team_nudging_defaults_off_and_round_trips(tmp_path):
+    team = team_store.create_team("Ops", communication_enabled=True)
 
-    assert team["nudge_enabled"] is True
-    assert team_store.get_team(team["team_id"])["nudge_enabled"] is True
+    assert team["nudge_enabled"] is False
+    assert team_store.get_team(team["team_id"])["nudge_enabled"] is False
 
     updated = team_store.set_nudge_enabled(team["team_id"], False)
     assert updated["nudge_enabled"] is False
@@ -138,7 +138,7 @@ def test_latest_activity_ignores_peer_tool_chatter(tmp_path):
         persona="Leader", voice_id="V", cwd=str(tmp_path), session="leader")
     worker = agents_db.create_agent(
         persona="Worker", voice_id="V", cwd=str(tmp_path), session="worker")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], leader)
     team_store.add_member(team["team_id"], worker)
     baseline = team_store.latest_activity_for_agent(leader)
@@ -163,7 +163,7 @@ def test_leader_gets_coordination_brief_others_do_not(tmp_path):
         persona="Lena", voice_id="V", cwd=str(tmp_path), session="lena")
     worker = agents_db.create_agent(
         persona="Omar", voice_id="V", cwd=str(tmp_path), session="omar")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], leader)
     team_store.add_member(team["team_id"], worker)
     team_store.set_leader(team["team_id"], leader)
@@ -192,7 +192,7 @@ def test_leader_heartbeat_gets_lean_protocol(tmp_path):
         persona="Lena", voice_id="V", cwd=str(tmp_path), session="lena")
     worker = agents_db.create_agent(
         persona="Omar", voice_id="V", cwd=str(tmp_path), session="omar")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], leader)
     team_store.add_member(team["team_id"], worker)
     team_store.set_leader(team["team_id"], leader)
@@ -214,7 +214,7 @@ def test_leader_tick_gets_leader_noop_reminder(tmp_path):
         persona="Lena", voice_id="V", cwd=str(tmp_path), session="lena")
     worker = agents_db.create_agent(
         persona="Omar", voice_id="V", cwd=str(tmp_path), session="omar")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], leader)
     team_store.add_member(team["team_id"], worker)
     team_store.set_leader(team["team_id"], leader)
@@ -228,7 +228,7 @@ def test_leader_tick_gets_leader_noop_reminder(tmp_path):
 def test_leaderless_team_does_not_get_direct_report_rule(tmp_path):
     worker = agents_db.create_agent(
         persona="Omar", voice_id="V", cwd=str(tmp_path), session="omar")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], worker)
 
     brief = team_store.team_protocol_instruction(worker)
@@ -245,7 +245,7 @@ def test_digest_is_bounded_and_drains_whole_backlog(tmp_path):
         persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike")
     rachel = agents_db.create_agent(
         persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], mike)
     team_store.add_member(team["team_id"], rachel)
 
@@ -276,7 +276,7 @@ def test_remove_member_clears_inbox_and_no_resurfacing(tmp_path):
         persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike")
     rachel = agents_db.create_agent(
         persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     team_store.add_member(team["team_id"], mike)
     team_store.add_member(team["team_id"], rachel)
     team_store.capture_assistant_message(
@@ -297,7 +297,7 @@ def test_delete_team_cascades(tmp_path):
         persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike")
     rachel = agents_db.create_agent(
         persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
-    team = team_store.create_team("Ops")
+    team = team_store.create_team("Ops", communication_enabled=True)
     tid = team["team_id"]
     team_store.add_member(tid, mike)
     team_store.add_member(tid, rachel)
@@ -320,7 +320,7 @@ def test_non_spoken_assistant_text_is_not_shared(tmp_path):
     rachel = agents_db.create_agent(
         persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel"
     )
-    team = team_store.create_team("Research")
+    team = team_store.create_team("Research", communication_enabled=True)
     team_store.add_member(team["team_id"], mike)
     team_store.add_member(team["team_id"], rachel)
 

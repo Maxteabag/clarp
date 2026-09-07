@@ -174,6 +174,221 @@ def test_injected_test_server_does_not_run_restart_recovery(
         srv.server_close()
 
 
+def test_server_restart_does_not_interrupt_healthy_external_runtime(
+    fake_ctx, monkeypatch,
+):
+    """A server-only restart must leave runtime-owned work completely alone."""
+    from lib import heartbeat, interrupted_turns
+
+    calls: list[str] = []
+    fake_ctx.runtime_client = SimpleNamespace(
+        ping=lambda: True,
+        recover_queued=lambda: 0,
+    )
+    monkeypatch.setattr(
+        server_module, "resume_persisted_agents",
+        lambda _ctx: calls.append("resume"))
+    monkeypatch.setattr(
+        interrupted_turns, "recover_after_restart",
+        lambda stream=None: calls.append("mark") or [])
+    monkeypatch.setattr(
+        heartbeat.HeartbeatScheduler, "run_restart_recovery_once",
+        lambda _scheduler: calls.append("heartbeat") or 0)
+
+    srv = build_server(
+        fake_ctx, _free_port(), bind_addr="127.0.0.1",
+        restart_recovery=True)
+    try:
+        assert calls == []
+    finally:
+        srv.server_close()
+
+
+def test_status_reports_external_runtime_health(fake_ctx):
+    fake_ctx.runtime_client = SimpleNamespace(
+        ping=lambda: True,
+        recover_queued=lambda: 0,
+        status=lambda: {
+            "protocol_version": 1,
+            "release_id": "runtime-42",
+            "draining": False,
+            "active": {"agent-1": "trace-1"},
+        },
+    )
+    port = _free_port()
+    srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body = _get(f"http://127.0.0.1:{port}/status")
+        assert status == 200
+        runtime = json.loads(body)["runtime"]
+        assert runtime == {
+            "available": True,
+            "release_id": "runtime-42",
+            "draining": False,
+            "active_turns": 1,
+        }
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_http_server_can_be_replaced_while_runtime_keeps_active_turn(
+    fake_ctx, tmp_path,
+):
+    from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+    from lib.turn_dispatch import DispatchResult
+
+    active = {}
+
+    class PersistentDispatch:
+        def dispatch(self, **kwargs):
+            agent = __import__("lib.agents", fromlist=["get_by_session"]).get_by_session(
+                kwargs["forced_session"])
+            active[agent["agent_id"]] = kwargs["trace_id"]
+            return DispatchResult(
+                session=kwargs["forced_session"], backend=agent["backend"])
+
+        def recover_queued(self):
+            return 0
+
+        def dispatch_queued(self, queue_id):
+            return DispatchResult(session=queue_id, backend="claude")
+
+    runtime_socket = tmp_path / "runtime.sock"
+    runtime = RuntimeRPCServer(
+        runtime_socket,
+        dispatch_service=PersistentDispatch(),
+        status_provider=lambda: {
+            "active": dict(active), "spawning": [], "terminals": [],
+            "queued": {},
+        },
+    )
+    runtime_thread = threading.Thread(target=runtime.serve_forever, daemon=True)
+    runtime_thread.start()
+    fake_ctx.runtime_client = RuntimeClient(runtime_socket)
+
+    def start_http_server():
+        port = _free_port()
+        server = build_server(fake_ctx, port, bind_addr="127.0.0.1")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, f"http://127.0.0.1:{port}"
+
+    first, first_url = start_http_server()
+    try:
+        status, body = _post(first_url + "/send", {
+            "session": "claude",
+            "text": "keep working through the update",
+            "force_session": True,
+            "hands_free": False,
+            "synthesize_audio": False,
+        })
+        assert status == 200
+        assert json.loads(body)["session"] == "claude"
+    finally:
+        first.shutdown()
+        first.server_close()
+
+    agent_id, trace_id = next(iter(active.items()))
+    assert fake_ctx.runtime_client.status()["active"] == {agent_id: trace_id}
+
+    replacement, replacement_url = start_http_server()
+    try:
+        status, _body = _get(replacement_url + "/agents/snapshot")
+        assert status == 200
+        assert fake_ctx.runtime_client.status()["active"] == {
+            agent_id: trace_id}
+    finally:
+        replacement.shutdown()
+        replacement.server_close()
+        runtime.shutdown()
+        runtime.server_close()
+
+
+def test_runtime_owned_turn_completes_after_http_server_is_gone(
+    fake_ctx, tmp_path,
+):
+    from lib import agents as agents_db
+    from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+    from lib.runtime_events import RuntimeEventStream
+    from lib.turn_dispatch import TurnDispatchService, clear_for_agent
+
+    class RuntimeBackends:
+        CLAUDE = "claude"
+
+        def __init__(self):
+            self.spawn = None
+
+        def normalize(self, backend):
+            return backend or "claude"
+
+        def active_handles(self, _backend, _agent_id):
+            return [SimpleNamespace(is_alive=lambda: self.spawn is not None)] \
+                if self.spawn is not None else []
+
+        def interrupt(self, _backend, _agent_id):
+            return 0
+
+        def steer_turn(self, *_args, **_kwargs):
+            return False
+
+        def spawn_turn(self, _backend, **kwargs):
+            self.spawn = kwargs
+
+    runtime_backends = RuntimeBackends()
+    runtime_ctx = SimpleNamespace(
+        default_session="claude",
+        agents_path=fake_ctx.agents_path,
+        stream=RuntimeEventStream(),
+        runtime_client=None,
+    )
+    runtime_dispatch = TurnDispatchService(
+        runtime_ctx, backend_registry=runtime_backends, home=tmp_path,
+        uuid_factory=lambda: "runtime-conversation",
+    )
+    runtime_socket = tmp_path / "turn-runtime.sock"
+    runtime = RuntimeRPCServer(
+        runtime_socket, dispatch_service=runtime_dispatch)
+    runtime_thread = threading.Thread(target=runtime.serve_forever, daemon=True)
+    runtime_thread.start()
+    fake_ctx.runtime_client = RuntimeClient(runtime_socket)
+
+    port = _free_port()
+    first = build_server(fake_ctx, port, bind_addr="127.0.0.1")
+    first_thread = threading.Thread(target=first.serve_forever, daemon=True)
+    first_thread.start()
+    try:
+        status, _body = _post(f"http://127.0.0.1:{port}/send", {
+            "session": "claude", "text": "finish after deployment",
+            "force_session": True, "hands_free": False,
+            "synthesize_audio": False,
+        })
+        assert status == 200
+        assert runtime_backends.spawn is not None
+    finally:
+        first.shutdown()
+        first.server_close()
+
+    agent = agents_db.get_by_session("claude")
+    before = fake_ctx.runtime_client.status()["active"]
+    assert before.get(agent["agent_id"])
+
+    # The provider callback is owned by the runtime and still commits the
+    # terminal result after every HTTP server thread has stopped.
+    runtime_backends.spawn["on_result"]({
+        "duration_ms": 25,
+        "last_agent_message": "finished without interruption",
+    })
+
+    assert agents_db.latest_state(agent["agent_id"])["kind"] == "done"
+    assert fake_ctx.runtime_client.status()["active"] == {}
+    clear_for_agent(agent["agent_id"])
+    runtime.shutdown()
+    runtime.server_close()
+
+
 def test_artifact_http_round_trip_and_pagination(running_server):
     base, _ctx, _srv = running_server
     status, body = _post(base + "/artifacts", {
@@ -308,8 +523,54 @@ def test_get_snapshot_returns_seeded_data(running_server):
     status, body = _get(base + "/agents/snapshot")
     assert status == 200
     data = json.loads(body)
-    assert {a["session"] for a in data["agents"]} == {"claude", "rachel"}
+    assert {a["session"] for a in data["agents"] if not a["is_janitor"]} == {"claude", "rachel"}
+    assert {a["session"] for a in data["agents"] if a["is_janitor"]} == {
+        "clarp-message-delegator", "clarp-tool-explainer"}
     assert next(a for a in data["agents"] if a["session"] == "claude")["persona"] == "Mike"
+
+
+@pytest.mark.parametrize("endpoint", ["/agent-file", "/agent-files"])
+@pytest.mark.parametrize("credential_kind", ["bearer", "cookie", "query"])
+@pytest.mark.parametrize("scope", ["limited", "full", "administrator"])
+def test_host_file_browsing_requires_full_device_scope(
+    running_server, tmp_path, endpoint, credential_kind, scope,
+):
+    from urllib.parse import urlencode
+    from lib import device_pairing
+
+    base, ctx, _srv = running_server
+    ctx.auth_token = "administrator-secret"
+    if scope == "administrator":
+        token = ctx.auth_token
+    else:
+        issued = device_pairing.issue(device_name="Test phone", scope=scope)
+        token = device_pairing.exchange(issued["code"])["token"]
+    secret = tmp_path / "secret.txt"
+    secret.write_text("host secret")
+    query = {"session": "claude", "root": str(tmp_path)}
+    if endpoint == "/agent-file":
+        query["path"] = secret.name
+    headers = {}
+    if credential_kind == "bearer":
+        headers["Authorization"] = f"Bearer {token}"
+    elif credential_kind == "cookie":
+        headers["Cookie"] = f"claude_pwa_token={token}"
+    else:
+        query["token"] = token
+    request = urllib.request.Request(
+        f"{base}{endpoint}?{urlencode(query)}", headers=headers)
+    if scope == "limited":
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(request, timeout=2)
+        assert error.value.code == 403
+        assert b"host secret" not in error.value.read()
+    else:
+        with urllib.request.urlopen(request, timeout=2) as response:
+            payload = json.load(response)
+        if endpoint == "/agent-file":
+            assert payload["content"] == "host secret"
+        else:
+            assert "secret.txt" in [row["name"] for row in payload["entries"]]
 
 
 def test_one_time_pairing_issues_revocable_device_credential(fake_ctx):
@@ -337,6 +598,21 @@ def test_one_time_pairing_issues_revocable_device_credential(fake_ctx):
             base + "/server-info",
             headers={"Authorization": f"Bearer {token}"})
         assert status == 200
+
+        controller_events = fake_ctx.stream.subscribe()
+        status, body = _post_with_headers(
+            base + "/remote-action",
+            {
+                "action": "controller-event",
+                "button": "secondary",
+                "controller_event": "single-click",
+            },
+            {"Authorization": f"Bearer {token}"},
+        )
+        assert status == 200
+        assert json.loads(body)["controller_event_id"]
+        assert json.loads(controller_events.get(timeout=1))["action"] == "controller-event"
+        fake_ctx.stream.unsubscribe(controller_events)
 
         request = urllib.request.Request(
             base + "/managed-skills",
@@ -1382,8 +1658,9 @@ def test_orchestrator_settings_round_trip(running_server):
         "enabled": False,
         "fallback_only": True,
         "confidence_threshold": 0.84,
-        "model": "gemini-flash-3.1",
-        "effort": "low_latency",
+        "provider": "codex",
+        "model": "gpt-5.3-codex-spark",
+        "effort": "low",
         "timeout_ms": 1250,
     })
 
@@ -1392,7 +1669,9 @@ def test_orchestrator_settings_round_trip(running_server):
     assert after["enabled"] is False
     assert after["fallback_only"] is True
     assert after["confidence_threshold"] == 0.84
-    assert after["model"] == "gemini-flash-3.1"
+    assert after["provider"] == "codex"
+    assert after["model"] == "gpt-5.3-codex-spark"
+    assert after["effort"] == "low"
     assert after["timeout_ms"] == 1250
 
 
@@ -2524,6 +2803,23 @@ def test_post_preview_synthesizes_via_fake_tts(running_server):
     assert files, "expected one mp3 written by FakeTTSEngine"
 
 
+def test_delete_agent_ignores_query_string_and_unknown_is_404(
+    running_server, monkeypatch,
+):
+    base, _ctx, _srv = running_server
+    from lib import backends
+
+    monkeypatch.setattr(backends, "interrupt_any", lambda _agent_id: 0)
+    status, _ = _delete(base + "/agents/rachel?token=not-part-of-session")
+    assert status == 200
+
+    from lib import agents as agents_db
+    assert agents_db.get_by_session("rachel") is None
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _delete(base + "/agents/rachel")
+    assert error.value.code == 404
+
+
 def test_post_agents_opens_runtime_row(running_server):
     base, ctx, _srv = running_server
     status, body = _post(base + "/agents", {
@@ -2581,11 +2877,58 @@ def test_post_agents_resume_exposes_history_immediately(running_server, monkeypa
 
 def test_remote_action_broadcasts_to_sse(running_server):
     base, ctx, _srv = running_server
+    q = ctx.stream.subscribe()
     status, _ = _post(base + "/remote-action", {"action": "record-toggle"})
     assert status == 200
-    # Stream's recent buffer should include the broadcast event.
-    types = [ev["type"] for ev in ctx.stream.recent()]
-    assert "remote-action" in types
+    event = json.loads(q.get(timeout=1))
+    ctx.stream.unsubscribe(q)
+    assert event["type"] == "remote-action"
+    # Input events act only at the instant they arrive. A reconnect must never
+    # replay a stale toggle and unexpectedly start the microphone.
+    assert not any(ev["type"] == "remote-action" for ev in ctx.stream.recent())
+
+
+def test_controller_action_broadcasts_bounded_live_event(running_server):
+    base, ctx, _srv = running_server
+    q = ctx.stream.subscribe()
+    status, body = _post(base + "/remote-action", {
+        "action": "controller-event",
+        "controller_id": "duo-one",
+        "controller_event_id": "event-one",
+        "button": "secondary",
+        "controller_event": "swipe-right",
+        "duration_ms": 780,
+        "queued": False,
+        "ignored": "not forwarded",
+    })
+    assert status == 200
+    assert json.loads(body)["controller_event_id"] == "event-one"
+    event = json.loads(q.get(timeout=1))
+    ctx.stream.unsubscribe(q)
+    assert event == {
+        "type": "remote-action",
+        "action": "controller-event",
+        "controller_id": "duo-one",
+        "controller_event_id": "event-one",
+        "button": "secondary",
+        "controller_event": "swipe-right",
+        "duration_ms": 780,
+        "age_ms": 0,
+        "queued": False,
+        "ts": event["ts"],
+    }
+
+
+def test_controller_action_rejects_unknown_gesture(running_server):
+    base, _ctx, _srv = running_server
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + "/remote-action", {
+            "action": "controller-event",
+            "button": "primary",
+            "controller_event": "shake",
+        })
+    assert error.value.code == 400
+    assert json.loads(error.value.read())["error"] == "unknown controller_event"
 
 
 def test_turn_queue_can_be_listed_edited_deleted_and_paused_by_stop(running_server):
@@ -2613,6 +2956,60 @@ def test_turn_queue_can_be_listed_edited_deleted_and_paused_by_stop(running_serv
     status, _ = _delete(base + "/turn-queue/queue-http")
     assert status == 200
     assert turn_queue.get("queue-http") is None
+
+
+def test_stop_barrier_is_executed_by_external_runtime(fake_ctx):
+    from lib import agents as agents_db, turn_queue
+    from lib.runtime_bridge import StopLease
+
+    calls = []
+
+    class RuntimeOwner:
+        def ping(self):
+            return True
+
+        def recover_queued(self):
+            return 0
+
+        def status(self):
+            return {"active": {}, "spawning": [], "terminals": []}
+
+        def begin_stop(self, agent_id, backend, *, strict, hold):
+            calls.append(("begin", agent_id, backend, strict, hold))
+            turn_queue.set_paused(agent_id, True)
+            return StopLease(
+                lease_id="stop-lease", trace_id="trace-runtime", terminated=1,
+                dropped=0)
+
+        def finish_stop(self, lease_id, cancelled_trace_ids=None):
+            calls.append(("finish", lease_id, cancelled_trace_ids))
+
+    fake_ctx.runtime_client = RuntimeOwner()
+    agent = agents_db.get_by_session("claude")
+    turn_queue.enqueue(
+        queue_id="queue-runtime-stop", agent_id=agent["agent_id"],
+        session="claude", text="later", trace_id="queue-trace",
+        client_msg_id="queue-client", synthesize_audio=False,
+        origin="user", sender_agent_id="")
+    port = _free_port()
+    srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body = _post(
+            f"http://127.0.0.1:{port}/stop", {"session": "claude"})
+        assert status == 200
+        assert json.loads(body)["terminated"] == 1
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+    assert calls == [
+        ("begin", agent["agent_id"], agent["backend"], False, True),
+        ("finish", "stop-lease", set()),
+    ]
+    assert turn_queue.get("queue-runtime-stop") is not None
+    assert turn_queue.is_paused(agent["agent_id"])
 
 
 def test_turn_queue_manual_send_endpoint(running_server, monkeypatch):
@@ -2688,3 +3085,60 @@ def test_404_for_unknown_path(running_server):
     with pytest.raises(urllib.error.HTTPError) as excinfo:
         urllib.request.urlopen(req, timeout=2).read()
     assert excinfo.value.code == 404
+
+
+def test_message_audio_lookup_is_authenticated_and_does_not_synthesize(running_server):
+    base, ctx, _srv = running_server
+    from lib import agents, clip_store, tts_queue
+    from lib.db import conn, now_ms
+    agent = agents.get_by_session('rachel')
+    conn().execute("INSERT INTO messages(message_id,agent_id,seq,role,text,updated_at) VALUES(?,?,1,'assistant',?,?)",
+                   ('replay-message', agent['agent_id'], '<speak>The saved answer.</speak>Details.', now_ms()))
+    path = ctx.audio_dir / 'retained.mp3'
+    path.write_bytes(b'retained')
+    clip = clip_store.record_clip(agent_id=agent['agent_id'], path=str(path), runtime_id=lambda _: None)
+    queue = tts_queue.enqueue(agent_id=agent['agent_id'], session='rachel', voice_id='V_RACHEL',
+                              text='Rachel here. The saved answer.', source='pwa', trace_id='original-turn')
+    tts_queue.mark_done(queue, clip_id=clip)
+    ctx.auth_token = 'replay-test-token'
+    url = base + '/clips/message?session=rachel&message_id=replay-message'
+    with pytest.raises(urllib.error.HTTPError) as denied:
+        _get(url)
+    assert denied.value.code == 401
+    status, body = _get(url, headers={'Authorization': 'Bearer replay-test-token'})
+    assert status == 200
+    assert [event['clip_id'] for event in json.loads(body)['events']] == [clip]
+    assert tts_queue.pending_count() == 0
+    with pytest.raises(urllib.error.HTTPError) as wrong_agent:
+        _get(base + '/clips/message?session=claude&message_id=replay-message',
+             headers={'Authorization': 'Bearer replay-test-token'})
+    assert wrong_agent.value.code == 404
+
+
+def test_recursive_team_api_defaults_settings_and_atomic_cycle_rejection(running_server):
+    base, _ctx, _srv = running_server
+    status, body = _post(base + '/teams', {'name': 'Clarp'})
+    assert status == 200
+    parent = json.loads(body)['team']
+    assert parent['leader_enabled'] is False
+    assert parent['communication_enabled'] is False
+    status, body = _post(base + '/teams', {'name': 'Development', 'parent_team_id': parent['team_id']})
+    assert status == 200
+    child = json.loads(body)['team']
+    assert child['parent_team_id'] == parent['team_id']
+    status, body = _post(base + '/teams/' + child['team_id'], {'communication_enabled': True, 'leader_enabled': True})
+    assert status == 200
+    assert json.loads(body)['team']['communication_enabled'] is True
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + '/teams/' + parent['team_id'], {'name': 'Wrong', 'parent_team_id': child['team_id']})
+    assert error.value.code == 400
+    status, body = _get(base + '/teams')
+    saved = {t['team_id']: t for t in json.loads(body)['teams']}
+    assert saved[parent['team_id']]['name'] == 'Clarp'
+    assert saved[parent['team_id']]['communication_enabled'] is False
+    status, body = _post(base + '/teams/' + child['team_id'], {'parent_team_id': '', 'leader_enabled': False, 'communication_enabled': False})
+    assert status == 200
+    assert json.loads(body)['team']['parent_team_id'] is None
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + '/teams', {'name': 'Bad', 'parent_team_id': ['wrong type']})
+    assert error.value.code == 400

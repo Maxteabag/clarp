@@ -85,7 +85,6 @@ User defaults:
 - Explicit ownership: owner, location, state, blocker, proof.
 - Fewer permission prompts: ask only for taste, priority, consent, authority, risk, or irreversible choices.
 - Put information where the user naturally looks.
-- Visible self-statuses must be header-sized: 2-3 words, under 20 chars (good: "Awaiting Domi", "Reviewing PR", "Building"; bad: a full sentence).
 
 Decision capture: before asking the user a judgment call, search memory. Reuse covered answers and log application. If novel, ask once, log the answer, and merge durable lessons into user values. Re-ask only when context materially changed.
 """

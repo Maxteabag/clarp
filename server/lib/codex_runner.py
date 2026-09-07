@@ -68,17 +68,22 @@ _SPEAK_RE = re.compile(r"<speak>(.*?)</speak>", re.DOTALL | re.IGNORECASE)
 _VOICE_PREAMBLE_HEAD = "[voice-mode]"
 _VOICE_PREAMBLE_SPLIT = "\n\n--- user message ---\n"
 
-# Always-on for app-dispatched turns (every codex/agy turn is one): the
-# PWA/iOS client renders plain text but CANNOT show interactive prompts, so
-# the agent must ask in prose rather than via a question/choice tool.
+# Always-on for app-dispatched turns: CLI question UIs are unavailable,
+# while supporting Hosts can publish durable questions to the native inbox.
 _NO_INTERACTIVE_QUESTIONS = (
-    "You are connected through a phone/voice app. It shows your text replies "
-    "but CANNOT display interactive prompts — no question tools, no "
-    "multiple-choice pickers, no approval dialogs. If you need to ask the "
-    "user something or offer choices, just write it as plain text and wait "
-    "for their next message. Never call a tool whose purpose is to ask the "
-    "user a question or request a choice; it won't render and they can't "
-    "answer it."
+    "You are connected through a phone/voice app. It cannot display CLI "
+    "interactive prompts, question tools, multiple-choice pickers, or approval "
+    "dialogs. Never call AskUserQuestion, request_user_input, or similar CLI "
+    "popup tools; they will not render. For a material clarification, use the "
+    "clarp-decisions skill's documented clarp-agent-artifacts question helper "
+    "when the Host supports native questions. These durable Clarp artifacts "
+    "are answered in Updates or the conversation, not in a CLI popup. For "
+    "explicit authorization, use the skill's decision helper and wait for "
+    "approval. If native questions are unavailable, ask in ordinary text and "
+    "wait for the user's reply. Make routine implementation choices yourself "
+    "and continue independent work while awaiting a necessary answer. Never "
+    "self-resolve a question or approval; a preference or custom answer is "
+    "not blanket authorization."
 )
 
 # Added only for spoken turns: how the <speak> voice gating works.
@@ -99,6 +104,11 @@ _VOICE_INSTRUCTION = (
     "whatever they'd actually want in their ear, judged for listening — "
     "selective, but not a vague headline. Leave out detail that only makes "
     "sense on screen. "
+    "When that summary runs long, split it across consecutive <speak> blocks "
+    "of about a minute each rather than one long one: each block is "
+    "synthesized as its own clip, so the first starts playing while the rest "
+    "is still being written, and no single clip is long enough to be cut off "
+    "at a provider limit. "
     "Put code, paths, commands, logs, tables, long lists, and detailed "
     "evidence OUTSIDE the tags (shown but not spoken). Say it once: don't "
     "restate your spoken text in the written part."
@@ -159,10 +169,7 @@ def persona_identity_instruction(persona: str, session: str = "") -> str:
     if session:
         identity = (
             f"{identity} Use the installed `clarp-background-jobs` skill for "
-            f"work that continues after your final response. Never set a visible "
-            f"status for foreground analysis, tool calls, or builds you are "
-            f"awaiting in the current turn. Detached statuses must be 2-3 words "
-            f"and under 20 characters."
+            f"work that continues after your final response."
         )
     return identity
 
@@ -209,9 +216,9 @@ def apply_voice_preamble(text: str, *, voice: bool = True,
                          persona: str = "", session: str = "") -> str:
     """Prepend the app-turn instruction block to a prompt.
 
-    The no-interactive-questions rule is always included (the app can't show
-    question UIs); the <speak> voice guidance is added only when `voice` is
-    True (a spoken turn). `voice` defaults True so existing callers keep the
+    The CLI-question restriction is always included (native question artifacts
+    remain available on supporting Hosts); the <speak> voice guidance is added
+    only when `voice` is True (a spoken turn). `voice` defaults True so existing callers keep the
     full block."""
     identity = persona_identity_instruction(persona, session)
     if identity:
@@ -271,7 +278,10 @@ def build_cmd(session_id: str = "", *, is_new_session: bool = False,
     """
     base = [CODEX_BIN, "exec", "--json"]
     if isolated:
-        base += ["--sandbox", "workspace-write", "--ephemeral"]
+        # Routing runs in the workspace root, which need not be a git repo;
+        # without the check skipped Codex refuses to start at all.
+        base += ["--sandbox", "workspace-write", "--ephemeral",
+                 "--skip-git-repo-check"]
     else:
         base.append("--dangerously-bypass-approvals-and-sandbox")
     if model:
@@ -362,11 +372,13 @@ def spawn_turn(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        bufsize=1,
+        bufsize=1, start_new_session=(os.name == "posix"),
         env={**os.environ, "CLAUDE_PWA_SESSION": session},
     )
     attach_stderr_drain(proc)
-    handle = TurnHandle(proc=proc, drain_thread=None)   # type: ignore[arg-type]
+    handle = TurnHandle(
+        proc=proc, drain_thread=None,
+        process_group=proc.pid if os.name == "posix" else None)   # type: ignore[arg-type]
     runtime_agent_id = "" if isolated else agent_id
     if runtime_agent_id:
         _register(runtime_agent_id, handle)

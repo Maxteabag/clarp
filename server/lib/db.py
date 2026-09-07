@@ -48,7 +48,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 69
+_SCHEMA_VERSION = 78
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -277,10 +277,10 @@ def conn() -> sqlite3.Connection:
     c = getattr(_LOCAL, "conn", None)
     if c is not None:
         return c
-    c = _open_connection()
     # Migrate exactly once per process (idempotent + serialized). WAL means
     # every per-thread connection sees the migrated schema on the shared file.
     with _CONN_LOCK:
+        c = _open_connection()
         if not _MIGRATED:
             _migrate(c)
             _MIGRATED = True
@@ -332,6 +332,7 @@ CREATE TABLE agents (
     personality TEXT NOT NULL DEFAULT '',
     avatar_path TEXT NOT NULL DEFAULT '',
     archived_at INTEGER,
+    is_janitor INTEGER NOT NULL DEFAULT 0 CHECK (is_janitor IN (0, 1)),
     voice_verbosity INTEGER NOT NULL DEFAULT 0
 );
 
@@ -627,7 +628,10 @@ CREATE TABLE teams (
     updated_at INTEGER NOT NULL,
     archived_at INTEGER,
     nudge_enabled INTEGER NOT NULL DEFAULT 1,
-    leader_agent_id TEXT
+    leader_agent_id TEXT,
+    parent_team_id TEXT,
+    leader_enabled INTEGER NOT NULL DEFAULT 0,
+    communication_enabled INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_teams_active ON teams(archived_at, updated_at DESC);
 
@@ -998,7 +1002,8 @@ CREATE TABLE artifacts (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     completed_at INTEGER,
-    deleted_at INTEGER
+    deleted_at INTEGER,
+    archived_at INTEGER
 );
 CREATE INDEX idx_artifacts_agent_updated ON artifacts(agent_id, updated_at DESC);
 CREATE INDEX idx_artifacts_session_updated ON artifacts(session, updated_at DESC);
@@ -1016,7 +1021,17 @@ CREATE TABLE artifact_decisions (
     resolved_at INTEGER,
     resolved_by TEXT NOT NULL DEFAULT '',
     revision INTEGER NOT NULL DEFAULT 1,
-    expires_at INTEGER
+    expires_at INTEGER,
+    response_type TEXT NOT NULL DEFAULT 'approval',
+    options_json TEXT NOT NULL DEFAULT '[]',
+    allow_custom_text INTEGER NOT NULL DEFAULT 0,
+    recommended_option_id TEXT,
+    blocks_progress INTEGER NOT NULL DEFAULT 0,
+    priority_reason TEXT NOT NULL DEFAULT '',
+    urgency TEXT NOT NULL DEFAULT 'normal',
+    response_effort TEXT NOT NULL DEFAULT 'review',
+    deadline_at INTEGER,
+    answer_json TEXT
 );
 CREATE INDEX idx_artifact_decisions_status ON artifact_decisions(status, decision_id);
 
@@ -1031,7 +1046,9 @@ CREATE TABLE decision_deliveries (
     choice TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at INTEGER NOT NULL,
-    delivered_at INTEGER
+    delivered_at INTEGER,
+    response_type TEXT NOT NULL DEFAULT 'approval',
+    answer_json TEXT
 );
 CREATE INDEX idx_decision_deliveries_pending ON decision_deliveries(status, created_at);
 
@@ -1165,6 +1182,7 @@ CREATE TABLE paired_devices (
 CREATE INDEX idx_paired_devices_active ON paired_devices(revoked_at, created_at DESC);
 
 CREATE TABLE oracle_delegations (
+    completion_trace_id TEXT NOT NULL DEFAULT '',
     delegation_id      TEXT PRIMARY KEY,
     owner_principal    TEXT NOT NULL,
     trace_id           TEXT NOT NULL UNIQUE,
@@ -1314,6 +1332,43 @@ CREATE INDEX vocab_runs_trace ON vocab_runs(trace_id)
 """
 
 
+_EXPLANATION_CACHE_SCHEMA = """
+CREATE TABLE tool_explanation_cache (
+    cache_key TEXT PRIMARY KEY,
+    explanation TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX tool_explanation_cache_expiry ON tool_explanation_cache(expires_at);
+CREATE TABLE tool_explanation_jobs (
+    cache_key TEXT PRIMARY KEY,
+    detail_level INTEGER NOT NULL,
+    activity_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    available_at INTEGER NOT NULL,
+    owner TEXT NOT NULL DEFAULT '',
+    lease_until INTEGER NOT NULL DEFAULT 0,
+    failure_reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX tool_explanation_jobs_queue ON tool_explanation_jobs(status, available_at, created_at);
+CREATE TABLE tool_explanation_demands (
+    cache_key TEXT NOT NULL REFERENCES tool_explanation_jobs(cache_key) ON DELETE CASCADE,
+    demand_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY(cache_key, demand_id)
+);
+CREATE INDEX tool_explanation_demands_owner ON tool_explanation_demands(demand_id);
+CREATE TABLE tool_explanation_releases (
+    demand_id TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
+"""
+_SCHEMA_SQL += _EXPLANATION_CACHE_SCHEMA
+from .html_forms import SCHEMA as _HTML_FORMS_SCHEMA
+_SCHEMA_SQL += _HTML_FORMS_SCHEMA
+
+
 def _migrate(con: sqlite3.Connection) -> None:
     """Bring the DB up to the current schema version.
 
@@ -1349,12 +1404,29 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v65(con)
             if version < 66:
                 _migrate_to_v66(con)
-            if version < 67:
-                _migrate_to_v67(con)
-            if version < 68:
-                _migrate_to_v68(con)
-            if version < 69:
-                _migrate_to_v69(con)
+            if version < 70:
+                _migrate_to_v70(con)
+            if version < 71:
+                _migrate_to_v71(con)
+            if version < 72:
+                for statement in _EXPLANATION_CACHE_SCHEMA.split(";"):
+                    if statement.strip():
+                        con.execute(statement)
+            if version < 73:
+                _migrate_to_v73(con)
+            if version < 74:
+                for statement in _HTML_FORMS_SCHEMA.split(";"):
+                    if statement.strip(): con.execute(statement)
+            if version < 75:
+                columns = {row[1] for row in con.execute("PRAGMA table_info(oracle_delegations)")}
+                if "completion_trace_id" not in columns:
+                    con.execute("ALTER TABLE oracle_delegations ADD COLUMN completion_trace_id TEXT NOT NULL DEFAULT ''")
+            if version < 76:
+                _migrate_to_v76(con)
+            if version < 77:
+                con.execute(_ACTIVE_INTERVAL_TRIGGER)
+            if version < 78:
+                _migrate_to_v78(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1494,6 +1566,46 @@ def _migrate_to_v66(con: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_to_v70(con: sqlite3.Connection) -> None:
+    """Reconcile attention columns across the historical v67-v69 schema overlap.
+
+    Some Hosts reached v69 through unrelated experimental migrations before
+    attention shipped as v67. Reconcile the actual columns rather than assuming
+    any of those version stamps proves attention exists. All changes are
+    additive; unrelated columns, tables and existing answer snapshots stay put.
+    """
+    additions = {
+        "artifacts": ("archived_at INTEGER",),
+        "artifact_decisions": (
+            "response_type TEXT NOT NULL DEFAULT 'approval'",
+            "options_json TEXT NOT NULL DEFAULT '[]'",
+            "allow_custom_text INTEGER NOT NULL DEFAULT 0",
+            "recommended_option_id TEXT",
+            "blocks_progress INTEGER NOT NULL DEFAULT 0",
+            "priority_reason TEXT NOT NULL DEFAULT ''",
+            "urgency TEXT NOT NULL DEFAULT 'normal'",
+            "response_effort TEXT NOT NULL DEFAULT 'review'",
+            "deadline_at INTEGER",
+            "answer_json TEXT",
+        ),
+        "decision_deliveries": (
+            "response_type TEXT NOT NULL DEFAULT 'approval'",
+            "answer_json TEXT",
+        ),
+    }
+    for table, definitions in additions.items():
+        columns = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+        for definition in definitions:
+            if definition.split()[0] not in columns:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+    con.execute("""UPDATE artifact_decisions SET answer_json=json_object('choice',resolved_choice)
+                    WHERE response_type='approval' AND answer_json IS NULL
+                      AND status IN ('accepted','rejected')""")
+    con.execute("""UPDATE decision_deliveries SET answer_json=json_object('choice',choice)
+                    WHERE response_type='approval' AND answer_json IS NULL
+                      AND choice IN ('accepted','rejected')""")
+
+
 
 def now_ms() -> int:
     return int(time.time() * 1000)
@@ -1502,10 +1614,13 @@ def now_ms() -> int:
 def reset_for_tests(path: pathlib.Path | None = None) -> None:
     """Test helper: close cached connection so a new path takes effect."""
     global DB_PATH, _MIGRATED, _LAST_LOCK_REPORT_AT
-    if path is not None:
-        DB_PATH = path
-    _MIGRATED = False
-    close_local()
+    # Opening and migrating a connection form one operation. A worker that
+    # opens the previous test's file must not mark the next file migrated.
+    with _CONN_LOCK:
+        if path is not None:
+            DB_PATH = path
+        _MIGRATED = False
+        close_local()
     with _TRANSACTION_LOCK:
         _TRANSACTION_OWNERS.clear()
         _LAST_LOCK_REPORT_AT = 0.0
@@ -1544,85 +1659,27 @@ def _migrate_to_v65(con: sqlite3.Connection) -> None:
         " WHERE trace_id IS NOT NULL")
 
 
-def _migrate_to_v69(con: sqlite3.Connection) -> None:
-    """Repair a v68 that only carries half of what v68 came to mean.
+def _migrate_to_v78(con: sqlite3.Connection) -> None:
+    """Dreaming seed strategies, thread kill notes, and agent voice verbosity.
 
-    Two branches independently bumped to 68 — one adding `voice_verbosity`,
-    one adding `artifact_branch` — so a database stamped 68 by whichever
-    landed first is missing the other's column and can never be upgraded by
-    the merged v68, because `_migrate` skips a version it has already reached.
-    This runs the same guarded adds one version later, where every 68 database
-    is reachable regardless of which branch stamped it.
+    Guarded: a host can reach this point with the columns already present.
     """
-    columns = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
-    if "voice_verbosity" not in columns:
-        con.execute(
-            "ALTER TABLE agents ADD COLUMN voice_verbosity INTEGER NOT NULL"
-            " DEFAULT 0")
-    dream_columns = {row[1] for row in con.execute(
-        "PRAGMA table_info(dream_runs)")}
-    if "artifact_branch" not in dream_columns:
-        con.execute(
-            "ALTER TABLE dream_runs ADD COLUMN artifact_branch TEXT NOT NULL"
-            " DEFAULT ''")
-
-
-def _migrate_to_v68(con: sqlite3.Connection) -> None:
-    """Per-agent narration level, and a durable home for dream-built code.
-
-    The spoken contract was one acknowledgment, silence, then a summary. That
-    is right when driving and wrong when following along, so the level moves
-    per agent. 0 is the previous behaviour, so nothing changes until the
-    slider does.
-    """
-    # Guarded because an older release running against the same file resets
-    # user_version to its own, lower number without dropping columns a newer
-    # build already added. Re-running must then be a no-op, not a crash.
-    columns = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
-    if "voice_verbosity" not in columns:
-        con.execute(
-            "ALTER TABLE agents ADD COLUMN voice_verbosity INTEGER NOT NULL"
-            " DEFAULT 0")
-    # Same version, second concern: a dream's built code survives its
-    # worktree. Whatever a run builds at `worktree` altitude used to live in
-    # an untracked scratch directory that nothing referenced and nothing
-    # cleaned up; recording the branch it was committed to makes the highest
-    # value output of a night durable instead of prose in a digest.
-    dream_columns = {row[1] for row in con.execute(
-        "PRAGMA table_info(dream_runs)")}
-    if "artifact_branch" not in dream_columns:
-        con.execute(
-            "ALTER TABLE dream_runs ADD COLUMN artifact_branch TEXT NOT NULL"
-            " DEFAULT ''")
-
-
-
-def _migrate_to_v67(con: sqlite3.Connection) -> None:
-    """Dreaming records its recipe, and a thread records why it died.
-
-    A run is now an experiment: which seeding strategy produced its ideas and
-    how much of the live session was in context are recorded per run, so two
-    nights can be compared instead of merely read. `killed_reason` closes the
-    other half - the ledger used to show only what survived.
-    """
-    # Guarded, like every other migration here. A host can reach this point
-    # with the columns already present — from a fresh schema, or from a later
-    # repair migration — and re-running has to be a no-op, not a crash.
     runs = {row[1] for row in con.execute("PRAGMA table_info(dream_runs)")}
     for name, definition in (
         ("seed_strategy", "TEXT NOT NULL DEFAULT 'control'"),
         ("context_dose", "TEXT NOT NULL DEFAULT 'full'"),
         ("seed_material", "TEXT NOT NULL DEFAULT ''"),
+        ("artifact_branch", "TEXT NOT NULL DEFAULT ''"),
     ):
         if name not in runs:
-            con.execute(
-                f"ALTER TABLE dream_runs ADD COLUMN {name} {definition}")
+            con.execute(f"ALTER TABLE dream_runs ADD COLUMN {name} {definition}")
     threads = {row[1] for row in con.execute("PRAGMA table_info(dream_threads)")}
     for name in ("killed_reason", "origin_note"):
         if name not in threads:
-            con.execute(
-                f"ALTER TABLE dream_threads ADD COLUMN {name} TEXT NOT NULL"
-                " DEFAULT ''")
+            con.execute(f"ALTER TABLE dream_threads ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+    agent_cols = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if "voice_verbosity" not in agent_cols:
+        con.execute("ALTER TABLE agents ADD COLUMN voice_verbosity INTEGER NOT NULL DEFAULT 0")
 
 
 _V64_SQL = """
@@ -1714,3 +1771,196 @@ CREATE INDEX vocab_runs_recent ON vocab_runs(created_at DESC);
 CREATE INDEX vocab_runs_trace ON vocab_runs(trace_id)
     WHERE trace_id <> '';
 """
+
+
+def _migrate_to_v71(con: sqlite3.Connection) -> None:
+    """Preserve existing coordination; newly created teams are passive groups."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(teams)")}
+    for definition in ("parent_team_id TEXT", "leader_enabled INTEGER NOT NULL DEFAULT 0",
+                       "communication_enabled INTEGER NOT NULL DEFAULT 0"):
+        if definition.split()[0] not in columns:
+            con.execute(f"ALTER TABLE teams ADD COLUMN {definition}")
+    if "communication_enabled" not in columns:
+        con.execute("UPDATE teams SET communication_enabled = 1")
+    if "leader_enabled" not in columns:
+        con.execute("UPDATE teams SET leader_enabled = CASE WHEN COALESCE(leader_agent_id, '') != '' THEN 1 ELSE 0 END")
+
+
+_JANITOR_SCHEMA = """
+CREATE TABLE IF NOT EXISTS janitor_configs (
+    agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
+    template_id TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    revision INTEGER NOT NULL DEFAULT 1,
+    generation INTEGER NOT NULL DEFAULT 1,
+    scope_json TEXT NOT NULL DEFAULT '{}',
+    execution_json TEXT NOT NULL DEFAULT '{}',
+    options_json TEXT NOT NULL DEFAULT '{}',
+    last_error TEXT NOT NULL DEFAULT '',
+    last_run_at INTEGER,
+    last_change_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_trigger_definitions (
+    trigger_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    defaults_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (trigger_id, version)
+);
+CREATE TABLE IF NOT EXISTS janitor_attachments (
+    attachment_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),
+    trigger_id TEXT NOT NULL,
+    trigger_version INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    next_run_at INTEGER,
+    retired_at INTEGER,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(trigger_id, trigger_version)
+        REFERENCES janitor_trigger_definitions(trigger_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_janitor_attachments_agent
+    ON janitor_attachments(agent_id, retired_at);
+CREATE TABLE IF NOT EXISTS janitor_progress (
+    attachment_id TEXT PRIMARY KEY REFERENCES janitor_attachments(attachment_id),
+    generation INTEGER NOT NULL,
+    state_json TEXT NOT NULL DEFAULT '{}',
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_runs (
+    run_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),
+    session TEXT NOT NULL,
+    attachment_id TEXT NOT NULL REFERENCES janitor_attachments(attachment_id),
+    generation INTEGER NOT NULL,
+    trace_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'queued',
+    outcome TEXT NOT NULL DEFAULT '',
+    candidates_json TEXT NOT NULL,
+    configuration_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    finished_at INTEGER,
+    error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_janitor_runs_agent
+    ON janitor_runs(agent_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_janitor_runs_one_active
+    ON janitor_runs(agent_id) WHERE status IN ('queued', 'running');
+CREATE TABLE IF NOT EXISTS janitor_effects (
+    run_id TEXT NOT NULL REFERENCES janitor_runs(run_id),
+    target_agent_id TEXT NOT NULL REFERENCES agents(agent_id),
+    target_session TEXT NOT NULL,
+    observed_state_id INTEGER NOT NULL,
+    outcome TEXT NOT NULL,
+    before_label TEXT NOT NULL,
+    after_label TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(run_id, target_agent_id)
+);
+CREATE TABLE IF NOT EXISTS janitor_label_ownership (
+    target_agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
+    owner_agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),
+    run_id TEXT NOT NULL REFERENCES janitor_runs(run_id),
+    label TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1,
+    task_signature TEXT NOT NULL,
+    valid_until INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_creation_requests (
+    request_id TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    identity_json TEXT NOT NULL,
+    session TEXT NOT NULL UNIQUE,
+    agent_id TEXT REFERENCES agents(agent_id),
+    response_json TEXT,
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS janitor_pilot_imports (
+    import_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES janitor_configs(agent_id),
+    imported_at INTEGER NOT NULL,
+    payload_sha256 TEXT NOT NULL
+);
+INSERT OR IGNORE INTO janitor_trigger_definitions
+    (trigger_id, version, name, kind, defaults_json) VALUES
+    ('agent-work-completed', 1, 'After an agent finishes a turn', 'event',
+     '{"coalesce_seconds":8,"max_targets":3}'),
+    ('schedule', 1, 'On a schedule', 'schedule',
+     '{"cron":"0 9 * * *","timezone":"UTC","max_targets":3}');
+"""
+_SCHEMA_SQL += _JANITOR_SCHEMA
+
+_ACTIVE_INTERVAL_TRIGGER = """INSERT OR IGNORE INTO janitor_trigger_definitions
+    (trigger_id,version,name,kind,defaults_json) VALUES
+    ('active-interval',1,'Periodically while using the app','interval',
+     '{"interval_seconds":900,"idle_timeout_seconds":300,"run_on_resume":true,"max_targets":3,"coalesce_seconds":0}')"""
+_SCHEMA_SQL += _ACTIVE_INTERVAL_TRIGGER + ";"
+
+
+def _migrate_to_v73(con: sqlite3.Connection) -> None:
+    """Add optional maintenance without rewriting existing identities/history."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if "is_janitor" not in columns:
+        con.execute("ALTER TABLE agents ADD COLUMN is_janitor INTEGER NOT NULL "
+                    "DEFAULT 0 CHECK (is_janitor IN (0, 1))")
+    for statement in _JANITOR_SCHEMA.split(";"):
+        if statement.strip():
+            con.execute(statement)
+
+
+_BUILTIN_JANITOR_SCHEMA = """
+CREATE TABLE IF NOT EXISTS janitor_builtins (
+    role TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL UNIQUE REFERENCES agents(agent_id),
+    seed_version INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_demand_results (
+    run_id TEXT PRIMARY KEY REFERENCES janitor_runs(run_id),
+    result_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS janitor_demand_claims (
+    run_id TEXT PRIMARY KEY REFERENCES janitor_runs(run_id),
+    claimed_at INTEGER NOT NULL,
+    finished_at INTEGER
+);
+INSERT OR IGNORE INTO janitor_trigger_definitions
+    (trigger_id,version,name,kind,defaults_json) VALUES
+    ('routing-requested',1,'When a message needs a recipient','demand','{}'),
+    ('tool-explanation-requested',1,'When a tool explanation is requested','demand','{}');
+CREATE TRIGGER IF NOT EXISTS janitor_demand_trigger_no_update
+BEFORE UPDATE ON janitor_trigger_definitions
+WHEN OLD.kind='demand'
+BEGIN SELECT RAISE(ABORT,'Demand trigger versions are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS janitor_demand_trigger_no_delete
+BEFORE DELETE ON janitor_trigger_definitions
+WHEN OLD.kind='demand'
+BEGIN SELECT RAISE(ABORT,'Demand trigger versions are immutable'); END;
+"""
+_SCHEMA_SQL += _BUILTIN_JANITOR_SCHEMA
+
+
+def _migrate_to_v76(con: sqlite3.Connection) -> None:
+    """Add demand execution contracts without enabling or converting agents."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(janitor_configs)")}
+    if "execution_json" not in columns:
+        con.execute("ALTER TABLE janitor_configs ADD COLUMN execution_json TEXT NOT NULL DEFAULT '{}'")
+    if "options_json" not in columns:
+        con.execute("ALTER TABLE janitor_configs ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'")
+    statement = ""
+    for line in _BUILTIN_JANITOR_SCHEMA.splitlines(keepends=True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            con.execute(statement)
+            statement = ""
+    assert not statement.strip()

@@ -8,11 +8,11 @@ wire contract the clients follow is in [docs/protocol.md](docs/protocol.md).
 ## One turn, end to end
 
 ```
-  phone / browser                    server (server/)                          host
-  ───────────────                    ────────────────                          ────
+  phone / browser             clarp.service          clarp-runtime.service          host
+  ───────────────             ─────────────          ─────────────────────          ────
   POST /transcribe ──► stt.py (Whisper) ──► text
-  POST /send ────────► turn_dispatch.py ──► clarp_runner.py ──spawn──► claude -p … --plugin-dir plugin/
-                                                                          │
+  POST /send ────────► Unix socket ──────► turn_dispatch.py ──spawn──► claude -p … --plugin-dir plugin/
+                                                                             │
                        hooks (plugin/hooks/*.py) ◄── UserPromptSubmit/Pre/PostToolUse/Stop/…
                        write state_log + messages rows into state.sqlite
                                 │
@@ -22,8 +22,14 @@ wire contract the clients follow is in [docs/protocol.md](docs/protocol.md).
 ```
 
 - **A turn is one subprocess.** `/send` launches the backend CLI for that
-  message and exits when the reply is complete. Continuity comes from the
-  backend's own `--resume`; there is no long-lived terminal process.
+  message through `clarp-runtime`. The replaceable HTTP server never owns that
+  subprocess. Restarting `clarp.service` reconnects to the same runtime and
+  cannot terminate the turn.
+- **Runtime releases roll at idle boundaries.** A runtime-affecting release is
+  identified separately from server/static changes. The old runtime keeps
+  accepting and finishing work until it reaches an idle boundary, fences new
+  admissions, records a clean handoff, and restarts on the new version. Only a
+  runtime crash produces interruption markers and continuity prompts.
 - **SQLite is the source of truth.** `~/.local/share/clarp/state.sqlite` holds
   agents, runtimes, turns, messages, clips, queues, and settings. Hooks
   (separate processes) and the server share it through WAL mode. The schema
@@ -47,6 +53,7 @@ should hold no business logic; handlers delegate to `server/lib/`.
 |---|---|
 | Persistence | `db.py` (schema, connections, migrations), `settings_store.py`, `maintenance.py` (pruning), `instance_backup.py` |
 | Agents and turns | `agents.py`, `agent_lifecycle.py` (create/relaunch/fork/delete), `turn_dispatch.py` (queue, preemption, retries), `turn_queue.py`, `reconcile.py` (repairs drifted state on read), `snapshot.py` (`/agents/snapshot`) |
+| Runtime boundary | `runtime.py`, `runtime_bridge.py` (versioned private RPC), `runtime_events.py` (durable cross-process SSE relay), `runtime_release.py` (idle rolling handoff), `runtime_startup.py` (crash-only recovery) |
 | Backends | `backends.py` (adapter selection), `clarp_runner.py` (Claude), `codex_runner.py` + `codex_app_server.py`, `agy_runner.py`, `provider_capabilities.py` (model catalogue), `backend_auth.py`, `backend_usage.py` |
 | Conversation read model | `message_store.py`, `conversation.py`, `transcript_log.py`, `codex_transcript.py`, `agy_transcript.py`, `transcript_watcher.py` + `transcript_streamer.py` (live text while a turn runs), `activity.py` |
 | Events | `audio_stream.py` (SSE hub + clip janitor), `state_watcher.py`, `eventlog.py` + `telemetry.py` (diagnostics into `telemetry.sqlite`) |
@@ -99,6 +106,7 @@ calendar, prompt history. They are safe to ignore when working on the PWA.
 ~/.local/share/clarp/state.sqlite    the source of truth
 ~/.local/share/clarp/telemetry.sqlite diagnostics (24 h detail, 30 d rollups)
 ~/.local/share/clarp/current/        the installed release (symlink)
+~/.cache/clarp/runtime.sock          private server-to-runtime RPC socket
 ~/.cache/clarp/audio/                synthesized clips and HLS segments
 ```
 

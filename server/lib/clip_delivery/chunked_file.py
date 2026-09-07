@@ -23,6 +23,8 @@ when a client reconnects after the broker has aged out the buffer.
 """
 from __future__ import annotations
 
+from .. import clip_store
+
 import pathlib
 import time
 
@@ -163,7 +165,7 @@ class ChunkedFileSession:
 
         # 1. Producer-side state: synthesis is done.
         try:
-            agents_db.mark_clip_producer_status(
+            clip_store.mark_clip_producer_status(
                 clip_id=self._clip_id,
                 producer_status=ClipProducerStatus.COMPLETE,
                 byte_count=size,
@@ -216,7 +218,7 @@ class ChunkedFileSession:
         except OSError: pass
 
         try:
-            agents_db.mark_clip_producer_status(
+            clip_store.mark_clip_producer_status(
                 clip_id=self._clip_id,
                 producer_status=ClipProducerStatus.FAILED,
                 error=error,

@@ -7,7 +7,7 @@ Rectangle {
 
     required property var controller
 
-    color: "#e6121116"
+    color: "#e61a1b26"
 
     MouseArea {
         anchors.fill: parent
@@ -21,8 +21,8 @@ Rectangle {
         height: cardColumn.implicitHeight + 56
         anchors.centerIn: parent
         radius: 22
-        color: "#1b1820"
-        border.color: "#3b3343"
+        color: "#20212e"
+        border.color: "#41445a"
 
         ColumnLayout {
             id: cardColumn
@@ -35,7 +35,7 @@ Rectangle {
 
             Text {
                 text: "Connect to Clarp"
-                color: "#f2ece7"
+                color: "#c0caf5"
                 font.pixelSize: 24
                 font.weight: Font.DemiBold
             }
@@ -43,7 +43,7 @@ Rectangle {
             Text {
                 Layout.fillWidth: true
                 text: "The native client connects directly to the Clarp server. Credentials remain outside the UI after this session."
-                color: "#918997"
+                color: "#8d93b0"
                 font.pixelSize: 12
                 wrapMode: Text.Wrap
             }
@@ -70,12 +70,12 @@ Rectangle {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 1
-                color: "#332d3a"
+                color: "#292b3a"
             }
 
             Label {
                 text: "Or pair with a one-time code from clarp-admin pair create"
-                color: "#918997"
+                color: "#8d93b0"
                 font.pixelSize: 11
             }
 

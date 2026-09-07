@@ -18,6 +18,7 @@ class RuntimePaths:
     config_dir: pathlib.Path
     data_dir: pathlib.Path
     app_session: pathlib.Path
+    runtime_socket: pathlib.Path
     last_source: pathlib.Path
     source_markers_dir: pathlib.Path
     audio_dir: pathlib.Path
@@ -42,6 +43,7 @@ class RuntimePaths:
             config_dir=config,
             data_dir=data,
             app_session=cache / "current-session",
+            runtime_socket=cache / "runtime.sock",
             last_source=cache / "last-source",
             source_markers_dir=cache / "source-markers",
             audio_dir=cache / "audio",

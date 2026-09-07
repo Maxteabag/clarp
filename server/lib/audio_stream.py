@@ -11,9 +11,12 @@ or the /preview handler. Nothing scans the directory.
 """
 from __future__ import annotations
 
+from . import clip_store
+
 import json
 import pathlib
 import queue
+import sqlite3
 import threading
 import time
 
@@ -41,6 +44,17 @@ _STATEFUL_SINGLETON_TYPES = frozenset({
     SSEType.SERVER_VERSION,
 })
 
+# Actions describe user input at one instant and must never survive an SSE
+# reconnect. Keep this read-side fence even though current producers use
+# broadcast_ephemeral(): upgraded installations may still have action rows
+# persisted by an older release until the SSE retention window expires.
+_NON_REPLAYABLE_TYPES = frozenset({SSEType.REMOTE_ACTION})
+
+
+def _replayable(events: list[dict]) -> list[dict]:
+    return [event for event in events
+            if event.get("type") not in _NON_REPLAYABLE_TYPES]
+
 
 class SubscriberQueue(queue.Queue):
     """Per-SSE-subscriber event queue.
@@ -57,6 +71,8 @@ class AudioStream:
     RECENT_WINDOW_SEC = SERVER_TIMING.audio_recent_window_sec
     AUDIO_RETAIN_SEC  = SERVER_TIMING.audio_retain_sec
     JANITOR_INTERVAL_SEC = SERVER_TIMING.audio_janitor_interval_sec
+    REPLAY_RETAIN_SEC = 7 * 24 * 60 * 60
+    REPLAY_RETAIN_MAX_BYTES = 256 * 1024 * 1024
 
     def __init__(self, audio_dir: pathlib.Path, *,
                  transcript_event_min_interval_sec: float = 0.25,
@@ -97,16 +113,17 @@ class AudioStream:
         if since_event_id is not None:
             try:
                 from . import agents as _agents
-                return _agents.events_after(since_event_id)
+                return _replayable(_agents.events_after(since_event_id))
             except Exception:
                 pass
         try:
             from . import agents as _agents
-            return _agents.recent_events(int(self.RECENT_WINDOW_SEC * 1000))
+            return _replayable(
+                _agents.recent_events(int(self.RECENT_WINDOW_SEC * 1000)))
         except Exception:
             pass
         with self._recent_lock:
-            return [ev for _, ev in self._recent]
+            return _replayable([ev for _, ev in self._recent])
 
     def broadcast(self, event_dict: dict) -> None:
         event_dict = dict(event_dict)
@@ -129,7 +146,7 @@ class AudioStream:
         if event_dict.get("type") == SSEType.AUDIO:
             try:
                 from . import agents as _agents
-                _agents.mark_clip_status(
+                clip_store.mark_clip_status(
                     clip_id=event_dict.get("clip_id"),
                     url=event_dict.get("url"),
                     status=ClipStatus.BROADCAST,
@@ -160,6 +177,18 @@ class AudioStream:
             cutoff = time.time() - self.RECENT_WINDOW_SEC
             while self._recent and self._recent[0][0] < cutoff:
                 self._recent.pop(0)
+        self._deliver(event_dict, sse_event_id=sse_event_id)
+
+    def broadcast_ephemeral(self, event_dict: dict) -> None:
+        """Deliver live input without recording it for reconnect replay.
+
+        Physical button edges and shortcut toggles describe an action at one
+        instant, not durable state. Replaying one later can unexpectedly start
+        a microphone or stop an agent.
+        """
+        self._deliver(dict(event_dict), sse_event_id=None)
+
+    def _deliver(self, event_dict: dict, *, sse_event_id: int | None) -> None:
         payload = json.dumps(event_dict)
         dead = []
         with self._subs_lock:
@@ -193,6 +222,7 @@ class AudioStream:
                 "type": event_dict.get("type"),
                 "session": event_dict.get("session"),
                 "subscribers": sub_count,
+                "ephemeral": sse_event_id is None,
             },
         )
         health.mark_success("sse")
@@ -217,17 +247,26 @@ class AudioStream:
 
     def _janitor(self) -> None:
         while not self._stop.wait(self.JANITOR_INTERVAL_SEC):
-            cutoff = time.time() - self.AUDIO_RETAIN_SEC
-            try:
-                for p in self.audio_dir.glob("*.mp3"):
-                    try:
-                        if p.stat().st_mtime < cutoff:
-                            p.unlink()
-                            # Take the sidecar with it.
-                            side = p.with_suffix(p.suffix + ".json")
-                            try: side.unlink()
-                            except FileNotFoundError: pass
-                    except OSError as e:
-                        log_exception("audioJanitorUnlinkFail", e, detail=p.name)
-            except FileNotFoundError as e:
-                log_exception("audioJanitorMissingDir", e, detail=str(self.audio_dir))
+            self._prune_audio()
+
+    def _prune_audio(self) -> None:
+        from .message_audio import retained_mp3_paths
+        try:
+            protected = retained_mp3_paths(audio_dir=self.audio_dir,
+                max_age_ms=self.REPLAY_RETAIN_SEC * 1000, max_bytes=self.REPLAY_RETAIN_MAX_BYTES)
+        except (sqlite3.Error, OSError) as error:
+            log_exception("audioReplayRetentionLookupFail", error)
+            return  # A transient metadata failure must not erase the replay cache.
+        cutoff = time.time() - self.AUDIO_RETAIN_SEC
+        try:
+            for p in self.audio_dir.glob("*.mp3"):
+                try:
+                    if p.stat().st_mtime < cutoff and str(p.resolve()) not in protected:
+                        p.unlink()
+                        side = p.with_suffix(p.suffix + ".json")
+                        try: side.unlink()
+                        except FileNotFoundError: pass
+                except OSError as error:
+                    log_exception("audioJanitorUnlinkFail", error, detail=p.name)
+        except FileNotFoundError as error:
+            log_exception("audioJanitorMissingDir", error, detail=str(self.audio_dir))

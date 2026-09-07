@@ -34,6 +34,8 @@ stream is complete.
 """
 from __future__ import annotations
 
+from .. import clip_store
+
 import pathlib
 import shutil
 import subprocess
@@ -262,7 +264,7 @@ class HlsSession:
         playlist_size = (self._playlist_path.stat().st_size
                          if self._playlist_path.is_file() else 0)
         try:
-            agents_db.mark_clip_producer_status(
+            clip_store.mark_clip_producer_status(
                 clip_id=self._clip_id,
                 producer_status=ClipProducerStatus.COMPLETE,
                 byte_count=total_bytes,
@@ -308,7 +310,7 @@ class HlsSession:
         except OSError:
             pass
         try:
-            agents_db.mark_clip_producer_status(
+            clip_store.mark_clip_producer_status(
                 clip_id=self._clip_id,
                 producer_status=ClipProducerStatus.FAILED,
                 error=error,

@@ -123,6 +123,11 @@ class ServerContext:
     # Managed storage for agent-published images/media. SQLite remains the
     # authoritative index; files here are opaque blob storage.
     media_dir: pathlib.Path | None = None
+    # Production HTTP processes submit agent execution to a separately managed
+    # runtime. Tests and the runtime process itself leave this unset and run the
+    # injected/local dispatch implementation.
+    runtime_client: Any | None = None
+    tool_explanations: Any | None = None
 
     def __post_init__(self):
         if self.clip_broker is None:
@@ -163,7 +168,8 @@ class ServerContext:
         try:
             from . import agents as agents_db  # local: avoid startup cycles
             for info in agents_db.list_agents():
-                add(info.get("persona"))
+                if agents_db.interaction_capabilities(info)["can_voice_target"]:
+                    add(info.get("persona"))
         except Exception as e:  # noqa: BLE001 - prompt bias must never break STT
             log_exception("vocabAgentsFail", e)
         return names
@@ -195,7 +201,7 @@ class ServerContext:
         from . import agents as agents_db
         from . import vocab_store
         from .vocab_compile import Sources, compile_and_record
-        from .workspace_vocab import sources_for
+        from .workspace_vocab import WorkspaceSources, sources_for
 
         provider, model = self._transcription_provider_model(requested_model)
         agent: dict = {}
@@ -218,7 +224,14 @@ class ServerContext:
         except Exception as e:  # noqa: BLE001
             log_exception("vocabCorrectionsFail", e)
             known = ()
-        workspace = sources_for(agent.get("cwd"))
+        # Reading an agent's folders is a choice its profile makes. Without
+        # one, the workspace contributes nothing: this call used to be
+        # unconditional, which is how an agent rooted at /home fed hundreds of
+        # package-tree library names into the payload ahead of the glossary.
+        workspace = (
+            sources_for(agent.get("cwd"))
+            if vocab_store.agent_harvests_workspace(agent_id)
+            else WorkspaceSources())
         include_names = delegated and delegation_agent_names_enabled()
 
         result = compile_and_record(
@@ -250,7 +263,7 @@ class ServerContext:
         from . import agents as agents_db
         from . import vocab_store
         from .vocab_compile import Sources, compile_for
-        from .workspace_vocab import sources_for
+        from .workspace_vocab import WorkspaceSources, sources_for
 
         provider, model = self._transcription_provider_model(requested_model)
         agent: dict = {}
@@ -262,7 +275,10 @@ class ServerContext:
         agent_id = str(agent.get("agent_id") or "")
         static, profile_id = self._vocab_static_packs(
             delegated=delegated, agent_id=agent_id)
-        workspace = sources_for(agent.get("cwd"))
+        workspace = (
+            sources_for(agent.get("cwd"))
+            if vocab_store.agent_harvests_workspace(agent_id)
+            else WorkspaceSources())
         include_names = delegated and delegation_agent_names_enabled()
         result = compile_for(
             provider=provider, model=model, static_packs=static,
@@ -408,7 +424,7 @@ class ServerContext:
             log_exception("speakAnnounceFail", e, detail=text[:60])
 
     @classmethod
-    def production(cls) -> "ServerContext":
+    def production(cls, *, connect_runtime: bool = True) -> "ServerContext":
         """Build the ctx used by the live server. Reads config.toml."""
         from .agent_store import AGENTS_FILE, get_roster  # local: avoid cycle
 
@@ -457,6 +473,10 @@ class ServerContext:
                     cfg.whisper_model, cfg.whisper_compute,
                     f"configured transcription model is not installed: {default_id}",
                     provider=provider)
+        runtime_client = None
+        if connect_runtime:
+            from .runtime_bridge import RuntimeClient
+            runtime_client = RuntimeClient(paths.runtime_socket)
         return cls(
             root=root,
             static=static,
@@ -470,4 +490,5 @@ class ServerContext:
             stream=stream,
             stt=stt,
             roster_names=tuple(get_roster().keys()),
+            runtime_client=runtime_client,
         )

@@ -36,4 +36,37 @@ describe('PWA avatar resolution', () => {
 
     expect(resolveAvatarUrl(agents, 'Nova', 'nova')).toBe('');
   });
+
+  it('wears the model portrait only when the computer prefers it', () => {
+    const agents = {
+      rachel: {
+        name: 'Rachel',
+        avatar_url: '',
+        model_avatar_url: '/static/avatars/models/rachel.opus.png?v=abc',
+      },
+    };
+
+    expect(resolveAvatarUrl(agents, 'Rachel', 'rachel'))
+      .toBe('/static/avatars/rachel.png');
+    expect(resolveAvatarUrl(agents, 'Rachel', 'rachel', { preferModel: true }))
+      .toBe('/static/avatars/models/rachel.opus.png?v=abc');
+  });
+
+  it('falls back to the bundled portrait when no model variant is bundled', () => {
+    const agents = { mike: { name: 'Mike', avatar_url: '', model_avatar_url: '' } };
+
+    expect(resolveAvatarUrl(agents, 'Mike', 'mike', { preferModel: true }))
+      .toBe('/static/avatars/mike.png');
+  });
+
+  it('keeps a chosen portrait even when model portraits are preferred', () => {
+    // The server withholds model_avatar_url for a custom portrait; this
+    // pins the client half of that contract.
+    const agents = {
+      gordon: { name: 'Gordon', avatar_url: '/avatars/gordon?v=1', model_avatar_url: '' },
+    };
+
+    expect(resolveAvatarUrl(agents, 'Gordon', 'gordon', { preferModel: true }))
+      .toBe('/avatars/gordon?v=1');
+  });
 });

@@ -89,7 +89,7 @@ def pending_leader_ticks(*, now: float | None = None) -> list[dict]:
     now = time.time() if now is None else now
     out: list[dict] = []
     for team in team_store.list_teams():  # active teams only
-        if team.get("nudge_enabled") is False:
+        if not team.get("leader_enabled") or not team.get("nudge_enabled"):
             continue
         leader_id = (team.get("leader_agent_id") or "").strip()
         if not leader_id:
@@ -189,6 +189,9 @@ class TeamLeaderScheduler:
         ticks = pending_leader_ticks()
         for tick in ticks:
             try:
+                current = team_store.get_team(tick["team_id"])
+                if not current or current["archived_at"] is not None or not current["leader_enabled"] or not current["nudge_enabled"] or current["leader_agent_id"] != tick["leader_agent_id"]:
+                    continue
                 self._send_tick(tick["leader_session"], TICK_PROMPT)
                 log("teamLeaderTick",
                     f"{tick['team_name']} -> {tick['leader_session']} "

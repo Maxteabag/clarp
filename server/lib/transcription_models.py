@@ -308,6 +308,20 @@ def catalog_status() -> list[dict]:
     return result
 
 
+# Systran publishes most faster-whisper conversions, but never built a turbo
+# one, so the catalogue offered a model that could not be installed at all:
+# the download failed with "Repository Not Found". Anything absent from this
+# map keeps the Systran default.
+_FASTER_WHISPER_REPOS: dict[str, str] = {
+    "large-v3-turbo": "deepdml/faster-whisper-large-v3-turbo-ct2",
+}
+
+
+def _faster_whisper_repo(model: str) -> str:
+    """The HuggingFace repo that actually holds this conversion."""
+    return _FASTER_WHISPER_REPOS.get(model, f"Systran/faster-whisper-{model}")
+
+
 def install(model_id: str) -> None:
     item = model_by_id(model_id)
     if item is None:
@@ -324,7 +338,7 @@ def install(model_id: str) -> None:
         managed_root.mkdir(parents=True, exist_ok=True)
         try:
             local_path = snapshot_download(
-                repo_id=f"Systran/faster-whisper-{item['model']}",
+                repo_id=_faster_whisper_repo(item["model"]),
                 local_dir=str(managed_root),
             )
         except BaseException:
@@ -412,8 +426,13 @@ def _job_worker_alive(job: dict) -> bool:
 def start_install(
     model_id: str, *, session: str = "", computer_id: str = "", on_complete=None,
 ) -> dict:
-    if model_by_id(model_id) is None:
+    item = model_by_id(model_id)
+    if item is None:
         raise ValueError(f"unsupported transcription model: {model_id}")
+    from .transcription_catalog import platform_kind
+    host = platform_kind()
+    if host not in item.get("platforms", ["linux", "macos"]):
+        raise ValueError(f"{model_id} is not supported on {host}")
     from . import background_jobs
     session = session.strip()
     computer_id = computer_id.strip()

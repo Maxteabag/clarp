@@ -219,6 +219,8 @@ class Config:
     openai_api_key: str = ""             # [openai] api_key or env OPENAI_API_KEY
     openai_realtime_model: str = "gpt-realtime-2.1"
     openai_realtime_voice: str = "cedar"
+    oracle_diagnostics: bool = False
+    openai_realtime_transcription_model: str = "gpt-4o-mini-transcribe"
     cartesia_model: str = "sonic-3.5"
     cartesia_voices: dict[str, str] = field(
         default_factory=lambda: dict(DEFAULT_CARTESIA_VOICES))
@@ -263,6 +265,10 @@ class Config:
     # the clarp wrapper ("clarp"). Override via [agents] claude_cli or
     # CLAUDE_PWA_CLAUDE_CLI.
     claude_cli: str = "claude"
+    # Empty disables account failover. The trusted local command reads a JSON
+    # model list on stdin and returns {"available": true} only after activation
+    # and successful quota verification. Credentials never enter Host state.
+    claude_account_switch_command: tuple[str, ...] = ()
     claude_model: str = ""
     claude_effort: str = ""              # "" | low | medium | high | xhigh | max
     codex_model: str = ""
@@ -456,6 +462,9 @@ def load(path: pathlib.Path | None = None) -> Config:
         openai_realtime_voice = str(
             openai.get("realtime_voice", "cedar")
         ).strip() or "cedar",
+        oracle_diagnostics = bool(openai.get("oracle_diagnostics", False)),
+        openai_realtime_transcription_model = str(openai.get(
+            "realtime_transcription_model", "gpt-4o-mini-transcribe")).strip(),
         cartesia_model  = str(cartesia.get("model", "sonic-3.5")),
         local_tts_voice = str(
             (data.get("local_tts", {}) or {}).get("voice", "")).strip(),
@@ -472,6 +481,11 @@ def load(path: pathlib.Path | None = None) -> Config:
         claude_cli      = str(os.environ.get("CLAUDE_PWA_CLAUDE_CLI")
                               or agents.get("claude_cli", "claude")),
         claude_model    = str(agents.get("claude_model", "")),
+        claude_account_switch_command = tuple(
+            agents.get("claude_account_switch_command", ()))
+            if isinstance(agents.get("claude_account_switch_command", ()), (list, tuple))
+            and all(isinstance(arg, str) and arg for arg in
+                    agents.get("claude_account_switch_command", ())) else (),
         claude_effort   = str(agents.get("claude_effort", "")),
         codex_model     = str(agents.get("codex_model", "")),
         codex_reasoning_effort = str(agents.get("codex_reasoning_effort", "")),

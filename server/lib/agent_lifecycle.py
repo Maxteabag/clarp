@@ -52,11 +52,24 @@ class AgentLifecycleService:
         with self._create_lock:
             return self._create_locked(data)
 
-    def _create_locked(self, data: dict) -> AgentLifecycleResult:
+    def create_janitor(self, data: dict) -> AgentLifecycleResult:
+        """Private creation path for the dedicated Janitor configuration API.
+
+        Uses the same identity/runtime service, but does not reserve a voice or
+        announce a ready chat. The caller configures the paused Janitor before
+        publishing its roster event. A JSON field on ordinary create cannot
+        enable this behavior.
+        """
+        if data.get("replace_sid"):
+            raise AgentLifecycleError(400, "Use Janitor configure for an existing agent")
+        with self._create_lock:
+            return self._create_locked(data, janitor=True)
+
+    def _create_locked(self, data: dict, *, janitor: bool = False) -> AgentLifecycleResult:
         persona = (data.get("name") or "").strip()
         if not persona:
             raise AgentLifecycleError(400, "name required")
-        voice_id = (data.get("voice_id") or "").strip()
+        voice_id = "" if janitor else (data.get("voice_id") or "").strip()
         persona_definition = persona_store.get(persona)
         avatar_temp = None
         avatar_raw = None
@@ -83,6 +96,9 @@ class AgentLifecycleService:
         explicit_session = "".join(
             c for c in (data.get("session") or "").strip()
             if c.isalnum() or c in "._-")
+        if janitor and explicit_session and agents_db.session_exists(explicit_session):
+            raise AgentLifecycleError(409, "session_taken",
+                message="The reserved Janitor identity is already in use")
         if explicit_session and not agents_db.session_exists(explicit_session):
             session = explicit_session
         else:
@@ -91,7 +107,7 @@ class AgentLifecycleService:
         replace_sid = (data.get("replace_sid") or "").strip()
         fork_id = (data.get("fork_session_id") or "").strip()
         backend = backends.normalize(data.get("backend"))
-        synthesize_audio = data.get("synthesize_audio", True) is not False
+        synthesize_audio = not janitor and data.get("synthesize_audio", True) is not False
         agents = load_agents(self.ctx.agents_path)
         clear_retained_model = False
         clear_retained_effort = False
@@ -107,6 +123,9 @@ class AgentLifecycleService:
             if not data.get("backend"):
                 backend = backends.normalize(current.get("backend"))
             existing_agent = agents_db.get_by_session(replace_sid) or {}
+            if not agents_db.interaction_capabilities(existing_agent)["can_restart"]:
+                raise AgentLifecycleError(409, "janitor_managed",
+                    message="Janitors are managed from their maintenance configuration")
             # A relaunch inherits the agent's directory the same way it inherits
             # voice and backend. Without this an omitted cwd falls back to $HOME:
             # on a host that silently wakes the agent up outside its repo, and in
@@ -220,15 +239,15 @@ class AgentLifecycleService:
                 and effective_requested_effort):
             raise AgentLifecycleError(
                 400, "AGY model-specific effort compatibility is unknown")
-        if not voice_id:
+        if not janitor and not voice_id:
             _, roster_voice = lookup_persona(persona)
             voice_id = ((persona_definition or {}).get("voice_id")
                         or roster_voice or next(iter(AGENT_ROSTER.values())))
         from .voice import CARTESIA, resolve_voice
-        selected_cartesia = resolve_voice(voice_id, CARTESIA)
+        selected_cartesia = "" if janitor else resolve_voice(voice_id, CARTESIA)
         if selected_cartesia:
             for sid, info in agents.items():
-                if sid == replace_sid:
+                if sid == replace_sid or (info or {}).get("is_janitor"):
                     continue
                 existing_cartesia = (
                     resolve_voice((info or {}).get("voice_id"), CARTESIA)
@@ -271,7 +290,14 @@ class AgentLifecycleService:
         agents[session] = {
             "name": persona, "voice_id": voice_id, "cwd": cwd, "backend": backend,
         }
-        save_agents(agents, self.ctx.agents_path)
+        if janitor:
+            agents_db.create_agent(
+                persona=persona, voice_id="", cwd=cwd, session=session, backend=backend,
+                model=effective_requested_model, effort=effective_requested_effort,
+                **({"creation_request_id": str(data["creation_request_id"])}
+                   if data.get("creation_request_id") else {}))
+        else:
+            save_agents(agents, self.ctx.agents_path)
         agent = agents_db.get_by_session(session)
         if not agent:
             raise AgentLifecycleError(500, "agent persistence failed")
@@ -336,6 +362,8 @@ class AgentLifecycleService:
             # Pass session so the announcement engine can resolve the agent's
             # persona → Cartesia voice (else it falls back to ElevenLabs).
             self.ctx.speak_announcement(announcement, voice_id, session=session)
+        if janitor:
+            return AgentLifecycleResult(session, persona, "", backend)
         self.ctx.stream.broadcast({
             "type": SSEType.AGENT_ROSTER,
             "kind": "relaunched" if replace_sid else ("forked" if fork_id else "created"),
@@ -367,11 +395,20 @@ class AgentLifecycleService:
         if not session:
             raise AgentLifecycleError(400, "name required")
         agent = agents_db.get_by_session(session)
-        if agent:
+        if not agent:
+            raise AgentLifecycleError(
+                404, "agent_not_found", message=f"No active agent session: {session}")
+        if not agents_db.interaction_capabilities(agent)["can_restart"]:
+            raise AgentLifecycleError(409, "janitor_managed",
+                message="Remove Janitors from their maintenance configuration")
+        runtime_client = getattr(self.ctx, "runtime_client", None)
+        if runtime_client is not None:
+            runtime_client.release_agent(agent["agent_id"])
+        else:
             backends.interrupt_any(agent["agent_id"])
             agents_db.soft_delete(agent["agent_id"])
-            if agents_db.get_focus() == agent["agent_id"]:
-                agents_db.set_focus(None)
+        if agents_db.get_focus() == agent["agent_id"]:
+            agents_db.set_focus(None)
         self.ctx.stream.broadcast({
             "type": SSEType.AGENT_ROSTER, "kind": "deleted", "session": session,
         })

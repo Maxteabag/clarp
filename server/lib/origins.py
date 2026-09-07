@@ -1,7 +1,7 @@
 """Canonical origin classifications for agent turns.
 
 A turn's ``origin`` records what *caused* it (``user``, ``oracle``, ``agent``, ``heartbeat``,
-``leader_tick``, ``dreaming``, ``schedule``, ``automation``). Several subsystems
+``leader_tick``, ``dreaming``, ``janitor``, ``schedule``, ``automation``). Several subsystems
 ask the same questions about an origin — "is this our own routine automation?",
 "may this page the user?" — and historically each kept a private literal set. They
 drifted: the dream snapshot filter forgot ``leader_tick``, so routine leader-tick
@@ -35,10 +35,10 @@ from __future__ import annotations
 MARKER_ORIGIN = "system"
 
 # Axis A — our own scheduled automation, never a real external signal.
-ROUTINE_AUTOMATION_ORIGINS = frozenset({"heartbeat", "leader_tick", "dreaming"})
+ROUTINE_AUTOMATION_ORIGINS = frozenset({"heartbeat", "leader_tick", "dreaming", "janitor"})
 
-# Origins a client may set on POST /send. ``leader_tick`` is intentionally
-# absent: it is stamped server-side only, never accepted from a client payload.
+# Origins a client may set on POST /send. ``leader_tick`` and ``janitor``
+# are stamped server-side only, never accepted from a client payload.
 CLIENT_SETTABLE_ORIGINS = frozenset(
     {"user", "oracle", "agent", "schedule", "automation", "watcher", "heartbeat", "dreaming"}
 )

@@ -196,7 +196,7 @@ def _is_team_leader(agent_id: str) -> bool:
         from . import team_store
 
         return any(
-            (team.get("leader_agent_id") or "") == agent_id
+            team.get("leader_enabled") and (team.get("leader_agent_id") or "") == agent_id
             for team in team_store.teams_for_agent(agent_id)
         )
     except Exception as exc:  # pragma: no cover - defensive around notification path
@@ -341,7 +341,10 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
     source_message_id = source["message_id"] if source is not None else ""
     special_automation = settings_store.get_bool(
         "automation_special_treatment", default=False)
-    if not agent_id:
+    agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
+    if origin == "janitor" or (agent and not agents_db.interaction_capabilities(agent)["can_chat"]):
+        reason = "janitor-maintenance"
+    elif not agent_id:
         reason = "missing-agent"
     elif cause is None:
         reason = "missing-causing-row"
