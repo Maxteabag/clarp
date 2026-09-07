@@ -148,6 +148,20 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] QUrl mediaSource(const QString& assetId) const;
     Q_INVOKABLE [[nodiscard]] QString resolveMediaMarkdown(const QString& markdown) const;
     Q_INVOKABLE [[nodiscard]] QStringList markdownDisplayBlocks(const QString& markdown) const;
+    // Returns false when the link was refused, so the view can say so instead
+    // of silently doing nothing.
+    Q_INVOKABLE bool openExternalLink(const QString& link);
+    Q_INVOKABLE void copyToClipboard(const QString& text) const;
+    Q_INVOKABLE [[nodiscard]] QString linkifiedOutput(const QString& text) const;
+    Q_INVOKABLE [[nodiscard]] bool canLinkifyOutput(const QString& text) const;
+    // A read-only viewer for agent reports. HTML is rendered by Qt's own rich
+    // text engine, so no web engine is involved; see sanitizedReportHtml for
+    // why the body must be rewritten before it reaches the renderer.
+    Q_INVOKABLE [[nodiscard]] QVariantMap reportForArtifact(const QString& artifactId) const;
+    Q_INVOKABLE [[nodiscard]] bool artifactIsViewableReport(const QVariant& artifact) const;
+    // Screenshot/test seam only; refuses unless a screenshot run is in progress
+    // so a normal session can never inject artifacts it did not fetch.
+    Q_INVOKABLE void seedScreenshotArtifacts(const QVariantList& artifacts);
     Q_INVOKABLE [[nodiscard]] QVariantList artifactsForSession(const QString& session) const;
     [[nodiscard]] QString baseUrl() const;
     [[nodiscard]] QString selectedSession() const;

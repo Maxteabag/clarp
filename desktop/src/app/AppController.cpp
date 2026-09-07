@@ -10,7 +10,9 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QClipboard>
 #include <QDesktopServices>
+#include <QGuiApplication>
 #include <QMimeDatabase>
 #include <QProcess>
 #include <QRegularExpression>
@@ -416,7 +418,93 @@ QString AppController::resolveMediaMarkdown(const QString& markdown) const {
 }
 
 QStringList AppController::markdownDisplayBlocks(const QString& markdown) const {
-    return clarp::markdownDisplayBlocks(markdown);
+    // Repair ported URLs before splitting, so every display block gets links.
+    return clarp::markdownDisplayBlocks(clarp::markdownWithExplicitAutolinks(markdown));
+}
+
+bool AppController::openExternalLink(const QString& link) {
+    const QString target = link.trimmed();
+    if (!clarp::isOpenableLink(target)) {
+        // Transcript text is model, tool and web output. Refuse anything that is
+        // not a web or mail link rather than handing an arbitrary scheme to the
+        // desktop, which would launch whatever handler is registered for it.
+        setErrorMessage(QStringLiteral("Only web and mail links can be opened: %1")
+                            .arg(target.left(120)));
+        return false;
+    }
+    if (!QDesktopServices::openUrl(QUrl(target, QUrl::StrictMode))) {
+        setErrorMessage(QStringLiteral("No application is available to open that link"));
+        return false;
+    }
+    setErrorMessage({});
+    return true;
+}
+
+void AppController::copyToClipboard(const QString& text) const {
+    if (QClipboard* clipboard = QGuiApplication::clipboard()) {
+        clipboard->setText(text);
+    }
+}
+
+QString AppController::linkifiedOutput(const QString& text) const {
+    return clarp::linkifiedPlainText(text);
+}
+
+bool AppController::canLinkifyOutput(const QString& text) const {
+    return text.size() <= clarp::maxLinkifiedTextLength
+        && (text.contains(QStringLiteral("http://")) || text.contains(QStringLiteral("https://"))
+            || text.contains(QStringLiteral("www.")));
+}
+
+namespace {
+
+// Types whose payload carries a body the report viewer can render.
+bool reportTypeHasBody(const QString& type) {
+    return type == QStringLiteral("document") || type == QStringLiteral("research")
+        || type == QStringLiteral("html_form");
+}
+
+} // namespace
+
+bool AppController::artifactIsViewableReport(const QVariant& artifact) const {
+    const QVariantMap map = artifact.toMap();
+    return reportTypeHasBody(map.value(QStringLiteral("type")).toString())
+        && !map.value(QStringLiteral("content")).toString().trimmed().isEmpty();
+}
+
+void AppController::seedScreenshotArtifacts(const QVariantList& artifacts) {
+    if (!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")) {
+        qWarning("Refusing to seed artifacts outside a screenshot run");
+        return;
+    }
+    m_updateArtifacts = artifacts;
+    emit updatesChanged();
+}
+
+QVariantMap AppController::reportForArtifact(const QString& artifactId) const {
+    for (const QVariant& value : m_updateArtifacts) {
+        const QVariantMap map = value.toMap();
+        if (map.value(QStringLiteral("artifact_id")).toString() != artifactId) {
+            continue;
+        }
+        if (!artifactIsViewableReport(value)) {
+            return {};
+        }
+        const QString content = map.value(QStringLiteral("content")).toString();
+        const bool html = clarp::looksLikeHtmlReport(content);
+        return QVariantMap{
+            {QStringLiteral("artifact_id"), artifactId},
+            {QStringLiteral("title"), map.value(QStringLiteral("title"))},
+            {QStringLiteral("summary"), map.value(QStringLiteral("summary"))},
+            {QStringLiteral("type"), map.value(QStringLiteral("type"))},
+            {QStringLiteral("session"), map.value(QStringLiteral("session"))},
+            {QStringLiteral("isHtml"), html},
+            // Markdown bodies go to Qt's Markdown reader unchanged; only HTML
+            // can reference remote resources, so only HTML is rewritten.
+            {QStringLiteral("body"), html ? clarp::sanitizedReportHtml(content, m_baseUrl) : content},
+        };
+    }
+    return {};
 }
 
 QVariantList AppController::artifactsForSession(const QString& session) const {

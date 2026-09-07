@@ -140,6 +140,20 @@ add_test(NAME clarp-desktop-ready-reply COMMAND clarp-desktop)
 set_tests_properties(clarp-desktop-ready-reply PROPERTIES TIMEOUT 15
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=ready-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/ready-reply/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_READY_REPLY=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/ready-reply/capture.png")
 
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    # Renders the report fixture with every remote-resource vector aimed at a
+    # local listener and fails if the client touches it. Includes its own
+    # control render, so a silent pass cannot come from a broken probe.
+    add_test(NAME clarp-desktop-report-no-fetch
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/report_no_fetch.py
+            $<TARGET_FILE:clarp-desktop>
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main.cpp
+            ${CLARP_QML_TEST_RUNNER})
+    set_tests_properties(clarp-desktop-report-no-fetch PROPERTIES TIMEOUT 180)
+endif()
+
 add_executable(clarp-desktop-presence-tests tst_desktop_presence.cpp
     ../src/platform/DesktopPresence.cpp ../src/platform/DesktopPresence.h)
 target_include_directories(clarp-desktop-presence-tests PRIVATE ../src)

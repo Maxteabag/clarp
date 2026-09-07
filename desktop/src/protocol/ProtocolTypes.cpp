@@ -2,6 +2,7 @@
 
 #include <QJsonValue>
 #include <QRegularExpression>
+#include <QUrl>
 #include <QSet>
 #include <algorithm>
 #include <ranges>
@@ -189,6 +190,198 @@ QString displayName(const Agent& agent) {
 
 QString voiceDeliverySession(const QString& captureSession, const QString& currentSession) {
     return captureSession.isEmpty() ? currentSession : captureSession;
+}
+
+bool isOpenableLink(const QString& link) {
+    const QUrl url(link.trimmed(), QUrl::StrictMode);
+    if (!url.isValid() || url.isRelative() || url.isEmpty()) {
+        return false;
+    }
+    const QString scheme = url.scheme().toLower();
+    if (scheme == QStringLiteral("mailto")) {
+        return !url.path().isEmpty();
+    }
+    // A host is required so "https:///etc/passwd" cannot reach the handler.
+    return (scheme == QStringLiteral("http") || scheme == QStringLiteral("https"))
+        && !url.host().isEmpty();
+}
+
+QString linkifiedPlainText(const QString& text) {
+    // Stop before the closing punctuation that usually follows a URL in prose
+    // so a trailing ")" or "." is not swallowed into the target.
+    static const QRegularExpression candidate(
+        QStringLiteral(R"((?:https?://|www\.)[^\s<>"']+)"));
+
+    QString result;
+    result.reserve(text.size() + 64);
+    result += QStringLiteral("<div style=\"white-space: pre-wrap;\">");
+
+    qsizetype cursor = 0;
+    auto matches = candidate.globalMatch(text);
+    while (matches.hasNext()) {
+        const QRegularExpressionMatch match = matches.next();
+        QString found = match.captured();
+        while (!found.isEmpty()
+               && QStringLiteral(".,;:!?)]}'\"").contains(found.back())) {
+            found.chop(1);
+        }
+        if (found.isEmpty()) {
+            continue;
+        }
+        const QString target = found.startsWith(QStringLiteral("www."))
+            ? QStringLiteral("https://") + found : found;
+        if (!isOpenableLink(target)) {
+            continue;
+        }
+        result += text.mid(cursor, match.capturedStart() - cursor).toHtmlEscaped();
+        result += QStringLiteral("<a href=\"%1\">%2</a>")
+                      .arg(target.toHtmlEscaped(), found.toHtmlEscaped());
+        cursor = match.capturedStart() + found.size();
+    }
+    result += text.mid(cursor).toHtmlEscaped();
+    result += QStringLiteral("</div>");
+    return result;
+}
+
+namespace {
+
+// A resource may load only if it carries its own bytes or comes from the Host
+// the user is already authenticated against.
+bool reportResourceAllowed(QString reference, const QString& hostOrigin) {
+    reference = reference.trimmed();
+    while (reference.size() >= 2
+           && ((reference.startsWith(u'"') && reference.endsWith(u'"'))
+               || (reference.startsWith(u'\'') && reference.endsWith(u'\'')))) {
+        reference = reference.mid(1, reference.size() - 2).trimmed();
+    }
+    if (reference.isEmpty()) {
+        return false;
+    }
+    if (reference.startsWith(QStringLiteral("data:"), Qt::CaseInsensitive)) {
+        return true;
+    }
+    return !hostOrigin.isEmpty()
+        && reference.startsWith(hostOrigin, Qt::CaseInsensitive);
+}
+
+} // namespace
+
+QString markdownWithExplicitAutolinks(const QString& markdown) {
+    // Only URLs carrying an explicit port need help; md4c already links the
+    // rest, and rewriting those would needlessly churn well-formed text.
+    static const QRegularExpression ported(
+        QStringLiteral(R"(https?://[^\s<>"'`\]\)]*:\d{1,5}(?:/[^\s<>"'`\]\)]*)?)"));
+
+    const QStringList lines = markdown.split(u'\n');
+    QStringList output;
+    output.reserve(lines.size());
+    bool inFence = false;
+
+    for (const QString& line : lines) {
+        const QString trimmed = line.trimmed();
+        if (trimmed.startsWith(QStringLiteral("```"))
+            || trimmed.startsWith(QStringLiteral("~~~"))) {
+            inFence = !inFence;
+            output.append(line);
+            continue;
+        }
+        // Indented code blocks and fenced content must stay literal.
+        if (inFence || line.startsWith(QStringLiteral("    "))
+            || line.startsWith(u'\t')) {
+            output.append(line);
+            continue;
+        }
+
+        QString rewritten;
+        rewritten.reserve(line.size() + 16);
+        qsizetype cursor = 0;
+        bool inCodeSpan = false;
+        auto matches = ported.globalMatch(line);
+        while (matches.hasNext()) {
+            const QRegularExpressionMatch match = matches.next();
+            const QString before = line.mid(cursor, match.capturedStart() - cursor);
+            // Track backtick parity so a URL inside `code` is left alone.
+            inCodeSpan ^= (before.count(u'`') % 2) != 0;
+            rewritten += before;
+            const QChar preceding = match.capturedStart() > 0
+                ? line.at(match.capturedStart() - 1) : QChar(u' ');
+            // Already a markdown link target, an existing autolink, or code.
+            const bool alreadyLinked = preceding == u'(' || preceding == u'<';
+            if (inCodeSpan || alreadyLinked) {
+                rewritten += match.captured();
+            } else {
+                rewritten += u'<' + match.captured() + u'>';
+            }
+            cursor = match.capturedEnd();
+        }
+        rewritten += line.mid(cursor);
+        output.append(rewritten);
+    }
+    return output.join(u'\n');
+}
+
+bool looksLikeHtmlReport(const QString& content) {
+    static const QRegularExpression markup(
+        QStringLiteral(R"((?i)<(!doctype\s+html|html|head|body|div|table|h[1-6]|p|ul|ol|section|article|style)\b)"));
+    return markup.match(content).hasMatch();
+}
+
+QString sanitizedReportHtml(const QString& html, const QString& hostOrigin) {
+    QString result = html;
+
+    // Qt ignores <script> when rendering, but never carry it into the document.
+    static const QRegularExpression scripts(
+        QStringLiteral(R"((?is)<script\b[^>]*>.*?</script\s*>)"));
+    result.remove(scripts);
+
+    // CSS @import fetches a stylesheet; there is no safe rewrite, so drop it.
+    static const QRegularExpression cssImport(
+        QStringLiteral(R"((?is)@import\s+[^;}]*;?)"));
+    result.remove(cssImport);
+
+    // Every CSS url(...) reference, in <style> blocks and style attributes.
+    static const QRegularExpression cssUrl(
+        QStringLiteral(R"((?is)url\(\s*([^)]*)\s*\))"));
+    QString cssRewritten;
+    cssRewritten.reserve(result.size());
+    qsizetype cursor = 0;
+    auto cssMatches = cssUrl.globalMatch(result);
+    while (cssMatches.hasNext()) {
+        const QRegularExpressionMatch match = cssMatches.next();
+        cssRewritten += result.mid(cursor, match.capturedStart() - cursor);
+        if (reportResourceAllowed(match.captured(1), hostOrigin)) {
+            cssRewritten += match.captured();
+        } else {
+            // "none" keeps the declaration syntactically valid without a fetch.
+            cssRewritten += QStringLiteral("none");
+        }
+        cursor = match.capturedEnd();
+    }
+    cssRewritten += result.mid(cursor);
+    result = cssRewritten;
+
+    // Attributes Qt resolves as resources: <img src> and the legacy
+    // background= attribute honoured on table elements.
+    static const QRegularExpression resourceAttribute(
+        QStringLiteral(R"((?is)\b(src|background)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+))"));
+    QString attributeRewritten;
+    attributeRewritten.reserve(result.size());
+    cursor = 0;
+    auto attributeMatches = resourceAttribute.globalMatch(result);
+    while (attributeMatches.hasNext()) {
+        const QRegularExpressionMatch match = attributeMatches.next();
+        attributeRewritten += result.mid(cursor, match.capturedStart() - cursor);
+        if (reportResourceAllowed(match.captured(2), hostOrigin)) {
+            attributeRewritten += match.captured();
+        } else {
+            // Keep the attribute present but unresolvable, so the layout still
+            // reserves the element and nothing leaves the machine.
+            attributeRewritten += match.captured(1) + QStringLiteral("=\"\"");
+        }
+        cursor = match.capturedEnd();
+    }
+    attributeRewritten += result.mid(cursor);
+    return attributeRewritten;
 }
 
 QStringList markdownDisplayBlocks(const QString& markdown) {

@@ -61,7 +61,8 @@ ApplicationWindow {
     function overlayVisible() {
         return previewVersionPanel.visible || quickNewAgent.visible || renameAgent.visible || quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
             || startAgent.visible || overview.visible || connection.visible
-            || queueDialog.visible || profilePanel.visible || settingsPanel.dialogOpen;
+            || queueDialog.visible || profilePanel.visible || reportView.visible
+            || settingsPanel.dialogOpen;
     }
 
     function workspaceAvailable() {
@@ -263,6 +264,8 @@ ApplicationWindow {
             connection.visible = false;
         else if (queueDialog.visible)
             queueDialog.visible = false;
+        else if (reportView.visible)
+            reportView.visible = false;
         else if (profilePanel.visible)
             profilePanel.visible = false;
         else if (rail.searchOwnsFocus) {
@@ -402,6 +405,7 @@ ApplicationWindow {
                         app.selectSession(session);
                         root.selectedSurface = "chats";
                     }
+                    onOpenReport: artifactId => reportView.open(artifactId)
                 }
 
                 TeamsPanel {
@@ -596,6 +600,15 @@ ApplicationWindow {
         controller: app
         visible: false
         z: 105
+        onCloseRequested: visible = false
+    }
+
+    ReportView {
+        id: reportView
+        anchors.fill: parent
+        controller: app
+        visible: false
+        z: 101
         onCloseRequested: visible = false
     }
 
