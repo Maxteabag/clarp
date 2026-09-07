@@ -2569,6 +2569,19 @@ void NativeCoreTest::pairConversationRoomsAreReadOnlyProjections() {
         && !controller.agentConversations().first().toMap().value(QStringLiteral("unread")).toBool(), 3'000);
     QCOMPARE(controller.unreadAgentConversations(), 0);
 
+    // An older Host without the route must not raise a chat error banner.
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agent-conversations"), 404,
+                           QJsonObject{{QStringLiteral("error"), QStringLiteral("not found")}});
+    controller.clearError();
+    controller.loadAgentConversations();
+    QTRY_VERIFY_WITH_TIMEOUT(controller.agentConversations().isEmpty(), 3'000);
+    QCOMPARE(controller.errorMessage(), QString{});
+    QCOMPARE(controller.unreadAgentConversations(), 0);
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agent-conversations"), 200,
+                           roomsResponse);
+    controller.loadAgentConversations();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.agentConversations().size(), 1, 3'000);
+
     // Another agent's turn refreshes open rooms without a second selection.
     server.sendEvent({{QStringLiteral("type"), QStringLiteral("transcript-updated")},
                       {QStringLiteral("session"), QStringLiteral("rachel")}});

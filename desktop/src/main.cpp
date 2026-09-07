@@ -219,6 +219,17 @@ int main(int argc, char* argv[]) {
             }
         });
     }
+    // Screenshot-only: open a specific chat, including an agent-conversation
+    // projection that no fixture scenario can select on its own.
+    if (!screenshotPath.isEmpty() && controller != nullptr
+        && qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SELECT_SESSION")) {
+        const QString requested = qEnvironmentVariable("CLARP_SCREENSHOT_SELECT_SESSION");
+        QTimer::singleShot(1'400, &application, [controller, requested] {
+            if (!requested.isEmpty()) {
+                controller->selectSession(requested);
+            }
+        });
+    }
     if (!screenshotPath.isEmpty() && rootWindow != nullptr) {
         const QStringList size = qEnvironmentVariable("CLARP_SCREENSHOT_SIZE").split(u'x');
         if (size.size() == 2) {

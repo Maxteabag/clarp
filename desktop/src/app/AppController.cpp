@@ -2920,6 +2920,15 @@ void AppController::handleRequestFailure(const QString& tag, const QString& mess
     if (tag.startsWith(QStringLiteral("recoverable:"))) {
         return;
     }
+    if (tag == QStringLiteral("agent-conversations")) {
+        // A Host without this route simply has no pair conversations to show.
+        // Never turn an optional projection into a chat error banner.
+        if (!m_agentConversations.isEmpty()) {
+            m_agentConversations.clear();
+            emit agentConversationsChanged();
+        }
+        return;
+    }
     const QString detail =
         statusCode > 0 ? QStringLiteral("%1 (HTTP %2)").arg(message).arg(statusCode) : message;
     setErrorMessage(detail);
