@@ -378,6 +378,7 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/status": "_handle_oracle_status",
         "/oracle/delegations": "_handle_oracle_delegations_get",
         "/oracle/realtime": "_handle_oracle_realtime",
+        "/oracle/calls/status": "_handle_oracle_call_status",
         "/agent-schedules": "_handle_agent_schedules_get",
     }
     _ROOT_STATIC = {"/manifest.json", "/styles.css", "/icon.png"}
@@ -457,6 +458,8 @@ class Handler(BaseHTTPRequestHandler):
         "/teams": "_handle_team_create",
         "/artifacts": "_handle_artifact_create",
         "/decisions": "_handle_decision_create",
+        "/oracle/calls": "_handle_oracle_call_create",
+        "/oracle/calls/close": "_handle_oracle_call_close",
         "/oracle/delegations": "_handle_oracle_delegation_create",
         "/oracle/delegations/ack": "_handle_oracle_delegation_ack",
         "/oracle/delegations/cancel": "_handle_oracle_delegation_cancel",
@@ -3616,6 +3619,39 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(
             200, json.dumps({"delegations": rows}).encode(),
             "application/json")
+
+    def _handle_oracle_call_status(self):
+        from lib import oracle_calls
+        from urllib.parse import parse_qs, urlparse
+        query = parse_qs(urlparse(self.path).query)
+        rows = oracle_calls.call_results(str(self._request_principal), query.get("attempt_id", [""])[0])
+        return self._send(200, json.dumps({"delegations": rows}).encode(), "application/json")
+
+    def _handle_oracle_call_create(self):
+        from lib import oracle_calls
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        try:
+            result = oracle_calls.create_call(ctx=self.ctx,
+                principal=str(self._request_principal),
+                attempt_id=str(data.get("attempt_id") or ""), sdp=data.get("sdp"),
+                fallback=str(data.get("oracle_session") or ""),
+                stop=lambda session: self._stop_agent_session(session, strict=True, defer_finish=True)[1])
+            return self._send(200, json.dumps(result).encode(), "application/json")
+        except ValueError as exc:
+            return self._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
+        except Exception as exc:
+            log_exception("oracleCallCreateFail", exc)
+            return self._send(502, b'{"error":"Oracle connection unavailable"}', "application/json")
+
+    def _handle_oracle_call_close(self):
+        from lib import oracle_calls
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        oracle_calls.close_call(str(self._request_principal), str(data.get("attempt_id") or ""))
+        return self._send(200, b'{"closed":true}', "application/json")
 
     def _handle_oracle_delegation_create(self):
         from lib import oracle_delegations
