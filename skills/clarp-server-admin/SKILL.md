@@ -26,6 +26,30 @@ previously opened by another feature branch can have a higher marker without
 the new feature's columns. Do not lower the marker or assume version order alone
 proves compatibility. Fix and test the candidate migration first.
 
+### Choose the version number against every source, not just main
+
+`_migrate` returns early when `PRAGMA user_version >= _SCHEMA_VERSION`, so a
+number another branch already used means your migration **silently never runs**
+on that host: the deploy succeeds, the tables are missing, and the feature fails
+at runtime. Several agents work this repo in parallel and deploy feature
+branches to the live host, so `origin/main` alone does not tell you what is
+taken. Read all four before picking:
+
+```bash
+git fetch origin
+grep -n '_SCHEMA_VERSION = ' server/lib/db.py                       # your branch
+git show origin/main:server/lib/db.py | grep -n '_SCHEMA_VERSION = ' # merged
+grep -n '_SCHEMA_VERSION = ' ~/.local/share/clarp/current/lib/db.py  # deployed
+sqlite3 ~/.local/share/clarp/state.sqlite 'pragma user_version;'     # live DB
+```
+
+Take `max(all four) + 1`, add a `_migrate_to_vNN` guarded by
+`if version < NN:`, and keep every statement `CREATE TABLE IF NOT EXISTS` so
+re-applying is harmless whichever branch lands first. Re-check after every
+rebase: a merge that lands mid-task can take your number. Verify after
+deploying that `pragma user_version` advanced *and* the new tables exist --
+a matching version number alone does not prove the migration ran.
+
 Use the helper from this skill to migrate a new private backup, never the live
 database. Choose an existing private directory for the output:
 
@@ -76,8 +100,37 @@ It heartbeats a process-fenced job and records `installer-exit`; job completion
 means the installer finished, not that phone/runtime verification is complete.
 Once installation starts, the installer owns rollback; cancelling the tracking
 job is not an emergency stop for the installer. Verify the deployed SHA, schema,
-runtime availability, and `clarp-admin doctor` afterwards. The split runtime
-drains to a new release when idle; do not restart it manually while turns run.
+runtime availability, and `clarp-admin doctor` afterwards.
+
+## Installing does not deploy runner code
+
+`install_and_restart` runs `systemctl --user enable --now
+clarp-runtime.service` and `restart clarp.service`. `enable --now` does not
+restart an already-running runtime, and nothing in the server automatically
+adopts a new release, so **the runtime keeps its old code until someone
+restarts it**. Verified on 2026-09-07: no drain-to-new-release mechanism exists
+in `runtime.py` or `service_manager.py`.
+
+That split decides whether your change is actually live:
+
+| Where the code lives | Live after `install.sh`? |
+|---|---|
+| HTTP endpoints (`server.py`), schema migrations | yes |
+| Runner/turn code (`turn_dispatch.py`, `*_runner.py`) | **no** |
+
+Confirm which side you changed, then check whether the runtime predates the
+deploy:
+
+```bash
+ps -o lstart= -p $(systemctl --user show clarp-runtime.service -p MainPID --value)
+stat -c %y ~/.local/share/clarp/current
+```
+
+Restarting the runtime interrupts **every in-flight turn on the host**,
+including the calling agent's own turn, so it cannot be done silently from
+inside a turn that still needs to report. Check `/agents/snapshot` for `busy`
+agents and queued turns, then ask for explicit approval with `clarp-decisions`
+rather than restarting unannounced.
 
 ## Docker Container Administration
 
