@@ -71,6 +71,10 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const {
         return message.origin;
     case SenderNameRole:
         return message.senderName;
+    case SenderAgentIdRole:
+        return message.senderAgentId;
+    case SenderSessionRole:
+        return message.senderSession;
     case PendingRole:
         return message.pending;
     case DeliveryFailedRole:
@@ -108,6 +112,8 @@ QHash<int, QByteArray> ConversationModel::roleNames() const {
         {ToolNameRole, "toolName"},
         {OriginRole, "origin"},
         {SenderNameRole, "senderName"},
+        {SenderAgentIdRole, "senderAgentId"},
+        {SenderSessionRole, "senderSession"},
         {PendingRole, "pending"},
         {DeliveryFailedRole, "deliveryFailed"},
         {ActivityRole, "activity"},
@@ -508,6 +514,8 @@ void ConversationModel::mergeRows(const QJsonArray& rows) {
             if (previous.toolName != incoming.toolName) changedRoles.append(ToolNameRole);
             if (previous.origin != incoming.origin) changedRoles.append(OriginRole);
             if (previous.senderName != incoming.senderName) changedRoles.append(SenderNameRole);
+            if (previous.senderAgentId != incoming.senderAgentId) changedRoles.append(SenderAgentIdRole);
+            if (previous.senderSession != incoming.senderSession) changedRoles.append(SenderSessionRole);
             if (previous.pending != incoming.pending) changedRoles.append(PendingRole);
             if (previous.deliveryFailed != incoming.deliveryFailed) changedRoles.append(DeliveryFailedRole);
             if (previous.activity != incoming.activity) changedRoles.append(ActivityRole);

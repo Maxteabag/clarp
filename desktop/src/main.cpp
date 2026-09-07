@@ -229,7 +229,8 @@ int main(int argc, char* argv[]) {
                            [controller, screenshotScenario] {
             QString session = controller->selectedSession();
             if (session.isEmpty() && (screenshotScenario == QStringLiteral("markdown") ||
-                                      screenshotScenario == QStringLiteral("tool-spacing"))) {
+                                      screenshotScenario == QStringLiteral("tool-spacing") ||
+                                      screenshotScenario == QStringLiteral("team-messages"))) {
                 session = QStringLiteral("markdown-fixture");
                 controller->agents()->applySnapshot(
                     {{QStringLiteral("agents"),
@@ -335,6 +336,22 @@ int main(int argc, char* argv[]) {
                                 {QStringLiteral("role"), QStringLiteral("assistant")},
                                 {QStringLiteral("text"), QStringLiteral("The sidebar can be fully hidden with **Ctrl+B**. Text is larger, and tool calls stay close to the reply.\n\nParagraphs still have breathing room. **Ctrl+K** opens commands from anywhere.")},
                                 {QStringLiteral("revision"), 4}},
+                };
+            } else if (screenshotScenario == QStringLiteral("team-messages")) {
+                controller->setActivityDisplayMode(0);
+                turns = {
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("team-user")}, {QStringLiteral("role"), QStringLiteral("user")},
+                        {QStringLiteral("text"), QStringLiteral("Can you verify the combined desktop update?")}},
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("team-sender")}, {QStringLiteral("role"), QStringLiteral("user")},
+                        {QStringLiteral("origin"), QStringLiteral("agent")}, {QStringLiteral("sender_name"), QStringLiteral("C++ Agent")},
+                        {QStringLiteral("sender_agent_id"), QStringLiteral("fixture-agent")}, {QStringLiteral("sender_session"), session},
+                        {QStringLiteral("text"), QStringLiteral("The combined client is ready. All desktop checks passed, and the updater owns installation.")}},
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("team-tools")}, {QStringLiteral("role"), QStringLiteral("assistant")},
+                        {QStringLiteral("text"), QStringLiteral("I checked the installed build and the new settings.")},
+                        {QStringLiteral("timestamp"), QStringLiteral("2020-01-01T10:00:00Z")}, {QStringLiteral("activity_count"), 21}},
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("team-done")}, {QStringLiteral("role"), QStringLiteral("assistant")},
+                        {QStringLiteral("timestamp"), QStringLiteral("2020-01-01T10:01:23Z")},
+                        {QStringLiteral("text"), QStringLiteral("Verified. Reopen the preview when you are ready.")}}
                 };
             } else if (screenshotScenario == QStringLiteral("markdown")) {
                 turns = {

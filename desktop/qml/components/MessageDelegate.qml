@@ -17,6 +17,16 @@ Item {
     required property string toolName
     required property string origin
     required property string senderName
+    property string senderAgentId: ""
+    property string senderSession: ""
+    property string activitySummary: ""
+    readonly property bool teamAuthored: root.origin === "agent"
+    readonly property bool rightAligned: root.userAuthored || root.teamAuthored
+    readonly property string senderAvatarSession: {
+        root.controller.agentRevision;
+        return root.senderAgentId.length > 0
+            ? root.controller.agentSessionById(root.senderAgentId) : root.senderSession;
+    }
     required property bool pending
     required property bool deliveryFailed
     required property bool activity
@@ -97,12 +107,11 @@ Item {
         spacing: 2
 
         Text {
-            visible: !root.activity && (root.origin === "agent"
-                || root.origin === "automation" || root.automated)
+            objectName: "messageProvenance"
+            visible: !root.activity && !root.teamAuthored
+                && (root.origin === "automation" || root.automated)
             Layout.leftMargin: 2
-            text: root.origin === "agent"
-                ? ((root.senderName || "Agent") + " · TEAM")
-                : ((root.category || "AUTOMATION").toUpperCase())
+            text: (root.category || "AUTOMATION").toUpperCase()
             color: root.origin === "agent" ? "#8f96bc" : "#8a806f"
             font.family: "JetBrains Mono"
             font.pixelSize: 9
@@ -113,7 +122,24 @@ Item {
         Item {
             visible: root.activity || root.body.length > 0
             Layout.fillWidth: true
-            implicitHeight: root.activity ? activityCard.implicitHeight : messageBubble.visible ? messageBubble.implicitHeight : 0
+            implicitHeight: root.activity ? activityCard.implicitHeight : messageBubble.visible
+                ? Math.max(messageBubble.implicitHeight, root.teamAuthored ? 36 : 0) : 0
+
+            AgentAvatar {
+                objectName: "teamMessageAvatar"
+                visible: root.teamAuthored && !root.activity && root.body.length > 0
+                controller: root.controller
+                session: root.senderAvatarSession
+                name: root.senderName || "Agent"
+                avatarSize: 36
+                cornerRadius: 18
+                x: parent.width - width
+                y: 4
+                Accessible.name: name
+                HoverHandler { id: senderHover }
+                ToolTip.visible: senderHover.hovered
+                ToolTip.text: name
+            }
 
             Rectangle {
                 id: activityCard
@@ -179,12 +205,13 @@ Item {
                 id: messageBubble
                 objectName: "userMessageBackground"
                 visible: !root.activity && root.body.length > 0
-                width: Math.min(parent.width * (root.userAuthored ? 0.78 : 0.95), 840,
+                width: Math.min(Math.max(0, parent.width - (root.teamAuthored ? 46 : 0)),
+                    parent.width * (root.rightAligned ? 0.78 : 0.95), 840,
                     root.body.length > 160 ? 840 : Math.max(140, bubbleMetrics.advanceWidth + 28))
-                x: root.userAuthored ? parent.width - width : 0
+                x: root.rightAligned ? parent.width - width - (root.teamAuthored ? 46 : 0) : 0
                 implicitHeight: messageBlocks.implicitHeight + 24
                 radius: 14
-                color: root.userAuthored ? "#493651" : "#1b191f"
+                color: root.teamAuthored ? "#293b52" : root.userAuthored ? "#493651" : "#1b191f"
                 border.width: root.deliveryFailed ? 1 : 0
                 border.color: "#8d5763"
                 opacity: root.pending ? 0.68 : 1
@@ -233,7 +260,7 @@ Item {
             visible: !root.activity && root.presentedActivityCount > 0 && !root.showTools && !root.forceActivityInline
             activeFocusOnTab: visible
             Accessible.role: Accessible.Button
-            Accessible.name: root.groupSummary.length > 0 ? root.groupSummary : root.presentedActivityCount + " tool calls"
+            Accessible.name: root.groupSummary || root.activitySummary || root.presentedActivityCount + " tool calls"
             function toggle() {
                 if (root.groupSummary.length > 0) { root.toggleActivityGroup(); return; }
                 if (!root.activityExpanded && root.toolDetailsAvailable)
@@ -251,11 +278,13 @@ Item {
             color: activityTap.hovered ? "#202335" : "transparent"
 
             Text {
+                objectName: "activitySummaryText"
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.groupSummary.length > 0 ? (root.groupedExpanded ? "▾ " : "▸ ") + root.groupSummary : root.activityExpanded
-                    ? root.presentedActivityCount + " activities"
-                    : "+" + root.presentedActivityCount + " more"
+                text: (root.groupSummary.length > 0
+                    ? (root.groupedExpanded ? "▾ " : "▸ ") + root.groupSummary
+                    : (root.activityExpanded ? "▾ " : "▸ ")
+                        + (root.activitySummary || root.presentedActivityCount + " tool calls"))
                 color: "#72778f"
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
@@ -320,7 +349,7 @@ Item {
         Text {
             visible: root.showTimestamp && root.timestamp.length > 0
                 && !root.activity
-            Layout.alignment: root.userAuthored ? Qt.AlignRight : Qt.AlignLeft
+            Layout.alignment: root.rightAligned ? Qt.AlignRight : Qt.AlignLeft
             Layout.leftMargin: 12
             Layout.rightMargin: 12
             text: Qt.formatDateTime(new Date(root.timestamp), "MMM d  HH:mm")

@@ -16,7 +16,7 @@ class ConversationPresentationModel : public QSortFilterProxyModel {
     void setShowWhenReady(bool value);
     QVariant data(const QModelIndex& index, int role) const override;
     Q_INVOKABLE int indexOfMessage(const QString& id) const;
-    enum GroupRole { GroupIdsRole = Qt::UserRole + 100, GroupLabelRole, GroupExpandedRole, ActivityInlineRole };
+    enum GroupRole { GroupIdsRole = Qt::UserRole + 100, GroupLabelRole, GroupExpandedRole, ActivityInlineRole, ActivityLabelRole };
     QHash<int, QByteArray> roleNames() const override;
     int activityMode() const { return m_activityMode; }
     void setActivityMode(int mode);
@@ -38,6 +38,7 @@ class ConversationPresentationModel : public QSortFilterProxyModel {
     bool groupedRow(int row) const;
     bool inlineRow(const QModelIndex& row) const;
     QList<QModelIndex> groupRows(int row) const;
+    QString activityLabel(const QList<QModelIndex>& rows) const;
     void refreshGroups();
 };
 }

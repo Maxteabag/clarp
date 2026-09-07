@@ -232,6 +232,7 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] QString agentModel(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentEffort(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentNameById(const QString& agentId) const;
+    Q_INVOKABLE [[nodiscard]] QString agentSessionById(const QString& agentId) const;
     Q_INVOKABLE [[nodiscard]] QString teamNameById(const QString& teamId) const;
     Q_INVOKABLE [[nodiscard]] QVariantList teamAgentChoices() const;
     Q_INVOKABLE [[nodiscard]] QVariantList matchingAgents(const QString& query) const;

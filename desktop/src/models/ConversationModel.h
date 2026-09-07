@@ -43,6 +43,8 @@ class ConversationModel : public QAbstractListModel {
         CategoryRole,
         ToolDetailsAvailableRole,
         ActivityCountRole,
+        SenderAgentIdRole,
+        SenderSessionRole,
     };
     Q_ENUM(Role)
 

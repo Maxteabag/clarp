@@ -39,6 +39,7 @@ QVariant ConversationPresentationModel::data(const QModelIndex& item, int role) 
     const QModelIndex source = mapToSource(item);
     if (role == ActivityInlineRole) return inlineRow(source);
     const auto rows = groupedRow(source.row()) ? groupRows(source.row()) : QList<QModelIndex>{};
+    if (role == ActivityLabelRole) return activityLabel(rows.isEmpty() ? QList<QModelIndex>{source} : rows);
     if (!rows.isEmpty()) {
         const bool expanded = m_expanded.contains(source.data(ConversationModel::MessageIdRole).toString());
         if (role == GroupExpandedRole) return expanded;
@@ -54,13 +55,7 @@ QVariant ConversationPresentationModel::data(const QModelIndex& item, int role) 
                 static_cast<int>(row.data(ConversationModel::ToolsRole).toList().size()),
                 static_cast<int>(row.data(ConversationModel::DisplayCellsRole).toList().size())});
             if (role == ConversationModel::ActivityCountRole) return count;
-            QString label = QStringLiteral("%1 tool calls").arg(count);
-            const auto start = QDateTime::fromString(rows.first().data(ConversationModel::TimestampRole).toString(), Qt::ISODateWithMs);
-            const auto end = QDateTime::fromString(rows.last().data(ConversationModel::TimestampRole).toString(), Qt::ISODateWithMs);
-            const qint64 seconds = start.secsTo(end);
-            if (start.isValid() && end.isValid() && seconds > 0)
-                label += QStringLiteral(" · %1h %2m %3s").arg(seconds / 3600).arg(seconds / 60 % 60).arg(seconds % 60);
-            return label;
+            return activityLabel(rows);
         }
         if (role == ConversationModel::BodyRole) return QString{};
         if (role == ConversationModel::ActivityRole) return false;
@@ -89,7 +84,43 @@ QHash<int, QByteArray> ConversationPresentationModel::roleNames() const {
     auto roles = QSortFilterProxyModel::roleNames();
     roles.insert(GroupIdsRole, "groupIds"); roles.insert(GroupLabelRole, "groupLabel");
     roles.insert(GroupExpandedRole, "groupExpanded"); roles.insert(ActivityInlineRole, "activityInline");
+    roles.insert(ActivityLabelRole, "activityLabel");
     return roles;
+}
+QString ConversationPresentationModel::activityLabel(const QList<QModelIndex>& rows) const {
+    if (rows.isEmpty() || !rows.first().isValid()) return {};
+    int count = 0;
+    for (const auto& row : rows) count += std::max({row.data(ConversationModel::ActivityRole).toBool() ? 1 : 0,
+        row.data(ConversationModel::ActivityCountRole).toInt(),
+        static_cast<int>(row.data(ConversationModel::ToolsRole).toList().size()),
+        static_cast<int>(row.data(ConversationModel::DisplayCellsRole).toList().size())});
+    if (count == 0) return {};
+    QString label = QStringLiteral("%1 tool call%2").arg(count).arg(count == 1 ? QString{} : QStringLiteral("s"));
+    const auto timeOf = [](const QModelIndex& row) {
+        return QDateTime::fromString(row.data(ConversationModel::TimestampRole).toString(), Qt::ISODateWithMs);
+    };
+    const auto start = timeOf(rows.first());
+    auto end = timeOf(rows.last());
+    // The following assistant message closes the activity interval. Never
+    // count time waiting for the next user or a teammate as tool execution.
+    const auto next = sourceModel()->index(rows.last().row() + 1, 0);
+    if (next.isValid() && next.data(ConversationModel::AuthorRole).toString() == QStringLiteral("assistant")
+        && next.data(ConversationModel::OriginRole).toString().isEmpty()
+        && !next.data(ConversationModel::AutomatedRole).toBool()
+        && next.data(ConversationModel::KindRole).toString() != QStringLiteral("live")
+        && !next.data(ConversationModel::ActivityRole).toBool()) {
+        const auto boundary = timeOf(next);
+        if (boundary.isValid() && (!end.isValid() || boundary > end)) end = boundary;
+    }
+    const qint64 seconds = start.secsTo(end);
+    if (start.isValid() && end.isValid() && seconds > 0) {
+        QString elapsed;
+        if (seconds >= 3600) elapsed += QStringLiteral("%1h ").arg(seconds / 3600);
+        if (seconds >= 60) elapsed += QStringLiteral("%1m ").arg(seconds / 60 % 60);
+        elapsed += QStringLiteral("%1s").arg(seconds % 60);
+        label += QStringLiteral(" · %1 elapsed").arg(elapsed);
+    }
+    return label;
 }
 bool ConversationPresentationModel::inlineRow(const QModelIndex& row) const {
     if (m_activityMode == 1) return true;
@@ -139,7 +170,13 @@ void ConversationPresentationModel::setSourceModel(QAbstractItemModel* model) {
         connect(model, &QAbstractItemModel::dataChanged, this, [this](const QModelIndex& first, const QModelIndex& last) {
             if (m_activityMode == 1) return;
             for (int row = first.row(); row <= last.row(); ++row)
-                if (groupedRow(row) || groupedRow(row - 1)) { refreshGroups(); break; }
+                if (groupedRow(row) || groupedRow(row - 1)) { refreshGroups(); return; }
+            // A reply timestamp can close the preceding message's tool span.
+            // Notify derived labels even when neither row is a synthetic group.
+            for (int row = std::max(0, first.row() - 1); row <= last.row(); ++row) {
+                const auto item = mapFromSource(sourceModel()->index(row, 0));
+                if (item.isValid()) emit dataChanged(item, item, {ActivityLabelRole});
+            }
         });
         connect(model, &QAbstractItemModel::rowsInserted, this, [this] { if (m_activityMode != 1) refreshGroups(); });
         connect(model, &QAbstractItemModel::rowsRemoved, this, [this] { if (m_activityMode != 1) refreshGroups(); });

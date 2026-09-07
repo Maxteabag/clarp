@@ -607,6 +607,7 @@ class NativeCoreTest final : public QObject {
 
   private slots:
     void oldActivityGroupsAreLazyAndVisitScoped();
+    void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
     void readyModePreservesActivityAndHidesOnlyProvisionalBody();
     void idleContactStartsFreshWithSavedDefaults();
     void redesignedRosterFiltersWithoutMutatingSource();
@@ -644,6 +645,52 @@ class NativeCoreTest final : public QObject {
     void markdownParagraphsBecomeVisibleDisplayBlocks();
 };
 
+void NativeCoreTest::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender() {
+    ConversationModel source;
+    source.openSession(QStringLiteral("timing"));
+    QJsonObject tools{{QStringLiteral("id"), QStringLiteral("tools")}, {QStringLiteral("role"), QStringLiteral("assistant")},
+        {QStringLiteral("text"), QStringLiteral("Checking the build.")}, {QStringLiteral("activity_count"), 21},
+        {QStringLiteral("timestamp"), QStringLiteral("2020-01-01T10:00:00Z")}};
+    QJsonObject done{{QStringLiteral("id"), QStringLiteral("done")}, {QStringLiteral("role"), QStringLiteral("assistant")},
+        {QStringLiteral("text"), QStringLiteral("Done.")}, {QStringLiteral("timestamp"), QStringLiteral("2020-01-01T10:01:23Z")}};
+    const auto load = [&] {
+        source.applyLog({{QStringLiteral("turns"), QJsonArray{tools, done}}}, ConversationModel::LoadKind::Replace);
+    };
+    load();
+    ConversationPresentationModel view;
+    view.setSourceModel(&source);
+    view.setActivityMode(0);
+    QCOMPARE(view.index(0, 0).data(ConversationPresentationModel::ActivityLabelRole).toString(),
+             QStringLiteral("21 tool calls · 1m 23s elapsed"));
+    QVERIFY(view.index(0, 0).data(ConversationPresentationModel::GroupLabelRole).toString().isEmpty());
+    QSignalSpy labels(&view, &QAbstractItemModel::dataChanged);
+    done.insert(QStringLiteral("timestamp"), QStringLiteral("2020-01-01T10:02:00Z"));
+    source.applyLog({{QStringLiteral("turns"), QJsonArray{done}}}, ConversationModel::LoadKind::Delta);
+    QCOMPARE(view.index(0, 0).data(ConversationPresentationModel::ActivityLabelRole).toString(),
+             QStringLiteral("21 tool calls · 2m 0s elapsed"));
+    bool updatedPrecedingLabel = false;
+    for (const auto& signal : labels) {
+        if (signal.at(0).value<QModelIndex>().row() == 0
+            && signal.at(2).value<QList<int>>().contains(ConversationPresentationModel::ActivityLabelRole))
+            updatedPrecedingLabel = true;
+    }
+    QVERIFY(updatedPrecedingLabel);
+    done.insert(QStringLiteral("role"), QStringLiteral("user"));
+    done.insert(QStringLiteral("origin"), QStringLiteral("agent"));
+    done.insert(QStringLiteral("sender_agent_id"), QStringLiteral("sender-id"));
+    done.insert(QStringLiteral("sender_session"), QStringLiteral("sender-session"));
+    load();
+    QCOMPARE(view.index(0, 0).data(ConversationPresentationModel::ActivityLabelRole).toString(), QStringLiteral("21 tool calls"));
+    QCOMPARE(source.index(1, 0).data(ConversationModel::SenderAgentIdRole).toString(), QStringLiteral("sender-id"));
+    QCOMPARE(source.index(1, 0).data(ConversationModel::SenderSessionRole).toString(), QStringLiteral("sender-session"));
+    ConversationModel restored;
+    QVERIFY(restored.restoreCacheSnapshot(source.cacheSnapshot()));
+    QCOMPARE(restored.index(1, 0).data(ConversationModel::SenderAgentIdRole).toString(), QStringLiteral("sender-id"));
+    tools.insert(QStringLiteral("timestamp"), QStringLiteral("invalid"));
+    load();
+    QCOMPARE(view.index(0, 0).data(ConversationPresentationModel::ActivityLabelRole).toString(), QStringLiteral("21 tool calls"));
+}
+
 void NativeCoreTest::oldActivityGroupsAreLazyAndVisitScoped() {
     QStandardItemModel source;
     const auto append = [&source](const QString& id, const QString& time, const QString& kind) {
@@ -664,7 +711,7 @@ void NativeCoreTest::oldActivityGroupsAreLazyAndVisitScoped() {
     view.setSourceModel(&source);
     view.setActivityMode(2);
     QCOMPARE(view.rowCount(), 1);
-    QCOMPARE(view.data(view.index(0, 0), ConversationPresentationModel::GroupLabelRole).toString(), QStringLiteral("2 tool calls · 1h 32m 23s"));
+    QCOMPARE(view.data(view.index(0, 0), ConversationPresentationModel::GroupLabelRole).toString(), QStringLiteral("2 tool calls · 1h 32m 23s elapsed"));
     QVERIFY(view.data(view.index(0, 0), ConversationModel::ToolsRole).toList().isEmpty());
     view.toggleGroup(QStringLiteral("a"));
     QCOMPARE(view.data(view.index(0, 0), ConversationModel::ToolsRole).toList().size(), 2);
