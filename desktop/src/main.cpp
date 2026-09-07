@@ -232,6 +232,7 @@ int main(int argc, char* argv[]) {
             QString session = controller->selectedSession();
             if (session.isEmpty() && (screenshotScenario == QStringLiteral("markdown") ||
                                       screenshotScenario == QStringLiteral("tool-spacing") ||
+                                      screenshotScenario == QStringLiteral("preview-versions") ||
                                       screenshotScenario == QStringLiteral("team-messages"))) {
                 session = QStringLiteral("markdown-fixture");
                 controller->agents()->applySnapshot(

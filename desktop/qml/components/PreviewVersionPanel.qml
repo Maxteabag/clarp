@@ -7,11 +7,13 @@ FocusScope {
     id: root
     required property var switcher
     property bool canRestart: true
+    signal closed()
+    function close() { visible = false; closed(); }
     visible: false
     onVisibleChanged: if (visible) { forceActiveFocus(); switcher.refresh(); }
-    Keys.onEscapePressed: visible = false
+    Keys.onEscapePressed: close()
     Rectangle { anchors.fill: parent; color: "#bb101018" }
-    MouseArea { anchors.fill: parent; onClicked: root.visible = false }
+    MouseArea { anchors.fill: parent; onClicked: root.close() }
     Rectangle {
         anchors.centerIn: parent
         width: Math.min(620, parent.width - 32)
@@ -105,7 +107,7 @@ FocusScope {
                     onClicked: root.switcher.selectVersion("latest")
                 }
                 Item { Layout.fillWidth: true }
-                Button { text: "Close · Esc"; onClicked: root.visible = false }
+                Button { text: "Close · Esc"; onClicked: root.close() }
             }
         }
     }
