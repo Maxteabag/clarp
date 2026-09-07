@@ -49,6 +49,9 @@ class ToolNarrator : public QObject {
     Q_INVOKABLE void releaseView(QObject* owner);
     Q_INVOKABLE void request(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false);
     Q_INVOKABLE [[nodiscard]] QString explanation(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false) const;
+    // True once this row's explanation has definitively failed, so the view can
+    // fall back to the original tool call instead of a dead-end message.
+    Q_INVOKABLE [[nodiscard]] bool failed(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false) const;
 
   signals:
     void enabledChanged();

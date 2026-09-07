@@ -18,6 +18,7 @@ TestCase {
         property string response: ""
         signal changed()
         function explanation() { return response; }
+        function failed() { return false; }
         function acquireView(owner, activity) { acquisitions++; }
         function releaseView(owner) { releases++; }
     }

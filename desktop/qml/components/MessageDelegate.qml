@@ -233,7 +233,7 @@ Item {
                         }
                     }
                     Text {
-                        visible: !liveExplanation.narrationEnabled
+                        visible: !liveExplanation.narrationShown
                         Layout.maximumWidth: activityRow.width * 0.3
                         elide: Text.ElideRight
                         text: root.toolName || root.messageKind || "Working"
@@ -244,13 +244,13 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: liveExplanation.narrationEnabled ? liveExplanation.displayText : root.body
+                        text: liveExplanation.narrationShown ? liveExplanation.displayText : root.body
                         textFormat: Text.PlainText
-                        color: liveExplanation.narrationEnabled ? "#82aaff" : "#969bb5"
+                        color: liveExplanation.narrationShown ? "#82aaff" : "#969bb5"
                         font.family: "JetBrains Mono"
                         font.pixelSize: 12
-                        wrapMode: liveExplanation.narrationEnabled ? Text.Wrap : Text.NoWrap
-                        elide: liveExplanation.narrationEnabled ? Text.ElideNone : Text.ElideRight
+                        wrapMode: liveExplanation.narrationShown ? Text.Wrap : Text.NoWrap
+                        elide: liveExplanation.narrationShown ? Text.ElideNone : Text.ElideRight
                     }
                 }
             }
