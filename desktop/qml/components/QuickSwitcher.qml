@@ -65,6 +65,7 @@ Rectangle {
     }
     readonly property var commands: [
         { kind: "command", label: "New contact & chat", action: "quick-new-agent", key: "Ctrl+Shift+N", group: "agent" },
+        { kind: "command", label: "Rename contact", action: "rename-agent", key: "F2", group: "agent", keywords: "rename name title relabel persona" },
         { kind: "command", label: "Preview versions · update or roll back", action: "preview-versions", key: "", group: "settings", keywords: "previous installs rollback downgrade" },
         { kind: "command", label: "New agent", action: "new", key: "Ctrl+N", group: "agent" },
         { kind: "command", label: "Start an idle contact", action: "new-contact", key: "Ctrl+Alt+N", group: "agent" },
@@ -159,7 +160,7 @@ Rectangle {
             }
             if (String(item.action).startsWith("setting:")) root.applySetting(String(item.action));
             else root.commandRequested(String(item.action));
-            if (["preview-versions", "quick-new-agent", "new", "overview", "connection", "orchestrator", "updates", "teams", "settings"].includes(String(item.action)))
+            if (["preview-versions", "quick-new-agent", "rename-agent", "new", "overview", "connection", "orchestrator", "updates", "teams", "settings"].includes(String(item.action)))
                 shouldRestore = false;
         } else if (String(item.kind) === "contact") {
             root.contactRequested(String(item.name));

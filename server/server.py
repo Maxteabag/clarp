@@ -373,6 +373,7 @@ class Handler(BaseHTTPRequestHandler):
         "/diagnostics/settings": "_handle_diagnostics_settings_post",
         "/agent-dreaming": "_handle_agent_dreaming",
         "/agent-mute": "_handle_agent_mute",
+        "/agent-rename": "_handle_agent_rename",
         "/agent-voice-verbosity": "_handle_agent_voice_verbosity",
         "/team-nudging": "_handle_team_nudging",
         "/compact": "_handle_compact",
@@ -3230,6 +3231,53 @@ class Handler(BaseHTTPRequestHandler):
             "ok": True,
             "session": session,
             "muted": bool(fresh.get("muted")),
+        }).encode(), "application/json")
+
+    def _handle_agent_rename(self):
+        """Change an agent's display name, keeping every stable identifier.
+
+        The name is `agents.persona`. `session` and `agent_id` are untouched, so
+        addressing, transcripts, pairings and routing all survive the rename.
+        """
+        from lib import agents as agents_db
+        data = self._read_json()
+        if data is None:
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        if self._reject_janitor_control(data):
+            return
+        session = (data.get("session") or "").strip()
+        if not session:
+            return self._send(400, b'{"error":"session required"}', "application/json")
+        # Collapse internal runs of whitespace: this is a display name, and a
+        # name that only differs by spacing is not a different contact.
+        name = " ".join(str(data.get("name") or "").split())
+        if not name or len(name) > 60:
+            return self._send(400, b'{"error":"name required (maximum 60 characters)"}',
+                              "application/json")
+        agent = agents_db.get_by_session(session)
+        if not agent:
+            return self._send(404, b'{"error":"no such agent"}', "application/json")
+        # Agent creation permits one live session per contact name, and the
+        # persona-to-session lookup relies on it. A rename has to hold the same
+        # line or that lookup becomes ambiguous.
+        owner = next((a for a in agents_db.list_agents()
+                      if a["agent_id"] != agent["agent_id"]
+                      and str(a["persona"] or "").strip().casefold() == name.casefold()),
+                     None)
+        if owner is not None:
+            return self._send(409, json.dumps({
+                "error": "contact_occupied",
+                "message": f"{owner['persona']} already has an active session.",
+                "owner": owner["persona"], "session": owner["session"],
+            }).encode(), "application/json")
+        if str(agent.get("persona") or "") != name:
+            agents_db.update_agent(agent["agent_id"], persona=name)
+            self.ctx.stream.broadcast({
+                "type": SSEType.AGENT_ROSTER, "kind": "agent-renamed",
+                "session": session, "name": name,
+            })
+        return self._send(200, json.dumps({
+            "ok": True, "session": session, "name": name,
         }).encode(), "application/json")
 
     def _handle_dreaming_runs(self):

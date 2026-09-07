@@ -211,6 +211,13 @@ int main(int argc, char* argv[]) {
                 return;
             }
             if (QObject* view = rootWindow->findChild<QObject*>(screenshotView)) {
+                // The rename dialog is normally opened with the chat it targets,
+                // so a bare visible=true would capture an empty form.
+                if (controller != nullptr && screenshotView == QStringLiteral("renameAgent")) {
+                    const QString session = controller->selectedSession();
+                    view->setProperty("session", session);
+                    view->setProperty("currentName", controller->agentName(session));
+                }
                 if (controller != nullptr &&
                     (screenshotView == QStringLiteral("agentProfilePanel") ||
                      screenshotView == QStringLiteral("queueDialog"))) {

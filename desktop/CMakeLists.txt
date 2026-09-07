@@ -135,6 +135,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/SettingsPanel.qml
         qml/components/StatusPill.qml
         qml/components/QuickNewAgentDialog.qml
+        qml/components/RenameAgentDialog.qml
         qml/components/StartAgentDialog.qml
         qml/components/ToolCard.qml
         qml/components/ActivityExplanation.qml
