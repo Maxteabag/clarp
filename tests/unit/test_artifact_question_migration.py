@@ -145,6 +145,13 @@ def _legacy_host(tmp_path, version, attention_shape, *, v68_variant="both"):
         DROP TABLE decision_deliveries;
         DROP TABLE artifact_decisions;
         DROP TABLE artifacts;
+        ALTER TABLE dream_runs DROP COLUMN artifact_branch;
+        ALTER TABLE dream_runs DROP COLUMN seed_strategy;
+        ALTER TABLE dream_runs DROP COLUMN context_dose;
+        ALTER TABLE dream_runs DROP COLUMN seed_material;
+        ALTER TABLE dream_threads DROP COLUMN killed_reason;
+        ALTER TABLE dream_threads DROP COLUMN origin_note;
+        ALTER TABLE agents DROP COLUMN voice_verbosity;
     """ + _LEGACY_TABLES)
     if version >= 67:
         con.executescript(_DREAM_V67)
@@ -224,12 +231,28 @@ def _legacy_host(tmp_path, version, attention_shape, *, v68_variant="both"):
 
 
 def _unrelated_snapshot(con):
-    tables = ("agents", "dream_runs", "dream_threads", "external_sentinel")
     return {
-        "schema": [tuple(row) for row in con.execute(
-            "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name IN (?,?,?,?) ORDER BY type,name", tables)],
-        "rows": {table: [tuple(row) for row in con.execute(f"SELECT * FROM {table} ORDER BY rowid")] for table in tables},
+        "external_sentinel": {
+            "schema": [tuple(row) for row in con.execute(
+                "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name = 'external_sentinel' ORDER BY type,name")],
+            "rows": [tuple(row) for row in con.execute("SELECT * FROM external_sentinel ORDER BY rowid")],
+        },
+        "rows": {
+            table: [dict(row) for row in con.execute(f"SELECT * FROM {table} ORDER BY rowid")]
+            for table in ("agents", "dream_runs", "dream_threads")
+        },
     }
+
+
+def _assert_unrelated_preserved(con, before):
+    after = _unrelated_snapshot(con)
+    assert after["external_sentinel"] == before["external_sentinel"]
+    for table, before_rows in before["rows"].items():
+        after_rows = after["rows"][table]
+        assert len(after_rows) == len(before_rows)
+        for b_row, a_row in zip(before_rows, after_rows):
+            for col, val in b_row.items():
+                assert a_row[col] == val, f"Value mismatch for {table}.{col}: expected {val}, got {a_row[col]}"
 
 
 def _column_contract(con, table):
@@ -245,7 +268,7 @@ def test_overlap_versions_reconcile_attention_without_touching_unrelated_data(tm
     before = _unrelated_snapshot(con)
     db._migrate(con)
     assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
-    assert _unrelated_snapshot(con) == before
+    _assert_unrelated_preserved(con, before)
     fresh = db.conn()
     for table in ("artifacts", "artifact_decisions", "decision_deliveries"):
         assert _column_contract(con, table) == _column_contract(fresh, table)
@@ -272,7 +295,8 @@ def test_overlap_versions_reconcile_attention_without_touching_unrelated_data(tm
     before_rerun = con.total_changes
     db._migrate(con)
     assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
-    assert con.total_changes == before_rerun and _unrelated_snapshot(con) == before
+    assert con.total_changes == before_rerun
+    _assert_unrelated_preserved(con, before)
     assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     con.close()
 
@@ -282,10 +306,14 @@ def test_split_v68_variants_keep_their_existing_unrelated_columns(tmp_path, v68_
     con = _legacy_host(tmp_path, 68, "absent", v68_variant=v68_variant)
     before = _unrelated_snapshot(con)
     db._migrate(con)
-    assert _unrelated_snapshot(con) == before
+    _assert_unrelated_preserved(con, before)
     assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     assert "archived_at" in _column_contract(con, "artifacts")
     assert "response_type" in _column_contract(con, "artifact_decisions")
+    if v68_variant == "voice":
+        assert con.execute("SELECT voice_verbosity FROM agents WHERE agent_id='agent'").fetchone()[0] == 2
+    elif v68_variant == "branch":
+        assert con.execute("SELECT artifact_branch FROM dream_runs WHERE run_id='dream'").fetchone()[0] == "dream/preserve-this-branch"
     con.close()
 
 

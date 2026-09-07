@@ -30,3 +30,12 @@ def test_seed_defaults_mints_unique_sessions_for_custom_names(tmp_path, monkeypa
     }))
     assert roster_seed.seed_defaults("claude", cwd=tmp_path) == 3
     assert set(agents.session_dict()) == {"ab", "ab-2", "agent"}
+
+
+def test_seed_defaults_seeds_when_only_janitor_agents_exist(tmp_path):
+    c = db.conn()
+    c.execute("""INSERT INTO agents(agent_id,persona,voice_id,cwd,session,backend,model,effort,
+        is_janitor,heartbeat_enabled,dreaming_enabled,created_at) VALUES (?,?,?,?,?,?,?,?,1,0,0,?)""",
+        ("janitor-1", "Message delegator", "", str(tmp_path), "clarp-delegator", "codex", "", "", db.now_ms()))
+    assert roster_seed.seed_defaults("codex", cwd=tmp_path) == len(DEFAULT_ROSTER)
+    assert set(agents.session_dict()) == {name.lower() for name in DEFAULT_ROSTER} | {"clarp-delegator"}

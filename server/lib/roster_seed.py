@@ -16,7 +16,7 @@ def seed_defaults(backend: str, *, cwd: Path | None = None) -> int:
     try:
         database.execute("BEGIN IMMEDIATE")
         # Any row, including a soft-deleted one, proves this is not a fresh DB.
-        if database.execute("SELECT 1 FROM agents LIMIT 1").fetchone() is not None:
+        if database.execute("SELECT 1 FROM agents WHERE is_janitor = 0 LIMIT 1").fetchone() is not None:
             database.execute("COMMIT")
             return 0
         first_agent_id = None
