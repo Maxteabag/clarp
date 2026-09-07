@@ -13,6 +13,13 @@ Rectangle {
     required property var conversationModel
     required property bool active
     readonly property int agentRevision: controller.agentRevision
+    // Agent-to-agent pair rooms are read-only Host projections.
+    readonly property bool pairRoom: root.controller.isPairSession(root.session)
+    readonly property var pairRoomInfo: {
+        root.controller.agentConversations;
+        return root.pairRoom ? root.controller.agentConversation(root.session) : ({});
+    }
+    readonly property var pairParticipants: (root.pairRoomInfo && root.pairRoomInfo.participants) || []
     signal openConnection
     signal queueRequested(string session)
     signal profileRequested(string session)
@@ -61,7 +68,8 @@ Rectangle {
                 spacing: 9
 
                 AgentAvatar {
-                    Layout.preferredWidth: 38
+                    visible: !root.pairRoom
+                    Layout.preferredWidth: visible ? 38 : 0
                     Layout.preferredHeight: 38
                     controller: root.controller
                     session: root.session
@@ -69,6 +77,28 @@ Rectangle {
                     avatarSize: 38
                     cornerRadius: 19
                     fallbackColor: root.active ? "#555970" : "#3b3e50"
+                }
+                Item {
+                    objectName: "pairHeaderAvatars"
+                    visible: root.pairRoom
+                    Layout.preferredWidth: visible ? 56 : 0
+                    Layout.preferredHeight: 38
+                    Repeater {
+                        model: root.pairRoom ? root.pairParticipants.slice(0, 2) : []
+                        AgentAvatar {
+                            required property var modelData
+                            required property int index
+                            x: index * 22
+                            y: index * 6
+                            z: 2 - index
+                            controller: root.controller
+                            session: String(modelData.session || "")
+                            name: String(modelData.name || "Agent")
+                            avatarSize: 32
+                            cornerRadius: 16
+                            fallbackColor: index === 0 ? "#555970" : "#3b3e50"
+                        }
+                    }
                 }
 
                 ColumnLayout {
@@ -90,6 +120,7 @@ Rectangle {
                     Text {
                         text: {
                             root.agentRevision;
+                            if (root.pairRoom) return "Agent-to-agent conversation";
                             return root.session.length > 0
                                 ? root.controller.agentBackend(root.session)
                                 : root.controller.baseUrl;
@@ -105,13 +136,14 @@ Rectangle {
                 StatusPill {
                     status: {
                         root.agentRevision;
+                        if (root.pairRoom) return "idle";
                         return root.controller.agentState(root.session) || root.controller.connectionState;
                     }
                 }
 
                 ToolButton {
                     id: paneMenuButton
-                    visible: root.active && root.session.length > 0
+                    visible: root.active && root.session.length > 0 && !root.pairRoom
                         && (headerHover.hovered || paneMenu.visible)
                     text: "···"
                     implicitWidth: 28
@@ -243,6 +275,11 @@ Rectangle {
                 required property var model
                 senderAgentId: String(model.senderAgentId || "")
                 senderSession: String(model.senderSession || "")
+                replyToAgentId: String(model.replyToAgentId || "")
+                replyToName: String(model.replyToName || "")
+                replyToSession: String(model.replyToSession || "")
+                delivery: String(model.delivery || "")
+                groupView: root.pairRoom
                 activitySummary: String(model.activityLabel || "")
                 required property var groupIds
                 required property string groupLabel
@@ -302,19 +339,37 @@ Rectangle {
         }
 
         Composer {
+            visible: !root.pairRoom
             Layout.fillWidth: true
-            Layout.preferredHeight: implicitHeight
+            Layout.preferredHeight: visible ? implicitHeight : 0
             controller: root.controller
             session: root.session
             paneId: root.paneId
             active: root.active
             onOpenConnection: root.openConnection()
         }
+
+        Rectangle {
+            objectName: "pairRoomFooter"
+            visible: root.pairRoom
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? 44 : 0
+            color: "#171822"
+            Text {
+                anchors.centerIn: parent
+                width: parent.width - 32
+                horizontalAlignment: Text.AlignHCenter
+                text: "Agents talk here. To reply, open one of them and message it directly."
+                color: "#8d93b0"
+                font.pixelSize: 12
+                elide: Text.ElideRight
+            }
+        }
     }
 
     onSessionChanged: {
         presentation.beginVisit();
-        if (session.length > 0 && controller.connected)
+        if (session.length > 0 && controller.connected && !root.pairRoom)
             controller.loadMedia(session);
     }
     Component.onCompleted: {

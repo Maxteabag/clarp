@@ -124,6 +124,10 @@ Message Message::fromJson(const QJsonObject& object) {
     message.senderName = stringValue(object, "sender_name");
     message.senderAgentId = stringValue(object, "sender_agent_id");
     message.senderSession = stringValue(object, "sender_session");
+    message.replyToAgentId = stringValue(object, "reply_to_agent_id");
+    message.replyToName = stringValue(object, "reply_to_name");
+    message.replyToSession = stringValue(object, "reply_to_session");
+    message.delivery = stringValue(object, "delivery");
     message.traceId = stringValue(object, "trace_id");
     message.category = stringValue(object, "category");
     if (message.category.isEmpty()) {
