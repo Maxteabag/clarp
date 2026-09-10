@@ -37,7 +37,10 @@ jobs:
           appstream
           clang
           cmake
+          dbus
           ninja
+          python
+          systemd
           qt6-base
           qt6-declarative
           qt6-multimedia

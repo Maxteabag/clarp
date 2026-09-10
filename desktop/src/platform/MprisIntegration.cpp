@@ -14,7 +14,10 @@
 namespace clarp {
 namespace {
 
-constexpr auto MprisService = QLatin1StringView("org.mpris.MediaPlayer2.Clarp");
+QString mprisService() {
+    return QStringLiteral("org.mpris.MediaPlayer2.Clarp.instance%1")
+        .arg(QCoreApplication::applicationPid());
+}
 constexpr auto MprisPath = QLatin1StringView("/org/mpris/MediaPlayer2");
 
 } // namespace
@@ -114,11 +117,11 @@ MprisIntegration::MprisIntegration(QQuickWindow* window, AudioController* audio,
       m_rootAdaptor(std::make_unique<MprisRootAdaptor>(this)),
       m_playerAdaptor(std::make_unique<MprisPlayerAdaptor>(this)) {
     QDBusConnection bus = QDBusConnection::sessionBus();
-    if (!bus.isConnected() || !bus.registerService(MprisService.toString())) {
+    if (!bus.isConnected() || !bus.registerService(mprisService())) {
         return;
     }
     if (!bus.registerObject(MprisPath.toString(), this, QDBusConnection::ExportAdaptors)) {
-        bus.unregisterService(MprisService.toString());
+        bus.unregisterService(mprisService());
         return;
     }
     m_registered = true;
@@ -132,7 +135,7 @@ MprisIntegration::~MprisIntegration() {
     }
     QDBusConnection bus = QDBusConnection::sessionBus();
     bus.unregisterObject(MprisPath.toString());
-    bus.unregisterService(MprisService.toString());
+    bus.unregisterService(mprisService());
 }
 
 QString MprisIntegration::playbackStatus() const {

@@ -74,6 +74,10 @@ target_sources(clarp-desktop PRIVATE
     src/media/PortraitImage.h
     src/media/AudioController.cpp
     src/media/AudioController.h
+    src/media/AudioCoordinator.cpp
+    src/media/AudioCoordinator.h
+    src/media/RecordingSession.cpp
+    src/media/RecordingSession.h
     src/media/WavEncoder.cpp
     src/media/WavEncoder.h
     src/models/AgentListModel.cpp

@@ -7,8 +7,29 @@ link Qt WebEngine or embed the PWA.
 The native client includes multi-pane conversations, revision-safe transcript
 sync, resumable SSE, agent lifecycle and schedule controls, voice selection,
 microphone transcription, authenticated audio playback, system notifications,
-tray controls, MPRIS media-key integration, a single-instance guard, and
+tray controls, MPRIS media-key integration, multiple independent instances, and
 native Secret Service credential storage.
+
+Each launch opens a new window. Instances share saved preferences, pane layout,
+and conversation drafts; the latest write to the same saved item wins. Closing
+or quitting one instance does not close the others.
+
+Automatic voice replies have one playback owner per desktop user and Host
+credential. Play/pause/stop and mute controls in every window target that owner;
+changing focus does not move playback. A replacement owner recovers unstarted
+queued clips from a private local journal. Replies already started are not
+replayed automatically after a crash, and the latest 4,096 terminal clip IDs
+remain deduplicated across restarts. This coordinates this desktop's windows;
+it does not arbitrate playback with a phone or another computer. The desktop
+session bus must be available; playback stays stopped if coordination cannot
+start. Screenshot captures never join live audio coordination.
+
+Recording belongs to the window and conversation where it starts. Switching
+focus does not retarget its transcription. Only one Clarp window can hold the
+microphone, regardless of Host; other windows show an error when asked to record.
+Queued reply playback waits until recording ends. Changing the recording
+window's Host or credentials cancels its recording and pending transcriptions.
+The microphone shortcut remains local to the focused window.
 
 ## Install a bundled release
 
