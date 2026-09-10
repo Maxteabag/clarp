@@ -57,6 +57,8 @@ target_sources(clarp-desktop PRIVATE
     src/terminal/TerminalLaunch.h
     src/app/AppController.cpp
     src/app/AppController.h
+    src/app/WorkspaceContext.cpp
+    src/app/WorkspaceContext.h
     src/app/PreviewVersions.cpp
     src/app/PreviewVersions.h
     src/app/CredentialStore.cpp
@@ -123,6 +125,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/Composer.qml
         qml/components/ConnectionPage.qml
         qml/components/ConversationPane.qml
+        qml/components/HeaderContext.qml
         qml/components/TranscriptList.qml
         qml/components/DisplayCellCard.qml
         qml/components/MessageDelegate.qml
@@ -150,6 +153,10 @@ qt_add_qml_module(clarp-desktop
         qml/components/Workspace.qml
     RESOURCES
         resources/clarp.svg
+        resources/icons/directory.svg
+        resources/icons/repo.svg
+        resources/icons/worktree.svg
+        resources/icons/more.svg
 )
 
 target_include_directories(clarp-desktop PRIVATE src src/app src/models)

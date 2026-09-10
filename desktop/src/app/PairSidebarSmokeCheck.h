@@ -15,6 +15,7 @@ inline void startPairSidebarSmokeCheck(QGuiApplication& application, QQuickWindo
         application.exit(EXIT_FAILURE);
         return;
     }
+    window->setProperty("sidebarVisible", true); // This lane exercises the expanded sidebar.
     auto* timer = new QTimer(&application);
     timer->setInterval(120);
     QObject::connect(timer, &QTimer::timeout, &application,

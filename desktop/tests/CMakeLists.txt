@@ -14,6 +14,8 @@ add_executable(clarp-desktop-tests
     ../src/app/CredentialStore.h
     ../src/app/AppController.cpp
     ../src/app/AppController.h
+    ../src/app/WorkspaceContext.cpp
+    ../src/app/WorkspaceContext.h
     ../src/app/TranscriptCache.cpp
     ../src/app/TranscriptCache.h
     ../src/app/ToolNarrator.cpp
@@ -134,7 +136,10 @@ set_tests_properties(clarp-desktop-settings-keyboard PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=settings-keyboard-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/settings-keyboard/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_SETTINGS_KEYBOARD=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/settings-keyboard/capture.png"
 )
 
-file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config")
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config/MaxTeaBag")
+# A saved expanded sidebar must not override the collapsed startup contract.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config/MaxTeaBag/ClarpScreenshot.conf"
+    "[appearance]\nsidebarVisible=true\n")
 add_test(NAME clarp-desktop-context-keyboard COMMAND clarp-desktop)
 set_tests_properties(clarp-desktop-context-keyboard PROPERTIES TIMEOUT 15
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=context-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_CONTEXT_KEYBOARD=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/capture.png")
@@ -187,3 +192,10 @@ add_test(NAME clarp-desktop-audio-coordination
     COMMAND ${CLARP_DBUS_RUN_SESSION} -- ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/audio_coordination.py $<TARGET_FILE:clarp-audio-coordination-probe>)
 set_tests_properties(clarp-desktop-audio-coordination PROPERTIES TIMEOUT 60)
+
+add_executable(clarp-workspace-context-tests tst_workspace_context.cpp
+    ../src/app/WorkspaceContext.cpp ../src/app/WorkspaceContext.h)
+target_include_directories(clarp-workspace-context-tests PRIVATE ../src)
+target_link_libraries(clarp-workspace-context-tests PRIVATE Qt6::Core Qt6::Test)
+clarp_apply_quality_settings(clarp-workspace-context-tests)
+add_test(NAME clarp-desktop-workspace-context COMMAND clarp-workspace-context-tests)

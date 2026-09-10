@@ -10,7 +10,18 @@ microphone transcription, authenticated audio playback, system notifications,
 tray controls, MPRIS media-key integration, multiple independent instances, and
 native Secret Service credential storage.
 
-Each launch opens a new window. Instances share saved preferences, pane layout,
+Each launch opens a new window with the sidebar collapsed, including when an
+older saved preference had it expanded. Ctrl+B toggles the sidebar; Ctrl+K opens
+the command/agent picker. Chat uses square edges, monospace text, text-only
+controls and author names, and an empty composer without placeholder text or an
+inner border. The full composer height accepts typing focus and uses a blinking
+block caret. Ctrl+Shift+K shows/hides the keybinding bar and remembers that choice.
+The header shows the Host's status label, configured model and effort, and the
+working directory. Shared local paths are classified from Git metadata as a
+repository or linked worktree; remote paths remain directory labels. The More
+menu and workspace context use compact icons.
+
+Each window is independent. Instances share saved preferences, pane layout,
 and conversation drafts; the latest write to the same saved item wins. Closing
 or quitting one instance does not close the others.
 

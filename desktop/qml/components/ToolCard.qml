@@ -93,7 +93,7 @@ Rectangle {
             }
             Text {
                 visible: (!explanation.narrationShown && root.detail.length > 0) || explanation.text.length > 0
-                text: root.expanded ? "−" : "+"
+                text: root.expanded ? "Hide" : "Details"
                 color: "#858aa7"
                 font.pixelSize: 13
             }

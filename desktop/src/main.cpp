@@ -279,6 +279,10 @@ int main(int argc, char* argv[]) {
                           {QStringLiteral("agent_id"), QStringLiteral("fixture-agent")},
                           {QStringLiteral("session"), session},
                           {QStringLiteral("persona"), QStringLiteral("OPUS")},
+                          {QStringLiteral("cwd"), qEnvironmentVariable("CLARP_SCREENSHOT_WORKSPACE")},
+                          {QStringLiteral("model"), qEnvironmentVariable("CLARP_SCREENSHOT_MODEL")},
+                          {QStringLiteral("effort"), qEnvironmentVariable("CLARP_SCREENSHOT_EFFORT")},
+                          {QStringLiteral("status_text"), qEnvironmentVariable("CLARP_SCREENSHOT_STATUS")},
                           {QStringLiteral("backend"), QStringLiteral("local")},
                           {QStringLiteral("latest_state"), QStringLiteral("idle")},
                       }}}});
