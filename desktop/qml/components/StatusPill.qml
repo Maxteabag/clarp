@@ -4,6 +4,7 @@ Rectangle {
     id: root
 
     required property string status
+    property bool showIndicator: true
     property string label: status.length > 0 ? status : "offline"
     readonly property bool quiet: status === "live" || status === "done" || status === "idle"
     property color tone: {
@@ -27,7 +28,8 @@ Rectangle {
 
         Rectangle {
             anchors.verticalCenter: parent.verticalCenter
-            width: 5
+            visible: root.showIndicator
+            width: visible ? 5 : 0
             height: 5
             radius: 2.5
             color: root.tone
