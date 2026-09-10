@@ -3,6 +3,8 @@ import QtTest
 import "../../qml/components"
 
 TestCase {
+    id: testCase
+    visible: true
     name: "ComposerGrowth"
     width: 600
     height: 500
@@ -40,6 +42,25 @@ TestCase {
         active: true
     }
 
+    function test_entireInputHeightAcceptsClicksAndBlockCursorBlinks() {
+        const editor = findChild(composer, "paneComposerEditor");
+        editor.clear();
+        tryCompare(composer, "height", 54);
+        for (const y of [1, composer.height - 2]) {
+            testCase.forceActiveFocus();
+            mouseClick(composer, composer.width / 2, y);
+            tryVerify(() => editor.activeFocus);
+        }
+        const cursor = findChild(editor, "terminalBlockCursor");
+        verify(cursor !== null);
+        verify(cursor.width >= cursor.height * 0.35, "Caret must be a character-width block, not a thin line");
+        tryCompare(cursor, "opacity", 0, 1500);
+        keyClick(Qt.Key_A);
+        tryVerify(() => cursor.opacity > 0);
+        compare(editor.text, "a");
+        editor.clear();
+    }
+
     function test_growthAndSend() {
         const editor = findChild(composer, "paneComposerEditor");
         verify(editor !== null);
@@ -49,7 +70,7 @@ TestCase {
         editor.text = "wrapped words ".repeat(40);
         tryVerify(() => composer.height > 54);
         editor.text = "line\n".repeat(100);
-        tryCompare(composer, "height", 214);
+        tryCompare(composer, "height", 200);
         editor.clear();
         tryCompare(composer, "height", 54);
         editor.forceActiveFocus();

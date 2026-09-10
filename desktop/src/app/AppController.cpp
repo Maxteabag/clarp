@@ -1172,6 +1172,7 @@ QVariantMap AppController::agentDetails(const QString& session) const {
             {QStringLiteral("name"), displayName(*agent)},
             {QStringLiteral("backend"), agent->backend},
             {QStringLiteral("working_directory"), agent->workingDirectory},
+            {QStringLiteral("workspace"), m_workspaceContext.describe(agent->workingDirectory, m_sharedFilesystem)},
             {QStringLiteral("model"), agent->model},
             {QStringLiteral("effort"), agent->effort},
             {QStringLiteral("state"), m_agents.displayState(session)},

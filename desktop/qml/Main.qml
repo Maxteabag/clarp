@@ -15,7 +15,8 @@ ApplicationWindow {
     property string voiceName: ""
     property string selectedSurface: "chats"
     property real uiScale: 1.15
-    property bool sidebarVisible: true
+    property bool sidebarVisible: false
+    property bool shortcutsVisible: true
     property real sidebarExpandedWidth: 354
     property bool redesignedSidebarSized: false
     readonly property bool settingsOverlayVisible: root.selectedSurface === "settings" && root.overlayVisible()
@@ -99,6 +100,7 @@ ApplicationWindow {
     }
 
     function runCommand(action) {
+        if (action === "shortcut-bar") { root.shortcutsVisible = !root.shortcutsVisible; return; }
         let layoutChanged = false;
         if (action === "escape") {
             if (keyboard.contextName === "search") rail.focusCurrentAgent();
@@ -225,7 +227,7 @@ ApplicationWindow {
     Core.Settings {
         category: "appearance"
         property alias uiScale: root.uiScale
-        property alias sidebarVisible: root.sidebarVisible
+        property alias shortcutsVisible: root.shortcutsVisible
         property alias sidebarExpandedWidth: root.sidebarExpandedWidth
         property alias redesignedSidebarSized: root.redesignedSidebarSized
     }
@@ -447,6 +449,7 @@ ApplicationWindow {
 
         }
         ShortcutBar {
+            visible: root.shortcutsVisible
             Layout.fillWidth: true
             keymap: keyboard
         }

@@ -37,6 +37,7 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
         const auto selected = [rail, &second] { return rail->property("keyboardSession").toString() == second; };
         switch (step++) {
         case 0: {
+            if (!require(!window->property("sidebarVisible").toBool())) return;
             QJsonArray agents;
             for (const auto& session : {QStringLiteral("keyboard-first"), second}) {
                 agents.append(QJsonObject{{QStringLiteral("session"), session},
@@ -60,6 +61,14 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             press(Qt::Key_I, {}, QStringLiteral("i"));
             press(Qt::Key_Space, {}, QStringLiteral(" "));
             if (!require(window->activeFocusItem()->property("text").toString() == QStringLiteral("ejki "))) return;
+            {
+                const bool hints = window->property("shortcutsVisible").toBool();
+                press(Qt::Key_K, Qt::ControlModifier | Qt::ShiftModifier);
+                if (!require(window->property("shortcutsVisible").toBool() != hints && state("composer"))) return;
+                press(Qt::Key_K, Qt::ControlModifier | Qt::ShiftModifier);
+                if (!require(window->property("shortcutsVisible").toBool() == hints
+                    && window->activeFocusItem()->property("text").toString() == QStringLiteral("ejki "))) return;
+            }
             press(Qt::Key_Escape);
             break;
         case 2:
