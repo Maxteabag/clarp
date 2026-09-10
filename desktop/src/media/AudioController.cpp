@@ -17,9 +17,46 @@
 
 namespace clarp {
 
-AudioController::AudioController(QObject* parent) : QObject(parent) {}
+AudioController::AudioController(QObject* parent) : QObject(parent) {
+    m_pendingPlayback.setInterval(250);
+    connect(&m_pendingPlayback, &QTimer::timeout, this, &AudioController::startNextClip);
+    m_pendingPlayback.start();
+    connect(&m_coordinator, &AudioCoordinator::clipReady, this, &AudioController::enqueueOwned);
+    connect(&m_coordinator, &AudioCoordinator::commandReceived, this, &AudioController::applyCommand);
+    connect(&m_coordinator, &AudioCoordinator::error, this, &AudioController::mediaError);
+    connect(&m_coordinator, &AudioCoordinator::stateReceived, this,
+        [this](bool muted, bool playing, bool paused, bool available) {
+            if (m_muted != muted) {
+                m_muted = muted;
+                if (muted && m_coordinator.owner()) silenceLocal();
+                emit mutedChanged(muted);
+            }
+            if (!m_coordinator.owner() && (m_remotePlaying != playing || m_remotePaused != paused || m_remoteAvailable != available)) {
+                m_remotePlaying = playing;
+                m_remotePaused = paused;
+                m_remoteAvailable = available;
+                emit playingChanged();
+            }
+        });
+    connect(&m_coordinator, &AudioCoordinator::ownershipChanged, this, [this] {
+        if (!m_coordinator.owner()) resetPlayback();
+        emit playingChanged();
+    });
+    connect(this, &AudioController::playingChanged, this, [this] {
+        m_coordinator.publish(playing(), paused(), playbackAvailable());
+    });
+}
 
-AudioController::~AudioController() { cancelRecording(); }
+
+AudioController::~AudioController() {
+    for (auto* reply : m_transcriptionSessions.keys()) {
+        disconnect(reply, nullptr, this, nullptr);
+        reply->abort();
+    }
+    cancelRecording();
+    resetPlayback();
+    m_coordinator.stop();
+}
 
 void AudioController::ensurePlayer() {
     if (m_player != nullptr) {
@@ -55,6 +92,18 @@ void AudioController::ensurePlayer() {
 }
 
 void AudioController::setEndpoint(QUrl baseUrl, QString bearerToken) {
+    if (baseUrl.isEmpty()) {
+        cancelRecording();
+        for (auto* reply : m_transcriptionSessions.keys()) {
+            m_cancelledTranscriptions.insert(reply);
+            reply->abort();
+        }
+        resetPlayback();
+        m_coordinator.stop();
+        m_baseUrl = QUrl{};
+        m_bearerToken.clear();
+        return;
+    }
     QString path = baseUrl.path();
     if (!path.endsWith('/')) {
         path.append('/');
@@ -62,34 +111,41 @@ void AudioController::setEndpoint(QUrl baseUrl, QString bearerToken) {
     baseUrl.setPath(path);
     baseUrl.setQuery(QString{});
     baseUrl.setFragment(QString{});
+    if (m_baseUrl != baseUrl || m_bearerToken != bearerToken) {
+        cancelRecording();
+        for (auto* reply : m_transcriptionSessions.keys()) {
+            m_cancelledTranscriptions.insert(reply);
+            reply->abort();
+        }
+        resetPlayback();
+        m_coordinator.stop();
+    }
     m_baseUrl = std::move(baseUrl);
     m_bearerToken = std::move(bearerToken);
+    if (!m_bearerToken.isEmpty() && !qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")) m_coordinator.configure(m_baseUrl.toString() + QChar::Null + m_bearerToken, m_muted);
 }
 
 void AudioController::setMuted(bool muted) {
-    m_muted = muted;
-    if (muted) {
-        silence();
+    if (m_coordinator.configured()) {
+        m_coordinator.command(QStringLiteral("mute"), muted);
+    } else {
+        m_muted = muted;
+        emit mutedChanged(muted);
     }
 }
 
 void AudioController::enqueueClip(const QJsonObject& event) {
-    AudioClip clip = AudioClip::fromJson(event);
-    if (m_muted || clip.preferredSource().isEmpty()) {
+    if (!AudioClip::fromJson(event).preferredSource().isEmpty()) m_coordinator.submit(event);
+}
+
+void AudioController::enqueueOwned(const QJsonObject& event) {
+    if (!m_coordinator.owner()) return;
+    if (m_muted) {
+        m_coordinator.finish(event);
         return;
     }
-    if (clip.clipId > 0) {
-        if (m_seenClipIds.contains(clip.clipId)) {
-            return;
-        }
-        m_seenClipIds.insert(clip.clipId);
-        m_recentClipIds.enqueue(clip.clipId);
-        while (m_recentClipIds.size() > 256) {
-            m_seenClipIds.remove(m_recentClipIds.dequeue());
-        }
-    }
-    acknowledge(clip, QStringLiteral("queued"));
-    m_clipQueue.enqueue(std::move(clip));
+    acknowledge(AudioClip::fromJson(event), QStringLiteral("queued"));
+    m_clipQueue.enqueue(event);
     startNextClip();
 }
 
@@ -104,16 +160,20 @@ int AudioController::transcriptionsForSession(const QString& session) const {
 }
 
 bool AudioController::playing() const {
+    if (m_coordinator.configured() && !m_coordinator.owner()) return m_remotePlaying;
     return (m_player != nullptr && m_player->playbackState() == QMediaPlayer::PlayingState) ||
            (m_pcmOutput != nullptr && m_pcmOutput->state() == QAudio::ActiveState);
 }
 
 bool AudioController::paused() const {
+    if (m_coordinator.configured() && !m_coordinator.owner()) return m_remotePaused;
     return (m_player != nullptr && m_player->playbackState() == QMediaPlayer::PausedState) ||
            (m_pcmOutput != nullptr && m_pcmOutput->state() == QAudio::SuspendedState);
 }
 
-bool AudioController::playbackAvailable() const { return m_hasCurrentClip; }
+bool AudioController::playbackAvailable() const {
+    return m_coordinator.configured() && !m_coordinator.owner() ? m_remoteAvailable : m_hasCurrentClip;
+}
 
 void AudioController::toggleRecording() {
     if (m_recording) {
@@ -136,8 +196,16 @@ void AudioController::startRecording() {
     if (m_recording) {
         return;
     }
+    if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")) return;
+    if (!m_recordingLease.acquire(m_recordingSession)) {
+        m_recordingSession.clear();
+        emit mediaError(QStringLiteral("Another Clarp window is recording. Stop that recording before starting here."));
+        return;
+    }
+    silence();
     const QAudioDevice device = QMediaDevices::defaultAudioInput();
     if (device.isNull()) {
+        cancelRecording();
         emit mediaError(QStringLiteral("No microphone is available"));
         return;
     }
@@ -152,6 +220,7 @@ void AudioController::startRecording() {
     m_captureDevice = m_audioSource->start();
     if (m_captureDevice == nullptr) {
         m_audioSource.reset();
+        cancelRecording();
         emit mediaError(QStringLiteral("The microphone could not be started"));
         return;
     }
@@ -175,14 +244,14 @@ void AudioController::stopRecording() {
     m_audioSource.reset();
     setRecording(false);
 
+    const QString targetSession = m_recordingLease.release();
+    m_recordingSession.clear();
     const QByteArray wav = encodeWav(m_capturePcm, m_captureFormat);
     m_capturePcm.clear();
     if (wav.size() <= 1'068) {
         emit mediaError(QStringLiteral("Recording was too short"));
         return;
     }
-    const QString targetSession = m_recordingSession;
-    m_recordingSession.clear();
     transcribeRecording(wav, targetSession);
 }
 
@@ -191,6 +260,7 @@ void AudioController::cancelRecording() {
         m_audioSource->stop();
         m_audioSource.reset();
     }
+    m_recordingLease.release();
     m_captureDevice = nullptr;
     m_capturePcm.clear();
     m_recordingSession.clear();
@@ -206,14 +276,58 @@ void AudioController::cancelTranscriptionsForSession(const QString& session) {
     }
 }
 
-void AudioController::silence() {
-    m_clipQueue.clear();
+void AudioController::silence() { m_coordinator.command(QStringLiteral("stop")); }
+
+void AudioController::silenceLocal() {
+    while (!m_clipQueue.isEmpty()) m_coordinator.finish(m_clipQueue.dequeue());
     if (m_hasCurrentClip) {
         finishCurrentClip(QStringLiteral("play-fail"), QStringLiteral("interrupted by user"));
     }
 }
 
-void AudioController::pausePlayback() {
+void AudioController::pausePlayback() { m_coordinator.command(QStringLiteral("pause")); }
+void AudioController::resumePlayback() { m_coordinator.command(QStringLiteral("resume")); }
+void AudioController::togglePlaybackPause() { m_coordinator.command(QStringLiteral("toggle")); }
+
+void AudioController::applyCommand(const QString& action) {
+    if (action == QStringLiteral("stop")) {
+        silenceLocal();
+    } else if (action == QStringLiteral("pause")) {
+        pauseLocal();
+    } else if (action == QStringLiteral("resume")) {
+        resumeLocal();
+    } else if (action == QStringLiteral("toggle")) {
+        if (paused()) resumeLocal();
+        else pauseLocal();
+    }
+}
+
+void AudioController::resetPlayback() {
+    // Stop effects before relinquishing the bus name. Keep unstarted journal
+    // entries for the next owner; never acknowledge interrupted audio as played.
+    m_clipQueue.clear();
+    m_hasCurrentClip = false;
+    m_currentClip = {};
+    m_currentEvent = {};
+    m_downloading = m_playStarted = false;
+    m_remotePlaying = m_remotePaused = m_remoteAvailable = false;
+    if (m_downloadReply != nullptr) {
+        disconnect(m_downloadReply, nullptr, this, nullptr);
+        m_downloadReply->abort();
+        m_downloadReply->deleteLater();
+        m_downloadReply = nullptr;
+    }
+    if (m_player != nullptr) {
+        m_player->stop();
+        m_player->setSource({});
+    }
+    if (m_pcmOutput != nullptr) { m_pcmOutput->stop(); m_pcmOutput = nullptr; }
+    m_playbackBuffer.close();
+    m_hlsArtifacts.clear();
+    m_hlsMedia.clear();
+}
+
+void AudioController::pauseLocal() {
     if (m_player != nullptr && m_player->playbackState() == QMediaPlayer::PlayingState) {
         m_player->pause();
     } else if (m_pcmOutput != nullptr && m_pcmOutput->state() == QAudio::ActiveState) {
@@ -221,19 +335,11 @@ void AudioController::pausePlayback() {
     }
 }
 
-void AudioController::resumePlayback() {
+void AudioController::resumeLocal() {
     if (m_player != nullptr && m_player->playbackState() == QMediaPlayer::PausedState) {
         m_player->play();
     } else if (m_pcmOutput != nullptr && m_pcmOutput->state() == QAudio::SuspendedState) {
         m_pcmOutput->resume();
-    }
-}
-
-void AudioController::togglePlaybackPause() {
-    if (paused()) {
-        resumePlayback();
-    } else {
-        pausePlayback();
     }
 }
 
@@ -287,8 +393,12 @@ void AudioController::startNextClip() {
     if (m_muted || m_downloading || m_hasCurrentClip || m_clipQueue.isEmpty()) {
         return;
     }
-    m_currentClip = m_clipQueue.dequeue();
+    if (!m_coordinator.owner() || m_recordingLease.busy()) return;
+    m_currentEvent = m_clipQueue.dequeue();
+    if (!m_coordinator.begin(m_currentEvent)) return;
+    m_currentClip = AudioClip::fromJson(m_currentEvent);
     m_hasCurrentClip = true;
+    emit playingChanged();
     m_playStarted = false;
     if (!m_currentClip.playlistUrl.isEmpty() && m_currentClip.completeUrl.isEmpty()) {
         downloadHlsPlaylist();
@@ -509,6 +619,8 @@ void AudioController::finishCurrentClip(const QString& status, const QString& er
         return;
     }
     const AudioClip finished = m_currentClip;
+    m_coordinator.finish(m_currentEvent);
+    m_currentEvent = {};
     m_currentClip = {};
     m_hasCurrentClip = false;
     m_downloading = false;

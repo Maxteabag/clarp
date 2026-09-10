@@ -301,7 +301,7 @@ QString markdownWithExplicitAutolinks(const QString& markdown) {
             const QRegularExpressionMatch match = matches.next();
             const QString before = line.mid(cursor, match.capturedStart() - cursor);
             // Track backtick parity so a URL inside `code` is left alone.
-            inCodeSpan ^= (before.count(u'`') % 2) != 0;
+            inCodeSpan = inCodeSpan != ((before.count(u'`') % 2) != 0);
             rewritten += before;
             const QChar preceding = match.capturedStart() > 0
                 ? line.at(match.capturedStart() - 1) : QChar(u' ');
