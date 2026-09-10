@@ -103,6 +103,46 @@ def test_logout_uses_cli_owned_commands_and_clears_task(monkeypatch):
     assert "claude" not in backend_auth._validation_cache
 
 
+def test_codex_logout_recycles_app_servers(monkeypatch):
+    recycled = []
+    monkeypatch.setattr(backend_auth.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(backend_auth, "_recycle_codex_writers", lambda: recycled.append("codex"))
+    monkeypatch.setattr(
+        backend_auth, "_credential_metadata", lambda _backend: (False, 0))
+
+    def fake_run(argv, timeout=8):
+        if argv[-2:] == ["login", "status"]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="Not logged in")
+        if argv[-3:] == ["auth", "status", "--json"]:
+            return SimpleNamespace(
+                returncode=0, stdout=json.dumps({"loggedIn": False}), stderr="")
+        return SimpleNamespace(returncode=0, stdout="Logged out", stderr="")
+
+    monkeypatch.setattr(backend_auth, "_run", fake_run)
+    backend_auth.logout("codex")
+    assert recycled == ["codex"]
+
+
+def test_claude_logout_does_not_recycle_codex_writers(monkeypatch):
+    recycled = []
+    monkeypatch.setattr(backend_auth.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(backend_auth, "_recycle_codex_writers", lambda: recycled.append("codex"))
+    monkeypatch.setattr(
+        backend_auth, "_credential_metadata", lambda _backend: (False, 0))
+
+    def fake_run(argv, timeout=8):
+        if argv[-3:] == ["auth", "status", "--json"]:
+            return SimpleNamespace(
+                returncode=0, stdout=json.dumps({"loggedIn": False}), stderr="")
+        if argv[-2:] == ["login", "status"]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="Not logged in")
+        return SimpleNamespace(returncode=0, stdout="Logged out", stderr="")
+
+    monkeypatch.setattr(backend_auth, "_run", fake_run)
+    backend_auth.logout("claude")
+    assert recycled == []
+
+
 def test_device_login_output_is_structured_and_ansi_free():
     value = backend_auth._task_value(
         "codex", "running",
