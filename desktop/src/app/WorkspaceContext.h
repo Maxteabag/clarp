@@ -12,7 +12,7 @@ class WorkspaceContext final {
     WorkspaceContext();
     [[nodiscard]] QVariantMap describe(const QString& path, bool sharedFilesystem) const;
   private:
-    struct Entry { qint64 checkedAt; QVariantMap details; };
+    struct Entry { qint64 checkedAt = 0; QVariantMap details; };
     QElapsedTimer m_clock;
     mutable QHash<QString, Entry> m_cache;
 };
