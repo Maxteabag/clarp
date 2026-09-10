@@ -1,3 +1,6 @@
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_program(CLARP_DBUS_RUN_SESSION dbus-run-session REQUIRED)
+
 add_executable(clarp-palette-tests tst_palette.cpp)
 target_include_directories(clarp-palette-tests PRIVATE ../src)
 target_link_libraries(clarp-palette-tests PRIVATE Qt6::Gui Qt6::Test)
@@ -21,6 +24,10 @@ add_executable(clarp-desktop-tests
     ../src/media/PortraitImage.cpp
     ../src/media/AudioController.cpp
     ../src/media/AudioController.h
+    ../src/media/AudioCoordinator.cpp
+    ../src/media/AudioCoordinator.h
+    ../src/media/RecordingSession.cpp
+    ../src/media/RecordingSession.h
     ../src/media/WavEncoder.cpp
     ../src/media/WavEncoder.h
     ../src/models/AgentListModel.cpp
@@ -69,9 +76,11 @@ clarp_apply_quality_settings(clarp-tool-narrator-tests)
 add_test(NAME clarp-desktop-tool-narrator COMMAND clarp-tool-narrator-tests)
 set_tests_properties(clarp-desktop-tool-narrator PROPERTIES TIMEOUT 20)
 
-add_test(NAME clarp-desktop-core COMMAND clarp-desktop-tests)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/core/data" "${CMAKE_CURRENT_BINARY_DIR}/core/runtime")
+file(CHMOD "${CMAKE_CURRENT_BINARY_DIR}/core/runtime" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+add_test(NAME clarp-desktop-core COMMAND ${CLARP_DBUS_RUN_SESSION} -- $<TARGET_FILE:clarp-desktop-tests>)
 set_tests_properties(clarp-desktop-core PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/core/data;XDG_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/core/runtime"
 )
 
 add_test(
@@ -162,3 +171,19 @@ clarp_apply_quality_settings(clarp-desktop-presence-tests)
 add_test(NAME clarp-desktop-presence COMMAND clarp-desktop-presence-tests)
 set_tests_properties(clarp-desktop-presence PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_FORCE_STDERR_LOGGING=1" TIMEOUT 15)
+
+add_test(NAME clarp-desktop-multiple-instances
+    COMMAND ${CLARP_DBUS_RUN_SESSION} -- ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/multiple_instances.py $<TARGET_FILE:clarp-desktop>)
+set_tests_properties(clarp-desktop-multiple-instances PROPERTIES TIMEOUT 35)
+
+add_executable(clarp-audio-coordination-probe audio_coordination_probe.cpp
+    ../src/media/AudioCoordinator.cpp ../src/media/AudioCoordinator.h
+    ../src/media/RecordingSession.cpp ../src/media/RecordingSession.h)
+target_include_directories(clarp-audio-coordination-probe PRIVATE ../src)
+target_link_libraries(clarp-audio-coordination-probe PRIVATE Qt6::Core Qt6::DBus)
+clarp_apply_quality_settings(clarp-audio-coordination-probe)
+add_test(NAME clarp-desktop-audio-coordination
+    COMMAND ${CLARP_DBUS_RUN_SESSION} -- ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/audio_coordination.py $<TARGET_FILE:clarp-audio-coordination-probe>)
+set_tests_properties(clarp-desktop-audio-coordination PROPERTIES TIMEOUT 60)
