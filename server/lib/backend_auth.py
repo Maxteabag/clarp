@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from . import backends
+from .log import log_exception
 
 _lock = threading.Lock()
 _tasks: dict[str, dict[str, Any]] = {}
@@ -380,6 +381,8 @@ def start_login(backend: str) -> dict[str, Any]:
                 backend, state, output, started_at=started_at,
                 error="" if state == "complete" else _failure_summary(output))
             _validation_cache.pop(backend, None)
+        if backend == backends.CODEX and state == "complete":
+            _recycle_codex_writers()
 
     threading.Thread(target=worker, daemon=True,
                      name=f"backend-login-{backend}").start()
@@ -440,4 +443,22 @@ def logout(backend: str) -> dict[str, Any]:
         _tasks.pop(backend, None)
         _code_submitted.pop(backend, None)
         _validation_cache.pop(backend, None)
+    if backend == backends.CODEX:
+        _recycle_codex_writers()
     return next(row for row in status(validate=False) if row["id"] == backend)
+
+
+def _recycle_codex_writers() -> None:
+    """Drop leftover Codex app-servers after credentials change.
+
+    ``codex login`` rewrites ``~/.codex/auth.json`` in another process. The
+    per-agent app-server still holds thread writer locks and the previous
+    token. The next ``thread/resume`` then fails with ``already has an
+    active writer``. Closing stdin lets flock drop; the next turn starts a
+    fresh app-server that re-reads auth.
+    """
+    from . import codex_app_server
+    try:
+        codex_app_server.recycle_clients()
+    except Exception as exc:  # noqa: BLE001
+        log_exception("codexAppServerRecycleFail", exc)
