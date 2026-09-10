@@ -121,3 +121,40 @@ def test_client_factory_attaches_stream_before_initialization(monkeypatch):
     client = codex_app_server._client("agent-1", "codex", stream=stream)
     assert created == [client]
     assert client.stream is stream
+
+
+class _FakeProc:
+    def __init__(self):
+        self.stdin = type("Stdin", (), {"close": lambda _self: None})()
+        self.signals = []
+        self._code = None
+
+    def poll(self):
+        return self._code
+
+    def terminate(self):
+        self.signals.append("term")
+        self._code = 0
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self):
+        self.signals.append("kill")
+        self._code = 0
+
+
+def test_recycle_clients_closes_stdio_and_drops_writer_slots():
+    first = object.__new__(codex_app_server._Client)
+    first.active = None
+    first.proc = _FakeProc()
+    second = object.__new__(codex_app_server._Client)
+    second.active = None
+    second.proc = _FakeProc()
+    codex_app_server._CLIENTS.clear()
+    codex_app_server._CLIENTS["a"] = first
+    codex_app_server._CLIENTS["b"] = second
+    assert codex_app_server.recycle_clients() == 2
+    assert codex_app_server._CLIENTS == {}
+    assert first.proc.signals == ["term"]
+    assert second.proc.signals == ["term"]
