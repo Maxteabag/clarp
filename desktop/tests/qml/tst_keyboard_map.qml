@@ -26,6 +26,7 @@ TestCase {
             for (const key of ["E", "C", "I", "J", "K", "Space", "Tab", "Return"])
                 verify(!keys().includes(key), state + " stole " + key);
             verify(keys().includes("Escape"));
+            verify(keys().includes("Ctrl+Shift+K"));
         }
         map.contextName = "modal";
         compare(keys(), ["Escape"]);

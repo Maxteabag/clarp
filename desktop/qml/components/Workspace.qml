@@ -9,7 +9,7 @@ Rectangle {
     signal openConnectionRequested
     signal queueRequested(string session)
     signal profileRequested(string session)
-    readonly property real paneGap: 8
+    readonly property real paneGap: 4
     color: "#10121a"
 
     function focusNavigation() { navigationFocus.forceActiveFocus(); }

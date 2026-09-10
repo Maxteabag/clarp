@@ -77,6 +77,7 @@ Rectangle {
         { kind: "command", label: "Zoom pane", action: "zoom", key: "Ctrl+Alt+Z", group: "layout" },
         { kind: "command", label: "Balance panes", action: "balance", key: "Ctrl+Alt+=", group: "layout" },
         { kind: "command", label: root.sidebarVisible ? "Hide sidebar" : "Show sidebar", action: "sidebar", key: "Ctrl+B", group: "view" },
+        { kind: "command", label: "Show/hide keybindings", action: "shortcut-bar", key: "Ctrl+Shift+K", group: "view" },
         { kind: "command", label: "Larger interface", action: "ui-larger", key: "Ctrl+=", group: "view" },
         { kind: "command", label: "Smaller interface", action: "ui-smaller", key: "Ctrl+-", group: "view" },
         { kind: "command", label: "Reset interface size", action: "ui-reset", key: "Ctrl+0", group: "view" },
