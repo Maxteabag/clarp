@@ -2,6 +2,9 @@
 <meta charset="utf-8">
 <title>Clarp · fleet map</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="stylesheet" href="/static/lib/viz-recap.css">
+<script src="/static/lib/marked.min.js"></script>
+<script src="/static/lib/purify.min.js"></script>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -84,6 +87,7 @@
 <div id="bar">
   <div id="transport" role="group" aria-label="Map controls">
   <button id="live" aria-pressed="true">live</button>
+  <button id="catch-up">Catch me up</button>
   <button id="fit">Fit world</button>
   <button id="play">Replay ×120</button>
   <button id="flow-demo" hidden aria-pressed="false">Workflow demo</button>
@@ -96,3 +100,10 @@
   </div>
 </div>
 <script type="module" src="/static/viz-world-host.js"></script>
+<dialog id="recap" aria-labelledby="recap-title">
+  <header class="recap-top"><div><small>YOUR WORK, WAITING FOR YOU</small><h1 id="recap-title">Catch me up</h1><p id="recap-summary"></p><small id="recap-range"></small></div>
+  <div class="recap-controls"><label for="recap-period">Show</label><select id="recap-period"><option value="yesterday">Yesterday</option><option value="since">Since last review</option><option value="week">Last 7 days</option></select><button id="recap-refresh">Refresh</button><button id="recap-done" disabled>I'm caught up</button><button id="recap-close">Back to map</button></div></header>
+  <p id="recap-status" role="status"></p><p id="recap-storage" role="status"></p><div id="recap-list"></div><details class="recap-coverage"><summary>What's included</summary><p id="recap-coverage"></p></details>
+</dialog>
+<dialog id="recap-reader" aria-label="Artifact reader"></dialog>
+<script type="module" src="/static/lib/viz-recap.js"></script>

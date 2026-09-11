@@ -315,6 +315,8 @@ class Handler(BaseHTTPRequestHandler):
         "/message-tool-details": "_handle_message_tool_details",
         "/status": "_handle_status",
         "/viz/events": "_handle_viz_events",
+        "/viz/recap": "_handle_viz_recap",
+        "/viz/recap/artifact": "_handle_viz_recap_artifact",
         "/viz": "_send_viz_page",
         "/diagnostics/health": "_handle_diagnostics_health",
         "/backend-usage": "_handle_backend_usage",
@@ -1289,6 +1291,25 @@ class Handler(BaseHTTPRequestHandler):
     def _send_viz_page(self):
         """The fleet map itself; a static page that reads /viz/events."""
         return self._send_file(self.ctx.static / "viz.html")
+
+    def _handle_viz_recap(self):
+        from urllib.parse import parse_qs, urlsplit
+        from lib import db, viz_recap
+        import time
+        query = parse_qs(urlsplit(self.path).query)
+        now = int(time.time()*1000)
+        try:
+            result = viz_recap.build(db.conn(), int(query.get('since', [now-86400000])[0]), int(query.get('until', [now])[0]), now)
+        except ValueError as error:
+            return self._send(400, json.dumps({'error': str(error)}).encode(), 'application/json')
+        return self._send(200, json.dumps(result).encode(), 'application/json')
+
+    def _handle_viz_recap_artifact(self):
+        from urllib.parse import parse_qs, urlsplit
+        from lib import db, viz_recap
+        identity = parse_qs(urlsplit(self.path).query).get('id', [''])[0]
+        result = viz_recap.content(db.conn(), identity)
+        return self._send(200 if result else 404, json.dumps(result or {'error': 'Artifact not found'}).encode(), 'application/json')
 
     def _handle_snapshot(self):
         """Unified per-agent read model for the dashboard."""
