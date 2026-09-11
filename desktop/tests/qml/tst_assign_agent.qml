@@ -10,7 +10,7 @@ TestCase {
         id: stub
         property bool connected: true
         property string errorMessage: ""
-        property var assignmentContacts: [{name: "Friend"}]
+        property var assignmentContacts: [{name: "Friend"}, {name: "Other Friend"}]
         property int calls: 0
         property var args: []
         signal contactAssignmentSucceeded(string session)
@@ -46,4 +46,28 @@ TestCase {
         dialog.submit();
         compare(stub.args, ["same-session", "choose", "Friend"]);
     }
+    function test_keyboardChoosesContactWithoutMouse() {
+        const dialog = createTemporaryObject(factory, testCase);
+        dialog.open("same-session", false);
+        wait(30);
+        keyClick(Qt.Key_Down);
+        compare(dialog.mode, "choose");
+        keyClick(Qt.Key_Tab);
+        keyClick(Qt.Key_Down);
+        keyClick(Qt.Key_Return);
+        compare(stub.calls, 1);
+        compare(stub.args, ["same-session", "choose", "Other Friend"]);
+    }
+    function test_keyboardCreatesContactWithoutMouse() {
+        const dialog = createTemporaryObject(factory, testCase);
+        dialog.open("same-session", false);
+        wait(30);
+        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Return);
+        tryCompare(findChild(dialog, "assignmentNewName"), "activeFocus", true);
+        keyClick(Qt.Key_N); keyClick(Qt.Key_O); keyClick(Qt.Key_V); keyClick(Qt.Key_A);
+        keyClick(Qt.Key_Return);
+        compare(stub.calls, 1);
+        compare(stub.args, ["same-session", "create", "nova"]);
+    }
+
 }

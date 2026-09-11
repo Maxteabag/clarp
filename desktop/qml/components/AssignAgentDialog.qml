@@ -23,11 +23,30 @@ Rectangle {
         Qt.callLater(() => automaticOption.forceActiveFocus());
         if (automatic && controller.connected) submit();
     }
+    function selectMode(index) {
+        const options = [automaticOption, chooseOption, createOption];
+        const selected = (index + options.length) % options.length;
+        mode = ["auto", "choose", "create"][selected];
+        options[selected].forceActiveFocus();
+    }
+    function modeKey(event, index) {
+        switch (event.key) {
+        case Qt.Key_Up: selectMode(index - 1); break;
+        case Qt.Key_Down: selectMode(index + 1); break;
+        case Qt.Key_Return: case Qt.Key_Enter: submit(); break;
+        case Qt.Key_Escape: if (!submitting) closeRequested(); break;
+        default: return;
+        }
+        event.accepted = true;
+    }
     function submit() {
         if (submitting || !controller.connected) return;
         const name = mode === "create" ? nameField.text.trim()
             : mode === "choose" ? String(contactField.currentValue || "") : "";
-        if (mode !== "auto" && !name) return;
+        if (mode !== "auto" && !name) {
+            if (mode === "create") nameField.forceActiveFocus();
+            return;
+        }
         submitting = true;
         controller.assignContact(session, mode, name);
     }
@@ -50,25 +69,26 @@ Rectangle {
             id: form
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }
             spacing: 14
-            TuiText { text: "Assign a contact"; color: "#c0caf5"; font.pixelSize: 18 }
-            TuiText {
-                Layout.fillWidth: true
-                text: "Keep this agent’s backend, model, and conversation."
-                color: "#9ca1bd"; wrapMode: Text.Wrap
-            }
+            TuiText { text: "Assign contact"; color: "#c0caf5"; font.pixelSize: 18 }
             TuiRadioButton {
                 id: automaticOption
                 objectName: "assignAutomatically"
-                text: "Automatically assign · default"
+                text: "Automatic"
                 checked: root.mode === "auto"; enabled: !root.submitting
                 onClicked: root.mode = "auto"
-                Keys.onReturnPressed: root.submit()
-                Keys.onEnterPressed: root.submit()
+                onActiveFocusChanged: if (activeFocus) root.mode = "auto"
+                Keys.onPressed: event => root.modeKey(event, 0)
+                KeyNavigation.tab: chooseOption
             }
             TuiRadioButton {
-                text: "Choose a contact"
+                id: chooseOption
+                text: "Choose contact"
                 checked: root.mode === "choose"; enabled: !root.submitting
                 onClicked: root.mode = "choose"
+                onActiveFocusChanged: if (activeFocus) root.mode = "choose"
+                Keys.onPressed: event => root.modeKey(event, 1)
+                KeyNavigation.tab: contactField
+                KeyNavigation.backtab: automaticOption
             }
             ThemedComboBox {
                 id: contactField
@@ -78,23 +98,32 @@ Rectangle {
                 Layout.fillWidth: true
                 model: root.controller.assignmentContacts
                 textRole: "name"; valueRole: "name"
+                Keys.onReturnPressed: root.submit()
+                Keys.onEnterPressed: root.submit()
+                KeyNavigation.tab: createOption
+                KeyNavigation.backtab: chooseOption
             }
             TuiText {
                 visible: root.mode === "choose" && root.controller.assignmentContacts.length === 0
-                text: "No compatible contacts available. Create one below."
+                text: "No contacts available"
                 color: "#9ca1bd"
                 Layout.fillWidth: true; wrapMode: Text.Wrap
             }
             TuiRadioButton {
-                text: "Create a new contact"
+                id: createOption
+                text: "New contact"
                 checked: root.mode === "create"; enabled: !root.submitting
                 onClicked: { root.mode = "create"; Qt.callLater(() => nameField.forceActiveFocus()); }
+                onActiveFocusChanged: if (activeFocus) root.mode = "create"
+                Keys.onPressed: event => root.modeKey(event, 2)
+                KeyNavigation.tab: nameField
+                KeyNavigation.backtab: chooseOption
             }
             TuiTextField {
                 id: nameField
                 objectName: "assignmentNewName"
                 visible: root.mode === "create"; enabled: !root.submitting
-                Layout.fillWidth: true; placeholderText: "Contact name"
+                Layout.fillWidth: true; placeholderText: "Name"
                 onAccepted: root.submit()
             }
             TuiText {

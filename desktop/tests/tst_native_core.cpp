@@ -1023,7 +1023,9 @@ void NativeCoreTest::launchPoolCarriesBackendModelAndHandlesEmpty() {
     QVERIFY(server.listenLocal());
     const auto oldBase = qgetenv("CLARP_BASE_URL");
     const auto oldToken = qgetenv("CLARP_TOKEN");
+    const auto oldBackend = QSettings().value(QStringLiteral("launch/backend"));
     const auto restore = qScopeGuard([&] {
+        QSettings().setValue(QStringLiteral("launch/backend"), oldBackend);
         qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken);
     });
     qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
@@ -1052,6 +1054,7 @@ void NativeCoreTest::launchPoolCarriesBackendModelAndHandlesEmpty() {
     QCOMPARE(request.value(QStringLiteral("effort")).toString(), QStringLiteral("high"));
     QVERIFY(!request.contains(QStringLiteral("replace_sid")));
     QTRY_VERIFY_WITH_TIMEOUT(controller.startingContact().isEmpty(), 3000);
+    QCOMPARE(controller.lastBackend(), QStringLiteral("grok"));
     QSignalSpy empty(&controller, &AppController::launchPoolEmpty);
     server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agents/snapshot"), 200,
         {{QStringLiteral("agents"), QJsonArray{}}, {QStringLiteral("personas"), QJsonArray{}}});

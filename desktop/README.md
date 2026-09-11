@@ -256,7 +256,11 @@ See `REWRITE_PLAN.md` for the behavioral scope and completion gates.
 
 ## Launch an agent from the desktop command
 
-`clarp-desktop --new-agent` opens a backend and model chooser. New agents are
+`clarp-desktop --new-agent` opens backend icon cards. The last successful backend
+is selected and focused: Enter launches, arrows or Tab change the selection.
+M opens the optional model picker; arrows select a model and Enter launches.
+Escape returns from models to cards, then closes the chooser. Background chat
+loading cannot take focus while a dialog is open. New agents are
 anonymous by default, named `Codex-5342` or similar, without occupying a saved
 contact. Settings → Agent identity can disable this default.
 
@@ -285,3 +289,10 @@ Examples: `clarp-desktop --backend codex --model MODEL_ID --effort high`,
 `clarp-desktop --new-agent`, and `clarp-desktop --no-new-agent`.
 The preview launcher forwards the same flags. Workspace uses the saved launch
 workspace, or `~`. Unsupported model/backend combinations are reported by the Host.
+
+Keyboard launch simulations live in `desktop/tests/qml/tst_launch_keyboard.qml`.
+They send real key events to isolated controls and verify launch arguments,
+focus, duplicate-submit prevention, cancellation, retries and empty-pool naming.
+`CLARP_SCREENSHOT_LAUNCH_KEYS` enables an offscreen-only full-window key driver;
+it refuses anything except the fixture token `offline-launch-keyboard-fixture`.
+Backend images are reused unchanged from the iOS `Backend*.imageset` assets.
