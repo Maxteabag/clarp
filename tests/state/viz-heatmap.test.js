@@ -2,6 +2,16 @@ import {it,expect} from 'vitest';
 import {activityHeat,HEAT_WINDOW,densityGrid,heatColor,HEAT_SIGMA,pixelHeat} from '../../static/lib/viz-heatmap.js';
 const hits=[{id:'file',x:0,y:0,w:40,h:40},{id:'other',x:1000,y:0,w:40,h:40}];
 const event=(id,ts=1000)=>({id,ts,agent_id:'a',world_target:'file'});
+it('remembers repeated activity across time without giving one burst the same history credit',()=>{
+ const steady=Array.from({length:10},(_,i)=>event(String(i),(i+1)*60000));
+ const burst=Array.from({length:10},(_,i)=>event(String(i),600000));
+ const recurrent=activityHeat(steady,hits,1200000).spots[0],isolated=activityHeat(burst,hits,1200000).spots[0];
+ expect(recurrent.historyWeight).toBeGreaterThan(0);expect(isolated.historyWeight).toBe(0);
+ expect(recurrent.weight).toBeGreaterThan(isolated.weight);
+ expect(activityHeat(steady,hits,1800000).spots[0].weight).toBeLessThan(recurrent.weight);
+ expect(activityHeat(steady,hits,600000+HEAT_WINDOW).spots).toEqual([]);
+ expect(activityHeat([...steady,...steady],hits,1200000)).toEqual(activityHeat(steady,hits,1200000));
+});
 it('gets warmer with repeated events and cools without renormalizing',()=>{
  const single=activityHeat([event('a')],hits,1000),many=activityHeat([event('a'),event('b')],hits,1000);
  expect(many.spots[0].weight).toBeGreaterThan(single.spots[0].weight);

@@ -33,8 +33,8 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhe
  // and identity; names and small marks appear as the viewer moves closer.
  const detail=lantern.detailLevel(camera.k,pixelRatio);
  const relations={rails:0,tethers:0,threads:0,deliveries:0,discoveries:0,moorings:0,routes:0};
- c.fillStyle='#091c24';c.fillRect(0,0,width,height);
- const glow=c.createRadialGradient(width*.4,height*.5,10,width*.4,height*.5,width*.7);glow.addColorStop(0,'#19484455');glow.addColorStop(1,'#091c2400');c.fillStyle=glow;c.fillRect(0,0,width,height);
+ if(!interaction.heatmapBackground){c.fillStyle='#091c24';c.fillRect(0,0,width,height);
+ const glow=c.createRadialGradient(width*.4,height*.5,10,width*.4,height*.5,width*.7);glow.addColorStop(0,'#19484455');glow.addColorStop(1,'#091c2400');c.fillStyle=glow;c.fillRect(0,0,width,height);}
  c.save();c.translate(camera.x,camera.y);c.scale(camera.k,camera.k);c.textBaseline='alphabetic';
  // Belonging is material and still: configured origins are double rails with
  // anchors. They never move by themselves; only deliveries travel along them.
@@ -211,7 +211,7 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhe
   hits.push({id:'thread:'+th.id,label:th.fromName+' → '+th.toName,purpose:(transfer?'Explicit handoff · “'+plan.title+'” transferred':plan?'Agent message referencing “'+plan.title+'” · a reference, not a transfer':'Agent message · collaboration, no object transfer')+' · '+clock(th.ts),sample:th.excerpt,x:knot.x-14,y:knot.y-14,w:28,h:28});
  }
  if(interaction.selected){const h=hits.find(h=>h.id===interaction.selected);if(h){c.strokeStyle='#f3dfaeaa';c.lineWidth=1;c.beginPath();c.roundRect(h.x-3,h.y-3,h.w+6,h.h+6,16);c.stroke();}}
- c.restore();return {title:'Flow · The Lantern Works',hits,heatTargets:[...hits,...m.files.map(f=>({id:f.id,x:f.x-1,y:f.y-1,w:2,h:2}))],bounds:m.bounds,agents,territories:m.projects.length+m.ownerGroups.length,files:drawnFiles,visualActions,
+ c.restore();return {title:'Flow · The Lantern Works',heatmapBackground:!!interaction.heatmapBackground,hits,heatTargets:[...hits,...m.files.map(f=>({id:f.id,x:f.x-1,y:f.y-1,w:2,h:2}))],bounds:m.bounds,agents,territories:m.projects.length+m.ownerGroups.length,files:drawnFiles,visualActions,
   projects:m.projects.map(p=>({id:p.id,label:p.label,children:p.members.map(r=>r.id),character:p.character||null})),recentTraces:m.actors.filter(a=>playhead-(a.event.finished_at??a.event.ts)<180000).length,
   detail,components:visibleComponents,workspaces:m.regions.map(r=>({id:r.id,x:r.x,y:r.y,rx:r.rx,ry:r.ry,validation:r.validation?.state||'none',hiddenWork:r.hiddenWork||0})),ownerGroups:m.ownerGroups.map(o=>({id:o.id,children:o.repos.map(r=>r.id),runs:o.repos.flatMap(r=>(r.runs||[]).map(run=>({repo:r.id,conclusion:run.conclusion,status:run.status})))})),ownerPortraits:m.ownerGroups.filter(o=>avatars[o.id]).map(o=>o.id),githubLogo:m.ownerGroups.length>0,
   workObjects,waits:waitMeta,posts:m.posts.map(p=>({region:p.region,boundary:p.boundary,x:p.x,y:p.y,waits:p.waits.length})),relations,workEvidence:{available:m.work.available,synthetic:m.work.synthetic,plans:m.work.objects.length,threads:m.threads.length,contract:m.work.contract}};
