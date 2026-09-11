@@ -37,7 +37,7 @@ Rectangle {
         width: Math.min(590, parent.width - 48)
         implicitHeight: contentColumn.implicitHeight + 56
         anchors.centerIn: parent
-        radius: 20
+        radius: 0
         color: "#20212e"
         border.color: "#41445a"
 
@@ -51,26 +51,26 @@ Rectangle {
 
             RowLayout {
                 Layout.fillWidth: true
-                Text {
+                TuiText {
                     Layout.fillWidth: true
                     text: "Orchestrator"
                     color: "#c0caf5"
-                    font.pixelSize: 21
+                    font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
-                BusyIndicator {
+                TuiBusyIndicator {
                     visible: root.controller.orchestratorLoading
                     running: visible
                     implicitWidth: 22
                     implicitHeight: 22
                 }
-                ToolButton {
+                TuiToolButton {
                     text: "×"
                     onClicked: root.closeRequested()
                 }
             }
 
-            Text {
+            TuiText {
                 Layout.fillWidth: true
                 text: "Name matching runs first. The routing model resolves delegations that do not clearly select one agent."
                 color: "#8d93b0"
@@ -78,16 +78,16 @@ Rectangle {
                 font.pixelSize: 12
             }
 
-            Switch {
+            TuiSwitch {
                 id: enabledSwitch
                 text: "Use AI to resolve failed delegations"
             }
-            Switch {
+            TuiSwitch {
                 id: fallbackSwitch
                 text: "Only when name matching cannot decide"
             }
 
-            Label {
+            TuiLabel {
                 text: "Automatic routing confidence  " + confidenceSlider.value.toFixed(2)
                 color: "#a9b1d6"
             }
@@ -105,7 +105,7 @@ Rectangle {
                 spacing: 10
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Label {
+                    TuiLabel {
                         text: "Provider"
                         color: "#a9b1d6"
                     }
@@ -118,7 +118,7 @@ Rectangle {
                 }
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Label {
+                    TuiLabel {
                         text: "Effort"
                         color: "#a9b1d6"
                     }
@@ -130,17 +130,17 @@ Rectangle {
                 }
             }
 
-            Label {
+            TuiLabel {
                 text: "Model override"
                 color: "#a9b1d6"
             }
-            TextField {
+            TuiTextField {
                 id: modelField
                 Layout.fillWidth: true
                 placeholderText: "Provider default"
             }
 
-            Label {
+            TuiLabel {
                 text: "Timeout (milliseconds)"
                 color: "#a9b1d6"
             }
@@ -157,9 +157,9 @@ Rectangle {
                 visible: root.controller.orchestratorLastDecision.length > 0
                 Layout.fillWidth: true
                 implicitHeight: lastDecision.implicitHeight + 18
-                radius: 9
+                radius: 0
                 color: "#1a1b26"
-                Text {
+                TuiText {
                     id: lastDecision
                     anchors.fill: parent
                     anchors.margins: 9
@@ -175,11 +175,11 @@ Rectangle {
                 Item {
                     Layout.fillWidth: true
                 }
-                Button {
+                TuiButton {
                     text: "Cancel"
                     onClicked: root.closeRequested()
                 }
-                Button {
+                TuiButton {
                     text: "Save"
                     enabled: root.loaded && !root.controller.orchestratorLoading
                     onClicked: {

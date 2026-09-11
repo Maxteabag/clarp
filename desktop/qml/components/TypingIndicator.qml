@@ -5,7 +5,7 @@ Rectangle {
     objectName: "replyTypingIndicator"
     implicitWidth: 132
     implicitHeight: 32
-    radius: 16
+    radius: 0
     color: "#1b191f"
     Accessible.role: Accessible.StaticText
     Accessible.name: "Agent is working"
@@ -13,7 +13,7 @@ Rectangle {
         id: indicatorRow
         anchors.centerIn: parent
         spacing: 5
-        Text {
+        TuiText {
             text: "Working…"
             color: "#9ea4c7"
             font.pixelSize: 12
@@ -24,7 +24,7 @@ Rectangle {
             Rectangle {
                 id: dot
                 required property int index
-                width: 6; height: 6; radius: 3
+                width: 6; height: 6; radius: 0
                 anchors.verticalCenter: indicatorRow.verticalCenter
                 color: "#bb9af7"
                 opacity: 0.4

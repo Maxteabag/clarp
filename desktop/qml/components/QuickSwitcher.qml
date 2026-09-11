@@ -183,7 +183,7 @@ Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: Math.min(145, parent.height * 0.15)
-        radius: 6
+        radius: 0
         color: "#1a1b26"
         border.color: "#3c3f58"
 
@@ -197,7 +197,7 @@ Rectangle {
             anchors.margins: 5
             spacing: 4
 
-            TextField {
+            TuiTextField {
                 id: search
                 Layout.fillWidth: true
                 text: root.query
@@ -210,7 +210,7 @@ Rectangle {
                 background: Rectangle {
                     color: "#1a1b26"
                     border.color: "#303246"
-                    radius: 3
+                    radius: 0
                 }
                 onTextChanged: {
                     root.query = text;
@@ -257,7 +257,7 @@ Rectangle {
                     onClicked: root.choose(index)
 
                     background: Rectangle {
-                        radius: 3
+                        radius: 0
                         color: resultRow.highlighted ? "#2a2c3c" : resultRow.hovered ? "#22232f" : "transparent"
 
                         Rectangle {
@@ -285,7 +285,7 @@ Rectangle {
                                 cornerRadius: 6
                                 fallbackColor: "#414458"
                             }
-                            Text {
+                            TuiText {
                                 visible: String(resultRow.modelData.kind) !== "agent"
                                 anchors.centerIn: parent
                                 text: String(resultRow.modelData.kind) === "contact" ? "+" : "›"
@@ -297,7 +297,7 @@ Rectangle {
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 1
-                            Text {
+                            TuiText {
                                 text: String(resultRow.modelData.kind) === "command"
                                     ? String(resultRow.modelData.label)
                                     : (String(resultRow.modelData.kind) === "contact" ? "Start " : "")
@@ -307,7 +307,7 @@ Rectangle {
                                 font.pixelSize: 12
                                 font.weight: Font.Medium
                             }
-                            Text {
+                            TuiText {
                                 visible: String(resultRow.modelData.kind) !== "command"
                                 text: String(resultRow.modelData.kind) === "contact"
                                     ? "New session · " + String(resultRow.modelData.backend) + " · " + String(resultRow.modelData.directory)
@@ -323,7 +323,7 @@ Rectangle {
                             status: String(resultRow.modelData.kind) === "agent"
                                 ? String(resultRow.modelData.state) : "idle"
                         }
-                        Text {
+                        TuiText {
                             visible: String(resultRow.modelData.kind) === "command"
                             text: String(resultRow.modelData.group || "").toUpperCase()
                             color: "#55586e"
@@ -336,10 +336,10 @@ Rectangle {
                                 && String(resultRow.modelData.key || "").length > 0
                             Layout.preferredWidth: visible ? shortcutText.implicitWidth + 10 : 0
                             Layout.preferredHeight: 19
-                            radius: 3
+                            radius: 0
                             color: "#20212d"
                             border.color: "#36384b"
-                            Text {
+                            TuiText {
                                 id: shortcutText
                                 anchors.centerIn: parent
                                 text: String(resultRow.modelData.key || "")
@@ -352,7 +352,7 @@ Rectangle {
                 }
             }
 
-            Text {
+            TuiText {
                 visible: root.results.length === 0
                 Layout.alignment: Qt.AlignHCenter
                 text: root.contactsOnly ? "No idle contacts" : "No matching agent or contact"

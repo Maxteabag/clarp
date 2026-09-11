@@ -48,15 +48,15 @@ Rectangle {
         anchors.centerIn: parent
         width: Math.min(480, parent.width - 32)
         height: form.implicitHeight + 40
-        radius: 12
+        radius: 0
         color: "#20212e"
         border.color: "#41445a"
         ColumnLayout {
             id: form
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }
             spacing: 14
-            Text { text: "Rename contact"; font.pixelSize: 20; color: "#c0caf5" }
-            TextField {
+            TuiText { text: "Rename contact"; font.pixelSize: 17; color: "#c0caf5" }
+            TuiTextField {
                 id: nameField
                 objectName: "renameAgentName"
                 Layout.fillWidth: true
@@ -65,7 +65,7 @@ Rectangle {
                 onAccepted: root.submit()
                 Keys.onEscapePressed: root.closeRequested()
             }
-            Text {
+            TuiText {
                 Layout.fillWidth: true
                 // Reads as "Chat id  stays the same" with no chat to name, and
                 // there is nothing reassuring about that.
@@ -75,7 +75,7 @@ Rectangle {
                 elide: Text.ElideMiddle
                 font.pixelSize: 12
             }
-            Text {
+            TuiText {
                 Layout.fillWidth: true
                 visible: root.controller.errorMessage.length > 0 || !root.controller.connected
                 text: root.controller.errorMessage || "Connect to the Host to rename a contact"
@@ -84,8 +84,8 @@ Rectangle {
             }
             RowLayout {
                 Item { Layout.fillWidth: true }
-                Button { text: "Cancel"; onClicked: root.closeRequested() }
-                Button {
+                TuiButton { text: "Cancel"; onClicked: root.closeRequested() }
+                TuiButton {
                     objectName: "renameAgentSubmit"
                     text: root.submitting ? "Renaming…" : "Rename · Enter"
                     enabled: !root.submitting && root.controller.connected

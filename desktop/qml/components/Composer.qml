@@ -89,7 +89,7 @@ Rectangle {
         anchors.margins: 0
         spacing: 7
 
-        Text {
+        TuiText {
             visible: root.active && root.controller.startingContact.length > 0
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 19 : 0
@@ -102,7 +102,7 @@ Rectangle {
             visible: root.transcriptionCount > 0
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 19 : 0
-            Text {
+            TuiText {
                 Layout.fillWidth: true
                 text: root.transcriptionCount === 1
                     ? "Transcribing voice in background…"
@@ -112,7 +112,7 @@ Rectangle {
                 font.pixelSize: 12
                 elide: Text.ElideRight
             }
-            ToolButton {
+            TuiToolButton {
                 visible: root.active
                 text: "Cancel"
                 implicitWidth: 58
@@ -123,7 +123,7 @@ Rectangle {
             }
         }
 
-        Text {
+        TuiText {
             visible: root.queueCount > 0
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 19 : 0
@@ -177,7 +177,7 @@ Rectangle {
                                 fillMode: Image.PreserveAspectCrop
                                 asynchronous: true
                             }
-                            Text {
+                            TuiText {
                                 id: attachmentLabel
                                 Layout.fillWidth: true
                                 text: String(attachmentChip.modelData.name || "file")
@@ -188,7 +188,7 @@ Rectangle {
                                 font.pixelSize: 12
                                 elide: Text.ElideMiddle
                             }
-                            ToolButton {
+                            TuiToolButton {
                                 text: "Remove"
                                 visible: root.active
                                 implicitWidth: 64
@@ -208,7 +208,7 @@ Rectangle {
             Layout.fillHeight: true
             spacing: 0
 
-        ToolButton {
+        TuiToolButton {
             visible: root.active && root.revealControls
             text: "Attach"
             enabled: root.session.length > 0
@@ -301,7 +301,7 @@ Rectangle {
             }
         }
 
-        ToolButton {
+        TuiToolButton {
             id: stopButton
             visible: {
                 if (!root.active)
@@ -316,7 +316,7 @@ Rectangle {
             onClicked: root.controller.stopSession(root.session)
             ToolTip.visible: hovered
             ToolTip.text: "Stop agent · Ctrl+."
-            contentItem: Text {
+            contentItem: TuiText {
                 text: stopButton.text
                 color: "#9e7d87"
                 font.pixelSize: 12
@@ -329,7 +329,7 @@ Rectangle {
             }
         }
 
-        ToolButton {
+        TuiToolButton {
             id: playbackButton
             visible: root.active && (root.controller.audio.playing || root.controller.audio.paused)
             text: "Silence"
@@ -338,7 +338,7 @@ Rectangle {
             onClicked: root.controller.audio.silence()
             ToolTip.visible: hovered
             ToolTip.text: "Stop voice playback"
-            contentItem: Text {
+            contentItem: TuiText {
                 text: playbackButton.text
                 color: "#74778e"
                 font.pixelSize: 12
@@ -351,7 +351,7 @@ Rectangle {
             }
         }
 
-        ToolButton {
+        TuiToolButton {
             id: recordButton
             visible: root.active && root.revealControls
             text: root.controller.audio.recording ? "Finish" : "Record"
@@ -361,7 +361,7 @@ Rectangle {
             onClicked: root.controller.toggleRecordingForSession(root.session)
             ToolTip.visible: hovered
             ToolTip.text: root.controller.audio.recording ? "Stop and transcribe" : "Talk · Ctrl+Shift+Space"
-            contentItem: Text {
+            contentItem: TuiText {
                 text: recordButton.text
                 color: root.controller.audio.recording ? "#b98591" : "#74778e"
                 font.pixelSize: 12
@@ -417,7 +417,7 @@ Rectangle {
         color: "#d0262a3d"
         border.color: "#a7addb"
         border.width: 2
-        Text {
+        TuiText {
             anchors.centerIn: parent
             text: "DROP TO ATTACH"
             color: "#d8dbef"

@@ -22,7 +22,7 @@ Rectangle {
     implicitHeight: !visible ? 0 : compact && !expanded ? 27 : compact ? 116 : 224
     color: "#181a24"
     border.color: "#303448"
-    radius: 5
+    radius: 0
 
     ColumnLayout {
         anchors.fill: parent
@@ -32,7 +32,7 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             Layout.preferredHeight: 18
-            Text {
+            TuiText {
                 Layout.fillWidth: true
                 text: "MEDIA  " + root.assets.length
                 color: "#858aa5"
@@ -41,7 +41,7 @@ Rectangle {
                 font.weight: Font.DemiBold
                 font.letterSpacing: 0.8
             }
-            ToolButton {
+            TuiToolButton {
                 visible: root.compact
                 text: root.expanded ? "−" : "+"
                 implicitWidth: 20
@@ -68,7 +68,7 @@ Rectangle {
                 required property var modelData
                 width: root.compact ? 142 : 190
                 height: ListView.view.height
-                radius: 4
+                radius: 0
                 color: "#11131b"
                 border.color: "#34394e"
                 clip: true
@@ -88,7 +88,7 @@ Rectangle {
                     anchors.bottom: parent.bottom
                     height: caption.implicitHeight + 10
                     color: "#c012141d"
-                    Text {
+                    TuiText {
                         id: caption
                         anchors.left: parent.left
                         anchors.right: parent.right
@@ -102,7 +102,7 @@ Rectangle {
                         elide: Text.ElideRight
                     }
                 }
-                BusyIndicator {
+                TuiBusyIndicator {
                     anchors.centerIn: parent
                     running: preview.status === Image.Loading
                     visible: running
@@ -134,7 +134,7 @@ Rectangle {
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle {
-            radius: 7
+            radius: 0
             color: "#11131b"
             border.color: "#555c7d"
         }
@@ -147,7 +147,7 @@ Rectangle {
                 fillMode: Image.PreserveAspectFit
                 asynchronous: true
             }
-            Text {
+            TuiText {
                 id: viewerCaption
                 anchors.left: parent.left
                 anchors.right: parent.right

@@ -4,6 +4,14 @@ import QtQuick.Controls
 
 ComboBox {
     id: root
+    font.family: "JetBrains Mono"
+    background: Rectangle {
+        implicitWidth: 120
+        implicitHeight: 40
+        color: root.palette.base
+        border.width: 1
+        border.color: root.visualFocus ? root.palette.highlight : root.palette.midlight
+    }
     // Basic's default delegate pairs highlightedText with palette.light,
     // rather than highlight, producing low contrast with a dark app palette.
     delegate: ItemDelegate {
