@@ -440,6 +440,7 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-dreaming": "_handle_agent_dreaming",
         "/agent-mute": "_handle_agent_mute",
         "/agent-rename": "_handle_agent_rename",
+        "/agent-assign": "_handle_agent_assign",
         "/agent-voice-verbosity": "_handle_agent_voice_verbosity",
         "/team-nudging": "_handle_team_nudging",
         "/compact": "_handle_compact",
@@ -3353,6 +3354,25 @@ class Handler(BaseHTTPRequestHandler):
             "session": session,
             "muted": bool(fresh.get("muted")),
         }).encode(), "application/json")
+
+    def _handle_agent_assign(self):
+        from lib.contact_assignment import assign_contact
+        data = self._read_json()
+        if data is None:
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        if self._reject_janitor_control(data):
+            return
+        try:
+            result = assign_contact(str(data.get("session") or ""),
+                                    str(data.get("mode") or "auto"), data.get("name"))
+        except AgentLifecycleError as exc:
+            return self._send(exc.status, json.dumps(exc.response()).encode(), "application/json")
+        except ValueError as exc:
+            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+        if data.get("mode") != "options":
+            self.ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER, "kind": "contact-assigned",
+                                       "session": result["session"], "name": result["name"]})
+        return self._send(200, json.dumps(result).encode(), "application/json")
 
     def _handle_agent_rename(self):
         """Change an agent's display name, keeping every stable identifier.

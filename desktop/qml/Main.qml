@@ -55,12 +55,16 @@ ApplicationWindow {
     palette.disabled.windowText: "#8d93b0"
     palette.disabled.buttonText: "#8d93b0"
 
+    function openLaunchAgent(backend, model, effort, anonymousMode) {
+        launchAgent.open(backend, model, effort, anonymousMode);
+    }
+
     function composerOwnsFocus() {
         return root.activeFocusItem && root.activeFocusItem.objectName === "paneComposerEditor";
     }
 
     function overlayVisible() {
-        return previewVersionPanel.visible || quickNewAgent.visible || renameAgent.visible || quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
+        return assignAgent.visible || launchAgent.visible || previewVersionPanel.visible || quickNewAgent.visible || renameAgent.visible || quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
             || startAgent.visible || overview.visible || connection.visible
             || queueDialog.visible || profilePanel.visible || reportView.visible
             || settingsPanel.dialogOpen;
@@ -133,6 +137,9 @@ ApplicationWindow {
             quickSwitcher.open(root.composerOwnsFocus());
         } else if (action === "preview-versions") {
             previewVersionPanel.visible = true;
+        } else if (action === "assign-agent" || action === "auto-assign-agent") {
+            if (app.selectedSession.length > 0 && !app.isPairSession(app.selectedSession))
+                assignAgent.open(app.selectedSession, action === "auto-assign-agent", root.composerOwnsFocus());
         } else if (action === "quick-new-agent") {
             quickNewAgent.visible = true;
         } else if (action === "rename-agent") {
@@ -246,7 +253,11 @@ ApplicationWindow {
     }
 
     function escapeFocus() {
-        if (previewVersionPanel.visible)
+        if (assignAgent.visible) {
+            if (!assignAgent.submitting) assignAgent.closeRequested();
+        } else if (launchAgent.visible) {
+            if (!launchAgent.submitting) { launchAgent.autoStart = false; launchAgent.closeRequested(); }
+        } else if (previewVersionPanel.visible)
             previewVersionPanel.close();
         else if (quickNewAgent.visible)
             quickNewAgent.closeRequested();
@@ -499,6 +510,37 @@ ApplicationWindow {
             orchestrator.visible = true;
             app.loadOrchestrator();
         }
+    }
+
+    Connections {
+        target: app
+        function onContactAssignmentRequested(session: string, automatic: bool) {
+            if (!root.overlayVisible()) assignAgent.open(session, automatic, root.composerOwnsFocus());
+        }
+    }
+
+    AssignAgentDialog {
+        id: assignAgent
+        objectName: "assignAgent"
+        anchors.fill: parent
+        controller: app
+        visible: false
+        z: 101
+        onCloseRequested: {
+            visible = false;
+            if (returnToComposer) app.requestComposerFocus(app.panes.activePaneId);
+            else root.focusConversation();
+        }
+    }
+
+    LaunchAgentDialog {
+        id: launchAgent
+        objectName: "launchAgent"
+        anchors.fill: parent
+        controller: app
+        visible: false
+        z: 100
+        onCloseRequested: { visible = false; root.focusConversation(); }
     }
 
     QuickNewAgentDialog {

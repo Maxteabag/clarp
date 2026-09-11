@@ -66,6 +66,27 @@ class AgentLifecycleService:
             return self._create_locked(data, janitor=True)
 
     def _create_locked(self, data: dict, *, janitor: bool = False) -> AgentLifecycleResult:
+        if data.get("auto_contact") is True and not janitor:
+            if data.get("anonymous") or data.get("replace_sid"):
+                raise AgentLifecycleError(400, "conflicting launch options")
+            from .contact_assignment import available_contacts
+            choices = available_contacts(backends.normalize(data.get("backend")))
+            if not choices:
+                raise AgentLifecycleError(409, "contact_pool_empty")
+            data = dict(data, name=choices[0]["name"])
+        if data.get("anonymous") is True and not janitor:
+            if data.get("replace_sid"):
+                raise AgentLifecycleError(400, "anonymous launch must be fresh")
+            data = dict(data)
+            backend_name = backends.normalize(data.get("backend"))
+            label = {"codex": "Codex", "claude": "Claude", "grok": "Grok", "agy": "AGY", "opencode": "OpenCode"}.get(backend_name, backend_name)
+            occupied = {str(a["persona"]).casefold() for a in agents_db.list_agents()}
+            while True:
+                name = f"{label}-{secrets.token_hex(2)}"
+                if name.casefold() not in occupied and not persona_store.get(name):
+                    break
+            data.update(name=name, voice_id="{}", personality="", avatar_symbol="")
+            data.pop("session", None)
         persona = (data.get("name") or "").strip()
         if not persona:
             raise AgentLifecycleError(400, "name required")

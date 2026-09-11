@@ -71,6 +71,9 @@ class AppController : public QObject {
     Q_PROPERTY(int activityDisplayMode READ activityDisplayMode WRITE setActivityDisplayMode NOTIFY toolsVisibleChanged)
     Q_PROPERTY(bool timestampsVisible READ timestampsVisible WRITE setTimestampsVisible
                    NOTIFY timestampsVisibleChanged)
+    Q_PROPERTY(bool anonymousAgents READ anonymousAgents WRITE setAnonymousAgents NOTIFY anonymousAgentsChanged)
+    Q_PROPERTY(QVariantList assignmentContacts READ assignmentContacts NOTIFY assignmentContactsChanged)
+    Q_PROPERTY(bool newAgentOnStartup READ newAgentOnStartup WRITE setNewAgentOnStartup NOTIFY newAgentOnStartupChanged)
     Q_PROPERTY(bool minimalUi READ minimalUi WRITE setMinimalUi NOTIFY minimalUiChanged)
     Q_PROPERTY(bool sharedFilesystem READ sharedFilesystem WRITE setSharedFilesystem
                    NOTIFY sharedFilesystemChanged)
@@ -265,7 +268,18 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] QVariantList matchingAgents(const QString& query) const;
     Q_INVOKABLE [[nodiscard]] QVariantList matchingContacts(const QString& query) const;
     Q_INVOKABLE [[nodiscard]] QString quickStartBackend() const;
-    Q_INVOKABLE bool quickStartContact(const QString& name);
+    Q_INVOKABLE bool quickStartContact(const QString& name, const QString& backend = {},
+                                      const QString& model = {}, const QString& effort = {});
+    Q_INVOKABLE bool startAvailableContact(const QString& backend, const QString& model, const QString& effort);
+    [[nodiscard]] bool newAgentOnStartup() const { return m_newAgentOnStartup; }
+    void setNewAgentOnStartup(bool value);
+    [[nodiscard]] bool anonymousAgents() const { return m_anonymousAgents; }
+    void setAnonymousAgents(bool value);
+    [[nodiscard]] QVariantList assignmentContacts() const { return m_assignmentContacts; }
+    Q_INVOKABLE bool startAnonymousAgent(const QString& backend, const QString& model, const QString& effort);
+    Q_INVOKABLE void loadAssignmentContacts(const QString& session);
+    Q_INVOKABLE void requestContactAssignment(const QString& session, bool automatic) { emit contactAssignmentRequested(session, automatic); }
+    Q_INVOKABLE void assignContact(const QString& session, const QString& mode, const QString& name);
     [[nodiscard]] QString startingContact() const;
     Q_INVOKABLE [[nodiscard]] QVariantList modelsForBackend(const QString& backend) const;
     Q_INVOKABLE [[nodiscard]] QVariantList effortsForModel(const QString& backend,
@@ -365,6 +379,12 @@ class AppController : public QObject {
     void showWhenReadyChanged();
     void toolsVisibleChanged();
     void timestampsVisibleChanged();
+    void anonymousAgentsChanged();
+    void assignmentContactsChanged();
+    void contactAssignmentRequested(const QString& session, bool automatic);
+    void contactAssignmentSucceeded(const QString& session);
+    void newAgentOnStartupChanged();
+    void launchPoolEmpty();
     void minimalUiChanged();
     void sharedFilesystemChanged();
     void connectionStateChanged();
@@ -514,6 +534,10 @@ class AppController : public QObject {
     bool m_toolsVisible = false;
     int m_activityDisplayMode = 0;
     bool m_timestampsVisible = false;
+    bool m_anonymousAgents = true;
+    QVariantList m_assignmentContacts;
+    QString m_assignmentSession;
+    bool m_newAgentOnStartup = true;
     bool m_minimalUi = false;
     bool m_sharedFilesystem = false;
     bool m_voicesLoading = false;

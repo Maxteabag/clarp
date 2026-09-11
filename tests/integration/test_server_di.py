@@ -3204,3 +3204,19 @@ def test_recursive_team_api_defaults_settings_and_atomic_cycle_rejection(running
     with pytest.raises(urllib.error.HTTPError) as error:
         _post(base + '/teams', {'name': 'Bad', 'parent_team_id': ['wrong type']})
     assert error.value.code == 400
+
+
+def test_agent_assignment_endpoint_keeps_existing_session(running_server):
+    base, _ctx, _srv = running_server
+    from lib import agents as agents_db, personas
+    before = agents_db.get_by_session("claude")
+    status, body = _post(base + "/agent-assign", {"session": "claude", "mode": "create", "name": "Assigned Contact"})
+    assert status == 200
+    after = agents_db.get_by_session("claude")
+    assert after["agent_id"] == before["agent_id"]
+    assert after["backend"] == before["backend"]
+    assert after["persona"] == "Assigned Contact"
+    assert personas.get("Assigned Contact") is not None
+    status, body = _post(base + "/agent-assign", {"session": "claude", "mode": "options"})
+    assert status == 200
+    assert any(c["name"] == "Assigned Contact" for c in json.loads(body)["contacts"])
