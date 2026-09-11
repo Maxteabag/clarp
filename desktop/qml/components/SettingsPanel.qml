@@ -13,7 +13,7 @@ Rectangle {
     signal closeRequested
     readonly property bool dialogOpen: ttsDialog.visible
     property int focusedIndex: 0
-    readonly property var actions: [timestampsRow, readyRow, toolsRow, narrationRow, minimalUiRow, spokenRow, mobilePushRow,
+    readonly property var actions: [timestampsRow, readyRow, toolsRow, narrationRow, startupRow, anonymousRow, minimalUiRow, spokenRow, mobilePushRow,
         connectionRow, orchestratorRow, filesystemRow, routingRow]
     color: "#1a1b26"
     objectName: "settingsPanel"
@@ -240,6 +240,30 @@ Rectangle {
                     color: "#82aaff"
                     font.pixelSize: 12
                     wrapMode: Text.Wrap
+                }
+            }
+
+            SettingsGroup {
+                title: "STARTUP"
+                SettingsToggle {
+                    id: startupRow
+                    objectName: "setting-new-agent-startup"
+                    label: "Start a new agent when opening Clarp"
+                    detail: "Choose a backend on startup. Launch flags override this setting."
+                    checked: root.controller.newAgentOnStartup
+                    onToggled: value => root.controller.newAgentOnStartup = value
+                }
+            }
+
+            SettingsGroup {
+                title: "AGENT IDENTITY"
+                SettingsToggle {
+                    id: anonymousRow
+                    objectName: "setting-anonymous-agents"
+                    label: "Anonymous agents by default"
+                    detail: "Start as Codex-5342 or similar. Ctrl+A assigns a contact; Ctrl+Shift+A assigns automatically."
+                    checked: root.controller.anonymousAgents
+                    onToggled: value => root.controller.anonymousAgents = value
                 }
             }
 

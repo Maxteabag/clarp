@@ -424,3 +424,31 @@ def test_mint_session_is_unique_and_avoids_existing():
     assert agents_db.session_exists(a)
     for _ in range(10):
         assert AgentLifecycleService._mint_session("Antoni") != a
+
+
+def test_anonymous_launch_does_not_claim_a_contact_or_voice(tmp_path):
+    service = AgentLifecycleService(_ctx(tmp_path))
+    first = service.create({"anonymous": True, "backend": "codex", "cwd": str(tmp_path), "synthesize_audio": False})
+    second = service.create({"anonymous": True, "backend": "codex", "cwd": str(tmp_path), "synthesize_audio": False})
+    assert first.persona.startswith("Codex-")
+    assert first.persona != second.persona
+    assert first.session != second.session
+    assert personas.get(first.persona) is None
+    row = agents_db.get_by_session(first.session)
+    assert row["voice_id"] == "{}"
+    assert row["personality"] == ""
+    assert agents_db.current_runtime_id(row["agent_id"])
+
+
+def test_auto_contact_selects_compatible_unoccupied_contact(tmp_path, monkeypatch):
+    free = personas.create(name="Free Contact", voice_id="{}")
+    occupied = personas.create(name="Occupied Contact", voice_id="{}")
+    incompatible = {"name": "Wrong Backend", "voice_id": "{}", "tier": "claude"}
+    agents_db.create_agent(persona="Occupied Contact", voice_id="{}", cwd=str(tmp_path), session="occupied")
+    monkeypatch.setattr(personas, "list_all", lambda: [occupied, incompatible, free])
+    service = AgentLifecycleService(_ctx(tmp_path))
+    result = service.create({"auto_contact": True, "backend": "codex", "cwd": str(tmp_path), "synthesize_audio": False})
+    assert result.persona == "Free Contact"
+    with pytest.raises(AgentLifecycleError) as error:
+        service.create({"auto_contact": True, "backend": "codex", "cwd": str(tmp_path), "synthesize_audio": False})
+    assert error.value.code == "contact_pool_empty"

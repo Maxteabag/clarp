@@ -612,6 +612,7 @@ class NativeCoreTest final : public QObject {
     void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
     void readyModePreservesActivityAndHidesOnlyProvisionalBody();
     void idleContactStartsFreshWithSavedDefaults();
+    void launchPoolCarriesBackendModelAndHandlesEmpty();
     void redesignedRosterFiltersWithoutMutatingSource();
     void rosterLookupIsConsistentDuringStructuralSignals();
     void circularPortraitsAreBoundedAndAntialiased();
@@ -1015,6 +1016,50 @@ void NativeCoreTest::idleContactStartsFreshWithSavedDefaults() {
     QTRY_VERIFY_WITH_TIMEOUT(controller.startingContact().isEmpty(), 3000);
     QVERIFY(!controller.errorMessage().isEmpty());
     QCOMPARE(controller.selectedSession(), freshSession);
+}
+
+void NativeCoreTest::launchPoolCarriesBackendModelAndHandlesEmpty() {
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
+    const auto restore = qScopeGuard([&] {
+        qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken);
+    });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
+    qputenv("CLARP_TOKEN", "test-token");
+    AppController controller;
+    QTRY_VERIFY_WITH_TIMEOUT(controller.connected(), 3000);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.agents()->rowCount(), 1, 3000);
+    const QJsonArray personas{
+        QJsonObject{{QStringLiteral("name"), QStringLiteral("Rachel")}},
+        QJsonObject{{QStringLiteral("name"), QStringLiteral("Bella")}}};
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agents/snapshot"), 200,
+        {{QStringLiteral("agents"), QJsonArray{QJsonObject{
+            {QStringLiteral("session"), QStringLiteral("rachel")},
+            {QStringLiteral("persona"), QStringLiteral("Rachel")}}}},
+         {QStringLiteral("personas"), personas}});
+    server.setJsonResponse(QStringLiteral("POST"), QStringLiteral("/agents"), 201,
+        {{QStringLiteral("session"), QStringLiteral("bella-new")}});
+    QVERIFY(controller.startAvailableContact(QStringLiteral("grok"), QStringLiteral("test-model"), QStringLiteral("high")));
+    QVERIFY(!controller.startAvailableContact(QStringLiteral("claude"), {}, {}));
+    QTRY_COMPARE_WITH_TIMEOUT(server.requestCount(QStringLiteral("POST"), QStringLiteral("/agents")), 1, 3000);
+    const auto request = server.requestJson(QStringLiteral("POST"), QStringLiteral("/agents"));
+    QVERIFY(request.value(QStringLiteral("auto_contact")).toBool());
+    QVERIFY(!request.contains(QStringLiteral("name")));
+    QCOMPARE(request.value(QStringLiteral("backend")).toString(), QStringLiteral("grok"));
+    QCOMPARE(request.value(QStringLiteral("model")).toString(), QStringLiteral("test-model"));
+    QCOMPARE(request.value(QStringLiteral("effort")).toString(), QStringLiteral("high"));
+    QVERIFY(!request.contains(QStringLiteral("replace_sid")));
+    QTRY_VERIFY_WITH_TIMEOUT(controller.startingContact().isEmpty(), 3000);
+    QSignalSpy empty(&controller, &AppController::launchPoolEmpty);
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agents/snapshot"), 200,
+        {{QStringLiteral("agents"), QJsonArray{}}, {QStringLiteral("personas"), QJsonArray{}}});
+    server.setJsonResponse(QStringLiteral("POST"), QStringLiteral("/agents"), 409,
+        {{QStringLiteral("error"), QStringLiteral("contact_pool_empty")}});
+    QVERIFY(controller.startAvailableContact(QStringLiteral("codex"), {}, {}));
+    QTRY_COMPARE_WITH_TIMEOUT(empty.size(), 1, 3000);
+    QCOMPARE(server.requestCount(QStringLiteral("POST"), QStringLiteral("/agents")), 2);
 }
 
 void NativeCoreTest::agentTerminalLaunchesNativeCliThroughDefaultTerminal() {

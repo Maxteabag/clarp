@@ -13,6 +13,8 @@ TestCase {
     QtObject {
         id: stub
         property bool timestampsVisible: false
+        property bool anonymousAgents: true
+        property bool newAgentOnStartup: true
         property bool minimalUi: false
         property bool pauseMobilePush: true
         property bool showWhenReady: false
@@ -190,6 +192,15 @@ TestCase {
         compare(stub.toolNarrator.detailLevel, 4);
         mouseClick(dial, dial.leftPadding + 1, dial.height / 2);
         compare(stub.toolNarrator.detailLevel, 0);
+        keyClick(Qt.Key_Down);
+        tryCompare(findChild(panel, "setting-new-agent-startup"), "activeFocus", true);
+        const before = stub.newAgentOnStartup;
+        keyClick(Qt.Key_Space);
+        compare(stub.newAgentOnStartup, !before);
+        keyClick(Qt.Key_Down);
+        tryCompare(findChild(panel, "setting-anonymous-agents"), "activeFocus", true);
+        keyClick(Qt.Key_Space);
+        compare(stub.anonymousAgents, false);
         keyClick(Qt.Key_Down);
         tryCompare(findChild(panel, "setting-minimal-ui"), "activeFocus", true);
     }
