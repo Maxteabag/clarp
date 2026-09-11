@@ -1,0 +1,6 @@
+FROM python:3.12-slim
+# No Codex CLI, no auth.json, no network. Fake app-server + source checks.
+WORKDIR /clarp
+COPY tests/qa/fake_codex.py tests/qa/isolated_codex_lock.py /clarp/tests/qa/
+COPY server/lib/codex_app_server.py server/lib/agy_runner.py server/lib/error_classify.py /clarp/server/lib/
+CMD ["python3", "/clarp/tests/qa/isolated_codex_lock.py"]
