@@ -3,8 +3,9 @@
 Status: Accepted. Owner request, 2026-09-11.
 Supersedes: ADR 0016's screen-space bandwidth and ADR 0017's adaptive pixel size.
 
-Heat represents a fixed field on the map. Use Gaussian sigma 30 world units,
-the existing decay and fixed color domain, and 16-world-unit pixel blocks.
+Heat represents a fixed field on the map. Following the owner's request for
+10x larger heat, use Gaussian sigma 300 world units, the existing decay and fixed
+color domain, and 160-world-unit pixel blocks.
 Zoom only projects that field: it must not merge different neighborhoods or
 change pixel-block membership. Pan and display pixel ratio likewise do not
 change the field.
