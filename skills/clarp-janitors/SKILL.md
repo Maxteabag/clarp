@@ -141,3 +141,25 @@ it never automatically enables the replacement or restarts a failed cutover.
 For developer lifecycle integration, admission/backoff and timezone tests, read
 the Host's `docs/janitor-runner.md`. Reuse that implementation and its focused
 tests rather than starting a second listener or custom scheduler.
+
+## Custom maintenance tasks
+
+The `custom-task` template runs owner-supplied `options.instructions` through the
+normal managed agent executor. Use a schedule or active-interval trigger; it does
+not need task-agent candidates. Create paused, inspect the instructions and trigger,
+then enable only within the user's authorization. Empty instructions cannot enable.
+Instructions may reference installed skills or local helper scripts. Configuration
+is stored on the Host, not in public source files. Custom tasks have the agent's
+normal tools; the prompt defines authorized scope, not an OS sandbox.
+
+Use `--config @FILE` with `template_id: custom-task`, `options.instructions`, and
+versioned `attachments`. See `docs/custom-janitors.md` for the full JSON example.
+Run context includes frozen configuration. Agents must recheck it before effects;
+use idempotent tools with their own ownership and comparison checks. Pausing fences
+future dispatch/context reads but cannot roll back an external action already made.
+
+A completed custom run means its agent turn ended, not verified external success.
+Inspect its summary and action receipts. Failures wait for the next configured
+occurrence instead of automatically replaying external actions. Reset defaults
+preserves custom instructions. Existing scheduled agents are not auto-converted:
+pause their old schedule and confirm they are idle before an authorized migration.
