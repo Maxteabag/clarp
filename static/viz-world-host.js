@@ -11,6 +11,8 @@ let scene={entities:[],relations:[],events:[]},meta={},program=null,sandbox=null
 let pixelRatio=Math.min(devicePixelRatio||1,2);
 let width=innerWidth,height=innerHeight,camera={x:20,y:70,k:.7},revision=0,live=true,playing=false,playhead=Date.now(),tmin=0,tmax=0;
 let frames=0,failure='',loading=false,last=performance.now(),signature='',selected=null;
+let recapOpen=false;
+document.addEventListener('fleet-recap',e=>{recapOpen=!!e.detail;});
 const avatarCache=new AvatarCache(blobs=>sandbox?.setAvatars(blobs));
 // Artifact previews are host-owned thumbnails of recorded media; the demo uses
 // a generated placeholder so the synthetic sequence never resembles live output.
@@ -161,10 +163,10 @@ function frame(now){
   else if(live)playhead=Date.now();else if(playing){playhead=Math.min(tmax,playhead+dt*120);if(playhead===tmax)playing=false;}
   slider.value=String(1000*(playhead-tmin)/Math.max(1,tmax-tmin));
   document.getElementById('clock').textContent=new Date(playhead).toLocaleTimeString();
-  if(width>0&&height>0&&scene.entities.length)sandbox?.draw({scene,time:now,width:canvas.width,height:canvas.height,pixelRatio,camera:{x:camera.x*pixelRatio,y:camera.y*pixelRatio,k:camera.k*pixelRatio},playhead,interaction:{selected,actionLabels},reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches});
+  if(!recapOpen&&width>0&&height>0&&scene.entities.length)sandbox?.draw({scene,time:now,width:canvas.width,height:canvas.height,pixelRatio,camera:{x:camera.x*pixelRatio,y:camera.y*pixelRatio,k:camera.k*pixelRatio},playhead,interaction:{selected,actionLabels},reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches});
   requestAnimationFrame(frame);
 }
-requestAnimationFrame(frame);init();setInterval(()=>{if(live)load();},5000);
+requestAnimationFrame(frame);init();setInterval(()=>{if(live&&!recapOpen)load();},5000);
 function replay(){live=false;liveButton.ariaPressed='false';}
 liveButton.onclick=()=>{
   // Live means now: drop any historical anchor so polling returns to the present.

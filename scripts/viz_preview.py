@@ -78,7 +78,13 @@ def main():
             self.send_error(405)
 
         def do_GET(self):
-            if self.path.split('?')[0] == '/viz/events':
+            if urlsplit(self.path).path in ('/viz/recap', '/viz/recap/artifact'):
+                try:
+                    handler = ProductionHandler._handle_viz_recap_artifact if urlsplit(self.path).path.endswith('/artifact') else ProductionHandler._handle_viz_recap
+                    handler(self)
+                finally:
+                    db.close_local()
+            elif self.path.split('?')[0] == '/viz/events':
                 try:
                     ProductionHandler._handle_viz_events(self)
                 finally:

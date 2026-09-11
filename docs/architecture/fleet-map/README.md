@@ -6,6 +6,8 @@ ideas, a task backlog, or an approval queue.
 
 ## Current decisions
 
+The morning recap is specified in [0014](0014-morning-recap.md).
+
 | Record | Status | Decision |
 | --- | --- | --- |
 | [0001](0001-procedural-visual-software.md) | Accepted | Agents develop executable visual software, not just icons. |
