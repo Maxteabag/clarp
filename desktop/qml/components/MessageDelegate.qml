@@ -25,6 +25,7 @@ Item {
     property string delivery: ""
     // Pair rooms show every row as an authored group message with its avatar.
     property bool groupView: false
+    property int explanationRepeat: 1
     property string activitySummary: ""
     // Only an incoming prompt written by another agent is that agent's message.
     // The current agent's answer to it stays the current agent's own row.
@@ -210,7 +211,7 @@ Item {
                     TuiText {
                         Layout.fillWidth: true
                         text: (root.activityStatus === "error" ? "Error · " : "")
-                            + (liveExplanation.narrationShown ? liveExplanation.displayText : root.body)
+                            + (liveExplanation.narrationShown ? liveExplanation.displayText + (root.explanationRepeat > 1 ? " (x" + root.explanationRepeat + ")" : "") : root.body)
                         textFormat: Text.PlainText
                         color: root.activityStatus === "error" ? "#bd7484"
                             : liveExplanation.narrationShown ? "#82aaff" : "#969bb5"
@@ -396,9 +397,10 @@ Item {
                 ToolCard {
                     session: root.session
                     required property var modelData
-                    visible: root.groupSummary.length > 0 || root.displayCells.length === 0
+                    visible: Number(modelData._explanationRepeat ?? 1) !== 0
+                        && (root.groupSummary.length > 0 || root.displayCells.length === 0
                         || ["Edit", "MultiEdit", "Write"].includes(
-                            String(modelData.name || ""))
+                            String(modelData.name || "")))
                     Layout.preferredHeight: visible ? implicitHeight : 0
                     Layout.fillWidth: true
                     tool: modelData

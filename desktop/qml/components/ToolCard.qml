@@ -14,6 +14,7 @@ Rectangle {
     property string session: ""
     property bool localFilesAllowed: false
     property bool expanded: false
+    readonly property int explanationRepeat: Number(tool._explanationRepeat ?? 1)
     readonly property string toolName: String(tool.name || tool.action || "Tool")
     readonly property string summary: String(tool.summary || tool.description || tool.file_path || "")
     readonly property string status: String(tool.status || "recorded")
@@ -85,7 +86,7 @@ Rectangle {
                 objectName: "activityExplanationText"
                 visible: explanation.narrationShown
                 Layout.fillWidth: true
-                text: explanation.displayText
+                text: explanation.displayText + (root.explanationRepeat > 1 ? " (x" + root.explanationRepeat + ")" : "")
                 textFormat: Text.PlainText
                 color: "#82aaff"
                 font.pixelSize: 13

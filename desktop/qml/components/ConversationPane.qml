@@ -38,6 +38,18 @@ Rectangle {
         sourceModel: root.conversationModel
         showWhenReady: root.controller.showWhenReady
         activityMode: root.controller.activityDisplayMode
+        function refreshExplanations() {
+            const narrator = root.controller.toolNarrator || null;
+            updateExplanations(narrator, root.session,
+                root.controller.sharedFilesystem ? root.controller.agentWorkingDirectory(root.session) : "",
+                Boolean(root.controller.sharedFilesystem));
+        }
+        Component.onCompleted: refreshExplanations()
+        property Connections explanationUpdates: Connections {
+            target: root.controller.toolNarrator || null
+            function onChanged() { Qt.callLater(presentation.refreshExplanations); }
+            function onEnabledChanged() { Qt.callLater(presentation.refreshExplanations); }
+        }
     }
 
     color: root.active ? "#1a1b26" : "#1a1b26"
@@ -249,6 +261,7 @@ Rectangle {
                 replyToName: String(model.replyToName || "")
                 replyToSession: String(model.replyToSession || "")
                 delivery: String(model.delivery || "")
+                explanationRepeat: Number(model.explanationRepeat || 1)
                 groupView: root.pairRoom
                 activitySummary: String(model.activityLabel || "")
                 required property var groupIds
@@ -338,6 +351,7 @@ Rectangle {
     }
 
     onSessionChanged: {
+        presentation.refreshExplanations();
         presentation.beginVisit();
         if (session.length > 0 && controller.connected && !root.pairRoom)
             controller.loadMedia(session);

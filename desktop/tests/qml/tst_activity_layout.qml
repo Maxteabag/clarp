@@ -175,6 +175,50 @@ TestCase {
         function failed(activity) { return rowFailed; }
     }
 
+    function test_duplicateCardsDoNotReserveRows() {
+        const message = createTemporaryObject(toolOnlyMessage, testCase, {
+            displayCells: [], tools: [{name: "Read", summary: "Files"}]
+        });
+        waitForRendering(message);
+        const singleHeight = message.implicitHeight;
+        message.tools = [
+            {name: "Read", summary: "Files", _explanationRepeat: 3},
+            {name: "Read", summary: "Files", _explanationRepeat: 0},
+            {name: "Read", summary: "Files", _explanationRepeat: 0}
+        ];
+        tryCompare(message, "implicitHeight", singleHeight);
+        message.tools = [];
+        message.displayCells = [{title: "Read", summary: "Files"}];
+        waitForRendering(message);
+        const cellHeight = message.implicitHeight;
+        message.displayCells = [
+            {title: "Read", summary: "Files", _explanationRepeat: 3},
+            {title: "Read", summary: "Files", _explanationRepeat: 0}
+        ];
+        tryCompare(message, "implicitHeight", cellHeight);
+    }
+
+    function test_explanationRepeatCount() {
+        narratorStub.enabled = true;
+        narratorStub.ready = true;
+        narratorStub.unavailable = false;
+        narratorStub.rowFailed = false;
+        narratorStub.responseText = "Build the desktop preview.";
+        narratorStub.revision++;
+        const card = createTemporaryObject(toolCard, testCase, {
+            narrator: narratorStub,
+            tool: {name: "Build", _explanationRepeat: 3}
+        });
+        const label = findChild(card, "activityExplanationText");
+        compare(label.text, "Build the desktop preview. (x3)");
+        card.width = 480;
+        card.height = card.implicitHeight;
+        wait(30);
+        grabImage(card).save("/var/tmp/clarp-explanation-repeat.png");
+        card.tool = {name: "Build"};
+        compare(label.text, "Build the desktop preview.");
+    }
+
     function test_translationIsBlueOptionalAndKeepsRawDetails() {
         narratorStub.enabled = true;
         narratorStub.ready = false;

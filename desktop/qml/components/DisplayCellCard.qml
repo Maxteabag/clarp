@@ -13,6 +13,7 @@ Rectangle {
     property string session: ""
     property bool localFilesAllowed: false
     property bool expanded: false
+    readonly property int explanationRepeat: Number(cell._explanationRepeat ?? 1)
     readonly property string title: String(cell.title || "Activity")
     readonly property string summary: String(cell.summary || "")
     readonly property string status: String(cell.status || "recorded")
@@ -21,6 +22,7 @@ Rectangle {
     readonly property color statusColor: status === "error" ? "#bd7484"
         : (status === "running" || status === "ok") ? "#89a879" : "#676b80"
 
+    visible: explanationRepeat !== 0
     implicitHeight: cardColumn.implicitHeight + 6
     radius: 0
     color: hover.hovered ? "#222638" : "transparent"
@@ -77,7 +79,7 @@ Rectangle {
                 objectName: "activityExplanationText"
                 visible: explanation.narrationShown
                 Layout.fillWidth: true
-                text: explanation.displayText
+                text: explanation.displayText + (root.explanationRepeat > 1 ? " (x" + root.explanationRepeat + ")" : "")
                 textFormat: Text.PlainText
                 color: "#82aaff"
                 font.pixelSize: 13

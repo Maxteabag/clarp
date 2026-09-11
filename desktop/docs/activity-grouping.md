@@ -36,3 +36,17 @@ activity timestamp if no closing reply exists. Never include the wait for a user
 or teammate. This is not summed per-tool runtime: parallel calls and thinking
 may overlap the interval. Invalid/missing timestamps omit timing, not invent it.
 Timing does not fetch tool details or explanations. Expansion remains lazy.
+
+## Repeated explanations
+
+Consecutive ready Janitor explanations with identical text and status share the
+first displayed row, suffixed `(x2)`, `(x3)`, etc. This works inside expanded
+activity groups and across tool-only transcript rows. Prose, pending/failed
+explanations, and different text or status break a run. Developer mode restores
+the original rows. Source records and their tool details are never rewritten.
+
+Grouping reads the existing narrator cache only; it never requests translations
+for offscreen or collapsed activity. Verify late arrival, append/remove, mode
+changes and group expansion with
+`consecutiveExplanationsCollapseWithoutChangingTranscript`, and label rendering
+with `ActivityLayout::test_explanationRepeatCount`.
