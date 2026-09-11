@@ -332,6 +332,7 @@ Rectangle {
             session: root.session
             paneId: root.paneId
             active: root.active
+            onJumpToLatestRequested: root.jumpToLatest()
             onOpenConnection: root.openConnection()
         }
 
