@@ -296,3 +296,9 @@ focus, duplicate-submit prevention, cancellation, retries and empty-pool naming.
 `CLARP_SCREENSHOT_LAUNCH_KEYS` enables an offscreen-only full-window key driver;
 it refuses anything except the fixture token `offline-launch-keyboard-fixture`.
 Backend images are reused unchanged from the iOS `Backend*.imageset` assets.
+
+New-agent startup is a standalone `LaunchAgentPage`: the chat shell and title
+are hidden from the first frame. Cancel closes that launch window. A successful
+creation stays on the page until a fresh roster contains the exact returned
+session. Older roster responses cannot select a previous agent; retrying a
+pending creation refreshes its roster instead of creating another agent.

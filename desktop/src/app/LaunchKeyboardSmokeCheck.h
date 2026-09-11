@@ -30,6 +30,12 @@ inline void startLaunchKeyboardSmokeCheck(QQuickWindow* window) {
         if (!keys.contains(name)) { qCritical("Unknown simulated key"); QCoreApplication::exit(EXIT_FAILURE); return; }
     }
     QTimer::singleShot(1200, window, [window, input, keys] {
+        const auto* shell = window->findChild<QObject*>(QStringLiteral("desktopShell"));
+        if (!shell || shell->property("visible").toBool() || window->title() != QStringLiteral("New agent — Clarp")) {
+            qCritical("Launch must hide the chat shell and its title");
+            QCoreApplication::exit(EXIT_FAILURE);
+            return;
+        }
         if (!window->activeFocusItem() || !window->activeFocusItem()->objectName().startsWith(QStringLiteral("providerCard-"))) {
             qCritical().noquote() << "Startup stole focus from the provider cards:" << (window->activeFocusItem() ? window->activeFocusItem()->objectName() : QStringLiteral("none"));
             QCoreApplication::exit(EXIT_FAILURE);
