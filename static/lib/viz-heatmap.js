@@ -19,8 +19,8 @@ export function activityHeat(events,hits,playhead){
  return {spots,located,unlocated,truncated:false};
 }
 // Fixed world-space bandwidth: the camera only changes how the field is viewed.
-export const HEAT_SIGMA=30;
-export const HEAT_PIXEL_SIZE=16;
+export const HEAT_SIGMA=300;
+export const HEAT_PIXEL_SIZE=160;
 export const HEAT_COLOR_MAX=8; // decayed event weight at a kernel center
 export function densityGrid(spots,camera,width,height,pixelRatio=1){
  const worldWidth=width/camera.k,worldHeight=height/camera.k;
