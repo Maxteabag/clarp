@@ -32,6 +32,14 @@ from .protocol import AgentState, SSEType, TurnSource
 
 
 AGY_BIN = "agy"  # resolved from PATH; tests can monkeypatch.
+# agy's print mode has its own wall-clock cap (`--print-timeout`, default
+# 5m0s). When it fires the CLI exits rc=1 with
+# `status=ERROR: timeout waiting for response`, the drain rolls the turn back,
+# and the user just sees the agent go quiet. Clarp has no server-side per-turn
+# watchdog for any other backend — a hung turn is ended by the next preempting
+# send — so pin the cap out of the way instead of letting it truncate long
+# turns.
+AGY_PRINT_TIMEOUT = "24h"
 LIVE_TEXT_INTERVAL_SEC = 0.25
 _CLEAN_STATUSES = {"SUCCESS"}
 _SECRET_VALUE = re.compile(
@@ -79,10 +87,14 @@ def build_cmd(conversation_id: str = "", *,
     conversation whose id we recover from the log. `is_new_session` is
     accepted for signature parity; only conversation_id decides resume.
 
+    `--print-timeout` is always pinned to AGY_PRINT_TIMEOUT: agy's 5-minute
+    default silently kills any longer turn with rc=1.
+
     Model values must be present in the last observed or bundled fallback
     catalog. ``4.8`` is rejected before spawn because it is not a catalog id."""
     cmd = [AGY_BIN, "--dangerously-skip-permissions",
-           "--output-format", "stream-json"]
+           "--output-format", "stream-json",
+           "--print-timeout", AGY_PRINT_TIMEOUT]
     if model and effort:
         raise ValueError(
             "AGY model-specific effort compatibility is unknown; "
