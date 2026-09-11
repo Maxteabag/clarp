@@ -140,3 +140,95 @@ def test_unknown_or_deleted_participants_are_missing(tmp_path):
     agents_db.soft_delete(cpp)
     assert agent_conversations.list_conversations() == []
     assert agent_conversations.load_timeline(agent_conversations.conversation_id(hugo, cpp))["missing"] is True
+
+
+def test_pair_list_uses_partial_index_instead_of_scanning_private_history(tmp_path):
+    """Frequent sidebar refreshes must not walk every private transcript row."""
+    hugo, cpp = _pair(tmp_path)
+    _send(cpp, hugo, 'hello', client_id='pair-index')
+    statements = []
+    con = agents_db.conn()
+    con.set_trace_callback(statements.append)
+    try:
+        rooms = agent_conversations.list_conversations()
+    finally:
+        con.set_trace_callback(None)
+    assert len(rooms) == 1
+    query = next(sql for sql in statements if 'WITH pair_rows' in sql)
+    plan = '\n'.join(row[3] for row in con.execute('EXPLAIN QUERY PLAN ' + query))
+    assert 'idx_messages_pair_projection' in plan, plan
+
+
+def test_pair_index_upgrade_preserves_messages_and_is_idempotent(tmp_path):
+    from lib import db
+    hugo, cpp = _pair(tmp_path)
+    _send(cpp, hugo, 'retained pair', client_id='pair-migration')
+    _private(hugo, 'retained private', client_id='private-migration', timestamp='2026-09-07T03:30:00Z')
+    con = db.conn()
+    before = [tuple(row) for row in con.execute('SELECT * FROM messages ORDER BY message_id')]
+    expected = agent_conversations.list_conversations()
+    con.execute('DROP INDEX IF EXISTS idx_messages_pair_projection')
+    con.execute('PRAGMA user_version = 80')
+    db._migrate(con)
+    db._migrate_to_v81(con)
+    assert [tuple(row) for row in con.execute('SELECT * FROM messages ORDER BY message_id')] == before
+    assert agent_conversations.list_conversations() == expected
+    assert con.execute("SELECT 1 FROM sqlite_master WHERE name='idx_messages_pair_projection'").fetchone()
+
+
+def test_pair_cache_coalesces_clients_and_refreshes_on_messages_and_roster(tmp_path, monkeypatch):
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    import time
+
+    hugo, cpp = _pair(tmp_path)
+    _send(cpp, hugo, 'first', client_id='cache-first')
+    original = agent_conversations.list_conversations
+    calls = []
+    def counted():
+        calls.append(1)
+        time.sleep(0.02)  # Force concurrent requests to overlap one build.
+        return original()
+    monkeypatch.setattr(agent_conversations, 'list_conversations', counted)
+    cache = agent_conversations.PairConversationListCache()
+    start = threading.Barrier(8)
+    def fetch(_):
+        start.wait(timeout=5)
+        return cache.get_payload()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        responses = list(pool.map(fetch, range(8)))
+    assert len(calls) == 1
+    assert len(set(responses)) == 1
+    assert json.loads(responses[0])['conversations'][0]['message_count'] == 1
+
+    _send(hugo, cpp, 'second', client_id='cache-second')
+    assert json.loads(cache.get_payload())['conversations'][0]['message_count'] == 2
+    assert len(calls) == 2
+    agents_db.conn().execute('UPDATE agents SET persona=? WHERE agent_id=?', ('Renamed', hugo))
+    assert 'Renamed' in json.loads(cache.get_payload())['conversations'][0]['title']
+    assert len(calls) == 3
+    agents_db.conn().execute('UPDATE agents SET deleted_at=1 WHERE agent_id=?', (cpp,))
+    assert json.loads(cache.get_payload())['conversations'] == []
+
+
+def test_pair_cache_expires_and_failed_refresh_can_retry(tmp_path, monkeypatch):
+    import pytest
+    now = [0.0]
+    cache = agent_conversations.PairConversationListCache(clock=lambda: now[0])
+    calls = []
+    def load():
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError('temporary failure')
+        return []
+    monkeypatch.setattr(agent_conversations, 'list_conversations', load)
+    assert cache.get_payload() == b'{"conversations": []}'
+    now[0] = 0.5
+    cache.get_payload()
+    assert len(calls) == 1
+    now[0] = 1.1
+    with pytest.raises(RuntimeError, match='temporary failure'):
+        cache.get_payload()
+    assert cache.get_payload() == b'{"conversations": []}'
+    assert len(calls) == 3
