@@ -47,6 +47,7 @@ FEATURES: tuple[str, ...] = (
     "diagnostics",
     "tool_explanations",
     "agent_creation_details",
+    "launch_directories",
 )
 
 

@@ -256,7 +256,7 @@ See `REWRITE_PLAN.md` for the behavioral scope and completion gates.
 
 ## Launch an agent from the desktop command
 
-`clarp-desktop --new-agent` opens backend icon cards. The last successful backend
+`clarp-desktop --new-agent` first opens directory search at Home, with recent launch directories and zoxide matches. Enter confirms the directory, then opens backend icon cards. The last successful backend
 is selected and focused: Enter launches, arrows or Tab change the selection.
 M opens the optional model picker; arrows select a model and Enter launches.
 Escape returns from models to cards, then closes the chooser. Background chat
@@ -264,7 +264,8 @@ loading cannot take focus while a dialog is open. New agents are
 anonymous by default, named `Codex-5342` or similar, without occupying a saved
 contact. Settings → Agent identity can disable this default.
 
-- `--backend claude|codex|grok|agy|opencode` implies `--new-agent` and skips the chooser.
+- `--backend claude|codex|grok|agy|opencode` implies `--new-agent` and skips backend selection after the directory is confirmed.
+- `--cwd /path` supplies the directory and skips the directory screen.
 - `--model MODEL_ID` chooses the provider model; omission uses the provider default.
 - `--effort EFFORT` passes the model's reasoning effort to the Host.
 - `--anonymous` / `--contact` override the anonymous preference for this launch.
@@ -309,3 +310,11 @@ conversation-history and Updates loading until afterward. Roster/history
 requests are coalesced while in flight. Session-only responses from older Hosts
 retain the guarded roster fallback. Anonymous launches do not synthesize startup
 announcements.
+
+Directory search runs on the selected Host. It uses zoxide ranking, a subsequence
+fallback for known/recent paths, and explicit path completion. Home is always the
+initial choice; removed directories and automation-only recent workspaces are
+excluded. Arrows select results, Enter confirms, and Tab completes a path. An
+in-flight search must finish before typed input is confirmed; failed searches
+never silently use the previous workspace. An explicit `--cwd` is validated by
+normal agent creation on the Host.

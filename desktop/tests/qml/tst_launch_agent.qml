@@ -9,6 +9,10 @@ TestCase {
     QtObject {
         id: stub
         property bool anonymousAgents: false
+        property var launchDirectories: []
+        property bool launchDirectoriesLoading: false
+        function loadLaunchDirectories(query) {}
+        function setLaunchDirectory(path) {}
         property bool connected: true
         property string errorMessage: ""
         property string lastWorkingDirectory: "/workspace"
@@ -29,15 +33,15 @@ TestCase {
     function test_anonymousSettingAndFlags() {
         const dialog = createTemporaryObject(factory, testCase);
         stub.anonymousAgents = true;
-        dialog.open("codex", "my-model", "high"); wait(20);
+        dialog.open("codex", "my-model", "high", undefined, "/workspace"); wait(20);
         compare(stub.args, ["anonymous", "codex", "my-model", "high"]);
-        dialog.open("codex", "my-model", "high", 0); wait(20);
+        dialog.open("codex", "my-model", "high", 0, "/workspace"); wait(20);
         compare(stub.args, ["codex", "my-model", "high"]);
         stub.anonymousAgents = false;
     }
     function test_chooserDoesNotCreateUntilBackendSelected() {
         const dialog = createTemporaryObject(factory, testCase);
-        dialog.open("", "", ""); wait(20);
+        dialog.open("", "", "", undefined, "/workspace"); wait(20);
         compare(stub.starts, 0); compare(stub.creates, 0);
         dialog.backend = "claude";
         dialog.submit(); dialog.submit();
@@ -47,7 +51,7 @@ TestCase {
     function test_flagsWaitForConnectionAndEmptyPoolOffersCreation() {
         stub.connected = false;
         const dialog = createTemporaryObject(factory, testCase);
-        dialog.open("codex", "test-model", "high"); wait(20);
+        dialog.open("codex", "test-model", "high", undefined, "/workspace"); wait(20);
         compare(stub.starts, 0);
         stub.connected = true;
         compare(stub.starts, 1);
@@ -62,7 +66,7 @@ TestCase {
     }
     function test_errorAllowsRetryWithoutLosingModel() {
         const dialog = createTemporaryObject(factory, testCase);
-        dialog.open("grok", "chosen-model", ""); wait(20);
+        dialog.open("grok", "chosen-model", "", undefined, "/workspace"); wait(20);
         compare(stub.starts, 1);
         stub.errorMessage = "Contact already occupied";
         verify(!dialog.submitting);

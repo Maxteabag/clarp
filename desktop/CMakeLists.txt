@@ -154,6 +154,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/StatusPill.qml
         qml/components/AssignAgentDialog.qml
         qml/components/LaunchAgentPage.qml
+        qml/components/LaunchDirectoryPicker.qml
         qml/components/QuickNewAgentDialog.qml
         qml/components/RenameAgentDialog.qml
         qml/components/StartAgentDialog.qml
