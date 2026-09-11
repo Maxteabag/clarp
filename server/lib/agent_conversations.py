@@ -129,14 +129,14 @@ def _participants_for(agent_ids: set[str]) -> dict[str, dict[str, Any]]:
 def list_conversations(limit: int = 200) -> list[dict[str, Any]]:
     """Every agent pair with at least one delivered agent-origin message.
 
-    Aggregates, the newest row per pair and all participants resolve in three
-    statements. A per-room query loop cost ~1.8 s on a real transcript store,
-    which the sidebar waited on before it could show the section at all.
+    Scan the partial pair index once and materialize lightweight metadata for
+    the three consumers below. Otherwise SQLite can inline this CTE and scan
+    the entire message table three times. Fetch bodies only for the winners.
     """
     limit = max(1, min(int(limit), 1000))
     rows = conn().execute(f"""
-        WITH pair_rows AS (
-            SELECT m.message_id, m.agent_id, m.role, m.timestamp, m.text, m.revision,
+        WITH pair_rows AS MATERIALIZED (
+            SELECT m.message_id, m.agent_id, m.role, m.timestamp, m.revision,
                    m.sender_agent_id, m.seq, {_ACTIVITY} AS activity,
                    MIN(m.agent_id, m.sender_agent_id) AS low,
                    MAX(m.agent_id, m.sender_agent_id) AS high
@@ -152,7 +152,7 @@ def list_conversations(limit: int = 200) -> list[dict[str, Any]]:
               FROM pair_rows GROUP BY low, high
         ),
         ranked AS (
-            SELECT low, high, message_id, agent_id, role, timestamp, text, revision, sender_agent_id,
+            SELECT low, high, message_id, agent_id, role, timestamp, revision, sender_agent_id,
                    ROW_NUMBER() OVER (PARTITION BY low, high
                        ORDER BY COALESCE(timestamp, '') DESC, seq DESC) AS position
               FROM pair_rows
@@ -160,11 +160,12 @@ def list_conversations(limit: int = 200) -> list[dict[str, Any]]:
         SELECT aggregated.low, aggregated.high, aggregated.message_count,
                aggregated.latest_revision, aggregated.latest_activity,
                ranked.message_id, ranked.agent_id, ranked.role, ranked.timestamp,
-               ranked.text, ranked.revision, ranked.sender_agent_id
+               latest.text, ranked.revision, ranked.sender_agent_id
           FROM aggregated
           JOIN delivered ON delivered.low = aggregated.low AND delivered.high = aggregated.high
           JOIN ranked ON ranked.low = aggregated.low AND ranked.high = aggregated.high
                      AND ranked.position = 1
+          JOIN messages latest ON latest.message_id = ranked.message_id
          ORDER BY aggregated.latest_activity DESC
          LIMIT ?""", (limit,)).fetchall()
     known = _participants_for({row[key] for row in rows for key in ("low", "high")})
