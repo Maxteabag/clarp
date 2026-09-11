@@ -993,6 +993,8 @@ def apply_final_assistant_side_effects(*, agent_id: str,
 # turn_dispatch.
 TEAM_CONTEXT_OPEN = "--- Clarp team context ---"
 TEAM_CONTEXT_CLOSE = "--- End Clarp team context ---"
+FALLBACK_CONTEXT_OPEN = "--- Clarp fallback context ---"
+FALLBACK_CONTEXT_CLOSE = "--- End Clarp fallback context ---"
 
 
 def strip_injected_team_context(text: str) -> str:
@@ -1009,6 +1011,30 @@ def strip_injected_team_context(text: str) -> str:
         if TEAM_CONTEXT_CLOSE not in rest:
             return before.rstrip()
         _, after = rest.split(TEAM_CONTEXT_CLOSE, 1)
+        out = (before + after).strip()
+    return out
+
+
+def strip_injected_context(text: str) -> str:
+    """Drop every server-injected block from a user turn.
+
+    A block appended without delimiters was imported as part of the user's own
+    words, so the chat showed the user's message twice: once as they typed it
+    and once several kilobytes long with the injection attached.
+    """
+    return _strip_block(strip_injected_team_context(text),
+                        FALLBACK_CONTEXT_OPEN, FALLBACK_CONTEXT_CLOSE)
+
+
+def _strip_block(text: str, opening: str, closing: str) -> str:
+    if not text or opening not in text:
+        return text
+    out = text
+    while opening in out:
+        before, rest = out.split(opening, 1)
+        if closing not in rest:
+            return before.rstrip()
+        _, after = rest.split(closing, 1)
         out = (before + after).strip()
     return out
 
@@ -1086,7 +1112,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         msg_id = str(turn.get("id") or _message_id(
             agent_id, backend_session_id, source_file, seq))
         if role == "user":
-            text = strip_injected_team_context(text)
+            text = strip_injected_context(text)
             if heartbeat.should_skip_heartbeat_prompt(text):
                 current_heartbeat_key = msg_id
                 current_origin, current_sender_agent_id = "heartbeat", ""

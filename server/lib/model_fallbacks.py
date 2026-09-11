@@ -431,13 +431,57 @@ def conversation_rows(agent_id):
 
 
 def continuation_context(agent_id):
+    """Hand the next turn the fallback answer that already did the work.
+
+    Delimited so the transcript importer can strip it: appended bare, it was
+    stored as part of the user's own message and the chat showed every turn
+    twice. Offered only until the agent's own model answers again, because a
+    fallback result stops being "work already completed" the moment the real
+    model has spoken — before this check it was re-appended to every prompt for
+    the life of the runtime.
+    """
+    from . import message_store
+
     rows = conversation_rows(agent_id)
-    if not rows:
+    if not rows or _superseded_by_own_reply(agent_id, rows[-1]):
         return ""
     return (
-        "\nClarp fallback work already completed in this conversation. Use its result; do not repeat completed actions:\n"
+        "\n" + message_store.FALLBACK_CONTEXT_OPEN + "\n"
+        "Clarp fallback work already completed in this conversation."
+        " Use its result; do not repeat completed actions:\n"
         + rows[-1]["text"][-12000:]
+        + "\n" + message_store.FALLBACK_CONTEXT_CLOSE + "\n"
     )
+
+
+def _superseded_by_own_reply(agent_id, row):
+    """True once the agent's own assistant turn is newer than the fallback.
+
+    The fallback's own delivered answer is itself stored as an assistant
+    message, so it is excluded by trace: counting it would suppress the
+    context on the very next turn and strand the work it just did.
+    """
+    from . import db
+
+    finished = db.conn().execute(
+        """SELECT MAX(COALESCE(
+               CAST((julianday(timestamp) - 2440587.5) * 86400000 AS INTEGER),
+               updated_at))
+             FROM messages
+            WHERE agent_id = ? AND role = 'assistant'
+              AND COALESCE(text, '') != ''
+              AND COALESCE(origin, 'user') != 'automation'
+              AND COALESCE(trace_id, '') != ?""",
+        (agent_id, row.get("trace_id") or ""),
+    ).fetchone()[0]
+    if not finished:
+        return False
+    try:
+        from datetime import datetime
+        completed = datetime.fromisoformat(row["timestamp"]).timestamp() * 1000
+    except (TypeError, ValueError):
+        return False
+    return int(finished) > int(completed)
 
 
 def schema_object(text, schema):

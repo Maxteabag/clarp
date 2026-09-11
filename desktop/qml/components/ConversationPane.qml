@@ -52,7 +52,7 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 58
+            Layout.preferredHeight: 34
             color: "#1a1b26"
 
             HoverHandler { id: headerHover }
@@ -67,85 +67,34 @@ Rectangle {
                 anchors.rightMargin: 8
                 spacing: 9
 
-                AgentAvatar {
-                    visible: !root.pairRoom
-                    Layout.preferredWidth: visible ? 38 : 0
-                    Layout.preferredHeight: 38
-                    controller: root.controller
-                    session: root.session
-                    name: root.controller.agentName(root.session)
-                    avatarSize: 38
-                    cornerRadius: 19
-                    fallbackColor: root.active ? "#555970" : "#3b3e50"
-                }
-                Item {
-                    objectName: "pairHeaderAvatars"
-                    visible: root.pairRoom
-                    Layout.preferredWidth: visible ? 56 : 0
-                    Layout.preferredHeight: 38
-                    Repeater {
-                        model: root.pairRoom ? root.pairParticipants.slice(0, 2) : []
-                        AgentAvatar {
-                            required property var modelData
-                            required property int index
-                            x: index * 22
-                            y: index * 6
-                            z: 2 - index
-                            controller: root.controller
-                            session: String(modelData.session || "")
-                            name: String(modelData.name || "Agent")
-                            avatarSize: 32
-                            cornerRadius: 16
-                            fallbackColor: index === 0 ? "#555970" : "#3b3e50"
-                        }
-                    }
-                }
-
-                ColumnLayout {
+                HeaderContext {
                     Layout.fillWidth: true
-                    spacing: 1
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: {
-                            root.agentRevision;
-                            return root.controller.agentName(root.session) || "No agent selected";
-                        }
-                        color: root.active ? "#f0ebe6" : "#8b8491"
-                        font.pixelSize: 16
-                        font.weight: Font.DemiBold
-                        horizontalAlignment: Text.AlignLeft
-                        elide: Text.ElideRight
-                    }
-                    Text {
-                        text: {
-                            root.agentRevision;
-                            if (root.pairRoom) return "Agent-to-agent conversation";
-                            return root.session.length > 0
-                                ? root.controller.agentBackend(root.session)
-                                : root.controller.baseUrl;
-                        }
-                        visible: root.active && root.width > 520
-                        color: "#82788e"
-                        font.family: "JetBrains Mono"
-                        font.pixelSize: 12
-                        elide: Text.ElideRight
-                    }
-                }
-
-                StatusPill {
-                    status: {
+                    Layout.fillHeight: true
+                    agentName: {
                         root.agentRevision;
-                        if (root.pairRoom) return "idle";
-                        return root.controller.agentState(root.session) || root.controller.connectionState;
+                        return root.controller.agentName(root.session);
                     }
+                    metadata: {
+                        root.agentRevision;
+                        root.controller.sharedFilesystem;
+                        return root.controller.agentDetails(root.session);
+                    }
+                    showRuntime: root.session.length > 0 && !root.pairRoom
                 }
 
-                ToolButton {
+                TuiToolButton {
                     id: paneMenuButton
                     visible: root.active && root.session.length > 0 && !root.pairRoom
                         && (headerHover.hovered || paneMenu.visible)
-                    text: "···"
+                    text: "More"
+                    display: AbstractButton.IconOnly
+                    icon.source: Qt.resolvedUrl("../../resources/icons/more.svg")
+                    icon.width: 18
+                    icon.height: 18
+                    icon.color: "#a6adc8"
+                    Accessible.name: "Conversation actions"
+                    ToolTip.visible: hovered
+                    ToolTip.text: "More"
                     implicitWidth: 28
                     implicitHeight: 26
                     onClicked: paneMenu.open()
@@ -204,7 +153,7 @@ Rectangle {
                 anchors.leftMargin: 16
                 anchors.rightMargin: 8
 
-                Text {
+                TuiText {
                     Layout.fillWidth: true
                     text: root.controller.errorMessage || root.conversationModel.error
                     color: "#c9959e"
@@ -212,14 +161,14 @@ Rectangle {
                     font.pixelSize: 11
                     elide: Text.ElideRight
                 }
-                Button {
+                TuiButton {
                     visible: root.conversationModel.error.length > 0
                     text: "Retry"
                     implicitHeight: 26
                     onClicked: root.controller.refreshSession(root.session)
                 }
-                ToolButton {
-                    text: "×"
+                TuiToolButton {
+                    text: "Dismiss"
                     onClicked: {
                         root.controller.clearError();
                         root.conversationModel.error = "";
@@ -246,11 +195,32 @@ Rectangle {
                 required property string section
                 width: transcript.width
                 height: section.length > 0 ? 32 : 0
-                Text {
+                visible: section.length > 0
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 14
+                    anchors.right: dateLabel.left
+                    anchors.rightMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: 1
+                    color: "#303342"
+                }
+                TuiText {
+                    id: dateLabel
                     anchors.centerIn: parent
                     text: parent.section
                     color: "#8d93b0"
+                    font.family: "JetBrains Mono"
                     font.pixelSize: 11
+                }
+                Rectangle {
+                    anchors.left: dateLabel.right
+                    anchors.leftMargin: 12
+                    anchors.right: parent.right
+                    anchors.rightMargin: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: 1
+                    color: "#303342"
                 }
             }
             boundsBehavior: Flickable.StopAtBounds
@@ -259,7 +229,7 @@ Rectangle {
                 width: transcript.width
                 height: root.conversationModel.hasMore ? 32 : 4
 
-                Button {
+                TuiButton {
                     visible: root.conversationModel.hasMore
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: root.conversationModel.loading ? "Loading…" : "Load earlier messages"
@@ -308,7 +278,7 @@ Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: root.working
                 }
-                BusyIndicator {
+                TuiBusyIndicator {
                     anchors.centerIn: parent
                     running: root.conversationModel.loading && !root.working
                     visible: running
@@ -328,10 +298,10 @@ Rectangle {
                 }
             }
 
-            Label {
+            TuiLabel {
                 anchors.centerIn: parent
-                visible: transcript.count === 0 && !root.conversationModel.loading
-                text: root.session.length > 0 ? "No messages yet. Start the conversation below." : "Choose an agent from the sidebar."
+                visible: root.session.length === 0 && transcript.count === 0 && !root.conversationModel.loading
+                text: "Choose an agent · Ctrl+K"
                 color: "#5e6176"
                 font.family: "JetBrains Mono"
                 font.pixelSize: 11
@@ -355,7 +325,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 44 : 0
             color: "#171822"
-            Text {
+            TuiText {
                 anchors.centerIn: parent
                 width: parent.width - 32
                 horizontalAlignment: Text.AlignHCenter
@@ -384,22 +354,22 @@ Rectangle {
         }
     }
 
-    ToolButton {
+    TuiToolButton {
         visible: !transcript.followLatest
             && (transcript.newMessagesBelow || transcript.distanceFromBottom >= 180)
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 12
         anchors.bottomMargin: 64
-        width: 34
-        height: 34
+        width: 104
+        height: 28
         z: 30
-        text: transcript.newMessagesBelow ? "↓•" : "↓"
+        text: transcript.newMessagesBelow ? "New messages" : "Latest"
         onClicked: transcript.scrollToLatest()
         ToolTip.visible: hovered
         ToolTip.text: transcript.newMessagesBelow ? "Jump to new messages" : "Jump to latest"
         background: Rectangle {
-            radius: 17
+            radius: 0
             color: "#30354f"
             border.color: "#777fae"
         }

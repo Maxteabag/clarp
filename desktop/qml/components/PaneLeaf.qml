@@ -14,9 +14,9 @@ Rectangle {
     focus: true
 
     color: active ? "#292b3a" : "#20212e"
-    border.color: active ? "#bb9af7" : "#302b37"
-    border.width: active ? 2 : 1
-    radius: 2
+    border.color: active ? "#414556" : "#282b36"
+    border.width: 1
+    radius: 0
     clip: true
     opacity: active ? 1 : 0.76
 

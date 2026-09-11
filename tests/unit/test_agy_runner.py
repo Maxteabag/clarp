@@ -32,12 +32,31 @@ def test_build_cmd_fresh_vs_resume():
     # value (that bug made agy treat --dangerously-skip-permissions as the
     # prompt). build_cmd carries no prompt; spawn_turn adds --print=<prompt>.
     assert "-p" not in fresh
-    assert not any(a.startswith("--print") for a in fresh)
+    # --print-timeout is fine; only the prompt-carrying flags must be absent.
+    assert not any(a == "--print" or a.startswith("--print=") or
+                   a == "--prompt" or a.startswith("--prompt=")
+                   for a in fresh)
     assert "--conversation" not in fresh
     assert fresh[fresh.index("--output-format") + 1] == "stream-json"
     resume = agy_runner.build_cmd("conv-9")
     assert "--conversation" in resume
     assert resume[resume.index("--conversation") + 1] == "conv-9"
+
+
+def test_build_cmd_pins_print_timeout_past_agy_default():
+    """agy's own --print-timeout default (5m0s) killed long turns mid-work:
+    rc=1 with `status=ERROR: timeout waiting for response`, the reply rolled
+    back, and the agent went silent. Every dispatch must override it."""
+    for cmd in (agy_runner.build_cmd("", is_new_session=True),
+                agy_runner.build_cmd("conv-9")):
+        assert cmd[cmd.index("--print-timeout") + 1] == agy_runner.AGY_PRINT_TIMEOUT
+    assert agy_runner.AGY_PRINT_TIMEOUT == "24h"
+
+
+def test_agy_print_timeout_reads_as_timeout_not_runner_exit():
+    assert error_classify.classify_error(
+        "agy exited rc=1: status=ERROR: timeout waiting for response"
+    ) == error_classify.TIMEOUT
 
 
 def test_build_cmd_model_pin_opt_in():

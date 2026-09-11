@@ -125,13 +125,14 @@ TestCase {
         waitForRendering(message);
         const background = findChild(message, "userMessageBackground");
         verify(background !== null);
-        compare(background.color, "#493651");
+        compare(background.color, "#20212e");
+        compare(background.radius, 0);
         verify(background.x > 0, "Outgoing bubbles align right in the combined redesign");
         for (const child of background.children)
             verify(!(child.visible && child.width === 2), "User messages must not retain the left accent line");
     }
 
-    function test_agentMessageHasRightAlignedDistinctBubbleAndSenderAvatar() {
+    function test_agentMessageKeepsRightAlignmentAndSenderName() {
         const message = createTemporaryObject(toolOnlyMessage, testCase, {
             authorRole: "user", origin: "agent", senderName: "C++ Agent",
             senderAgentId: "sender-id", senderSession: "sender-before",
@@ -141,12 +142,11 @@ TestCase {
         waitForRendering(message);
         const bubble = findChild(message, "userMessageBackground");
         verify(bubble.x > 0);
-        compare(bubble.color, "#293b52");
+        compare(bubble.radius, 0);
         const avatar = findChild(message, "teamMessageAvatar");
-        verify(avatar.visible);
-        compare(avatar.name, "C++ Agent");
-        compare(avatar.session, "sender-now");
-        verify(avatar.x >= bubble.x + bubble.width);
+        verify(avatar === null || !avatar.visible);
+        compare(findChild(message, "groupAuthorName").text, "C++ Agent");
+        verify(findChild(message, "groupAuthorLine").visible);
         compare(findChild(message, "messageProvenance").visible, false);
     }
 
@@ -157,7 +157,7 @@ TestCase {
         });
         verify(message !== null);
         waitForRendering(message);
-        compare(findChild(message, "activitySummaryText").text, "▸ 21 tool calls · 1m 23s elapsed");
+        compare(findChild(message, "activitySummaryText").text, "Show · 21 tool calls · 1m 23s elapsed");
         compare(findChild(message, "displayCellCard"), null);
     }
 

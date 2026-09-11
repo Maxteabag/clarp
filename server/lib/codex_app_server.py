@@ -1,8 +1,9 @@
 """Persistent Codex app-server transport with genuine mid-turn steering.
 
 Unlike ``codex exec`` (one process per turn), app-server keeps a thread alive
-and exposes ``turn/steer``.  Clarp uses one lightweight server connection per
-agent so a follow-up can join the active turn without cancelling its work.
+and exposes ``turn/steer``.  Clarp keeps **one** stdio app-server for the Host
+and multiplexes agents by ``threadId``. One process per agent left leftover
+writers that blocked ``thread/resume`` with JSON-RPC ``-32600``.
 """
 from __future__ import annotations
 
@@ -11,17 +12,37 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from . import agents as agents_db, backend_usage, tts_queue
+from . import codex_runner
 from .codex_runner import (
-    CODEX_BIN, _TurnState, _broadcast_transcript, _handle_item, _record_state,
+    _TurnState, _broadcast_transcript, _handle_item, _record_state,
     _persist_live_text, _speak, app_turn_instructions, persona_identity_instruction,
 )
 from .log import log, log_exception
 from .protocol import AgentState
+
+
+def _codex_argv() -> list[str]:
+    """Resolve ``codex app-server --stdio`` from the live runner binary.
+
+    Read ``codex_runner.CODEX_BIN`` at spawn time so the QA host (and tests)
+    can point at ``fake_codex.py`` without also patching this module. A
+    ``.py`` path is launched with the current interpreter.
+    """
+    binary = str(codex_runner.CODEX_BIN)
+    if os.path.isfile(binary) and binary.endswith(".py"):
+        return [sys.executable, binary, "app-server", "--stdio"]
+    found = shutil.which(binary)
+    if found is None and os.path.isfile(binary) and os.access(binary, os.X_OK):
+        found = binary
+    if found is None:
+        raise FileNotFoundError(f"`{binary}` not on PATH")
+    return [found, "app-server", "--stdio"]
 
 
 @dataclass
@@ -43,8 +64,9 @@ class _ActiveTurn:
 
 class AppTurnHandle:
     """ProcessRegistry-compatible logical handle for one app-server turn."""
-    def __init__(self, client: "_Client"):
+    def __init__(self, client: "_Client", agent_id: str = ""):
         self.client = client
+        self.agent_id = agent_id
         self.proc = self
         self._done = threading.Event()
 
@@ -64,17 +86,16 @@ class AppTurnHandle:
         return not self._done.is_set()
 
     def terminate(self) -> None:
-        self.client.interrupt_active()
+        self.client.interrupt_active(self.agent_id)
 
 
 class _Client:
     def __init__(self, agent_id: str, session: str, stream=None):
-        if shutil.which(CODEX_BIN) is None:
-            raise FileNotFoundError(f"`{CODEX_BIN}` not on PATH")
+        argv = _codex_argv()
         self.agent_id = agent_id
         env = {**os.environ, "CLAUDE_PWA_SESSION": session}
         self.proc = subprocess.Popen(
-            [CODEX_BIN, "app-server", "--stdio"],
+            argv,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, bufsize=1,
             env=env,
@@ -84,6 +105,7 @@ class _Client:
         self._next_id = 1
         self._pending: dict[int, tuple[threading.Event, dict]] = {}
         self.active: _ActiveTurn | None = None
+        self._actives: dict[str, _ActiveTurn] = {}
         self.thread_id = ""
         self.stream = stream
         self.reader = threading.Thread(target=self._read, daemon=True)
@@ -174,12 +196,17 @@ class _Client:
         for done, box in pending:
             box["error"] = {"message": message}
             done.set()
-        active = self.active
+        actives = list(getattr(self, "_actives", {}).values())
+        if self.active is not None and self.active not in actives:
+            actives.append(self.active)
         self.active = None
-        if active and not active.handle._done.is_set():
-            active.handle._done.set()
-            if active.on_error:
-                self._callback(active.on_error, message)
+        if hasattr(self, "_actives"):
+            self._actives.clear()
+        for active in actives:
+            if active and not active.handle._done.is_set():
+                active.handle._done.set()
+                if active.on_error:
+                    self._callback(active.on_error, message)
 
     def _callback(self, callback: Callable, value: Any) -> None:
         """Never block the protocol reader in dispatch/queue lifecycle code."""
@@ -191,8 +218,19 @@ class _Client:
                               detail=self.agent_id)
         threading.Thread(target=run, daemon=True).start()
 
+    def _pick_active(self, params: dict) -> _ActiveTurn | None:
+        thread_id = str(params.get("threadId") or "")
+        turn = params.get("turn")
+        if not thread_id and isinstance(turn, dict):
+            thread_id = str(turn.get("threadId") or "")
+        if thread_id:
+            for active in list(getattr(self, "_actives", {}).values()):
+                if active.thread_id == thread_id:
+                    return active
+        return self.active
+
     def _notification(self, method: str, params: dict) -> None:
-        active = self.active
+        active = self._pick_active(params)
         if method == "account/rateLimits/updated":
             try:
                 snapshot = backend_usage.capture_codex_rate_limits(params)
@@ -252,7 +290,10 @@ class _Client:
                 active.state, agent_id=active.agent_id,
                 session=active.session, trace_id=active.trace_id,
                 stream=active.stream, force=True)
-            self.active = None
+            if hasattr(self, "_actives"):
+                self._actives.pop(active.agent_id, None)
+            if self.active is active:
+                self.active = None
             active.handle._done.set()
             if status == "failed":
                 message = str(error.get("message") or "codex turn failed")
@@ -273,19 +314,23 @@ class _Client:
               is_new_session: bool, session: str, trace_id: str, model: str,
               effort: str, voice: bool, persona: str,
               handle: AppTurnHandle, on_session_init, on_result,
-              on_error, stream, enqueue) -> None:
+              on_error, stream, enqueue, agent_id: str = "") -> None:
         cwd = pathlib.Path(os.path.expanduser(str(cwd))).resolve()
+        owner = agent_id or self.agent_id
         developer_instructions = persona_identity_instruction(persona, session)
         # Claim the logical slot before any blocking RPC. A simultaneous send
         # then sees a live starting handle and waits to steer instead of
         # declaring the dispatch stale and starting an overlapping turn.
         active = _ActiveTurn(
-            "", backend_session_id, self.agent_id, session, trace_id,
+            "", backend_session_id, owner, session, trace_id,
             _TurnState(live_backend_session_id=backend_session_id),
             handle, on_result, on_error, stream, enqueue, voice,
         )
         self.stream = stream
         self.active = active
+        if not hasattr(self, "_actives"):
+            self._actives = {}
+        self._actives[owner] = active
         try:
             if backend_session_id and not is_new_session:
                 result = self.request("thread/resume", {
@@ -332,14 +377,15 @@ class _Client:
                 raise RuntimeError("Codex app-server returned no turn id")
             active.turn_id = turn_id
         except Exception:
+            self._actives.pop(owner, None)
             if self.active is active:
                 self.active = None
             active.handle._done.set()
             raise
 
     def steer(self, text: str, client_msg_id: str = "",
-              synthesize_audio: bool = False) -> bool:
-        active = self.active
+              synthesize_audio: bool = False, agent_id: str = "") -> bool:
+        active = self._actives.get(agent_id) if agent_id else self.active
         if active is None or not active.handle.is_alive():
             return False
         # turn/start's response can precede turn/started. The protocol only
@@ -361,15 +407,42 @@ class _Client:
         self.request("turn/steer", params)
         return True
 
-    def interrupt_active(self) -> None:
-        active = self.active
+    def interrupt_active(self, agent_id: str = "") -> None:
+        active = self._actives.get(agent_id) if agent_id else self.active
         if active:
             if not active.turn_id:
-                self.proc.terminate()
+                if len(getattr(self, "_actives", {})) <= 1:
+                    self.proc.terminate()
                 return
             self.request("turn/interrupt", {
                 "threadId": active.thread_id, "turnId": active.turn_id,
             })
+
+    def shutdown(self) -> None:
+        """EOF stdin so the stdio app-server exits and drops its writer lock."""
+        try:
+            owners = list(getattr(self, "_actives", {}))
+            if self.active is not None and self.active.agent_id not in owners:
+                owners.append(self.active.agent_id)
+            if owners:
+                for owner in owners:
+                    self.interrupt_active(owner)
+            elif self.active:
+                self.interrupt_active()
+        except Exception:
+            pass
+        try:
+            if self.proc.stdin is not None:
+                self.proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+        if self.proc.poll() is not None:
+            return
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
 
 
 def _normalize_item(item: dict) -> dict:
@@ -392,14 +465,20 @@ def _normalize_item(item: dict) -> dict:
 
 _CLIENTS: dict[str, _Client] = {}
 _LOCK = threading.Lock()
+_SHARED_KEY = "__shared__"
 
 
 def _client(agent_id: str, session: str, stream=None) -> _Client:
+    """One app-server process for the Host.
+
+    Codex serialises thread writes with an exclusive flock. One process per
+    agent meant a leftover writer blocked ``thread/resume`` with -32600.
+    """
     with _LOCK:
-        client = _CLIENTS.get(agent_id)
+        client = _CLIENTS.get(_SHARED_KEY)
         if client is None or client.proc.poll() is not None:
             client = _Client(agent_id, session, stream=stream)
-            _CLIENTS[agent_id] = client
+            _CLIENTS[_SHARED_KEY] = client
         elif stream is not None:
             client.stream = stream
         return client
@@ -423,7 +502,7 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
             isolated=True,
         )
     client = _client(agent_id, session, stream=stream)
-    handle = AppTurnHandle(client)
+    handle = AppTurnHandle(client, agent_id=agent_id)
     agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
     persona = (agent or {}).get("persona") or ""
     client.start(text=text, cwd=cwd, backend_session_id=backend_session_id,
@@ -432,27 +511,71 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
                  voice=voice_preamble, persona=persona, handle=handle,
                  on_session_init=on_session_init, on_result=on_result,
                  on_error=on_error, stream=stream,
-                 enqueue=enqueue or tts_queue.enqueue)
+                 enqueue=enqueue or tts_queue.enqueue, agent_id=agent_id)
     log("codexAppTurnStart", f"agent={agent_id} thread={client.thread_id} trace={trace_id}")
     return handle
 
 
+def _shared_client() -> _Client | None:
+    with _LOCK:
+        client = _CLIENTS.get(_SHARED_KEY)
+        if client is None:
+            for item in _CLIENTS.values():
+                return item
+        return client
+
+
 def steer(agent_id: str, text: str, *, client_msg_id: str = "",
           synthesize_audio: bool = False) -> bool:
-    with _LOCK:
-        client = _CLIENTS.get(agent_id)
-    return bool(client and client.steer(text, client_msg_id, synthesize_audio))
+    client = _shared_client()
+    return bool(client and client.steer(
+        text, client_msg_id, synthesize_audio, agent_id=agent_id))
 
 
 def active_handles(agent_id: str) -> list[AppTurnHandle]:
-    with _LOCK:
-        client = _CLIENTS.get(agent_id)
-    active = client.active if client else None
+    client = _shared_client()
+    if client is None:
+        return []
+    active = getattr(client, "_actives", {}).get(agent_id) or (
+        client.active if getattr(client.active, "agent_id", None) == agent_id
+        else None)
     return [active.handle] if active and active.handle.is_alive() else []
 
 
 def interrupt(agent_id: str) -> int:
     handles = active_handles(agent_id)
-    for handle in handles:
-        handle.terminate()
-    return len(handles)
+    if handles:
+        for handle in handles:
+            handle.terminate()
+        return len(handles)
+    client = _shared_client()
+    if client is None:
+        return 0
+    client.interrupt_active(agent_id)
+    return 0
+
+
+def recycle_clients() -> int:
+    """Close every app-server so the next turn re-reads ``auth.json``.
+
+    Out-of-band ``codex login`` rewrites credentials without telling these
+    processes. Leaving them alive keeps the old token in memory and the
+    thread writer lock held, so the next ``thread/resume`` fails with
+    ``-32600 already has an active writer``.
+    """
+    with _LOCK:
+        unique: dict[int, _Client] = {}
+        for client in _CLIENTS.values():
+            unique[id(client)] = client
+        clients = list(unique.values())
+        _CLIENTS.clear()
+    closed = 0
+    for client in clients:
+        try:
+            client.shutdown()
+        except Exception as exc:  # noqa: BLE001
+            log_exception("codexAppServerShutdownFail", exc)
+        closed += 1
+    if closed:
+        log("codexAppServerRecycle", f"closed={closed}")
+    return closed

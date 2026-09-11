@@ -1,4 +1,5 @@
 #pragma once
+#include "app/WorkspaceContext.h"
 
 #include "app/CredentialStore.h"
 #include "app/TranscriptCache.h"
@@ -429,6 +430,7 @@ class AppController : public QObject {
 
     ApiClient m_api;
     SseClient m_sse;
+    WorkspaceContext m_workspaceContext;
     CredentialStore m_credentials;
     TranscriptCache m_transcriptCache;
     QTemporaryDir m_mediaDirectory;

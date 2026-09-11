@@ -107,7 +107,7 @@ Design constraints:
 - Agent overview, creation/relaunch/fork/release, voice picker, and orchestrator
   settings.
 - Tool/activity presentation, older-history loading, unread badges, native
-  desktop notifications, system tray, and single-instance behavior.
+  desktop notifications, system tray, and multiple-instance behavior.
 
 ### 5. Native media
 

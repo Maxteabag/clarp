@@ -1,6 +1,8 @@
 #pragma once
 
 #include "protocol/ProtocolTypes.h"
+#include "media/AudioCoordinator.h"
+#include "media/RecordingSession.h"
 
 #include <QAudioFormat>
 #include <QAudioOutput>
@@ -62,6 +64,7 @@ class AudioController : public QObject {
     void transcribeRecording(const QByteArray& wav, const QString& targetSession);
 
   signals:
+    void mutedChanged(bool muted);
     void recordingChanged();
     void transcribingChanged();
     void playingChanged();
@@ -76,6 +79,12 @@ class AudioController : public QObject {
     void setRecording(bool recording);
     void changeTranscriptionCount(const QString& session, int delta);
     void ensurePlayer();
+    void enqueueOwned(const QJsonObject& event);
+    void silenceLocal();
+    void resetPlayback();
+    void applyCommand(const QString& action);
+    void pauseLocal();
+    void resumeLocal();
     void startNextClip();
     void downloadCurrentSource();
     void downloadHlsPlaylist();
@@ -94,9 +103,11 @@ class AudioController : public QObject {
     QIODevice* m_captureDevice = nullptr;
     QAudioFormat m_captureFormat;
     QByteArray m_capturePcm;
-    QQueue<AudioClip> m_clipQueue;
-    QQueue<qint64> m_recentClipIds;
-    QSet<qint64> m_seenClipIds;
+    AudioCoordinator m_coordinator;
+    RecordingSession m_recordingLease;
+    QTimer m_pendingPlayback;
+    QQueue<QJsonObject> m_clipQueue;
+    QJsonObject m_currentEvent;
     AudioClip m_currentClip;
     QNetworkReply* m_downloadReply = nullptr;
     QUrl m_currentSource;
@@ -114,6 +125,9 @@ class AudioController : public QObject {
     bool m_playStarted = false;
     bool m_hasCurrentClip = false;
     bool m_muted = false;
+    bool m_remotePlaying = false;
+    bool m_remotePaused = false;
+    bool m_remoteAvailable = false;
 };
 
 } // namespace clarp

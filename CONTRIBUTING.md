@@ -25,6 +25,7 @@ calls to the server on `127.0.0.1:7682` (override with `CLARP_UPSTREAM`).
 | `make js` | JavaScript unit tests (vitest) | ~15 s |
 | `make e2e` | Playwright against a throwaway Docker node | minutes |
 | `make docker-test` | Build the image; exercise install, restart, backup | minutes |
+| `make isolated-codex` | Fake Codex writer locks and AGY timeout checks; no live auth | ~30 s |
 
 Tests never touch a real install: every test owns a temporary database,
 config, and cache; `systemctl` and `launchctl` are shimmed; and any socket to

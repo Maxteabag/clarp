@@ -1,4 +1,4 @@
-.PHONY: test py js e2e docker-test install-py deploy deploy-static deploy-detached deploy-status deploy-log
+.PHONY: test py js e2e docker-test isolated-codex install-py deploy deploy-static deploy-detached deploy-status deploy-log
 
 test: py js
 
@@ -15,6 +15,10 @@ e2e:
 # Build the image and exercise install, restart, and backup inside a container.
 docker-test:
 	scripts/test_docker_node.sh
+
+# Fake Codex writer locks + Clarp source checks. No live auth, no network.
+isolated-codex:
+	tests/qa/run_isolated_docker.sh
 
 build:
 	npm run build

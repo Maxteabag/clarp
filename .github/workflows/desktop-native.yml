@@ -29,21 +29,25 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
-      - uses: actions/checkout@v4
-
       - name: Install Qt 6.11 and quality tools
         run: >-
           pacman -Syu --noconfirm
           appstream
           clang
           cmake
+          dbus
+          git
           ninja
+          python
+          systemd
           qt6-base
           qt6-declarative
           qt6-multimedia
           qt6-multimedia-ffmpeg
           qt6-svg
           qt6-wayland
+
+      - uses: actions/checkout@v4
 
       - name: Release build with warnings as errors
         working-directory: desktop

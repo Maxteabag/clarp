@@ -58,16 +58,16 @@ Rectangle {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 2
-                Text {
+                TuiText {
                     objectName: "reportTitle"
                     Layout.fillWidth: true
                     text: String(root.report.title || "Report")
                     color: "#e7e1dc"
-                    font.pixelSize: 19
+                    font.pixelSize: 17
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
-                Text {
+                TuiText {
                     Layout.fillWidth: true
                     visible: text.length > 0
                     text: String(root.report.summary || "")
@@ -76,14 +76,14 @@ Rectangle {
                     elide: Text.ElideRight
                 }
             }
-            Text {
+            TuiText {
                 objectName: "reportKind"
                 text: (root.report.isHtml ? "HTML" : "MARKDOWN")
                 color: "#72778f"
                 font.family: "JetBrains Mono"
                 font.pixelSize: 11
             }
-            Button {
+            TuiButton {
                 objectName: "reportClose"
                 text: "✕"
                 implicitHeight: 27
@@ -137,7 +137,7 @@ Rectangle {
             }
         }
 
-        Text {
+        TuiText {
             objectName: "reportEmpty"
             visible: !root.hasReport
             Layout.fillWidth: true

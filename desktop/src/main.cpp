@@ -7,23 +7,19 @@
 #include "platform/DesktopIntegration.h"
 
 #include <QApplication>
-#include <QDir>
 #include <QIcon>
+#include <QFont>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QKeyEvent>
 #include <QJSValue>
-#include <QLocalServer>
-#include <QLocalSocket>
-#include <QLockFile>
 #include <QQmlApplicationEngine>
 #include <QQmlError>
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSignalBlocker>
-#include <QStandardPaths>
 #include <QStyleHints>
 #include <QTimer>
 #include <algorithm>
@@ -48,36 +44,15 @@ int main(int argc, char* argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QApplication application(argc, argv);
+    QFont uiFont = application.font();
+    uiFont.setFamily(QStringLiteral("JetBrains Mono"));
+    uiFont.setStyleHint(QFont::Monospace);
+    QApplication::setFont(uiFont);
     application.styleHints()->setColorScheme(Qt::ColorScheme::Dark);
     QApplication::setPalette(clarp::desktopPalette(application.palette()));
     application.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/Clarp/Desktop/resources/clarp.svg")));
 
-    QString runtimeDirectory = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
-    if (runtimeDirectory.isEmpty()) {
-        runtimeDirectory = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-    }
-    // Development/test builds can coexist with the installed client without
-    // changing XDG_RUNTIME_DIR (which would also hide the Wayland socket).
-    const QString instanceName =
-        qEnvironmentVariable("CLARP_INSTANCE_NAME", QStringLiteral("com.maxteabag.Clarp"));
-    QLockFile instanceLock(QDir(runtimeDirectory).filePath(instanceName + QStringLiteral(".lock")));
-    if (!instanceLock.tryLock()) {
-        if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")) {
-            qCritical("The isolated screenshot instance is already in use");
-            return EXIT_FAILURE;
-        }
-        QLocalSocket existing;
-        existing.connectToServer(instanceName);
-        if (existing.waitForConnected(500)) {
-            existing.write("activate\n");
-            existing.waitForBytesWritten(200);
-        }
-        return EXIT_SUCCESS;
-    }
-    QLocalServer::removeServer(instanceName);
-    QLocalServer activationServer;
-    activationServer.listen(instanceName);
-
+    // Each launch owns its window and event loop; no process-wide activation lock.
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, &application,
                      [](const auto& warnings) {
@@ -116,23 +91,6 @@ int main(int argc, char* argv[]) {
             }
         }
     }
-    QObject::connect(&activationServer, &QLocalServer::newConnection, &application,
-                     [&activationServer, rootWindow, controller] {
-                         while (activationServer.hasPendingConnections()) {
-                             QLocalSocket* socket = activationServer.nextPendingConnection();
-                             socket->deleteLater();
-                         }
-                        if (rootWindow != nullptr) {
-                            rootWindow->show();
-                            rootWindow->raise();
-                            rootWindow->requestActivate();
-                            if (controller != nullptr) {
-                                controller->requestComposerFocus(
-                                    controller->panes()->activePaneId());
-                            }
-                        }
-                    });
-
     const QString screenshotPath = qEnvironmentVariable("CLARP_SCREENSHOT_PATH");
     if (!screenshotPath.isEmpty() && controller != nullptr && qEnvironmentVariableIsSet("CLARP_SCREENSHOT_MINIMAL_UI"))
         controller->setMinimalUi(qEnvironmentVariableIntValue("CLARP_SCREENSHOT_MINIMAL_UI") != 0);
@@ -267,6 +225,12 @@ int main(int argc, char* argv[]) {
                 return;
             }
             if (QObject* view = rootWindow->findChild<QObject*>(screenshotView)) {
+                if (screenshotView == QStringLiteral("settingsPanel"))
+                    rootWindow->setProperty("selectedSurface", QStringLiteral("settings"));
+                else if (screenshotView == QStringLiteral("teamsPanel"))
+                    rootWindow->setProperty("selectedSurface", QStringLiteral("teams"));
+                else if (screenshotView == QStringLiteral("updatesPanel"))
+                    rootWindow->setProperty("selectedSurface", QStringLiteral("updates"));
                 // The rename dialog is normally opened with the chat it targets,
                 // so a bare visible=true would capture an empty form.
                 if (controller != nullptr && screenshotView == QStringLiteral("renameAgent")) {
@@ -326,6 +290,10 @@ int main(int argc, char* argv[]) {
                           {QStringLiteral("agent_id"), QStringLiteral("fixture-agent")},
                           {QStringLiteral("session"), session},
                           {QStringLiteral("persona"), QStringLiteral("OPUS")},
+                          {QStringLiteral("cwd"), qEnvironmentVariable("CLARP_SCREENSHOT_WORKSPACE")},
+                          {QStringLiteral("model"), qEnvironmentVariable("CLARP_SCREENSHOT_MODEL")},
+                          {QStringLiteral("effort"), qEnvironmentVariable("CLARP_SCREENSHOT_EFFORT")},
+                          {QStringLiteral("status_text"), qEnvironmentVariable("CLARP_SCREENSHOT_STATUS")},
                           {QStringLiteral("backend"), QStringLiteral("local")},
                           {QStringLiteral("latest_state"), QStringLiteral("idle")},
                       }}}});

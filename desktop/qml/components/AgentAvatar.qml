@@ -6,13 +6,14 @@ Item {
     required property var controller
     required property string session
     required property string name
+    property bool showPortrait: false
     property string symbol: ""
     property real avatarSize: 40
     property real cornerRadius: 2
     property color fallbackColor: "#55596f"
     readonly property url resolvedSource: {
         root.controller.avatarRevision;
-        return root.session.length > 0 ? root.controller.avatarSource(root.session) : "";
+        return root.showPortrait && root.session.length > 0 ? root.controller.avatarSource(root.session) : "";
     }
 
     implicitWidth: avatarSize
@@ -22,12 +23,13 @@ Item {
     Rectangle {
         anchors.fill: parent
         visible: portrait.status !== Image.Ready
-        radius: root.cornerRadius
+        radius: 0
         antialiasing: true
-        color: root.fallbackColor
-        border.width: 0
+        color: "transparent"
+        border.width: 1
+        border.color: "#41445a"
 
-        Text {
+        TuiText {
             anchors.centerIn: parent
             text: root.symbol.length > 0 ? root.symbol : root.name.slice(0, 1).toUpperCase()
             color: "#e0e1ec"
