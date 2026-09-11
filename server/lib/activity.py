@@ -187,6 +187,10 @@ def state_activity_event(
         action = action or "stopped"
         summary = summary or "Stopped"
         status = ActivityStatus.OK
+    elif kind == AgentState.INTERRUPTED:
+        summary = summary or detail.get("message") or "Reply stopped. Your message is saved."
+        action = action or "needs attention"
+        status = ActivityStatus.ERROR
     elif kind == AgentState.SPAWNED:
         phase = "spawned"
         action = action or "started"

@@ -152,6 +152,10 @@ export function rememberUserNotification(ev) {
 export function bannerFor(sid) {
   const s = statusFor(sid);
   const kind = s.latest_state || '';
+  if (kind === AgentState.THINKING && shortActivityPhase(s) === 'reconnecting') {
+    return { cls: 'reconnecting', spinner: true,
+      msg: shortActivityText(s) || 'Reconnecting… Your message is saved.' };
+  }
   if (kind === AgentState.COMPACTING) {
     const trig = s.compacting_trigger === 'manual' ? ' (manual)' : '';
     return {
@@ -172,7 +176,7 @@ export function bannerFor(sid) {
     return {
       cls: AgentState.INTERRUPTED,
       icon: '!',
-      msg: shortActivityText(s) || 'Turn interrupted — send again to resume',
+      msg: shortActivityText(s) || 'Reply stopped. Your message is saved — send a message to resume.',
     };
   }
   return null;

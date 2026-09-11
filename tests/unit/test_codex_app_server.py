@@ -362,3 +362,52 @@ def test_external_leftover_writer_still_blocks_shared_client(tmp_path, monkeypat
         leftover.kill()
         leftover.wait(timeout=3)
         codex_app_server.recycle_clients()
+
+
+def test_credentials_change_retires_idle_connection(tmp_path, monkeypatch):
+    home = _install_fake_codex(tmp_path, monkeypatch)
+    auth = home / 'auth.json'
+    auth.write_text('old fixture credentials')
+    first = codex_app_server._client('one', 'one')
+    auth.write_text('new fixture credentials')
+    second = codex_app_server._client('one', 'one')
+    assert first.proc.poll() is not None
+    assert second.proc.pid != first.proc.pid
+    codex_app_server.recycle_clients()
+
+
+def test_credentials_change_and_recycle_preserve_active_turn(tmp_path, monkeypatch):
+    home = _install_fake_codex(tmp_path, monkeypatch)
+    auth = home / 'auth.json'
+    auth.write_text('old')
+    agent = agents_db.create_agent(persona='Busy', voice_id='v', cwd=str(tmp_path), session='busy', backend='codex')
+    handle = _spawn_fake_turn(tmp_path, agent_id=agent, session='busy', text='[qa-slow]')
+    client = handle.client
+    auth.write_text('new')
+    assert codex_app_server.recycle_clients() == 0
+    assert codex_app_server._client(agent, 'busy') is client
+    assert client.proc.poll() is None
+    handle.wait(8)
+    fresh = codex_app_server._client(agent, 'busy')
+    assert fresh is not client
+    assert client.proc.poll() is not None
+    codex_app_server.recycle_clients()
+
+
+def test_unknown_quota_bucket_is_not_regular_quota():
+    old = {'rateLimits': {'limitId': 'premium'}}
+    regular = {'rateLimitsByLimitId': {'codex': {'primary': {'usedPercent': 100}}}}
+    assert not codex_app_server._matching_bucket_blocked(old, regular)
+    matching = {'rateLimitsByLimitId': {'premium': {'primary': {'usedPercent': 100}}}}
+    assert codex_app_server._matching_bucket_blocked(old, matching)
+
+
+def test_failed_other_agent_cannot_refresh_busy_shared_connection(tmp_path, monkeypatch):
+    _install_fake_codex(tmp_path, monkeypatch)
+    agent = agents_db.create_agent(persona='Busy', voice_id='v', cwd=str(tmp_path), session='busy', backend='codex')
+    handle = _spawn_fake_turn(tmp_path, agent_id=agent, session='busy', text='[qa-slow]')
+    failure = codex_app_server.CodexTurnFailure('usage limit', handle.client, False)
+    assert not codex_app_server.recover_usage_failure(failure)
+    assert handle.client.proc.poll() is None
+    handle.wait(8)
+    codex_app_server.recycle_clients()

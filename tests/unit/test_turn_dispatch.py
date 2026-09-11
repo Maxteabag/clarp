@@ -1315,3 +1315,30 @@ def test_oracle_followup_steers_and_tracks_actual_terminal_result(tmp_path):
         queue_if_busy=True, synthesize_audio=False)
     assert len(backend.steered) == 1
     assert len(backend.spawned) == 1
+
+
+@pytest.mark.parametrize('stop_during_probe', [False, True])
+def test_stop_cancels_codex_connection_retry(tmp_path, monkeypatch, stop_during_probe):
+    from lib import codex_app_server
+    agent_id = agents_db.create_agent(persona='Stop', voice_id='v', cwd=str(tmp_path), session='stop', backend='codex')
+    agents_db.start_runtime(agent_id, 'stop')
+    backend = _CodexBackends()
+    pending = []
+    ctx = SimpleNamespace(default_session='stop', agents_path=tmp_path/'unused', stream=_Stream())
+    service = TurnDispatchService(ctx, backend_registry=backend, home=tmp_path,
+                                 retry_scheduler=lambda _delay, fn: pending.append(fn))
+    def recover(_message):
+        if stop_during_probe:
+            clear_for_agent(agent_id)
+        return True
+    monkeypatch.setattr(codex_app_server, 'recover_usage_failure', recover)
+    service.dispatch(text='hi', requested_session='stop', trace_id='stop-retry')
+    first = backend.spawned[0][1]
+    first['on_session_init']('same-thread')
+    first['on_error']("You've hit your usage limit.")
+    clear_for_agent(agent_id)
+    for callback in pending:
+        callback()
+    assert len(backend.spawned) == 1
+    if stop_during_probe:
+        assert pending == []

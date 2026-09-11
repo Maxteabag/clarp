@@ -206,6 +206,7 @@ class _TurnSpec:
     # Provider-only continuation; the admitted user message keeps its original
     # text and client ID across an account change.
     recovery_text: str = ""
+    codex_recovery_attempted: bool = False
     # Private runtime capability; never sourced from an ordinary send payload.
     janitor_run_id: str = ""
 
@@ -1406,6 +1407,22 @@ class TurnDispatchService:
                 f"superseded by a newer turn; ignoring its outcome")
             return
         msg = (message or "")[:300]
+        if (category == error_classify.USAGE_LIMIT
+                and spec.backend == backends.CODEX
+                and not spec.codex_recovery_attempted):
+            from . import codex_app_server
+            try:
+                recovered = codex_app_server.recover_usage_failure(message)
+            except Exception as exc:
+                log_exception("codexConnectionRecoveryFail", exc, detail=spec.trace_id)
+                recovered = False
+            with _TURN_LOCK:
+                if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
+                    return  # stop/new message during the quota request
+                if recovered:
+                    self._schedule_retry(
+                        replace(spec, codex_recovery_attempted=True), attempt, state, msg)
+                    return
         if self._start_model_fallback(spec, state, category, msg):
             return
         if (category == error_classify.USAGE_LIMIT
@@ -1436,7 +1453,8 @@ class TurnDispatchService:
             self._schedule_retry(spec, attempt, state, msg)
             return
         if category in error_classify.NOTIFY:
-            self._mark_interrupted(spec, category, msg, attempts=attempt)
+            self._mark_interrupted(spec, category, msg, attempts=attempt,
+                                   quota_confirmed=getattr(message, "quota_confirmed", None))
             if spec.origin == "heartbeat":
                 try:
                     from . import heartbeat
@@ -1513,7 +1531,9 @@ class TurnDispatchService:
         agents_db.record_state(
             spec.agent_id, AgentState.THINKING,
             {"dispatch": spec.backend, "reconnect": next_attempt,
-             "of": MAX_ATTEMPTS, "after_ms": int(delay * 1000)},
+             "of": MAX_ATTEMPTS, "after_ms": int(delay * 1000),
+             "summary": "Reconnecting… Your message is saved.",
+             "action": "reconnecting"},
         )
         eventlog.emit("server", "turnReconnect", context=spec.context,
                       detail={"attempt": next_attempt, "of": MAX_ATTEMPTS,
@@ -1553,7 +1573,8 @@ class TurnDispatchService:
         self.retry_scheduler(delay, _retry_spawn)
 
     def _mark_interrupted(self, spec: _TurnSpec, category: str,
-                          message: str | None, *, attempts: int) -> None:
+                          message: str | None, *, attempts: int,
+                          quota_confirmed: bool | None = None) -> None:
         human = {
             error_classify.CONNECTION: "Connection lost — retries exhausted",
             error_classify.TRANSIENT: "API unavailable (overloaded / rate limited)",
@@ -1563,7 +1584,10 @@ class TurnDispatchService:
             error_classify.TIMEOUT: "Turn timed out — backend stopped responding",
         }.get(category, "Turn interrupted")
         limit_event = None
-        if category == error_classify.USAGE_LIMIT and spec.backend == backends.CODEX:
+        if category == error_classify.USAGE_LIMIT and quota_confirmed is False:
+            human = "Codex could not complete this request. Try again"
+        if (category == error_classify.USAGE_LIMIT and spec.backend == backends.CODEX
+                and quota_confirmed is not False):
             try:
                 limit_event = backend_usage.record_classified_usage_limit(
                     backends.CODEX)
@@ -1580,6 +1604,7 @@ class TurnDispatchService:
         state_detail = {
             "dispatch": spec.backend, "reason": category, "message": human,
             "error": (message or "")[:200], "attempts": attempts,
+            "summary": human + ". Your message is saved.",
         }
         if limit_event:
             state_detail["provider_limit_event_id"] = limit_event[

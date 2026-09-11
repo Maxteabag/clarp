@@ -8,6 +8,7 @@ writers that blocked ``thread/resume`` with JSON-RPC ``-32600``.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import pathlib
 import shutil
@@ -59,6 +60,7 @@ class _ActiveTurn:
     stream: Any
     enqueue: Callable[..., int]
     voice: bool = False
+    produced_output: bool = False
     steer_ready: threading.Event = field(default_factory=threading.Event)
 
 
@@ -93,6 +95,9 @@ class _Client:
     def __init__(self, agent_id: str, session: str, stream=None):
         argv = _codex_argv()
         self.agent_id = agent_id
+        self.auth_fingerprint = _auth_fingerprint()
+        self.refresh_requested = False
+        self.rate_limits = {}
         env = {**os.environ, "CLAUDE_PWA_SESSION": session}
         self.proc = subprocess.Popen(
             argv,
@@ -232,6 +237,7 @@ class _Client:
     def _notification(self, method: str, params: dict) -> None:
         active = self._pick_active(params)
         if method == "account/rateLimits/updated":
+            self.rate_limits = params
             try:
                 snapshot = backend_usage.capture_codex_rate_limits(params)
                 event_stream = (active.stream if active is not None
@@ -260,6 +266,7 @@ class _Client:
         if method in ("item/started", "item/updated", "item/completed"):
             item = params.get("item")
             if isinstance(item, dict):
+                active.produced_output = True
                 normalized = _normalize_item(item)
                 phase = method.replace("/", ".")
                 _handle_item(phase, normalized, active.state,
@@ -272,6 +279,7 @@ class _Client:
             if isinstance(delta, dict):
                 delta = delta.get("text") or ""
             if isinstance(delta, str) and delta:
+                active.produced_output = True
                 current = active.state.pending_live_text
                 # Protocol deltas are normally incremental chunks, but tolerate
                 # servers that send a progressively complete snapshot.
@@ -298,7 +306,8 @@ class _Client:
             if status == "failed":
                 message = str(error.get("message") or "codex turn failed")
                 if active.on_error:
-                    self._callback(active.on_error, message)
+                    self._callback(active.on_error, CodexTurnFailure(
+                        message, self, active.produced_output))
             elif status == "interrupted":
                 if active.on_error:
                     self._callback(active.on_error, "codex turn interrupted")
@@ -443,6 +452,7 @@ class _Client:
             self.proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             self.proc.kill()
+            self.proc.wait(timeout=5)
 
 
 def _normalize_item(item: dict) -> dict:
@@ -464,8 +474,88 @@ def _normalize_item(item: dict) -> dict:
 
 
 _CLIENTS: dict[str, _Client] = {}
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()
 _SHARED_KEY = "__shared__"
+
+
+def _auth_fingerprint() -> bytes:
+    # Private generation marker only; never log credential contents or hashes.
+    try:
+        return hashlib.sha256((backend_usage._codex_home() / "auth.json").read_bytes()).digest()
+    except OSError:
+        return b""
+
+
+def _busy(client) -> bool:
+    turns = list(getattr(client, "_actives", {}).values())
+    active = getattr(client, "active", None)
+    if active is not None:
+        turns.append(active)
+    return any(not turn.handle._done.is_set() for turn in turns)
+
+
+class CodexTurnFailure(str):
+    def __new__(cls, message, client, produced_output):
+        value = super().__new__(cls, message)
+        value.client = client
+        value.produced_output = produced_output
+        value.quota_confirmed = False
+        return value
+
+
+def _matching_bucket_blocked(previous: dict, fresh: dict) -> bool:
+    """Never substitute regular Codex quota for a premium/model bucket."""
+    bucket = previous.get("rateLimits") or {}
+    limit_id = bucket.get("limitId")
+    if not limit_id:
+        return False
+    candidate = (fresh.get("rateLimitsByLimitId") or {}).get(limit_id)
+    default = fresh.get("rateLimits") or {}
+    if candidate is None and default.get("limitId") == limit_id:
+        candidate = default
+    if not isinstance(candidate, dict):
+        return False  # unknown: one fresh-connection attempt, not quota proof
+    if candidate.get("spendControlReached") or candidate.get("rateLimitReachedType"):
+        return True
+    for name in ("primary", "secondary", "individualLimit"):
+        window = candidate.get(name) or {}
+        used = window.get("usedPercent")
+        if isinstance(used, (int, float)) and used >= 100:
+            return True
+    return False
+
+
+def recover_usage_failure(message: str) -> bool:
+    """Refresh only an idle failed connection, before any model output/tools.
+
+    The dispatcher fences this to one retry of the same admitted turn. A fresh
+    matching exhausted bucket suppresses that retry. Sparse/missing quota is
+    unknown, so we permit one connection repair without claiming usable quota.
+    """
+    if not isinstance(message, CodexTurnFailure):
+        return False
+    with _LOCK:
+        client = message.client
+        if _CLIENTS.get(_SHARED_KEY) is not client:
+            return False
+        client.refresh_requested = True
+        if _busy(client) or message.produced_output:
+            return False
+        # Close the old writer before allowing a new process to resume its
+        # threads. Admission and retirement share this lock.
+        previous = getattr(client, "rate_limits", {})
+        client.shutdown()
+        _CLIENTS.clear()
+        fresh = _Client(client.agent_id, "", stream=getattr(client, "stream", None))
+        _CLIENTS[_SHARED_KEY] = fresh
+        try:
+            limits = fresh.request("account/rateLimits/read", {}, timeout=8)
+        except Exception:
+            # An unavailable quota service is not evidence of available quota.
+            # The new connection is retained; let the original failure surface.
+            return False
+        message.quota_confirmed = _matching_bucket_blocked(previous, limits)
+        return not message.quota_confirmed
 
 
 def _client(agent_id: str, session: str, stream=None) -> _Client:
@@ -476,6 +566,15 @@ def _client(agent_id: str, session: str, stream=None) -> _Client:
     """
     with _LOCK:
         client = _CLIENTS.get(_SHARED_KEY)
+        if client is not None:
+            fingerprint = _auth_fingerprint()
+            changed = getattr(client, "auth_fingerprint", fingerprint) != fingerprint
+            if changed or getattr(client, "refresh_requested", False):
+                client.refresh_requested = True
+                if not _busy(client):
+                    client.shutdown()
+                    _CLIENTS.clear()
+                    client = None
         if client is None or client.proc.poll() is not None:
             client = _Client(agent_id, session, stream=stream)
             _CLIENTS[_SHARED_KEY] = client
@@ -501,19 +600,21 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
             voice_preamble=voice_preamble, model=model, effort=effort,
             isolated=True,
         )
-    client = _client(agent_id, session, stream=stream)
-    handle = AppTurnHandle(client, agent_id=agent_id)
-    agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
-    persona = (agent or {}).get("persona") or ""
-    client.start(text=text, cwd=cwd, backend_session_id=backend_session_id,
-                 is_new_session=is_new_session, session=session,
-                 trace_id=trace_id, model=model, effort=effort,
-                 voice=voice_preamble, persona=persona, handle=handle,
-                 on_session_init=on_session_init, on_result=on_result,
-                 on_error=on_error, stream=stream,
-                 enqueue=enqueue or tts_queue.enqueue, agent_id=agent_id)
-    log("codexAppTurnStart", f"agent={agent_id} thread={client.thread_id} trace={trace_id}")
-    return handle
+    with _LOCK:
+        client = _client(agent_id, session, stream=stream)
+        handle = AppTurnHandle(client, agent_id=agent_id)
+        agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
+        persona = (agent or {}).get("persona") or ""
+        client.start(text=text, cwd=cwd, backend_session_id=backend_session_id,
+                     is_new_session=is_new_session, session=session,
+                     trace_id=trace_id, model=model, effort=effort,
+                     voice=voice_preamble, persona=persona, handle=handle,
+                     on_session_init=on_session_init, on_result=on_result,
+                     on_error=on_error, stream=stream,
+                     enqueue=enqueue or tts_queue.enqueue, agent_id=agent_id)
+        log("codexAppTurnStart", f"agent={agent_id} thread={client.thread_id} trace={trace_id}")
+        return handle
+
 
 
 def _shared_client() -> _Client | None:
@@ -556,26 +657,17 @@ def interrupt(agent_id: str) -> int:
 
 
 def recycle_clients() -> int:
-    """Close every app-server so the next turn re-reads ``auth.json``.
-
-    Out-of-band ``codex login`` rewrites credentials without telling these
-    processes. Leaving them alive keeps the old token in memory and the
-    thread writer lock held, so the next ``thread/resume`` fails with
-    ``-32600 already has an active writer``.
-    """
+    """Retire idle connections; active connections refresh on next idle admission."""
     with _LOCK:
-        unique: dict[int, _Client] = {}
-        for client in _CLIENTS.values():
-            unique[id(client)] = client
-        clients = list(unique.values())
-        _CLIENTS.clear()
-    closed = 0
-    for client in clients:
-        try:
+        clients = list({id(client): client for client in _CLIENTS.values()}.values())
+        closed = 0
+        for client in clients:
+            client.refresh_requested = True
+            if _busy(client):
+                continue
             client.shutdown()
-        except Exception as exc:  # noqa: BLE001
-            log_exception("codexAppServerShutdownFail", exc)
-        closed += 1
-    if closed:
-        log("codexAppServerRecycle", f"closed={closed}")
-    return closed
+            for key, value in list(_CLIENTS.items()):
+                if value is client:
+                    del _CLIENTS[key]
+            closed += 1
+        return closed
