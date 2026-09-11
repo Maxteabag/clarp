@@ -57,7 +57,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 81
+_SCHEMA_VERSION = 82
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1507,6 +1507,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v80(con)
             if version < 81:
                 _migrate_to_v81(con)
+            if version < 82:
+                _migrate_to_v82(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1777,6 +1779,17 @@ def _migrate_to_v65(con: sqlite3.Connection) -> None:
         " WHERE trace_id IS NOT NULL")
 
 
+_STATE_BOUNDARY_INDEX = """CREATE INDEX IF NOT EXISTS idx_state_log_boundaries
+    ON state_log(agent_id, ts DESC, state_id DESC)
+    WHERE kind IN ('done', 'idle', 'stopped')"""
+_SCHEMA_SQL += _STATE_BOUNDARY_INDEX + ";\n"
+
+
+def _migrate_to_v82(con: sqlite3.Connection) -> None:
+    """Seek completed-turn boundaries without visiting historical tool states."""
+    con.execute(_STATE_BOUNDARY_INDEX)
+
+
 _PAIR_PROJECTION_INDEX = """CREATE INDEX IF NOT EXISTS idx_messages_pair_projection
     ON messages(agent_id, sender_agent_id, timestamp, seq)
     WHERE COALESCE(origin, 'user') = 'agent'
@@ -1785,7 +1798,7 @@ _PAIR_PROJECTION_INDEX = """CREATE INDEX IF NOT EXISTS idx_messages_pair_project
       AND COALESCE(text, '') != ''
       AND COALESCE(tool_name, '') = ''
       AND role IN ('user', 'assistant')"""
-_SCHEMA_SQL += _PAIR_PROJECTION_INDEX + ";"
+_SCHEMA_SQL += _PAIR_PROJECTION_INDEX + ";\n"
 
 
 def _migrate_to_v81(con: sqlite3.Connection) -> None:

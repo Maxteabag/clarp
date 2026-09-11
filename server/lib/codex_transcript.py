@@ -117,7 +117,21 @@ def _shell_words(command: str) -> list[str]:
         return command.split()
 
 
+def _first_shell_word(command: str) -> str:
+    """Identify the executable without lexing a potentially enormous script body."""
+    lexer = shlex.shlex(command, posix=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        return lexer.get_token() or ""
+    except ValueError:
+        words = command.split(maxsplit=1)
+        return words[0] if words else ""
+
+
 def _strip_shell_wrapper(command: str) -> str:
+    if pathlib.PurePosixPath(_first_shell_word(command)).name not in {"bash", "sh", "zsh"}:
+        return command
     words = _shell_words(command)
     shell = pathlib.PurePosixPath(words[0]).name if words else ""
     if len(words) >= 3 and shell in {"bash", "sh", "zsh"} and words[1] == "-lc":
@@ -144,6 +158,9 @@ def _classify_exploration(command: str) -> dict | None:
             line = _classify_exploration(part)
             if line:
                 return line
+        return None
+    base = pathlib.PurePosixPath(_first_shell_word(display)).name
+    if base not in {"rg", "grep", "git", "ls", "find", "fd", "cat", "sed", "nl", "head", "tail"}:
         return None
     words = _shell_words(display)
     if not words:
