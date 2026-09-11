@@ -619,6 +619,7 @@ class NativeCoreTest final : public QObject {
 
   private slots:
     void oldActivityGroupsAreLazyAndVisitScoped();
+    void consecutiveExplanationsCollapseWithoutChangingTranscript();
     void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
     void readyModePreservesActivityAndHidesOnlyProvisionalBody();
     void idleContactStartsFreshWithSavedDefaults();
@@ -712,6 +713,69 @@ void NativeCoreTest::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender(
     tools.insert(QStringLiteral("timestamp"), QStringLiteral("invalid"));
     load();
     QCOMPARE(view.index(0, 0).data(ConversationPresentationModel::ActivityLabelRole).toString(), QStringLiteral("21 tool calls"));
+}
+
+void NativeCoreTest::consecutiveExplanationsCollapseWithoutChangingTranscript() {
+    QStandardItemModel source;
+    const auto append = [&source](const QString& id, const QString& text, const QString& body = QString{}) {
+        auto* row = new QStandardItem;
+        row->setData(id, ConversationModel::MessageIdRole);
+        row->setData(QStringLiteral("assistant"), ConversationModel::AuthorRole);
+        row->setData(body, ConversationModel::BodyRole);
+        row->setData(QVariantList{QVariantMap{{QStringLiteral("name"), id},
+            {QStringLiteral("summary"), text}}}, ConversationModel::ToolsRole);
+        source.appendRow(row);
+        return row;
+    };
+    append(QStringLiteral("a"), QStringLiteral("Check files"));
+    append(QStringLiteral("b"), QStringLiteral("Check files"));
+    ConversationPresentationModel view;
+    view.setSourceModel(&source);
+    const auto lookup = [](const QVariantMap& value) { return value.value(QStringLiteral("summary")).toString(); };
+    view.setExplanationLookup(lookup);
+    const auto repeat = [&view](int row) {
+        return view.index(row, 0).data(ConversationModel::ToolsRole).toList().first().toMap()
+            .value(QStringLiteral("_explanationRepeat"), 1).toInt();
+    };
+    QCOMPARE(view.rowCount(), 1);
+    QCOMPARE(repeat(0), 2);
+    append(QStringLiteral("c"), QStringLiteral("Check files"));
+    QCOMPARE(view.rowCount(), 1);
+    QCOMPARE(repeat(0), 3);
+    QCOMPARE(source.rowCount(), 3);
+    QCOMPARE(source.index(1, 0).data(ConversationModel::ToolsRole).toList().size(), 1);
+    auto* pending = append(QStringLiteral("d"), QString{});
+    append(QStringLiteral("e"), QStringLiteral("Check files"));
+    QCOMPARE(view.rowCount(), 3); // Pending explanations break the run.
+    pending->setData(QVariantList{QVariantMap{{QStringLiteral("summary"), QStringLiteral("Check files")}}}, ConversationModel::ToolsRole);
+    QCOMPARE(view.rowCount(), 1); // Late completion extends the first row.
+    QCOMPARE(repeat(0), 5);
+    const auto original = source.index(2, 0).data(ConversationModel::ToolsRole);
+    source.item(2)->setData(QVariantList{QVariantMap{{QStringLiteral("summary"), QStringLiteral("Different")}}}, ConversationModel::ToolsRole);
+    QCOMPARE(view.rowCount(), 3);
+    QCOMPARE(repeat(0), 2);
+    QCOMPARE(repeat(2), 2);
+    source.item(2)->setData(QVariantList{QVariantMap{{QStringLiteral("summary"), QStringLiteral("Check files")},
+        {QStringLiteral("status"), QStringLiteral("error")}}}, ConversationModel::ToolsRole);
+    QCOMPARE(view.rowCount(), 3); // Equal words must not hide a different status.
+    source.item(2)->setData(original, ConversationModel::ToolsRole);
+    QCOMPARE(repeat(0), 5);
+    append(QStringLiteral("f"), QStringLiteral("Check files"), QStringLiteral("A message boundary"));
+    QCOMPARE(view.rowCount(), 2);
+    QCOMPARE(repeat(1), 1);
+    view.setExplanationLookup({});
+    QCOMPARE(view.rowCount(), 6); // Developer mode restores every original row.
+    view.setExplanationLookup(lookup);
+    source.removeRow(1);
+    QCOMPARE(repeat(0), 4);
+    view.setActivityMode(0);
+    QCOMPARE(view.rowCount(), 2);
+    QVERIFY(view.index(0, 0).data(ConversationModel::ToolsRole).toList().isEmpty());
+    view.toggleGroup(QStringLiteral("a"));
+    const auto tools = view.index(0, 0).data(ConversationModel::ToolsRole).toList();
+    QCOMPARE(tools.size(), 4); // Details retained; delegates suppress repeats.
+    QCOMPARE(tools.first().toMap().value(QStringLiteral("_explanationRepeat")).toInt(), 4);
+    QCOMPARE(tools.last().toMap().value(QStringLiteral("_explanationRepeat")).toInt(), 0);
 }
 
 void NativeCoreTest::oldActivityGroupsAreLazyAndVisitScoped() {

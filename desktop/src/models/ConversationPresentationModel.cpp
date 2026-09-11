@@ -1,5 +1,7 @@
 #include "models/ConversationPresentationModel.h"
 #include "models/ConversationModel.h"
+#include "app/ToolNarrator.h"
+#include <QPointer>
 namespace clarp {
 namespace {
 // The Host stamps every ordinary row "user" and uses a dispatcher name
@@ -24,13 +26,13 @@ ConversationPresentationModel::ConversationPresentationModel(QObject* parent) : 
 void ConversationPresentationModel::setShowWhenReady(bool value) {
     if (m_showWhenReady == value) return;
     m_showWhenReady = value;
-    beginFilterChange();
-    endFilterChange(QSortFilterProxyModel::Direction::Rows);
+    refreshGroups();
     if (rowCount() > 0) emit dataChanged(index(0, 0), index(rowCount() - 1, 0),
         {ConversationModel::BodyRole});
     emit showWhenReadyChanged();
 }
 bool ConversationPresentationModel::filterAcceptsRow(int row, const QModelIndex& parent) const {
+    if (m_repeatedRows.contains(row)) return false;
     if (groupedRow(row) && row > 0 && groupedRow(row - 1)) return false;
     if (!m_showWhenReady) return true;
     const QModelIndex item = sourceModel()->index(row, 0, parent);
@@ -48,6 +50,12 @@ bool ConversationPresentationModel::filterAcceptsRow(int row, const QModelIndex&
 }
 QVariant ConversationPresentationModel::data(const QModelIndex& item, int role) const {
     const QModelIndex source = mapToSource(item);
+    if (m_explanationRows.value(source.row()).contains(role))
+        return m_explanationRows.value(source.row()).value(role);
+    if (role == ExplanationRepeatRole) return 1;
+    return presentationData(source, role);
+}
+QVariant ConversationPresentationModel::presentationData(const QModelIndex& source, int role) const {
     if (role == ActivityInlineRole) return inlineRow(source);
     const auto rows = groupedRow(source.row()) ? groupRows(source.row()) : QList<QModelIndex>{};
     if (role == ActivityLabelRole) return activityLabel(rows.isEmpty() ? QList<QModelIndex>{source} : rows);
@@ -85,17 +93,18 @@ QVariant ConversationPresentationModel::data(const QModelIndex& item, int role) 
     if (role == GroupLabelRole) return QString{};
     if (role == GroupExpandedRole) return false;
     if (m_showWhenReady && role == ConversationModel::BodyRole
-        && !QSortFilterProxyModel::data(item, ConversationModel::ActivityRole).toBool()
-        && QSortFilterProxyModel::data(item, ConversationModel::AuthorRole).toString() == QStringLiteral("assistant")
-        && QSortFilterProxyModel::data(item, ConversationModel::KindRole).toString() == QStringLiteral("live"))
+        && !source.data(ConversationModel::ActivityRole).toBool()
+        && source.data(ConversationModel::AuthorRole).toString() == QStringLiteral("assistant")
+        && source.data(ConversationModel::KindRole).toString() == QStringLiteral("live"))
         return QString{};
-    return QSortFilterProxyModel::data(item, role);
+    return source.data(role);
 }
 QHash<int, QByteArray> ConversationPresentationModel::roleNames() const {
     auto roles = QSortFilterProxyModel::roleNames();
     roles.insert(GroupIdsRole, "groupIds"); roles.insert(GroupLabelRole, "groupLabel");
     roles.insert(GroupExpandedRole, "groupExpanded"); roles.insert(ActivityInlineRole, "activityInline");
     roles.insert(ActivityLabelRole, "activityLabel");
+    roles.insert(ExplanationRepeatRole, "explanationRepeat");
     return roles;
 }
 QString ConversationPresentationModel::activityLabel(const QList<QModelIndex>& rows) const {
@@ -163,8 +172,96 @@ QList<QModelIndex> ConversationPresentationModel::groupRows(int row) const {
     return rows;
 }
 void ConversationPresentationModel::refreshGroups() {
-    beginFilterChange(); endFilterChange(QSortFilterProxyModel::Direction::Rows);
+    beginFilterChange();
+    rebuildExplanationRuns();
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
     if (rowCount() > 0) emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+}
+void ConversationPresentationModel::setExplanationLookup(std::function<QString(const QVariantMap&)> lookup) {
+    m_explanationLookup = std::move(lookup);
+    refreshGroups();
+}
+void ConversationPresentationModel::updateExplanations(QObject* object, const QString& session,
+                                                       const QString& directory, bool localFiles) {
+    QPointer<ToolNarrator> narrator = qobject_cast<ToolNarrator*>(object);
+    if (!narrator || !narrator->enabled() || narrator->unavailable()) {
+        setExplanationLookup({});
+        return;
+    }
+    setExplanationLookup([narrator, session, directory, localFiles](QVariantMap activity) {
+        activity.insert(QStringLiteral("_session"), session);
+        return narrator ? narrator->explanation(activity, directory, localFiles) : QString{};
+    });
+}
+void ConversationPresentationModel::rebuildExplanationRuns() {
+    m_explanationRows.clear();
+    m_repeatedRows.clear();
+    if (!sourceModel() || !m_explanationLookup) return;
+    struct Entry { int row; int role; int offset; };
+    Entry first{-1, 0, 0};
+    QString previous;
+    QString previousStatus;
+    int count = 0;
+    auto annotate = [this](const Entry& entry, int repetitions) {
+        if (entry.role == ExplanationRepeatRole) {
+            m_explanationRows[entry.row][entry.role] = repetitions;
+        } else {
+            auto values = m_explanationRows[entry.row][entry.role].toList();
+            auto value = values[entry.offset].toMap();
+            value.insert(QStringLiteral("_explanationRepeat"), repetitions);
+            values[entry.offset] = value;
+            m_explanationRows[entry.row][entry.role] = values;
+        }
+    };
+    auto append = [&](const Entry& entry, const QVariantMap& value) {
+        const QString text = m_explanationLookup(value);
+        const QString status = value.value(QStringLiteral("status"), QStringLiteral("recorded")).toString();
+        if (!text.isEmpty() && text == previous && status == previousStatus) {
+            annotate(first, ++count);
+            annotate(entry, 0);
+            return false;
+        }
+        previous = text;
+        previousStatus = status;
+        first = entry;
+        count = 1;
+        return true;
+    };
+    for (int row = 0; row < sourceModel()->rowCount(); ++row) {
+        if (groupedRow(row) && row > 0 && groupedRow(row - 1)) continue;
+        const auto source = sourceModel()->index(row, 0);
+        const bool activity = presentationData(source, ConversationModel::ActivityRole).toBool();
+        const bool prose = !presentationData(source, ConversationModel::BodyRole).toString().isEmpty() && !activity;
+        const bool collapsed = groupedRow(row) && !m_expanded.contains(source.data(ConversationModel::MessageIdRole).toString());
+        if (prose || groupedRow(row)) previous.clear();
+        if (collapsed) continue;
+        bool any = false;
+        bool retained = false;
+        if (activity) {
+            any = true;
+            retained = append({row, ExplanationRepeatRole, 0}, {
+                {QStringLiteral("name"), source.data(ConversationModel::ToolNameRole)},
+                {QStringLiteral("summary"), source.data(ConversationModel::BodyRole)},
+                {QStringLiteral("status"), source.data(ConversationModel::ActivityStatusRole)}});
+        } else {
+            const auto cells = presentationData(source, ConversationModel::DisplayCellsRole).toList();
+            for (const int role : {ConversationModel::DisplayCellsRole, ConversationModel::ToolsRole}) {
+                const auto values = presentationData(source, role).toList();
+                m_explanationRows[row][role] = values;
+                for (int offset = 0; offset < values.size(); ++offset) {
+                    const auto value = values[offset].toMap();
+                    const auto name = value.value(QStringLiteral("name")).toString();
+                    if (role == ConversationModel::ToolsRole && !groupedRow(row) && !cells.isEmpty()
+                        && name != QStringLiteral("Edit") && name != QStringLiteral("MultiEdit") && name != QStringLiteral("Write")) continue;
+                    any = true;
+                    retained = append({row, role, offset}, value) || retained;
+                }
+            }
+        }
+        if (!any) previous.clear();
+        if (any && !retained && !prose && !groupedRow(row)) m_repeatedRows.insert(row);
+        if (prose || groupedRow(row)) previous.clear();
+    }
 }
 void ConversationPresentationModel::setActivityMode(int mode) {
     if (m_activityMode == mode) return;
@@ -178,6 +275,7 @@ void ConversationPresentationModel::setSourceModel(QAbstractItemModel* model) {
     QSortFilterProxyModel::setSourceModel(model);
     if (model != nullptr) {
         connect(model, &QAbstractItemModel::dataChanged, this, [this](const QModelIndex& first, const QModelIndex& last) {
+            if (m_explanationLookup) { refreshGroups(); return; }
             if (m_activityMode == 1) return;
             for (int row = first.row(); row <= last.row(); ++row)
                 if (groupedRow(row) || groupedRow(row - 1)) { refreshGroups(); return; }
@@ -188,8 +286,9 @@ void ConversationPresentationModel::setSourceModel(QAbstractItemModel* model) {
                 if (item.isValid()) emit dataChanged(item, item, {ActivityLabelRole});
             }
         });
-        connect(model, &QAbstractItemModel::rowsInserted, this, [this] { if (m_activityMode != 1) refreshGroups(); });
-        connect(model, &QAbstractItemModel::rowsRemoved, this, [this] { if (m_activityMode != 1) refreshGroups(); });
+        connect(model, &QAbstractItemModel::modelReset, this, [this] { refreshGroups(); });
+        connect(model, &QAbstractItemModel::rowsInserted, this, [this] { if (m_activityMode != 1 || m_explanationLookup) refreshGroups(); });
+        connect(model, &QAbstractItemModel::rowsRemoved, this, [this] { if (m_activityMode != 1 || m_explanationLookup) refreshGroups(); });
     }
     beginVisit();
 }
@@ -201,6 +300,7 @@ int ConversationPresentationModel::indexOfMessage(const QString& id) const {
     const auto* source = qobject_cast<const ConversationModel*>(sourceModel());
     if (source == nullptr) return -1;
     int row = source->indexOfMessage(id);
+    while (row > 0 && m_repeatedRows.contains(row)) --row;
     if (groupedRow(row)) while (row > 0 && groupedRow(row - 1)) --row;
     return row < 0 ? -1 : mapFromSource(source->index(row, 0)).row();
 }
