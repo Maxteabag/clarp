@@ -482,6 +482,7 @@ class AppController : public QObject {
     QString m_lastWorkingDirectory;
     QString m_lastBackend;
     QString m_startingContact;
+    QString m_startingBackend;
     QString m_orchestratorLastDecision;
     QString m_composerFocusPane;
     QString m_sharedFilesystemHostOverride;

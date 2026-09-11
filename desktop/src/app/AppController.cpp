@@ -374,6 +374,7 @@ bool AppController::startAnonymousAgent(const QString& backend, const QString& m
     if (!connected() || backend.isEmpty() || !m_startingContact.isEmpty()) return false;
     setErrorMessage({});
     m_startingContact = QStringLiteral("anonymous");
+    m_startingBackend = backend;
     emit contactLaunchChanged();
     QJsonObject body{{QStringLiteral("anonymous"), true}, {QStringLiteral("backend"), backend},
         {QStringLiteral("cwd"), m_lastWorkingDirectory.isEmpty() ? QStringLiteral("~") : m_lastWorkingDirectory},
@@ -413,6 +414,7 @@ bool AppController::startAvailableContact(const QString& backend, const QString&
     if (!connected() || backend.isEmpty() || !m_startingContact.isEmpty()) return false;
     setErrorMessage({});
     m_startingContact = QStringLiteral("pool");
+    m_startingBackend = backend;
     emit contactLaunchChanged();
     QJsonObject body{{QStringLiteral("auto_contact"), true}, {QStringLiteral("backend"), backend},
         {QStringLiteral("cwd"), m_lastWorkingDirectory.isEmpty() ? QStringLiteral("~") : m_lastWorkingDirectory},
@@ -444,6 +446,7 @@ bool AppController::quickStartContact(const QString& name, const QString& backen
     }
     setErrorMessage({});
     m_startingContact = contactName;
+    m_startingBackend = backend.isEmpty() ? quickStartBackend() : backend;
     emit contactLaunchChanged();
     QJsonObject body{{QStringLiteral("name"), contactName},
          {QStringLiteral("cwd"), m_lastWorkingDirectory.isEmpty() ? QStringLiteral("~") : m_lastWorkingDirectory},
@@ -2815,6 +2818,12 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
     }
     if (tag.startsWith(QStringLiteral("agent-create:")) || tag == QStringLiteral("contact-create")) {
         if (tag == QStringLiteral("contact-create")) {
+            if (!m_startingBackend.isEmpty() && m_lastBackend != m_startingBackend) {
+                m_lastBackend = m_startingBackend;
+                QSettings().setValue(QStringLiteral("launch/backend"), m_lastBackend);
+                emit launchDefaultsChanged();
+            }
+            m_startingBackend.clear();
             m_startingContact.clear();
             emit contactLaunchChanged();
         }
@@ -2961,6 +2970,7 @@ void AppController::handleRequestFailure(const QString& tag, const QString& mess
         return;
     }
     if (tag == QStringLiteral("contact-create")) {
+        m_startingBackend.clear();
         m_startingContact.clear();
         emit contactLaunchChanged();
         if (message == QStringLiteral("contact_pool_empty")) {
