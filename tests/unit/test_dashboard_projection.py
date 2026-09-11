@@ -81,3 +81,66 @@ def test_completed_preview_is_ranked_independently_of_provisional_rows():
             (f'history-{number}', aid, number, 'assistant', 'Completed' if number == 0 else 'Partial',
              '[]', number + 1, 'user', 'transcript:old' if number == 0 else f'live:{number}'))
     assert message_store.dashboard_messages()[aid]['completed_head']['preview'] == 'Completed'
+
+
+def test_dashboard_state_work_is_bounded_after_a_long_completed_history():
+    """An idle history must not be sorted on every fleet refresh."""
+    aid = agents.create_agent(persona='Long history', voice_id='', cwd='/tmp', session='long-history')
+    con = db.conn()
+    con.execute('DELETE FROM state_log WHERE agent_id=?', (aid,))
+    con.executemany('INSERT INTO state_log(agent_id, kind, ts, detail) VALUES(?,?,?,?)',
+                    ((aid, 'tool', i + 1, '{}') for i in range(8000)))
+    con.execute('INSERT INTO state_log(agent_id, kind, ts, detail) VALUES(?,?,?,?)',
+                (aid, 'done', 8001, '{}'))
+    con.execute('INSERT INTO state_log(agent_id, kind, ts, detail) VALUES(?,?,?,?)',
+                (aid, 'thinking', 8002, '{}'))
+    ticks = []
+    def budget():
+        ticks.append(1)
+        return int(len(ticks) > 50)
+    con.set_progress_handler(budget, 1000)
+    try:
+        state = agents.dashboard_states()[aid]
+    finally:
+        con.set_progress_handler(None, 0)
+    assert state['kind'] == 'thinking'
+    assert state['turn_started_at'] == 8002
+    assert state['last_turn_end'] == 8001
+
+
+def test_indexed_state_clocks_match_history_semantics_for_ties_and_missing_boundaries():
+    import random
+    rng = random.Random(42)
+    for number in range(20):
+        aid = agents.create_agent(persona=f'Clock {number}', voice_id='', cwd='/tmp', session=f'clock-{number}')
+        db.conn().execute('DELETE FROM state_log WHERE agent_id=?', (aid,))
+        kinds = ('thinking', 'tool', 'compacting', 'background', 'idle', 'done', 'stopped')
+        for _ in range(number * 3):
+            db.conn().execute('INSERT INTO state_log(agent_id,kind,ts,detail) VALUES(?,?,?,?)',
+                              (aid, rng.choice(kinds), rng.randint(1, 12), '{}'))
+    projected = agents.dashboard_states()
+    for agent in agents.list_agents():
+        aid = agent['agent_id']
+        latest = agents.latest_state(aid)
+        if latest is None:
+            assert aid not in projected
+            continue
+        state = projected[aid]
+        assert {k: state[k] for k in ('kind', 'ts', 'detail')} == latest
+        assert (state['turn_started_at'] or 0) == agents.turn_started_at(aid)
+        assert (state['last_turn_end'] or 0) == agents.last_turn_end(aid)
+
+
+def test_state_boundary_index_upgrade_preserves_history():
+    aid = agents.create_agent(persona='Upgrade', voice_id='', cwd='/tmp', session='upgrade-clock')
+    agents.record_state(aid, 'thinking', {})
+    agents.record_state(aid, 'idle', {})
+    con = db.conn()
+    before = [tuple(row) for row in con.execute('SELECT * FROM state_log ORDER BY state_id')]
+    expected = agents.dashboard_states()
+    con.execute('DROP INDEX idx_state_log_boundaries')
+    con.execute('PRAGMA user_version = 81')
+    db._migrate(con)
+    db._migrate_to_v82(con)
+    assert [tuple(row) for row in con.execute('SELECT * FROM state_log ORDER BY state_id')] == before
+    assert agents.dashboard_states() == expected

@@ -834,3 +834,13 @@ def test_find_latest_jsonl_matches_uuid_suffix(tmp_path):
     assert codex_transcript.find_latest_jsonl(
         "nonexistent", sessions_root=tmp_path / "sessions") is None
     assert codex_transcript.find_latest_jsonl("") is None
+
+
+def test_non_exploration_scripts_do_not_tokenize_their_entire_body(monkeypatch):
+    from lib import codex_transcript
+    command = "python3 - <<'PY'\n" + "print('large script body')\n" * 4000 + 'PY'
+    def unexpected_split(*args, **kwargs):
+        raise AssertionError('non-exploration command body was fully tokenized')
+    monkeypatch.setattr(codex_transcript.shlex, 'split', unexpected_split)
+    assert codex_transcript._strip_shell_wrapper(command) == command
+    assert codex_transcript._classify_exploration(command) is None

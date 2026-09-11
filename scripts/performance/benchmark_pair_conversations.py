@@ -16,9 +16,12 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--database', type=Path, required=True)
 p.add_argument('--runs', type=int, default=5)
 p.add_argument('--clients', type=int, default=1)
+p.add_argument('--projection', choices=['pairs', 'states', 'messages'], default='pairs')
 p.add_argument('--cached', action='store_true', help='Exercise the shared HTTP response cache')
 p.add_argument('--repo', type=Path, default=Path(__file__).resolve().parents[2])
 a = p.parse_args()
+if a.cached and a.projection != 'pairs':
+    p.error('--cached is only supported for pairs')
 if a.runs < 1 or a.clients < 1:
     p.error('--runs and --clients must be positive')
 with tempfile.TemporaryDirectory(prefix='clarp-pair-benchmark-', dir='/var/tmp') as directory:
@@ -31,15 +34,17 @@ with tempfile.TemporaryDirectory(prefix='clarp-pair-benchmark-', dir='/var/tmp')
                       'CLARP_RUNTIME_SOCKET':'absent.sock'}.items():
         os.environ[key] = str(root/name)
     sys.path.insert(0, str(a.repo.resolve()/'server'))
-    from lib import agent_conversations, db
+    from lib import agent_conversations, agents, message_store, db
     # Resolve DB initialization outside the measured projection.
     db.conn()
     wall, cpu = [], []
     cache = agent_conversations.PairConversationListCache() if a.cached else None
+    projection = {"pairs": agent_conversations.list_conversations, "states": agents.dashboard_states,
+                  "messages": message_store.dashboard_messages}[a.projection]
     def fetch(_):
         if cache is not None:
             return json.loads(cache.get_payload())["conversations"]
-        return agent_conversations.list_conversations()
+        return projection()
     pool = ThreadPoolExecutor(max_workers=a.clients)
     for _ in range(a.runs):
         start, cpu_start = time.perf_counter(), time.process_time()
@@ -48,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix='clarp-pair-benchmark-', dir='/var/tmp')
         assert all(r == result for r in results), "inconsistent responses"
         cpu.append((time.process_time()-cpu_start)*1000)
         wall.append((time.perf_counter()-start)*1000)
-    print(json.dumps({'runs':a.runs, 'clients':a.clients, 'cached':a.cached, 'rooms':len(result),
+    print(json.dumps({'runs':a.runs, 'clients':a.clients, 'cached':a.cached, 'projection':a.projection, 'rows':len(result),
         'result_sha256':hashlib.sha256(json.dumps(result, sort_keys=True).encode()).hexdigest(),
         'wall_ms':[round(x,2) for x in wall], 'cpu_ms':[round(x,2) for x in cpu],
         'median_wall_ms':round(statistics.median(wall),2),
