@@ -192,6 +192,10 @@ ApplicationWindow {
             app.panes.equalize();
         } else if (action === "tools") {
             app.toolsVisible = !app.toolsVisible;
+        } else if (action === "jump-latest") {
+            workspace.jumpToLatest();
+        } else if (action === "dismiss-error") {
+            root.dismissConversationError();
         } else if (action === "refresh") {
             if (root.selectedSurface === "updates") app.loadUpdates();
             else app.refreshConversation();
@@ -253,6 +257,17 @@ ApplicationWindow {
         Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId));
     }
 
+    function dismissConversationError() {
+        if (root.selectedSurface !== "chats") return false;
+        const model = app.selectedSession.length > 0
+            ? app.conversationForSession(app.selectedSession) : null;
+        if (app.errorMessage.length === 0 && (!model || model.error.length === 0))
+            return false;
+        app.clearError();
+        if (model) model.error = "";
+        return true;
+    }
+
     function escapeFocus() {
         if (assignAgent.visible) {
             if (!assignAgent.submitting) assignAgent.closeRequested();
@@ -282,6 +297,8 @@ ApplicationWindow {
             reportView.visible = false;
         else if (profilePanel.visible)
             profilePanel.visible = false;
+        else if (root.dismissConversationError())
+            return;
         else if (rail.searchOwnsFocus) {
             rail.clearSearch();
             root.runCommand("chats");

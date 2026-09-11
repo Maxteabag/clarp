@@ -11,6 +11,7 @@ Rectangle {
     signal profileRequested(string session)
     readonly property bool active: controller.panes.activePaneId === String(node.id)
     readonly property string session: String(node.session || "")
+    function jumpToLatest() { conversation.jumpToLatest(); }
     focus: true
 
     color: active ? "#292b3a" : "#20212e"
@@ -36,6 +37,7 @@ Rectangle {
         spacing: 0
 
         ConversationPane {
+            id: conversation
             Layout.fillWidth: true
             Layout.fillHeight: true
             controller: root.controller

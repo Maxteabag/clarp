@@ -15,6 +15,10 @@ bool ownTurn(const QModelIndex& row) {
 }
 }
 ConversationPresentationModel::ConversationPresentationModel(QObject* parent) : QSortFilterProxyModel(parent) {
+    connect(this, &ConversationPresentationModel::countChanged, this, &ConversationPresentationModel::leadingDayLabelChanged);
+    connect(this, &QAbstractItemModel::dataChanged, this, &ConversationPresentationModel::leadingDayLabelChanged);
+    connect(this, &QAbstractItemModel::layoutChanged, this, &ConversationPresentationModel::leadingDayLabelChanged);
+    connect(this, &QAbstractItemModel::rowsMoved, this, &ConversationPresentationModel::leadingDayLabelChanged);
     connect(this, &QAbstractItemModel::modelReset, this, &ConversationPresentationModel::countChanged);
     connect(this, &QAbstractItemModel::rowsRemoved, this, &ConversationPresentationModel::countChanged);
     connect(this, &QAbstractItemModel::rowsInserted, this, [this](const QModelIndex&, int first, int last) {
@@ -22,6 +26,13 @@ ConversationPresentationModel::ConversationPresentationModel(QObject* parent) : 
         if (last == rowCount() - 1)
             emit rowsAppended(first == last && data(index(first, 0), ConversationModel::PendingRole).toBool());
     });
+}
+QString ConversationPresentationModel::leadingDayLabel() const {
+    for (int row = 0; row < rowCount(); ++row) {
+        const QString label = data(index(row, 0), ConversationModel::DayLabelRole).toString();
+        if (!label.isEmpty()) return label;
+    }
+    return {};
 }
 void ConversationPresentationModel::setShowWhenReady(bool value) {
     if (m_showWhenReady == value) return;

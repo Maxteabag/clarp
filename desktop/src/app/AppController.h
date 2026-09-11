@@ -156,7 +156,8 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] QStringList markdownDisplayBlocks(const QString& markdown) const;
     // Returns false when the link was refused, so the view can say so instead
     // of silently doing nothing.
-    Q_INVOKABLE bool openExternalLink(const QString& link);
+    Q_INVOKABLE bool openExternalLink(const QString& link, const QString& originatingHost = {});
+    Q_INVOKABLE bool openLocalReport(const QString& link, const QString& originatingHost);
     Q_INVOKABLE void copyToClipboard(const QString& text) const;
     Q_INVOKABLE [[nodiscard]] QString linkifiedOutput(const QString& text) const;
     Q_INVOKABLE [[nodiscard]] bool canLinkifyOutput(const QString& text) const;
