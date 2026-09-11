@@ -100,6 +100,11 @@ class FakeClarpServer final : public QTcpServer {
         return QJsonDocument::fromJson(m_requestBodies.value(method + u' ' + path)).object();
     }
 
+    void holdNextSnapshot() { m_holdSnapshot = true; }
+    bool hasHeldSnapshot() const { return m_heldSnapshot != nullptr; }
+    void releaseHeldSnapshot(const QJsonObject& body) {
+        if (m_heldSnapshot) { respond(m_heldSnapshot, 200, body); m_heldSnapshot = nullptr; }
+    }
     void holdLogRequests(bool hold) { m_holdLogs = hold; }
 
     void holdUploadRequests(bool hold) { m_holdUploads = hold; }
@@ -176,6 +181,9 @@ class FakeClarpServer final : public QTcpServer {
                              request.contains("Authorization: Bearer test-token") ||
                              request.contains("authorization: Bearer test-token");
 
+        if (requestKey == QStringLiteral("GET /agents/snapshot") && m_holdSnapshot) {
+            m_holdSnapshot = false; m_heldSnapshot = socket; return;
+        }
         if (const auto response = m_jsonResponses.constFind(requestKey);
             response != m_jsonResponses.cend()) {
             respond(socket, response->first, response->second);
@@ -561,6 +569,8 @@ class FakeClarpServer final : public QTcpServer {
     QHash<QString, QPair<int, QJsonObject>> m_jsonResponses;
     QPointer<QTcpSocket> m_heldLogSocket;
     QPointer<QTcpSocket> m_heldUploadSocket;
+    bool m_holdSnapshot = false;
+    QPointer<QTcpSocket> m_heldSnapshot;
     bool m_holdLogs = false;
     bool m_holdUploads = false;
     int m_transcribeCount = 0;
@@ -612,6 +622,7 @@ class NativeCoreTest final : public QObject {
     void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
     void readyModePreservesActivityAndHidesOnlyProvisionalBody();
     void idleContactStartsFreshWithSavedDefaults();
+    void newAgentWaitsForOwnRosterAndRejectsLateSnapshots();
     void launchPoolCarriesBackendModelAndHandlesEmpty();
     void redesignedRosterFiltersWithoutMutatingSource();
     void rosterLookupIsConsistentDuringStructuralSignals();
@@ -1018,6 +1029,45 @@ void NativeCoreTest::idleContactStartsFreshWithSavedDefaults() {
     QCOMPARE(controller.selectedSession(), freshSession);
 }
 
+void NativeCoreTest::newAgentWaitsForOwnRosterAndRejectsLateSnapshots() {
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    const auto oldBase = qgetenv("CLARP_BASE_URL"), oldToken = qgetenv("CLARP_TOKEN");
+    const auto restore = qScopeGuard([&] { qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken); });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN", "test-token");
+    AppController controller;
+    QTRY_VERIFY(controller.connected());
+    QTRY_COMPARE(controller.selectedSession(), QStringLiteral("rachel"));
+    server.holdNextSnapshot(); controller.refreshAgents(); QTRY_VERIFY(server.hasHeldSnapshot());
+    const QJsonObject old{{QStringLiteral("agents"), QJsonArray{QJsonObject{
+        {QStringLiteral("session"), QStringLiteral("rachel")}, {QStringLiteral("persona"), QStringLiteral("Rachel")}}}}};
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agents/snapshot"), 200, old);
+    server.setJsonResponse(QStringLiteral("POST"), QStringLiteral("/agents"), 201,
+        {{QStringLiteral("session"), QStringLiteral("new-codex")}});
+    QSignalSpy ready(&controller, &AppController::agentMutationSucceeded);
+    const auto snapshotsBeforeCreate = server.requestCount(QStringLiteral("GET"), QStringLiteral("/agents/snapshot"));
+    QVERIFY(controller.startAnonymousAgent(QStringLiteral("codex"), {}, {}));
+    QTRY_VERIFY(server.requestCount(QStringLiteral("GET"), QStringLiteral("/agents/snapshot")) > snapshotsBeforeCreate);
+    QTest::qWait(30);
+    QCOMPARE(ready.size(), 0);
+    QVERIFY(!controller.startingContact().isEmpty());
+    QVERIFY(controller.startAnonymousAgent(QStringLiteral("codex"), {}, {}));
+    QCOMPARE(server.requestCount(QStringLiteral("POST"), QStringLiteral("/agents")), 1);
+    QJsonArray rows = old.value(QStringLiteral("agents")).toArray();
+    rows.append(QJsonObject{{QStringLiteral("session"), QStringLiteral("new-codex")},
+                           {QStringLiteral("persona"), QStringLiteral("Codex-1234")},
+                           {QStringLiteral("backend"), QStringLiteral("codex")}});
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agents/snapshot"), 200,
+                           {{QStringLiteral("agents"), rows}});
+    controller.refreshAgents();
+    QTRY_COMPARE(ready.size(), 1);
+    QCOMPARE(controller.selectedSession(), QStringLiteral("new-codex"));
+    server.releaseHeldSnapshot(old); QTest::qWait(100);
+    QCOMPARE(controller.selectedSession(), QStringLiteral("new-codex"));
+    QCOMPARE(controller.panes()->activeSession(), QStringLiteral("new-codex"));
+    QCOMPARE(controller.agents()->rowCount(), 2);
+}
+
 void NativeCoreTest::launchPoolCarriesBackendModelAndHandlesEmpty() {
     FakeClarpServer server;
     QVERIFY(server.listenLocal());
@@ -1053,6 +1103,12 @@ void NativeCoreTest::launchPoolCarriesBackendModelAndHandlesEmpty() {
     QCOMPARE(request.value(QStringLiteral("model")).toString(), QStringLiteral("test-model"));
     QCOMPARE(request.value(QStringLiteral("effort")).toString(), QStringLiteral("high"));
     QVERIFY(!request.contains(QStringLiteral("replace_sid")));
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agents/snapshot"), 200,
+        {{QStringLiteral("agents"), QJsonArray{QJsonObject{
+            {QStringLiteral("session"), QStringLiteral("bella-new")},
+            {QStringLiteral("persona"), QStringLiteral("Bella")},
+            {QStringLiteral("backend"), QStringLiteral("grok")}}}}});
+    controller.refreshAgents();
     QTRY_VERIFY_WITH_TIMEOUT(controller.startingContact().isEmpty(), 3000);
     QCOMPARE(controller.lastBackend(), QStringLiteral("grok"));
     QSignalSpy empty(&controller, &AppController::launchPoolEmpty);

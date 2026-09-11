@@ -9,6 +9,7 @@ import "components"
 ApplicationWindow {
     id: root
 
+    property bool launchOnStartup: false
     property string relaunchSession: ""
     property string relaunchName: ""
     property string voiceSession: ""
@@ -26,7 +27,7 @@ ApplicationWindow {
     minimumWidth: Math.max(760, sidebarVisible ? Math.ceil(624 * uiScale) : 760)
     minimumHeight: 520
     visible: true
-    title: app.selectedName.length > 0 ? app.selectedName + " — Clarp" : "Clarp"
+    title: launchAgent.visible ? "New agent — Clarp" : app.selectedName.length > 0 ? app.selectedName + " — Clarp" : "Clarp"
     color: "#1a1b26"
     // Basic supplies control-specific defaults that can override the system
     // palette. Explicit window roles also propagate into popups and menus.
@@ -330,6 +331,9 @@ ApplicationWindow {
         transformOrigin: Item.TopLeft
 
     ColumnLayout {
+        id: desktopShell
+        objectName: "desktopShell"
+        visible: !launchAgent.visible
         anchors.fill: parent
         spacing: 0
 
@@ -473,7 +477,7 @@ ApplicationWindow {
 
         anchors.fill: parent
         controller: app
-        visible: app.agents.count === 0 && app.connectionState !== "live"
+        visible: !launchAgent.visible && app.agents.count === 0 && app.connectionState !== "live"
         z: 100
     }
 
@@ -535,14 +539,19 @@ ApplicationWindow {
         }
     }
 
-    LaunchAgentDialog {
+    LaunchAgentPage {
         id: launchAgent
         objectName: "launchAgent"
         anchors.fill: parent
         controller: app
-        visible: false
+        visible: root.launchOnStartup
         z: 100
-        onCloseRequested: { visible = false; root.focusConversation(); }
+        onCloseRequested: {
+            if (!submitting) { root.close(); return; }
+            visible = false;
+            root.selectedSurface = "chats";
+            app.requestComposerFocus(app.panes.activePaneId);
+        }
     }
 
     QuickNewAgentDialog {

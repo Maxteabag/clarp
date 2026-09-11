@@ -27,7 +27,7 @@ Rectangle {
         return choices;
     }
     signal closeRequested
-    color: "#e61a1b26"
+    color: "#1a1b26"
     Keys.onPressed: event => {
         if (event.key === Qt.Key_Escape) { back(); event.accepted = true; }
     }
@@ -115,11 +115,10 @@ Rectangle {
         }
     }
     MouseArea { anchors.fill: parent }
-    Rectangle {
+    Item {
         anchors.centerIn: parent
         width: Math.min(680, parent.width - 32)
         height: form.implicitHeight + 40
-        color: "#1a1b26"; border.color: "#41445a"
         ColumnLayout {
             id: form
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }

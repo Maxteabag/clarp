@@ -24,7 +24,7 @@ TestCase {
         function startAvailableContact(backend, model, effort) { starts++; args = [backend, model, effort]; return true; }
         function createAgent(name, cwd, backend, model, effort) { creates++; args = [name, cwd, backend, model, effort]; }
     }
-    Component { id: factory; LaunchAgentDialog { controller: stub; visible: false; width: 700; height: 700 } }
+    Component { id: factory; LaunchAgentPage { controller: stub; visible: false; width: 700; height: 700 } }
     function init() { stub.starts = 0; stub.creates = 0; stub.connected = true; stub.errorMessage = ""; }
     function test_anonymousSettingAndFlags() {
         const dialog = createTemporaryObject(factory, testCase);
