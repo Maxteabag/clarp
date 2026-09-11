@@ -384,6 +384,7 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/status": "_handle_oracle_status",
         "/oracle/delegations": "_handle_oracle_delegations_get",
         "/oracle/realtime": "_handle_oracle_realtime",
+        "/oracle/v2": "_handle_oracle_v2",
         "/oracle/calls/status": "_handle_oracle_call_status",
         "/agent-schedules": "_handle_agent_schedules_get",
     }
@@ -3676,6 +3677,10 @@ class Handler(BaseHTTPRequestHandler):
         from lib.oracle_realtime import capability
         return self._send(
             200, json.dumps(capability()).encode(), "application/json")
+
+    def _handle_oracle_v2(self):
+        from lib.oracle_live import serve
+        return serve(self)
 
     def _handle_oracle_realtime(self):
         from lib.oracle_realtime import serve
