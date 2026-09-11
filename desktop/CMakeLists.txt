@@ -169,6 +169,11 @@ qt_add_qml_module(clarp-desktop
         resources/icons/repo.svg
         resources/icons/worktree.svg
         resources/icons/more.svg
+        resources/backends/claude.png
+        resources/backends/codex.png
+        resources/backends/grok.png
+        resources/backends/agy.png
+        resources/backends/opencode.png
 )
 
 target_include_directories(clarp-desktop PRIVATE src src/app src/models)

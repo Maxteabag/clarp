@@ -2,6 +2,7 @@
 #include "app/PairSidebarSmokeCheck.h"
 #include "app/ReadyReplySmokeCheck.h"
 #include "app/KeyboardSmokeCheck.h"
+#include "app/LaunchKeyboardSmokeCheck.h"
 #include "app/AppController.h"
 #include "app/DesktopPalette.h"
 #include "platform/DesktopIntegration.h"
@@ -130,6 +131,7 @@ int main(int argc, char* argv[]) {
         });
     }
     const QString screenshotPath = qEnvironmentVariable("CLARP_SCREENSHOT_PATH");
+    if (!screenshotPath.isEmpty() && rootWindow != nullptr) startLaunchKeyboardSmokeCheck(rootWindow);
     if (!screenshotPath.isEmpty() && controller != nullptr && qEnvironmentVariableIsSet("CLARP_SCREENSHOT_MINIMAL_UI"))
         controller->setMinimalUi(qEnvironmentVariableIntValue("CLARP_SCREENSHOT_MINIMAL_UI") != 0);
     const QString screenshotLayout = qEnvironmentVariable("CLARP_SCREENSHOT_LAYOUT");

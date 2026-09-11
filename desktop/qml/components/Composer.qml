@@ -53,14 +53,18 @@ Rectangle {
     HoverHandler { id: composerHover }
 
     function restoreFocus() {
-        if (root.visible && root.active && root.controller.composerFocusPane === root.paneId)
-            Qt.callLater(() => editor.forceActiveFocus());
+        if (root.visible && root.enabled && root.active && root.controller.composerFocusPane === root.paneId)
+            Qt.callLater(() => {
+                if (root.visible && root.enabled && root.active && root.controller.composerFocusPane === root.paneId)
+                    editor.forceActiveFocus();
+            });
     }
 
     function restoreDraft() {
         editor.text = root.controller.paneDraft(root.paneId, root.session);
     }
 
+    onEnabledChanged: restoreFocus()
     onVisibleChanged: restoreFocus()
     onActiveChanged: {
         restoreDraft();
