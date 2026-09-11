@@ -28,7 +28,7 @@ module.exports.render=({ctx:c,scene={},time=0,width=1200,height=800,camera={},pl
  const m=model,now=playhead||0,ambient=reducedMotion?0:time*.001,k=camera.k||1;
  const history=new Map(),latest=new Map(),hits=[],agents=[];let drawnFiles=0;
  for(const ev of m.events){if(ev.ts>now)break;const h=history.get(ev.agent_id)||[];h.push(ev);history.set(ev.agent_id,h);latest.set(ev.world_target,ev);for(const target of ev.world_targets||[])latest.set(target,ev);}
- c.fillStyle='#0a1b25';c.fillRect(0,0,width,height);c.save();c.translate(camera.x||0,camera.y||0);c.scale(k,k);c.textBaseline='alphabetic';
+ if(!interaction.heatmapBackground){c.fillStyle='#0a1b25';c.fillRect(0,0,width,height);}c.save();c.translate(camera.x||0,camera.y||0);c.scale(k,k);c.textBaseline='alphabetic';
  for(let j=0;j<40;j++){const y=100+j*(m.bounds.h-100)/40;c.strokeStyle='#254451';c.globalAlpha=.2;c.beginPath();for(let i=0;i<50;i++){const x=i*40,yy=y+Math.sin(i*.48+j*.7+ambient*.15)*5;i?c.lineTo(x,yy):c.moveTo(x,yy);}c.stroke();}c.globalAlpha=1;
  text(c,'CLARP / LIVING FLEET',60,42,12,'#93babf','monospace');text(c,TITLE,58,85,38,'#ece8ce','Georgia');
  text(c,'Agents work at the places they touch.',60,115,15,muted);text(c,'GITHUB / REMOTE HARBOR',2100,135,13,'#c6b2f2','monospace');
@@ -102,5 +102,5 @@ module.exports.render=({ctx:c,scene={},time=0,width=1200,height=800,camera={},pl
  for(const a of agents){const ev=history.get(a.id)?.at(-1);if(ev?.workspace_target)votes.set(ev.workspace_target,(votes.get(ev.workspace_target)||0)+1);}
  const focus=m.places.get([...votes].sort((a,b)=>b[1]-a[1])[0]?.[0]);
  const focusBounds=focus?{x:Math.max(0,focus.x-45),y:Math.max(0,focus.y-120),w:1320,h:Math.max(800,Math.min(focus.h+240,1300))}:m.bounds;
- c.restore();return {title:TITLE,hits,bounds:m.bounds,focusBounds,agents,territories:m.rooms.length,files:drawnFiles};
+ c.restore();return {title:TITLE,heatmapBackground:!!interaction.heatmapBackground,hits,bounds:m.bounds,focusBounds,agents,territories:m.rooms.length,files:drawnFiles};
 };

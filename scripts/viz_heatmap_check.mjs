@@ -20,6 +20,18 @@ try{
   await page.locator('#heatmap').click();
   await page.waitForFunction(()=>window.fleetWorldSnapshot().heat.spots.length>0);
   const hot=await snap();assert.deepEqual(hot.camera,before.camera);
+  await page.waitForFunction(()=>window.fleetWorldSnapshot().meta.heatmapBackground===true);
+  const compositing=await page.evaluate(async()=>{
+   const {composeHeat}=await import('/static/lib/viz-heatmap.js');
+   const make=()=>{const c=document.createElement('canvas');c.width=c.height=100;return c;};
+   const foreground=make(),heat=make(),output=make();
+   const f=foreground.getContext('2d');f.fillStyle='#646464';f.fillRect(30,30,40,40);
+   const h=heat.getContext('2d');h.fillStyle='rgba(255,0,0,.5)';h.fillRect(0,0,100,100);
+   const ctx=output.getContext('2d');composeHeat(ctx,foreground,{heat,view:'cabinets',transparent:true});
+   return {background:[...ctx.getImageData(10,10,1,1).data],item:[...ctx.getImageData(50,50,1,1).data]};
+  });
+  assert(compositing.background[0]>100,'background receives the heat');
+  assert(compositing.item.slice(0,3).every(c=>Math.abs(c-100)<=6),'opaque items receive only a faint tint');
   const painted=await page.locator('#c').screenshot();assert(!plain.equals(painted),'heat changes actual canvas pixels');
   await page.screenshot({path:`${out}/${viewport.width}-heatmap.png`});
   await page.mouse.move(viewport.width/2,viewport.height/2);await page.mouse.wheel(0,100);
@@ -33,6 +45,10 @@ try{
   assert((await snap()).heat.enabled,'recap preserves heatmap mode');
   await page.reload();await page.waitForFunction(()=>window.fleetWorldSnapshot?.().frames>5);
   assert((await snap()).heat.enabled,'heat preference survives reload');
+  for(const view of ['world','cabinets','flow']){
+   await page.locator('#view-'+view).click();
+   await page.waitForFunction(v=>window.fleetWorldSnapshot().view===v&&window.fleetWorldSnapshot().meta.heatmapBackground===true,view);
+  }
   assert.deepEqual(errors,[]);results.push({viewport,located:hot.heat.located,spots:hot.heat.spots.length,pixelsChanged:true,errors});await context.close();
  }
  await fs.writeFile(out+'/verification.json',JSON.stringify({evidence:'Labeled synthetic workflow, real browser rendering',results},null,2));

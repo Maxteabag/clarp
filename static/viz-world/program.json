@@ -6,7 +6,7 @@
     "world.js",
     "avatar.js"
   ],
-  "source_digest": "16af3f9b0121a25bc5b982cb8ca15dbb657b8fbca044802b76b62a59067f526a",
+  "source_digest": "4f7d18f56402fa97833a5da216fa0e007eada120fdfd3778f015c818e7a02e7c",
   "authored_by": "gpt-6-astra",
   "notes": "Owner-approved destination-based activity: avatars work at actual files, directories and checkouts; local effects and verified remote transfers replace generic action stations."
 }
