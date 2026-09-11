@@ -118,7 +118,6 @@ function use(next){
       drawHeat(ctx,heatState,drawn.camera,drawn.pixelRatio);
       heatLegend.textContent=heatState.located?'Heat · cool → warm → busy · last 15 min':'Heat · no located activity in the last 15 min';
       if(heatState.unlocated)heatLegend.textContent+=` · ${heatState.unlocated} unlocated`;
-      if(heatState.truncated)heatLegend.textContent+=' · busiest 128 areas';
     }
     if(selected&&!document.getElementById('inspector').hidden)inspectHit(meta.hits?.find(h=>h.id===selected));
     lastFrameTimings=timings;
