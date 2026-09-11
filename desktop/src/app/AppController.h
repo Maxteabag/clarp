@@ -422,6 +422,7 @@ class AppController : public QObject {
     [[nodiscard]] qint64 agentConversationSeenRevision(const QString& conversationId) const;
     void refreshPairConversationsFor(const QString& session);
     void requestSnapshot();
+    bool retryCreatedAgent();
     void requestAvatars();
     void clearAvatarCache();
     void requestRecoverableClips(const QString& session);
@@ -467,6 +468,9 @@ class AppController : public QObject {
     QString m_baseUrl;
     QString m_bearerToken;
     QString m_selectedSession;
+    QString m_pendingCreatedSession;
+    int m_createdSnapshotAttempts = 0;
+    quint64 m_snapshotGeneration = 0;
     QString m_connectionState = QStringLiteral("offline");
     QString m_errorMessage;
     QString m_serverName;

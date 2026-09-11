@@ -25,7 +25,7 @@ TestCase {
         function startAvailableContact(backend, model, effort) { return startAnonymousAgent(backend,model,effort); }
         function createAgent(name,cwd,backend,model,effort) { starts++; args=[backend,model,effort,name]; }
     }
-    Component { id: factory; LaunchAgentDialog { controller: stub; visible: false; width: 820; height: 640 } }
+    Component { id: factory; LaunchAgentPage { controller: stub; visible: false; width: 820; height: 640 } }
     function init() { stub.starts=0; stub.args=[]; stub.connected=true; stub.errorMessage=""; stub.lastBackend="codex"; }
     function opened() { const d=createTemporaryObject(factory,testCase); d.open("","",""); wait(30); return d; }
     function test_providerKeys_data() {

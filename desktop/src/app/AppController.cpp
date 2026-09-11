@@ -371,6 +371,7 @@ void AppController::setAnonymousAgents(bool value) {
 }
 
 bool AppController::startAnonymousAgent(const QString& backend, const QString& model, const QString& effort) {
+    if (retryCreatedAgent()) return true;
     if (!connected() || backend.isEmpty() || !m_startingContact.isEmpty()) return false;
     setErrorMessage({});
     m_startingContact = QStringLiteral("anonymous");
@@ -411,6 +412,7 @@ void AppController::setNewAgentOnStartup(bool value) {
 }
 
 bool AppController::startAvailableContact(const QString& backend, const QString& model, const QString& effort) {
+    if (retryCreatedAgent()) return true;
     if (!connected() || backend.isEmpty() || !m_startingContact.isEmpty()) return false;
     setErrorMessage({});
     m_startingContact = QStringLiteral("pool");
@@ -704,6 +706,7 @@ void AppController::setBaseUrl(const QString& value) {
         return;
     }
     m_toolNarrator.reset();
+    m_pendingCreatedSession.clear();
     resetTransientRequestState();
     m_sse.stop();
     m_audio.setEndpoint({}, {});
@@ -909,6 +912,7 @@ void AppController::reconnect() {
 }
 
 void AppController::resetTransientRequestState() {
+    ++m_snapshotGeneration;
     m_startingContact.clear();
     emit contactLaunchChanged();
     for (const QString& session : std::as_const(m_logRequestsInFlight)) {
@@ -1449,6 +1453,7 @@ void AppController::createAgent(const QString& name, const QString& workingDirec
                                 const QString& backend, const QString& model, const QString& effort,
                                 const QString& replaceSession, const QString& mode,
                                 const QString& pastSessionId, const QVariantList& mcpServers) {
+    if (retryCreatedAgent()) return;
     const QString trimmedName = name.trimmed();
     const QString trimmedDirectory = workingDirectory.trimmed();
     if (trimmedName.isEmpty() || trimmedDirectory.isEmpty() || backend.trimmed().isEmpty()) {
@@ -2255,8 +2260,16 @@ void AppController::loadMessageToolDetails(const QString& session,
     m_api.get(tag, QStringLiteral("/message-tool-details"), query);
 }
 
+bool AppController::retryCreatedAgent() {
+    if (m_pendingCreatedSession.isEmpty()) return false;
+    m_createdSnapshotAttempts = 0;
+    setErrorMessage({});
+    requestSnapshot();
+    return true;
+}
+
 void AppController::requestSnapshot() {
-    m_api.get(QStringLiteral("snapshot"), QStringLiteral("/agents/snapshot"));
+    m_api.get(QStringLiteral("snapshot:%1").arg(++m_snapshotGeneration), QStringLiteral("/agents/snapshot"));
 }
 
 void AppController::clearAvatarCache() {
@@ -2661,7 +2674,8 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         emit contactAssignmentSucceeded(tag.sliced(17));
         return;
     }
-    if (tag == QStringLiteral("snapshot")) {
+    if (tag.startsWith(QStringLiteral("snapshot:"))) {
+        if (tag.sliced(9).toULongLong() != m_snapshotGeneration) return;
         m_availableMcpServers =
             object.value(QStringLiteral("available_mcp_servers")).toArray().toVariantList();
         m_agents.applySnapshot(object);
@@ -2675,6 +2689,25 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         }
         m_contacts.applySnapshot(object, activeNames);
         loadAgentConversations();
+        if (!m_pendingCreatedSession.isEmpty()) {
+            if (!m_agents.find(m_pendingCreatedSession)) {
+                if (++m_createdSnapshotAttempts <= 5) {
+                    const QString expected = m_pendingCreatedSession;
+                    QTimer::singleShot(200, this, [this, expected] {
+                        if (m_pendingCreatedSession == expected) requestSnapshot();
+                    });
+                } else {
+                    setErrorMessage(QStringLiteral("Your new agent is still loading. Press Enter to retry."));
+                }
+                return;
+            }
+            const QString created = std::exchange(m_pendingCreatedSession, {});
+            m_startingContact.clear();
+            emit contactLaunchChanged();
+            selectSession(created);
+            requestComposerFocus(m_panes.activePaneId());
+            emit agentMutationSucceeded(created);
+        }
         if (m_selectedSession.isEmpty() ||
             (m_agents.find(m_selectedSession) == nullptr && !isPairSession(m_selectedSession))) {
             const QString first = m_agents.firstSession();
@@ -2824,16 +2857,17 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
                 emit launchDefaultsChanged();
             }
             m_startingBackend.clear();
-            m_startingContact.clear();
-            emit contactLaunchChanged();
         }
         const QString session = object.value(QStringLiteral("session")).toString();
-        requestSnapshot();
-        if (!session.isEmpty()) {
-            selectSession(session);
-            requestComposerFocus(m_panes.activePaneId());
+        if (session.isEmpty()) {
+            m_startingContact.clear();
+            emit contactLaunchChanged();
+            setErrorMessage(QStringLiteral("The Host did not return the new agent's session."));
+            return;
         }
-        emit agentMutationSucceeded(session);
+        m_pendingCreatedSession = session;
+        m_createdSnapshotAttempts = 0;
+        requestSnapshot();
         return;
     }
     if (tag.startsWith(QStringLiteral("agent-release:")) ||
@@ -2959,6 +2993,7 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
 
 void AppController::handleRequestFailure(const QString& tag, const QString& message,
                                          int statusCode) {
+    if (tag.startsWith(QStringLiteral("snapshot:")) && tag.sliced(9).toULongLong() != m_snapshotGeneration) return;
     if (tag == QStringLiteral("desktop-presence") || tag == QStringLiteral("application-activity")) return; // Old/offline Hosts ignore optional leases.
 
     if (tag.startsWith(QStringLiteral("agent-assignment:"))) {
