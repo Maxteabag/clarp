@@ -33,6 +33,15 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
         auto* rail = window->findChild<QObject*>(QStringLiteral("sidebarRail"));
         if (!require(map != nullptr && rail != nullptr)) return;
         const auto state = [map](const char* name) { return map->property("contextName").toString() == QLatin1String(name); };
+        const auto visibleItem = [window](const QString& name) -> QQuickItem* {
+            QList<QQuickItem*> pending{window->contentItem()};
+            while (!pending.isEmpty()) {
+                auto* item = pending.takeLast();
+                pending.append(item->childItems());
+                if (item->objectName() == name && item->isVisible()) return item;
+            }
+            return nullptr;
+        };
         const QString second = QStringLiteral("keyboard-second");
         const auto selected = [rail, &second] { return rail->property("keyboardSession").toString() == second; };
         switch (step++) {
@@ -206,43 +215,45 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             break;
         }
         case 27: {
-            auto* transcript = window->findChild<QObject*>(QStringLiteral("transcriptList"));
+            auto* transcript = visibleItem(QStringLiteral("transcriptList"));
             if (!require(transcript && transcript->property("contentHeight").toReal() > transcript->property("height").toReal())) return;
             QMetaObject::invokeMethod(transcript, "pauseFollowing");
-            QMetaObject::invokeMethod(transcript, "positionViewAtBeginning");
+            transcript->setProperty("contentY", transcript->property("originY"));
             break;
         }
         case 28: {
-            auto* transcript = window->findChild<QObject*>(QStringLiteral("transcriptList"));
+            auto* transcript = visibleItem(QStringLiteral("transcriptList"));
+            if (transcript) qInfo("Scroll fixture before key: count=%d y=%.1f height=%.1f content=%.1f follow=%d end=%d", transcript->property("count").toInt(), transcript->property("contentY").toReal(), transcript->property("height").toReal(), transcript->property("contentHeight").toReal(), transcript->property("followLatest").toBool(), transcript->property("atYEnd").toBool());
             if (!require(transcript && !transcript->property("atYEnd").toBool())) return;
             press(Qt::Key_End, Qt::ControlModifier);
             break;
         }
         case 29: {
-            auto* transcript = window->findChild<QObject*>(QStringLiteral("transcriptList"));
+            auto* transcript = visibleItem(QStringLiteral("transcriptList"));
+            if (transcript) qInfo("After Ctrl+End: y=%.1f content=%.1f follow=%d end=%d state=%s draft=%s", transcript->property("contentY").toReal(), transcript->property("contentHeight").toReal(), transcript->property("followLatest").toBool(), transcript->property("atYEnd").toBool(), qPrintable(map->property("contextName").toString()), qPrintable(window->activeFocusItem()->property("text").toString()));
             if (!require(transcript && transcript->property("followLatest").toBool()
                 && transcript->property("atYEnd").toBool() && state("composer")
                 && window->activeFocusItem()->property("text").toString() == QStringLiteral("ejki "))) return;
             QMetaObject::invokeMethod(transcript, "pauseFollowing");
-            QMetaObject::invokeMethod(transcript, "positionViewAtBeginning");
+            transcript->setProperty("contentY", transcript->property("originY"));
             QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QVariant(QStringLiteral("jump-latest"))));
             break;
         }
         case 30: {
-            auto* transcript = window->findChild<QObject*>(QStringLiteral("transcriptList"));
+            auto* transcript = visibleItem(QStringLiteral("transcriptList"));
             if (!require(transcript && transcript->property("atYEnd").toBool())) return;
             QMetaObject::invokeMethod(transcript, "pauseFollowing");
-            QMetaObject::invokeMethod(transcript, "positionViewAtBeginning");
+            transcript->setProperty("contentY", transcript->property("originY"));
             break;
         }
         case 31: {
-            auto* latest = window->findChild<QObject*>(QStringLiteral("jumpToLatestButton"));
+            auto* latest = visibleItem(QStringLiteral("jumpToLatestButton"));
             if (!require(latest && latest->property("visible").toBool())) return;
             QMetaObject::invokeMethod(latest, "clicked");
             break;
         }
         default:
-            if (!require(window->findChild<QObject*>(QStringLiteral("transcriptList"))->property("atYEnd").toBool())) return;
+            if (!require(visibleItem(QStringLiteral("transcriptList"))->property("atYEnd").toBool())) return;
             if (!require(state("composer") && controller->selectedSession() == second)) return;
             window->setProperty("contextKeyboardVerified", true);
             timer->stop();

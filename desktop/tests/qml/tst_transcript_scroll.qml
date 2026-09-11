@@ -147,4 +147,12 @@ TestCase {
                "Async explanation growth above the reader must preserve the message offset");
     }
 
+    function test_jumpAccountsForBottomMargin() {
+        const view = createTemporaryObject(viewComponent, testCase, {topMargin: 10, bottomMargin: 10});
+        verify(view !== null);
+        view.scrollToLatest();
+        tryVerify(() => view.atYEnd && view.distanceFromBottom < 2,
+                  1000, "Latest must include the transcript bottom margin");
+    }
+
 }
