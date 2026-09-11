@@ -117,6 +117,25 @@ QHash<int, QByteArray> AgentListModel::roleNames() const {
     };
 }
 
+bool AgentListModel::upsertCreatedAgent(const QJsonObject& object) {
+    Agent agent = Agent::fromJson(object);
+    if (agent.session.isEmpty() || agent.agentId.isEmpty() || m_archivedOnly) return false;
+    m_transportAvailable = true;
+    const int row = indexOfSession(agent.session);
+    if (row >= 0) {
+        agent.unread = m_agents.at(row).unread;
+        m_agents[row] = std::move(agent);
+        notifyRow(row, {});
+    } else {
+        beginInsertRows({}, 0, 0);
+        m_agents.prepend(std::move(agent));
+        rebuildIndex();
+        endInsertRows();
+        emit countChanged();
+    }
+    return true;
+}
+
 void AgentListModel::applySnapshot(const QJsonObject& snapshot) {
     m_transportAvailable = true;
     QVector<Agent> next;

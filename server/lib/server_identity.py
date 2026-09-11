@@ -46,6 +46,7 @@ FEATURES: tuple[str, ...] = (
     "pairing",
     "diagnostics",
     "tool_explanations",
+    "agent_creation_details",
 )
 
 

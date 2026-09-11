@@ -3220,3 +3220,16 @@ def test_agent_assignment_endpoint_keeps_existing_session(running_server):
     status, body = _post(base + "/agent-assign", {"session": "claude", "mode": "options"})
     assert status == 200
     assert any(c["name"] == "Assigned Contact" for c in json.loads(body)["contacts"])
+
+
+def test_anonymous_creation_returns_its_agent_without_a_fleet_query(running_server, monkeypatch):
+    base, _ctx, _srv = running_server
+    from lib import agents as agents_db
+    monkeypatch.setattr(agents_db, "dashboard_states", lambda: pytest.fail("creation must not build the fleet"))
+    status, body = _post(base + "/agents", {"anonymous": True, "backend": "codex", "cwd": "/tmp"})
+    response = json.loads(body)
+    assert status == 200
+    assert response["agent"]["session"] == response["session"]
+    assert response["agent"]["agent_id"]
+    assert response["agent"]["backend"] == "codex"
+    assert response["agent"]["alive"] is True
