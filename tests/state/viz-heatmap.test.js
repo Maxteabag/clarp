@@ -13,13 +13,13 @@ it('pixelated display samples the same density and anchors cells to world coordi
  const spots=[{x:120,y:120,weight:2}],a={x:0,y:0,k:1},b={x:11,y:7,k:1};
  const ga=densityGrid(spots,a,300,240),gb=densityGrid(spots,b,300,240);
  const blocks=pixelHeat(ga,a,300,240),shifted=pixelHeat(gb,b,300,240);
- const first=blocks.find(c=>c.x===112&&c.y===112),second=shifted.find(c=>c.x===112&&c.y===112);
+ const first=blocks.find(c=>c.x===0&&c.y===0),second=shifted.find(c=>c.x===0&&c.y===0);
  expect(first.size).toBe(second.size);expect(Math.abs(first.value-second.value)).toBeLessThan(.05);
  expect(ga.density).toEqual(densityGrid(spots,a,300,240).density);
 });
 const at=(g,x,y)=>g.density[Math.round((y-g.originY)/g.cell)*g.cols+Math.round((x-g.originX)/g.cell)];
 it('matches the Gaussian profile and adds overlapping density before coloring',()=>{
- const a=grid([{x:120,y:120,weight:1}]),b=grid([{x:120,y:120,weight:2}]);
+ const a=densityGrid([{x:120,y:120,weight:1}],{x:0,y:0,k:1},900,600),b=densityGrid([{x:120,y:120,weight:2}],{x:0,y:0,k:1},900,600);
  expect(at(a,120,120)).toBeCloseTo(1,5);
  expect(at(a,120+HEAT_SIGMA,120)).toBeCloseTo(Math.exp(-.5),5);
  for(let i=0;i<a.density.length;i++)expect(b.density[i]).toBeCloseTo(2*a.density[i],5);
@@ -46,7 +46,7 @@ it('keeps overlapping heat, contour width and pixel blocks absolute across zoom'
  for(const k of [.5,1,2]){
   const camera={x:0,y:0,k},g=densityGrid(spots,camera,600,400);
   const values=[120,150,180,210].map(x=>at(g,x,120));
-  const block=pixelHeat(g,camera,600,400).find(b=>b.x===112&&b.y===112);
+  const block=pixelHeat(g,camera,600,400).find(b=>b.x===0&&b.y===0);
   if(reference){values.forEach((v,i)=>expect(v).toBeCloseTo(reference.values[i],5));expect(block).toEqual(reference.block);}
   else reference={values,block};
  }
