@@ -20,6 +20,27 @@ endif()
 
 project(ClarpDesktop VERSION ${CLARP_DESKTOP_VERSION} LANGUAGES CXX)
 
+# Leave a verifiable source receipt beside every configured release build. The
+# preview installer uses this to reject a binary copied from another checkout
+# whose build-info would otherwise be indistinguishable from the current one.
+execute_process(
+    COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}/.." rev-parse HEAD
+    OUTPUT_VARIABLE CLARP_BUILD_SOURCE_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+execute_process(
+    COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}/.." rev-parse HEAD:desktop
+    OUTPUT_VARIABLE CLARP_BUILD_DESKTOP_TREE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(CLARP_BUILD_SOURCE_COMMIT STREQUAL "" OR CLARP_BUILD_DESKTOP_TREE STREQUAL "")
+    message(FATAL_ERROR "Unable to record the Clarp source revision for this build")
+endif()
+file(WRITE "${CMAKE_BINARY_DIR}/clarp-build-source.txt"
+    "${CLARP_BUILD_SOURCE_COMMIT}\n${CLARP_BUILD_DESKTOP_TREE}\n")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
