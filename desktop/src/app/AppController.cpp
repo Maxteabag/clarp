@@ -3349,6 +3349,7 @@ void AppController::handleSseEvent(const QJsonObject& event) {
     } else if (type == QStringLiteral("audio")) {
         m_audio.enqueueClip(event);
     } else if (type == QStringLiteral("tts-error")) {
+        if (m_launchMode) return; // A launch screen has no speech request to report.
         setErrorMessage(event.value(QStringLiteral("message"))
                             .toString(event.value(QStringLiteral("error")).toString()));
     } else if (type == QStringLiteral("server-version")) {
