@@ -9,6 +9,7 @@ from . import (agents as agents_db, avatar_settings, backends, compaction, db,
                config, message_store, model_avatars, team_store,
                turn_queue, scheduler, janitors)
 from . import reconcile
+from .session_models import agent_model
 from . import personas as persona_store
 from .avatar_urls import versioned_avatar_url, janitor_avatar_url
 from .log import log_exception
@@ -121,7 +122,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "cwd":            a["cwd"],
             "session":        a["session"],
             "backend":        backend,
-            "model":          a.get("model") or "",
+            "model":          agent_model(a, bsid),
             "effort":         a.get("effort") or "",
             "mcp_servers":    mcp_servers,
             "schedules":      schedules.get(agent_id, []),

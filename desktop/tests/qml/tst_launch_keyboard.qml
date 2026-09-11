@@ -12,6 +12,13 @@ TestCase {
         property bool launchDirectoriesLoading: false
         function loadLaunchDirectories(query) {}
         function setLaunchDirectory(path) {}
+        property var pastSessions: []
+        property bool pastSessionsLoading: false
+        property var historyQuery: []
+        function loadPastSessions(cwd, backend) { historyQuery=[cwd,backend]; pastSessionsLoading=true; pastSessions=[]; }
+        function respondHistory(rows) { pastSessions=rows; pastSessionsLoading=false; pastSessionsChanged(); }
+        function resumeLaunchSession(backend,id,anonymous) { starts++; args=[backend,id,anonymous]; return true; }
+        function backendSupportsResume(backend) { return true; }
         property bool connected: true
         property bool anonymousAgents: true
         property string lastBackend: "codex"
@@ -30,8 +37,32 @@ TestCase {
         function createAgent(name,cwd,backend,model,effort) { starts++; args=[backend,model,effort,name]; }
     }
     Component { id: factory; LaunchAgentPage { controller: stub; visible: false; width: 820; height: 640 } }
-    function init() { stub.starts=0; stub.args=[]; stub.connected=true; stub.errorMessage=""; stub.lastBackend="codex"; }
+    function init() { stub.starts=0; stub.args=[]; stub.pastSessions=[]; stub.pastSessionsLoading=false; stub.connected=true; stub.errorMessage=""; stub.lastBackend="codex"; }
     function opened() { const d=createTemporaryObject(factory,testCase); d.open("","","", undefined, "/workspace"); wait(30); return d; }
+    function test_continueWaitsThenResumesLatestOnce() {
+        const d=opened(); keyClick(Qt.Key_C);
+        compare(stub.historyQuery,["/workspace","codex"]); compare(stub.starts,0);
+        keyClick(Qt.Key_Return); compare(stub.starts,0);
+        stub.respondHistory([{id:"latest",mtime:10},{id:"older",mtime:5}]);
+        compare(stub.args,["codex","latest",true]); compare(stub.starts,1);
+        keyClick(Qt.Key_Return); compare(stub.starts,1);
+    }
+    function test_resumeArrowsSelectOlder() {
+        const d=opened(); keyClick(Qt.Key_R);
+        stub.respondHistory([{id:"latest",mtime:10},{id:"older",mtime:5}]); wait(20);
+        keyClick(Qt.Key_Down); keyClick(Qt.Key_Return);
+        compare(stub.args,["codex","older",true]);
+    }
+    function test_escapeCancelsPendingContinue() {
+        const d=opened(); keyClick(Qt.Key_C); keyClick(Qt.Key_Escape);
+        stub.respondHistory([{id:"latest",mtime:10}]); wait(20);
+        compare(stub.starts,0); verify(!d.choosingSessions);
+        keyClick(Qt.Key_Return); compare(stub.args,["codex","",""]);
+    }
+    function test_noHistoryDoesNotCreate() {
+        const d=opened(); keyClick(Qt.Key_C); stub.respondHistory([]);
+        keyClick(Qt.Key_Return); compare(stub.starts,0);
+    }
     function test_providerKeys_data() {
         return [
             {tag:"default-1-key",keys:[],backend:"codex"},

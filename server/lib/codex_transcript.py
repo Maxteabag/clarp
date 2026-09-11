@@ -1722,7 +1722,7 @@ def list_sessions(
             uri = f"file:{db_path}?mode=ro"
             with sqlite3.connect(uri, uri=True, timeout=1) as conn:
                 conn.row_factory = sqlite3.Row
-                where = "WHERE has_user_event = 1"
+                where = "WHERE (has_user_event = 1 OR COALESCE(first_user_message, '') != '')"
                 params: list[Any] = []
                 if not all_projects and want:
                     where += " AND cwd = ?"

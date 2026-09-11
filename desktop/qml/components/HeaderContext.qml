@@ -76,7 +76,7 @@ Item {
             textFormat: Text.PlainText
             objectName: "headerModel"
             visible: root.showRuntime
-            text: String(root.metadata.model || "default model")
+            text: String(root.metadata.model || "Model unavailable")
             Layout.minimumWidth: 0
             Layout.maximumWidth: root.width * 0.19
             elide: Text.ElideMiddle
@@ -85,7 +85,7 @@ Item {
             font.pixelSize: 11
             HoverHandler { id: modelHover }
             ToolTip.visible: modelHover.hovered
-            ToolTip.text: "Configured model: " + String(root.metadata.model || "Host default")
+            ToolTip.text: root.metadata.model ? "Agent model: " + String(root.metadata.model) : "This session has not reported its model"
         }
         TuiText {
             textFormat: Text.PlainText

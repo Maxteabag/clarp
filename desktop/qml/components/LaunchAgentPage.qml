@@ -13,11 +13,16 @@ Rectangle {
     property bool autoStart: false
     property bool submitting: false
     property bool poolEmpty: false
+    property bool choosingSessions: false
+    readonly property bool historyLoading: controller.pastSessionsLoading || false
+    property bool continueLatest: false
+    property string resumeId: ""
     property bool choosingModel: false
     property bool choosingDirectory: true
     property string directory: "~"
     property string directoryLabel: "~"
     property int catalogRevision: 0
+    readonly property bool canResume: catalogRevision === 0 || controller.backendSupportsResume(backend)
     readonly property var providers: [
         {id:"claude",label:"Claude"}, {id:"codex",label:"Codex"},
         {id:"grok",label:"Grok"}, {id:"agy",label:"AGY"}, {id:"opencode",label:"OpenCode"}
@@ -39,6 +44,7 @@ Rectangle {
         if (visible && !submitting) {
             if (choosingDirectory) directoryPicker.focusSearch();
             else if (poolEmpty) nameField.forceActiveFocus();
+            else if (choosingSessions) sessions.forceActiveFocus();
             else if (choosingModel) models.forceActiveFocus();
             else cards.itemAt(selectedIndex).forceActiveFocus();
         }
@@ -48,9 +54,24 @@ Rectangle {
         if (backend !== next) { backend = next; modelId = ""; effort = ""; }
     }
     function moveProvider(delta) { selectProvider(selectedIndex + delta); focusSelected(); }
+    function showSessions(latest) {
+        if (submitting || !controller.connected || !canResume) return;
+        controller.clearError();
+        choosingModel = false; choosingSessions = true; continueLatest = latest; resumeId = "";
+        controller.loadPastSessions(directory, backend);
+        Qt.callLater(focusSelected);
+    }
+    function resumeSelected() {
+        if (submitting || controller.pastSessionsLoading) return;
+        const rows = controller.pastSessions;
+        if (!rows.length) return;
+        resumeId = String(rows[Math.max(0, sessions.currentIndex)].id);
+        submitting = controller.resumeLaunchSession(backend, resumeId, anonymous);
+    }
     function showModels() { choosingModel = !choosingModel; Qt.callLater(focusSelected); }
     function back() {
-        if (choosingModel) { choosingModel = false; Qt.callLater(focusSelected); }
+        if (choosingSessions) { choosingSessions = false; continueLatest = false; Qt.callLater(focusSelected); }
+        else if (choosingModel) { choosingModel = false; Qt.callLater(focusSelected); }
         else if (choosingDirectory) directoryPicker.back();
         else { choosingDirectory = true; Qt.callLater(focusSelected); }
     }
@@ -67,7 +88,7 @@ Rectangle {
         autoStart = wantedBackend.length > 0;
         submitting = false;
         poolEmpty = false;
-        choosingModel = false;
+        choosingModel = false; choosingSessions = false; continueLatest = false; resumeId = "";
         nameField.clear();
         controller.clearError();
         visible = true;
@@ -80,13 +101,14 @@ Rectangle {
     }
     function submit() {
         if (choosingDirectory) { directoryPicker.confirm(); return; }
+        if (choosingSessions && !poolEmpty) { resumeSelected(); return; }
         if (submitting || !controller.connected || !backend) return;
         controller.clearError();
         if (poolEmpty) {
             if (!nameField.text.trim()) return;
             submitting = true;
             controller.createAgent(nameField.text.trim(), directory,
-                backend, modelId, effort, "", "fresh", "", []);
+                backend, resumeId ? "" : modelId, resumeId ? "" : effort, "", resumeId ? "resume" : "fresh", resumeId, []);
         } else {
             submitting = anonymous ? controller.startAnonymousAgent(backend, modelId, effort)
                 : controller.startAvailableContact(backend, modelId, effort);
@@ -107,12 +129,20 @@ Rectangle {
             break;
         case Qt.Key_Return: case Qt.Key_Enter: submit(); break;
         case Qt.Key_M: showModels(); break;
+        case Qt.Key_C: showSessions(true); break;
+        case Qt.Key_R: showSessions(false); break;
         default: return;
         }
         event.accepted = true;
     }
     Connections {
         target: root.controller
+        function onPastSessionsChanged() {
+            if (!root.visible || !root.choosingSessions || root.controller.pastSessionsLoading) return;
+            sessions.currentIndex = 0;
+            if (root.continueLatest) { root.continueLatest = false; root.resumeSelected(); }
+            Qt.callLater(root.focusSelected);
+        }
         function onModelCatalogChanged() { root.catalogRevision++; }
         function onConnectedChanged() { root.maybeStart(); }
         function onLaunchPoolEmpty() {
@@ -122,7 +152,7 @@ Rectangle {
         }
         function onAgentMutationSucceeded() { if (root.visible && root.submitting) root.closeRequested(); }
         function onErrorMessageChanged() {
-            if (root.controller.errorMessage.length > 0) { root.submitting = false; Qt.callLater(root.focusSelected); }
+            if (root.controller.errorMessage.length > 0) { root.submitting = false; root.continueLatest = false; Qt.callLater(root.focusSelected); }
         }
     }
     MouseArea { anchors.fill: parent }
@@ -134,7 +164,7 @@ Rectangle {
             id: form
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }
             spacing: 16
-            TuiText { text: root.choosingDirectory ? "Directory" : root.poolEmpty ? "New contact" : "New agent"; color: "#c0caf5"; font.pixelSize: 18 }
+            TuiText { text: root.choosingDirectory ? "Directory" : root.poolEmpty ? "New contact" : root.choosingSessions ? "Resume session" : "New agent"; color: "#c0caf5"; font.pixelSize: 18 }
             LaunchDirectoryPicker {
                 id: directoryPicker
                 Layout.fillWidth: true
@@ -155,7 +185,7 @@ Rectangle {
             }
             RowLayout {
                 Layout.fillWidth: true
-                visible: !root.choosingDirectory && !root.poolEmpty
+                visible: !root.choosingDirectory && !root.poolEmpty && !root.choosingSessions
                 spacing: 8
                 Repeater {
                     id: cards
@@ -198,6 +228,49 @@ Rectangle {
                             }
                         }
                     }
+                }
+            }
+            ListView {
+                id: sessions
+                objectName: "launchSessions"
+                visible: root.choosingSessions && !root.choosingDirectory && !root.poolEmpty
+                enabled: !root.submitting
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(280, Math.max(1, count) * 52)
+                clip: true
+                model: root.controller.pastSessions || []
+                currentIndex: 0
+                keyNavigationEnabled: false
+                Keys.onShortcutOverride: event => {
+                    if ([Qt.Key_Return, Qt.Key_Enter, Qt.Key_Escape].includes(event.key)) event.accepted = true;
+                }
+                Keys.onPressed: event => {
+                    if ([Qt.Key_Down, Qt.Key_Up, Qt.Key_Tab, Qt.Key_Backtab].includes(event.key)) {
+                        const delta = event.key === Qt.Key_Up || event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) ? -1 : 1;
+                        if (count) currentIndex = (currentIndex + delta + count) % count;
+                        positionViewAtIndex(currentIndex, ListView.Contain);
+                    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) root.resumeSelected();
+                    else return;
+                    event.accepted = true;
+                }
+                TuiText {
+                    visible: sessions.count === 0
+                    text: root.controller.pastSessionsLoading ? "Loading…" : "No previous sessions"
+                    color: "#9ca1bd"
+                }
+                delegate: Rectangle {
+                    id: sessionRow
+                    required property var modelData
+                    required property int index
+                    width: sessions.width; height: 52
+                    color: sessions.currentIndex === index ? "#303348" : "transparent"
+                    border.color: sessions.currentIndex === index ? "#bb9af7" : "transparent"
+                    Column {
+                        anchors { fill: parent; margins: 7 }
+                        TuiText { width: parent.width; text: String(sessionRow.modelData.title || sessionRow.modelData.preview || sessionRow.modelData.id); elide: Text.ElideRight; color: "#c0caf5" }
+                        TuiText { text: new Date(Number(sessionRow.modelData.mtime) * 1000).toLocaleString(); color: "#9ca1bd"; font.pixelSize: 11 }
+                    }
+                    MouseArea { anchors.fill: parent; onClicked: { sessions.currentIndex = parent.index; root.resumeSelected(); } }
                 }
             }
             ListView {
@@ -266,12 +339,22 @@ Rectangle {
             RowLayout {
                 TuiButton {
                     id: modelButton
-                    visible: !root.choosingDirectory && !root.poolEmpty
+                    visible: !root.choosingDirectory && !root.poolEmpty && !root.choosingSessions
                     text: root.modelId ? root.modelId + " · M" : "Model · M"
                     enabled: !root.submitting
                     onClicked: root.showModels()
                     KeyNavigation.backtab: cards.itemAt(root.providers.length - 1)
                     KeyNavigation.tab: cancelButton
+                }
+                TuiButton {
+                    visible: !root.choosingDirectory && !root.poolEmpty && !root.choosingSessions
+                    text: "Continue · C"; enabled: !root.submitting && root.canResume
+                    onClicked: root.showSessions(true)
+                }
+                TuiButton {
+                    visible: !root.choosingDirectory && !root.poolEmpty && !root.choosingSessions
+                    text: "Resume · R"; enabled: !root.submitting && root.canResume
+                    onClicked: root.showSessions(false)
                 }
                 Item { Layout.fillWidth: true }
                 TuiButton {
@@ -283,8 +366,8 @@ Rectangle {
                 }
                 TuiButton {
                     id: startButton
-                    text: root.submitting ? "Starting…" : root.choosingDirectory ? "Continue ↵" : root.poolEmpty ? "Create ↵" : "Start ↵"
-                    enabled: !root.submitting && (root.choosingDirectory || root.controller.connected) && (!root.poolEmpty || nameField.text.trim().length > 0)
+                    text: root.submitting ? "Starting…" : root.choosingDirectory ? "Continue ↵" : root.poolEmpty ? "Create ↵" : root.choosingSessions ? "Resume ↵" : "Start ↵"
+                    enabled: !root.submitting && (root.choosingDirectory || root.controller.connected) && (!root.poolEmpty || nameField.text.trim().length > 0) && (!root.choosingSessions || root.poolEmpty || (!root.controller.pastSessionsLoading && sessions.count > 0))
                     onClicked: root.submit()
                     KeyNavigation.tab: cards.itemAt(0)
                     KeyNavigation.backtab: cancelButton
