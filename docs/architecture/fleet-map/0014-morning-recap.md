@@ -9,8 +9,9 @@ map as the complementary spatial view; changing modes does not redesign it.
 
 Offer Yesterday (local calendar), Since last review and Last 7 days. Include
 the user's last recorded request, agent-declared task status and current pending
-decisions. Published outcomes are distinct from declared completion. An old open
-task for a relevant agent remains visible. Archived agents keep their identity.
+decisions. Published outcomes are distinct from declared completion. Open tasks
+and pending decisions remain visible even without new activity after a review.
+Archived agents keep their identity.
 Do not invent project attribution or treat unpublished filesystem files as a
 complete artifact gallery. State coverage and record limits visibly.
 

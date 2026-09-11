@@ -35,6 +35,17 @@ def test_deleted_and_unsafe_content_cannot_be_opened():
     assert viz_recap.content(con,'unsafe') is None
 
 
+def test_open_work_survives_a_review_boundary_without_new_activity():
+    con, output=seed()
+    output('pending',kind='decision')
+    con.execute("INSERT INTO artifact_decisions(decision_id,artifact_id,question,status) VALUES('pending','pending','Approve?','pending')")
+    con.execute("INSERT INTO task_plans(plan_id,agent_id,session,title,status,created_at,updated_at) VALUES('open','agent-a','ada','Still working','active',10,20)")
+    result=viz_recap.build(con,200,300,now=300)
+    assert result['counts']['artifacts']==0
+    assert result['groups'][0]['plans'][0]['id']=='open'
+    assert result['groups'][0]['attention'][0]['id']=='pending'
+
+
 def test_limits_are_disclosed_and_dates_are_validated(monkeypatch):
     con, output=seed();output('a');output('b')
     monkeypatch.setattr(viz_recap,'LIMIT',1)

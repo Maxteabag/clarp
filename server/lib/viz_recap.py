@@ -72,16 +72,15 @@ def build(con, since, until, now=None):
             g['request'] = {'text': ' '.join((row['original_text'] or '').split())[:280], 'at': row['observed_at']}
         g['latest'] = max(g['latest'], row['observed_at'])
     plans = rows('plans', 'SELECT * FROM task_plans WHERE max(created_at,updated_at) BETWEEN ? AND ? ORDER BY updated_at DESC', (since, until))
-    # Old unfinished plans still matter for agents present in this recap.
-    unfinished = rows('unfinished plans', "SELECT * FROM task_plans WHERE status NOT IN ('completed','cancelled','failed') AND updated_at<? ORDER BY updated_at DESC", (since,))
-    known = set(groups) | {r['agent_id'] for r in plans}
-    for row in [*plans, *(r for r in unfinished if r['agent_id'] in known)]:
+    # Reviewing yesterday's outputs must not hide still-open work next morning.
+    unfinished = rows('unfinished plans', "SELECT * FROM task_plans WHERE status NOT IN ('completed','cancelled','failed') ORDER BY updated_at DESC", ())
+    known = {r['plan_id'] for r in plans}
+    for row in [*plans, *(r for r in unfinished if r['plan_id'] not in known)]:
         g = group(row['agent_id'], row['session'])
         items = con.execute("SELECT title FROM task_items WHERE plan_id=? AND status='in_progress' ORDER BY position LIMIT 1", (row['plan_id'],)).fetchone()
         g['plans'].append({'id': row['plan_id'], 'title': row['title'], 'status': row['status'], 'updated_at': row['updated_at'], 'current': items['title'] if items else None})
         g['latest'] = max(g['latest'], row['updated_at'])
     attention = rows('decisions', "SELECT a.agent_id,a.session,a.title,d.decision_id,d.blocks_progress,a.created_at FROM artifact_decisions d JOIN artifacts a USING(artifact_id) WHERE d.status='pending' AND a.deleted_at IS NULL AND (d.expires_at IS NULL OR d.expires_at>?) ORDER BY a.created_at DESC", (now,))
-    attention = [row for row in attention if row['agent_id'] in groups]
     for row in attention:
         g = group(row['agent_id'], row['session'])
         g['attention'].append({'id': row['decision_id'], 'title': row['title'], 'blocks_progress': bool(row['blocks_progress'])})
