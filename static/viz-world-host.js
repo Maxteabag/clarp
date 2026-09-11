@@ -26,9 +26,14 @@ let recoveryTimer=null,recoveryAttempts=0,lastFrameTimings={};
 const retryButton=document.getElementById('retry-render');
 const fittedViews=new Set();
 const heatButton=document.getElementById('heatmap'),heatLegend=document.getElementById('heat-legend');
+const heatStyleButton=document.getElementById('heat-style');let heatStyle='smooth';
+try{if(localStorage.getItem('clarp.fleet.heatStyle')==='pixelated')heatStyle='pixelated';}catch{}
+function heatStyleLabel(){heatStyleButton.textContent=heatStyle==='smooth'?'Smooth heat':'Pixelated heat';heatStyleButton.ariaPressed=String(heatStyle==='pixelated');}
+heatStyleButton.onclick=()=>{heatStyle=heatStyle==='smooth'?'pixelated':'smooth';heatStyleLabel();try{localStorage.setItem('clarp.fleet.heatStyle',heatStyle);}catch{}};
+heatStyleLabel();
 let heatEnabled=false,heatState={spots:[],located:0,unlocated:0};
 try{heatEnabled=localStorage.getItem('clarp.fleet.heatmap')==='true';}catch{}
-function heatLabel(){heatButton.ariaPressed=String(heatEnabled);heatLegend.hidden=!heatEnabled;}
+function heatLabel(){heatButton.ariaPressed=String(heatEnabled);heatLegend.hidden=!heatEnabled;heatStyleButton.hidden=!heatEnabled;}
 heatButton.onclick=()=>{heatEnabled=!heatEnabled;heatLabel();try{localStorage.setItem('clarp.fleet.heatmap',String(heatEnabled));}catch{}};
 heatLabel();
 const follow=new FollowCamera(),followButton=document.getElementById('follow-activity');
@@ -114,8 +119,8 @@ function use(next){
     ctx.drawImage(bitmap,0,0);bitmap.close();meta=result;frames++;
     const drawn=sandbox?.lastFrameInput;
     if(heatEnabled&&drawn&&drawn.width===canvas.width&&drawn.height===canvas.height){
-      heatState=activityHeat(sandbox.scene?.events||[],result.hits||[],drawn.playhead);
-      drawHeat(ctx,heatState,drawn.camera,drawn.pixelRatio);
+      heatState=activityHeat(sandbox.scene?.events||[],result.heatTargets||result.hits||[],drawn.playhead);
+      drawHeat(ctx,heatState,drawn.camera,drawn.pixelRatio,heatStyle);
       heatLegend.textContent=heatState.located?'Heat · cool → warm → busy · last 15 min':'Heat · no located activity in the last 15 min';
       if(heatState.unlocated)heatLegend.textContent+=` · ${heatState.unlocated} unlocated`;
     }
@@ -255,7 +260,7 @@ canvas.onpointerup=e=>{
  if(!pointers.has(e.pointerId))return;
  if(pointers.size===1&&!gestureMoved){
   const x=(e.clientX-camera.x)/camera.k,y=(e.clientY-camera.y)/camera.k;
-  const hit=[...(meta.hits||[])].reverse().find(b=>x>=b.x&&y>=b.y&&x<=b.x+b.w&&y<=b.y+b.h);
+  const hit=[...(meta.hits||[])].reverse().sort((a,b)=>(b.priority||0)-(a.priority||0)).find(b=>x>=b.x&&y>=b.y&&x<=b.x+b.w&&y<=b.y+b.h);
   if(hit){selected=hit.id;document.getElementById('inspector').hidden=false;inspectHit(hit);}
  }
  pointers.delete(e.pointerId);
