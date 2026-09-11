@@ -195,11 +195,32 @@ Rectangle {
                 required property string section
                 width: transcript.width
                 height: section.length > 0 ? 32 : 0
+                visible: section.length > 0
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 14
+                    anchors.right: dateLabel.left
+                    anchors.rightMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: 1
+                    color: "#303342"
+                }
                 Text {
+                    id: dateLabel
                     anchors.centerIn: parent
                     text: parent.section
                     color: "#8d93b0"
+                    font.family: "JetBrains Mono"
                     font.pixelSize: 11
+                }
+                Rectangle {
+                    anchors.left: dateLabel.right
+                    anchors.leftMargin: 12
+                    anchors.right: parent.right
+                    anchors.rightMargin: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: 1
+                    color: "#303342"
                 }
             }
             boundsBehavior: Flickable.StopAtBounds
