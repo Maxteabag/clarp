@@ -256,7 +256,7 @@ ApplicationWindow {
         if (assignAgent.visible) {
             if (!assignAgent.submitting) assignAgent.closeRequested();
         } else if (launchAgent.visible) {
-            if (!launchAgent.submitting) { launchAgent.autoStart = false; launchAgent.closeRequested(); }
+            if (!launchAgent.submitting) launchAgent.back();
         } else if (previewVersionPanel.visible)
             previewVersionPanel.close();
         else if (quickNewAgent.visible)
@@ -315,6 +315,7 @@ ApplicationWindow {
         delegate: Shortcut {
             required property var modelData
             sequence: modelData.key
+            enabled: !(launchAgent.visible && modelData.action === "escape")
             context: Qt.WindowShortcut
             autoRepeat: modelData.action === "agent-next" || modelData.action === "agent-previous"
             onActivated: root.runCommand(modelData.action)
@@ -393,6 +394,7 @@ ApplicationWindow {
 
                 Workspace {
                     id: workspace
+                    enabled: root.workspaceAvailable()
                     anchors.fill: parent
                     visible: root.selectedSurface === "chats"
                     controller: app
