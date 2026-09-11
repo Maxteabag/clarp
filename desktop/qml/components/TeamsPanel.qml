@@ -39,33 +39,33 @@ Rectangle {
             Layout.rightMargin: 12
             spacing: 9
 
-            Text {
+            TuiText {
                 text: "TEAMS"
                 color: "#c9cde3"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 19
+                font.pixelSize: 17
                 font.weight: Font.DemiBold
                 font.letterSpacing: 1.5
             }
-            Text {
+            TuiText {
                 text: root.controller.teams.length + " teams"
                 color: "#656a82"
                 font.family: "JetBrains Mono"
                 font.pixelSize: 11
             }
             Item { Layout.fillWidth: true }
-            BusyIndicator {
+            TuiBusyIndicator {
                 visible: root.controller.teamsLoading
                 running: visible
                 implicitWidth: 18
                 implicitHeight: 18
             }
-            Button {
+            TuiButton {
                 text: "+ New"
                 implicitHeight: 28
                 onClicked: createDialog.open()
             }
-            ToolButton {
+            TuiToolButton {
                 text: "↻"
                 implicitWidth: 28
                 implicitHeight: 28
@@ -85,7 +85,7 @@ Rectangle {
             Layout.fillWidth: true
             implicitHeight: visible ? 34 : 0
             color: "#2b2028"
-            Text {
+            TuiText {
                 anchors.fill: parent
                 anchors.margins: 8
                 text: root.controller.teamsError
@@ -122,7 +122,7 @@ Rectangle {
                         === root.controller.selectedTeamId
                     onClicked: root.controller.selectTeam(String(modelData.team_id || ""))
                     background: Rectangle {
-                        radius: 5
+                        radius: 0
                         color: teamRow.highlighted ? "#272b40"
                             : teamRow.hovered ? "#202332" : "transparent"
                         border.color: teamRow.highlighted ? "#596083" : "transparent"
@@ -132,12 +132,12 @@ Rectangle {
                         Rectangle {
                             Layout.preferredWidth: 34
                             Layout.preferredHeight: 34
-                            radius: 9
+                            radius: 0
                             color: {
                                 const value = String(teamRow.modelData.color || "");
                                 return value.startsWith("#") ? value : "#41465f";
                             }
-                            Text {
+                            TuiText {
                                 anchors.centerIn: parent
                                 text: String(teamRow.modelData.name || "?").slice(0, 1).toUpperCase()
                                 color: "#eef0fb"
@@ -150,7 +150,7 @@ Rectangle {
                             spacing: 2
                             RowLayout {
                                 Layout.fillWidth: true
-                                Text {
+                                TuiText {
                                     Layout.fillWidth: true
                                     text: String(teamRow.modelData.name || "Team")
                                     color: "#c8cadc"
@@ -162,9 +162,9 @@ Rectangle {
                                     visible: Number(teamRow.modelData.unread_count || 0) > 0
                                     Layout.preferredWidth: 18
                                     Layout.preferredHeight: 16
-                                    radius: 8
+                                    radius: 0
                                     color: "#91a884"
-                                    Text {
+                                    TuiText {
                                         anchors.centerIn: parent
                                         text: String(teamRow.modelData.unread_count || 0)
                                         color: "#1a1b26"
@@ -172,7 +172,7 @@ Rectangle {
                                     }
                                 }
                             }
-                            Text {
+                            TuiText {
                                 Layout.fillWidth: true
                                 text: String(teamRow.modelData.latest_message || "")
                                     || String((teamRow.modelData.member_agent_ids || []).length)
@@ -206,7 +206,7 @@ Rectangle {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 2
-                                Text {
+                                TuiText {
                                     Layout.fillWidth: true
                                     text: {
                                         const team = root.selectedTeam();
@@ -217,7 +217,7 @@ Rectangle {
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
                                 }
-                                Text {
+                                TuiText {
                                     Layout.fillWidth: true
                                     text: {
                                         const team = root.selectedTeam();
@@ -235,7 +235,7 @@ Rectangle {
                                     elide: Text.ElideMiddle
                                 }
                             }
-                            ToolButton {
+                            TuiToolButton {
                                 visible: root.controller.selectedTeamId.length > 0
                                 text: "···"
                                 implicitWidth: 28
@@ -321,19 +321,19 @@ Rectangle {
                                         required property string modelData
                                         implicitWidth: memberName.implicitWidth + removeMember.implicitWidth + 18
                                         implicitHeight: 25
-                                        radius: 12
+                                        radius: 0
                                         color: "#272b3c"
                                         border.color: "#3b4057"
                                         Row {
                                             anchors.centerIn: parent
                                             spacing: 4
-                                            Text {
+                                            TuiText {
                                                 id: memberName
                                                 text: root.controller.agentNameById(memberChip.modelData)
                                                 color: "#aeb2cb"
                                                 font.pixelSize: 11
                                             }
-                                            ToolButton {
+                                            TuiToolButton {
                                                 id: removeMember
                                                 text: "×"
                                                 implicitWidth: 18
@@ -348,7 +348,7 @@ Rectangle {
                                     }
                                 }
 
-                                Button {
+                                TuiButton {
                                     text: "+ member"
                                     implicitHeight: 25
                                     onClicked: {
@@ -378,7 +378,7 @@ Rectangle {
                             required property var modelData
                             width: ListView.view.width - 28
                             implicitHeight: messageColumn.implicitHeight + 18
-                            radius: 5
+                            radius: 0
                             color: "#202331"
                             border.width: 0
                             ColumnLayout {
@@ -390,14 +390,14 @@ Rectangle {
                                 spacing: 5
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    Text {
+                                    TuiText {
                                         Layout.fillWidth: true
                                         text: String(message.modelData.source_name || "Agent")
                                         color: "#9ca3c7"
                                         font.pixelSize: 12
                                         font.weight: Font.DemiBold
                                     }
-                                    Button {
+                                    TuiButton {
                                         visible: String(message.modelData.source_session || "").length > 0
                                         text: "Open chat"
                                         implicitHeight: 24
@@ -417,7 +417,7 @@ Rectangle {
                             }
                         }
 
-                        Label {
+                        TuiLabel {
                             anchors.centerIn: parent
                             visible: messages.count === 0 && !root.controller.teamsLoading
                             text: root.controller.selectedTeamId.length > 0
@@ -443,8 +443,8 @@ Rectangle {
         }
         ColumnLayout {
             width: 320
-            Label { text: "Team name" }
-            TextField {
+            TuiLabel { text: "Team name" }
+            TuiTextField {
                 id: teamName
                 Layout.fillWidth: true
                 placeholderText: "e.g. Release crew"
@@ -459,7 +459,7 @@ Rectangle {
         title: "Delete team?"
         standardButtons: Dialog.Yes | Dialog.Cancel
         onAccepted: root.controller.deleteTeam(root.controller.selectedTeamId)
-        Label {
+        TuiLabel {
             text: "This removes the team and its history."
             color: "#b8bbcf"
         }
@@ -478,15 +478,15 @@ Rectangle {
             String(editLeader.currentValue || ""))
         ColumnLayout {
             width: 340
-            Label { text: "Name" }
-            TextField { id: editName; Layout.fillWidth: true }
-            Label { text: "Color" }
-            TextField {
+            TuiLabel { text: "Name" }
+            TuiTextField { id: editName; Layout.fillWidth: true }
+            TuiLabel { text: "Color" }
+            TuiTextField {
                 id: editColor
                 Layout.fillWidth: true
                 placeholderText: "#596083"
             }
-            Label { text: "Leader" }
+            TuiLabel { text: "Leader" }
             ThemedComboBox {
                 id: editLeader
                 Layout.fillWidth: true
@@ -511,7 +511,7 @@ Rectangle {
         }
         ColumnLayout {
             width: 320
-            Label { text: "Agent" }
+            TuiLabel { text: "Agent" }
             ThemedComboBox {
                 id: memberChoice
                 Layout.fillWidth: true

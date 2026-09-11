@@ -78,7 +78,7 @@ ItemDelegate {
                 anchors.top: parent.top
                 width: 12
                 height: 12
-                radius: width / 2
+                radius: 0
                 color: "#bb9af7"
                 border.color: "#20212e"
                 border.width: 2
@@ -95,7 +95,7 @@ ItemDelegate {
                 Layout.fillWidth: true
                 spacing: 8
 
-                Text {
+                TuiText {
                     Layout.fillWidth: true
                     text: row.name
                     color: "#eee8e2"
@@ -104,7 +104,7 @@ ItemDelegate {
                     elide: Text.ElideRight
                 }
 
-                Text {
+                TuiText {
                     text: row.controller.chatStamp(row.lastActivity)
                     color: row.unread ? "#c69ade" : "#77717f"
                     font.pixelSize: 10
@@ -115,7 +115,7 @@ ItemDelegate {
                 Layout.fillWidth: true
                 spacing: 6
 
-                Text {
+                TuiText {
                     Layout.fillWidth: true
                     textFormat: Text.PlainText
                     objectName: "sidebarMessagePreview"
@@ -126,14 +126,14 @@ ItemDelegate {
                     maximumLineCount: 1
                 }
 
-                Text {
+                TuiText {
                     visible: row.muted
                     text: "⃠"
                     color: "#77717f"
                     font.pixelSize: 11
                 }
 
-                Text {
+                TuiText {
                     visible: row.queueCount > 0
                     text: row.queueCount + " queued"
                     color: "#dba163"
@@ -144,10 +144,10 @@ ItemDelegate {
                     visible: row.unread
                     implicitWidth: Math.max(18, unreadLabel.implicitWidth + 10)
                     implicitHeight: 18
-                    radius: height / 2
+                    radius: 0
                     color: "#bb9af7"
 
-                    Text {
+                    TuiText {
                         id: unreadLabel
 
                         anchors.centerIn: parent
@@ -159,7 +159,7 @@ ItemDelegate {
                 }
             }
 
-            Text {
+            TuiText {
                 visible: !row.archived && row.activityLine.length > 0
                 Layout.fillWidth: true
                 text: row.activityLine
@@ -169,7 +169,7 @@ ItemDelegate {
             }
         }
 
-        Button {
+        TuiButton {
             visible: row.archived && !row.collapsed
             text: "Restore"
             onClicked: row.controller.setAgentArchived(row.session, false)

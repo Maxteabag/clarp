@@ -70,7 +70,7 @@ ItemDelegate {
                 anchors.top: parent.top
                 width: 12
                 height: 12
-                radius: 6
+                radius: 0
                 color: "#bb9af7"
                 border.color: "#20212e"
                 border.width: 2
@@ -84,7 +84,7 @@ ItemDelegate {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8
-                Text {
+                TuiText {
                     objectName: "pairTitle"
                     Layout.fillWidth: true
                     text: String(row.room.title || "Agent conversation")
@@ -93,13 +93,13 @@ ItemDelegate {
                     font.weight: row.unread ? Font.DemiBold : Font.Medium
                     elide: Text.ElideRight
                 }
-                Text {
+                TuiText {
                     text: row.controller.chatStamp(Number(row.room.latest_activity || 0))
                     color: row.unread ? "#c69ade" : "#77717f"
                     font.pixelSize: 10
                 }
             }
-            Text {
+            TuiText {
                 objectName: "pairPreview"
                 Layout.fillWidth: true
                 textFormat: Text.PlainText

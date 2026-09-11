@@ -49,7 +49,7 @@ Rectangle {
         width: Math.min(820, parent.width - 36)
         height: Math.min(760, parent.height - 42)
         anchors.centerIn: parent
-        radius: 8
+        radius: 0
         color: "#171923"
         border.color: "#41465f"
 
@@ -66,6 +66,7 @@ Rectangle {
                 Layout.rightMargin: 10
                 spacing: 11
                 AgentAvatar {
+                    showPortrait: true
                     Layout.preferredWidth: 34
                     Layout.preferredHeight: 34
                     controller: root.controller
@@ -78,13 +79,13 @@ Rectangle {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 1
-                    Text {
+                    TuiText {
                         text: String(root.details.name || "Agent")
                         color: "#d0d3e4"
                         font.pixelSize: 15
                         font.weight: Font.DemiBold
                     }
-                    Text {
+                    TuiText {
                         Layout.fillWidth: true
                         text: String(root.details.backend || "") + "  ·  " + root.session
                         color: "#686d84"
@@ -94,7 +95,7 @@ Rectangle {
                     }
                 }
                 StatusPill { status: String(root.details.state || "offline") }
-                ToolButton { text: "×"; onClicked: root.closeRequested() }
+                TuiToolButton { text: "×"; onClicked: root.closeRequested() }
             }
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#303347" }
@@ -120,15 +121,15 @@ Rectangle {
                         }
                         RowLayout {
                             Layout.fillWidth: true
-                            Button {
+                            TuiButton {
                                 text: "Open files"
                                 onClicked: root.controller.openAgentFiles(root.session)
                             }
-                            Button {
+                            TuiButton {
                                 text: "Open terminal"
                                 onClicked: root.controller.openAgentTerminal(root.session)
                             }
-                            Button {
+                            TuiButton {
                                 text: "Voice"
                                 onClicked: root.voiceRequested(
                                     root.session, String(root.details.name || "Agent"))
@@ -144,14 +145,14 @@ Rectangle {
                         title: "CURRENT PLAN"
                         RowLayout {
                             Layout.fillWidth: true
-                            Text {
+                            TuiText {
                                 Layout.fillWidth: true
                                 text: String(root.controller.profileTaskPlan.title || "Loading plan…")
                                 color: "#c2c6d9"
                                 font.pixelSize: 13
                                 font.weight: Font.DemiBold
                             }
-                            Text {
+                            TuiText {
                                 visible: !root.controller.profileLoading
                                 text: String(root.controller.profileTaskPlan.completed_count || 0)
                                     + "/" + String(root.controller.profileTaskPlan.total_count || 0)
@@ -159,7 +160,7 @@ Rectangle {
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 11
                             }
-                            BusyIndicator {
+                            TuiBusyIndicator {
                                 visible: root.controller.profileLoading
                                 running: visible
                                 implicitWidth: 18
@@ -175,20 +176,20 @@ Rectangle {
                                 Rectangle {
                                     Layout.preferredWidth: 7
                                     Layout.preferredHeight: 7
-                                    radius: 3.5
+                                    radius: 0
                                     color: String(taskRow.modelData.status || "") === "completed"
                                         ? "#8da77f"
                                         : String(taskRow.modelData.status || "") === "in_progress"
                                             ? "#a8aed7" : "#51566b"
                                 }
-                                Text {
+                                TuiText {
                                     Layout.fillWidth: true
                                     text: String(taskRow.modelData.title || "Task")
                                     color: "#adb1c7"
                                     font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
-                                Text {
+                                TuiText {
                                     visible: (taskRow.modelData.subtasks || []).length > 0
                                     text: String((taskRow.modelData.subtasks || []).length) + " steps"
                                     color: "#62677e"
@@ -207,7 +208,7 @@ Rectangle {
                                 required property var modelData
                                 Layout.fillWidth: true
                                 implicitHeight: promptColumn.implicitHeight + 14
-                                radius: 4
+                                radius: 0
                                 color: "#181b26"
                                 border.color: "#2c3042"
                                 ColumnLayout {
@@ -227,7 +228,7 @@ Rectangle {
                                         color: "#b9bdd1"
                                         font.pixelSize: 12
                                     }
-                                    Text {
+                                    TuiText {
                                         Layout.fillWidth: true
                                         text: String(promptRow.modelData.created_at || "")
                                             + "  ·  "
@@ -242,7 +243,7 @@ Rectangle {
                         }
                         RowLayout {
                             Layout.fillWidth: true
-                            Text {
+                            TuiText {
                                 visible: root.controller.profilePrompts.length === 0
                                     && !root.controller.profilePromptsLoading
                                 Layout.fillWidth: true
@@ -251,13 +252,13 @@ Rectangle {
                                 font.pixelSize: 11
                             }
                             Item { Layout.fillWidth: true }
-                            BusyIndicator {
+                            TuiBusyIndicator {
                                 visible: root.controller.profilePromptsLoading
                                 running: visible
                                 implicitWidth: 18
                                 implicitHeight: 18
                             }
-                            Button {
+                            TuiButton {
                                 visible: root.controller.profilePromptsHaveMore
                                 text: "Load older"
                                 enabled: !root.controller.profilePromptsLoading
@@ -276,7 +277,7 @@ Rectangle {
                                 String(modelBox.currentValue || ""))
                         RowLayout {
                             Layout.fillWidth: true
-                            Label { text: "Model"; color: "#9297af"; font.pixelSize: 12 }
+                            TuiLabel { text: "Model"; color: "#9297af"; font.pixelSize: 12 }
                             ThemedComboBox {
                                 id: modelBox
                                 Layout.fillWidth: true
@@ -299,7 +300,7 @@ Rectangle {
                         }
                         RowLayout {
                             Layout.fillWidth: true
-                            Label { text: "Effort"; color: "#9297af"; font.pixelSize: 12 }
+                            TuiLabel { text: "Effort"; color: "#9297af"; font.pixelSize: 12 }
                             ThemedComboBox {
                                 id: effortBox
                                 Layout.fillWidth: true
@@ -354,10 +355,10 @@ Rectangle {
                                 Rectangle {
                                     Layout.preferredWidth: 6
                                     Layout.preferredHeight: 6
-                                    radius: 3
+                                    radius: 0
                                     color: "#899f7d"
                                 }
-                                Text {
+                                TuiText {
                                     Layout.fillWidth: true
                                     text: String(heartbeatRow.modelData.text || "Heartbeat check")
                                     color: "#aeb2c8"
@@ -366,7 +367,7 @@ Rectangle {
                                 }
                             }
                         }
-                        Text {
+                        TuiText {
                             visible: heartbeatCard.history.length === 0
                             text: heartbeatCard.schedule.enabled
                                 ? "No heartbeat history yet" : "Heartbeat is off"
@@ -385,13 +386,13 @@ Rectangle {
                                 id: teamMembership
                                 required property string modelData
                                 Layout.fillWidth: true
-                                Text {
+                                TuiText {
                                     Layout.fillWidth: true
                                     text: root.controller.teamNameById(teamMembership.modelData)
                                     color: "#adb1c7"
                                     font.pixelSize: 12
                                 }
-                                Text {
+                                TuiText {
                                     text: teamMembership.modelData
                                     color: "#62677e"
                                     font.family: "JetBrains Mono"
@@ -408,7 +409,7 @@ Rectangle {
                         title: "MCP SERVERS"
                         Repeater {
                             model: root.controller.availableMcpServers
-                            delegate: CheckBox {
+                            delegate: TuiCheckBox {
                                 id: mcpChoice
                                 required property string modelData
                                 Layout.fillWidth: true
@@ -433,7 +434,7 @@ Rectangle {
                             value: String(root.details.context_tokens || 0) + " / "
                                 + String(root.details.context_window || "unknown") + " tokens"
                         }
-                        Button {
+                        TuiButton {
                             text: "Compact context"
                             enabled: String(root.details.state || "") !== "compacting"
                             onClicked: compactDialog.open()
@@ -459,7 +460,7 @@ Rectangle {
                                 required property var modelData
                                 Layout.fillWidth: true
                                 implicitHeight: artifactColumn.implicitHeight + 14
-                                radius: 4
+                                radius: 0
                                 color: "#181b26"
                                 border.color: "#2c3042"
                                 ColumnLayout {
@@ -471,7 +472,7 @@ Rectangle {
                                     spacing: 2
                                     RowLayout {
                                         Layout.fillWidth: true
-                                        Text {
+                                        TuiText {
                                             Layout.fillWidth: true
                                             text: String(artifactRow.modelData.title || "Artifact")
                                             color: "#bfc3d7"
@@ -479,14 +480,14 @@ Rectangle {
                                             font.weight: Font.DemiBold
                                             elide: Text.ElideRight
                                         }
-                                        Text {
+                                        TuiText {
                                             text: String(artifactRow.modelData.type || "item").toUpperCase()
                                             color: "#777d99"
                                             font.family: "JetBrains Mono"
                                             font.pixelSize: 11
                                         }
                                     }
-                                    Text {
+                                    TuiText {
                                         Layout.fillWidth: true
                                         text: String(artifactRow.modelData.summary || "")
                                         color: "#686d84"
@@ -498,7 +499,7 @@ Rectangle {
                                 }
                             }
                         }
-                        Text {
+                        TuiText {
                             visible: root.artifacts.length === 0
                             text: "No artifacts for this agent yet"
                             color: "#666b82"
@@ -510,14 +511,14 @@ Rectangle {
                         title: "QUEUED MESSAGES"
                         RowLayout {
                             Layout.fillWidth: true
-                            Text {
+                            TuiText {
                                 Layout.fillWidth: true
                                 text: Number(root.details.queue_count || 0) === 0
                                     ? "Nothing waiting" : String(root.details.queue_count) + " waiting"
                                 color: "#858aa2"
                                 font.pixelSize: 12
                             }
-                            Button {
+                            TuiButton {
                                 text: "Manage"
                                 onClicked: root.queueRequested(root.session)
                             }
@@ -534,14 +535,14 @@ Rectangle {
                                 id: schedule
                                 required property var modelData
                                 Layout.fillWidth: true
-                                Text {
+                                TuiText {
                                     Layout.fillWidth: true
                                     text: String(schedule.modelData.name || "Scheduled task")
                                     color: "#adb1c7"
                                     font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
-                                Switch {
+                                TuiSwitch {
                                     checked: Boolean(schedule.modelData.enabled)
                                     onToggled: root.controller.setScheduleEnabled(
                                         String(schedule.modelData.schedule_id || ""), checked)
@@ -554,13 +555,13 @@ Rectangle {
                         title: "CHAT ACTIONS"
                         RowLayout {
                             Layout.fillWidth: true
-                            Button {
+                            TuiButton {
                                 text: "Relaunch"
                                 onClicked: root.relaunchRequested(
                                     root.session, String(root.details.name || "Agent"))
                             }
                             Item { Layout.fillWidth: true }
-                            Button {
+                            TuiButton {
                                 text: "Release…"
                                 onClicked: releaseDialog.open()
                             }
@@ -579,7 +580,7 @@ Rectangle {
         title: "Compact this conversation?"
         standardButtons: Dialog.Yes | Dialog.Cancel
         onAccepted: root.controller.compactSession(root.session)
-        Label { text: "Older context is summarized while the session stays open." }
+        TuiLabel { text: "Older context is summarized while the session stays open." }
     }
 
     Dialog {
@@ -592,7 +593,7 @@ Rectangle {
             root.controller.releaseAgent(root.session);
             root.closeRequested();
         }
-        Label { text: "The contact, history, files, and artifacts remain." }
+        TuiLabel { text: "The contact, history, files, and artifacts remain." }
     }
 
     component ProfileCard: Rectangle {
@@ -601,7 +602,7 @@ Rectangle {
         default property alias content: cardRows.data
         Layout.fillWidth: true
         implicitHeight: cardColumn.implicitHeight + 20
-        radius: 6
+        radius: 0
         color: "transparent"
         border.width: 0
         ColumnLayout {
@@ -611,7 +612,7 @@ Rectangle {
             anchors.top: parent.top
             anchors.margins: 10
             spacing: 8
-            Text {
+            TuiText {
                 text: card.title
                 color: "#858aa5"
                 font.family: "JetBrains Mono"
@@ -628,9 +629,9 @@ Rectangle {
         required property string label
         required property string value
         Layout.fillWidth: true
-        Text { text: info.label; color: "#888da5"; font.pixelSize: 11 }
+        TuiText { text: info.label; color: "#888da5"; font.pixelSize: 11 }
         Item { Layout.fillWidth: true }
-        Text {
+        TuiText {
             Layout.maximumWidth: 520
             text: info.value
             color: "#b2b6cc"
@@ -646,7 +647,7 @@ Rectangle {
         property bool checked: false
         signal toggled(bool checked)
         Layout.fillWidth: true
-        Text { Layout.fillWidth: true; text: toggle.label; color: "#adb1c7"; font.pixelSize: 12 }
-        Switch { checked: toggle.checked; onToggled: toggle.toggled(checked) }
+        TuiText { Layout.fillWidth: true; text: toggle.label; color: "#adb1c7"; font.pixelSize: 12 }
+        TuiSwitch { checked: toggle.checked; onToggled: toggle.toggled(checked) }
     }
 }

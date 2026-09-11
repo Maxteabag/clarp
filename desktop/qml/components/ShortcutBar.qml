@@ -13,7 +13,7 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: 6
         spacing: 16
-        Text {
+        TuiText {
             text: root.keymap.contextName === "composer" ? "INSERT"
                 : root.keymap.contextName === "sidebar" ? "AGENTS"
                 : root.keymap.contextName === "pane" ? "CONVERSATION"
@@ -32,12 +32,12 @@ Rectangle {
                     id: hint
                     required property var modelData
                     spacing: 5
-                    Text {
+                    TuiText {
                         text: hint.modelData.label + ":"
                         color: "#9ca1bd"
                         font.pixelSize: 11
                     }
-                    Text {
+                    TuiText {
                         text: hint.modelData.keys[0].replace("Return", "Enter").replace("Escape", "Esc")
                         color: "#c7adf1"
                         font.pixelSize: 11

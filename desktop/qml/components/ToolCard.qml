@@ -30,7 +30,7 @@ Rectangle {
     readonly property color statusColor: status === "error" ? "#df7777" : status === "running" ? "#e7aa68" : "#6fbd98"
 
     implicitHeight: toolColumn.implicitHeight + 6
-    radius: 2
+    radius: 0
     color: hover.hovered ? "#222638" : "transparent"
     border.width: 0
     HoverHandler { id: hover }
@@ -62,10 +62,10 @@ Rectangle {
             Rectangle {
                 Layout.preferredWidth: 7
                 Layout.preferredHeight: 7
-                radius: 4
+                radius: 0
                 color: root.statusColor
             }
-            Text {
+            TuiText {
                 visible: !explanation.narrationShown
                 text: root.toolName
                 color: "#9ea4c7"
@@ -73,7 +73,7 @@ Rectangle {
                 font.pixelSize: 12
                 font.weight: Font.DemiBold
             }
-            Text {
+            TuiText {
                 visible: !explanation.narrationShown
                 Layout.fillWidth: true
                 text: root.summary
@@ -81,7 +81,7 @@ Rectangle {
                 font.pixelSize: 12
                 elide: Text.ElideRight
             }
-            Text {
+            TuiText {
                 objectName: "activityExplanationText"
                 visible: explanation.narrationShown
                 Layout.fillWidth: true
@@ -91,7 +91,7 @@ Rectangle {
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
             }
-            Text {
+            TuiText {
                 visible: (!explanation.narrationShown && root.detail.length > 0) || explanation.text.length > 0
                 text: root.expanded ? "Hide" : "Details"
                 color: "#858aa7"
