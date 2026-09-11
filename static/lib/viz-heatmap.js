@@ -57,9 +57,33 @@ export function heatColor(value){
 }
 const layers=new WeakMap();
 const palette=Uint8ClampedArray.from(Array.from({length:256},(_,i)=>heatColor(i/255*HEAT_COLOR_MAX)).flat());
-export function drawHeat(ctx,heat,camera,pixelRatio=1){
+export function pixelHeat(grid,camera,width,height,pixelRatio=1){
+ const step=2**Math.round(Math.log2(16*pixelRatio/camera.k));
+ const left=Math.floor(-camera.x/camera.k/step),top=Math.floor(-camera.y/camera.k/step);
+ const right=Math.ceil((width-camera.x)/camera.k/step),bottom=Math.ceil((height-camera.y)/camera.k/step),blocks=[];
+ for(let y=top;y<bottom;y++)for(let x=left;x<right;x++){
+  const gx=((x+.5)*step*camera.k+camera.x)/pixelRatio/grid.cell+grid.pad;
+  const gy=((y+.5)*step*camera.k+camera.y)/pixelRatio/grid.cell+grid.pad;
+  const ix=Math.floor(gx),iy=Math.floor(gy),fx=gx-ix,fy=gy-iy;
+  if(ix<0||iy<0||ix+1>=grid.cols||iy+1>=grid.rows)continue;
+  const d=grid.density,n=iy*grid.cols+ix;
+  const value=d[n]*(1-fx)*(1-fy)+d[n+1]*fx*(1-fy)+d[n+grid.cols]*(1-fx)*fy+d[n+grid.cols+1]*fx*fy;
+  if(value>0)blocks.push({x:x*step,y:y*step,size:step,value});
+ }
+ return blocks;
+}
+export function drawHeat(ctx,heat,camera,pixelRatio=1,style='smooth'){
  if(!heat.spots.length)return;
  const grid=densityGrid(heat.spots,camera,ctx.canvas.width,ctx.canvas.height,pixelRatio);
+ if(style==='pixelated'){
+  ctx.save();ctx.globalCompositeOperation='source-over';
+  for(const block of pixelHeat(grid,camera,ctx.canvas.width,ctx.canvas.height,pixelRatio)){
+   const color=heatColor(block.value),x=Math.round(block.x*camera.k+camera.x),y=Math.round(block.y*camera.k+camera.y);
+   ctx.fillStyle=`rgba(${color[0]},${color[1]},${color[2]},${color[3]/255})`;
+   ctx.fillRect(x,y,Math.round((block.x+block.size)*camera.k+camera.x)-x,Math.round((block.y+block.size)*camera.k+camera.y)-y);
+  }
+  ctx.restore();return;
+ }
  let layer=layers.get(ctx);if(!layer){layer=document.createElement('canvas');layers.set(ctx,layer);}
  layer.width=grid.cols;layer.height=grid.rows;
  const paint=layer.getContext('2d'),pixels=paint.createImageData(grid.cols,grid.rows);

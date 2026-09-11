@@ -60,7 +60,8 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhe
    craft.branch(c,project.x,project.y+10);
   }
   for(const r of children){
-   craft.surface(c,r,seed+hash(r.id)%11,phase*.1,seed,project.character);
+   if(r.expanded){c.fillStyle='#123038';c.strokeStyle='#46675c';c.lineWidth=1;c.beginPath();c.roundRect(r.x-r.rx,r.y-r.ry,r.rx*2,r.ry*2,45);c.fill();c.stroke();}
+   else craft.surface(c,r,seed+hash(r.id)%11,phase*.1,seed,project.character);
    craft.ornament(c,r,project.character,craft.tinted(seed,project.character)[1]);
    if(r.kind==='service')craft.machine(c,r,m.latest.get(r.id),m.latest.get(r.id)?stateAt(m.latest.get(r.id),playhead):'unknown',time,reducedMotion);
    if(!r.core){craft.branch(c,r.x-95,r.y-r.ry+37);label(c,r.displayName,r.x-75,r.y-r.ry+42,13,'#c2d4c6');}
@@ -70,7 +71,18 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhe
    hits.push({id:r.id,label:r.label+(r.displayName?' · '+r.displayName:''),path:r.path,purpose:(r.kind==='service'?'Observed service':r.is_worktree?'Working copy · shared repository':r.kind==='unresolved'?'Location not recorded':'Workspace')+(v&&v.state!=='none'?'\nValidation: '+v.runs+' runs · '+({failed:'a check failed',interrupted:'a check chain failed; failing step unknown',recovered:'recovered: the same checks later passed',ok:'passing',running:'running now',unknown:'outcome unknown'}[v.state]||v.state)+(v.unresolved?.length?' · unresolved: '+v.unresolved.slice(0,3).join(' · '):''):'')+(r.hiddenWork?'\n+'+r.hiddenWork+' more work objects not drawn':''),x:r.x-r.rx,y:r.y-r.ry,w:r.rx*2,h:r.ry*2});
    if(r.hiddenWork){label(c,'+'+r.hiddenWork,r.x+(r.core?165:95),r.y+(r.core?118:100),10,'#b9ad86','Georgia');}
   }
-  label(c,project.label,project.x-75,project.y-(children.some(r=>r.core)?110:43),30,'#e4dfbc','Georgia');
+  const core=children.find(r=>r.core);label(c,project.label,project.x-75,core?.expanded?core.y-core.ry+35:project.y-(core?110:43),30,'#e4dfbc','Georgia');
+ }
+ // All component positions are fixed in the model. Zoom only reveals them.
+ const visibleComponents=[];
+ if(detail>=1){
+  for(const area of m.componentAreas){
+   c.fillStyle='#183c42';c.strokeStyle='#68897b88';c.lineWidth=1;c.beginPath();c.roundRect(area.x-area.w/2,area.y-area.h/2,area.w,area.h,22);c.fill();c.stroke();
+   label(c,area.name,area.x-area.w/2+15,area.y-area.h/2+25,16,'#c9d6bc','Georgia');
+   if(area.total>4)label(c,'4 of '+area.total+' recorded files',area.x-area.w/2+15,area.y+area.h/2-8,10,'#a6bfb3');
+   hits.push({id:area.id,label:area.name,path:area.path,purpose:'Recorded component area · '+area.total+' files',x:area.x-area.w/2,y:area.y-area.h/2,w:area.w,h:area.h});visibleComponents.push(area);
+  }
+  for(const r of m.regions.filter(r=>r.expanded))label(c,'Shared root'+(r.rootCount>4?' · 4 of '+r.rootCount+' files':''),r.x-255,r.rootY-38,14,'#c7d5bc','Georgia');
  }
  if(m.ownerGroups.length){
   const g=m.github;fx.region(c,g.x+g.w/2,g.y+g.h/2,g.w/2+35,g.h/2+25,phase*.04);c.fillStyle='#26263a99';c.fill();c.strokeStyle='#b19bcb44';c.stroke();
@@ -98,6 +110,11 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhe
  for(const f of m.files){
   const first=scene.events.find(e=>(e.world_targets||[e.world_target]).includes(f.id));if(first?.action==='create'&&playhead<first.ts)continue;drawnFiles++;
   const e=f.event,state=e?stateAt(e,playhead):'unknown',age=e?playhead-(e.finished_at??e.ts):Infinity;
+  if(m.regionMap.get(f.workspace)?.expanded&&detail<2){
+   drawnFiles--;
+   if(e&&age<8000){c.save();c.translate(f.x,f.y);c.scale(.65,.65);fx.action(c,{x:0,y:0},e,playhead,reducedMotion);c.restore();visualActions.push({target:f.id,action:e.action,state});}
+   continue;
+  }
   const deleted=e?.action==='delete'&&state==='succeeded',creating=e?.action==='create'&&state!=='succeeded';
   c.save();if(deleted)c.globalAlpha=Math.max(.08,1-age/2500);if(creating)c.globalAlpha=.3;
   const float=reducedMotion?0:Math.sin(time*.0014+hash(f.id))*2.5;c.translate(f.x,f.y+float);c.scale(.58,.58);
@@ -119,7 +136,7 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhe
   if(interaction.actionLabels)label(c,o.stage+(o.finished?' · '+o.status:''),o.x-w/2,o.y+h/2+11,9,'#acc5c5');
   visualActions.push({target:o.id,action:'work',state:o.stage});
   workObjects.push({id:o.id,stage:o.stage,status:o.status,workspace:o.workspace,x:o.x,y:o.y,w,h,artifact:o.outcome?.id||null,preview:!!(o.outcome&&images[o.outcome.id]),validation:o.evidence.validation.state,handoffs:o.handoffs.filter(h=>h.link==='transfer').length,references:o.handoffs.filter(h=>h.link!=='transfer').length,link:o.outcome?.link||null,agent:o.agent_id});
-  hits.push({id:'work:'+o.id,label:o.title,purpose:describe(o),link:o.outcome?.link||null,linkLabel:o.outcome?'Open '+o.outcome.type:'',x:o.x-w/2-3,y:o.y-h/2-3,w:w+6,h:h+6});
+  hits.push({id:'work:'+o.id,priority:10,label:o.title,purpose:describe(o),link:o.outcome?.link||null,linkLabel:o.outcome?'Open '+o.outcome.type:'',x:o.x-w/2-3,y:o.y-h/2-3,w:w+6,h:h+6});
  }
  for(const actor of m.actors){
   const e=actor.event,status=stateAt(e,playhead),col=fx.color(e.action),age=playhead-(e.finished_at??e.ts);
@@ -194,8 +211,8 @@ module.exports.render=({ctx:c,scene,time,width,height,camera,pixelRatio=1,playhe
   hits.push({id:'thread:'+th.id,label:th.fromName+' → '+th.toName,purpose:(transfer?'Explicit handoff · “'+plan.title+'” transferred':plan?'Agent message referencing “'+plan.title+'” · a reference, not a transfer':'Agent message · collaboration, no object transfer')+' · '+clock(th.ts),sample:th.excerpt,x:knot.x-14,y:knot.y-14,w:28,h:28});
  }
  if(interaction.selected){const h=hits.find(h=>h.id===interaction.selected);if(h){c.strokeStyle='#f3dfaeaa';c.lineWidth=1;c.beginPath();c.roundRect(h.x-3,h.y-3,h.w+6,h.h+6,16);c.stroke();}}
- c.restore();return {title:'Flow · The Lantern Works',hits,bounds:m.bounds,agents,territories:m.projects.length+m.ownerGroups.length,files:drawnFiles,visualActions,
+ c.restore();return {title:'Flow · The Lantern Works',hits,heatTargets:[...hits,...m.files.map(f=>({id:f.id,x:f.x-1,y:f.y-1,w:2,h:2}))],bounds:m.bounds,agents,territories:m.projects.length+m.ownerGroups.length,files:drawnFiles,visualActions,
   projects:m.projects.map(p=>({id:p.id,label:p.label,children:p.members.map(r=>r.id),character:p.character||null})),recentTraces:m.actors.filter(a=>playhead-(a.event.finished_at??a.event.ts)<180000).length,
-  detail,workspaces:m.regions.map(r=>({id:r.id,x:r.x,y:r.y,rx:r.rx,ry:r.ry,validation:r.validation?.state||'none',hiddenWork:r.hiddenWork||0})),ownerGroups:m.ownerGroups.map(o=>({id:o.id,children:o.repos.map(r=>r.id),runs:o.repos.flatMap(r=>(r.runs||[]).map(run=>({repo:r.id,conclusion:run.conclusion,status:run.status})))})),ownerPortraits:m.ownerGroups.filter(o=>avatars[o.id]).map(o=>o.id),githubLogo:m.ownerGroups.length>0,
+  detail,components:visibleComponents,workspaces:m.regions.map(r=>({id:r.id,x:r.x,y:r.y,rx:r.rx,ry:r.ry,validation:r.validation?.state||'none',hiddenWork:r.hiddenWork||0})),ownerGroups:m.ownerGroups.map(o=>({id:o.id,children:o.repos.map(r=>r.id),runs:o.repos.flatMap(r=>(r.runs||[]).map(run=>({repo:r.id,conclusion:run.conclusion,status:run.status})))})),ownerPortraits:m.ownerGroups.filter(o=>avatars[o.id]).map(o=>o.id),githubLogo:m.ownerGroups.length>0,
   workObjects,waits:waitMeta,posts:m.posts.map(p=>({region:p.region,boundary:p.boundary,x:p.x,y:p.y,waits:p.waits.length})),relations,workEvidence:{available:m.work.available,synthetic:m.work.synthetic,plans:m.work.objects.length,threads:m.threads.length,contract:m.work.contract}};
 };
