@@ -276,6 +276,7 @@ class AppController : public QObject {
     [[nodiscard]] bool anonymousAgents() const { return m_anonymousAgents; }
     void setAnonymousAgents(bool value);
     [[nodiscard]] QVariantList assignmentContacts() const { return m_assignmentContacts; }
+    void setLaunchMode(bool enabled);
     Q_INVOKABLE bool startAnonymousAgent(const QString& backend, const QString& model, const QString& effort);
     Q_INVOKABLE void loadAssignmentContacts(const QString& session);
     Q_INVOKABLE void requestContactAssignment(const QString& session, bool automatic) { emit contactAssignmentRequested(session, automatic); }
@@ -422,6 +423,8 @@ class AppController : public QObject {
     [[nodiscard]] qint64 agentConversationSeenRevision(const QString& conversationId) const;
     void refreshPairConversationsFor(const QString& session);
     void requestSnapshot();
+    void completeSnapshotRequest();
+    void resumeFleetLoading();
     bool retryCreatedAgent();
     void requestAvatars();
     void clearAvatarCache();
@@ -471,6 +474,12 @@ class AppController : public QObject {
     QString m_pendingCreatedSession;
     int m_createdSnapshotAttempts = 0;
     quint64 m_snapshotGeneration = 0;
+    bool m_launchMode = false;
+    QString m_launchSession;
+    bool m_snapshotInFlight = false;
+    bool m_snapshotDirty = false;
+    bool m_roomsInFlight = false;
+    bool m_roomsDirty = false;
     QString m_connectionState = QStringLiteral("offline");
     QString m_errorMessage;
     QString m_serverName;

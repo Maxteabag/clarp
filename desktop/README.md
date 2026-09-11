@@ -302,3 +302,10 @@ are hidden from the first frame. Cancel closes that launch window. A successful
 creation stays on the page until a fresh roster contains the exact returned
 session. Older roster responses cannot select a previous agent; retrying a
 pending creation refreshes its roster instead of creating another agent.
+
+Hosts with `agent_creation_details` return the new agent projection in POST
+`/agents`. The desktop opens that exact agent immediately and defers fleet,
+conversation-history and Updates loading until afterward. Roster/history
+requests are coalesced while in flight. Session-only responses from older Hosts
+retain the guarded roster fallback. Anonymous launches do not synthesize startup
+announcements.
