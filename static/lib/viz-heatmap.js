@@ -11,23 +11,66 @@ export function activityHeat(events,hits,playhead){
   if(!targets.length&&positions.has(e.workspace_target))targets=[e.workspace_target];
   if(!targets.length){unlocated++;continue;}located++;
   const weight=Math.exp(-age/(3*60*1000))/targets.length;
-  for(const id of targets){const p=positions.get(id),key=Math.round(p.x/80)+':'+Math.round(p.y/80);let c=cells.get(key);
+  for(const id of targets){const p=positions.get(id),key=p.x+':'+p.y;let c=cells.get(key);
    if(!c){c={x:0,y:0,weight:0};cells.set(key,c);}c.x+=p.x*weight;c.y+=p.y*weight;c.weight+=weight;
   }
  }
- const spots=[...cells.values()].map(c=>({x:c.x/c.weight,y:c.y/c.weight,weight:c.weight,intensity:1-Math.exp(-c.weight/4)})).sort((a,b)=>b.weight-a.weight);
- return {spots:spots.slice(0,128),located,unlocated,truncated:spots.length>128};
+ const spots=[...cells.values()].map(c=>({x:c.x/c.weight,y:c.y/c.weight,weight:c.weight}));
+ return {spots,located,unlocated,truncated:false};
 }
-export function drawHeat(ctx,heat,camera,pixelRatio=1){
- ctx.save();ctx.globalCompositeOperation='screen';
- for(const s of heat.spots){
-  const x=s.x*camera.k+camera.x,y=s.y*camera.k+camera.y;
-  const radius=Math.max(28*pixelRatio,Math.min(140*pixelRatio,180*camera.k));
-  if(x+radius<0||y+radius<0||x-radius>ctx.canvas.width||y-radius>ctx.canvas.height)continue;
-  const gradient=ctx.createRadialGradient(x,y,0,x,y,radius),alpha=.36*Math.sqrt(s.intensity);
-  const color=s.intensity>.65?'255,135,65':s.intensity>.25?'239,190,82':'70,169,152';
-  gradient.addColorStop(0,`rgba(${color},${alpha})`);gradient.addColorStop(.4,`rgba(${color},${alpha*.6})`);gradient.addColorStop(1,`rgba(${color},0)`);
-  ctx.fillStyle=gradient;ctx.fillRect(x-radius,y-radius,radius*2,radius*2);
+// Fixed CSS-pixel bandwidth is a deliberate map-view scale: zooming changes
+// the neighborhood being inspected, while a lone event keeps the same peak.
+export const HEAT_SIGMA=30;
+export const HEAT_COLOR_MAX=8; // decayed event weight at a kernel center
+export function densityGrid(spots,camera,width,height,pixelRatio=1){
+ const cssWidth=width/pixelRatio,cssHeight=height/pixelRatio;
+ const cell=Math.max(6,cssWidth/256,cssHeight/256),sigma=HEAT_SIGMA/cell;
+ const radius=Math.ceil(3*sigma),pad=radius+1;
+ const cols=Math.ceil(cssWidth/cell)+2*pad+1,rows=Math.ceil(cssHeight/cell)+2*pad+1;
+ const mass=new Float32Array(cols*rows),horizontal=new Float32Array(mass.length),density=new Float32Array(mass.length);
+ for(const s of spots){
+  const gx=(s.x*camera.k+camera.x)/pixelRatio/cell+pad,gy=(s.y*camera.k+camera.y)/pixelRatio/cell+pad;
+  if(![gx,gy,s.weight].every(Number.isFinite)||s.weight<=0||gx<0||gy<0||gx>=cols-1||gy>=rows-1)continue;
+  const x=Math.floor(gx),y=Math.floor(gy),fx=gx-x,fy=gy-y;
+  // Bilinear deposition avoids an abrupt jump when a point crosses a cell.
+  mass[y*cols+x]+=s.weight*(1-fx)*(1-fy);mass[y*cols+x+1]+=s.weight*fx*(1-fy);
+  mass[(y+1)*cols+x]+=s.weight*(1-fx)*fy;mass[(y+1)*cols+x+1]+=s.weight*fx*fy;
  }
+ const kernel=Float32Array.from({length:radius*2+1},(_,i)=>Math.exp(-.5*((i-radius)/sigma)**2));
+ // Separable Gaussian smoothing on scalar weights, before any color mapping.
+ // Peak-one kernels give intuitive units: one isolated fresh event peaks at ~1.
+ for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+  let value=0;for(let d=-radius;d<=radius;d++)if(x+d>=0&&x+d<cols)value+=mass[y*cols+x+d]*kernel[d+radius];
+  horizontal[y*cols+x]=value;
+ }
+ for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+  let value=0;for(let d=-radius;d<=radius;d++)if(y+d>=0&&y+d<rows)value+=horizontal[(y+d)*cols+x]*kernel[d+radius];
+  density[y*cols+x]=value;
+ }
+ return {density,cols,rows,cell,pad};
+}
+export function heatColor(value){
+ const t=Math.max(0,Math.min(1,value/HEAT_COLOR_MAX));
+ const stops=[[70,169,152],[239,190,82],[255,135,65]];
+ const i=t<.5?0:1,f=t<.5?t*2:(t-.5)*2;
+ return [...stops[i].map((v,c)=>Math.round(v+(stops[i+1][c]-v)*f)),Math.round(115*Math.sqrt(t))];
+}
+const layers=new WeakMap();
+const palette=Uint8ClampedArray.from(Array.from({length:256},(_,i)=>heatColor(i/255*HEAT_COLOR_MAX)).flat());
+export function drawHeat(ctx,heat,camera,pixelRatio=1){
+ if(!heat.spots.length)return;
+ const grid=densityGrid(heat.spots,camera,ctx.canvas.width,ctx.canvas.height,pixelRatio);
+ let layer=layers.get(ctx);if(!layer){layer=document.createElement('canvas');layers.set(ctx,layer);}
+ layer.width=grid.cols;layer.height=grid.rows;
+ const paint=layer.getContext('2d'),pixels=paint.createImageData(grid.cols,grid.rows);
+ for(let i=0;i<grid.density.length;i++)if(grid.density[i]>0){
+  const color=Math.min(255,Math.round(grid.density[i]/HEAT_COLOR_MAX*255))*4,p=i*4;
+  pixels.data[p]=palette[color];pixels.data[p+1]=palette[color+1];pixels.data[p+2]=palette[color+2];pixels.data[p+3]=palette[color+3];
+ }
+ paint.putImageData(pixels,0,0);
+ ctx.save();ctx.globalCompositeOperation='source-over';ctx.imageSmoothingEnabled=true;
+ const scale=grid.cell*pixelRatio;
+ // Grid nodes live at integer coordinates; image samples live at half pixels.
+ ctx.drawImage(layer,-(grid.pad+.5)*scale,-(grid.pad+.5)*scale,grid.cols*scale,grid.rows*scale);
  ctx.restore();
 }
