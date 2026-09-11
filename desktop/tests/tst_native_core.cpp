@@ -625,6 +625,7 @@ class NativeCoreTest final : public QObject {
     void idleContactStartsFreshWithSavedDefaults();
     void newAgentWaitsForOwnRosterAndRejectsLateSnapshots();
     void fastLaunchOpensWithoutWaitingForFleet();
+    void resumeLaunchOpensExactSessionWithoutFleet();
     void launchPoolCarriesBackendModelAndHandlesEmpty();
     void redesignedRosterFiltersWithoutMutatingSource();
     void rosterLookupIsConsistentDuringStructuralSignals();
@@ -1160,6 +1161,52 @@ void NativeCoreTest::fastLaunchOpensWithoutWaitingForFleet() {
     controller.setLaunchDirectory(QStringLiteral("/work/chosen directory"));
     QVERIFY(controller.startAnonymousAgent(QStringLiteral("codex"),{},{}));
     QTRY_COMPARE(ready.size(),1);
+    QCOMPARE(server.requestJson(QStringLiteral("POST"),QStringLiteral("/agents")).value(QStringLiteral("cwd")).toString(),QStringLiteral("/work/chosen directory"));
+    QCOMPARE(controller.selectedSession(),QStringLiteral("new-fast"));
+    QCOMPARE(controller.panes()->activeSession(),QStringLiteral("new-fast"));
+    QCOMPARE(server.requestCount(QStringLiteral("GET"),QStringLiteral("/agents/snapshot")),0);
+    QTRY_VERIFY(server.hasHeldSnapshot());
+    const auto before=server.requestCount(QStringLiteral("GET"),QStringLiteral("/agents/snapshot"));
+    for (int i=0;i<20;++i) controller.refreshAgents();
+    QTest::qWait(50);
+    QCOMPARE(server.requestCount(QStringLiteral("GET"),QStringLiteral("/agents/snapshot")),before);
+    server.releaseHeldSnapshot({{QStringLiteral("agents"),QJsonArray{agent}}});
+    QTRY_COMPARE(server.requestCount(QStringLiteral("GET"),QStringLiteral("/agents/snapshot")),before+1);
+    QCOMPARE(controller.selectedSession(),QStringLiteral("new-fast"));
+}
+
+void NativeCoreTest::resumeLaunchOpensExactSessionWithoutFleet() {
+    FakeClarpServer server; QVERIFY(server.listenLocal());
+    const auto oldBase=qgetenv("CLARP_BASE_URL"), oldToken=qgetenv("CLARP_TOKEN");
+    const auto oldLaunch=qApp->property("clarpLaunchMode");
+    const auto restore=qScopeGuard([&] { qputenv("CLARP_BASE_URL",oldBase); qputenv("CLARP_TOKEN",oldToken); qApp->setProperty("clarpLaunchMode",oldLaunch); });
+    qputenv("CLARP_BASE_URL",server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN","test-token");
+    qApp->setProperty("clarpLaunchMode",true);
+    AppController controller;
+    QTRY_VERIFY(controller.connected());
+    server.sendEvent({{QStringLiteral("type"),QStringLiteral("tts-error")},
+                      {QStringLiteral("message"),QStringLiteral("Other agent speech failed")}});
+    QTest::qWait(50);
+    QVERIFY(controller.errorMessage().isEmpty());
+    QCOMPARE(server.requestCount(QStringLiteral("GET"),QStringLiteral("/agents/snapshot")),0);
+    QCOMPARE(server.requestCount(QStringLiteral("GET"),QStringLiteral("/agent-conversations")),0);
+    const QJsonObject agent{{QStringLiteral("agent_id"),QStringLiteral("new-id")},
+        {QStringLiteral("session"),QStringLiteral("new-fast")},{QStringLiteral("persona"),QStringLiteral("Codex-fast")},
+        {QStringLiteral("backend"),QStringLiteral("codex")},{QStringLiteral("alive"),true}};
+    server.setJsonResponse(QStringLiteral("POST"),QStringLiteral("/agents"),201,
+        {{QStringLiteral("session"),QStringLiteral("new-fast")},{QStringLiteral("agent"),agent}});
+    server.setJsonResponse(QStringLiteral("GET"),QStringLiteral("/agents/snapshot"),200,
+        {{QStringLiteral("agents"),QJsonArray{agent}}});
+    server.holdNextSnapshot();
+    QSignalSpy ready(&controller,&AppController::agentMutationSucceeded);
+    controller.setLaunchDirectory(QStringLiteral("/work/chosen directory"));
+    QVERIFY(controller.resumeLaunchSession(QStringLiteral("codex"),QStringLiteral("native-session"),true));
+    QTRY_COMPARE(ready.size(),1);
+    const auto payload = server.requestJson(QStringLiteral("POST"),QStringLiteral("/agents"));
+    QCOMPARE(payload.value(QStringLiteral("resume_session_id")).toString(),QStringLiteral("native-session"));
+    QVERIFY(payload.value(QStringLiteral("open_existing")).toBool());
+    QVERIFY(!payload.contains(QStringLiteral("model")));
+
     QCOMPARE(server.requestJson(QStringLiteral("POST"),QStringLiteral("/agents")).value(QStringLiteral("cwd")).toString(),QStringLiteral("/work/chosen directory"));
     QCOMPARE(controller.selectedSession(),QStringLiteral("new-fast"));
     QCOMPARE(controller.panes()->activeSession(),QStringLiteral("new-fast"));

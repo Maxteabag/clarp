@@ -17,6 +17,13 @@ TestCase {
         agentName: "Opus"
     }
 
+    function test_missingModelNeverClaimsCurrentDefault() {
+        header.metadata = {model:"", default_model:"a-different-model"};
+        compare(findChild(header, "headerModel").text, "Model unavailable");
+        header.metadata = {model:"original-model", default_model:"a-different-model"};
+        compare(findChild(header, "headerModel").text, "original-model");
+    }
+
     function test_statusModelEffortAndWorkspaceStayDistinct() {
         header.metadata = {state: "thinking", status_text: "Ready for review", model: "gpt-6-astra", effort: "high",
             workspace: {kind: "worktree", path: "/work/project-feature", label: "project / feature"}};

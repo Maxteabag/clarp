@@ -8,6 +8,9 @@ TestCase {
     when: windowShown
     QtObject {
         id: stub
+        property var pastSessions: []
+        property bool pastSessionsLoading: false
+        function backendSupportsResume(backend) { return true; }
         property bool connected: true
         property bool anonymousAgents: true
         property string lastBackend: "codex"
