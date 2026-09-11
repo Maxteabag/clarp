@@ -71,3 +71,22 @@ def test_pair_list_and_log_share_the_log_shape(host):
     assert status == 200 and delta["turns"] == []
     status, missing = request(host, "/log?session=pair:x:y")
     assert status == 200 and missing["missing"] is True and missing["turns"] == []
+
+
+def test_pair_list_shares_response_without_weakening_auth_or_hiding_new_messages(host, monkeypatch):
+    from lib import agent_conversations
+    original = agent_conversations.list_conversations
+    calls = []
+    def counted():
+        calls.append(1)
+        return original()
+    monkeypatch.setattr(agent_conversations, 'list_conversations', counted)
+    for _ in range(8):
+        assert request(host, '/agent-conversations') == (200, {'conversations': []})
+    assert len(calls) == 1
+    assert request(host, '/agent-conversations', auth=False)[0] == 401
+    message_store.record_user_message(agent_id=host.hugo, backend_session_id='bs1',
+        client_msg_id='new-pair', text='hello', origin='agent', sender_agent_id=host.cpp)
+    status, body = request(host, '/agent-conversations')
+    assert status == 200 and len(body['conversations']) == 1
+    assert len(calls) == 2
