@@ -56,6 +56,7 @@ class AgentListModel : public QAbstractListModel {
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
     void applySnapshot(const QJsonObject& snapshot);
+    bool upsertCreatedAgent(const QJsonObject& object);
     void applyStateEvent(const QJsonObject& event);
     void applyFocusEvent(const QJsonObject& event);
     void applyQueueEvent(const QJsonObject& event);

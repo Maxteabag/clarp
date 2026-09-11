@@ -97,6 +97,8 @@ AppController::AppController(QObject* parent)
       m_emptyConversation(this), m_conversation(&m_emptyConversation),
       m_composerFocusPane(m_panes.activePaneId()),
       m_cacheEnabled(!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SCENARIO")) {
+    if (auto* application = QCoreApplication::instance())
+        m_launchMode = application->property("clarpLaunchMode").toBool();
     m_agentConversationsRefresh.setSingleShot(true);
     m_agentConversationsRefresh.setInterval(400);
     connect(&m_agentConversationsRefresh, &QTimer::timeout, this, &AppController::loadAgentConversations);
@@ -368,6 +370,21 @@ void AppController::setAnonymousAgents(bool value) {
     m_anonymousAgents = value;
     QSettings().setValue(QStringLiteral("launch/anonymousAgents"), value);
     emit anonymousAgentsChanged();
+}
+
+void AppController::setLaunchMode(bool enabled) {
+    m_launchMode = enabled;
+    if (enabled) {
+        ++m_snapshotGeneration;
+        m_snapshotInFlight = false;
+        m_snapshotDirty = false;
+    }
+}
+
+void AppController::resumeFleetLoading() {
+    m_launchMode = false;
+    requestSnapshot();
+    loadUpdates();
 }
 
 bool AppController::startAnonymousAgent(const QString& backend, const QString& model, const QString& effort) {
@@ -913,6 +930,10 @@ void AppController::reconnect() {
 
 void AppController::resetTransientRequestState() {
     ++m_snapshotGeneration;
+    m_snapshotInFlight = false;
+    m_snapshotDirty = false;
+    m_roomsInFlight = false;
+    m_roomsDirty = false;
     m_startingContact.clear();
     emit contactLaunchChanged();
     for (const QString& session : std::as_const(m_logRequestsInFlight)) {
@@ -981,6 +1002,7 @@ void AppController::resetTransientRequestState() {
 }
 
 void AppController::selectSession(const QString& session) {
+    if (m_launchMode && session != m_launchSession) return;
     if (session.isEmpty()) {
         return;
     }
@@ -1031,9 +1053,12 @@ int AppController::unreadAgentConversations() const {
 }
 
 void AppController::loadAgentConversations() {
+    if (m_launchMode) return;
+    if (m_roomsInFlight) { m_roomsDirty = true; return; }
     if (m_bearerToken.isEmpty()) {
         return;
     }
+    m_roomsInFlight = true;
     m_api.get(QStringLiteral("agent-conversations"), QStringLiteral("/agent-conversations"));
 }
 
@@ -1801,6 +1826,7 @@ void AppController::requestComposerFocus(const QString& paneId) {
 }
 
 void AppController::loadUpdates() {
+    if (m_launchMode) return;
     const quint64 generation = ++m_updatesGeneration;
     m_updatesError.clear();
     m_updateRequestsPending = 3;
@@ -2269,7 +2295,16 @@ bool AppController::retryCreatedAgent() {
 }
 
 void AppController::requestSnapshot() {
+    if (m_launchMode) return;
+    if (m_snapshotInFlight) { m_snapshotDirty = true; return; }
+    m_snapshotInFlight = true;
     m_api.get(QStringLiteral("snapshot:%1").arg(++m_snapshotGeneration), QStringLiteral("/agents/snapshot"));
+}
+
+void AppController::completeSnapshotRequest() {
+    m_snapshotInFlight = false;
+    if (std::exchange(m_snapshotDirty, false))
+        QTimer::singleShot(100, this, [this] { requestSnapshot(); });
 }
 
 void AppController::clearAvatarCache() {
@@ -2676,6 +2711,7 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
     }
     if (tag.startsWith(QStringLiteral("snapshot:"))) {
         if (tag.sliced(9).toULongLong() != m_snapshotGeneration) return;
+        completeSnapshotRequest();
         m_availableMcpServers =
             object.value(QStringLiteral("available_mcp_servers")).toArray().toVariantList();
         m_agents.applySnapshot(object);
@@ -2688,7 +2724,7 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
             }
         }
         m_contacts.applySnapshot(object, activeNames);
-        loadAgentConversations();
+        m_agentConversationsRefresh.start();
         if (!m_pendingCreatedSession.isEmpty()) {
             if (!m_agents.find(m_pendingCreatedSession)) {
                 if (++m_createdSnapshotAttempts <= 5) {
@@ -2740,6 +2776,8 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         return;
     }
     if (tag == QStringLiteral("agent-conversations")) {
+        m_roomsInFlight = false;
+        if (std::exchange(m_roomsDirty, false)) m_agentConversationsRefresh.start();
         applyAgentConversations(object.value(QStringLiteral("conversations")).toArray());
         return;
     }
@@ -2865,6 +2903,24 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
             setErrorMessage(QStringLiteral("The Host did not return the new agent's session."));
             return;
         }
+        const QJsonObject created = object.value(QStringLiteral("agent")).toObject();
+        if (created.value(QStringLiteral("session")).toString() == session && m_agents.upsertCreatedAgent(created)) {
+            ++m_snapshotGeneration; // Old fleet responses must not undo this authoritative creation.
+            m_snapshotInFlight = false;
+            m_snapshotDirty = false;
+            m_pendingCreatedSession.clear();
+            m_startingContact.clear();
+            emit contactLaunchChanged();
+            m_launchSession = session;
+            selectSession(session);
+            requestComposerFocus(m_panes.activePaneId());
+            emit agentMutationSucceeded(session);
+            QTimer::singleShot(500, this, &AppController::resumeFleetLoading);
+            return;
+        }
+        // Compatibility with Hosts that only return a session ID.
+        setLaunchMode(true);
+        setLaunchMode(false);
         m_pendingCreatedSession = session;
         m_createdSnapshotAttempts = 0;
         requestSnapshot();
@@ -2993,7 +3049,14 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
 
 void AppController::handleRequestFailure(const QString& tag, const QString& message,
                                          int statusCode) {
-    if (tag.startsWith(QStringLiteral("snapshot:")) && tag.sliced(9).toULongLong() != m_snapshotGeneration) return;
+    if (tag.startsWith(QStringLiteral("snapshot:"))) {
+        if (tag.sliced(9).toULongLong() != m_snapshotGeneration) return;
+        completeSnapshotRequest();
+    }
+    if (tag == QStringLiteral("agent-conversations")) {
+        m_roomsInFlight = false;
+        if (std::exchange(m_roomsDirty, false)) m_agentConversationsRefresh.start();
+    }
     if (tag == QStringLiteral("desktop-presence") || tag == QStringLiteral("application-activity")) return; // Old/offline Hosts ignore optional leases.
 
     if (tag.startsWith(QStringLiteral("agent-assignment:"))) {

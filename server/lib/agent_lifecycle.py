@@ -128,7 +128,7 @@ class AgentLifecycleService:
         replace_sid = (data.get("replace_sid") or "").strip()
         fork_id = (data.get("fork_session_id") or "").strip()
         backend = backends.normalize(data.get("backend"))
-        synthesize_audio = not janitor and data.get("synthesize_audio", True) is not False
+        synthesize_audio = not janitor and data.get("anonymous") is not True and data.get("synthesize_audio", True) is not False
         agents = load_agents(self.ctx.agents_path)
         clear_retained_model = False
         clear_retained_effort = False
