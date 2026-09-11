@@ -9,6 +9,9 @@ namespace clarp {
 class PreviewVersions : public QObject {
     Q_OBJECT
     QML_ELEMENT
+    Q_PROPERTY(bool restartAllowed MEMBER m_restartAllowed NOTIFY changed)
+    Q_PROPERTY(QString selectedSession MEMBER m_selectedSession NOTIFY changed)
+    Q_PROPERTY(QString selectedHost MEMBER m_selectedHost NOTIFY changed)
     Q_PROPERTY(bool enabled READ enabled CONSTANT)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString runningHash READ runningHash CONSTANT)
@@ -23,11 +26,17 @@ public:
     [[nodiscard]] QVariantMap catalog() const { return m_catalog; }
     [[nodiscard]] QString error() const { return m_error; }
     [[nodiscard]] QString notice() const { return m_notice; }
+    Q_INVOKABLE QVariantMap restartContext() const;
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void selectVersion(const QString& hash);
 signals:
     void changed();
 private:
+    bool m_restartAllowed = true;
+    QString m_selectedSession;
+    QString m_selectedHost;
+    QString m_requestedSession;
+    QString m_requestedHost;
     bool m_enabled = false;
     bool m_fixture = false;
     bool m_selecting = false;

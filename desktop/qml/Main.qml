@@ -192,6 +192,10 @@ ApplicationWindow {
             app.panes.equalize();
         } else if (action === "tools") {
             app.toolsVisible = !app.toolsVisible;
+        } else if (action === "update-preview") {
+            if (previewVersions.enabled && root.previewUpdateLabel.length > 0 && root.previewCanRestart && !previewVersions.busy)
+                previewVersions.selectVersion(String(previewVersions.catalog.current));
+            else if (previewVersions.enabled) previewVersionPanel.visible = true;
         } else if (action === "jump-latest") {
             workspace.jumpToLatest();
         } else if (action === "dismiss-error") {
@@ -227,8 +231,13 @@ ApplicationWindow {
     AppController {
         id: app
     }
-    PreviewVersions { id: previewVersions }
-    readonly property bool previewCanRestart: !app.sending && !app.audio.recording && !app.audio.transcribing
+    PreviewVersions {
+        id: previewVersions
+        restartAllowed: root.previewCanRestart
+        selectedSession: app.selectedSession
+        selectedHost: app.baseUrl
+    }
+    readonly property bool previewCanRestart: !app.sending && !app.uploading && !app.audio.recording && !app.audio.transcribing && !app.audio.playing
     readonly property string previewUpdateLabel: {
         const catalog = previewVersions.catalog;
         if (!catalog.current || catalog.current === previewVersions.runningHash) return "";
@@ -368,7 +377,7 @@ ApplicationWindow {
             }
             TuiButton {
                 visible: root.previewUpdateLabel.length > 0
-                text: "Update " + root.previewUpdateLabel
+                text: "Update " + root.previewUpdateLabel + " · Ctrl+Alt+U"
                 enabled: root.previewCanRestart && !previewVersions.busy
                 onClicked: previewVersions.selectVersion(String(previewVersions.catalog.current))
             }

@@ -66,6 +66,7 @@ class AppController : public QObject {
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool connecting READ connecting NOTIFY connectingChanged)
     Q_PROPERTY(bool sending READ sending NOTIFY sendingChanged)
+    Q_PROPERTY(bool uploading READ uploading NOTIFY composerRevisionChanged)
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
     Q_PROPERTY(bool pauseMobilePush READ pauseMobilePush WRITE setPauseMobilePush NOTIFY pauseMobilePushChanged)
     Q_PROPERTY(bool showWhenReady READ showWhenReady WRITE setShowWhenReady NOTIFY showWhenReadyChanged)
@@ -178,6 +179,8 @@ class AppController : public QObject {
     [[nodiscard]] bool connected() const;
     [[nodiscard]] bool connecting() const;
     [[nodiscard]] bool sending() const;
+    [[nodiscard]] bool uploading() const { return !m_pendingUploads.isEmpty(); }
+    void restoreDesktopSession(const QString& session);
     [[nodiscard]] bool muted() const;
     [[nodiscard]] bool pauseMobilePush() const { return m_pauseMobilePush; }
     void setPauseMobilePush(bool value);
@@ -335,6 +338,7 @@ class AppController : public QObject {
                                                                const QString& session) const;
     Q_INVOKABLE [[nodiscard]] bool composerCanSend(const QString& paneId,
                                                    const QString& session) const;
+    Q_INVOKABLE bool pasteClipboardImage(const QString& paneId, const QString& session);
     Q_INVOKABLE void attachLocalFile(const QString& paneId, const QString& session,
                                      const QUrl& fileUrl);
     Q_INVOKABLE void removeComposerAttachment(const QString& paneId, const QString& session,
@@ -481,6 +485,7 @@ class AppController : public QObject {
     QString m_baseUrl;
     QString m_bearerToken;
     QString m_selectedSession;
+    QString m_restoredSession;
     QString m_pendingCreatedSession;
     int m_createdSnapshotAttempts = 0;
     quint64 m_snapshotGeneration = 0;

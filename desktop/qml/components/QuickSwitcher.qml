@@ -81,6 +81,7 @@ Rectangle {
         { kind: "command", label: "Larger interface", action: "ui-larger", key: "Ctrl+=", group: "view" },
         { kind: "command", label: "Smaller interface", action: "ui-smaller", key: "Ctrl+-", group: "view" },
         { kind: "command", label: "Reset interface size", action: "ui-reset", key: "Ctrl+0", group: "view" },
+        { kind: "command", label: "Update desktop preview", action: "update-preview", key: "Ctrl+Alt+U", group: "view", keywords: "upgrade restart version" },
         { kind: "command", label: "Jump to latest", action: "jump-latest", key: "Ctrl+End", group: "view", keywords: "bottom newest scroll follow" },
         { kind: "command", label: "Dismiss conversation error", action: "dismiss-error", key: "Esc", group: "view", keywords: "clear close error warning banner" },
         { kind: "command", label: "Refresh conversation", action: "refresh", key: "Ctrl+R", group: "view" },

@@ -94,7 +94,11 @@ int main(int argc, char* argv[]) {
         &engine, &QQmlApplicationEngine::objectCreationFailed, &application,
         [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
     const bool versionManager = application.arguments().contains(QStringLiteral("--preview-versions"));
-    const bool launchOnStartup = !versionManager && !launchParser.isSet(QStringLiteral("no-new-agent"))
+    const bool restoreDesktop = qEnvironmentVariable("CLARP_RESTORE_DESKTOP") == QStringLiteral("1");
+    const QString restoreSession = qEnvironmentVariable("CLARP_RESTORE_SESSION");
+    qunsetenv("CLARP_RESTORE_DESKTOP");
+    qunsetenv("CLARP_RESTORE_SESSION");
+    const bool launchOnStartup = !restoreDesktop && !versionManager && !launchParser.isSet(QStringLiteral("no-new-agent"))
         && (explicitAgentLaunch || (QSettings().value(QStringLiteral("launch/newAgentOnStartup"), true).toBool()
             && !qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")));
     application.setProperty("clarpLaunchMode", launchOnStartup);
@@ -110,6 +114,7 @@ int main(int argc, char* argv[]) {
         rootWindow = qobject_cast<QQuickWindow*>(engine.rootObjects().constFirst());
         controller = engine.rootObjects().constFirst()->findChild<clarp::AppController*>();
         if (rootWindow != nullptr && controller != nullptr) {
+            if (restoreDesktop) controller->restoreDesktopSession(restoreSession);
             desktopIntegration =
                 std::make_unique<clarp::DesktopIntegration>(rootWindow, controller, &application);
             if (!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")) {
@@ -663,8 +668,13 @@ int main(int argc, char* argv[]) {
             : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_CONTEXT_KEYBOARD") ? 4'600
             : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SETTINGS_KEYBOARD") ? 3'300
             : screenshotScenario.isEmpty() ? 2'000 : 2'400;
-        QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath, sidebarToggles, sidebarWidth] {
+        QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath, sidebarToggles, sidebarWidth, controller, restoreDesktop, restoreSession] {
             if (rootWindow != nullptr) {
+                if (restoreDesktop && (!controller || controller->selectedSession() != restoreSession || application.property("clarpLaunchMode").toBool())) {
+                    qCritical("Update relaunch did not retain the exact conversation or entered new-agent mode");
+                    application.exit(EXIT_FAILURE); return;
+                }
+                if (restoreDesktop) qInfo("Update relaunch preserved session=%s without new-agent mode", qPrintable(restoreSession));
                 if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_MINIMAL_UI")) {
                     auto* button = rootWindow->findChild<QQuickItem*>(QStringLiteral("sidebarHideButton"));
                     const bool minimal = qEnvironmentVariableIntValue("CLARP_SCREENSHOT_MINIMAL_UI") != 0;

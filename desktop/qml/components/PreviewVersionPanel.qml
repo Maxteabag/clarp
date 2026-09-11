@@ -35,7 +35,7 @@ FocusScope {
             }
             TuiLabel {
                 visible: !root.canRestart
-                text: "Finish sending or recording before switching versions."
+                text: "Finish sending, uploads, recording, transcription or playback before switching versions."
                 color: "#e2b979"
             }
             TuiLabel {

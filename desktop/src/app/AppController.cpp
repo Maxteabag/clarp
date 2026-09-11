@@ -12,6 +12,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QClipboard>
+#include <QMimeData>
+#include <QImage>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QMimeDatabase>
@@ -802,6 +804,7 @@ void AppController::setBaseUrl(const QString& value) {
     m_archivedAgents.applySnapshot({{QStringLiteral("agents"), QJsonArray{}}});
     m_contacts.applySnapshot({}, {});
     m_selectedSession.clear();
+    m_restoredSession.clear();
     m_conversation = &m_emptyConversation;
     m_emptyConversation.openSession({});
     ++m_composerRevision;
@@ -1023,11 +1026,23 @@ void AppController::resetTransientRequestState() {
     emit pastSessionsChanged();
 }
 
+void AppController::restoreDesktopSession(const QString& session) {
+    if (session.isEmpty()) return;
+    m_restoredSession = session;
+    m_selectedSession = session;
+    m_conversation = ensureConversation(session);
+    m_panes.setActiveSession(session);
+    emit selectedSessionChanged();
+    emit conversationChanged();
+    refreshSelectedProperties();
+}
+
 void AppController::selectSession(const QString& session) {
     if (m_launchMode && session != m_launchSession) return;
     if (session.isEmpty()) {
         return;
     }
+    m_restoredSession.clear();
     const bool changed = m_selectedSession != session;
     m_selectedSession = session;
     m_agents.clearUnread(session);
@@ -1753,6 +1768,36 @@ void AppController::storeComposerAttachments(const QString& session,
     }
     ++m_composerRevision;
     emit composerRevisionChanged();
+}
+
+bool AppController::pasteClipboardImage(const QString& paneId, const QString& session) {
+    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+    if (mime == nullptr || !mime->hasImage()) return false; // Let native text paste proceed.
+    if (paneId != m_panes.activePaneId() || session != m_panes.activeSession() || session.isEmpty()) {
+        setErrorMessage(QStringLiteral("Select a conversation before pasting an image"));
+        return true;
+    }
+    const QImage image = qvariant_cast<QImage>(mime->imageData());
+    if (image.isNull() || image.sizeInBytes() > 256 * 1024 * 1024) {
+        setErrorMessage(QStringLiteral("Clipboard image is empty or too large"));
+        return true;
+    }
+    const QString folder = QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
+        .filePath(QStringLiteral("clipboard-images"));
+    if (!QDir().mkpath(folder)) {
+        setErrorMessage(QStringLiteral("Could not store the pasted image"));
+        return true;
+    }
+    const QString path = QDir(folder).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".png"));
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || !file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)
+        || !image.save(&file, "PNG") || file.size() > MaxComposerUploadBytes || !file.commit()) {
+        file.cancelWriting();
+        setErrorMessage(QStringLiteral("Could not store the pasted image (maximum 50 MB)"));
+        return true;
+    }
+    attachLocalFile(paneId, session, QUrl::fromLocalFile(path));
+    return true;
 }
 
 void AppController::attachLocalFile(const QString& paneId, const QString& session,
@@ -2798,6 +2843,14 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
             selectSession(created);
             requestComposerFocus(m_panes.activePaneId());
             emit agentMutationSucceeded(created);
+        }
+        if (!m_restoredSession.isEmpty()) {
+            if (m_agents.find(m_restoredSession) == nullptr && !isPairSession(m_restoredSession)) {
+                setErrorMessage(QStringLiteral("The conversation selected before updating is not available on this Host. Choose another conversation or retry."));
+                return; // Never replace the explicitly restored target with the first roster row.
+            }
+            const QString restored = std::exchange(m_restoredSession, {});
+            selectSession(restored);
         }
         if (m_selectedSession.isEmpty() ||
             (m_agents.find(m_selectedSession) == nullptr && !isPairSession(m_selectedSession))) {
