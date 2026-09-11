@@ -284,7 +284,17 @@ Rectangle {
                             root.controller.requestComposerFocus(root.paneId);
                     }
 
+                    Keys.onShortcutOverride: event => {
+                        if (event.key === Qt.Key_A && (event.modifiers & Qt.ControlModifier)
+                            && !(event.modifiers & (Qt.AltModifier | Qt.MetaModifier))) event.accepted = true;
+                    }
                     Keys.onPressed: event => {
+                        if (event.key === Qt.Key_A && (event.modifiers & Qt.ControlModifier)
+                            && !(event.modifiers & (Qt.AltModifier | Qt.MetaModifier))) {
+                            root.controller.requestContactAssignment(root.session, (event.modifiers & Qt.ShiftModifier) !== 0);
+                            event.accepted = true;
+                            return;
+                        }
                         const shift = (event.modifiers & Qt.ShiftModifier) !== 0;
                         if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !shift) {
                             if (editor.text.trim().length > 0 || root.attachments.length > 0) {
@@ -387,7 +397,7 @@ Rectangle {
     }
 
     Shortcut {
-        sequence: "Ctrl+Shift+A"
+        sequence: "Ctrl+Shift+O"
         context: Qt.ApplicationShortcut
         enabled: root.active && root.session.length > 0
         onActivated: fileDialog.open()

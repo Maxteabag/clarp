@@ -253,3 +253,35 @@ AppImage releases must include a checksum and the dependency-license inventory
 described in `THIRD_PARTY_NOTICES.md`.
 
 See `REWRITE_PLAN.md` for the behavioral scope and completion gates.
+
+## Launch an agent from the desktop command
+
+`clarp-desktop --new-agent` opens a backend and model chooser. New agents are
+anonymous by default, named `Codex-5342` or similar, without occupying a saved
+contact. Settings → Agent identity can disable this default.
+
+- `--backend claude|codex|grok|agy|opencode` implies `--new-agent` and skips the chooser.
+- `--model MODEL_ID` chooses the provider model; omission uses the provider default.
+- `--effort EFFORT` passes the model's reasoning effort to the Host.
+- `--anonymous` / `--contact` override the anonymous preference for this launch.
+- `--no-new-agent` opens normally, overriding the startup preference.
+- Settings → Startup controls whether an unflagged launch opens the chooser
+  (enabled by default). Explicit launch flags override this preference.
+
+With `--contact`, the Host selects an available contact compatible with the
+backend while holding its creation lock. If none is available, the desktop
+asks for a new name or Cancel. It never replaces an occupied contact.
+
+`Ctrl+A` opens assignment for the current agent: Automatically assign (default),
+Choose a contact, or Create a new contact. `Ctrl+Shift+A` immediately attempts
+automatic assignment; an empty pool leaves the dialog open to create a contact.
+Assignment preserves agent/session/runtime identifiers, backend, model, and
+conversation. Existing contact personality, voice, and avatar are copied;
+new contacts begin with no assigned voice. Repeated automatic assignment keeps
+an already assigned contact. The composer handles these keys before text editing;
+its draft and caret survive. Attach file moves to `Ctrl+Shift+O`.
+
+Examples: `clarp-desktop --backend codex --model MODEL_ID --effort high`,
+`clarp-desktop --new-agent`, and `clarp-desktop --no-new-agent`.
+The preview launcher forwards the same flags. Workspace uses the saved launch
+workspace, or `~`. Unsupported model/backend combinations are reported by the Host.

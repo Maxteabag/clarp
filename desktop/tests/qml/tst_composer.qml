@@ -24,6 +24,9 @@ TestCase {
         function paneDraft(pane, session) { return ""; }
         function setPaneDraft(pane, session, text) {}
         function requestComposerFocus(pane) {}
+        property int assignments: 0
+        property bool automatic: false
+        function requestContactAssignment(session, autoAssign) { assignments++; automatic = autoAssign; }
 
         property var audio: ({playing: false, paused: false, recording: false, transcribing: false, transcriptionsInFlight: 0, transcriptionsForSession: function(session) { return 0; }})
         property string sent: ""
@@ -40,6 +43,25 @@ TestCase {
         session: "fixture"
         paneId: "pane"
         active: true
+    }
+
+    function test_assignmentOverridesTextEditingShortcuts() {
+        const editor = findChild(composer, "paneComposerEditor");
+        editor.text = "Keep this draft";
+        editor.forceActiveFocus();
+        editor.cursorPosition = 5;
+        const calls = controller.assignments;
+        keyClick(Qt.Key_A, Qt.ControlModifier);
+        compare(controller.assignments, calls + 1);
+        compare(controller.automatic, false);
+        compare(editor.cursorPosition, 5);
+        compare(editor.selectedText, "");
+        keyClick(Qt.Key_A, Qt.ControlModifier | Qt.ShiftModifier);
+        compare(controller.assignments, calls + 2);
+        compare(controller.automatic, true);
+        compare(editor.text, "Keep this draft");
+        compare(editor.selectedText, "");
+        editor.clear();
     }
 
     function test_entireInputHeightAcceptsClicksAndBlockCursorBlinks() {

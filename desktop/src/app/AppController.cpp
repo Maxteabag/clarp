@@ -134,6 +134,8 @@ AppController::AppController(QObject* parent)
     });
     m_timestampsVisible =
         settings.value(QStringLiteral("conversation/timestampsVisible"), false).toBool();
+    m_anonymousAgents = settings.value(QStringLiteral("launch/anonymousAgents"), true).toBool();
+    m_newAgentOnStartup = settings.value(QStringLiteral("launch/newAgentOnStartup"), true).toBool();
     m_minimalUi = settings.value(QStringLiteral("appearance/minimalUi"), false).toBool();
     const QString sharedFilesystemHost =
         qEnvironmentVariable("CLARP_SHARED_FILESYSTEM_HOST").trimmed();
@@ -361,7 +363,68 @@ QVariantList AppController::matchingContacts(const QString& query) const {
     return result;
 }
 
-bool AppController::quickStartContact(const QString& name) {
+void AppController::setAnonymousAgents(bool value) {
+    if (m_anonymousAgents == value) return;
+    m_anonymousAgents = value;
+    QSettings().setValue(QStringLiteral("launch/anonymousAgents"), value);
+    emit anonymousAgentsChanged();
+}
+
+bool AppController::startAnonymousAgent(const QString& backend, const QString& model, const QString& effort) {
+    if (!connected() || backend.isEmpty() || !m_startingContact.isEmpty()) return false;
+    setErrorMessage({});
+    m_startingContact = QStringLiteral("anonymous");
+    emit contactLaunchChanged();
+    QJsonObject body{{QStringLiteral("anonymous"), true}, {QStringLiteral("backend"), backend},
+        {QStringLiteral("cwd"), m_lastWorkingDirectory.isEmpty() ? QStringLiteral("~") : m_lastWorkingDirectory},
+        {QStringLiteral("synthesize_audio"), !m_muted}};
+    if (!model.isEmpty()) body.insert(QStringLiteral("model"), model);
+    if (!effort.isEmpty()) body.insert(QStringLiteral("effort"), effort);
+    m_api.postJson(QStringLiteral("contact-create"), QStringLiteral("/agents"), body);
+    return true;
+}
+
+void AppController::loadAssignmentContacts(const QString& session) {
+    m_assignmentSession = session;
+    m_assignmentContacts.clear();
+    emit assignmentContactsChanged();
+    m_api.postJson(QStringLiteral("assignment-options:") + session, QStringLiteral("/agent-assign"),
+        {{QStringLiteral("session"), session}, {QStringLiteral("mode"), QStringLiteral("options")}});
+}
+
+void AppController::assignContact(const QString& session, const QString& mode, const QString& name) {
+    if (session.isEmpty() || !connected()) {
+        setErrorMessage(QStringLiteral("Connect and select an agent before assigning a contact"));
+        return;
+    }
+    setErrorMessage({});
+    m_api.postJson(QStringLiteral("agent-assignment:") + session, QStringLiteral("/agent-assign"),
+        {{QStringLiteral("session"), session}, {QStringLiteral("mode"), mode}, {QStringLiteral("name"), name}});
+}
+
+void AppController::setNewAgentOnStartup(bool value) {
+    if (m_newAgentOnStartup == value) return;
+    m_newAgentOnStartup = value;
+    QSettings().setValue(QStringLiteral("launch/newAgentOnStartup"), value);
+    emit newAgentOnStartupChanged();
+}
+
+bool AppController::startAvailableContact(const QString& backend, const QString& model, const QString& effort) {
+    if (!connected() || backend.isEmpty() || !m_startingContact.isEmpty()) return false;
+    setErrorMessage({});
+    m_startingContact = QStringLiteral("pool");
+    emit contactLaunchChanged();
+    QJsonObject body{{QStringLiteral("auto_contact"), true}, {QStringLiteral("backend"), backend},
+        {QStringLiteral("cwd"), m_lastWorkingDirectory.isEmpty() ? QStringLiteral("~") : m_lastWorkingDirectory},
+        {QStringLiteral("synthesize_audio"), !m_muted}};
+    if (!model.isEmpty()) body.insert(QStringLiteral("model"), model);
+    if (!effort.isEmpty()) body.insert(QStringLiteral("effort"), effort);
+    m_api.postJson(QStringLiteral("contact-create"), QStringLiteral("/agents"), body);
+    return true;
+}
+
+bool AppController::quickStartContact(const QString& name, const QString& backend,
+                                     const QString& model, const QString& effort) {
     if (!m_startingContact.isEmpty()) return false;
     if (!connected()) {
         setErrorMessage(QStringLiteral("Connect to the Host before starting a contact"));
@@ -382,11 +445,13 @@ bool AppController::quickStartContact(const QString& name) {
     setErrorMessage({});
     m_startingContact = contactName;
     emit contactLaunchChanged();
-    m_api.postJson(QStringLiteral("contact-create"), QStringLiteral("/agents"),
-        {{QStringLiteral("name"), contactName},
+    QJsonObject body{{QStringLiteral("name"), contactName},
          {QStringLiteral("cwd"), m_lastWorkingDirectory.isEmpty() ? QStringLiteral("~") : m_lastWorkingDirectory},
-         {QStringLiteral("backend"), quickStartBackend()},
-         {QStringLiteral("synthesize_audio"), !m_muted}});
+         {QStringLiteral("backend"), backend.isEmpty() ? quickStartBackend() : backend},
+         {QStringLiteral("synthesize_audio"), !m_muted}};
+    if (!model.isEmpty()) body.insert(QStringLiteral("model"), model);
+    if (!effort.isEmpty()) body.insert(QStringLiteral("effort"), effort);
+    m_api.postJson(QStringLiteral("contact-create"), QStringLiteral("/agents"), body);
     return true;
 }
 
@@ -2581,6 +2646,18 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         }
         return;
     }
+    if (tag.startsWith(QStringLiteral("assignment-options:"))) {
+        if (tag.sliced(19) == m_assignmentSession) {
+            m_assignmentContacts = object.value(QStringLiteral("contacts")).toArray().toVariantList();
+            emit assignmentContactsChanged();
+        }
+        return;
+    }
+    if (tag.startsWith(QStringLiteral("agent-assignment:"))) {
+        requestSnapshot();
+        emit contactAssignmentSucceeded(tag.sliced(17));
+        return;
+    }
     if (tag == QStringLiteral("snapshot")) {
         m_availableMcpServers =
             object.value(QStringLiteral("available_mcp_servers")).toArray().toVariantList();
@@ -2875,9 +2952,21 @@ void AppController::handleRequestFailure(const QString& tag, const QString& mess
                                          int statusCode) {
     if (tag == QStringLiteral("desktop-presence") || tag == QStringLiteral("application-activity")) return; // Old/offline Hosts ignore optional leases.
 
+    if (tag.startsWith(QStringLiteral("agent-assignment:"))) {
+        setErrorMessage(message == QStringLiteral("contact_pool_empty")
+            ? QStringLiteral("No compatible contacts are available. Choose Create a new contact.")
+            : message == QStringLiteral("contact_unavailable")
+                ? QStringLiteral("That contact is occupied or incompatible with this backend. Choose another contact.")
+                : message);
+        return;
+    }
     if (tag == QStringLiteral("contact-create")) {
         m_startingContact.clear();
         emit contactLaunchChanged();
+        if (message == QStringLiteral("contact_pool_empty")) {
+            emit launchPoolEmpty();
+            return;
+        }
     }
     if (tag == QStringLiteral("settings-action:tts")) {
         m_settingsStatusPending = std::max(0, m_settingsStatusPending - 1);

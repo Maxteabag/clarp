@@ -7,6 +7,7 @@
 #include "platform/DesktopIntegration.h"
 
 #include <QApplication>
+#include <QCommandLineParser>
 #include <QIcon>
 #include <QFont>
 #include <QImage>
@@ -44,6 +45,32 @@ int main(int argc, char* argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QApplication application(argc, argv);
+    QCommandLineParser launchParser;
+    launchParser.setApplicationDescription(QStringLiteral("Clarp desktop and agent launcher"));
+    launchParser.addHelpOption();
+    launchParser.addVersionOption();
+    launchParser.addOption({QStringLiteral("anonymous"), QStringLiteral("Start anonymously, overriding Settings")});
+    launchParser.addOption({QStringLiteral("contact"), QStringLiteral("Start with an available contact, overriding Settings")});
+    launchParser.addOption({QStringLiteral("new-agent"), QStringLiteral("Start an agent; prompt for backend if omitted")});
+    launchParser.addOption({QStringLiteral("no-new-agent"), QStringLiteral("Open the desktop without starting an agent, overriding Settings")});
+    launchParser.addOption({QStringLiteral("backend"), QStringLiteral("Start with claude, codex, grok, agy, or opencode (implies --new-agent)"), QStringLiteral("backend")});
+    launchParser.addOption({QStringLiteral("model"), QStringLiteral("Use this backend model ID"), QStringLiteral("model")});
+    launchParser.addOption({QStringLiteral("effort"), QStringLiteral("Use this model reasoning effort"), QStringLiteral("effort")});
+    launchParser.addOption({QStringLiteral("preview-versions"), QStringLiteral("Manage saved preview versions")});
+    launchParser.process(application);
+    const QString launchBackend = launchParser.value(QStringLiteral("backend")).trimmed().toLower();
+    const int anonymousMode = launchParser.isSet(QStringLiteral("anonymous")) ? 1 : launchParser.isSet(QStringLiteral("contact")) ? 0 : -1;
+    const bool explicitAgentLaunch = anonymousMode >= 0 || launchParser.isSet(QStringLiteral("new-agent"))
+        || launchParser.isSet(QStringLiteral("backend")) || launchParser.isSet(QStringLiteral("model"))
+        || launchParser.isSet(QStringLiteral("effort"));
+    if ((launchParser.isSet(QStringLiteral("anonymous")) && launchParser.isSet(QStringLiteral("contact")))
+        || (explicitAgentLaunch && launchParser.isSet(QStringLiteral("no-new-agent")))
+        || (launchParser.isSet(QStringLiteral("backend")) && !QStringList{
+            QStringLiteral("claude"), QStringLiteral("codex"), QStringLiteral("grok"),
+            QStringLiteral("agy"), QStringLiteral("opencode")}.contains(launchBackend))) {
+        qCritical("Invalid backend or conflicting agent launch flags. See --help.");
+        return EXIT_FAILURE;
+    }
     QFont uiFont = application.font();
     uiFont.setFamily(QStringLiteral("JetBrains Mono"));
     uiFont.setStyleHint(QFont::Monospace);
@@ -90,6 +117,17 @@ int main(int argc, char* argv[]) {
                 presence->setConnected(controller->connected());
             }
         }
+    }
+    if (rootWindow != nullptr && controller != nullptr && !versionManager
+        && !launchParser.isSet(QStringLiteral("no-new-agent"))
+        && (explicitAgentLaunch || (controller->newAgentOnStartup()
+            && !qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")))) {
+        const QString launchModel = launchParser.value(QStringLiteral("model"));
+        const QString launchEffort = launchParser.value(QStringLiteral("effort"));
+        QTimer::singleShot(0, rootWindow, [rootWindow, launchBackend, launchModel, launchEffort, anonymousMode] {
+            QMetaObject::invokeMethod(rootWindow, "openLaunchAgent",
+                Q_ARG(QVariant, launchBackend), Q_ARG(QVariant, launchModel), Q_ARG(QVariant, launchEffort), Q_ARG(QVariant, anonymousMode));
+        });
     }
     const QString screenshotPath = qEnvironmentVariable("CLARP_SCREENSHOT_PATH");
     if (!screenshotPath.isEmpty() && controller != nullptr && qEnvironmentVariableIsSet("CLARP_SCREENSHOT_MINIMAL_UI"))
