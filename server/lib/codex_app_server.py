@@ -371,6 +371,26 @@ class _Client:
                 "threadId": active.thread_id, "turnId": active.turn_id,
             })
 
+    def shutdown(self) -> None:
+        """EOF stdin so the stdio app-server exits and drops its writer lock."""
+        try:
+            if self.active:
+                self.interrupt_active()
+        except Exception:
+            pass
+        try:
+            if self.proc.stdin is not None:
+                self.proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+        if self.proc.poll() is not None:
+            return
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+
 
 def _normalize_item(item: dict) -> dict:
     out = dict(item)
@@ -456,3 +476,26 @@ def interrupt(agent_id: str) -> int:
     for handle in handles:
         handle.terminate()
     return len(handles)
+
+
+def recycle_clients() -> int:
+    """Close every app-server so the next turn re-reads ``auth.json``.
+
+    Out-of-band ``codex login`` rewrites credentials without telling these
+    processes. Leaving them alive keeps the old token in memory and the
+    thread writer lock held, so the next ``thread/resume`` fails with
+    ``-32600 already has an active writer``.
+    """
+    with _LOCK:
+        clients = list(_CLIENTS.values())
+        _CLIENTS.clear()
+    closed = 0
+    for client in clients:
+        try:
+            client.shutdown()
+        except Exception as exc:  # noqa: BLE001
+            log_exception("codexAppServerShutdownFail", exc)
+        closed += 1
+    if closed:
+        log("codexAppServerRecycle", f"closed={closed}")
+    return closed
