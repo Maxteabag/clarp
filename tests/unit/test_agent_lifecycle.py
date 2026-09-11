@@ -458,3 +458,39 @@ def test_anonymous_launch_never_synthesizes_an_announcement(tmp_path):
     ctx = _ctx(tmp_path)
     AgentLifecycleService(ctx).create({"anonymous": True, "backend": "codex", "cwd": str(tmp_path)})
     assert ctx.announcements == []
+
+
+def test_launch_pins_model_before_global_default_changes(tmp_path, monkeypatch):
+    from lib import session_models
+    monkeypatch.setattr(session_models, 'launch_default', lambda backend, cfg: 'original-model')
+    result = AgentLifecycleService(_ctx(tmp_path)).create({
+        'anonymous': True, 'backend': 'codex', 'cwd': str(tmp_path)})
+    monkeypatch.setattr(session_models, 'launch_default', lambda backend, cfg: 'different-model')
+    assert agents_db.get_by_session(result.session)['model'] == 'original-model'
+
+
+def test_resume_existing_opens_owner_without_creation(tmp_path):
+    ctx = _ctx(tmp_path)
+    service = AgentLifecycleService(ctx)
+    result = service.create({'anonymous': True, 'backend': 'codex', 'cwd': str(tmp_path)})
+    agent = agents_db.get_by_session(result.session)
+    agents_db.bind_backend_session(agent['agent_id'], 'native-session')
+    count = len(agents_db.list_agents())
+    events = len(ctx.stream.events)
+    reopened = service.create({'anonymous': True, 'backend': 'codex', 'cwd': str(tmp_path),
+        'resume_session_id': 'native-session', 'open_existing': True})
+    assert reopened.session == result.session
+    assert len(agents_db.list_agents()) == count
+    assert len(ctx.stream.events) == events
+
+
+def test_resume_unbound_preserves_recorded_model(tmp_path, monkeypatch):
+    from lib import backends, session_models
+    monkeypatch.setattr(backends, 'list_sessions', lambda *a, **kw: [{'id':'native'}])
+    monkeypatch.setattr(session_models, 'recorded_model', lambda *a: 'session-model')
+    monkeypatch.setattr(session_models, 'launch_default', lambda *a: 'wrong-default')
+    result = AgentLifecycleService(_ctx(tmp_path)).create({'anonymous': True, 'backend':'codex',
+        'cwd':str(tmp_path), 'resume_session_id':'native', 'open_existing':True})
+    agent = agents_db.get_by_session(result.session)
+    assert agent['model'] == 'session-model'
+    assert agents_db.live_backend_session(agent['agent_id']) == 'native'

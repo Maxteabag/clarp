@@ -289,6 +289,7 @@ class AppController : public QObject {
                                                            const QString& model) const;
     Q_INVOKABLE [[nodiscard]] bool backendSupportsResume(const QString& backend) const;
     Q_INVOKABLE [[nodiscard]] bool backendSupportsFork(const QString& backend) const;
+    Q_INVOKABLE bool resumeLaunchSession(const QString& backend, const QString& sessionId, bool anonymous);
     Q_INVOKABLE void loadPastSessions(const QString& workingDirectory, const QString& backend,
                                       bool allProjects = false);
     [[nodiscard]] QVariantList launchDirectories() const { return m_launchDirectories; }
@@ -568,6 +569,7 @@ class AppController : public QObject {
     bool m_sharedFilesystem = false;
     bool m_voicesLoading = false;
     bool m_orchestratorLoading = false;
+    quint64 m_pastSessionsGeneration = 0;
     bool m_pastSessionsLoading = false;
     bool m_hasStoredCredential = false;
     quint64 m_agentRevision = 0;
