@@ -56,8 +56,8 @@ ApplicationWindow {
     palette.disabled.windowText: "#8d93b0"
     palette.disabled.buttonText: "#8d93b0"
 
-    function openLaunchAgent(backend, model, effort, anonymousMode) {
-        launchAgent.open(backend, model, effort, anonymousMode);
+    function openLaunchAgent(backend, model, effort, anonymousMode, directory) {
+        launchAgent.open(backend, model, effort, anonymousMode, directory);
     }
 
     function composerOwnsFocus() {

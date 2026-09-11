@@ -395,7 +395,7 @@ bool AppController::startAnonymousAgent(const QString& backend, const QString& m
     m_startingBackend = backend;
     emit contactLaunchChanged();
     QJsonObject body{{QStringLiteral("anonymous"), true}, {QStringLiteral("backend"), backend},
-        {QStringLiteral("cwd"), m_lastWorkingDirectory.isEmpty() ? QStringLiteral("~") : m_lastWorkingDirectory},
+        {QStringLiteral("cwd"), launchDirectory().isEmpty() ? QStringLiteral("~") : launchDirectory()},
         {QStringLiteral("synthesize_audio"), !m_muted}};
     if (!model.isEmpty()) body.insert(QStringLiteral("model"), model);
     if (!effort.isEmpty()) body.insert(QStringLiteral("effort"), effort);
@@ -436,7 +436,7 @@ bool AppController::startAvailableContact(const QString& backend, const QString&
     m_startingBackend = backend;
     emit contactLaunchChanged();
     QJsonObject body{{QStringLiteral("auto_contact"), true}, {QStringLiteral("backend"), backend},
-        {QStringLiteral("cwd"), m_lastWorkingDirectory.isEmpty() ? QStringLiteral("~") : m_lastWorkingDirectory},
+        {QStringLiteral("cwd"), launchDirectory().isEmpty() ? QStringLiteral("~") : launchDirectory()},
         {QStringLiteral("synthesize_audio"), !m_muted}};
     if (!model.isEmpty()) body.insert(QStringLiteral("model"), model);
     if (!effort.isEmpty()) body.insert(QStringLiteral("effort"), effort);
@@ -1450,6 +1450,16 @@ void AppController::loadPastSessions(const QString& workingDirectory, const QStr
         query.addQueryItem(QStringLiteral("scope"), QStringLiteral("all"));
     }
     m_api.get(QStringLiteral("past-sessions"), QStringLiteral("/past-sessions"), query);
+}
+
+void AppController::loadLaunchDirectories(const QString& query) {
+    m_launchDirectories.clear();
+    m_launchDirectoriesLoading = true;
+    emit launchDirectoriesChanged();
+    QUrlQuery parameters;
+    parameters.addQueryItem(QStringLiteral("q"), query);
+    m_api.get(QStringLiteral("launch-directories:%1").arg(++m_launchDirectoryGeneration),
+              QStringLiteral("/launch-directories"), parameters);
 }
 
 void AppController::loadDirectorySuggestions(const QString& path) {
@@ -2679,6 +2689,13 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         emit pastSessionsChanged();
         return;
     }
+    if (tag.startsWith(QStringLiteral("launch-directories:"))) {
+        if (tag.sliced(19).toULongLong() != m_launchDirectoryGeneration) return;
+        m_launchDirectories = object.value(QStringLiteral("matches")).toArray().toVariantList();
+        m_launchDirectoriesLoading = false;
+        emit launchDirectoriesChanged();
+        return;
+    }
     if (tag == QStringLiteral("directory-suggestions")) {
         m_directorySuggestions = object.value(QStringLiteral("matches")).toArray().toVariantList();
         emit pathsChanged();
@@ -2894,6 +2911,12 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
                 QSettings().setValue(QStringLiteral("launch/backend"), m_lastBackend);
                 emit launchDefaultsChanged();
             }
+            const QString directory = object.value(QStringLiteral("agent")).toObject().value(QStringLiteral("cwd")).toString(m_launchDirectory);
+            if (!directory.isEmpty() && m_lastWorkingDirectory != directory) {
+                m_lastWorkingDirectory = directory;
+                QSettings().setValue(QStringLiteral("launch/workingDirectory"), directory);
+                emit launchDefaultsChanged();
+            }
             m_startingBackend.clear();
         }
         const QString session = object.value(QStringLiteral("session")).toString();
@@ -3049,6 +3072,11 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
 
 void AppController::handleRequestFailure(const QString& tag, const QString& message,
                                          int statusCode) {
+    if (tag.startsWith(QStringLiteral("launch-directories:"))) {
+        if (tag.sliced(19).toULongLong() != m_launchDirectoryGeneration) return;
+        m_launchDirectoriesLoading = false;
+        emit launchDirectoriesChanged();
+    }
     if (tag.startsWith(QStringLiteral("snapshot:"))) {
         if (tag.sliced(9).toULongLong() != m_snapshotGeneration) return;
         completeSnapshotRequest();
