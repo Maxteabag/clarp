@@ -101,16 +101,16 @@ Rectangle {
             spacing: 13
 
             Item { Layout.preferredHeight: 14 }
-            Text {
+            TuiText {
                 objectName: "settingsHeading"
                 text: "SETTINGS"
                 color: "#c9cde3"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 20
+                font.pixelSize: 17
                 font.weight: Font.DemiBold
                 font.letterSpacing: 1.6
             }
-            Text {
+            TuiText {
                 Layout.fillWidth: true
                 text: "↑↓ / Tab move · Space / Enter change · Esc back to chat"
                 color: "#858aa5"
@@ -158,9 +158,9 @@ Rectangle {
                         spacing: 8
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "Tool detail"; color: "#d2d7eb"; font.pixelSize: 14 }
+                            TuiText { text: "Tool detail"; color: "#d2d7eb"; font.pixelSize: 14 }
                             Item { Layout.fillWidth: true }
-                            Text {
+                            TuiText {
                                 text: root.controller.toolNarrator.detailLevels[root.controller.toolNarrator.detailLevel]
                                 color: "#82aaff"
                                 font.pixelSize: 14
@@ -185,9 +185,9 @@ Rectangle {
                                 y: detailDial.topPadding + (detailDial.availableHeight - height) / 2
                                 width: detailDial.availableWidth
                                 height: 4
-                                radius: 2
+                                radius: 0
                                 color: "#454c65"
-                                Rectangle { width: parent.width * detailDial.visualPosition; height: parent.height; radius: 2; color: "#82aaff" }
+                                Rectangle { width: parent.width * detailDial.visualPosition; height: parent.height; radius: 0; color: "#82aaff" }
                                 Repeater {
                                     model: 5
                                     Rectangle {
@@ -205,20 +205,20 @@ Rectangle {
                                 y: detailDial.topPadding + (detailDial.availableHeight - height) / 2
                                 implicitWidth: 16
                                 implicitHeight: 16
-                                radius: 8
+                                radius: 0
                                 color: "#c4cee9"
                                 border.color: "#82aaff"
                             }
                         }
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "Developer"; color: "#858da8"; font.pixelSize: 11 }
+                            TuiText { text: "Developer"; color: "#858da8"; font.pixelSize: 11 }
                             Item { Layout.fillWidth: true }
-                            Text { text: "← → to adjust"; color: "#858da8"; font.pixelSize: 11 }
+                            TuiText { text: "← → to adjust"; color: "#858da8"; font.pixelSize: 11 }
                             Item { Layout.fillWidth: true }
-                            Text { text: "Grandma"; color: "#858da8"; font.pixelSize: 11 }
+                            TuiText { text: "Grandma"; color: "#858da8"; font.pixelSize: 11 }
                         }
-                        Text {
+                        TuiText {
                             Layout.fillWidth: true
                             text: narrationRow.detail
                             color: "#a2aac4"
@@ -227,14 +227,14 @@ Rectangle {
                         }
                     }
                 }
-                Text {
+                TuiText {
                     Layout.fillWidth: true
                     text: "Your Host uses Spark low to explain tool metadata and bounded script excerpts. Results are shared across clients; this detail choice stays on this device. Secret filtering is best-effort."
                     color: "#858aa5"
                     font.pixelSize: 12
                     wrapMode: Text.Wrap
                 }
-                Text {
+                TuiText {
                     Layout.fillWidth: true
                     text: root.controller.toolNarrator.status
                     color: "#82aaff"
@@ -387,7 +387,7 @@ Rectangle {
         default property alias content: rows.data
         Layout.fillWidth: true
         implicitHeight: column.implicitHeight + 20
-        radius: 6
+        radius: 0
         color: "transparent"
         border.width: 0
         ColumnLayout {
@@ -397,7 +397,7 @@ Rectangle {
             anchors.top: parent.top
             anchors.margins: 10
             spacing: 8
-            Text {
+            TuiText {
                 text: group.title
                 color: "#858aa5"
                 font.family: "JetBrains Mono"
@@ -434,7 +434,7 @@ Rectangle {
         Accessible.onToggleAction: { if (checkable) activated(); }
 
         background: Rectangle {
-            radius: 4
+            radius: 0
             color: actionRow.activeFocus ? "#292d41" : hover.hovered ? "#212431" : "transparent"
             border.width: actionRow.activeFocus ? 1 : 0
             border.color: "#606888"
@@ -444,14 +444,14 @@ Rectangle {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 1
-                Text {
+                TuiText {
                     Layout.fillWidth: true
                     text: actionRow.label
                     color: actionRow.activeFocus ? "#e0e3f2" : "#c2c5d8"
                     font.pixelSize: 14
                     wrapMode: Text.Wrap
                 }
-                Text {
+                TuiText {
                     Layout.fillWidth: true
                     text: actionRow.detail
                     color: actionRow.activeFocus ? "#a2aac4" : "#777d95"
@@ -459,7 +459,7 @@ Rectangle {
                     wrapMode: Text.Wrap
                 }
             }
-            Text {
+            TuiText {
                 Layout.preferredWidth: 34
                 horizontalAlignment: Text.AlignRight
                 text: actionRow.checkable ? (actionRow.checked ? "ON" : "OFF") : "›"
@@ -504,9 +504,9 @@ Rectangle {
         Layout.leftMargin: 8
         Layout.rightMargin: 8
         Layout.preferredHeight: 28
-        Text { text: infoRow.label; color: "#aeb2c8"; font.pixelSize: 12 }
+        TuiText { text: infoRow.label; color: "#aeb2c8"; font.pixelSize: 12 }
         Item { Layout.fillWidth: true }
-        Text {
+        TuiText {
             text: infoRow.value
             color: "#6d728a"
             font.family: "JetBrains Mono"
@@ -528,7 +528,7 @@ Rectangle {
             String(fallbackProvider.currentValue || "none"), "")
         ColumnLayout {
             width: 360
-            Label { text: "Primary provider" }
+            TuiLabel { text: "Primary provider" }
             ThemedComboBox {
                 id: primaryProvider
                 objectName: "settingsPrimaryProvider"
@@ -536,14 +536,14 @@ Rectangle {
                 textRole: "label"
                 valueRole: "id"
             }
-            Label { text: "Fallback" }
+            TuiLabel { text: "Fallback" }
             ThemedComboBox {
                 id: fallbackProvider
                 Layout.fillWidth: true
                 textRole: "label"
                 valueRole: "id"
             }
-            Text {
+            TuiText {
                 Layout.fillWidth: true
                 text: "Changing to a local provider may briefly restart the Host."
                 color: "#6d728a"

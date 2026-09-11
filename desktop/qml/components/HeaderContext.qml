@@ -14,7 +14,7 @@ Item {
     RowLayout {
         anchors.fill: parent
         spacing: 12
-        Text {
+        TuiText {
             textFormat: Text.PlainText
             objectName: "headerAgentName"
             text: root.agentName || "No agent selected"
@@ -40,7 +40,7 @@ Item {
                 Layout.preferredHeight: 16
                 source: Qt.resolvedUrl("../../resources/icons/" + (root.workspace.kind || "directory") + ".svg")
             }
-            Text {
+            TuiText {
                 textFormat: Text.PlainText
                 objectName: "headerWorkspaceLabel"
                 Layout.fillWidth: true
@@ -57,7 +57,7 @@ Item {
             }
         }
         Item { visible: !String(root.workspace.path || "").length; Layout.fillWidth: true }
-        Text {
+        TuiText {
             textFormat: Text.PlainText
             objectName: "headerJanitorStatus"
             visible: root.showRuntime && text.length > 0
@@ -72,7 +72,7 @@ Item {
             ToolTip.visible: statusHover.hovered
             ToolTip.text: "Status: " + String(root.metadata.status_text || "")
         }
-        Text {
+        TuiText {
             textFormat: Text.PlainText
             objectName: "headerModel"
             visible: root.showRuntime
@@ -87,7 +87,7 @@ Item {
             ToolTip.visible: modelHover.hovered
             ToolTip.text: "Configured model: " + String(root.metadata.model || "Host default")
         }
-        Text {
+        TuiText {
             textFormat: Text.PlainText
             objectName: "headerEffort"
             visible: root.showRuntime

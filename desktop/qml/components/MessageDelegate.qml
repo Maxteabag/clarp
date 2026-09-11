@@ -114,7 +114,7 @@ Item {
         width: parent.width
         spacing: 2
 
-        Text {
+        TuiText {
             objectName: "messageProvenance"
             visible: !root.activity && !root.teamAuthored
                 && (root.origin === "automation" || root.automated)
@@ -133,7 +133,7 @@ Item {
             Layout.fillWidth: true
             Layout.leftMargin: 2
             spacing: 6
-            Text {
+            TuiText {
                 objectName: "groupAuthorName"
                 text: root.senderName || "Agent"
                 color: "#c7adf1"
@@ -142,7 +142,7 @@ Item {
                 elide: Text.ElideRight
                 Layout.maximumWidth: parent.width * 0.5
             }
-            Text {
+            TuiText {
                 objectName: "groupReplyMarker"
                 visible: root.replyToName.length > 0
                 text: root.replyMarkerText
@@ -158,7 +158,7 @@ Item {
             }
         }
 
-        Text {
+        TuiText {
             objectName: "replyMarker"
             visible: root.replyMarkerVisible && !root.groupView
             Layout.leftMargin: 2
@@ -181,7 +181,7 @@ Item {
                 x: 0
                 width: parent.width
                 implicitHeight: Math.max(24, activityRow.implicitHeight + 4)
-                radius: 2
+                radius: 0
                 color: "transparent"
                 border.width: 0
 
@@ -197,7 +197,7 @@ Item {
                     anchors.rightMargin: 3
                     spacing: 7
 
-                    Text {
+                    TuiText {
                         visible: !liveExplanation.narrationShown
                         Layout.maximumWidth: activityRow.width * 0.3
                         elide: Text.ElideRight
@@ -207,7 +207,7 @@ Item {
                         font.pixelSize: 12
                         font.weight: Font.DemiBold
                     }
-                    Text {
+                    TuiText {
                         Layout.fillWidth: true
                         text: (root.activityStatus === "error" ? "Error · " : "")
                             + (liveExplanation.narrationShown ? liveExplanation.displayText : root.body)
@@ -337,10 +337,10 @@ Item {
             }
             Layout.fillWidth: true
             implicitHeight: visible ? 24 : 0
-            radius: 3
+            radius: 0
             color: activityTap.hovered ? "#202335" : "transparent"
 
-            Text {
+            TuiText {
                 objectName: "activitySummaryText"
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
@@ -367,7 +367,7 @@ Item {
             Layout.rightMargin: 2
             spacing: 1
 
-            Button {
+            TuiButton {
                 visible: root.toolDetailsAvailable
                     && root.displayCells.length === 0 && root.tools.length === 0
                 text: "Load activity details"
@@ -410,7 +410,7 @@ Item {
             }
         }
 
-        Text {
+        TuiText {
             visible: root.showTimestamp && root.timestamp.length > 0
                 && !root.activity
             Layout.alignment: root.rightAligned ? Qt.AlignRight : Qt.AlignLeft
@@ -428,13 +428,13 @@ Item {
             Layout.leftMargin: 4
             Layout.rightMargin: 4
             spacing: 6
-            Text {
+            TuiText {
                 text: root.deliveryFailed ? "Not delivered" : "Delivering…"
                 color: root.deliveryFailed ? "#b56f7c" : "#5f6278"
                 font.family: "JetBrains Mono"
                 font.pixelSize: 9
             }
-            Button {
+            TuiButton {
                 visible: root.deliveryFailed
                 text: "Retry"
                 implicitHeight: 22

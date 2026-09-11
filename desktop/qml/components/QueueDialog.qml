@@ -21,7 +21,7 @@ Rectangle {
         width: Math.min(660, parent.width - 40)
         height: Math.min(620, parent.height - 60)
         anchors.centerIn: parent
-        radius: 7
+        radius: 0
         color: "#181a24"
         border.color: "#42465f"
 
@@ -40,7 +40,7 @@ Rectangle {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 2
-                    Text {
+                    TuiText {
                         text: "QUEUED MESSAGES"
                         color: "#c9cde3"
                         font.family: "JetBrains Mono"
@@ -48,27 +48,27 @@ Rectangle {
                         font.weight: Font.DemiBold
                         font.letterSpacing: 1.2
                     }
-                    Text {
+                    TuiText {
                         text: root.controller.agentName(root.session)
                             + (root.controller.turnQueuePaused ? "  ·  paused" : "")
                         color: root.controller.turnQueuePaused ? "#b18b70" : "#686d84"
                         font.pixelSize: 9
                     }
                 }
-                BusyIndicator {
+                TuiBusyIndicator {
                     visible: root.controller.turnQueueLoading
                     running: visible
                     implicitWidth: 18
                     implicitHeight: 18
                 }
-                ToolButton {
+                TuiToolButton {
                     text: "↻"
                     onClicked: root.controller.loadTurnQueue(root.session)
                 }
-                ToolButton { text: "×"; onClicked: root.closeRequested() }
+                TuiToolButton { text: "×"; onClicked: root.closeRequested() }
             }
 
-            Text {
+            TuiText {
                 visible: root.controller.turnQueueError.length > 0
                 Layout.fillWidth: true
                 text: root.controller.turnQueueError
@@ -92,7 +92,7 @@ Rectangle {
                     required property var modelData
                     width: ListView.view.width
                     implicitHeight: queueColumn.implicitHeight + 18
-                    radius: 5
+                    radius: 0
                     color: "#202330"
                     border.color: "#34384d"
 
@@ -104,7 +104,7 @@ Rectangle {
                         anchors.margins: 9
                         spacing: 7
 
-                        TextArea {
+                        TuiTextArea {
                             id: queuedText
                             Layout.fillWidth: true
                             text: String(queueRow.modelData.text || "")
@@ -113,14 +113,14 @@ Rectangle {
                             font.pixelSize: 11
                             color: "#c2c5d7"
                             background: Rectangle {
-                                radius: 3
+                                radius: 0
                                 color: "#1b1d28"
                                 border.color: queuedText.activeFocus ? "#737aa3" : "#303448"
                             }
                         }
                         RowLayout {
                             Layout.fillWidth: true
-                            Text {
+                            TuiText {
                                 Layout.fillWidth: true
                                 text: String(queueRow.modelData.enqueued_at || "")
                                 color: "#62677e"
@@ -128,7 +128,7 @@ Rectangle {
                                 font.pixelSize: 8
                                 elide: Text.ElideRight
                             }
-                            Button {
+                            TuiButton {
                                 text: "Save"
                                 enabled: !root.controller.turnQueueLoading
                                     && queuedText.text.trim().length > 0
@@ -136,13 +136,13 @@ Rectangle {
                                 onClicked: root.controller.updateQueuedTurn(
                                     String(queueRow.modelData.id || ""), queuedText.text)
                             }
-                            Button {
+                            TuiButton {
                                 text: "Send now"
                                 enabled: !root.controller.turnQueueLoading
                                 onClicked: root.controller.sendQueuedTurn(
                                     String(queueRow.modelData.id || ""))
                             }
-                            ToolButton {
+                            TuiToolButton {
                                 text: "⌫"
                                 enabled: !root.controller.turnQueueLoading
                                 onClicked: root.controller.deleteQueuedTurn(
@@ -154,7 +154,7 @@ Rectangle {
                     }
                 }
 
-                Label {
+                TuiLabel {
                     anchors.centerIn: parent
                     visible: queueList.count === 0 && !root.controller.turnQueueLoading
                     text: "No queued messages"

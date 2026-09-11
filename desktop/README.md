@@ -21,6 +21,11 @@ working directory. Shared local paths are classified from Git metadata as a
 repository or linked worktree; remote paths remain directory labels. The More
 menu and workspace context use compact icons.
 
+The same TUI-inspired styling applies to the sidebar, settings, pickers and
+dialogs: shared square controls, monospace labels, thin borders and restrained
+focus/selection states. Layouts and actions are unchanged. Lists use outlined
+initials/symbols; the agent profile still shows the actual portrait.
+
 Each window is independent. Instances share saved preferences, pane layout,
 and conversation drafts; the latest write to the same saved item wins. Closing
 or quitting one instance does not close the others.

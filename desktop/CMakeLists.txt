@@ -132,6 +132,16 @@ qt_add_qml_module(clarp-desktop
         qml/components/MediaGallery.qml
         qml/components/OrchestratorDialog.qml
         qml/components/ThemedComboBox.qml
+        qml/components/TuiText.qml
+        qml/components/TuiLabel.qml
+        qml/components/TuiButton.qml
+        qml/components/TuiBusyIndicator.qml
+        qml/components/TuiToolButton.qml
+        qml/components/TuiTextField.qml
+        qml/components/TuiTextArea.qml
+        qml/components/TuiCheckBox.qml
+        qml/components/TuiSwitch.qml
+        qml/components/TuiRadioButton.qml
         qml/components/PaneLeaf.qml
         qml/components/PairRow.qml
         qml/components/AgentProfilePanel.qml
