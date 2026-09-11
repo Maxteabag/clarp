@@ -99,6 +99,9 @@ def main():
                 del self.headers['If-Modified-Since']
             if urlsplit(self.path).path == '/viz/dev-revision' and a.reload:
                 self._send(200,json.dumps(revisions(ROOT)).encode(),'application/json')
+            elif urlsplit(self.path).path == '/viz/activity':
+                try:ProductionHandler._handle_viz_activity(self)
+                finally:db.close_local()
             elif urlsplit(self.path).path in ('/viz/recap', '/viz/recap/artifact'):
                 try:
                     handler = ProductionHandler._handle_viz_recap_artifact if urlsplit(self.path).path.endswith('/artifact') else ProductionHandler._handle_viz_recap

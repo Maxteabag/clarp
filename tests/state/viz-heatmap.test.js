@@ -1,5 +1,5 @@
 import {it,expect} from 'vitest';
-import {activityHeat,HEAT_WINDOW,densityGrid,heatColor,HEAT_SIGMA} from '../../static/lib/viz-heatmap.js';
+import {activityHeat,HEAT_WINDOW,densityGrid,heatColor,HEAT_SIGMA,pixelHeat} from '../../static/lib/viz-heatmap.js';
 const hits=[{id:'file',x:0,y:0,w:40,h:40},{id:'other',x:1000,y:0,w:40,h:40}];
 const event=(id,ts=1000)=>({id,ts,agent_id:'a',world_target:'file'});
 it('gets warmer with repeated events and cools without renormalizing',()=>{
@@ -9,6 +9,14 @@ it('gets warmer with repeated events and cools without renormalizing',()=>{
  expect(activityHeat([event('a')],hits,1000+HEAT_WINDOW).spots).toEqual([]);
 });
 const grid=spots=>densityGrid(spots,{x:0,y:0,k:1},300,240);
+it('pixelated display samples the same density and anchors cells to world coordinates while panning',()=>{
+ const spots=[{x:120,y:120,weight:2}],a={x:0,y:0,k:1},b={x:11,y:7,k:1};
+ const ga=densityGrid(spots,a,300,240),gb=densityGrid(spots,b,300,240);
+ const blocks=pixelHeat(ga,a,300,240),shifted=pixelHeat(gb,b,300,240);
+ const first=blocks.find(c=>c.x===112&&c.y===112),second=shifted.find(c=>c.x===112&&c.y===112);
+ expect(first.size).toBe(second.size);expect(Math.abs(first.value-second.value)).toBeLessThan(.05);
+ expect(ga.density).toEqual(densityGrid(spots,a,300,240).density);
+});
 const at=(g,x,y)=>g.density[Math.round(y/g.cell+g.pad)*g.cols+Math.round(x/g.cell+g.pad)];
 it('matches the Gaussian profile and adds overlapping density before coloring',()=>{
  const a=grid([{x:120,y:120,weight:1}]),b=grid([{x:120,y:120,weight:2}]);

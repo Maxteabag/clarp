@@ -316,6 +316,7 @@ class Handler(BaseHTTPRequestHandler):
         "/status": "_handle_status",
         "/viz/events": "_handle_viz_events",
         "/viz/recap": "_handle_viz_recap",
+        "/viz/activity": "_handle_viz_activity",
         "/viz/recap/artifact": "_handle_viz_recap_artifact",
         "/viz": "_send_viz_page",
         "/diagnostics/health": "_handle_diagnostics_health",
@@ -1303,6 +1304,18 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as error:
             return self._send(400, json.dumps({'error': str(error)}).encode(), 'application/json')
         return self._send(200, json.dumps(result).encode(), 'application/json')
+
+    def _handle_viz_activity(self):
+        from urllib.parse import parse_qs, urlsplit
+        from lib import db, viz_activity
+        import time
+        query=parse_qs(urlsplit(self.path).query)
+        try:
+            until=int(query.get('until',[int(time.time()*1000)])[0])
+            after=int(query.get('after',[0])[0]);before=int(query.get('before',[0])[0])
+            if min(until,after,before)<0 or (after and before):raise ValueError('Invalid activity cursor')
+        except ValueError as error:return self._send(400,json.dumps({'error':str(error)}).encode(),'application/json')
+        return self._send(200,json.dumps(viz_activity.build(db.conn(),until,after,before)).encode(),'application/json')
 
     def _handle_viz_recap_artifact(self):
         from urllib.parse import parse_qs, urlsplit

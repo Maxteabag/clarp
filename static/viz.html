@@ -96,6 +96,7 @@
   <button id="follow-activity" aria-pressed="false" title="Follow new activity, then return to the overview. Drag or zoom to pause.">Follow activity</button>
   <button id="heatmap" aria-pressed="false" title="Recorded activity density over the last 15 minutes at the timeline position. Activity fades as it ages.">Heatmap</button>
   <span id="heat-legend" hidden aria-live="polite"></span>
+  <button id="heat-style" hidden aria-pressed="false" title="Switch the heatmap between smooth shading and map-anchored squares">Smooth heat</button>
   <button id="play">Replay ×120</button>
   <button id="flow-demo" hidden aria-pressed="false">Workflow demo</button>
   <button id="flow-labels" hidden aria-pressed="false">Action labels</button>
@@ -114,3 +115,13 @@
 </dialog>
 <dialog id="recap-reader" aria-label="Artifact reader"></dialog>
 <script type="module" src="/static/lib/viz-recap.js"></script>
+<details id="activity-feed" open><summary>Activity stream</summary><div class="activity-controls"><button id="activity-pause">Pause</button><button id="activity-earlier">Earlier</button><small id="activity-status">Connecting…</small></div><ol id="activity-items" aria-label="Clarp activity"></ol></details>
+<script type="module" src="/static/lib/viz-activity.js"></script>
+<style>
+#activity-feed{position:fixed;left:14px;bottom:65px;width:340px;max-width:calc(100vw - 28px);background:#0b2027ed;border:1px solid #3a5557;border-radius:10px;color:#c8d7d1;font:12px/1.4 'Trebuchet MS',sans-serif;z-index:2}
+#activity-feed>summary{padding:9px 12px;cursor:pointer;color:#d8d1b2}.activity-controls{padding:0 10px 8px;display:flex;gap:6px;align-items:center}.activity-controls small{font-size:10px;color:#90a9a3}.activity-controls button{font-size:11px;padding:3px 8px}
+#activity-items{list-style:none;padding:0 10px;margin:0;max-height:235px;overflow:auto;overscroll-behavior:contain}#activity-items li{border-left:2px solid var(--agent-color);padding:6px 8px;margin-bottom:8px;overflow-wrap:anywhere}#activity-items header{display:flex;justify-content:space-between;gap:6px}#activity-items strong{color:var(--agent-color)}#activity-items time,#activity-items small{color:#95aaa5;font-size:10px}#activity-items p{margin:4px 0}#activity-items pre{white-space:pre-wrap;font-size:10px}#activity-items summary{cursor:pointer;font-size:10px}
+@media(max-width:600px){#activity-feed{bottom:128px;left:10px;width:260px}#activity-items{max-height:145px}.activity-controls button{min-height:32px}}
+@media(max-width:600px){body:has(#activity-feed[open]) #heat-legend{display:none}}
+@media(max-width:899px),(max-height:599px){#heat-legend{bottom:calc(var(--viz-toolbar-height,116px) + 58px)}body:has(#activity-feed[open]) #heat-legend{display:none}}
+</style>

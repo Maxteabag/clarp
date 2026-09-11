@@ -6,6 +6,9 @@ ideas, a task backlog, or an approval queue.
 
 ## Current decisions
 
+Layered zoom and pixelated heat are specified in [0017](0017-layered-zoom-and-pixel-heat.md).
+The activity feed is specified in [0018](0018-activity-feed.md).
+
 The optional activity heatmap is specified in [0015](0015-activity-heatmap.md).
 Its density algorithm is refined by [0016](0016-gaussian-density-field.md).
 
