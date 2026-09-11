@@ -3,7 +3,7 @@ let items=[],cursor=0,paused=false,reading=false,busy=false,previousTime=0,previ
 if(innerWidth<900||innerHeight<600)panel.open=false;
 function placeFeed(){
  const bar=document.getElementById('bar').getBoundingClientRect(),hud=document.getElementById('hud').getBoundingClientRect();
- panel.style.bottom=(bar.height+12)+'px';list.style.maxHeight=Math.max(50,Math.min(235,innerHeight-bar.height-hud.bottom-105))+'px';
+ panel.style.bottom=(bar.height+12)+'px';list.style.maxHeight=Math.max(50,Math.min(420,innerHeight-bar.height-hud.bottom-105))+'px';
  document.documentElement.style.setProperty('--viz-toolbar-height',bar.height+'px');
 }
 new ResizeObserver(placeFeed).observe(document.getElementById('bar'));addEventListener('resize',placeFeed);placeFeed();
