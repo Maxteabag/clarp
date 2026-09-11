@@ -140,3 +140,37 @@ def test_unknown_or_deleted_participants_are_missing(tmp_path):
     agents_db.soft_delete(cpp)
     assert agent_conversations.list_conversations() == []
     assert agent_conversations.load_timeline(agent_conversations.conversation_id(hugo, cpp))["missing"] is True
+
+
+def test_pair_list_uses_partial_index_instead_of_scanning_private_history(tmp_path):
+    """Frequent sidebar refreshes must not walk every private transcript row."""
+    hugo, cpp = _pair(tmp_path)
+    _send(cpp, hugo, 'hello', client_id='pair-index')
+    statements = []
+    con = agents_db.conn()
+    con.set_trace_callback(statements.append)
+    try:
+        rooms = agent_conversations.list_conversations()
+    finally:
+        con.set_trace_callback(None)
+    assert len(rooms) == 1
+    query = next(sql for sql in statements if 'WITH pair_rows' in sql)
+    plan = '\n'.join(row[3] for row in con.execute('EXPLAIN QUERY PLAN ' + query))
+    assert 'idx_messages_pair_projection' in plan, plan
+
+
+def test_pair_index_upgrade_preserves_messages_and_is_idempotent(tmp_path):
+    from lib import db
+    hugo, cpp = _pair(tmp_path)
+    _send(cpp, hugo, 'retained pair', client_id='pair-migration')
+    _private(hugo, 'retained private', client_id='private-migration', timestamp='2026-09-07T03:30:00Z')
+    con = db.conn()
+    before = [tuple(row) for row in con.execute('SELECT * FROM messages ORDER BY message_id')]
+    expected = agent_conversations.list_conversations()
+    con.execute('DROP INDEX IF EXISTS idx_messages_pair_projection')
+    con.execute('PRAGMA user_version = 80')
+    db._migrate(con)
+    db._migrate_to_v81(con)
+    assert [tuple(row) for row in con.execute('SELECT * FROM messages ORDER BY message_id')] == before
+    assert agent_conversations.list_conversations() == expected
+    assert con.execute("SELECT 1 FROM sqlite_master WHERE name='idx_messages_pair_projection'").fetchone()
