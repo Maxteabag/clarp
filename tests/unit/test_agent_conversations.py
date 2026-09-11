@@ -174,3 +174,61 @@ def test_pair_index_upgrade_preserves_messages_and_is_idempotent(tmp_path):
     assert [tuple(row) for row in con.execute('SELECT * FROM messages ORDER BY message_id')] == before
     assert agent_conversations.list_conversations() == expected
     assert con.execute("SELECT 1 FROM sqlite_master WHERE name='idx_messages_pair_projection'").fetchone()
+
+
+def test_pair_cache_coalesces_clients_and_refreshes_on_messages_and_roster(tmp_path, monkeypatch):
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    import time
+
+    hugo, cpp = _pair(tmp_path)
+    _send(cpp, hugo, 'first', client_id='cache-first')
+    original = agent_conversations.list_conversations
+    calls = []
+    def counted():
+        calls.append(1)
+        time.sleep(0.02)  # Force concurrent requests to overlap one build.
+        return original()
+    monkeypatch.setattr(agent_conversations, 'list_conversations', counted)
+    cache = agent_conversations.PairConversationListCache()
+    start = threading.Barrier(8)
+    def fetch(_):
+        start.wait(timeout=5)
+        return cache.get_payload()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        responses = list(pool.map(fetch, range(8)))
+    assert len(calls) == 1
+    assert len(set(responses)) == 1
+    assert json.loads(responses[0])['conversations'][0]['message_count'] == 1
+
+    _send(hugo, cpp, 'second', client_id='cache-second')
+    assert json.loads(cache.get_payload())['conversations'][0]['message_count'] == 2
+    assert len(calls) == 2
+    agents_db.conn().execute('UPDATE agents SET persona=? WHERE agent_id=?', ('Renamed', hugo))
+    assert 'Renamed' in json.loads(cache.get_payload())['conversations'][0]['title']
+    assert len(calls) == 3
+    agents_db.conn().execute('UPDATE agents SET deleted_at=1 WHERE agent_id=?', (cpp,))
+    assert json.loads(cache.get_payload())['conversations'] == []
+
+
+def test_pair_cache_expires_and_failed_refresh_can_retry(tmp_path, monkeypatch):
+    import pytest
+    now = [0.0]
+    cache = agent_conversations.PairConversationListCache(clock=lambda: now[0])
+    calls = []
+    def load():
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError('temporary failure')
+        return []
+    monkeypatch.setattr(agent_conversations, 'list_conversations', load)
+    assert cache.get_payload() == b'{"conversations": []}'
+    now[0] = 0.5
+    cache.get_payload()
+    assert len(calls) == 1
+    now[0] = 1.1
+    with pytest.raises(RuntimeError, match='temporary failure'):
+        cache.get_payload()
+    assert cache.get_payload() == b'{"conversations": []}'
+    assert len(calls) == 3

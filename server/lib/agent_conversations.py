@@ -9,6 +9,9 @@ chat and was only delivered onward if the agent sent a message itself.
 """
 from __future__ import annotations
 
+import json
+import threading
+import time
 from typing import Any
 
 from .avatar_urls import janitor_avatar_url, versioned_avatar_url
@@ -251,3 +254,37 @@ def load_timeline(session: str, *, after_revision: int = 0, before_message_id: s
         "conversation_id": session, "has_more": has_more, "includes_automated": False,
         "participants": participants, "title": title_for(participants),
     }
+
+
+class PairConversationListCache:
+    """Share immutable sidebar responses across clients of one HTTP server.
+
+    Canonical message revisions and participant metadata invalidate immediately;
+    a one-second ceiling also bounds reuse after out-of-band database edits.
+    The lock coalesces simultaneous misses instead of fanning out SQL work.
+    Pair transcripts themselves always use the uncached timeline path.
+    """
+
+    def __init__(self, *, clock=time.monotonic):
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._key = None
+        self._payload = None
+        self._expires = 0.0
+
+    def get_payload(self) -> bytes:
+        with self._lock:
+            con = conn()
+            revision = con.execute(
+                "SELECT revision FROM message_clock WHERE singleton = 0").fetchone()[0]
+            participants = tuple(tuple(row) for row in con.execute(
+                """SELECT agent_id, session, persona, avatar_path, is_janitor,
+                          archived_at, deleted_at FROM agents ORDER BY agent_id"""))
+            key = (revision, participants)
+            if self._payload is not None and key == self._key and self._clock() < self._expires:
+                return self._payload
+            payload = json.dumps({"conversations": list_conversations()}).encode()
+            self._payload = payload
+            self._key = key
+            self._expires = self._clock() + 1.0
+            return payload
