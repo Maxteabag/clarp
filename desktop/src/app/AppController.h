@@ -50,6 +50,8 @@ class AppController : public QObject {
     Q_PROPERTY(quint64 mediaRevision READ mediaRevision NOTIFY mediaChanged)
     Q_PROPERTY(QVariantList pastSessions READ pastSessions NOTIFY pastSessionsChanged)
     Q_PROPERTY(bool pastSessionsLoading READ pastSessionsLoading NOTIFY pastSessionsChanged)
+    Q_PROPERTY(QVariantList launchDirectories READ launchDirectories NOTIFY launchDirectoriesChanged)
+    Q_PROPERTY(bool launchDirectoriesLoading READ launchDirectoriesLoading NOTIFY launchDirectoriesChanged)
     Q_PROPERTY(QVariantList directorySuggestions READ directorySuggestions NOTIFY pathsChanged)
     Q_PROPERTY(QVariantList favoritePaths READ favoritePaths NOTIFY pathsChanged)
     Q_PROPERTY(QString lastWorkingDirectory READ lastWorkingDirectory NOTIFY launchDefaultsChanged)
@@ -289,6 +291,11 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] bool backendSupportsFork(const QString& backend) const;
     Q_INVOKABLE void loadPastSessions(const QString& workingDirectory, const QString& backend,
                                       bool allProjects = false);
+    [[nodiscard]] QVariantList launchDirectories() const { return m_launchDirectories; }
+    [[nodiscard]] bool launchDirectoriesLoading() const { return m_launchDirectoriesLoading; }
+    Q_INVOKABLE void loadLaunchDirectories(const QString& query);
+    Q_INVOKABLE void setLaunchDirectory(const QString& path) { m_launchDirectory = path.trimmed(); }
+    [[nodiscard]] QString launchDirectory() const { return m_launchDirectory.isEmpty() ? m_lastWorkingDirectory : m_launchDirectory; }
     Q_INVOKABLE void loadDirectorySuggestions(const QString& path);
     Q_INVOKABLE void loadFavoritePaths();
     Q_INVOKABLE void refreshAgents();
@@ -403,6 +410,7 @@ class AppController : public QObject {
     void mediaChanged();
     void pastSessionsChanged();
     void pathsChanged();
+    void launchDirectoriesChanged();
     void launchDefaultsChanged();
     void contactLaunchChanged();
     void hasStoredCredentialChanged();
@@ -493,6 +501,10 @@ class AppController : public QObject {
     QVariantList m_favoritePaths;
     QVariantList m_availableMcpServers;
     QString m_lastWorkingDirectory;
+    QString m_launchDirectory;
+    QVariantList m_launchDirectories;
+    bool m_launchDirectoriesLoading = false;
+    quint64 m_launchDirectoryGeneration = 0;
     QString m_lastBackend;
     QString m_startingContact;
     QString m_startingBackend;

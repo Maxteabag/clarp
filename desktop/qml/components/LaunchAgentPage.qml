@@ -14,6 +14,9 @@ Rectangle {
     property bool submitting: false
     property bool poolEmpty: false
     property bool choosingModel: false
+    property bool choosingDirectory: true
+    property string directory: "~"
+    property string directoryLabel: "~"
     property int catalogRevision: 0
     readonly property var providers: [
         {id:"claude",label:"Claude"}, {id:"codex",label:"Codex"},
@@ -34,7 +37,8 @@ Rectangle {
 
     function focusSelected() {
         if (visible && !submitting) {
-            if (poolEmpty) nameField.forceActiveFocus();
+            if (choosingDirectory) directoryPicker.focusSearch();
+            else if (poolEmpty) nameField.forceActiveFocus();
             else if (choosingModel) models.forceActiveFocus();
             else cards.itemAt(selectedIndex).forceActiveFocus();
         }
@@ -46,10 +50,15 @@ Rectangle {
     function moveProvider(delta) { selectProvider(selectedIndex + delta); focusSelected(); }
     function showModels() { choosingModel = !choosingModel; Qt.callLater(focusSelected); }
     function back() {
-        if (choosingModel) { choosingModel = false; Qt.callLater(focusSelected); } else cancel();
+        if (choosingModel) { choosingModel = false; Qt.callLater(focusSelected); }
+        else if (choosingDirectory) directoryPicker.back();
+        else { choosingDirectory = true; Qt.callLater(focusSelected); }
     }
     function cancel() { if (!submitting) { autoStart = false; closeRequested(); } }
-    function open(wantedBackend, wantedModel, wantedEffort, anonymousMode) {
+    function open(wantedBackend, wantedModel, wantedEffort, anonymousMode, wantedDirectory) {
+        directory = wantedDirectory || "~"; directoryLabel = directory;
+        choosingDirectory = !wantedDirectory;
+        controller.setLaunchDirectory(directory);
         anonymous = anonymousMode === 1 ? true : anonymousMode === 0 ? false : controller.anonymousAgents;
         const saved = controller.lastBackend || "codex";
         backend = wantedBackend || (providers.some(p => p.id === saved) ? saved : "codex");
@@ -62,19 +71,21 @@ Rectangle {
         nameField.clear();
         controller.clearError();
         visible = true;
+        if (choosingDirectory) directoryPicker.open();
         Qt.callLater(maybeStart);
         Qt.callLater(focusSelected);
     }
     function maybeStart() {
-        if (visible && autoStart && controller.connected) { autoStart = false; submit(); }
+        if (visible && !choosingDirectory && autoStart && controller.connected) { autoStart = false; submit(); }
     }
     function submit() {
+        if (choosingDirectory) { directoryPicker.confirm(); return; }
         if (submitting || !controller.connected || !backend) return;
         controller.clearError();
         if (poolEmpty) {
             if (!nameField.text.trim()) return;
             submitting = true;
-            controller.createAgent(nameField.text.trim(), controller.lastWorkingDirectory || "~",
+            controller.createAgent(nameField.text.trim(), directory,
                 backend, modelId, effort, "", "fresh", "", []);
         } else {
             submitting = anonymous ? controller.startAnonymousAgent(backend, modelId, effort)
@@ -123,10 +134,28 @@ Rectangle {
             id: form
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }
             spacing: 16
-            TuiText { text: root.poolEmpty ? "New contact" : "New agent"; color: "#c0caf5"; font.pixelSize: 18 }
+            TuiText { text: root.choosingDirectory ? "Directory" : root.poolEmpty ? "New contact" : "New agent"; color: "#c0caf5"; font.pixelSize: 18 }
+            LaunchDirectoryPicker {
+                id: directoryPicker
+                Layout.fillWidth: true
+                controller: root.controller
+                visible: root.choosingDirectory
+                onChosen: (path, label) => {
+                    root.directory = path; root.directoryLabel = label;
+                    root.controller.setLaunchDirectory(path);
+                    root.choosingDirectory = false;
+                    Qt.callLater(root.maybeStart); Qt.callLater(root.focusSelected);
+                }
+                onCancelRequested: root.cancel()
+            }
+            TuiText {
+                visible: !root.choosingDirectory
+                Layout.fillWidth: true
+                text: root.directoryLabel; color: "#9ca1bd"; elide: Text.ElideMiddle
+            }
             RowLayout {
                 Layout.fillWidth: true
-                visible: !root.poolEmpty
+                visible: !root.choosingDirectory && !root.poolEmpty
                 spacing: 8
                 Repeater {
                     id: cards
@@ -174,7 +203,7 @@ Rectangle {
             ListView {
                 id: models
                 objectName: "launchModels"
-                visible: root.choosingModel && !root.poolEmpty
+                visible: !root.choosingDirectory && root.choosingModel && !root.poolEmpty
                 enabled: !root.submitting
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.min(180, count * 36)
@@ -214,7 +243,7 @@ Rectangle {
             }
             TuiCheckBox {
                 id: anonymousChoice
-                visible: root.choosingModel && !root.poolEmpty
+                visible: !root.choosingDirectory && root.choosingModel && !root.poolEmpty
                 text: "Anonymous"; checked: root.anonymous; enabled: !root.submitting
                 onToggled: root.anonymous = checked
                 KeyNavigation.tab: modelButton
@@ -223,7 +252,7 @@ Rectangle {
             TuiTextField {
                 id: nameField
                 objectName: "launchContactName"
-                visible: root.poolEmpty; enabled: !root.submitting
+                visible: !root.choosingDirectory && root.poolEmpty; enabled: !root.submitting
                 Layout.fillWidth: true; placeholderText: "Name"
                 onAccepted: root.submit()
                 Keys.onEscapePressed: root.cancel()
@@ -237,7 +266,7 @@ Rectangle {
             RowLayout {
                 TuiButton {
                     id: modelButton
-                    visible: !root.poolEmpty
+                    visible: !root.choosingDirectory && !root.poolEmpty
                     text: root.modelId ? root.modelId + " · M" : "Model · M"
                     enabled: !root.submitting
                     onClicked: root.showModels()
@@ -254,8 +283,8 @@ Rectangle {
                 }
                 TuiButton {
                     id: startButton
-                    text: root.submitting ? "Starting…" : root.poolEmpty ? "Create ↵" : "Start ↵"
-                    enabled: !root.submitting && root.controller.connected && (!root.poolEmpty || nameField.text.trim().length > 0)
+                    text: root.submitting ? "Starting…" : root.choosingDirectory ? "Continue ↵" : root.poolEmpty ? "Create ↵" : "Start ↵"
+                    enabled: !root.submitting && (root.choosingDirectory || root.controller.connected) && (!root.poolEmpty || nameField.text.trim().length > 0)
                     onClicked: root.submit()
                     KeyNavigation.tab: cards.itemAt(0)
                     KeyNavigation.backtab: cancelButton

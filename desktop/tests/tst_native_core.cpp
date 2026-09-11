@@ -1153,8 +1153,10 @@ void NativeCoreTest::fastLaunchOpensWithoutWaitingForFleet() {
         {{QStringLiteral("agents"),QJsonArray{agent}}});
     server.holdNextSnapshot();
     QSignalSpy ready(&controller,&AppController::agentMutationSucceeded);
+    controller.setLaunchDirectory(QStringLiteral("/work/chosen directory"));
     QVERIFY(controller.startAnonymousAgent(QStringLiteral("codex"),{},{}));
     QTRY_COMPARE(ready.size(),1);
+    QCOMPARE(server.requestJson(QStringLiteral("POST"),QStringLiteral("/agents")).value(QStringLiteral("cwd")).toString(),QStringLiteral("/work/chosen directory"));
     QCOMPARE(controller.selectedSession(),QStringLiteral("new-fast"));
     QCOMPARE(controller.panes()->activeSession(),QStringLiteral("new-fast"));
     QCOMPARE(server.requestCount(QStringLiteral("GET"),QStringLiteral("/agents/snapshot")),0);

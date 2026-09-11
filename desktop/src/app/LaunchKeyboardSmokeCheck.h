@@ -27,7 +27,7 @@ inline void startLaunchKeyboardSmokeCheck(QQuickWindow* window) {
         {QStringLiteral("Escape"), Qt::Key_Escape}};
     const QStringList input = sequence.split(u',');
     for (const QString& name : input) {
-        if (!keys.contains(name)) { qCritical("Unknown simulated key"); QCoreApplication::exit(EXIT_FAILURE); return; }
+        if (!keys.contains(name) && !(name.startsWith(QStringLiteral("Text=")) && name.size() <= 517)) { qCritical("Unknown simulated key"); QCoreApplication::exit(EXIT_FAILURE); return; }
     }
     QTimer::singleShot(1200, window, [window, input, keys] {
         const auto* shell = window->findChild<QObject*>(QStringLiteral("desktopShell"));
@@ -36,7 +36,11 @@ inline void startLaunchKeyboardSmokeCheck(QQuickWindow* window) {
             QCoreApplication::exit(EXIT_FAILURE);
             return;
         }
-        if (!window->activeFocusItem() || !window->activeFocusItem()->objectName().startsWith(QStringLiteral("providerCard-"))) {
+        const auto* page = window->findChild<QObject*>(QStringLiteral("launchAgent"));
+        const bool directoryStep = page && page->property("choosingDirectory").toBool();
+        if (!window->activeFocusItem() || (directoryStep
+            ? window->activeFocusItem()->objectName() != QStringLiteral("launchDirectorySearch")
+            : !window->activeFocusItem()->objectName().startsWith(QStringLiteral("providerCard-")))) {
             qCritical().noquote() << "Startup stole focus from the provider cards:" << (window->activeFocusItem() ? window->activeFocusItem()->objectName() : QStringLiteral("none"));
             QCoreApplication::exit(EXIT_FAILURE);
             return;
@@ -46,6 +50,14 @@ inline void startLaunchKeyboardSmokeCheck(QQuickWindow* window) {
         QObject::connect(timer, &QTimer::timeout, window, [window, timer, input, keys, index = 0]() mutable {
             if (index >= input.size()) { timer->stop(); timer->deleteLater(); return; }
             const QString keyName = input.at(index++);
+            if (keyName.startsWith(QStringLiteral("Text="))) {
+                for (const QChar character : keyName.sliced(5)) {
+                    QKeyEvent down(QEvent::KeyPress, Qt::Key_unknown, Qt::NoModifier, QString(character));
+                    QKeyEvent up(QEvent::KeyRelease, Qt::Key_unknown, Qt::NoModifier, QString(character));
+                    QCoreApplication::sendEvent(window, &down); QCoreApplication::sendEvent(window, &up);
+                }
+                return;
+            }
             const Qt::Key key = keys.value(keyName);
             qInfo().noquote() << "Simulated key" << keyName << "focus"
                 << (window->activeFocusItem() ? window->activeFocusItem()->objectName() : QStringLiteral("none"));

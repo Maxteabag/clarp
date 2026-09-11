@@ -364,6 +364,7 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-model-options": "_handle_agent_model_options",
         "/agent-fallbacks": "_handle_agent_fallbacks_get",
         "/favorite-paths": "_handle_favorite_paths",
+        "/launch-directories": "_handle_launch_directories",
         "/orchestrator/decisions": "_handle_orchestrator_decisions",
         "/dirs": "_handle_dirs",
         "/past-sessions": "_handle_past_sessions",
@@ -1210,6 +1211,12 @@ class Handler(BaseHTTPRequestHandler):
                               "application/json")
         self._send(200, json.dumps(update(data["model_avatars"])).encode(),
                    "application/json")
+
+    def _handle_launch_directories(self):
+        from urllib.parse import parse_qs, urlparse
+        from lib.launch_directories import lookup
+        query = parse_qs(urlparse(self.path).query).get("q", [""])[0]
+        return self._send(200, json.dumps(lookup(query)).encode(), "application/json")
 
     def _handle_favorite_paths(self):
         from urllib.parse import parse_qs, urlparse

@@ -8,6 +8,10 @@ TestCase {
     when: windowShown
     QtObject {
         id: stub
+        property var launchDirectories: []
+        property bool launchDirectoriesLoading: false
+        function loadLaunchDirectories(query) {}
+        function setLaunchDirectory(path) {}
         property bool connected: true
         property bool anonymousAgents: true
         property string lastBackend: "codex"
@@ -27,7 +31,7 @@ TestCase {
     }
     Component { id: factory; LaunchAgentPage { controller: stub; visible: false; width: 820; height: 640 } }
     function init() { stub.starts=0; stub.args=[]; stub.connected=true; stub.errorMessage=""; stub.lastBackend="codex"; }
-    function opened() { const d=createTemporaryObject(factory,testCase); d.open("","",""); wait(30); return d; }
+    function opened() { const d=createTemporaryObject(factory,testCase); d.open("","","", undefined, "/workspace"); wait(30); return d; }
     function test_providerKeys_data() {
         return [
             {tag:"default-1-key",keys:[],backend:"codex"},
@@ -63,7 +67,7 @@ TestCase {
         const d=opened();
         const spy=createTemporaryQmlObject('import QtTest; SignalSpy {}',testCase);
         spy.target=d; spy.signalName="closeRequested";
-        keyClick(Qt.Key_Escape); compare(stub.starts,0); compare(spy.count,1);
+        keyClick(Qt.Key_Escape); keyClick(Qt.Key_Escape); compare(stub.starts,0); compare(spy.count,1);
     }
     function test_backtabSelectsPreviousProvider() {
         const d=opened(); keyClick(Qt.Key_Backtab); keyClick(Qt.Key_Return);
@@ -90,8 +94,8 @@ TestCase {
 
     function test_cancelPendingDirectLaunchStaysCancelledAfterConnection() {
         stub.connected=false;
-        const d=createTemporaryObject(factory,testCase); d.open("codex","",""); wait(30);
-        keyClick(Qt.Key_Escape); stub.connected=true; wait(30);
+        const d=createTemporaryObject(factory,testCase); d.open("codex","","", undefined, "/workspace"); wait(30);
+        keyClick(Qt.Key_Escape); keyClick(Qt.Key_Escape); stub.connected=true; wait(30);
         compare(stub.starts,0);
     }
 
