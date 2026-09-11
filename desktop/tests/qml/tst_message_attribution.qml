@@ -3,7 +3,7 @@ import QtTest
 import "../../qml/components"
 
 // A reply to another agent is the current agent's own message. Only an
-// incoming prompt is rendered as the other agent's, with its avatar.
+// incoming prompt keeps the other agent's name in the text-only chat.
 TestCase {
     id: testCase
     name: "MessageAttribution"
@@ -53,16 +53,16 @@ TestCase {
         }
     }
 
-    function test_incomingAgentPromptKeepsItsSenderAvatar() {
+    function test_incomingAgentPromptKeepsItsSenderName() {
         const row = createTemporaryObject(factory, testCase, {
             authorRole: "user", origin: "agent", body: "Status: survey done",
             senderName: "C++ Junior", senderAgentId: "agent-cpp", delivery: "sent"});
         verify(row.teamAuthored);
         verify(row.rightAligned);
         const avatar = findChild(row, "teamMessageAvatar");
-        verify(avatar !== null && avatar.visible);
-        compare(avatar.name, "C++ Junior");
-        compare(avatar.session, "cjunior-0940");
+        verify(avatar === null || !avatar.visible);
+        compare(findChild(row, "groupAuthorName").text, "C++ Junior");
+        verify(findChild(row, "groupAuthorLine").visible);
         const marker = findChild(row, "replyMarker");
         verify(marker === null || !marker.visible);
     }
@@ -98,14 +98,14 @@ TestCase {
         verify(marker === null || !marker.visible);
     }
 
-    function test_pairRoomShowsBothAuthorsWithAvatarsAndMarkers() {
+    function test_pairRoomShowsBothAuthorNamesAndReplyMarkers() {
         const incoming = createTemporaryObject(factory, testCase, {
             groupView: true, authorRole: "user", origin: "agent",
             body: "Status: survey done", senderName: "C++ Junior",
             senderAgentId: "agent-cpp", delivery: "sent"});
         verify(!incoming.rightAligned);
         const incomingAvatar = findChild(incoming, "teamMessageAvatar");
-        verify(incomingAvatar !== null && incomingAvatar.visible);
+        verify(incomingAvatar === null || !incomingAvatar.visible);
         compare(findChild(incoming, "groupAuthorName").text, "C++ Junior");
         verify(!findChild(incoming, "groupReplyMarker").visible);
 

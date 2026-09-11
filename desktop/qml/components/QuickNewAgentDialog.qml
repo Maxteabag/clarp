@@ -37,15 +37,15 @@ Rectangle {
         anchors.centerIn: parent
         width: Math.min(480, parent.width - 32)
         height: form.implicitHeight + 40
-        radius: 12
+        radius: 0
         color: "#20212e"
         border.color: "#41445a"
         ColumnLayout {
             id: form
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }
             spacing: 14
-            Text { text: "New contact & chat"; font.pixelSize: 20; color: "#c0caf5" }
-            TextField {
+            TuiText { text: "New contact & chat"; font.pixelSize: 17; color: "#c0caf5" }
+            TuiTextField {
                 id: nameField
                 objectName: "quickNewAgentName"
                 Layout.fillWidth: true
@@ -54,14 +54,14 @@ Rectangle {
                 onAccepted: root.submit()
                 Keys.onEscapePressed: root.closeRequested()
             }
-            Text {
+            TuiText {
                 Layout.fillWidth: true
                 text: root.controller.quickStartBackend() + " · " + (root.controller.lastWorkingDirectory || "~")
                 color: "#9ca1bd"
                 elide: Text.ElideMiddle
                 font.pixelSize: 12
             }
-            Text {
+            TuiText {
                 Layout.fillWidth: true
                 visible: root.controller.errorMessage.length > 0 || !root.controller.connected
                 text: root.controller.errorMessage || "Connect to the Host to start an agent"
@@ -70,8 +70,8 @@ Rectangle {
             }
             RowLayout {
                 Item { Layout.fillWidth: true }
-                Button { text: "Cancel"; onClicked: root.closeRequested() }
-                Button {
+                TuiButton { text: "Cancel"; onClicked: root.closeRequested() }
+                TuiButton {
                     text: root.submitting ? "Starting…" : "Create & start · Enter"
                     enabled: !root.submitting && root.controller.connected && nameField.text.trim().length > 0
                     onClicked: root.submit()

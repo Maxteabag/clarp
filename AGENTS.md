@@ -80,3 +80,12 @@ question per batch of related changes; check `clarp-agent-artifacts attention`
 before adding another so you do not stack duplicates. Committing and pushing
 still follow the usual rule that they happen when the user asks — the answer to
 this question is that ask.
+
+## Fleet-map vision and decisions
+
+Before changing fleet-map behavior, authoring prompts, visuals, or generated-source
+contracts, read [the vision and decision index](docs/architecture/fleet-map/README.md)
+and the linked accepted ADRs. The current direction is creative but not disruptive:
+extend established concepts; do not interpret ordinary novelty as a redesign request.
+New explicit owner instructions take precedence. Record lasting changes to the vision
+as a new ADR and update the index; do not silently rewrite the rationale to match code.

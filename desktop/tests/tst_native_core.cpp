@@ -644,6 +644,7 @@ class NativeCoreTest final : public QObject {
     void contactsExcludeActivePersonas();
     void microphoneCanCaptureNativePcm();
     void backgroundTranscriptionsKeepTheirChatOwnership();
+    void sharedPlaybackDoesNotDuplicateDownloads();
     void markdownParagraphsBecomeVisibleDisplayBlocks();
     void agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent();
     void pairConversationRoomsAreReadOnlyProjections();
@@ -2658,12 +2659,50 @@ void NativeCoreTest::microphoneCanCaptureNativePcm() {
     QCOMPARE(errors.count(), 0);
 }
 
+void NativeCoreTest::sharedPlaybackDoesNotDuplicateDownloads() {
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/clip.wav"), 404,
+                           {{QStringLiteral("error"), QStringLiteral("offline fixture")}});
+    AudioController first;
+    AudioController second;
+    const QString token = QUuid::createUuid().toString();
+    first.setEndpoint(QUrl(server.baseUrl()), token);
+    second.setEndpoint(QUrl(server.baseUrl()), token);
+    RecordingSession microphone;
+    QVERIFY(microphone.acquire(QStringLiteral("recording-window-chat")));
+    const QJsonObject event{{QStringLiteral("clip_id"), 1}, {QStringLiteral("url"), QStringLiteral("/clip.wav")}};
+    first.enqueueClip(event);
+    second.enqueueClip(event);
+    QTRY_COMPARE_WITH_TIMEOUT(server.requestCount(QStringLiteral("POST"), QStringLiteral("/clips/ack")), 1, 3'000);
+    QTest::qWait(600);
+    QCOMPARE(server.requestCount(QStringLiteral("GET"), QStringLiteral("/clip.wav")), 0);
+    QCOMPARE(microphone.release(), QStringLiteral("recording-window-chat"));
+    QTRY_COMPARE_WITH_TIMEOUT(server.requestCount(QStringLiteral("GET"), QStringLiteral("/clip.wav")), 1, 3'000);
+    QTRY_COMPARE_WITH_TIMEOUT(server.requestCount(QStringLiteral("POST"), QStringLiteral("/clips/ack")), 2, 3'000);
+    first.enqueueClip(event);
+    second.enqueueClip(event);
+    QTest::qWait(600);
+    QCOMPARE(server.requestCount(QStringLiteral("GET"), QStringLiteral("/clip.wav")), 1);
+    QCOMPARE(server.requestCount(QStringLiteral("POST"), QStringLiteral("/clips/ack")), 2);
+    QSignalSpy firstMuted(&first, &AudioController::mutedChanged);
+    QSignalSpy secondMuted(&second, &AudioController::mutedChanged);
+    second.setMuted(true);
+    QTRY_COMPARE_WITH_TIMEOUT(firstMuted.count(), 1, 3'000);
+    QTRY_COMPARE_WITH_TIMEOUT(secondMuted.count(), 1, 3'000);
+    QCOMPARE(firstMuted.first().first().toBool(), true);
+    QCOMPARE(secondMuted.first().first().toBool(), true);
+}
+
 void NativeCoreTest::backgroundTranscriptionsKeepTheirChatOwnership() {
     FakeClarpServer server;
     QVERIFY(server.listenLocal());
     AudioController audio;
     audio.setEndpoint(QUrl(server.baseUrl()), QStringLiteral("test-token"));
     QSignalSpy ready(&audio, &AudioController::transcriptionReady);
+    AudioController otherWindow;
+    otherWindow.setEndpoint(QUrl(server.baseUrl()), QStringLiteral("test-token"));
+    QSignalSpy otherReady(&otherWindow, &AudioController::transcriptionReady);
 
     audio.transcribeRecording(QByteArray(2'000, 'a'), QStringLiteral("rachel"));
     audio.transcribeRecording(QByteArray(2'000, 'b'), QStringLiteral("bella"));
@@ -2688,6 +2727,12 @@ void NativeCoreTest::backgroundTranscriptionsKeepTheirChatOwnership() {
     QTRY_COMPARE_WITH_TIMEOUT(cancelled.transcriptionsInFlight(), 0, 3'000);
     QTest::qWait(50);
     QCOMPARE(cancelledReady.count(), 0);
+    QCOMPARE(otherReady.count(), 0); // A different window never receives these results.
+    audio.transcribeRecording(QByteArray(2'000, 'd'), QStringLiteral("original-host-chat"));
+    audio.setEndpoint(QUrl(server.baseUrl()), QStringLiteral("different-host-credential"));
+    QTRY_COMPARE_WITH_TIMEOUT(audio.transcriptionsInFlight(), 0, 3'000);
+    QTest::qWait(50);
+    QCOMPARE(ready.count(), 2); // Switching Host/account cancels the pending delivery.
 }
 
 void NativeCoreTest::agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent() {

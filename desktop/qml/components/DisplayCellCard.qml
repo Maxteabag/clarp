@@ -22,7 +22,7 @@ Rectangle {
         : (status === "running" || status === "ok") ? "#89a879" : "#676b80"
 
     implicitHeight: cardColumn.implicitHeight + 6
-    radius: 2
+    radius: 0
     color: hover.hovered ? "#222638" : "transparent"
     border.width: 0
     HoverHandler { id: hover }
@@ -54,10 +54,10 @@ Rectangle {
             Rectangle {
                 Layout.preferredWidth: 6
                 Layout.preferredHeight: 6
-                radius: 3
+                radius: 0
                 color: root.statusColor
             }
-            Text {
+            TuiText {
                 visible: !explanation.narrationShown
                 text: root.title
                 color: "#9ea4c7"
@@ -65,7 +65,7 @@ Rectangle {
                 font.pixelSize: 12
                 font.weight: Font.DemiBold
             }
-            Text {
+            TuiText {
                 visible: !explanation.narrationShown
                 Layout.fillWidth: true
                 text: root.summary
@@ -73,7 +73,7 @@ Rectangle {
                 font.pixelSize: 12
                 elide: Text.ElideMiddle
             }
-            Text {
+            TuiText {
                 objectName: "activityExplanationText"
                 visible: explanation.narrationShown
                 Layout.fillWidth: true
@@ -83,7 +83,7 @@ Rectangle {
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
             }
-            Text {
+            TuiText {
                 visible: explanation.text.length > 0 || (!explanation.narrationShown && (root.lines.length > 0 || root.detailCount > 0))
                 text: root.expanded ? "−" : "+"
                 color: "#858aa7"
@@ -148,7 +148,7 @@ Rectangle {
                 }
             }
 
-            Text {
+            TuiText {
                 visible: root.detailCount > root.lines.length
                 text: (root.detailCount - root.lines.length) + " more details available"
                 color: "#62667e"

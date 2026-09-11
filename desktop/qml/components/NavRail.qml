@@ -22,7 +22,7 @@ Rectangle {
         color: "#221f29"
     }
 
-    component RailButton: ToolButton {
+    component RailButton: TuiToolButton {
         id: railButton
 
         property int badge: 0
@@ -35,11 +35,11 @@ Rectangle {
         ToolTip.delay: 400
 
         background: Rectangle {
-            radius: 12
+            radius: 0
             color: railButton.selected ? "#292b3a" : railButton.hovered ? "#1d1a23" : "transparent"
         }
         contentItem: Item {
-            Text {
+            TuiText {
                 anchors.centerIn: parent
                 text: railButton.text
                 color: railButton.selected ? "#dcc7ea" : "#8d93b0"
@@ -54,12 +54,12 @@ Rectangle {
                 anchors.topMargin: 1
                 implicitWidth: Math.max(15, badgeLabel.implicitWidth + 8)
                 implicitHeight: 15
-                radius: height / 2
+                radius: 0
                 color: "#bb9af7"
                 border.color: "#101015"
                 border.width: 1.5
 
-                Text {
+                TuiText {
                     id: badgeLabel
 
                     anchors.centerIn: parent
@@ -122,12 +122,12 @@ Rectangle {
             Layout.topMargin: 4
             implicitWidth: 30
             implicitHeight: 30
-            radius: width / 2
+            radius: 0
             color: root.controller.connected ? "#1f3a2e" : "#3a2f1f"
             border.color: root.controller.connected ? "#6db895" : "#b9996f"
             border.width: 1
 
-            Text {
+            TuiText {
                 anchors.centerIn: parent
                 text: root.controller.serverName.length > 0 ? root.controller.serverName.slice(0, 1).toUpperCase() : "?"
                 color: root.controller.connected ? "#8fd4b3" : "#d3b98c"

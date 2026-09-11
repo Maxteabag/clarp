@@ -90,6 +90,8 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     assert current.is_symlink()
     assert (current / "server.py").is_file()
     assert (current / "runtime.py").is_file()
+    for source in (ROOT / "docs/architecture/fleet-map").glob("*.md"):
+        assert (current / "docs/architecture/fleet-map" / source.name).read_text() == source.read_text()
     assert (current / "RUNTIME_RELEASE_ID").read_text().strip()
     assert (current / "RUNTIME_READY").read_text().strip() == "ready"
     assert (current / "SOURCE_REMOTE").read_text().strip()

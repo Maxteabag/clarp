@@ -15,7 +15,8 @@ ApplicationWindow {
     property string voiceName: ""
     property string selectedSurface: "chats"
     property real uiScale: 1.15
-    property bool sidebarVisible: true
+    property bool sidebarVisible: false
+    property bool shortcutsVisible: true
     property real sidebarExpandedWidth: 354
     property bool redesignedSidebarSized: false
     readonly property bool settingsOverlayVisible: root.selectedSurface === "settings" && root.overlayVisible()
@@ -99,6 +100,7 @@ ApplicationWindow {
     }
 
     function runCommand(action) {
+        if (action === "shortcut-bar") { root.shortcutsVisible = !root.shortcutsVisible; return; }
         let layoutChanged = false;
         if (action === "escape") {
             const selectedState = app.selectedSession.length > 0
@@ -229,7 +231,7 @@ ApplicationWindow {
     Core.Settings {
         category: "appearance"
         property alias uiScale: root.uiScale
-        property alias sidebarVisible: root.sidebarVisible
+        property alias shortcutsVisible: root.shortcutsVisible
         property alias sidebarExpandedWidth: root.sidebarExpandedWidth
         property alias redesignedSidebarSized: root.redesignedSidebarSized
     }
@@ -329,19 +331,19 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.leftMargin: 14
             Layout.rightMargin: 14
-            Label {
+            TuiLabel {
                 text: previewVersions.error || (root.previewUpdateLabel.length > 0 ? "New update available" : "Preview pinned · automatic updates paused")
                 color: previewVersions.error.length > 0 ? "#e79aa4" : "#aeb6d8"
                 Layout.fillWidth: true
                 elide: Text.ElideRight
             }
-            Button {
+            TuiButton {
                 visible: root.previewUpdateLabel.length > 0
                 text: "Update " + root.previewUpdateLabel
                 enabled: root.previewCanRestart && !previewVersions.busy
                 onClicked: previewVersions.selectVersion(String(previewVersions.catalog.current))
             }
-            Button { text: "Versions…"; onClicked: previewVersionPanel.visible = true }
+            TuiButton { text: "Versions…"; onClicked: previewVersionPanel.visible = true }
         }
 
         SplitView {
@@ -451,6 +453,7 @@ ApplicationWindow {
 
         }
         ShortcutBar {
+            visible: root.shortcutsVisible
             Layout.fillWidth: true
             keymap: keyboard
         }

@@ -81,16 +81,16 @@ Rectangle {
                 anchors.rightMargin: root.collapsed ? 0 : 10
                 spacing: 6
 
-                Text {
+                TuiText {
                     visible: !root.collapsed
                     Layout.fillWidth: true
                     text: "Clarp"
                     color: "#f1ece6"
-                    font.pixelSize: 19
+                    font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
 
-                ToolButton {
+                TuiToolButton {
                     objectName: "sidebarHideButton"
                     visible: !root.controller.minimalUi
                     text: "‹"
@@ -117,13 +117,13 @@ Rectangle {
                     ToolTip.text: root.collapsed ? "Expand conversations" : "New agent (Ctrl+N)"
 
                     background: Rectangle {
-                        radius: width / 2
+                        radius: 0
                         color: newAgentButton.pressed ? "#a273c3" : newAgentButton.hovered ? "#c193dd" : "#bb9af7"
                     }
-                    contentItem: Text {
+                    contentItem: TuiText {
                         text: newAgentButton.text
                         color: "#1a1b26"
-                        font.pixelSize: 20
+                        font.pixelSize: 17
                         font.weight: Font.DemiBold
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
@@ -142,7 +142,7 @@ Rectangle {
                 anchors.leftMargin: 12
                 anchors.rightMargin: 12
                 anchors.bottomMargin: 8
-                radius: height / 2
+                radius: 0
                 color: "#211e27"
                 border.color: search.activeFocus ? "#6f527b" : "#2b2733"
                 border.width: 1
@@ -153,13 +153,13 @@ Rectangle {
                     anchors.rightMargin: 8
                     spacing: 8
 
-                    Text {
+                    TuiText {
                         text: "⌕"
                         color: "#8d93b0"
                         font.pixelSize: 15
                     }
 
-                    TextField {
+                    TuiTextField {
                         id: search
                         objectName: "chatListSearch"
 
@@ -176,7 +176,7 @@ Rectangle {
                         }
                     }
 
-                    ToolButton {
+                    TuiToolButton {
                         visible: search.text.length > 0
                         text: "×"
                         implicitWidth: 24
@@ -218,12 +218,12 @@ Rectangle {
                     onClicked: root.scope = String(chip.modelData.key)
 
                     background: Rectangle {
-                        radius: height / 2
+                        radius: 0
                         color: chip.selected ? "#bb9af7" : "#211e27"
                         border.color: chip.selected ? "transparent" : "#302b37"
                         border.width: 1
                     }
-                    contentItem: Text {
+                    contentItem: TuiText {
                         id: chipLabel
 
                         text: String(chip.modelData.label)
@@ -267,12 +267,12 @@ Rectangle {
             contentItem: RowLayout {
                 spacing: 12
 
-                Text {
+                TuiText {
                     text: root.showingPairs ? "‹" : "⇄"
                     color: "#8d93b0"
                     font.pixelSize: 14
                 }
-                Text {
+                TuiText {
                     objectName: "pairConversationsLabel"
                     Layout.fillWidth: true
                     text: root.showingPairs ? "Back to chats" : "Agent conversations"
@@ -284,9 +284,9 @@ Rectangle {
                     visible: !root.showingPairs && root.controller.unreadAgentConversations > 0
                     Layout.preferredWidth: visible ? Math.max(16, unreadLabel.implicitWidth + 8) : 0
                     Layout.preferredHeight: 16
-                    radius: height / 2
+                    radius: 0
                     color: "#bb9af7"
-                    Text {
+                    TuiText {
                         id: unreadLabel
                         anchors.centerIn: parent
                         text: root.controller.unreadAgentConversations
@@ -295,7 +295,7 @@ Rectangle {
                         font.weight: Font.Bold
                     }
                 }
-                Text {
+                TuiText {
                     visible: !root.showingPairs
                     text: root.pairRooms.length
                     color: "#77717f"
@@ -332,7 +332,7 @@ Rectangle {
                 onChatSelected: root.chatSelected()
             }
 
-            Label {
+            TuiLabel {
                 anchors.centerIn: parent
                 width: parent.width - 40
                 visible: pairList.count === 0
@@ -363,18 +363,18 @@ Rectangle {
             contentItem: RowLayout {
                 spacing: 12
 
-                Text {
+                TuiText {
                     text: root.showingArchive ? "‹" : "▤"
                     color: "#8d93b0"
                     font.pixelSize: 14
                 }
-                Text {
+                TuiText {
                     Layout.fillWidth: true
                     text: root.showingArchive ? "Back to chats" : "Archived"
                     color: "#c6bfcc"
                     font.pixelSize: 12
                 }
-                Text {
+                TuiText {
                     visible: !root.showingArchive
                     text: root.controller.archivedAgents.count
                     color: "#77717f"
@@ -417,7 +417,7 @@ Rectangle {
 
             ScrollBar.vertical: ScrollBar {}
 
-            Label {
+            TuiLabel {
                 anchors.centerIn: parent
                 width: parent.width - 40
                 visible: chats.count === 0

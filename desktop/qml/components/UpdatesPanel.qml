@@ -25,15 +25,15 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Text {
+            TuiText {
                 text: "UPDATES"
                 color: "#c9cde3"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 20
+                font.pixelSize: 17
                 font.weight: Font.DemiBold
                 font.letterSpacing: 1.6
             }
-            Text {
+            TuiText {
                 text: root.controller.attentionCount > 0
                     ? root.controller.attentionCount + " need attention" : "All caught up"
                 color: root.controller.attentionCount > 0 ? "#c68b98" : "#687089"
@@ -41,13 +41,13 @@ Rectangle {
                 font.pixelSize: 11
             }
             Item { Layout.fillWidth: true }
-            BusyIndicator {
+            TuiBusyIndicator {
                 running: root.controller.updatesLoading
                 visible: running
                 implicitWidth: 18
                 implicitHeight: 18
             }
-            ToolButton {
+            TuiToolButton {
                 text: "↻"
                 implicitWidth: 28
                 implicitHeight: 28
@@ -61,10 +61,10 @@ Rectangle {
             visible: root.controller.updatesError.length > 0
             Layout.fillWidth: true
             implicitHeight: visible ? errorText.implicitHeight + 14 : 0
-            radius: 4
+            radius: 0
             color: "#2b2028"
             border.color: "#724655"
-            Text {
+            TuiText {
                 id: errorText
                 anchors.fill: parent
                 anchors.margins: 7
@@ -84,7 +84,7 @@ Rectangle {
                 width: Math.max(0, root.width - 36)
                 spacing: 14
 
-                Text {
+                TuiText {
                     visible: root.controller.attentionItems.length > 0
                     text: "NEEDS ATTENTION"
                     color: "#8d91aa"
@@ -107,7 +107,7 @@ Rectangle {
                         }
                         Layout.fillWidth: true
                         implicitHeight: decisionColumn.implicitHeight + 20
-                        radius: 6
+                        radius: 0
                         color: "#202334"
                         border.width: 0
 
@@ -119,7 +119,7 @@ Rectangle {
                             anchors.margins: 10
                             spacing: 7
 
-                            Text {
+                            TuiText {
                                 Layout.fillWidth: true
                                 text: String(decision.modelData.title || "Decision")
                                 color: "#d0d3e5"
@@ -127,14 +127,14 @@ Rectangle {
                                 font.weight: Font.DemiBold
                                 elide: Text.ElideRight
                             }
-                            Text {
+                            TuiText {
                                 Layout.fillWidth: true
                                 text: String(decision.modelData.question || decision.modelData.summary || "")
                                 color: "#b8bbcf"
                                 wrapMode: Text.Wrap
                                 font.pixelSize: 13
                             }
-                            Text {
+                            TuiText {
                                 visible: text.length > 0
                                 Layout.fillWidth: true
                                 text: String(decision.modelData.context || "")
@@ -146,7 +146,7 @@ Rectangle {
                             }
                             RowLayout {
                                 Layout.fillWidth: true
-                                Text {
+                                TuiText {
                                     Layout.fillWidth: true
                                     text: String(decision.modelData.agent_name || "") + "  ·  "
                                         + String(decision.modelData.session || "")
@@ -155,7 +155,7 @@ Rectangle {
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
-                                Button {
+                                TuiButton {
                                     text: String(decision.modelData.no_label || "No")
                                     enabled: !decision.actionPending
                                     implicitHeight: 28
@@ -163,7 +163,7 @@ Rectangle {
                                         String(decision.modelData.decision_id || ""),
                                         "no", Number(decision.modelData.revision || 0))
                                 }
-                                Button {
+                                TuiButton {
                                     text: decision.actionPending ? "Resolving…"
                                         : String(decision.modelData.yes_label || "Yes")
                                     enabled: !decision.actionPending
@@ -177,7 +177,7 @@ Rectangle {
                     }
                 }
 
-                Text {
+                TuiText {
                     visible: root.controller.backgroundJobs.length > 0
                     text: "BACKGROUND JOBS"
                     color: "#8d91aa"
@@ -201,7 +201,7 @@ Rectangle {
                         readonly property real progress: root.controller.backgroundJobProgress(modelData)
                         Layout.fillWidth: true
                         implicitHeight: jobRow.implicitHeight + 16
-                        radius: 5
+                        radius: 0
                         color: "transparent"
                         border.width: 0
 
@@ -216,7 +216,7 @@ Rectangle {
                             Rectangle {
                                 Layout.preferredWidth: 6
                                 Layout.preferredHeight: 6
-                                radius: 3
+                                radius: 0
                                 color: root.isActiveJob(job.modelData) ? "#89a879"
                                     : String(job.modelData.status || "") === "failed"
                                         ? "#bd7484" : "#656a80"
@@ -224,7 +224,7 @@ Rectangle {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 2
-                                Text {
+                                TuiText {
                                     Layout.fillWidth: true
                                     text: String(job.modelData.title || job.modelData.kind || "Background job")
                                     color: "#c4c7da"
@@ -232,7 +232,7 @@ Rectangle {
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
                                 }
-                                Text {
+                                TuiText {
                                     Layout.fillWidth: true
                                     text: String(job.modelData.detail || "")
                                     color: "#6e7289"
@@ -248,13 +248,13 @@ Rectangle {
                                     value: Math.max(0, job.progress)
                                 }
                             }
-                            Text {
+                            TuiText {
                                 text: String(job.modelData.status || "").toUpperCase()
                                 color: root.isActiveJob(job.modelData) ? "#91aa85" : "#686d83"
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 11
                             }
-                            ToolButton {
+                            TuiToolButton {
                                 visible: root.isActiveJob(job.modelData)
                                     && job.modelData.can_cancel !== false
                                 text: "×"
@@ -270,7 +270,7 @@ Rectangle {
                     }
                 }
 
-                Text {
+                TuiText {
                     visible: root.controller.updateArtifacts.length > 0
                     text: "RECENT ARTIFACTS"
                     color: "#8d91aa"
@@ -288,7 +288,7 @@ Rectangle {
                         required property var modelData
                         Layout.fillWidth: true
                         implicitHeight: artifactRow.implicitHeight + 16
-                        radius: 5
+                        radius: 0
                         color: "transparent"
                         border.width: 0
 
@@ -299,7 +299,7 @@ Rectangle {
                             anchors.top: parent.top
                             anchors.margins: 8
                             spacing: 9
-                            Text {
+                            TuiText {
                                 text: String(artifact.modelData.type || "item").toUpperCase()
                                 color: "#858baa"
                                 font.family: "JetBrains Mono"
@@ -308,14 +308,14 @@ Rectangle {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 2
-                                Text {
+                                TuiText {
                                     Layout.fillWidth: true
                                     text: String(artifact.modelData.title || "Artifact")
                                     color: "#c3c6da"
                                     font.pixelSize: 13
                                     elide: Text.ElideRight
                                 }
-                                Text {
+                                TuiText {
                                     Layout.fillWidth: true
                                     text: String(artifact.modelData.summary || "")
                                     color: "#6b6f86"
@@ -323,7 +323,7 @@ Rectangle {
                                     elide: Text.ElideRight
                                 }
                             }
-                            Button {
+                            TuiButton {
                                 objectName: "artifactViewReport"
                                 // Reports open in the native viewer, not a browser.
                                 visible: root.controller.artifactIsViewableReport(artifact.modelData)
@@ -332,7 +332,7 @@ Rectangle {
                                 onClicked: root.openReport(
                                     String(artifact.modelData.artifact_id || ""))
                             }
-                            Button {
+                            TuiButton {
                                 visible: String(artifact.modelData.session || "").length > 0
                                 text: "Open chat"
                                 implicitHeight: 27
@@ -350,13 +350,13 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.topMargin: 80
                     spacing: 7
-                    Text {
+                    TuiText {
                         Layout.alignment: Qt.AlignHCenter
                         text: "✓"
                         color: "#89a879"
-                        font.pixelSize: 26
+                        font.pixelSize: 17
                     }
-                    Text {
+                    TuiText {
                         Layout.alignment: Qt.AlignHCenter
                         text: "Nothing needs you right now"
                         color: "#aeb2c9"

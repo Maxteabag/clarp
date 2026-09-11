@@ -20,7 +20,7 @@ Rectangle {
         width: Math.min(520, parent.width - 48)
         height: cardColumn.implicitHeight + 56
         anchors.centerIn: parent
-        radius: 22
+        radius: 0
         color: "#20212e"
         border.color: "#41445a"
 
@@ -33,14 +33,14 @@ Rectangle {
             anchors.margins: 28
             spacing: 16
 
-            Text {
+            TuiText {
                 text: "Connect to Clarp"
                 color: "#c0caf5"
-                font.pixelSize: 24
+                font.pixelSize: 17
                 font.weight: Font.DemiBold
             }
 
-            Text {
+            TuiText {
                 Layout.fillWidth: true
                 text: "The native client connects directly to the Clarp server. Credentials remain outside the UI after this session."
                 color: "#8d93b0"
@@ -48,7 +48,7 @@ Rectangle {
                 wrapMode: Text.Wrap
             }
 
-            TextField {
+            TuiTextField {
                 id: serverField
 
                 Layout.fillWidth: true
@@ -57,7 +57,7 @@ Rectangle {
                 selectByMouse: true
             }
 
-            TextField {
+            TuiTextField {
                 id: tokenField
 
                 Layout.fillWidth: true
@@ -73,7 +73,7 @@ Rectangle {
                 color: "#292b3a"
             }
 
-            Label {
+            TuiLabel {
                 text: "Or pair with a one-time code from clarp-admin pair create"
                 color: "#8d93b0"
                 font.pixelSize: 11
@@ -82,7 +82,7 @@ Rectangle {
             RowLayout {
                 Layout.fillWidth: true
 
-                TextField {
+                TuiTextField {
                     id: pairingField
 
                     Layout.fillWidth: true
@@ -91,7 +91,7 @@ Rectangle {
                     selectByMouse: true
                 }
 
-                Button {
+                TuiButton {
                     text: "Pair"
                     enabled: pairingField.text.trim().length > 0 && !root.controller.connecting
                     onClicked: root.controller.pairDevice(serverField.text, pairingField.text)
@@ -99,7 +99,7 @@ Rectangle {
 
             }
 
-            Text {
+            TuiText {
                 visible: root.controller.errorMessage.length > 0
                 Layout.fillWidth: true
                 text: root.controller.errorMessage
@@ -119,13 +119,13 @@ Rectangle {
                     Layout.fillWidth: true
                 }
 
-                Button {
+                TuiButton {
                     text: "Cancel"
                     visible: root.controller.agents.count > 0
                     onClicked: root.visible = false
                 }
 
-                Button {
+                TuiButton {
                     text: "Forget device token"
                     visible: root.controller.hasStoredCredential
                     enabled: !root.controller.connecting
@@ -136,7 +136,7 @@ Rectangle {
                     }
                 }
 
-                Button {
+                TuiButton {
                     text: root.controller.connecting ? "Connecting…" : "Connect"
                     enabled: !root.controller.connecting
                     onClicked: root.controller.connectToServer(serverField.text, tokenField.text)

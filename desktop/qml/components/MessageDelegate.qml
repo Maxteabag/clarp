@@ -34,11 +34,6 @@ Item {
     readonly property string replyMarkerText: "↩ Replying to " + root.replyToName
         + (root.delivery === "private" ? " · private reply" : "")
     readonly property bool rightAligned: !root.groupView && (root.userAuthored || root.teamAuthored)
-    readonly property string senderAvatarSession: {
-        root.controller.agentRevision;
-        return root.senderAgentId.length > 0
-            ? root.controller.agentSessionById(root.senderAgentId) : root.senderSession;
-    }
     required property bool pending
     required property bool deliveryFailed
     required property bool activity
@@ -97,6 +92,7 @@ Item {
 
     TextMetrics {
         id: bubbleMetrics
+        font.family: "JetBrains Mono"
         font.pixelSize: 15
         // Long messages already use the available width; do not shape the
         // entire growing stream a second time just to measure the bubble.
@@ -118,7 +114,7 @@ Item {
         width: parent.width
         spacing: 2
 
-        Text {
+        TuiText {
             objectName: "messageProvenance"
             visible: !root.activity && !root.teamAuthored
                 && (root.origin === "automation" || root.automated)
@@ -133,11 +129,11 @@ Item {
 
         RowLayout {
             objectName: "groupAuthorLine"
-            visible: root.groupView && !root.activity && root.body.length > 0
+            visible: (root.groupView || root.teamAuthored) && !root.activity && root.body.length > 0
             Layout.fillWidth: true
-            Layout.leftMargin: 46
+            Layout.leftMargin: 2
             spacing: 6
-            Text {
+            TuiText {
                 objectName: "groupAuthorName"
                 text: root.senderName || "Agent"
                 color: "#c7adf1"
@@ -146,7 +142,7 @@ Item {
                 elide: Text.ElideRight
                 Layout.maximumWidth: parent.width * 0.5
             }
-            Text {
+            TuiText {
                 objectName: "groupReplyMarker"
                 visible: root.replyToName.length > 0
                 text: root.replyMarkerText
@@ -162,7 +158,7 @@ Item {
             }
         }
 
-        Text {
+        TuiText {
             objectName: "replyMarker"
             visible: root.replyMarkerVisible && !root.groupView
             Layout.leftMargin: 2
@@ -177,23 +173,7 @@ Item {
             visible: root.activity || root.body.length > 0
             Layout.fillWidth: true
             implicitHeight: root.activity ? activityCard.implicitHeight : messageBubble.visible
-                ? Math.max(messageBubble.implicitHeight, root.teamAuthored || root.groupView ? 36 : 0) : 0
-
-            AgentAvatar {
-                objectName: "teamMessageAvatar"
-                visible: (root.teamAuthored || root.groupView) && !root.activity && root.body.length > 0
-                controller: root.controller
-                session: root.senderAvatarSession
-                name: root.senderName || "Agent"
-                avatarSize: 36
-                cornerRadius: 18
-                x: root.groupView ? 0 : parent.width - width
-                y: 4
-                Accessible.name: name
-                HoverHandler { id: senderHover }
-                ToolTip.visible: senderHover.hovered
-                ToolTip.text: name
-            }
+                ? messageBubble.implicitHeight : 0
 
             Rectangle {
                 id: activityCard
@@ -201,7 +181,7 @@ Item {
                 x: 0
                 width: parent.width
                 implicitHeight: Math.max(24, activityRow.implicitHeight + 4)
-                radius: 2
+                radius: 0
                 color: "transparent"
                 border.width: 0
 
@@ -217,22 +197,7 @@ Item {
                     anchors.rightMargin: 3
                     spacing: 7
 
-                    Rectangle {
-                        id: activityDot
-                        implicitWidth: 6
-                        implicitHeight: 6
-                        radius: 3
-                        color: root.activityStatus === "error" ? "#bd7484" : "#89a879"
-                        opacity: 1
-
-                        SequentialAnimation on opacity {
-                            running: root.activity && root.activityStatus === "running"
-                            loops: Animation.Infinite
-                            NumberAnimation { to: 0.32; duration: 520 }
-                            NumberAnimation { to: 1; duration: 520 }
-                        }
-                    }
-                    Text {
+                    TuiText {
                         visible: !liveExplanation.narrationShown
                         Layout.maximumWidth: activityRow.width * 0.3
                         elide: Text.ElideRight
@@ -242,11 +207,13 @@ Item {
                         font.pixelSize: 12
                         font.weight: Font.DemiBold
                     }
-                    Text {
+                    TuiText {
                         Layout.fillWidth: true
-                        text: liveExplanation.narrationShown ? liveExplanation.displayText : root.body
+                        text: (root.activityStatus === "error" ? "Error · " : "")
+                            + (liveExplanation.narrationShown ? liveExplanation.displayText : root.body)
                         textFormat: Text.PlainText
-                        color: liveExplanation.narrationShown ? "#82aaff" : "#969bb5"
+                        color: root.activityStatus === "error" ? "#bd7484"
+                            : liveExplanation.narrationShown ? "#82aaff" : "#969bb5"
                         font.family: "JetBrains Mono"
                         font.pixelSize: 12
                         wrapMode: liveExplanation.narrationShown ? Text.Wrap : Text.NoWrap
@@ -259,13 +226,13 @@ Item {
                 id: messageBubble
                 objectName: "userMessageBackground"
                 visible: !root.activity && root.body.length > 0
-                width: Math.min(Math.max(0, parent.width - (root.teamAuthored || root.groupView ? 46 : 0)),
+                width: Math.min(Math.max(0, parent.width),
                     parent.width * (root.rightAligned ? 0.78 : 0.95), 840,
                     root.body.length > 160 ? 840 : Math.max(140, bubbleMetrics.advanceWidth + 28))
-                x: root.groupView ? 46 : root.rightAligned ? parent.width - width - (root.teamAuthored ? 46 : 0) : 0
+                x: root.rightAligned ? parent.width - width : 0
                 implicitHeight: messageBlocks.implicitHeight + 24
-                radius: 14
-                color: root.teamAuthored || root.groupView ? "#293b52" : root.userAuthored ? "#493651" : "#1b191f"
+                radius: 0
+                color: root.userAuthored ? "#20212e" : "transparent"
                 border.width: root.deliveryFailed ? 1 : 0
                 border.color: "#8d5763"
                 opacity: root.pending ? 0.68 : 1
@@ -301,6 +268,7 @@ Item {
                             color: "#e7e1dc"
                             selectedTextColor: "#fff8ff"
                             selectionColor: "#6f527b"
+                            font.family: "JetBrains Mono"
                             font.pixelSize: 15
                             // Routed through the controller so a non-web scheme in
                             // model output cannot reach the desktop handler.
@@ -369,16 +337,16 @@ Item {
             }
             Layout.fillWidth: true
             implicitHeight: visible ? 24 : 0
-            radius: 3
+            radius: 0
             color: activityTap.hovered ? "#202335" : "transparent"
 
-            Text {
+            TuiText {
                 objectName: "activitySummaryText"
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
                 text: (root.groupSummary.length > 0
-                    ? (root.groupedExpanded ? "▾ " : "▸ ") + root.groupSummary
-                    : (root.activityExpanded ? "▾ " : "▸ ")
+                    ? (root.groupedExpanded ? "Hide · " : "Show · ") + root.groupSummary
+                    : (root.activityExpanded ? "Hide · " : "Show · ")
                         + (root.activitySummary || root.presentedActivityCount + " tool calls"))
                 color: "#72778f"
                 font.family: "JetBrains Mono"
@@ -399,7 +367,7 @@ Item {
             Layout.rightMargin: 2
             spacing: 1
 
-            Button {
+            TuiButton {
                 visible: root.toolDetailsAvailable
                     && root.displayCells.length === 0 && root.tools.length === 0
                 text: "Load activity details"
@@ -442,7 +410,7 @@ Item {
             }
         }
 
-        Text {
+        TuiText {
             visible: root.showTimestamp && root.timestamp.length > 0
                 && !root.activity
             Layout.alignment: root.rightAligned ? Qt.AlignRight : Qt.AlignLeft
@@ -460,13 +428,13 @@ Item {
             Layout.leftMargin: 4
             Layout.rightMargin: 4
             spacing: 6
-            Text {
+            TuiText {
                 text: root.deliveryFailed ? "Not delivered" : "Delivering…"
                 color: root.deliveryFailed ? "#b56f7c" : "#5f6278"
                 font.family: "JetBrains Mono"
                 font.pixelSize: 9
             }
-            Button {
+            TuiButton {
                 visible: root.deliveryFailed
                 text: "Retry"
                 implicitHeight: 22

@@ -20,25 +20,25 @@ FocusScope {
         height: Math.min(520, parent.height - 32)
         color: "#1e2130"
         border.color: "#42445b"
-        radius: 10
+        radius: 0
         MouseArea { anchors.fill: parent }
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 22
             spacing: 12
-            Label { text: "Preview versions"; font.pixelSize: 22; color: "#c5c7e2" }
-            Label {
+            TuiLabel { text: "Preview versions"; font.pixelSize: 17; color: "#c5c7e2" }
+            TuiLabel {
                 Layout.fillWidth: true
                 text: "Choose a build and reopen. Rolling back pauses automatic updates. Chats stay on the Host."
                 wrapMode: Text.Wrap
                 color: "#a7abc5"
             }
-            Label {
+            TuiLabel {
                 visible: !root.canRestart
                 text: "Finish sending or recording before switching versions."
                 color: "#e2b979"
             }
-            Label {
+            TuiLabel {
                 visible: Boolean(root.switcher.catalog.pinned)
                 text: "Pinned to an older build — automatic updates paused"
                 color: "#e2b979"
@@ -72,28 +72,28 @@ FocusScope {
                     background: Rectangle {
                         color: versionRow.hovered || versionRow.activeFocus
                             || (versionRow.ListView.isCurrentItem && versions.activeFocus) ? "#34364b" : "#272a3b"
-                        radius: 4
+                        radius: 0
                     }
                     onClicked: root.switcher.selectVersion(String(modelData.hash))
                     Keys.onReturnPressed: root.switcher.selectVersion(String(modelData.hash))
                     Keys.onEnterPressed: root.switcher.selectVersion(String(modelData.hash))
                 }
             }
-            Label {
+            TuiLabel {
                 Layout.fillWidth: true
                 visible: root.switcher.error.length > 0
                 text: root.switcher.error
                 wrapMode: Text.Wrap
                 color: "#e79aa4"
             }
-            Label {
+            TuiLabel {
                 Layout.fillWidth: true
                 visible: String(root.switcher.notice || "").length > 0
                 text: String(root.switcher.notice || "")
                 wrapMode: Text.Wrap
                 color: "#a5cda0"
             }
-            Label {
+            TuiLabel {
                 Layout.fillWidth: true
                 text: "Recovery is always available from Clarp Preview Versions in the app launcher."
                 wrapMode: Text.Wrap
@@ -101,13 +101,13 @@ FocusScope {
                 font.pixelSize: 11
             }
             RowLayout {
-                Button {
+                TuiButton {
                     text: "Latest · resume updates"
                     enabled: !root.switcher.busy && root.canRestart
                     onClicked: root.switcher.selectVersion("latest")
                 }
                 Item { Layout.fillWidth: true }
-                Button { text: "Close · Esc"; onClicked: root.close() }
+                TuiButton { text: "Close · Esc"; onClicked: root.close() }
             }
         }
     }

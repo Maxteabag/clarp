@@ -34,7 +34,7 @@ Rectangle {
     readonly property string draftScope: paneId + "|" + session
     signal openConnection
 
-    implicitHeight: Math.max(54, Math.min(200, editor.contentHeight + editor.topPadding + editor.bottomPadding + 4) + 14) + (transcriptionCount > 0 ? 25 : 0)
+    implicitHeight: Math.max(54, Math.min(200, editor.contentHeight + editor.topPadding + editor.bottomPadding + 4)) + (transcriptionCount > 0 ? 25 : 0)
         + (queueCount > 0 ? 25 : 0) + (attachments.length > 0 ? 31 : 0)
         + (root.active && root.controller.startingContact.length > 0 ? 25 : 0)
     color: root.active ? "#1a1b26" : "#1a1b26"
@@ -42,6 +42,7 @@ Rectangle {
     border.width: 0
 
     Rectangle {
+        z: 1
         width: parent.width
         height: 1
         color: root.active ? "#454b6c" : "#272a39"
@@ -81,10 +82,10 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 7
+        anchors.margins: 0
         spacing: 7
 
-        Text {
+        TuiText {
             visible: root.active && root.controller.startingContact.length > 0
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 19 : 0
@@ -97,20 +98,20 @@ Rectangle {
             visible: root.transcriptionCount > 0
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 19 : 0
-            Text {
+            TuiText {
                 Layout.fillWidth: true
                 text: root.transcriptionCount === 1
                     ? "Transcribing voice in background…"
                     : root.transcriptionCount + " voice notes transcribing…"
                 color: "#8997b8"
                 font.family: "JetBrains Mono"
-                font.pixelSize: 8
+                font.pixelSize: 12
                 elide: Text.ElideRight
             }
-            ToolButton {
+            TuiToolButton {
                 visible: root.active
-                text: "×"
-                implicitWidth: 20
+                text: "Cancel"
+                implicitWidth: 58
                 implicitHeight: 18
                 onClicked: root.controller.audio.cancelTranscriptionsForSession(root.session)
                 ToolTip.visible: hovered
@@ -118,7 +119,7 @@ Rectangle {
             }
         }
 
-        Text {
+        TuiText {
             visible: root.queueCount > 0
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 19 : 0
@@ -126,7 +127,7 @@ Rectangle {
                 + "  ·  Ctrl+Enter queues next"
             color: "#8f93b3"
             font.family: "JetBrains Mono"
-            font.pixelSize: 8
+            font.pixelSize: 12
             elide: Text.ElideRight
             verticalAlignment: Text.AlignVCenter
         }
@@ -151,7 +152,7 @@ Rectangle {
                         required property var modelData
                         height: 24
                         width: Math.min(220, attachmentLabel.implicitWidth + 36)
-                        radius: 4
+                        radius: 0
                         color: "#262938"
                         border.color: "#42465e"
                         RowLayout {
@@ -172,7 +173,7 @@ Rectangle {
                                 fillMode: Image.PreserveAspectCrop
                                 asynchronous: true
                             }
-                            Text {
+                            TuiText {
                                 id: attachmentLabel
                                 Layout.fillWidth: true
                                 text: String(attachmentChip.modelData.name || "file")
@@ -180,13 +181,13 @@ Rectangle {
                                         ? "" : " · " + String(attachmentChip.modelData.status))
                                 color: String(attachmentChip.modelData.status || "ready") === "failed"
                                     ? "#c98a98" : "#adb1c8"
-                                font.pixelSize: 9
+                                font.pixelSize: 12
                                 elide: Text.ElideMiddle
                             }
-                            ToolButton {
-                                text: "×"
+                            TuiToolButton {
+                                text: "Remove"
                                 visible: root.active
-                                implicitWidth: 22
+                                implicitWidth: 64
                                 implicitHeight: 22
                                 onClicked: root.controller.removeComposerAttachment(
                                     root.paneId, root.session,
@@ -201,40 +202,27 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 6
+            spacing: 0
 
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: "#20212e"
-            radius: Math.min(22, height / 2)
-            border.width: 1
-            border.color: editor.activeFocus ? "#6f527b" : "#2b2733"
-
-            Text {
-                anchors.left: parent.left
-                anchors.leftMargin: 9
-                anchors.verticalCenter: parent.verticalCenter
-                text: "❯"
-                color: editor.activeFocus ? "#c4caf2" : "#676a80"
-                font.family: "JetBrains Mono"
-                font.pixelSize: 15
-                font.weight: Font.DemiBold
-            }
+            color: "#1a1b26"
+            radius: 0
+            border.width: 0
 
             ScrollView {
+                id: editorScroll
                 anchors.fill: parent
-                anchors.margins: 2
-                anchors.leftMargin: 17
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                 TextArea {
                     id: editor
                     objectName: "paneComposerEditor"
+                    width: editorScroll.availableWidth
+                    height: Math.max(implicitHeight, editorScroll.availableHeight)
                     text: ""
-                    placeholderText: root.session.length > 0
-                        ? "Type to " + root.controller.agentName(root.session) + "…"
-                        : "Choose an agent"
+                    placeholderText: ""
                     enabled: root.active && root.session.length > 0
                         && root.controller.startingContact.length === 0
                     opacity: root.active ? 1 : 0.58
@@ -244,9 +232,37 @@ Rectangle {
                     font.family: "JetBrains Mono"
                     font.pixelSize: 15
                     background: null
-                    leftPadding: 7
-                    topPadding: 6
-                    bottomPadding: 5
+                    leftPadding: 12
+                    rightPadding: 12
+                    topPadding: 14
+                    bottomPadding: 12
+
+                    FontMetrics { id: cursorMetrics; font: editor.font }
+                    cursorDelegate: Rectangle {
+                        id: terminalCursor
+                        objectName: "terminalBlockCursor"
+                        width: Math.max(1, cursorMetrics.advanceWidth("M"))
+                        height: cursorMetrics.height
+                        color: editor.color
+                        opacity: 0.65
+                        visible: editor.activeFocus && editor.selectionStart === editor.selectionEnd
+
+                        SequentialAnimation {
+                            id: cursorBlink
+                            running: terminalCursor.visible
+                            loops: Animation.Infinite
+                            PropertyAction { target: terminalCursor; property: "opacity"; value: 0.65 }
+                            PauseAnimation { duration: 550 }
+                            PropertyAction { target: terminalCursor; property: "opacity"; value: 0 }
+                            PauseAnimation { duration: 550 }
+                        }
+                        Connections {
+                            target: editor
+                            function onCursorPositionChanged() {
+                                if (terminalCursor.visible) cursorBlink.restart();
+                            }
+                        }
+                    }
                     onTextChanged: root.controller.setPaneDraft(root.paneId, root.session, text)
                     onActiveFocusChanged: {
                         if (activeFocus)
@@ -270,24 +286,24 @@ Rectangle {
             }
         }
 
-        ToolButton {
+        TuiToolButton {
             id: playbackButton
             visible: root.active && (root.controller.audio.playing || root.controller.audio.paused)
-            text: "■"
-            implicitWidth: visible ? 28 : 0
+            text: "Silence"
+            implicitWidth: visible ? 64 : 0
             implicitHeight: 28
             onClicked: root.controller.audio.silence()
             ToolTip.visible: hovered
             ToolTip.text: "Stop voice playback"
-            contentItem: Text {
+            contentItem: TuiText {
                 text: playbackButton.text
                 color: "#74778e"
-                font.pixelSize: 8
+                font.pixelSize: 12
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
             }
             background: Rectangle {
-                radius: 4
+                radius: 0
                 color: playbackButton.hovered ? "#242633" : "transparent"
             }
         }
@@ -332,16 +348,16 @@ Rectangle {
         anchors.fill: parent
         visible: root.dropActive
         z: 40
-        radius: 4
+        radius: 0
         color: "#d0262a3d"
         border.color: "#a7addb"
         border.width: 2
-        Text {
+        TuiText {
             anchors.centerIn: parent
             text: "DROP TO ATTACH"
             color: "#d8dbef"
             font.family: "JetBrains Mono"
-            font.pixelSize: 10
+            font.pixelSize: 12
             font.weight: Font.DemiBold
         }
     }

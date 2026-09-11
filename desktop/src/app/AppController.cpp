@@ -107,6 +107,13 @@ AppController::AppController(QObject* parent)
                                                           QStringLiteral("http://127.0.0.1:7682"))
                                                    .toString()));
     m_muted = settings.value(QStringLiteral("audio/muted"), false).toBool();
+    m_audio.setMuted(m_muted);
+    connect(&m_audio, &AudioController::mutedChanged, this, [this](bool muted) {
+        if (m_muted == muted) return;
+        m_muted = muted;
+        QSettings().setValue(QStringLiteral("audio/muted"), muted);
+        emit mutedChanged();
+    });
     m_pauseMobilePush = settings.value(QStringLiteral("notifications/pauseMobileWhileDesktopActive"), true).toBool();
     m_showWhenReady = settings.value(QStringLiteral("conversation/showWhenReady"), false).toBool();
     m_toolsVisible = settings.value(QStringLiteral("conversation/toolsVisible"), false).toBool();
@@ -175,7 +182,7 @@ AppController::AppController(QObject* parent)
                 }
                 m_bearerToken.clear();
                 m_sse.stop();
-                m_audio.silence();
+                m_audio.setEndpoint({}, {});
                 setConnecting(false);
                 setConnectionState(QStringLiteral("offline"));
                 setErrorMessage({});
@@ -631,7 +638,7 @@ void AppController::setBaseUrl(const QString& value) {
     m_toolNarrator.reset();
     resetTransientRequestState();
     m_sse.stop();
-    m_audio.silence();
+    m_audio.setEndpoint({}, {});
     m_api.setEndpoint(QUrl(normalized), {});
     m_baseUrl = normalized;
     const bool shared =
@@ -717,13 +724,7 @@ void AppController::setBaseUrl(const QString& value) {
 }
 
 void AppController::setMuted(bool muted) {
-    if (m_muted == muted) {
-        return;
-    }
-    m_muted = muted;
     m_audio.setMuted(muted);
-    QSettings().setValue(QStringLiteral("audio/muted"), muted);
-    emit mutedChanged();
 }
 
 void AppController::setPauseMobilePush(bool value) {
@@ -832,9 +833,8 @@ void AppController::reconnect() {
     clearAvatarCache();
     m_api.setEndpoint(endpoint, m_bearerToken);
     m_sse.setEndpoint(endpoint, m_bearerToken);
-    m_audio.setEndpoint(endpoint, m_bearerToken);
-    m_audio.setMuted(m_muted);
     setErrorMessage({});
+    m_audio.setEndpoint(endpoint, m_bearerToken);
     setConnecting(true);
     setConnectionState(QStringLiteral("connecting"));
     m_api.get(QStringLiteral("server-info"), QStringLiteral("/server-info"));
@@ -1118,6 +1118,7 @@ void AppController::stopSession(const QString& session) {
 }
 
 void AppController::toggleRecordingForSession(const QString& session) {
+    if (session.isEmpty() && !m_audio.recording()) return;
     m_audio.toggleRecordingForSession(session);
 }
 
@@ -1171,6 +1172,7 @@ QVariantMap AppController::agentDetails(const QString& session) const {
             {QStringLiteral("name"), displayName(*agent)},
             {QStringLiteral("backend"), agent->backend},
             {QStringLiteral("working_directory"), agent->workingDirectory},
+            {QStringLiteral("workspace"), m_workspaceContext.describe(agent->workingDirectory, m_sharedFilesystem)},
             {QStringLiteral("model"), agent->model},
             {QStringLiteral("effort"), agent->effort},
             {QStringLiteral("state"), m_agents.displayState(session)},
