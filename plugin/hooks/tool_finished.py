@@ -65,6 +65,8 @@ def main() -> int:
     try:
         agents_db.record_state(agent["agent_id"], AgentState.TOOL,
                                {"phase": "tool_finished",
+                                "call_id": payload.get("tool_use_id"),
+                                "cwd": payload.get("cwd"),
                                 "status": tool_status_from_hook_payload(payload),
                                 "tool": tool_name,
                                 "input": tool_input,

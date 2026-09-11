@@ -123,3 +123,28 @@ The helper creates or updates named teams and replaces direct membership only
 for teams in the plan. It preserves unrelated teams. `--require-all-active`
 refuses a plan that omits an active agent. Success requires final verification
 with no omitted or multiply assigned active agents.
+
+## Create a designer contact and delegate an implementation
+
+Use `GET /agents/snapshot` field `personas` for saved contacts; `GET /personas`
+is not a supported listing route on the verified Host. Check both personas and
+active agents before creation. For voice conflicts, parse each saved `voice_id`
+JSON and compare its Cartesia ID, not the entire serialized string: older records
+may contain multiple providers.
+
+Read `GET /agent-model-options` and select an exact ID from
+`providers[BACKEND].models`. `POST /agents` accepts `model` at creation; verify the
+stored override via `/agent-llm` and the snapshot before dispatch. Preserve the
+returned session slug. A creation response alone does not prove a model turn ran.
+
+For multi-step delegated engineering, commit a durable handoff in the project,
+create an isolated worktree from that commit, and create one plan for the returned
+session using `clarp-agent-tasks`. Send the handoff path, returned plan ID, scope,
+evidence requirements and report-back destination with `clarp-admin prompt` and
+an explicit `--from` session. Verify the destination's `/log` contains the message
+and an actual response/tool activity. Native Clarp tracks the running turn;
+separately detached workers still require the background-jobs skill.
+
+Generated portrait art belongs in the persona API, not built-in source files.
+Convert the selected generated image to a bounded square JPEG for the API, retain
+the original, and publish through `clarp-media-publish` for the agent gallery.

@@ -12,6 +12,7 @@ Endpoints (see Handler.do_GET / do_POST for the dispatch tables):
 from __future__ import annotations
 
 from lib import clip_store
+from lib import viz_normalize
 
 import gzip
 import json
@@ -313,6 +314,8 @@ class Handler(BaseHTTPRequestHandler):
         "/log": "_handle_log",
         "/message-tool-details": "_handle_message_tool_details",
         "/status": "_handle_status",
+        "/viz/events": "_handle_viz_events",
+        "/viz": "_send_viz_page",
         "/diagnostics/health": "_handle_diagnostics_health",
         "/backend-usage": "_handle_backend_usage",
         "/backend-auth": "_handle_backend_auth",
@@ -386,6 +389,7 @@ class Handler(BaseHTTPRequestHandler):
         "/tool-explanations": "_handle_tool_explanations",
         "/desktop-presence": "_handle_desktop_presence",
         "/application-activity": "_handle_application_activity",
+        "/viz/supersede": "_handle_viz_supersede",
         "/send": "_handle_send",
         "/dreaming/run": "_handle_dreaming_run_post",
         "/orchestrator/route-delegation": "_handle_orchestrator_route_delegation",
@@ -837,6 +841,10 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/notification-avatars/"):
             return self._handle_notification_avatar(
                 path[len("/notification-avatars/"):].strip("/"))
+        if path.startswith("/viz/owner-avatar/"):
+            from lib.viz_owner_avatar import portrait
+            result=portrait(unquote(path[len("/viz/owner-avatar/"):]))
+            return self._send(200,*result) if result else self._send(404,b"not found")
         if path.startswith("/avatars/"):
             return self._handle_agent_avatar(path[len("/avatars/"):].strip("/"))
         if path.startswith("/persona-avatars/"):
@@ -1233,6 +1241,54 @@ class Handler(BaseHTTPRequestHandler):
         from lib import agent_conversations
         body = json.dumps({"conversations": agent_conversations.list_conversations()}).encode()
         self._send(200, body, "application/json")
+
+    def _handle_viz_events(self):
+        """Normalized fleet activity for the map, over a time window."""
+        from urllib.parse import parse_qs, urlparse
+        qs = parse_qs(urlparse(self.path).query)
+
+        def _int(name, default):
+            try:
+                return int((qs.get(name, [""])[0] or "").strip() or default)
+            except ValueError:
+                return default
+
+        import time
+        window_s = max(60, min(_int("window", 3600), 90 * 86400))
+        until = _int("until", 0) or None
+        anchor = until if until else int(time.time() * 1000)
+        payload = viz_normalize.build_fleet_map(
+            anchor - window_s * 1000, until, limit=_int("limit", 4000))
+        from lib import viz_learning
+        clusters = payload.pop("_unknown_clusters", [])
+        payload["learning"] = viz_learning.status()
+        self._send(200, json.dumps(payload).encode(), "application/json")
+        if payload.get("world"):
+            viz_learning.offer_scene(payload["world"])
+        else:
+            viz_learning.offer(clusters)
+
+    def _handle_viz_supersede(self):
+        from lib import viz_learning
+        data = self._read_json()
+        if isinstance(data, dict) and data.get("world"):
+            import time
+            world = viz_normalize.build_fleet_map(int(time.time()*1000)-3600000)["world"]
+            result = viz_learning.offer_scene(world, force=True, reason=str(data.get("reason", "Improve this detail while preserving the established world")) + " Selected entity: " + str(data.get("entity_id", "whole world")))
+            return self._send(202, json.dumps(result).encode(), "application/json")
+        if (not isinstance(data, dict) or not isinstance(data.get("entity_id"), str)
+                or not isinstance(data.get("revision"), int)):
+            return self._send(400, b'{"error":"entity_id and revision required"}', "application/json")
+        try:
+            result = viz_learning.supersede(data["entity_id"], data["revision"],
+                                             str(data.get("reason", "Rethink this representation")))
+        except ValueError as error:
+            return self._send(409, json.dumps({"error": str(error)}).encode(), "application/json")
+        self._send(202, json.dumps(result).encode(), "application/json")
+
+    def _send_viz_page(self):
+        """The fleet map itself; a static page that reads /viz/events."""
+        return self._send_file(self.ctx.static / "viz.html")
 
     def _handle_snapshot(self):
         """Unified per-agent read model for the dashboard."""
