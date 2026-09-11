@@ -1,4 +1,5 @@
 #include "app/AppController.h"
+#include "app/LocalReport.h"
 #include "terminal/TerminalLaunch.h"
 #include "app/TimeFormat.h"
 #include "media/PortraitImage.h"
@@ -516,8 +517,28 @@ QStringList AppController::markdownDisplayBlocks(const QString& markdown) const 
     return clarp::markdownDisplayBlocks(clarp::markdownWithExplicitAutolinks(markdown));
 }
 
-bool AppController::openExternalLink(const QString& link) {
+bool AppController::openLocalReport(const QString& link, const QString& originatingHost) {
+    if (originatingHost.isEmpty() || normalizedBaseUrl(originatingHost) != m_baseUrl || !m_sharedFilesystem) {
+        setErrorMessage(QStringLiteral("Local reports require the originating Host to share this desktop's filesystem"));
+        return false;
+    }
+    const QUrl url = clarp::localReportUrl(link.trimmed());
+    if (url.isEmpty()) {
+        setErrorMessage(QStringLiteral("Local report must be a readable, non-executable HTML, PDF, text or image file"));
+        return false;
+    }
+    if (!QDesktopServices::openUrl(url)) {
+        setErrorMessage(QStringLiteral("No application is available to open this local report"));
+        return false;
+    }
+    setErrorMessage({});
+    return true;
+}
+
+bool AppController::openExternalLink(const QString& link, const QString& originatingHost) {
     const QString target = link.trimmed();
+    if (target.startsWith('/') || QUrl(target).scheme() == QStringLiteral("file"))
+        return openLocalReport(target, originatingHost);
     if (!clarp::isOpenableLink(target)) {
         // Transcript text is model, tool and web output. Refuse anything that is
         // not a web or mail link rather than handing an arbitrary scheme to the

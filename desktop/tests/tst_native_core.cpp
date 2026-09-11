@@ -1,5 +1,7 @@
 #include "models/ConversationPresentationModel.h"
 #include <QTextDocument>
+#include <QDesktopServices>
+#include "app/LocalReport.h"
 #include <QStandardItemModel>
 #include "app/AppController.h"
 #include "app/CredentialStore.h"
@@ -37,6 +39,14 @@
 #include <cmath>
 
 using namespace clarp;
+class ReportUrlCapture : public QObject {
+    Q_OBJECT
+public:
+    QList<QUrl> opened;
+public slots:
+    void capture(const QUrl& url) { opened.append(url); }
+};
+
 
 namespace {
 
@@ -618,6 +628,8 @@ class NativeCoreTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void localReportsRequireOriginAndSafeReadableFiles();
+    void leadingDayTracksVisibleHistory();
     void oldActivityGroupsAreLazyAndVisitScoped();
     void consecutiveExplanationsCollapseWithoutChangingTranscript();
     void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
@@ -3148,6 +3160,77 @@ void NativeCoreTest::pairConversationRoomsAreReadOnlyProjections() {
                       {QStringLiteral("session"), QStringLiteral("rachel")}});
     QTRY_VERIFY_WITH_TIMEOUT(server.requestCount(QStringLiteral("GET"), QStringLiteral("/agent-conversations")) >= 2, 3'000);
     QCOMPARE(controller.selectedSession(), room);
+}
+
+
+void NativeCoreTest::localReportsRequireOriginAndSafeReadableFiles() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ReportUrlCapture capture;
+    QDesktopServices::setUrlHandler("file", &capture, "capture");
+    const auto cleanup = qScopeGuard([] { QDesktopServices::unsetUrlHandler("file"); });
+    const auto write = [&](const QString& name, const QByteArray& body) {
+        const QString path = dir.filePath(name);
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly) || file.write(body) != body.size()) return QString{};
+        file.close();
+        file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        return path;
+    };
+    const QString html = write("report with spaces.html", "<html><body>Report</body></html>");
+    QVERIFY(!html.isEmpty());
+    AppController controller;
+    const QString origin = controller.baseUrl();
+    controller.setSharedFilesystem(false);
+    QVERIFY(!controller.openLocalReport(html, origin));
+    controller.setSharedFilesystem(true);
+    QVERIFY(!controller.openLocalReport(html, "http://different.invalid"));
+    QVERIFY(!controller.openLocalReport(html, {}));
+    QVERIFY(!controller.openLocalReport(dir.filePath("missing.txt"), origin));
+    QVERIFY(!controller.openLocalReport(dir.path(), origin));
+    QVERIFY(!controller.openLocalReport(write("launcher.desktop", "[Desktop Entry]\nExec=bad"), origin));
+    QVERIFY(!controller.openLocalReport(write("hidden.txt", "[Desktop Entry]\nExec=bad"), origin));
+    QVERIFY(!controller.openLocalReport(write("program.txt", "#!/bin/sh\necho bad"), origin));
+    QVERIFY(!controller.openLocalReport(write("unknown.xyz", "plain text"), origin));
+    const QString executable = write("executable.html", "<html>Report</html>");
+    QVERIFY(QFile::setPermissions(executable, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+    QVERIFY(!controller.openLocalReport(executable, origin));
+    const QString unreadable = write("unreadable.txt", "text");
+    QVERIFY(QFile::setPermissions(unreadable, QFileDevice::WriteOwner));
+    QVERIFY(!controller.openLocalReport(unreadable, origin));
+    QVERIFY(!controller.openLocalReport("file://remote/report.html", origin));
+    QVERIFY(!controller.openLocalReport("javascript:alert(1)", origin));
+    QCOMPARE(capture.opened.size(), 0);
+    QVERIFY(controller.openExternalLink(html, origin));
+    QCOMPARE(capture.opened.last(), QUrl::fromLocalFile(QFileInfo(html).canonicalFilePath()));
+    const QString alias = dir.filePath("alias.html");
+    QVERIFY(QFile::link(html, alias));
+    QVERIFY(controller.openLocalReport(QUrl::fromLocalFile(alias).toString(), origin));
+    QCOMPARE(capture.opened.last(), QUrl::fromLocalFile(QFileInfo(html).canonicalFilePath()));
+    for (const auto& pair : QList<QPair<QString,QByteArray>>{{"report.pdf", "%PDF-1.4\n"}, {"report.txt", "plain text"}, {"report.svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"}}) {
+        QVERIFY(controller.openLocalReport(write(pair.first, pair.second), origin));
+    }
+    QVERIFY(!isOpenableLink(html));
+    QVERIFY(!isOpenableLink(QUrl::fromLocalFile(html).toString()));
+    QVERIFY(isOpenableLink("https://example.com/report"));
+    controller.setSharedFilesystem(false);
+}
+
+void NativeCoreTest::leadingDayTracksVisibleHistory() {
+  QStandardItemModel rows; ConversationPresentationModel view;view.setSourceModel(&rows);
+  QSignalSpy changed(&view,&ConversationPresentationModel::leadingDayLabelChanged);
+  auto add=[&](const QString& day,bool prepend=false){auto *r=new QStandardItem;r->setData(day,ConversationModel::DayLabelRole);r->setData("user",ConversationModel::AuthorRole);if(prepend)rows.insertRow(0,r);else rows.appendRow(r);};
+  QCOMPARE(view.leadingDayLabel(),QString{}); // empty: no heading
+  add("Today");QCOMPARE(view.leadingDayLabel(),QString("Today"));QVERIFY(changed.count()>0);
+  add("Today");QCOMPARE(view.leadingDayLabel(),QString("Today")); // one current day: suppress initial heading
+  changed.clear();add("Yesterday",true);QCOMPARE(view.leadingDayLabel(),QString("Yesterday"));QVERIFY(changed.count()>0); // prepend exposes useful Today transition
+  QCOMPARE(view.index(1,0).data(ConversationModel::DayLabelRole).toString(),QString("Today")); // roles unchanged
+  rows.removeRow(0);QCOMPARE(view.leadingDayLabel(),QString("Today"));
+  changed.clear();rows.item(0)->setData("Yesterday",ConversationModel::DayLabelRole);QCOMPARE(view.leadingDayLabel(),QString("Yesterday"));QVERIFY(changed.count()>0);
+  rows.clear();QCOMPARE(view.leadingDayLabel(),QString{});
+  add("");add("Today");QCOMPARE(view.leadingDayLabel(),QString("Today")); // pending row without timestamp
+  rows.clear();add("12 June");add("Yesterday");add("Today");QCOMPARE(view.leadingDayLabel(),QString("12 June")); // loaded multi-day history
+  rows.clear();add("Yesterday");QCOMPARE(view.leadingDayLabel(),QString("Yesterday")); // preserve old-day context
 }
 
 QTEST_MAIN(NativeCoreTest)

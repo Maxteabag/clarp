@@ -15,7 +15,15 @@ Rectangle {
     function focusNavigation() { navigationFocus.forceActiveFocus(); }
     Item { id: navigationFocus; objectName: "conversationNavigationFocus" }
 
+    function jumpToLatest() {
+        for (let i = 0; i < paneViews.count; ++i) {
+            const pane = paneViews.itemAt(i) as PaneLeaf;
+            if (pane && pane.active) { pane.jumpToLatest(); return; }
+        }
+    }
+
     Repeater {
+        id: paneViews
         model: root.controller.panes.paneLayout
 
         PaneLeaf {

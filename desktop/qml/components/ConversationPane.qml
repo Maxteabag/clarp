@@ -20,6 +20,7 @@ Rectangle {
         return root.pairRoom ? root.controller.agentConversation(root.session) : ({});
     }
     readonly property var pairParticipants: (root.pairRoomInfo && root.pairRoomInfo.participants) || []
+    function jumpToLatest() { transcript.scrollToLatest(); }
     signal openConnection
     signal queueRequested(string session)
     signal profileRequested(string session)
@@ -180,7 +181,7 @@ Rectangle {
                     onClicked: root.controller.refreshSession(root.session)
                 }
                 TuiToolButton {
-                    text: "Dismiss"
+                    text: "Dismiss · Esc"
                     onClicked: {
                         root.controller.clearError();
                         root.conversationModel.error = "";
@@ -206,8 +207,10 @@ Rectangle {
             section.delegate: Item {
                 required property string section
                 width: transcript.width
-                height: section.length > 0 ? 32 : 0
-                visible: section.length > 0
+                readonly property bool showHeading: section.length > 0
+                    && !(section === "Today" && presentation.leadingDayLabel === "Today")
+                height: showHeading ? 32 : 0
+                visible: showHeading
                 Rectangle {
                     anchors.left: parent.left
                     anchors.leftMargin: 14
@@ -369,6 +372,7 @@ Rectangle {
     }
 
     TuiToolButton {
+        objectName: "jumpToLatestButton"
         visible: !transcript.followLatest
             && (transcript.newMessagesBelow || transcript.distanceFromBottom >= 180)
         anchors.right: parent.right
@@ -381,7 +385,7 @@ Rectangle {
         text: transcript.newMessagesBelow ? "New messages" : "Latest"
         onClicked: transcript.scrollToLatest()
         ToolTip.visible: hovered
-        ToolTip.text: transcript.newMessagesBelow ? "Jump to new messages" : "Jump to latest"
+        ToolTip.text: "Jump to latest · Ctrl+End"
         background: Rectangle {
             radius: 0
             color: "#30354f"

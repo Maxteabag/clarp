@@ -69,6 +69,15 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
                 if (!require(window->property("shortcutsVisible").toBool() == hints
                     && window->activeFocusItem()->property("text").toString() == QStringLiteral("ejki "))) return;
             }
+            // Escape dismisses a visible error before changing composer focus.
+            controller->conversationForSession(second)->setError(QStringLiteral("Keyboard error fixture"));
+            press(Qt::Key_Escape);
+            if (!require(controller->conversationForSession(second)->error().isEmpty()
+                && state("composer")
+                && window->activeFocusItem()->property("text").toString() == QStringLiteral("ejki "))) return;
+            controller->conversationForSession(second)->setError(QStringLiteral("Palette error fixture"));
+            QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QVariant(QStringLiteral("dismiss-error"))));
+            if (!require(controller->conversationForSession(second)->error().isEmpty())) return;
             press(Qt::Key_Escape);
             break;
         case 2:
@@ -145,6 +154,15 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
         case 19:
             if (!require(state("composer") && controller->selectedSession() == second
                          && !map->property("hasAttention").toBool())) return;
+            // Selecting agents can produce a real error from the deliberately
+            // unavailable fixture Host. Dismiss it before testing navigation.
+            if (!controller->errorMessage().isEmpty()
+                || !controller->conversationForSession(second)->error().isEmpty()) {
+                press(Qt::Key_Escape);
+                if (!require(controller->errorMessage().isEmpty()
+                    && controller->conversationForSession(second)->error().isEmpty()
+                    && state("composer"))) return;
+            }
             press(Qt::Key_Escape);
             press(Qt::Key_E);
             break;
@@ -173,7 +191,58 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             if (!require(state("modal") && window->findChild<QObject*>(QStringLiteral("assignAgent"))->property("visible").toBool())) return;
             press(Qt::Key_Escape);
             break;
+        case 26: {
+            if (!require(state("composer"))) return;
+            QJsonArray turns;
+            for (int row = 0; row < 80; ++row) {
+                turns.append(QJsonObject{{QStringLiteral("id"), QStringLiteral("scroll-%1").arg(row)},
+                    {QStringLiteral("role"), QStringLiteral("assistant")},
+                    {QStringLiteral("text"), QStringLiteral("Keyboard scroll fixture row %1: a retained conversation message.").arg(row)},
+                    {QStringLiteral("timestamp"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}});
+            }
+            controller->conversationForSession(second)->applyLog(
+                {{QStringLiteral("conversation_id"), QStringLiteral("keyboard-scroll")},
+                 {QStringLiteral("turns"), turns}}, clarp::ConversationModel::LoadKind::Replace);
+            break;
+        }
+        case 27: {
+            auto* transcript = window->findChild<QObject*>(QStringLiteral("transcriptList"));
+            if (!require(transcript && transcript->property("contentHeight").toReal() > transcript->property("height").toReal())) return;
+            QMetaObject::invokeMethod(transcript, "pauseFollowing");
+            QMetaObject::invokeMethod(transcript, "positionViewAtBeginning");
+            break;
+        }
+        case 28: {
+            auto* transcript = window->findChild<QObject*>(QStringLiteral("transcriptList"));
+            if (!require(transcript && !transcript->property("atYEnd").toBool())) return;
+            press(Qt::Key_End, Qt::ControlModifier);
+            break;
+        }
+        case 29: {
+            auto* transcript = window->findChild<QObject*>(QStringLiteral("transcriptList"));
+            if (!require(transcript && transcript->property("followLatest").toBool()
+                && transcript->property("atYEnd").toBool() && state("composer")
+                && window->activeFocusItem()->property("text").toString() == QStringLiteral("ejki "))) return;
+            QMetaObject::invokeMethod(transcript, "pauseFollowing");
+            QMetaObject::invokeMethod(transcript, "positionViewAtBeginning");
+            QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QVariant(QStringLiteral("jump-latest"))));
+            break;
+        }
+        case 30: {
+            auto* transcript = window->findChild<QObject*>(QStringLiteral("transcriptList"));
+            if (!require(transcript && transcript->property("atYEnd").toBool())) return;
+            QMetaObject::invokeMethod(transcript, "pauseFollowing");
+            QMetaObject::invokeMethod(transcript, "positionViewAtBeginning");
+            break;
+        }
+        case 31: {
+            auto* latest = window->findChild<QObject*>(QStringLiteral("jumpToLatestButton"));
+            if (!require(latest && latest->property("visible").toBool())) return;
+            QMetaObject::invokeMethod(latest, "clicked");
+            break;
+        }
         default:
+            if (!require(window->findChild<QObject*>(QStringLiteral("transcriptList"))->property("atYEnd").toBool())) return;
             if (!require(state("composer") && controller->selectedSession() == second)) return;
             window->setProperty("contextKeyboardVerified", true);
             timer->stop();

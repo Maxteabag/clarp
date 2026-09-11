@@ -8,6 +8,7 @@ import QtQuick.Layouts
 // text engine. Nothing here embeds a browser, so the native-only gate holds.
 Rectangle {
     id: root
+    property string linkOriginHost: ""
     objectName: "reportView"
 
     required property var controller
@@ -30,6 +31,7 @@ Rectangle {
     Keys.onEscapePressed: event => { root.closeRequested(); event.accepted = true; }
 
     function open(artifactId) {
+        root.linkOriginHost = controller && controller.baseUrl ? String(controller.baseUrl) : "";
         root.artifactId = artifactId;
         root.visible = true;
     }
@@ -44,7 +46,10 @@ Rectangle {
         reportBody.text = String(root.report.body || "");
     }
     onReportChanged: root.applyReport()
-    Component.onCompleted: root.applyReport()
+    Component.onCompleted: {
+        root.linkOriginHost = controller && controller.baseUrl ? String(controller.baseUrl) : "";
+        root.applyReport();
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -127,7 +132,7 @@ Rectangle {
                 selectedTextColor: "#fff8ff"
                 selectionColor: "#6f527b"
                 font.pixelSize: 15
-                onLinkActivated: link => root.controller.openExternalLink(link)
+                onLinkActivated: link => root.controller.openExternalLink(link, root.linkOriginHost)
 
                 HoverHandler {
                     objectName: "reportLinkHover"
