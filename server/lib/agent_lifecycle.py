@@ -66,6 +66,18 @@ class AgentLifecycleService:
             return self._create_locked(data, janitor=True)
 
     def _create_locked(self, data: dict, *, janitor: bool = False) -> AgentLifecycleResult:
+        if data.get("open_existing") is True and data.get("resume_session_id") and not janitor:
+            backend = backends.normalize(data.get("backend"))
+            sid = str(data["resume_session_id"]).strip()
+            owner = agents_db.get_by_backend_session(sid)
+            if owner and backends.normalize(owner.get("backend")) == backend:
+                return AgentLifecycleResult(owner["session"], owner["persona"], owner["voice_id"], backend)
+            if not backends.get(backend).resumable:
+                raise AgentLifecycleError(400, "resume_unsupported")
+            from .launch_paths import recover_user_path
+            cwd = str(recover_user_path(str(data.get("cwd") or "~")))
+            if not any(item.get("id") == sid for item in backends.list_sessions(backend, cwd, limit=100)):
+                raise AgentLifecycleError(404, "Session is no longer available in this directory")
         if data.get("auto_contact") is True and not janitor:
             if data.get("anonymous") or data.get("replace_sid"):
                 raise AgentLifecycleError(400, "conflicting launch options")
@@ -232,6 +244,11 @@ class AgentLifecycleService:
             else ("" if clear_retained_effort else retained_effort))
         from . import config as app_config
         cfg = app_config.load()
+        from .session_models import launch_default, recorded_model
+        if not effective_requested_model and not janitor:
+            resume_id = str(data.get("resume_session_id") or data.get("fork_session_id") or "")
+            effective_requested_model = (recorded_model(backend, resume_id) if resume_id
+                                         else launch_default(backend, cfg))
         requested_mcp_servers: list[str] | None = None
         if "mcp_servers" in data:
             raw_mcp = data.get("mcp_servers")
@@ -327,9 +344,9 @@ class AgentLifecycleService:
         # the existing pins. Effort is validated against the backend's CLI.
         llm_update: dict[str, str] = {}
         if "model" in data:
-            llm_update["model"] = requested_model
-        elif clear_retained_model:
-            llm_update["model"] = ""
+            llm_update["model"] = effective_requested_model
+        elif clear_retained_model or (not retained_model and effective_requested_model):
+            llm_update["model"] = effective_requested_model
         if "effort" in data:
             llm_update["effort"] = requested_effort
         elif clear_retained_effort:

@@ -769,6 +769,7 @@ void AppController::setBaseUrl(const QString& value) {
     m_mediaContentRequests.clear();
     m_promptHistoryRequests.clear();
     m_toolDetailRequests.clear();
+    ++m_pastSessionsGeneration;
     m_pastSessions.clear();
     m_directorySuggestions.clear();
     m_favoritePaths.clear();
@@ -1435,6 +1436,21 @@ bool AppController::backendSupportsFork(const QString& backend) const {
     return providers.value(backend).toMap().value(QStringLiteral("supports_fork")).toBool();
 }
 
+bool AppController::resumeLaunchSession(const QString& backend, const QString& sessionId, bool anonymous) {
+    if (retryCreatedAgent()) return true;
+    if (!connected() || sessionId.isEmpty() || !m_startingContact.isEmpty()) return false;
+    setErrorMessage({});
+    m_startingContact = QStringLiteral("resume");
+    m_startingBackend = backend;
+    emit contactLaunchChanged();
+    m_api.postJson(QStringLiteral("contact-create"), QStringLiteral("/agents"),
+        {{QStringLiteral("backend"), backend}, {QStringLiteral("cwd"), launchDirectory()},
+         {QStringLiteral("resume_session_id"), sessionId}, {QStringLiteral("open_existing"), true},
+         {anonymous ? QStringLiteral("anonymous") : QStringLiteral("auto_contact"), true},
+         {QStringLiteral("synthesize_audio"), false}});
+    return true;
+}
+
 void AppController::loadPastSessions(const QString& workingDirectory, const QString& backend,
                                      bool allProjects) {
     if (workingDirectory.trimmed().isEmpty() || backend.isEmpty()) {
@@ -1449,7 +1465,7 @@ void AppController::loadPastSessions(const QString& workingDirectory, const QStr
     if (allProjects) {
         query.addQueryItem(QStringLiteral("scope"), QStringLiteral("all"));
     }
-    m_api.get(QStringLiteral("past-sessions"), QStringLiteral("/past-sessions"), query);
+    m_api.get(QStringLiteral("past-sessions:%1").arg(++m_pastSessionsGeneration), QStringLiteral("/past-sessions"), query);
 }
 
 void AppController::loadLaunchDirectories(const QString& query) {
@@ -2683,7 +2699,8 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         emit modelCatalogChanged();
         return;
     }
-    if (tag == QStringLiteral("past-sessions")) {
+    if (tag.startsWith(QStringLiteral("past-sessions:"))) {
+        if (tag.section(u':', 1).toULongLong() != m_pastSessionsGeneration) return;
         m_pastSessions = object.value(QStringLiteral("sessions")).toArray().toVariantList();
         m_pastSessionsLoading = false;
         emit pastSessionsChanged();
@@ -3072,6 +3089,9 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
 
 void AppController::handleRequestFailure(const QString& tag, const QString& message,
                                          int statusCode) {
+    if (tag.startsWith(QStringLiteral("past-sessions:")) &&
+        tag.section(u':', 1).toULongLong() != m_pastSessionsGeneration) return;
+
     if (tag.startsWith(QStringLiteral("launch-directories:"))) {
         if (tag.sliced(19).toULongLong() != m_launchDirectoryGeneration) return;
         m_launchDirectoriesLoading = false;
@@ -3289,7 +3309,8 @@ void AppController::handleRequestFailure(const QString& tag, const QString& mess
     } else if (tag.startsWith(QStringLiteral("orchestrator-"))) {
         m_orchestratorLoading = false;
         emit orchestratorChanged();
-    } else if (tag == QStringLiteral("past-sessions")) {
+    } else if (tag.startsWith(QStringLiteral("past-sessions:"))) {
+        if (tag.section(u':', 1).toULongLong() != m_pastSessionsGeneration) return;
         m_pastSessionsLoading = false;
         emit pastSessionsChanged();
     } else if (tag == QStringLiteral("directory-suggestions")) {

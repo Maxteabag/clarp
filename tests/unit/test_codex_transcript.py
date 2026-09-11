@@ -802,7 +802,7 @@ def test_list_sessions_reads_renamed_threads_across_projects(tmp_path):
         conn.execute(
             "INSERT INTO threads VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             ("uuid-a", "/work/one", "Renamed session", "Generated",
-             "Preview one", "First one", 10, 10_000, str(rollouts[0]), 1, 10_000))
+             "Preview one", "First one", 10, 10_000, str(rollouts[0]), 0, 10_000))
         conn.execute(
             "INSERT INTO threads VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             ("uuid-b", "/work/two", None, "Second title",

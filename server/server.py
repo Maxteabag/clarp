@@ -4387,7 +4387,10 @@ class Handler(BaseHTTPRequestHandler):
         agent = {key: row.get(key) for key in (
             "agent_id", "session", "persona", "backend", "cwd", "model", "effort",
             "voice_id", "avatar_symbol", "muted", "heartbeat_enabled", "dreaming_enabled")}
-        agent.update(alive=True, latest_state="idle", last_activity=row.get("created_at", 0),
+        from lib.session_models import agent_model
+        agent["model"] = agent_model(row, agents_db.live_backend_session(row["agent_id"]))
+        state = agents_db.latest_state(row["agent_id"]) or {}
+        agent.update(alive=True, latest_state=state.get("kind") or "idle", last_activity=row.get("created_at", 0),
                      mcp_servers=decode_mcp(row.get("mcp_servers"))[1],
                      avatar_url=versioned_avatar_url("/avatars", row.get("agent_id", ""), row.get("avatar_path") or ""))
         return self._send(200, json.dumps({
