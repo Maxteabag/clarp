@@ -157,6 +157,22 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
                          && window->activeFocusItem()->objectName() == QStringLiteral("quickNewAgentName"))) return;
             press(Qt::Key_Escape);
             break;
+        case 22:
+            if (!require(state("composer"))) return;
+            press(Qt::Key_A, Qt::ControlModifier);
+            break;
+        case 23:
+            if (!require(state("modal") && window->findChild<QObject*>(QStringLiteral("assignAgent"))->property("visible").toBool())) return;
+            press(Qt::Key_Escape);
+            break;
+        case 24:
+            if (!require(state("composer") && window->activeFocusItem()->property("text").toString() == QStringLiteral("ejki "))) return;
+            press(Qt::Key_A, Qt::ControlModifier | Qt::ShiftModifier);
+            break;
+        case 25:
+            if (!require(state("modal") && window->findChild<QObject*>(QStringLiteral("assignAgent"))->property("visible").toBool())) return;
+            press(Qt::Key_Escape);
+            break;
         default:
             if (!require(state("composer") && controller->selectedSession() == second)) return;
             window->setProperty("contextKeyboardVerified", true);
