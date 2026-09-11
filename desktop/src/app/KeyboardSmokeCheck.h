@@ -110,6 +110,9 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             break;
         case 5:
             if (!require(state("composer") && controller->selectedSession() == second)) return;
+            // Offline selection may asynchronously report a connection error.
+            // This step tests navigation; dedicated steps above test dismissal.
+            QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QVariant(QStringLiteral("dismiss-error"))));
             press(Qt::Key_Escape);
             press(Qt::Key_Tab);
             break;
@@ -286,15 +289,14 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             break;
         }
         case 35:
-            controller->audio()->setRecording(true); // State fixture only; no microphone capture.
+            window->findChild<clarp::PreviewVersions*>()->setProperty("restartAllowed", false);
             press(Qt::Key_U, Qt::ControlModifier | Qt::AltModifier);
             break;
         case 36: {
             auto* versions = window->findChild<clarp::PreviewVersions*>();
             if (!require(versions && versions->restartContext().value(QStringLiteral("session")).toString().isEmpty()
-                && state("modal"))) return;
-            controller->audio()->setRecording(false);
-            press(Qt::Key_Escape);
+                && !versions->error().isEmpty() && state("composer"))) return;
+            versions->setProperty("restartAllowed", true);
             break;
         }
         case 37:
