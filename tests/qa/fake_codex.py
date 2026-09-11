@@ -40,6 +40,8 @@ def app_server():
     a threadId mints a new id so one process can own many threads.
     """
     held_locks = {}
+    quota_file = Path(os.environ.get("CLARP_QA_PROVIDER_ROOT", "/nonexistent")) / "quota-mode"
+    quota_mode = quota_file.read_text().strip() if quota_file.exists() else ""
     cancel_by_turn = {}
     current_thread = str(uuid.uuid4())
 
@@ -74,6 +76,17 @@ def app_server():
             **base, "turn": {"id": turn_id, "threadId": thread_id}}})
         text = "QA reply: " + "".join(
             item.get("text", "") for item in params.get("input", []))
+        if quota_mode in ("stale", "blocked", "unknown-blocked", "partial"):
+            if quota_mode == "stale":
+                quota_file.unlink(missing_ok=True)  # only a NEW process recovers
+            emit({"method": "account/rateLimits/updated", "params": {
+                "rateLimits": {"limitId": "premium", "primary": {"usedPercent": 100}}}})
+            if quota_mode == "partial":
+                emit({"method": "item/started", "params": {**base, "item": {
+                    "id": turn_id, "type": "commandExecution", "command": "fixture"}}})
+            emit({"method": "turn/completed", "params": {**base, "turn": {
+                "id": turn_id, "status": "failed", "error": {"message": "You've hit your usage limit."}}}})
+            return
         if "[qa-slow]" in text and stop.wait(3):
             emit({"method": "turn/completed", "params": {
                 **base, "turn": {"id": turn_id, "status": "interrupted"}}})
@@ -100,6 +113,12 @@ def app_server():
         result = {}
         if method == "initialize":
             result = {"serverInfo": {"name": "fake-codex", "version": "0"}}
+        elif method == "account/rateLimits/read":
+            result = {"rateLimitsByLimitId": {
+                "codex": {"limitId": "codex", "primary": {"usedPercent": 2}},
+                **({"premium": {"limitId": "premium", "primary": {"usedPercent": 100}}}
+                   if quota_mode == "blocked" else {}),
+            }}
         elif method == "thread/start":
             thread_id = params.get("threadId") or str(uuid.uuid4())
             current_thread = thread_id
