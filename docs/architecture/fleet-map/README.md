@@ -7,6 +7,7 @@ ideas, a task backlog, or an approval queue.
 ## Current decisions
 
 The morning recap is specified in [0014](0014-morning-recap.md).
+Optional camera following is specified in [0013](0013-follow-activity-camera.md).
 
 | Record | Status | Decision |
 | --- | --- | --- |
