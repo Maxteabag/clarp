@@ -96,6 +96,7 @@ int main(int argc, char* argv[]) {
     const bool launchOnStartup = !versionManager && !launchParser.isSet(QStringLiteral("no-new-agent"))
         && (explicitAgentLaunch || (QSettings().value(QStringLiteral("launch/newAgentOnStartup"), true).toBool()
             && !qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")));
+    application.setProperty("clarpLaunchMode", launchOnStartup);
     if (!versionManager) engine.setInitialProperties({{QStringLiteral("launchOnStartup"), launchOnStartup}});
     if (versionManager) application.setApplicationName(QStringLiteral("ClarpPreviewVersionManager"));
     engine.loadFromModule("Clarp.Desktop", versionManager ? "PreviewVersionWindow" : "Main");
@@ -125,6 +126,7 @@ int main(int argc, char* argv[]) {
         }
     }
     if (rootWindow != nullptr && controller != nullptr && launchOnStartup) {
+        controller->setLaunchMode(true);
         const QString launchModel = launchParser.value(QStringLiteral("model"));
         const QString launchEffort = launchParser.value(QStringLiteral("effort"));
         QTimer::singleShot(0, rootWindow, [rootWindow, launchBackend, launchModel, launchEffort, anonymousMode] {
