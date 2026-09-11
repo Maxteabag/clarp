@@ -9,6 +9,7 @@
 
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QSettings>
 #include <QIcon>
 #include <QFont>
 #include <QImage>
@@ -92,6 +93,10 @@ int main(int argc, char* argv[]) {
         &engine, &QQmlApplicationEngine::objectCreationFailed, &application,
         [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
     const bool versionManager = application.arguments().contains(QStringLiteral("--preview-versions"));
+    const bool launchOnStartup = !versionManager && !launchParser.isSet(QStringLiteral("no-new-agent"))
+        && (explicitAgentLaunch || (QSettings().value(QStringLiteral("launch/newAgentOnStartup"), true).toBool()
+            && !qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")));
+    if (!versionManager) engine.setInitialProperties({{QStringLiteral("launchOnStartup"), launchOnStartup}});
     if (versionManager) application.setApplicationName(QStringLiteral("ClarpPreviewVersionManager"));
     engine.loadFromModule("Clarp.Desktop", versionManager ? "PreviewVersionWindow" : "Main");
 
@@ -119,10 +124,7 @@ int main(int argc, char* argv[]) {
             }
         }
     }
-    if (rootWindow != nullptr && controller != nullptr && !versionManager
-        && !launchParser.isSet(QStringLiteral("no-new-agent"))
-        && (explicitAgentLaunch || (controller->newAgentOnStartup()
-            && !qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")))) {
+    if (rootWindow != nullptr && controller != nullptr && launchOnStartup) {
         const QString launchModel = launchParser.value(QStringLiteral("model"));
         const QString launchEffort = launchParser.value(QStringLiteral("effort"));
         QTimer::singleShot(0, rootWindow, [rootWindow, launchBackend, launchModel, launchEffort, anonymousMode] {
