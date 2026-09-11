@@ -6,6 +6,8 @@ ideas, a task backlog, or an approval queue.
 
 ## Current decisions
 
+Absolute heat coordinates are specified in [0019](0019-world-space-heat.md).
+
 Layered zoom and pixelated heat are specified in [0017](0017-layered-zoom-and-pixel-heat.md).
 The activity feed is specified in [0018](0018-activity-feed.md).
 

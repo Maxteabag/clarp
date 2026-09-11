@@ -18,36 +18,30 @@ export function activityHeat(events,hits,playhead){
  const spots=[...cells.values()].map(c=>({x:c.x/c.weight,y:c.y/c.weight,weight:c.weight}));
  return {spots,located,unlocated,truncated:false};
 }
-// Fixed CSS-pixel bandwidth is a deliberate map-view scale: zooming changes
-// the neighborhood being inspected, while a lone event keeps the same peak.
+// Fixed world-space bandwidth: the camera only changes how the field is viewed.
 export const HEAT_SIGMA=30;
+export const HEAT_PIXEL_SIZE=16;
 export const HEAT_COLOR_MAX=8; // decayed event weight at a kernel center
 export function densityGrid(spots,camera,width,height,pixelRatio=1){
- const cssWidth=width/pixelRatio,cssHeight=height/pixelRatio;
- const cell=Math.max(6,cssWidth/256,cssHeight/256),sigma=HEAT_SIGMA/cell;
- const radius=Math.ceil(3*sigma),pad=radius+1;
- const cols=Math.ceil(cssWidth/cell)+2*pad+1,rows=Math.ceil(cssHeight/cell)+2*pad+1;
- const mass=new Float32Array(cols*rows),horizontal=new Float32Array(mass.length),density=new Float32Array(mass.length);
+ const worldWidth=width/camera.k,worldHeight=height/camera.k;
+ const cell=Math.max(6,worldWidth/256,worldHeight/256);
+ const originX=(Math.floor(-camera.x/camera.k/cell)-1)*cell,originY=(Math.floor(-camera.y/camera.k/cell)-1)*cell;
+ const cols=Math.ceil(worldWidth/cell)+3,rows=Math.ceil(worldHeight/cell)+3,density=new Float32Array(cols*rows);
+ const support=3*HEAT_SIGMA;
+ // Sample the same Gaussian field at world coordinates. Coarse overview grids
+ // affect display resolution only, never kernel width or the color domain.
  for(const s of spots){
-  const gx=(s.x*camera.k+camera.x)/pixelRatio/cell+pad,gy=(s.y*camera.k+camera.y)/pixelRatio/cell+pad;
-  if(![gx,gy,s.weight].every(Number.isFinite)||s.weight<=0||gx<0||gy<0||gx>=cols-1||gy>=rows-1)continue;
-  const x=Math.floor(gx),y=Math.floor(gy),fx=gx-x,fy=gy-y;
-  // Bilinear deposition avoids an abrupt jump when a point crosses a cell.
-  mass[y*cols+x]+=s.weight*(1-fx)*(1-fy);mass[y*cols+x+1]+=s.weight*fx*(1-fy);
-  mass[(y+1)*cols+x]+=s.weight*(1-fx)*fy;mass[(y+1)*cols+x+1]+=s.weight*fx*fy;
+  if(![s.x,s.y,s.weight].every(Number.isFinite)||s.weight<=0)continue;
+  const left=Math.max(0,Math.ceil((s.x-support-originX)/cell)),right=Math.min(cols-1,Math.floor((s.x+support-originX)/cell));
+  const top=Math.max(0,Math.ceil((s.y-support-originY)/cell)),bottom=Math.min(rows-1,Math.floor((s.y+support-originY)/cell));
+  if(left>right||top>bottom)continue;
+  const xs=[];for(let x=left;x<=right;x++)xs.push(Math.exp(-.5*((originX+x*cell-s.x)/HEAT_SIGMA)**2));
+  for(let y=top;y<=bottom;y++){
+   const wy=s.weight*Math.exp(-.5*((originY+y*cell-s.y)/HEAT_SIGMA)**2);
+   for(let x=left;x<=right;x++)density[y*cols+x]+=wy*xs[x-left];
+  }
  }
- const kernel=Float32Array.from({length:radius*2+1},(_,i)=>Math.exp(-.5*((i-radius)/sigma)**2));
- // Separable Gaussian smoothing on scalar weights, before any color mapping.
- // Peak-one kernels give intuitive units: one isolated fresh event peaks at ~1.
- for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
-  let value=0;for(let d=-radius;d<=radius;d++)if(x+d>=0&&x+d<cols)value+=mass[y*cols+x+d]*kernel[d+radius];
-  horizontal[y*cols+x]=value;
- }
- for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
-  let value=0;for(let d=-radius;d<=radius;d++)if(y+d>=0&&y+d<rows)value+=horizontal[(y+d)*cols+x]*kernel[d+radius];
-  density[y*cols+x]=value;
- }
- return {density,cols,rows,cell,pad};
+ return {density,cols,rows,cell,originX,originY,spots};
 }
 export function heatColor(value){
  const t=Math.max(0,Math.min(1,value/HEAT_COLOR_MAX));
@@ -58,19 +52,20 @@ export function heatColor(value){
 const layers=new WeakMap();
 const palette=Uint8ClampedArray.from(Array.from({length:256},(_,i)=>heatColor(i/255*HEAT_COLOR_MAX)).flat());
 export function pixelHeat(grid,camera,width,height,pixelRatio=1){
- const step=2**Math.round(Math.log2(16*pixelRatio/camera.k));
+ const step=HEAT_PIXEL_SIZE;
  const left=Math.floor(-camera.x/camera.k/step),top=Math.floor(-camera.y/camera.k/step);
- const right=Math.ceil((width-camera.x)/camera.k/step),bottom=Math.ceil((height-camera.y)/camera.k/step),blocks=[];
- for(let y=top;y<bottom;y++)for(let x=left;x<right;x++){
-  const gx=((x+.5)*step*camera.k+camera.x)/pixelRatio/grid.cell+grid.pad;
-  const gy=((y+.5)*step*camera.k+camera.y)/pixelRatio/grid.cell+grid.pad;
-  const ix=Math.floor(gx),iy=Math.floor(gy),fx=gx-ix,fy=gy-iy;
-  if(ix<0||iy<0||ix+1>=grid.cols||iy+1>=grid.rows)continue;
-  const d=grid.density,n=iy*grid.cols+ix;
-  const value=d[n]*(1-fx)*(1-fy)+d[n+1]*fx*(1-fy)+d[n+grid.cols]*(1-fx)*fy+d[n+grid.cols+1]*fx*fy;
-  if(value>0)blocks.push({x:x*step,y:y*step,size:step,value});
+ const right=Math.ceil((width-camera.x)/camera.k/step),bottom=Math.ceil((height-camera.y)/camera.k/step),blocks=new Map();
+ // Visit only cells touched by events, not the potentially enormous empty map.
+ for(const s of grid.spots){
+  if(![s.x,s.y,s.weight].every(Number.isFinite)||s.weight<=0)continue;
+  const x0=Math.max(left,Math.ceil((s.x-3*HEAT_SIGMA)/step-.5)),x1=Math.min(right-1,Math.floor((s.x+3*HEAT_SIGMA)/step-.5));
+  const y0=Math.max(top,Math.ceil((s.y-3*HEAT_SIGMA)/step-.5)),y1=Math.min(bottom-1,Math.floor((s.y+3*HEAT_SIGMA)/step-.5));
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+   const value=s.weight*Math.exp(-.5*((((x+.5)*step-s.x)/HEAT_SIGMA)**2+(((y+.5)*step-s.y)/HEAT_SIGMA)**2)),key=x+':'+y;
+   const b=blocks.get(key);if(b)b.value+=value;else blocks.set(key,{x:x*step,y:y*step,size:step,value});
+  }
  }
- return blocks;
+ return [...blocks.values()];
 }
 export function drawHeat(ctx,heat,camera,pixelRatio=1,style='smooth'){
  if(!heat.spots.length)return;
@@ -93,8 +88,8 @@ export function drawHeat(ctx,heat,camera,pixelRatio=1,style='smooth'){
  }
  paint.putImageData(pixels,0,0);
  ctx.save();ctx.globalCompositeOperation='source-over';ctx.imageSmoothingEnabled=true;
- const scale=grid.cell*pixelRatio;
+ const scale=grid.cell*camera.k;
  // Grid nodes live at integer coordinates; image samples live at half pixels.
- ctx.drawImage(layer,-(grid.pad+.5)*scale,-(grid.pad+.5)*scale,grid.cols*scale,grid.rows*scale);
+ ctx.drawImage(layer,(grid.originX-grid.cell/2)*camera.k+camera.x,(grid.originY-grid.cell/2)*camera.k+camera.y,grid.cols*scale,grid.rows*scale);
  ctx.restore();
 }

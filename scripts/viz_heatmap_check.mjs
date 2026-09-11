@@ -10,6 +10,7 @@ try{
   const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   const target=new URL(url);target.searchParams.set('view','flow');await page.goto(target.href);
   await page.waitForFunction(()=>window.fleetWorldSnapshot?.().frames>5);
+  if(await page.locator('#activity-feed').count())await page.locator('#activity-feed').evaluate(e=>e.open=false);
   const snap=()=>page.evaluate(()=>window.fleetWorldSnapshot());
   assert(!(await snap()).heat.enabled);
   await page.locator('#flow-demo').click();
