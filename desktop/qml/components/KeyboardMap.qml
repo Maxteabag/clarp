@@ -17,7 +17,8 @@ QtObject {
     }
     readonly property var states: ({
         root: [],
-        main: [binding("next-attention", ["Ctrl+J"], "Next attention", true, "attention"),
+        main: [binding("update-preview", ["Ctrl+Alt+U"], "Update", false),
+            binding("next-attention", ["Ctrl+J"], "Next attention", true, "attention"),
             binding("switcher", ["Ctrl+K"], "Commands"),
             binding("sidebar", ["Ctrl+B"], "Show/hide sidebar", false),
             binding("shortcut-bar", ["Ctrl+Shift+K"], "Show/hide keybindings", false),

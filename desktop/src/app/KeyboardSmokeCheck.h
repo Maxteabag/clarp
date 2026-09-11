@@ -1,7 +1,10 @@
 #pragma once
 
 #include "app/AppController.h"
+#include "app/PreviewVersions.h"
 #include <QGuiApplication>
+#include <QClipboard>
+#include <QImage>
 #include <QJsonArray>
 #include <QKeyEvent>
 #include <QQuickItem>
@@ -59,6 +62,9 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             // Restore both identities even when selection was persisted as second.
             controller->panes()->setActiveSession(second);
             controller->setPaneDraft(controller->panes()->activePaneId(), second, QString{});
+            for (const auto& attachment : controller->composerAttachments(controller->panes()->activePaneId(), second))
+                controller->removeComposerAttachment(controller->panes()->activePaneId(), second,
+                    attachment.toMap().value(QStringLiteral("id")).toString());
             controller->requestComposerFocus(controller->panes()->activePaneId());
             break;
         }
@@ -252,7 +258,51 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             QMetaObject::invokeMethod(latest, "clicked");
             break;
         }
+        case 32: {
+            if (!require(state("composer"))) return;
+            controller->setSharedFilesystem(true);
+            QImage clipboardImage(4, 3, QImage::Format_ARGB32);
+            clipboardImage.fill(Qt::green);
+            QGuiApplication::clipboard()->setImage(clipboardImage);
+            press(Qt::Key_V, Qt::ControlModifier);
+            break;
+        }
+        case 33: {
+            const auto attachments = controller->composerAttachments(controller->panes()->activePaneId(), second);
+            if (!require(attachments.size() == 1 && state("composer")
+                && window->activeFocusItem()->property("text").toString() == QStringLiteral("ejki "))) return;
+            const auto attachment = attachments.first().toMap();
+            controller->removeComposerAttachment(controller->panes()->activePaneId(), second, attachment.value(QStringLiteral("id")).toString());
+            QFile::remove(attachment.value(QStringLiteral("path")).toString());
+            QGuiApplication::clipboard()->setText(QStringLiteral("paste"));
+            press(Qt::Key_V, Qt::ControlModifier);
+            break;
+        }
+        case 34: {
+            if (!require(window->activeFocusItem()->property("text").toString().contains(QStringLiteral("paste")))) return;
+            controller->setPaneDraft(controller->panes()->activePaneId(), second, QStringLiteral("ejki "));
+            QGuiApplication::clipboard()->clear();
+            controller->setSharedFilesystem(false);
+            break;
+        }
+        case 35:
+            controller->audio()->setRecording(true); // State fixture only; no microphone capture.
+            press(Qt::Key_U, Qt::ControlModifier | Qt::AltModifier);
+            break;
+        case 36: {
+            auto* versions = window->findChild<clarp::PreviewVersions*>();
+            if (!require(versions && versions->restartContext().value(QStringLiteral("session")).toString().isEmpty()
+                && state("modal"))) return;
+            controller->audio()->setRecording(false);
+            press(Qt::Key_Escape);
+            break;
+        }
+        case 37:
+            if (!require(state("composer"))) return;
+            press(Qt::Key_U, Qt::ControlModifier | Qt::AltModifier);
+            break;
         default:
+            if (!require(window->findChild<clarp::PreviewVersions*>()->restartContext().value(QStringLiteral("session")).toString() == second)) return;
             if (!require(visibleItem(QStringLiteral("transcriptList"))->property("atYEnd").toBool())) return;
             if (!require(state("composer") && controller->selectedSession() == second)) return;
             window->setProperty("contextKeyboardVerified", true);

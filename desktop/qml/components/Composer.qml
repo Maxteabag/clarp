@@ -290,12 +290,19 @@ Rectangle {
                     }
 
                     Keys.onShortcutOverride: event => {
+                        if (event.key === Qt.Key_V && event.modifiers === Qt.ControlModifier)
+                            event.accepted = true;
                         if (event.key === Qt.Key_End && event.modifiers === Qt.ControlModifier)
                             event.accepted = true;
                         if (event.key === Qt.Key_A && (event.modifiers & Qt.ControlModifier)
                             && !(event.modifiers & (Qt.AltModifier | Qt.MetaModifier))) event.accepted = true;
                     }
                     Keys.onPressed: event => {
+                        if (event.key === Qt.Key_V && event.modifiers === Qt.ControlModifier) {
+                            if (!root.controller.pasteClipboardImage(root.paneId, root.session)) editor.paste();
+                            event.accepted = true;
+                            return;
+                        }
                         if (event.key === Qt.Key_End && event.modifiers === Qt.ControlModifier) {
                             root.jumpToLatestRequested();
                             event.accepted = true;

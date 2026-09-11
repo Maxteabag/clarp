@@ -1,6 +1,10 @@
 #include "models/ConversationPresentationModel.h"
 #include <QTextDocument>
 #include <QDesktopServices>
+#include <QClipboard>
+#include <QMimeData>
+#include "app/PreviewRelaunch.h"
+#include "app/PreviewVersions.h"
 #include "app/LocalReport.h"
 #include <QStandardItemModel>
 #include "app/AppController.h"
@@ -628,6 +632,10 @@ class NativeCoreTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void clipboardImageBecomesAttachmentWithoutSending();
+    void relaunchPreservesHostSessionAndDraft();
+    void previewRestartCapturesContextAndRejectsBusy();
+    void restoredSessionDoesNotFallBackToAnotherAgent();
     void localReportsRequireOriginAndSafeReadableFiles();
     void leadingDayTracksVisibleHistory();
     void oldActivityGroupsAreLazyAndVisitScoped();
@@ -3231,6 +3239,103 @@ void NativeCoreTest::leadingDayTracksVisibleHistory() {
   add("");add("Today");QCOMPARE(view.leadingDayLabel(),QString("Today")); // pending row without timestamp
   rows.clear();add("12 June");add("Yesterday");add("Today");QCOMPARE(view.leadingDayLabel(),QString("12 June")); // loaded multi-day history
   rows.clear();add("Yesterday");QCOMPARE(view.leadingDayLabel(),QString("Yesterday")); // preserve old-day context
+}
+
+
+void NativeCoreTest::clipboardImageBecomesAttachmentWithoutSending() {
+    QVERIFY(QGuiApplication::platformName() == QStringLiteral("offscreen"));
+    auto* clipboard = QGuiApplication::clipboard();
+    const auto cleanup = qScopeGuard([clipboard] { clipboard->clear(); });
+    AppController controller;
+    const QString session = QStringLiteral("paste-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    controller.restoreDesktopSession(session);
+    controller.setSharedFilesystem(true);
+    const QString pane = controller.panes()->activePaneId();
+    controller.setPaneDraft(pane, session, QStringLiteral("Keep this draft"));
+    clipboard->setText(QStringLiteral("plain paste"));
+    QVERIFY(!controller.pasteClipboardImage(pane, session));
+    QImage image(3, 2, QImage::Format_ARGB32);
+    image.fill(QColor(Qt::red));
+    clipboard->setImage(image);
+    QVERIFY(controller.pasteClipboardImage(pane, session));
+    const auto attachments = controller.composerAttachments(pane, session);
+    QCOMPARE(attachments.size(), 1);
+    const auto attachment = attachments.first().toMap();
+    const QString path = attachment.value(QStringLiteral("path")).toString();
+    QCOMPARE(QImage(path), image);
+    QCOMPARE(attachment.value(QStringLiteral("status")).toString(), QStringLiteral("ready"));
+    QCOMPARE(controller.paneDraft(pane, session), QStringLiteral("Keep this draft"));
+    QVERIFY(!controller.sending());
+    QVERIFY(controller.pasteClipboardImage(QStringLiteral("wrong-pane"), session));
+    QCOMPARE(controller.composerAttachments(pane, session).size(), 1);
+    controller.removeComposerAttachment(pane, session, attachment.value(QStringLiteral("id")).toString());
+    QVERIFY(QFile::remove(path));
+    controller.setPaneDraft(pane, session, {});
+    controller.setSharedFilesystem(false);
+}
+
+void NativeCoreTest::relaunchPreservesHostSessionAndDraft() {
+    QProcessEnvironment env;
+    env.insert(QStringLiteral("UNRELATED"), QStringLiteral("retained"));
+    const auto next = previewRelaunchEnvironment(env, QStringLiteral("http://host.example:7682"), QStringLiteral("agent-exact"));
+    QCOMPARE(next.value(QStringLiteral("CLARP_RESTORE_SESSION")), QStringLiteral("agent-exact"));
+    QCOMPARE(next.value(QStringLiteral("CLARP_BASE_URL")), QStringLiteral("http://host.example:7682"));
+    QCOMPARE(next.value(QStringLiteral("CLARP_RESTORE_DESKTOP")), QStringLiteral("1"));
+    QCOMPARE(next.value(QStringLiteral("UNRELATED")), QStringLiteral("retained"));
+    QCOMPARE(previewRelaunchArguments(QStringLiteral("/helper.py"), 123),
+             QStringList({QStringLiteral("/helper.py"), QStringLiteral("--restart-after"), QStringLiteral("123")}));
+    AppController first;
+    first.restoreDesktopSession(QStringLiteral("restore-exact"));
+    const auto pane = first.panes()->activePaneId();
+    first.setPaneDraft(pane, QStringLiteral("restore-exact"), QStringLiteral("unsent draft"));
+    QSettings().sync();
+    AppController nextController;
+    nextController.restoreDesktopSession(QStringLiteral("restore-exact"));
+    QCOMPARE(nextController.selectedSession(), QStringLiteral("restore-exact"));
+    QCOMPARE(nextController.panes()->activeSession(), QStringLiteral("restore-exact"));
+    QCOMPARE(nextController.paneDraft(nextController.panes()->activePaneId(), QStringLiteral("restore-exact")), QStringLiteral("unsent draft"));
+    first.setPaneDraft(pane, QStringLiteral("restore-exact"), {});
+}
+
+
+void NativeCoreTest::previewRestartCapturesContextAndRejectsBusy() {
+    const auto oldPath = qgetenv("CLARP_SCREENSHOT_PATH");
+    const auto oldScenario = qgetenv("CLARP_SCREENSHOT_SCENARIO");
+    const auto restore = qScopeGuard([&] {
+        oldPath.isNull() ? qunsetenv("CLARP_SCREENSHOT_PATH") : qputenv("CLARP_SCREENSHOT_PATH", oldPath);
+        oldScenario.isNull() ? qunsetenv("CLARP_SCREENSHOT_SCENARIO") : qputenv("CLARP_SCREENSHOT_SCENARIO", oldScenario);
+    });
+    qputenv("CLARP_SCREENSHOT_PATH", "/dev/null");
+    qputenv("CLARP_SCREENSHOT_SCENARIO", "preview-versions");
+    PreviewVersions versions;
+    versions.setProperty("selectedHost", "http://origin.example");
+    versions.setProperty("selectedSession", "exact-selected-session");
+    versions.setProperty("restartAllowed", false);
+    versions.selectVersion("new");
+    QVERIFY(versions.restartContext().value("session").toString().isEmpty());
+    QVERIFY(!versions.error().isEmpty());
+    versions.setProperty("restartAllowed", true);
+    versions.selectVersion("new");
+    QCOMPARE(versions.restartContext().value("session").toString(), QString("exact-selected-session"));
+    QCOMPARE(versions.restartContext().value("host").toString(), QString("http://origin.example"));
+    QVERIFY(versions.restartContext().value("arguments").toStringList().contains("--restart-after"));
+}
+void NativeCoreTest::restoredSessionDoesNotFallBackToAnotherAgent() {
+    FakeClarpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    const auto oldBase = qgetenv("CLARP_BASE_URL"), oldToken = qgetenv("CLARP_TOKEN");
+    const auto restore = qScopeGuard([&] {
+        oldBase.isNull() ? qunsetenv("CLARP_BASE_URL") : qputenv("CLARP_BASE_URL", oldBase);
+        oldToken.isNull() ? qunsetenv("CLARP_TOKEN") : qputenv("CLARP_TOKEN", oldToken);
+    });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN", "fixture-token");
+    AppController controller;
+    controller.restoreDesktopSession("missing-restored-target");
+    QTRY_VERIFY_WITH_TIMEOUT(controller.agents()->rowCount() > 0, 3000);
+    QCOMPARE(controller.selectedSession(), QString("missing-restored-target"));
+    QVERIFY(controller.errorMessage().contains("before updating"));
+    controller.selectSession("rachel");
+    QCOMPARE(controller.selectedSession(), QString("rachel"));
 }
 
 QTEST_MAIN(NativeCoreTest)
