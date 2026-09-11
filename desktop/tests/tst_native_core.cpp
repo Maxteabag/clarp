@@ -1142,6 +1142,10 @@ void NativeCoreTest::fastLaunchOpensWithoutWaitingForFleet() {
     qApp->setProperty("clarpLaunchMode",true);
     AppController controller;
     QTRY_VERIFY(controller.connected());
+    server.sendEvent({{QStringLiteral("type"),QStringLiteral("tts-error")},
+                      {QStringLiteral("message"),QStringLiteral("Other agent speech failed")}});
+    QTest::qWait(50);
+    QVERIFY(controller.errorMessage().isEmpty());
     QCOMPARE(server.requestCount(QStringLiteral("GET"),QStringLiteral("/agents/snapshot")),0);
     QCOMPARE(server.requestCount(QStringLiteral("GET"),QStringLiteral("/agent-conversations")),0);
     const QJsonObject agent{{QStringLiteral("agent_id"),QStringLiteral("new-id")},
