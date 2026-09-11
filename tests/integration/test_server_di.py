@@ -3233,3 +3233,14 @@ def test_anonymous_creation_returns_its_agent_without_a_fleet_query(running_serv
     assert response["agent"]["agent_id"]
     assert response["agent"]["backend"] == "codex"
     assert response["agent"]["alive"] is True
+
+
+def test_launch_directory_lookup_returns_home_without_creating_agents(running_server):
+    base, _ctx, _srv = running_server
+    from lib import agents as agents_db
+    before = len(agents_db.list_agents())
+    status, body = _get(base + '/launch-directories')
+    result = json.loads(body)
+    assert status == 200
+    assert result['matches'][0]['path'] == result['home']
+    assert len(agents_db.list_agents()) == before
