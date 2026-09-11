@@ -6,6 +6,8 @@ ideas, a task backlog, or an approval queue.
 
 ## Current decisions
 
+Fading history and background compositing are specified in [0020](0020-history-and-background-heat.md).
+
 Absolute heat coordinates are specified in [0019](0019-world-space-heat.md).
 
 Layered zoom and pixelated heat are specified in [0017](0017-layered-zoom-and-pixel-heat.md).

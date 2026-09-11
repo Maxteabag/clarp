@@ -1,6 +1,6 @@
 // Small transport/camera shell. All visual semantics live in replaceable source.
 import {SourceSandbox} from '/static/lib/viz-source-sandbox.js';
-import {activityHeat,drawHeat} from '/static/lib/viz-heatmap.js';
+import {activityHeat,drawHeat,composeHeat} from '/static/lib/viz-heatmap.js';
 import {FollowCamera,cameraForBounds,easeCamera} from '/static/lib/viz-follow-camera.js';
 import {AvatarCache} from '/static/lib/viz-avatar-cache.js';
 import {FlowMemory} from '/static/lib/viz-flow-memory.js';
@@ -26,6 +26,7 @@ let recoveryTimer=null,recoveryAttempts=0,lastFrameTimings={};
 const retryButton=document.getElementById('retry-render');
 const fittedViews=new Set();
 const heatButton=document.getElementById('heatmap'),heatLegend=document.getElementById('heat-legend');
+const heatCanvas=document.createElement('canvas'),heatContext=heatCanvas.getContext('2d');
 const heatStyleButton=document.getElementById('heat-style');let heatStyle='smooth';
 try{if(localStorage.getItem('clarp.fleet.heatStyle')==='pixelated')heatStyle='pixelated';}catch{}
 function heatStyleLabel(){heatStyleButton.textContent=heatStyle==='smooth'?'Smooth heat':'Pixelated heat';heatStyleButton.ariaPressed=String(heatStyle==='pixelated');}
@@ -116,14 +117,17 @@ function use(next){
   sandbox?.destroy();program=next;
   let goodFrames=0;
   sandbox=new SourceSandbox(next,(bitmap,result,timings)=>{
-    ctx.drawImage(bitmap,0,0);bitmap.close();meta=result;frames++;
+    meta=result;frames++;
     const drawn=sandbox?.lastFrameInput;
+    let heatLayer=null;
     if(heatEnabled&&drawn&&drawn.width===canvas.width&&drawn.height===canvas.height){
       heatState=activityHeat(sandbox.scene?.events||[],result.heatTargets||result.hits||[],drawn.playhead);
-      drawHeat(ctx,heatState,drawn.camera,drawn.pixelRatio,heatStyle);
-      heatLegend.textContent=heatState.located?'Heat · cool → warm → busy · last 15 min':'Heat · no located activity in the last 15 min';
+      heatCanvas.width=canvas.width;heatCanvas.height=canvas.height;
+      drawHeat(heatContext,heatState,drawn.camera,drawn.pixelRatio,heatStyle);heatLayer=heatCanvas;
+      heatLegend.textContent=heatState.located?'Heat · recent activity + fading history':'Heat · no located activity in the loaded hour';
       if(heatState.unlocated)heatLegend.textContent+=` · ${heatState.unlocated} unlocated`;
     }
+    composeHeat(ctx,bitmap,{heat:heatLayer,view,transparent:!!result.heatmapBackground});bitmap.close();
     if(selected&&!document.getElementById('inspector').hidden)inspectHit(meta.hits?.find(h=>h.id===selected));
     lastFrameTimings=timings;
     if(failure)learning.textContent='Rendering resumed';
@@ -199,7 +203,7 @@ function frame(now){
     const target=cameraForBounds(bounds,{width,top:document.getElementById('hud').getBoundingClientRect().bottom+24,bottom:document.getElementById('bar').getBoundingClientRect().top-40});
     if(target)camera=easeCamera(camera,target,dt,matchMedia('(prefers-reduced-motion: reduce)').matches);
   }
-  if(!recapOpen&&width>0&&height>0&&scene.entities.length)sandbox?.draw({scene,time:now,width:canvas.width,height:canvas.height,pixelRatio,camera:{x:camera.x*pixelRatio,y:camera.y*pixelRatio,k:camera.k*pixelRatio},playhead,interaction:{selected,actionLabels},reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches});
+  if(!recapOpen&&width>0&&height>0&&scene.entities.length)sandbox?.draw({scene,time:now,width:canvas.width,height:canvas.height,pixelRatio,camera:{x:camera.x*pixelRatio,y:camera.y*pixelRatio,k:camera.k*pixelRatio},playhead,interaction:{selected,actionLabels,heatmapBackground:heatEnabled},reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches});
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);init();setInterval(()=>{if(live&&!recapOpen)load();},5000);

@@ -1,5 +1,5 @@
 // Recorded activity density, not progress, importance or successful outcomes.
-export const HEAT_WINDOW=15*60*1000;
+export const HEAT_WINDOW=60*60*1000;
 export function activityHeat(events,hits,playhead){
  const positions=new Map(hits.filter(h=>[h.x,h.y,h.w,h.h].every(Number.isFinite)).map(h=>[h.id,{x:h.x+h.w/2,y:h.y+h.h/2}]));
  const cells=new Map(),seen=new Set();let located=0,unlocated=0;
@@ -10,18 +10,41 @@ export function activityHeat(events,hits,playhead){
   let targets=[...new Set(e.world_targets||[e.world_target])].filter(id=>positions.has(id));
   if(!targets.length&&positions.has(e.workspace_target))targets=[e.workspace_target];
   if(!targets.length){unlocated++;continue;}located++;
-  const weight=Math.exp(-age/(3*60*1000))/targets.length;
+  const fraction=1/targets.length,weight=Math.exp(-age/(3*60*1000))*fraction;
   for(const id of targets){const p=positions.get(id),key=p.x+':'+p.y;let c=cells.get(key);
-   if(!c){c={x:0,y:0,weight:0};cells.set(key,c);}c.x+=p.x*weight;c.y+=p.y*weight;c.weight+=weight;
+   if(!c){c={x:p.x,y:p.y,recentWeight:0,buckets:new Map(),first:e.ts,last:e.ts};cells.set(key,c);}
+   c.recentWeight+=weight;c.first=Math.min(c.first,e.ts);c.last=Math.max(c.last,e.ts);
+   const minute=Math.floor(e.ts/60000),bucket=c.buckets.get(minute)||{credit:0,last:e.ts};
+   bucket.credit+=fraction;bucket.last=Math.max(bucket.last,e.ts);c.buckets.set(minute,bucket);
   }
  }
- const spots=[...cells.values()].map(c=>({x:c.x/c.weight,y:c.y/c.weight,weight:c.weight}));
+ const spots=[...cells.values()].map(c=>{
+  // Activity spread across time earns a modest, slower-decaying memory.
+  // Cap each minute's history credit so a burst of tool spam cannot fake it.
+  const sustained=1-Math.exp(-(c.last-c.first)/180000);
+  const historyWeight=.35*sustained*[...c.buckets.values()].reduce((n,b)=>n+Math.min(1,b.credit)*Math.exp(-(playhead-b.last)/900000),0);
+  return {x:c.x,y:c.y,recentWeight:c.recentWeight,historyWeight,weight:c.recentWeight+historyWeight};
+ });
  return {spots,located,unlocated,truncated:false};
 }
 // Fixed world-space bandwidth: the camera only changes how the field is viewed.
 export const HEAT_SIGMA=300;
 export const HEAT_PIXEL_SIZE=160;
 export const HEAT_COLOR_MAX=8; // decayed event weight at a kernel center
+export function composeHeat(ctx,foreground,{heat=null,view='flow',transparent=false}={}){
+ ctx.save();ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+ ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+ if(transparent){
+  const width=ctx.canvas.width,height=ctx.canvas.height;
+  ctx.fillStyle=view==='flow'?'#091c24':view==='world'?'#0a1b25':'#101d25';ctx.fillRect(0,0,width,height);
+  if(view==='flow'){const glow=ctx.createRadialGradient(width*.4,height*.5,10,width*.4,height*.5,width*.7);glow.addColorStop(0,'#19484455');glow.addColorStop(1,'#091c2400');ctx.fillStyle=glow;ctx.fillRect(0,0,width,height);}
+  if(heat)ctx.drawImage(heat,0,0);
+ }
+ ctx.drawImage(foreground,0,0);
+ // Only a faint trace reaches opaque objects; the main field sits beneath them.
+ if(heat){ctx.globalAlpha=.06;ctx.drawImage(heat,0,0);}
+ ctx.restore();
+}
 export function densityGrid(spots,camera,width,height,pixelRatio=1){
  const worldWidth=width/camera.k,worldHeight=height/camera.k;
  const cell=Math.max(6,worldWidth/256,worldHeight/256);
