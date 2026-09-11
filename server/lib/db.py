@@ -57,7 +57,7 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 80
+_SCHEMA_VERSION = 81
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1505,6 +1505,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v79(con)
             if version < 80:
                 _migrate_to_v80(con)
+            if version < 81:
+                _migrate_to_v81(con)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1773,6 +1775,22 @@ def _migrate_to_v65(con: sqlite3.Connection) -> None:
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_trace ON messages(trace_id)"
         " WHERE trace_id IS NOT NULL")
+
+
+_PAIR_PROJECTION_INDEX = """CREATE INDEX IF NOT EXISTS idx_messages_pair_projection
+    ON messages(agent_id, sender_agent_id, timestamp, seq)
+    WHERE COALESCE(origin, 'user') = 'agent'
+      AND COALESCE(sender_agent_id, '') != ''
+      AND sender_agent_id != agent_id
+      AND COALESCE(text, '') != ''
+      AND COALESCE(tool_name, '') = ''
+      AND role IN ('user', 'assistant')"""
+_SCHEMA_SQL += _PAIR_PROJECTION_INDEX + ";"
+
+
+def _migrate_to_v81(con: sqlite3.Connection) -> None:
+    """Index only pair messages so sidebar refreshes skip private history."""
+    con.execute(_PAIR_PROJECTION_INDEX)
 
 
 def _migrate_to_v79(con: sqlite3.Connection) -> None:
