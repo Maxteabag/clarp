@@ -452,3 +452,9 @@ def test_auto_contact_selects_compatible_unoccupied_contact(tmp_path, monkeypatc
     with pytest.raises(AgentLifecycleError) as error:
         service.create({"auto_contact": True, "backend": "codex", "cwd": str(tmp_path), "synthesize_audio": False})
     assert error.value.code == "contact_pool_empty"
+
+
+def test_anonymous_launch_never_synthesizes_an_announcement(tmp_path):
+    ctx = _ctx(tmp_path)
+    AgentLifecycleService(ctx).create({"anonymous": True, "backend": "codex", "cwd": str(tmp_path)})
+    assert ctx.announcements == []

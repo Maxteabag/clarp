@@ -4373,8 +4373,18 @@ class Handler(BaseHTTPRequestHandler):
                 f"status={e.status} code={e.code} :: {e.message}")
             return self._send(e.status, json.dumps(e.response()).encode(),
                               "application/json")
+        from lib import agents as agents_db
+        from lib.mcp_selection import decode as decode_mcp
+        from lib.avatar_urls import versioned_avatar_url
+        row = agents_db.get_by_session(result.session) or {}
+        agent = {key: row.get(key) for key in (
+            "agent_id", "session", "persona", "backend", "cwd", "model", "effort",
+            "voice_id", "avatar_symbol", "muted", "heartbeat_enabled", "dreaming_enabled")}
+        agent.update(alive=True, latest_state="idle", last_activity=row.get("created_at", 0),
+                     mcp_servers=decode_mcp(row.get("mcp_servers"))[1],
+                     avatar_url=versioned_avatar_url("/avatars", row.get("agent_id", ""), row.get("avatar_path") or ""))
         return self._send(200, json.dumps({
-            "ok": True, "session": result.session, "name": result.persona,
+            "ok": True, "session": result.session, "name": result.persona, "agent": agent,
         }).encode(), "application/json")
 
     def _handle_create_persona(self):
