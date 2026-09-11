@@ -17,7 +17,7 @@ it('pixelated display samples the same density and anchors cells to world coordi
  expect(first.size).toBe(second.size);expect(Math.abs(first.value-second.value)).toBeLessThan(.05);
  expect(ga.density).toEqual(densityGrid(spots,a,300,240).density);
 });
-const at=(g,x,y)=>g.density[Math.round(y/g.cell+g.pad)*g.cols+Math.round(x/g.cell+g.pad)];
+const at=(g,x,y)=>g.density[Math.round((y-g.originY)/g.cell)*g.cols+Math.round((x-g.originX)/g.cell)];
 it('matches the Gaussian profile and adds overlapping density before coloring',()=>{
  const a=grid([{x:120,y:120,weight:1}]),b=grid([{x:120,y:120,weight:2}]);
  expect(at(a,120,120)).toBeCloseTo(1,5);
@@ -36,9 +36,20 @@ it('uses the same density and color domain across pixel ratios and pans',()=>{
  const retina=densityGrid(points,{x:0,y:0,k:2},600,480,2);
  expect(retina.density).toEqual(a.density);
  const panned=densityGrid(points,{x:24,y:0,k:1},300,240);
- expect(at(panned,144,120)).toBeCloseTo(at(a,120,120),5);
+ expect(at(panned,120,120)).toBeCloseTo(at(a,120,120),5);
  const zoomed=densityGrid(points,{x:0,y:0,k:2},600,480);
- expect(at(zoomed,240,240)).toBeCloseTo(at(a,120,120),5);
+ expect(at(zoomed,120,120)).toBeCloseTo(at(a,120,120),5);
+});
+it('keeps overlapping heat, contour width and pixel blocks absolute across zoom',()=>{
+ const spots=[{x:120,y:120,weight:2},{x:180,y:120,weight:3}];
+ let reference;
+ for(const k of [.5,1,2]){
+  const camera={x:0,y:0,k},g=densityGrid(spots,camera,600,400);
+  const values=[120,150,180,210].map(x=>at(g,x,120));
+  const block=pixelHeat(g,camera,600,400).find(b=>b.x===112&&b.y===112);
+  if(reference){values.forEach((v,i)=>expect(v).toBeCloseTo(reference.values[i],5));expect(block).toEqual(reference.block);}
+  else reference={values,block};
+ }
 });
 it('keeps contributions at viewport edges and retains more than 128 locations',()=>{
  const edge=grid([{x:-6,y:120,weight:1}]);expect(at(edge,0,120)).toBeCloseTo(Math.exp(-.5*(6/HEAT_SIGMA)**2),5);
