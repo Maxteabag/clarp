@@ -144,6 +144,8 @@ class ContextHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, addr, handler_cls, ctx: ServerContext):
         self.ctx = ctx
+        from lib.agent_conversations import PairConversationListCache
+        self.pair_conversations = PairConversationListCache()
         self._close_callbacks = []
         self.local_tls = False
         self.local_transport = None
@@ -1385,9 +1387,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_agent_conversations(self):
         """Pair conversations between agents, grouped by stable agent IDs."""
-        from lib import agent_conversations
-        body = json.dumps({"conversations": agent_conversations.list_conversations()}).encode()
-        self._send(200, body, "application/json")
+        self._send(200, self.server.pair_conversations.get_payload(), "application/json")
 
     def _handle_viz_events(self):
         """Normalized fleet activity for the map, over a time window."""
