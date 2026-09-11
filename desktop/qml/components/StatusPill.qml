@@ -31,11 +31,11 @@ Rectangle {
             visible: root.showIndicator
             width: visible ? 5 : 0
             height: 5
-            radius: 2.5
+            radius: 0
             color: root.tone
         }
 
-        Text {
+        TuiText {
             id: labelText
             anchors.verticalCenter: parent.verticalCenter
             text: root.label.toUpperCase()

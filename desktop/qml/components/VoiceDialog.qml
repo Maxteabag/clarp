@@ -22,7 +22,7 @@ Rectangle {
         width: Math.min(560, parent.width - 48)
         height: Math.min(680, parent.height - 48)
         anchors.centerIn: parent
-        radius: 20
+        radius: 0
         color: "#20212e"
         border.color: "#41445a"
 
@@ -33,20 +33,20 @@ Rectangle {
 
             RowLayout {
                 Layout.fillWidth: true
-                Text {
+                TuiText {
                     Layout.fillWidth: true
-                    text: root.agentName + "’s voice"
+                    text: (root.agentName || "Agent") + "’s voice"
                     color: "#c0caf5"
-                    font.pixelSize: 21
+                    font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
-                ToolButton {
+                TuiToolButton {
                     text: "×"
                     onClicked: root.closeRequested()
                 }
             }
 
-            Text {
+            TuiText {
                 visible: text.length > 0
                 Layout.fillWidth: true
                 text: root.controller.voiceBio
@@ -55,7 +55,7 @@ Rectangle {
                 font.pixelSize: 12
             }
 
-            BusyIndicator {
+            TuiBusyIndicator {
                 Layout.alignment: Qt.AlignHCenter
                 visible: root.controller.voicesLoading
                 running: visible
@@ -78,7 +78,7 @@ Rectangle {
 
                     width: ListView.view.width
                     implicitHeight: 54
-                    radius: 11
+                    radius: 0
                     color: current ? "#30263a" : "#201d25"
                     border.color: current ? "#704f82" : "#312c38"
 
@@ -91,24 +91,24 @@ Rectangle {
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 1
-                            Text {
+                            TuiText {
                                 text: voiceRow.label
                                 color: "#e8e1e9"
                                 font.pixelSize: 13
                                 font.weight: Font.Medium
                             }
-                            Text {
+                            TuiText {
                                 text: voiceRow.current ? "Current" : voiceRow.takenBy.length > 0 ? "Used by " + voiceRow.takenBy : "Available"
                                 color: voiceRow.takenBy.length > 0 ? "#a77c7d" : "#77717f"
                                 font.pixelSize: 10
                             }
                         }
 
-                        Button {
+                        TuiButton {
                             text: "Preview"
                             onClicked: root.controller.previewVoice(root.session, root.agentName, voiceRow.voiceId)
                         }
-                        Button {
+                        TuiButton {
                             text: "Use"
                             visible: !voiceRow.current && voiceRow.takenBy.length === 0
                             onClicked: root.controller.chooseVoice(root.session, voiceRow.voiceId)

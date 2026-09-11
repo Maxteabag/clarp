@@ -82,7 +82,7 @@ Rectangle {
                     showRuntime: root.session.length > 0 && !root.pairRoom
                 }
 
-                ToolButton {
+                TuiToolButton {
                     id: paneMenuButton
                     visible: root.active && root.session.length > 0 && !root.pairRoom
                         && (headerHover.hovered || paneMenu.visible)
@@ -153,7 +153,7 @@ Rectangle {
                 anchors.leftMargin: 16
                 anchors.rightMargin: 8
 
-                Text {
+                TuiText {
                     Layout.fillWidth: true
                     text: root.controller.errorMessage || root.conversationModel.error
                     color: "#c9959e"
@@ -161,13 +161,13 @@ Rectangle {
                     font.pixelSize: 11
                     elide: Text.ElideRight
                 }
-                Button {
+                TuiButton {
                     visible: root.conversationModel.error.length > 0
                     text: "Retry"
                     implicitHeight: 26
                     onClicked: root.controller.refreshSession(root.session)
                 }
-                ToolButton {
+                TuiToolButton {
                     text: "Dismiss"
                     onClicked: {
                         root.controller.clearError();
@@ -205,7 +205,7 @@ Rectangle {
                     height: 1
                     color: "#303342"
                 }
-                Text {
+                TuiText {
                     id: dateLabel
                     anchors.centerIn: parent
                     text: parent.section
@@ -229,7 +229,7 @@ Rectangle {
                 width: transcript.width
                 height: root.conversationModel.hasMore ? 32 : 4
 
-                Button {
+                TuiButton {
                     visible: root.conversationModel.hasMore
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: root.conversationModel.loading ? "Loading…" : "Load earlier messages"
@@ -278,7 +278,7 @@ Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: root.working
                 }
-                BusyIndicator {
+                TuiBusyIndicator {
                     anchors.centerIn: parent
                     running: root.conversationModel.loading && !root.working
                     visible: running
@@ -298,7 +298,7 @@ Rectangle {
                 }
             }
 
-            Label {
+            TuiLabel {
                 anchors.centerIn: parent
                 visible: root.session.length === 0 && transcript.count === 0 && !root.conversationModel.loading
                 text: "Choose an agent · Ctrl+K"
@@ -325,7 +325,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 44 : 0
             color: "#171822"
-            Text {
+            TuiText {
                 anchors.centerIn: parent
                 width: parent.width - 32
                 horizontalAlignment: Text.AlignHCenter
@@ -354,7 +354,7 @@ Rectangle {
         }
     }
 
-    ToolButton {
+    TuiToolButton {
         visible: !transcript.followLatest
             && (transcript.newMessagesBelow || transcript.distanceFromBottom >= 180)
         anchors.right: parent.right

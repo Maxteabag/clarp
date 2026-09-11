@@ -327,19 +327,19 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.leftMargin: 14
             Layout.rightMargin: 14
-            Label {
+            TuiLabel {
                 text: previewVersions.error || (root.previewUpdateLabel.length > 0 ? "New update available" : "Preview pinned · automatic updates paused")
                 color: previewVersions.error.length > 0 ? "#e79aa4" : "#aeb6d8"
                 Layout.fillWidth: true
                 elide: Text.ElideRight
             }
-            Button {
+            TuiButton {
                 visible: root.previewUpdateLabel.length > 0
                 text: "Update " + root.previewUpdateLabel
                 enabled: root.previewCanRestart && !previewVersions.busy
                 onClicked: previewVersions.selectVersion(String(previewVersions.catalog.current))
             }
-            Button { text: "Versions…"; onClicked: previewVersionPanel.visible = true }
+            TuiButton { text: "Versions…"; onClicked: previewVersionPanel.visible = true }
         }
 
         SplitView {

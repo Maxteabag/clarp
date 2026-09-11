@@ -8,6 +8,7 @@
 
 #include <QApplication>
 #include <QIcon>
+#include <QFont>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -43,6 +44,10 @@ int main(int argc, char* argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QApplication application(argc, argv);
+    QFont uiFont = application.font();
+    uiFont.setFamily(QStringLiteral("JetBrains Mono"));
+    uiFont.setStyleHint(QFont::Monospace);
+    QApplication::setFont(uiFont);
     application.styleHints()->setColorScheme(Qt::ColorScheme::Dark);
     QApplication::setPalette(clarp::desktopPalette(application.palette()));
     application.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/Clarp/Desktop/resources/clarp.svg")));
@@ -220,6 +225,12 @@ int main(int argc, char* argv[]) {
                 return;
             }
             if (QObject* view = rootWindow->findChild<QObject*>(screenshotView)) {
+                if (screenshotView == QStringLiteral("settingsPanel"))
+                    rootWindow->setProperty("selectedSurface", QStringLiteral("settings"));
+                else if (screenshotView == QStringLiteral("teamsPanel"))
+                    rootWindow->setProperty("selectedSurface", QStringLiteral("teams"));
+                else if (screenshotView == QStringLiteral("updatesPanel"))
+                    rootWindow->setProperty("selectedSurface", QStringLiteral("updates"));
                 // The rename dialog is normally opened with the chat it targets,
                 // so a bare visible=true would capture an empty form.
                 if (controller != nullptr && screenshotView == QStringLiteral("renameAgent")) {

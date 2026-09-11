@@ -92,7 +92,7 @@ Rectangle {
         width: Math.min(620, parent.width - 48)
         height: Math.min(760, parent.height - 48)
         anchors.centerIn: parent
-        radius: 20
+        radius: 0
         color: "#20212e"
         border.color: "#41445a"
 
@@ -112,29 +112,29 @@ Rectangle {
                     width: formScroll.availableWidth
                     spacing: 12
 
-                Text {
+                TuiText {
                     text: root.replaceSession.length > 0 ? "Relaunch agent" : "Start an agent"
                     color: "#c0caf5"
-                    font.pixelSize: 21
+                    font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
 
-                Label {
+                TuiLabel {
                     text: "Name"
                     color: "#8d93b0"
                 }
-                TextField {
+                TuiTextField {
                     id: nameField
                     Layout.fillWidth: true
                     placeholderText: "Rachel"
                     selectByMouse: true
                 }
 
-                Label {
+                TuiLabel {
                     text: "Workspace"
                     color: "#8d93b0"
                 }
-                TextField {
+                TuiTextField {
                     id: workspaceField
                     Layout.fillWidth: true
                     placeholderText: "~/Projects/example"
@@ -151,7 +151,7 @@ Rectangle {
                     clip: true
                     model: root.controller.directorySuggestions
 
-                    delegate: Button {
+                    delegate: TuiButton {
                         required property var modelData
                         text: root.pathLabel(modelData)
                         ToolTip.visible: hovered
@@ -169,7 +169,7 @@ Rectangle {
                     clip: true
                     model: root.controller.favoritePaths
 
-                    delegate: Button {
+                    delegate: TuiButton {
                         id: favoriteButton
                         required property var modelData
                         readonly property string favoritePath: String(modelData.path || "")
@@ -186,7 +186,7 @@ Rectangle {
 
                     ColumnLayout {
                         Layout.fillWidth: true
-                        Label {
+                        TuiLabel {
                             text: "Backend"
                             color: "#8d93b0"
                         }
@@ -201,7 +201,7 @@ Rectangle {
                     }
                     ColumnLayout {
                         Layout.fillWidth: true
-                        Label {
+                        TuiLabel {
                             text: "Effort"
                             color: "#8d93b0"
                         }
@@ -215,7 +215,7 @@ Rectangle {
                     }
                 }
 
-                Label {
+                TuiLabel {
                     text: "Model"
                     color: "#8d93b0"
                 }
@@ -232,7 +232,7 @@ Rectangle {
                         && root.controller.availableMcpServers.length > 0
                     Layout.fillWidth: true
                     spacing: 4
-                    Label {
+                    TuiLabel {
                         text: "MCP servers"
                         color: "#8d93b0"
                     }
@@ -241,7 +241,7 @@ Rectangle {
                         spacing: 6
                         Repeater {
                             model: root.controller.availableMcpServers
-                            delegate: CheckBox {
+                            delegate: TuiCheckBox {
                                 id: mcpServer
                                 required property string modelData
                                 text: modelData
@@ -260,26 +260,26 @@ Rectangle {
                     }
                 }
 
-                Label {
+                TuiLabel {
                     text: "Conversation"
                     color: "#8d93b0"
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Button {
+                    TuiButton {
                         text: "Fresh"
                         checked: root.launchMode === "fresh"
                         checkable: true
                         onClicked: root.setLaunchMode("fresh")
                     }
-                    Button {
+                    TuiButton {
                         visible: root.controller.backendSupportsResume(String(backendField.currentValue))
                         text: "Resume"
                         checked: root.launchMode === "resume"
                         checkable: true
                         onClicked: root.setLaunchMode("resume")
                     }
-                    Button {
+                    TuiButton {
                         visible: root.controller.backendSupportsFork(String(backendField.currentValue))
                         text: "Fork"
                         checked: root.launchMode === "fork"
@@ -309,14 +309,14 @@ Rectangle {
                         onClicked: root.pastSessionId = String(pastRow.modelData.id)
                         contentItem: Column {
                             spacing: 1
-                            Text {
+                            TuiText {
                                 width: parent.width
                                 text: String(pastRow.modelData.title || pastRow.modelData.preview || pastRow.modelData.id)
                                 color: "#ddd5df"
                                 elide: Text.ElideRight
                                 font.pixelSize: 11
                             }
-                            Text {
+                            TuiText {
                                 width: parent.width
                                 text: String(pastRow.modelData.cwd || "")
                                 color: "#746d7a"
@@ -326,7 +326,7 @@ Rectangle {
                         }
                     }
 
-                    BusyIndicator {
+                    TuiBusyIndicator {
                         anchors.centerIn: parent
                         visible: root.controller.pastSessionsLoading
                         running: visible
@@ -347,11 +347,11 @@ Rectangle {
                 Item {
                     Layout.fillWidth: true
                 }
-                Button {
+                TuiButton {
                     text: "Cancel"
                     onClicked: root.closeRequested()
                 }
-                Button {
+                TuiButton {
                     text: root.replaceSession.length > 0 ? "Relaunch" : "Start"
                     enabled: nameField.text.trim().length > 0 && workspaceField.text.trim().length > 0 && (root.launchMode === "fresh" || root.pastSessionId.length > 0)
                     onClicked: root.controller.createAgent(
