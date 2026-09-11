@@ -1,5 +1,6 @@
 // Small transport/camera shell. All visual semantics live in replaceable source.
 import {SourceSandbox} from '/static/lib/viz-source-sandbox.js';
+import {activityHeat,drawHeat} from '/static/lib/viz-heatmap.js';
 import {FollowCamera,cameraForBounds,easeCamera} from '/static/lib/viz-follow-camera.js';
 import {AvatarCache} from '/static/lib/viz-avatar-cache.js';
 import {FlowMemory} from '/static/lib/viz-flow-memory.js';
@@ -24,6 +25,12 @@ let programHistory=[];
 let recoveryTimer=null,recoveryAttempts=0,lastFrameTimings={};
 const retryButton=document.getElementById('retry-render');
 const fittedViews=new Set();
+const heatButton=document.getElementById('heatmap'),heatLegend=document.getElementById('heat-legend');
+let heatEnabled=false,heatState={spots:[],located:0,unlocated:0};
+try{heatEnabled=localStorage.getItem('clarp.fleet.heatmap')==='true';}catch{}
+function heatLabel(){heatButton.ariaPressed=String(heatEnabled);heatLegend.hidden=!heatEnabled;}
+heatButton.onclick=()=>{heatEnabled=!heatEnabled;heatLabel();try{localStorage.setItem('clarp.fleet.heatmap',String(heatEnabled));}catch{}};
+heatLabel();
 const follow=new FollowCamera(),followButton=document.getElementById('follow-activity');
 let followPaused=false;
 try{follow.enabled=localStorage.getItem('clarp.fleet.follow')==='true';}catch{}
@@ -105,6 +112,14 @@ function use(next){
   let goodFrames=0;
   sandbox=new SourceSandbox(next,(bitmap,result,timings)=>{
     ctx.drawImage(bitmap,0,0);bitmap.close();meta=result;frames++;
+    const drawn=sandbox?.lastFrameInput;
+    if(heatEnabled&&drawn&&drawn.width===canvas.width&&drawn.height===canvas.height){
+      heatState=activityHeat(sandbox.scene?.events||[],result.hits||[],drawn.playhead);
+      drawHeat(ctx,heatState,drawn.camera,drawn.pixelRatio);
+      heatLegend.textContent=heatState.located?'Heat · cool → warm → busy · last 15 min':'Heat · no located activity in the last 15 min';
+      if(heatState.unlocated)heatLegend.textContent+=` · ${heatState.unlocated} unlocated`;
+      if(heatState.truncated)heatLegend.textContent+=' · busiest 128 areas';
+    }
     if(selected&&!document.getElementById('inspector').hidden)inspectHit(meta.hits?.find(h=>h.id===selected));
     lastFrameTimings=timings;
     if(failure)learning.textContent='Rendering resumed';
@@ -253,4 +268,4 @@ document.getElementById('redesign').onclick=async()=>{
  const r=await fetch('/viz/supersede',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({world:true,revision,entity_id:selected,reason:'Improve only this selected detail where needed. Keep the Lantern Works concepts, unaffected interactions, layout conventions and visual language. Prefer a compatible expansion or targeted repair; this is not a request for a redesign.'})});
  document.getElementById('design-result').textContent=r.ok?'Astra is improving this detail…':'Could not start development';
 };
-window.fleetWorldSnapshot=()=>({frames,revision,view,demoEnabled,actionLabels,live,playing,playhead,follow:{enabled:follow.enabled,paused:followPaused,phase:follow.phase},timeline:{since:tmin,until:tmax},camera:{...camera},failure,program:program?.title,frameTimings:lastFrameTimings,meta,scene,previews:Object.keys(currentImages())});
+window.fleetWorldSnapshot=()=>({frames,revision,view,demoEnabled,actionLabels,live,playing,playhead,heat:{enabled:heatEnabled,...heatState},follow:{enabled:follow.enabled,paused:followPaused,phase:follow.phase},timeline:{since:tmin,until:tmax},camera:{...camera},failure,program:program?.title,frameTimings:lastFrameTimings,meta,scene,previews:Object.keys(currentImages())});

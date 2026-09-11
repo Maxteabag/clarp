@@ -6,6 +6,8 @@ ideas, a task backlog, or an approval queue.
 
 ## Current decisions
 
+The optional activity heatmap is specified in [0015](0015-activity-heatmap.md).
+
 The morning recap is specified in [0014](0014-morning-recap.md).
 Optional camera following is specified in [0013](0013-follow-activity-camera.md).
 
