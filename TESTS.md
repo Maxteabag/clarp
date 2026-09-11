@@ -7,6 +7,7 @@
 | Python unit + integration (1,500 tests) | `make py` | in-process, every core, 60 s per-test timeout | ~30 s |
 | JavaScript unit (250 tests) | `make js` | vitest, in-process | ~15 s |
 | Container install, restart, backup | `make docker-test` | throwaway Docker node | minutes |
+| Codex writer-lock + AGY timeout (no auth) | `make isolated-codex` | `--network=none` fake app-server | ~30 s |
 | Browser suite (Playwright) | `make e2e` | Chromium on the host against a throwaway Docker node | minutes |
 
 The in-process suites never touch the host: each test owns a temp database,
