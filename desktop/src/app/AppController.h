@@ -66,6 +66,7 @@ class AppController : public QObject {
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool connecting READ connecting NOTIFY connectingChanged)
     Q_PROPERTY(bool sending READ sending NOTIFY sendingChanged)
+    Q_PROPERTY(bool uploading READ uploading NOTIFY composerRevisionChanged)
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
     Q_PROPERTY(bool pauseMobilePush READ pauseMobilePush WRITE setPauseMobilePush NOTIFY pauseMobilePushChanged)
     Q_PROPERTY(bool showWhenReady READ showWhenReady WRITE setShowWhenReady NOTIFY showWhenReadyChanged)
@@ -156,7 +157,8 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] QStringList markdownDisplayBlocks(const QString& markdown) const;
     // Returns false when the link was refused, so the view can say so instead
     // of silently doing nothing.
-    Q_INVOKABLE bool openExternalLink(const QString& link);
+    Q_INVOKABLE bool openExternalLink(const QString& link, const QString& originatingHost = {});
+    Q_INVOKABLE bool openLocalReport(const QString& link, const QString& originatingHost);
     Q_INVOKABLE void copyToClipboard(const QString& text) const;
     Q_INVOKABLE [[nodiscard]] QString linkifiedOutput(const QString& text) const;
     Q_INVOKABLE [[nodiscard]] bool canLinkifyOutput(const QString& text) const;
@@ -177,6 +179,8 @@ class AppController : public QObject {
     [[nodiscard]] bool connected() const;
     [[nodiscard]] bool connecting() const;
     [[nodiscard]] bool sending() const;
+    [[nodiscard]] bool uploading() const { return !m_pendingUploads.isEmpty(); }
+    void restoreDesktopSession(const QString& session);
     [[nodiscard]] bool muted() const;
     [[nodiscard]] bool pauseMobilePush() const { return m_pauseMobilePush; }
     void setPauseMobilePush(bool value);
@@ -250,6 +254,7 @@ class AppController : public QObject {
     Q_INVOKABLE void sendMessageTo(const QString& session, const QString& text,
                                    bool queueIfBusy = false);
     Q_INVOKABLE void retryFailedMessage(const QString& session, const QString& messageId);
+    Q_INVOKABLE void retryLatestFailedMessage();
     Q_INVOKABLE void stopAgent();
     Q_INVOKABLE void stopSession(const QString& session);
     Q_INVOKABLE void toggleRecordingForSession(const QString& session);
@@ -334,6 +339,7 @@ class AppController : public QObject {
                                                                const QString& session) const;
     Q_INVOKABLE [[nodiscard]] bool composerCanSend(const QString& paneId,
                                                    const QString& session) const;
+    Q_INVOKABLE bool pasteClipboardImage(const QString& paneId, const QString& session);
     Q_INVOKABLE void attachLocalFile(const QString& paneId, const QString& session,
                                      const QUrl& fileUrl);
     Q_INVOKABLE void removeComposerAttachment(const QString& paneId, const QString& session,
@@ -447,6 +453,7 @@ class AppController : public QObject {
     void setConnecting(bool connecting);
     void setConnectionState(const QString& state);
     void setErrorMessage(const QString& message);
+    bool openBrowserUrl(const QUrl& url);
     void handleJson(const QString& tag, const QJsonObject& object);
     void handleBytes(const QString& tag, const QByteArray& bytes, const QByteArray& contentType);
     void handleRequestFailure(const QString& tag, const QString& message, int statusCode);
@@ -480,10 +487,12 @@ class AppController : public QObject {
     QString m_baseUrl;
     QString m_bearerToken;
     QString m_selectedSession;
+    QString m_restoredSession;
     QString m_pendingCreatedSession;
     int m_createdSnapshotAttempts = 0;
     quint64 m_snapshotGeneration = 0;
     bool m_launchMode = false;
+    bool m_waitingForSessionChoice = false;
     QString m_launchSession;
     bool m_snapshotInFlight = false;
     bool m_snapshotDirty = false;

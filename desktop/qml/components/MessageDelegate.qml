@@ -6,6 +6,8 @@ import QtQuick.Layouts
 
 Item {
     id: root
+    property string linkOriginHost: ""
+    Component.onCompleted: linkOriginHost = controller && controller.baseUrl ? String(controller.baseUrl) : ""
 
     required property var controller
     required property string session
@@ -273,7 +275,7 @@ Item {
                             font.pixelSize: 15
                             // Routed through the controller so a non-web scheme in
                             // model output cannot reach the desktop handler.
-                            onLinkActivated: link => root.controller.openExternalLink(link)
+                            onLinkActivated: link => root.controller.openExternalLink(link, root.linkOriginHost)
 
                             // Without this the text just looks blue; the I-beam
                             // gives no hint that the URL can be clicked.
@@ -292,6 +294,7 @@ Item {
                                     if (link.length === 0)
                                         return;
                                     linkMenu.link = link;
+                                    linkMenu.originHost = root.linkOriginHost;
                                     linkMenu.x = eventPoint.position.x;
                                     linkMenu.y = eventPoint.position.y;
                                     linkMenu.open();
@@ -302,10 +305,11 @@ Item {
                                 id: linkMenu
                                 objectName: "messageLinkMenu"
                                 property string link: ""
+                                property string originHost: ""
                                 MenuItem {
                                     objectName: "messageLinkOpen"
                                     text: qsTr("Open link")
-                                    onTriggered: root.controller.openExternalLink(linkMenu.link)
+                                    onTriggered: root.controller.openExternalLink(linkMenu.link, linkMenu.originHost)
                                 }
                                 MenuItem {
                                     objectName: "messageLinkCopy"

@@ -20,6 +20,7 @@ Rectangle {
         return root.pairRoom ? root.controller.agentConversation(root.session) : ({});
     }
     readonly property var pairParticipants: (root.pairRoomInfo && root.pairRoomInfo.participants) || []
+    function jumpToLatest() { transcript.scrollToLatest(); }
     signal openConnection
     signal queueRequested(string session)
     signal profileRequested(string session)
@@ -180,7 +181,7 @@ Rectangle {
                     onClicked: root.controller.refreshSession(root.session)
                 }
                 TuiToolButton {
-                    text: "Dismiss"
+                    text: "Dismiss · Esc"
                     onClicked: {
                         root.controller.clearError();
                         root.conversationModel.error = "";
@@ -206,8 +207,10 @@ Rectangle {
             section.delegate: Item {
                 required property string section
                 width: transcript.width
-                height: section.length > 0 ? 32 : 0
-                visible: section.length > 0
+                readonly property bool showHeading: section.length > 0
+                    && !(section === "Today" && presentation.leadingDayLabel === "Today")
+                height: showHeading ? 32 : 0
+                visible: showHeading
                 Rectangle {
                     anchors.left: parent.left
                     anchors.leftMargin: 14
@@ -329,6 +332,7 @@ Rectangle {
             session: root.session
             paneId: root.paneId
             active: root.active
+            onJumpToLatestRequested: root.jumpToLatest()
             onOpenConnection: root.openConnection()
         }
 
@@ -368,7 +372,36 @@ Rectangle {
         }
     }
 
+    // Voice failures belong to this session and must not resize the reader.
+    Rectangle {
+        objectName: "voiceErrorOverlay"
+        visible: (root.conversationModel.voiceError || "").length > 0
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: transcript.y
+        height: 38
+        z: 40
+        color: "#2b2028"
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 16
+            anchors.rightMargin: 8
+            TuiText {
+                Layout.fillWidth: true
+                text: root.conversationModel.voiceError || ""
+                color: "#c9959e"
+                font.pixelSize: 11
+                elide: Text.ElideRight
+            }
+            TuiToolButton {
+                text: "Dismiss · Esc"
+                onClicked: root.conversationModel.voiceError = ""
+            }
+        }
+    }
+
     TuiToolButton {
+        objectName: "jumpToLatestButton"
         visible: !transcript.followLatest
             && (transcript.newMessagesBelow || transcript.distanceFromBottom >= 180)
         anchors.right: parent.right
@@ -381,7 +414,7 @@ Rectangle {
         text: transcript.newMessagesBelow ? "New messages" : "Latest"
         onClicked: transcript.scrollToLatest()
         ToolTip.visible: hovered
-        ToolTip.text: transcript.newMessagesBelow ? "Jump to new messages" : "Jump to latest"
+        ToolTip.text: "Jump to latest · Ctrl+End"
         background: Rectangle {
             radius: 0
             color: "#30354f"
