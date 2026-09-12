@@ -3,7 +3,9 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QThread>
-#define CHECK(condition) do { if (!(condition)) qFatal("Check failed: %s", #condition); } while (false)
+static void check(bool condition) {
+    if (!condition) qFatal("Avatar motion lifecycle assertion failed");
+}
 int main(int argc, char** argv) {
     QGuiApplication app(argc, argv);
     QTemporaryDir config;
@@ -16,27 +18,27 @@ int main(int argc, char** argv) {
     app.applicationStateChanged(Qt::ApplicationActive);
     clock.setReducedMotion(false);
     clock.reconcile({QStringLiteral("A")});
-    CHECK(!clock.ticking());
+    check(!clock.ticking());
     clock.observe(&observer, true);
-    CHECK(clock.ticking());
+    check(clock.ticking());
     QThread::msleep(35);
     const auto p = clock.phase(QStringLiteral("A"));
     clock.reconcile({QStringLiteral("A")});
-    CHECK(clock.phase(QStringLiteral("A")) >= p);
+    check(clock.phase(QStringLiteral("A")) >= p);
     clock.setReducedMotion(true);
-    CHECK(!clock.ticking());
-    CHECK(clock.phase(QStringLiteral("A")) == 0);
+    check(!clock.ticking());
+    check(clock.phase(QStringLiteral("A")) == 0);
     clock.setReducedMotion(false);
-    CHECK(clock.ticking());
+    check(clock.ticking());
     app.applicationStateChanged(Qt::ApplicationInactive);
-    CHECK(!clock.ticking());
+    check(!clock.ticking());
     app.applicationStateChanged(Qt::ApplicationActive);
-    CHECK(clock.ticking());
+    check(clock.ticking());
     clock.observe(&observer, false);
-    CHECK(!clock.ticking());
+    check(!clock.ticking());
     clock.observe(&observer, true);
     clock.reconcile({});
-    CHECK(!clock.ticking());
-    CHECK(!clock.working(QStringLiteral("A")));
+    check(!clock.ticking());
+    check(!clock.working(QStringLiteral("A")));
     return 0;
 }
