@@ -1,6 +1,7 @@
 #pragma once
 #include "app/AppController.h"
 #include "network/SseClient.h"
+#include "network/ApiClient.h"
 #include <QGuiApplication>
 #include <QDebug>
 #include <QQuickWindow>
@@ -73,6 +74,16 @@ inline void startVoiceViewportSmokeCheck(QGuiApplication& application, QQuickWin
             auto* sse = controller->findChild<clarp::SseClient*>();
             if (sse == nullptr) { application.exit(EXIT_FAILURE); timer->stop(); return; }
             sse->stop();
+            auto* api = controller->findChild<clarp::ApiClient*>(QString{}, Qt::FindDirectChildrenOnly);
+            if (api == nullptr) { qCritical("Voice fixture HTTP client is missing"); application.exit(EXIT_FAILURE); timer->stop(); return; }
+            // Synthetic turns are already seeded. Pending offline HTTP requests
+            // must not add unrelated errors to this voice-only measurement.
+            // Keep the real SSE event consumer connected for every voice event.
+            QObject::disconnect(api, &clarp::ApiClient::requestFailed, controller, nullptr);
+            // Reproduce an HTTP failure queued during setup, after SSE has stopped.
+            QTimer::singleShot(100, api, [api] {
+                emit api->requestFailed(QStringLiteral("voice-fixture-pending-request"), QStringLiteral("Connection refused"), 0);
+            });
             controller->clearError(); controller->conversationForSession(current)->setError({});
             QMetaObject::invokeMethod(transcript, "pauseFollowing");
             transcript->setProperty("contentY", transcript->property("originY").toReal() + 900);
