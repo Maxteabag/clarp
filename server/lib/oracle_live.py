@@ -22,6 +22,35 @@ from .oracle_diagnostics import OracleJournal
 from .oracle_calls import AgentTools, session_config as realtime_config
 from .oracle_realtime import _claim, _release, _send_http_error
 
+_CLOSING = set()
+_CLOSING_CONDITION = threading.Condition()
+
+
+def claim_connection(principal, timeout=3.0):
+    """Wait only for a closing session; never take over live ownership."""
+    deadline = time.monotonic() + timeout
+    with _CLOSING_CONDITION:
+        while True:
+            if _claim(principal):
+                return True
+            remaining = deadline - time.monotonic()
+            if principal not in _CLOSING or remaining <= 0:
+                return False
+            _CLOSING_CONDITION.wait(remaining)
+
+
+def mark_closing(principal):
+    with _CLOSING_CONDITION:
+        _CLOSING.add(principal)
+
+
+def release_connection(principal):
+    with _CLOSING_CONDITION:
+        _release(principal)
+        _CLOSING.discard(principal)
+        _CLOSING_CONDITION.notify_all()
+
+
 MODEL = "gpt-live-1"
 VOICE = "marin"
 ROUTER = "gpt-5.6-luna"
@@ -284,7 +313,23 @@ def serve(handler):
     key = config.load().openai_key()
     if not key:
         return _send_http_error(handler, 503, "Oracle v2 needs an OpenAI key on this Host")
-    if not _claim(principal):
+    query = parse_qs(urlparse(handler.path).query)
+    podcast_context = None
+    if "podcast_artifact" in query:
+        from . import artifacts, podcast_live
+        try:
+            artifact = artifacts.get(query["podcast_artifact"][0])
+            if not artifact or artifact["type"] != "audio":
+                raise ValueError("Podcast artifact not found")
+            episode = artifact.get("payload", {}).get("podcast")
+            podcast_context = podcast_live.context_for(
+                episode, float(query.get("position", ["0"])[0]),
+                float(artifact.get("duration_ms", 0))/1000)
+            if query.get("revision", [""])[0] != episode["revision"]:
+                raise ValueError("Podcast audio revision changed; reopen the episode")
+        except (ValueError, TypeError, KeyError):
+            return _send_http_error(handler, 400, "Invalid podcast artifact, revision or playhead")
+    if not claim_connection(principal):
         return _send_http_error(handler, 409, "An Oracle session is already active")
     upstream = None
     conversation = None
@@ -301,12 +346,16 @@ def serve(handler):
         handler.wfile.write(ws.handshake_response(headers["sec-websocket-key"]))
         handler.wfile.flush()
         handler.connection.settimeout(None)
-        fallback = parse_qs(urlparse(handler.path).query).get("oracle_session", [""])[0][:160]
-        tools = AgentTools(handler.ctx, principal, fallback,
-            lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
-        journal = OracleJournal() if config.load().oracle_diagnostics else None
-        conversation = Conversation(upstream, downstream, tools, key, journal=journal)
-        conversation.record("session.open", {"model": MODEL, "voice": VOICE, "engine": "Oracle v2"})
+        if podcast_context is not None:
+            conversation = podcast_live.PodcastConversation(upstream, downstream, key,
+                podcast_context, images=query.get("images", ["0"])[0] == "1")
+        else:
+            fallback = query.get("oracle_session", [""])[0][:160]
+            tools = AgentTools(handler.ctx, principal, fallback,
+                lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
+            conversation = Conversation(upstream, downstream, tools, key)
+        conversation.journal = OracleJournal() if config.load().oracle_diagnostics else None
+        conversation.record("session.open", {"model": MODEL, "voice": VOICE, "engine": "Podcast companion" if podcast_context is not None else "Oracle v2"})
         def pump():
             try:
                 while not conversation.stop.is_set():
@@ -339,7 +388,8 @@ def serve(handler):
                     conversation.stop.set()
         threading.Thread(target=pump, daemon=True, name="oracle-v2-receive").start()
         threading.Thread(target=poll, daemon=True, name="oracle-v2-results").start()
-        conversation.send({"type": "session.start", "session": live_config()})
+        conversation.send({"type": "session.start", "session":
+            podcast_live.session_config(podcast_context) if podcast_context is not None else live_config()})
         while not conversation.stop.is_set():
             frame = ws.read_frame(handler.rfile)
             if frame is None or frame[0] == ws.OP_CLOSE:
@@ -351,6 +401,8 @@ def serve(handler):
             elif opcode == ws.OP_TEXT:
                 event = client_event(payload.decode("utf-8"))
                 if event is not None:
+                    if event["type"] == "session.close":
+                        mark_closing(principal)
                     conversation.input(event)
                 else:
                     downstream({"type": "oracle_v2.notice", "message": "Unsupported Oracle v2 command"})
@@ -358,6 +410,7 @@ def serve(handler):
         if conversation is None:
             _send_http_error(handler, 502, "Oracle v2 upstream unavailable")
     finally:
+        mark_closing(principal)
         if conversation:
             try:
                 conversation.send({"type": "session.close"})
@@ -370,4 +423,4 @@ def serve(handler):
                 conversation.journal.close()
         if upstream:
             upstream.close()
-        _release(principal)
+        release_connection(principal)

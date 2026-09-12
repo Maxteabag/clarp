@@ -64,3 +64,32 @@ def test_fixed_config_uses_live_client_delegation():
     assert cfg['model']=='gpt-live-1'
     assert cfg['delegation']=={'type':'client'}
     assert cfg['audio']['format']=={'type':'audio/pcm','rate':24000}
+
+
+def test_closing_connection_reconnect_waits_for_release():
+    import threading
+    principal = 'closing-reconnect-test'
+    assert oracle_live.claim_connection(principal)
+    oracle_live.mark_closing(principal)
+    result = []
+    worker = threading.Thread(target=lambda: result.append(oracle_live.claim_connection(principal, timeout=1)))
+    worker.start()
+    oracle_live.release_connection(principal)
+    worker.join(2)
+    try:
+        assert result == [True]
+    finally:
+        oracle_live.release_connection(principal)
+
+
+def test_active_connection_is_not_replaced_and_closing_wait_is_bounded():
+    principal = 'active-reconnect-test'
+    assert oracle_live.claim_connection(principal)
+    try:
+        assert not oracle_live.claim_connection(principal, timeout=.01)
+        oracle_live.mark_closing(principal)
+        assert not oracle_live.claim_connection(principal, timeout=.01)
+    finally:
+        oracle_live.release_connection(principal)
+    assert oracle_live.claim_connection(principal)
+    oracle_live.release_connection(principal)
