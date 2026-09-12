@@ -1175,6 +1175,9 @@ void AppController::applyAgentConversations(const QJsonArray& conversations) {
             requestDelta(id);
         }
     }
+    if (m_agentConversations == rooms) {
+        return;
+    }
     m_agentConversations = rooms;
     emit agentConversationsChanged();
     emit selectedAgentChanged();
