@@ -95,6 +95,7 @@ def test_inaccurate_images_are_reviewed_and_never_returned(monkeypatch):
     monkeypatch.setattr(podcast_live, "urlopen", request)
     with pytest.raises(ValueError, match="accuracy review"):
         podcast_live.generate_image(api_key="fixture", context="source", question="Explain",
+            plan=lambda **kwargs: "Draw a conceptual diagram",
             review=lambda **kwargs: {"approved": False, "reason": "Contradictory timeline"})
     assert len(calls) == 2
     assert "Contradictory timeline" in json.loads(calls[-1].data)["prompt"]
@@ -113,5 +114,6 @@ def test_cancelled_diagram_does_not_start_a_paid_retry(monkeypatch):
     monkeypatch.setattr(podcast_live, "urlopen", request)
     with pytest.raises(ValueError, match="cancelled"):
         podcast_live.generate_image(api_key="fixture", context="source", question="Explain", review=review,
+                                   plan=lambda **kwargs: "Draw a conceptual diagram",
                                    should_continue=lambda: active[0])
     assert len(calls) == 1
