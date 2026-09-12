@@ -198,6 +198,8 @@ ApplicationWindow {
             else if (previewVersions.enabled) previewVersionPanel.visible = true;
         } else if (action === "jump-latest") {
             workspace.jumpToLatest();
+        } else if (action === "retry-message") {
+            app.retryLatestFailedMessage();
         } else if (action === "dismiss-error") {
             root.dismissConversationError();
         } else if (action === "refresh") {

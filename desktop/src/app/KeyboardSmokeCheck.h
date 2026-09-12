@@ -126,14 +126,16 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             break;
         case 8:
             if (!require(state("composer") && window->activeFocusItem()->property("text").toString() == QStringLiteral("ejki "))) return;
+            controller->conversationForSession(second)->setVoiceError(QStringLiteral("Voice synthesis failed."));
             press(Qt::Key_K, Qt::ControlModifier);
             break;
         case 9:
             if (!require(state("modal"))) return;
-            press(Qt::Key_Escape);
+            press(Qt::Key_D, {}, QStringLiteral("dismiss"));
+            press(Qt::Key_Return);
             break;
         case 10:
-            if (!require(state("composer"))) return;
+            if (!require(state("composer") && controller->conversationForSession(second)->voiceError().isEmpty())) return;
             press(Qt::Key_B, Qt::ControlModifier);
             break;
         case 11:
@@ -182,34 +184,39 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
                     && state("composer"))) return;
             }
             press(Qt::Key_Escape);
-            press(Qt::Key_E);
             break;
         case 20:
+            // Escape restores navigation focus on the next event-loop turn.
+            // Send E only after that transition has actually completed.
+            if (!require(state("pane"))) return;
+            press(Qt::Key_E);
+            break;
+        case 21:
             if (!require(state("sidebar") && selected())) return;
             press(Qt::Key_N, Qt::ControlModifier | Qt::ShiftModifier);
             break;
-        case 21:
+        case 22:
             if (!require(state("modal") && window->activeFocusItem() != nullptr
                          && window->activeFocusItem()->objectName() == QStringLiteral("quickNewAgentName"))) return;
             press(Qt::Key_Escape);
             break;
-        case 22:
+        case 23:
             if (!require(state("composer"))) return;
             press(Qt::Key_A, Qt::ControlModifier);
             break;
-        case 23:
+        case 24:
             if (!require(state("modal") && window->findChild<QObject*>(QStringLiteral("assignAgent"))->property("visible").toBool())) return;
             press(Qt::Key_Escape);
             break;
-        case 24:
+        case 25:
             if (!require(state("composer") && window->activeFocusItem()->property("text").toString() == QStringLiteral("ejki "))) return;
             press(Qt::Key_A, Qt::ControlModifier | Qt::ShiftModifier);
             break;
-        case 25:
+        case 26:
             if (!require(state("modal") && window->findChild<QObject*>(QStringLiteral("assignAgent"))->property("visible").toBool())) return;
             press(Qt::Key_Escape);
             break;
-        case 26: {
+        case 27: {
             if (!require(state("composer"))) return;
             QJsonArray turns;
             for (int row = 0; row < 80; ++row) {
@@ -223,21 +230,21 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
                  {QStringLiteral("turns"), turns}}, clarp::ConversationModel::LoadKind::Replace);
             break;
         }
-        case 27: {
+        case 28: {
             auto* transcript = visibleItem(QStringLiteral("transcriptList"));
             if (!require(transcript && transcript->property("contentHeight").toReal() > transcript->property("height").toReal())) return;
             QMetaObject::invokeMethod(transcript, "pauseFollowing");
             transcript->setProperty("contentY", transcript->property("originY"));
             break;
         }
-        case 28: {
+        case 29: {
             auto* transcript = visibleItem(QStringLiteral("transcriptList"));
             if (transcript) qInfo("Scroll fixture before key: count=%d y=%.1f height=%.1f content=%.1f follow=%d end=%d", transcript->property("count").toInt(), transcript->property("contentY").toReal(), transcript->property("height").toReal(), transcript->property("contentHeight").toReal(), transcript->property("followLatest").toBool(), transcript->property("atYEnd").toBool());
             if (!require(transcript && !transcript->property("atYEnd").toBool())) return;
             press(Qt::Key_End, Qt::ControlModifier);
             break;
         }
-        case 29: {
+        case 30: {
             auto* transcript = visibleItem(QStringLiteral("transcriptList"));
             if (transcript) qInfo("After Ctrl+End: y=%.1f content=%.1f follow=%d end=%d state=%s draft=%s", transcript->property("contentY").toReal(), transcript->property("contentHeight").toReal(), transcript->property("followLatest").toBool(), transcript->property("atYEnd").toBool(), qPrintable(map->property("contextName").toString()), qPrintable(window->activeFocusItem()->property("text").toString()));
             if (!require(transcript && transcript->property("followLatest").toBool()
@@ -248,20 +255,20 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QVariant(QStringLiteral("jump-latest"))));
             break;
         }
-        case 30: {
+        case 31: {
             auto* transcript = visibleItem(QStringLiteral("transcriptList"));
             if (!require(transcript && transcript->property("atYEnd").toBool())) return;
             QMetaObject::invokeMethod(transcript, "pauseFollowing");
             transcript->setProperty("contentY", transcript->property("originY"));
             break;
         }
-        case 31: {
+        case 32: {
             auto* latest = visibleItem(QStringLiteral("jumpToLatestButton"));
             if (!require(latest && latest->property("visible").toBool())) return;
             QMetaObject::invokeMethod(latest, "clicked");
             break;
         }
-        case 32: {
+        case 33: {
             if (!require(state("composer"))) return;
             controller->setSharedFilesystem(true);
             QImage clipboardImage(4, 3, QImage::Format_ARGB32);
@@ -270,7 +277,7 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             press(Qt::Key_V, Qt::ControlModifier);
             break;
         }
-        case 33: {
+        case 34: {
             const auto attachments = controller->composerAttachments(controller->panes()->activePaneId(), second);
             if (!require(attachments.size() == 1 && state("composer")
                 && window->activeFocusItem()->property("text").toString() == QStringLiteral("ejki "))) return;
@@ -281,34 +288,41 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             press(Qt::Key_V, Qt::ControlModifier);
             break;
         }
-        case 34: {
+        case 35: {
             if (!require(window->activeFocusItem()->property("text").toString().contains(QStringLiteral("paste")))) return;
             controller->setPaneDraft(controller->panes()->activePaneId(), second, QStringLiteral("ejki "));
             QGuiApplication::clipboard()->clear();
             controller->setSharedFilesystem(false);
             break;
         }
-        case 35:
+        case 36:
             window->findChild<clarp::PreviewVersions*>()->setProperty("restartAllowed", false);
             press(Qt::Key_U, Qt::ControlModifier | Qt::AltModifier);
             break;
-        case 36: {
+        case 37: {
             auto* versions = window->findChild<clarp::PreviewVersions*>();
             if (!require(versions && versions->restartContext().value(QStringLiteral("session")).toString().isEmpty()
                 && !versions->error().isEmpty() && state("composer"))) return;
             versions->setProperty("restartAllowed", true);
             break;
         }
-        case 37:
+        case 38:
             if (!require(state("composer"))) return;
             press(Qt::Key_U, Qt::ControlModifier | Qt::AltModifier);
             break;
-        default:
+        default: {
             if (!require(window->findChild<clarp::PreviewVersions*>()->restartContext().value(QStringLiteral("session")).toString() == second)) return;
             if (!require(visibleItem(QStringLiteral("transcriptList"))->property("atYEnd").toBool())) return;
             if (!require(state("composer") && controller->selectedSession() == second)) return;
+            controller->conversationForSession(second)->addOptimistic(QStringLiteral("keyboard-retry"), QStringLiteral("Retry through keyboard"));
+            controller->conversationForSession(second)->markDeliveryFailed(QStringLiteral("keyboard-retry"));
+            const QString draftBeforeRetry = window->activeFocusItem()->property("text").toString();
+            press(Qt::Key_R, Qt::ControlModifier | Qt::AltModifier);
+            if (!require(controller->conversationForSession(second)->indexOfMessage(QStringLiteral("u-keyboard-retry")) < 0
+                && window->activeFocusItem()->property("text").toString() == draftBeforeRetry)) return;
             window->setProperty("contextKeyboardVerified", true);
             timer->stop();
+        }
         }
     });
     QTimer::singleShot(2'050, timer, [timer] { timer->start(); });

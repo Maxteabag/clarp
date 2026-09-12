@@ -254,6 +254,7 @@ class AppController : public QObject {
     Q_INVOKABLE void sendMessageTo(const QString& session, const QString& text,
                                    bool queueIfBusy = false);
     Q_INVOKABLE void retryFailedMessage(const QString& session, const QString& messageId);
+    Q_INVOKABLE void retryLatestFailedMessage();
     Q_INVOKABLE void stopAgent();
     Q_INVOKABLE void stopSession(const QString& session);
     Q_INVOKABLE void toggleRecordingForSession(const QString& session);
@@ -491,6 +492,7 @@ class AppController : public QObject {
     int m_createdSnapshotAttempts = 0;
     quint64 m_snapshotGeneration = 0;
     bool m_launchMode = false;
+    bool m_waitingForSessionChoice = false;
     QString m_launchSession;
     bool m_snapshotInFlight = false;
     bool m_snapshotDirty = false;
