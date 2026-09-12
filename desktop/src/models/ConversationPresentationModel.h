@@ -10,10 +10,12 @@ class ConversationPresentationModel : public QSortFilterProxyModel {
     Q_OBJECT
     QML_ELEMENT
     Q_PROPERTY(bool showWhenReady READ showWhenReady WRITE setShowWhenReady NOTIFY showWhenReadyChanged)
+    Q_PROPERTY(QString leadingDayLabel READ leadingDayLabel NOTIFY leadingDayLabelChanged)
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
     Q_PROPERTY(int activityMode READ activityMode WRITE setActivityMode NOTIFY countChanged)
   public:
     explicit ConversationPresentationModel(QObject* parent = nullptr);
+    QString leadingDayLabel() const;
     bool showWhenReady() const { return m_showWhenReady; }
     void setShowWhenReady(bool value);
     QVariant data(const QModelIndex& item, int role) const override;
@@ -26,9 +28,10 @@ class ConversationPresentationModel : public QSortFilterProxyModel {
     Q_INVOKABLE void beginVisit();
     // Lookup is cache-only: grouping must never create explanation demand.
     void setExplanationLookup(std::function<QString(const QVariantMap&)> lookup);
-    Q_INVOKABLE void updateExplanations(QObject* narrator, const QString& session, const QString& directory, bool localFiles);
+    Q_INVOKABLE void updateExplanations(QObject* object, const QString& session, const QString& directory, bool localFiles);
     Q_INVOKABLE void toggleGroup(const QString& id);
   signals:
+    void leadingDayLabelChanged();
     void showWhenReadyChanged();
     void countChanged();
     void rowsAppended(bool fromCurrentUser);

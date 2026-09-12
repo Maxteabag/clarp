@@ -12,6 +12,8 @@ TestCase {
 
     QtObject {
         id: stubController
+        property string baseUrl: "http://origin.example"
+        property var openedOrigins: []
         property int mediaRevision: 0
         property var toolNarrator: null
         property int avatarRevision: 0
@@ -25,7 +27,7 @@ TestCase {
         function agentWorkingDirectory(session) { return ""; }
         function resolveMediaMarkdown(text) { return text; }
         function markdownDisplayBlocks(text) { return text.split("\n\n"); }
-        function openExternalLink(link) { opened.push(link); return true; }
+        function openExternalLink(link, origin) { opened.push(link); openedOrigins.push(origin); return true; }
         function copyToClipboard(text) { copied.push(text); }
         function canLinkifyOutput(text) { return text.indexOf("http") >= 0; }
         function linkifiedOutput(text) {
@@ -104,6 +106,21 @@ TestCase {
             }
         }
         return null;
+    }
+
+    function test_linkRetainsOriginAcrossHostSwitch() {
+        stubController.baseUrl = "http://origin.example";
+        stubController.opened = [];
+        stubController.openedOrigins = [];
+        const message = createTemporaryObject(linkMessage, testCase);
+        waitForRendering(message);
+        const editor = findChild(message, "messageTextBlock");
+        const spot = firstLinkPoint(editor);
+        verify(spot !== null);
+        stubController.baseUrl = "http://different.example";
+        mouseClick(editor, spot.x, spot.y);
+        tryCompare(stubController, "openedOrigins", ["http://origin.example"]);
+        stubController.baseUrl = "http://origin.example";
     }
 
     function test_bareUrlIsHoverableClickableAndCopyable() {

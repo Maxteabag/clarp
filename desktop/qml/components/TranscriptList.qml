@@ -33,8 +33,14 @@ ListView {
         }
     }
     function applyFollow() {
-        if (followLatest && !userInteracting && followTicket === scrollEpoch && visible)
-            positionViewAtEnd();
+        if (!followLatest || userInteracting || followTicket !== scrollEpoch || !visible) return;
+        forceLayout();
+        positionViewAtEnd();
+        forceLayout();
+        // positionViewAtEnd aligns the last item, but does not include the
+        // trailing margin. Finish at the Flickable's actual bottom extent.
+        contentY = Math.max(originY - topMargin,
+            originY + contentHeight + bottomMargin - height);
     }
     function scheduleFollow() {
         if (!followLatest || userInteracting) return;

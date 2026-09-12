@@ -15,6 +15,10 @@ bool ownTurn(const QModelIndex& row) {
 }
 }
 ConversationPresentationModel::ConversationPresentationModel(QObject* parent) : QSortFilterProxyModel(parent) {
+    connect(this, &ConversationPresentationModel::countChanged, this, &ConversationPresentationModel::leadingDayLabelChanged);
+    connect(this, &QAbstractItemModel::dataChanged, this, &ConversationPresentationModel::leadingDayLabelChanged);
+    connect(this, &QAbstractItemModel::layoutChanged, this, &ConversationPresentationModel::leadingDayLabelChanged);
+    connect(this, &QAbstractItemModel::rowsMoved, this, &ConversationPresentationModel::leadingDayLabelChanged);
     connect(this, &QAbstractItemModel::modelReset, this, &ConversationPresentationModel::countChanged);
     connect(this, &QAbstractItemModel::rowsRemoved, this, &ConversationPresentationModel::countChanged);
     connect(this, &QAbstractItemModel::rowsInserted, this, [this](const QModelIndex&, int first, int last) {
@@ -22,6 +26,13 @@ ConversationPresentationModel::ConversationPresentationModel(QObject* parent) : 
         if (last == rowCount() - 1)
             emit rowsAppended(first == last && data(index(first, 0), ConversationModel::PendingRole).toBool());
     });
+}
+QString ConversationPresentationModel::leadingDayLabel() const {
+    for (int row = 0; row < rowCount(); ++row) {
+        const QString label = data(index(row, 0), ConversationModel::DayLabelRole).toString();
+        if (!label.isEmpty()) return label;
+    }
+    return {};
 }
 void ConversationPresentationModel::setShowWhenReady(bool value) {
     if (m_showWhenReady == value) return;
@@ -196,9 +207,9 @@ void ConversationPresentationModel::updateExplanations(QObject* object, const QS
 void ConversationPresentationModel::rebuildExplanationRuns() {
     m_explanationRows.clear();
     m_repeatedRows.clear();
-    if (!sourceModel() || !m_explanationLookup) return;
+    if (sourceModel() == nullptr || !m_explanationLookup) return;
     struct Entry { int row; int role; int offset; };
-    Entry first{-1, 0, 0};
+    Entry first{.row = -1, .role = 0, .offset = 0};
     QString previous;
     QString previousStatus;
     int count = 0;
@@ -239,7 +250,7 @@ void ConversationPresentationModel::rebuildExplanationRuns() {
         bool retained = false;
         if (activity) {
             any = true;
-            retained = append({row, ExplanationRepeatRole, 0}, {
+            retained = append({.row = row, .role = ExplanationRepeatRole, .offset = 0}, {
                 {QStringLiteral("name"), source.data(ConversationModel::ToolNameRole)},
                 {QStringLiteral("summary"), source.data(ConversationModel::BodyRole)},
                 {QStringLiteral("status"), source.data(ConversationModel::ActivityStatusRole)}});
@@ -254,7 +265,7 @@ void ConversationPresentationModel::rebuildExplanationRuns() {
                     if (role == ConversationModel::ToolsRole && !groupedRow(row) && !cells.isEmpty()
                         && name != QStringLiteral("Edit") && name != QStringLiteral("MultiEdit") && name != QStringLiteral("Write")) continue;
                     any = true;
-                    retained = append({row, role, offset}, value) || retained;
+                    retained = append({.row = row, .role = role, .offset = offset}, value) || retained;
                 }
             }
         }

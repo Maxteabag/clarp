@@ -122,4 +122,37 @@ TestCase {
         tryVerify(() => view.contentY > 500);
         compare(view.followLatest, false);
     }
+    function test_jumpToLatestAfterVariableHeightChanges() {
+        const view = openView();
+        view.pauseFollowing();
+        view.positionViewAtIndex(5, ListView.Beginning);
+        for (let i = 0; i < 60; ++i) rows.setProperty(i, "rowHeight", i % 3 === 0 ? 520 : 48);
+        view.scrollToLatest();
+        tryVerify(() => view.atYEnd && view.followLatest);
+        rows.setProperty(59, "rowHeight", 1100);
+        tryVerify(() => view.atYEnd && view.followLatest);
+    }
+    function test_readingAnchorSurvivesExplanationRelayout() {
+        const view = openView();
+        view.pauseFollowing();
+        view.positionViewAtIndex(25, ListView.Beginning);
+        view.contentY += 12;
+        wait(60);
+        const before = view.itemAtIndex(25).y - view.contentY;
+        // An earlier visible explanation grows when its asynchronous wording arrives.
+        rows.setProperty(24, "rowHeight", 260);
+        wait(100);
+        verify(view.itemAtIndex(25) !== null);
+        verify(Math.abs(view.itemAtIndex(25).y - view.contentY - before) < 2,
+               "Async explanation growth above the reader must preserve the message offset");
+    }
+
+    function test_jumpAccountsForBottomMargin() {
+        const view = createTemporaryObject(viewComponent, testCase, {topMargin: 10, bottomMargin: 10});
+        verify(view !== null);
+        view.scrollToLatest();
+        tryVerify(() => view.atYEnd && view.distanceFromBottom < 2,
+                  1000, "Latest must include the transcript bottom margin");
+    }
+
 }

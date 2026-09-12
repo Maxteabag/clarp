@@ -1,4 +1,5 @@
 #include "app/PreviewVersions.h"
+#include "app/PreviewRelaunch.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
@@ -47,15 +48,22 @@ PreviewVersions::PreviewVersions(QObject* parent) : QObject(parent) {
                 refresh();
                 return;
             }
+            if (!m_restartAllowed || m_selectedSession != m_requestedSession || m_selectedHost != m_requestedHost) {
+                m_error = QStringLiteral("Version selected. Finish local activity and update again to reopen this conversation.");
+                m_selecting = false; emit changed(); return;
+            }
             QSettings settings;
             settings.sync();
             if (settings.status() != QSettings::NoError) {
                 m_error = QStringLiteral("Version selected, but settings could not be saved. Window kept open.");
-            } else if (QProcess::startDetached(QStringLiteral("/usr/bin/python3"),
-                {m_helper, QStringLiteral("--restart-after"), QString::number(QCoreApplication::applicationPid())})) {
-                QCoreApplication::quit();
             } else {
-                m_error = QStringLiteral("Version selected. Close and reopen the preview manually.");
+                QProcess relaunch;
+                relaunch.setProgram(QStringLiteral("/usr/bin/python3"));
+                relaunch.setArguments(previewRelaunchArguments(m_helper, QCoreApplication::applicationPid()));
+                relaunch.setProcessEnvironment(previewRelaunchEnvironment(QProcessEnvironment::systemEnvironment(),
+                    m_requestedHost, m_requestedSession));
+                if (relaunch.startDetached()) QCoreApplication::quit();
+                else m_error = QStringLiteral("Version selected. Close and reopen the preview manually.");
             }
         }
         m_selecting = false; emit changed();
@@ -64,12 +72,23 @@ PreviewVersions::PreviewVersions(QObject* parent) : QObject(parent) {
     connect(&m_timer, &QTimer::timeout, this, &PreviewVersions::refresh);
     if (m_enabled) { m_timer.start(); QTimer::singleShot(0, this, &PreviewVersions::refresh); }
 }
+QVariantMap PreviewVersions::restartContext() const {
+    return {{QStringLiteral("host"), m_requestedHost}, {QStringLiteral("session"), m_requestedSession},
+            {QStringLiteral("arguments"), previewRelaunchArguments(m_helper, QCoreApplication::applicationPid())}};
+}
 void PreviewVersions::refresh() {
     if (!m_enabled || m_fixture || busy()) return;
     m_process.start(QStringLiteral("/usr/bin/python3"), {m_helper, QStringLiteral("--catalog")});
 }
 void PreviewVersions::selectVersion(const QString& hash) {
-    if (!m_enabled || m_fixture || busy() || m_catalog.isEmpty()) return;
+    if (!m_enabled || busy() || m_catalog.isEmpty()) return;
+    if (!m_restartAllowed) {
+        m_error = QStringLiteral("Finish sending, uploading, recording or playback before updating this window.");
+        emit changed(); return;
+    }
+    m_requestedHost = m_selectedHost;
+    m_requestedSession = m_selectedSession;
+    if (m_fixture) { m_error.clear(); m_notice = QStringLiteral("Fixture captured restart request"); emit changed(); return; }
     m_selecting = true; m_error.clear(); m_notice.clear();
     m_process.start(QStringLiteral("/usr/bin/python3"), {m_helper, QStringLiteral("--select"), hash,
         QStringLiteral("--expected-current"), m_catalog.value(QStringLiteral("current")).toString()});
