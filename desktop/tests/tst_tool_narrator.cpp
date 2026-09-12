@@ -53,7 +53,10 @@ int fakeCodex(const QStringList& args) {
         answers.append(QJsonObject{
             {QStringLiteral("id"), behavior == QStringLiteral("invalid") ? QStringLiteral("wrong-id")
                 : request.toObject().value(QStringLiteral("id"))},
-            {QStringLiteral("text"), QStringLiteral("Build the desktop preview.")}});
+            {QStringLiteral("text"), behavior == QStringLiteral("generic")
+                ? QStringLiteral("Complete the current task")
+                : (behavior == QStringLiteral("read") ? QStringLiteral("Read file contents.")
+                   : QStringLiteral("Build the desktop preview."))}});
     }
     const qsizetype outputIndex = args.indexOf(QStringLiteral("--output-last-message"));
     QFile output(args.value(outputIndex + 1));
@@ -72,6 +75,8 @@ class ToolNarratorTest : public QObject {
     void disableCancelsAndRejectsLateReplies();
     void failureFallsBackWithoutRetryStorm_data();
     void failureFallsBackWithoutRetryStorm();
+    void rejectsContentFreeExplanation();
+    void acceptsSupportedFileRead();
     void scriptContextIsOptInBoundedAndInvalidatesCache();
     void detailLevelsChangeInstructionsAndDiscardPreviousTranslations();
 };
@@ -215,6 +220,28 @@ void ToolNarratorTest::disableCancelsAndRejectsLateReplies() {
     QVERIFY(narrator.status().startsWith(QStringLiteral("Off")));
     narrator.reset();
     QVERIFY(narrator.explanation(command()).isEmpty());
+}
+
+void ToolNarratorTest::rejectsContentFreeExplanation() {
+    QTemporaryDir directory;
+    const QString capture = directory.filePath(QStringLiteral("capture"));
+    ToolNarrator narrator(nullptr, QCoreApplication::applicationFilePath(),
+        {QStringLiteral("--fake-codex"), capture, QStringLiteral("generic")});
+    narrator.setEnabled(true);
+    narrator.request(command());
+    QTRY_VERIFY_WITH_TIMEOUT(narrator.unavailable(), 3'000);
+    QVERIFY(narrator.explanation(command()).isEmpty());
+}
+
+void ToolNarratorTest::acceptsSupportedFileRead() {
+    QTemporaryDir directory;
+    ToolNarrator narrator(nullptr, QCoreApplication::applicationFilePath(),
+        {QStringLiteral("--fake-codex"), directory.filePath(QStringLiteral("capture")), QStringLiteral("read")});
+    const QVariantMap activity{{QStringLiteral("name"), QStringLiteral("Bash")},
+        {QStringLiteral("command"), QStringLiteral("head notes.md")}};
+    narrator.setEnabled(true);
+    narrator.request(activity);
+    QTRY_COMPARE_WITH_TIMEOUT(narrator.explanation(activity), QStringLiteral("Read file contents."), 3'000);
 }
 
 void ToolNarratorTest::detailLevelsChangeInstructionsAndDiscardPreviousTranslations() {
