@@ -253,3 +253,28 @@ def test_agent_helper_follows_frozen_transcript_pages(saved):
     value=cli.full_conversation(ident,request=request)
     assert "".join(e["text"] for e in value["events"])=="My whole question."
     assert len(calls)==3 and value["next_event_id"] is None
+
+
+def test_new_process_reads_committed_history_after_writer_exits(tmp_path):
+    import os
+    import pathlib
+    import subprocess
+    import sys
+    root=pathlib.Path(__file__).resolve().parents[2]
+    environment={**os.environ,"PYTHONPATH":str(root/"server")+os.pathsep+str(root)}
+    writer="""import pathlib,sys
+from tests.unit.test_podcast_history import saved,delta
+ident,_,_=saved.__wrapped__(pathlib.Path(sys.argv[1]))
+delta(ident,'This question must survive a Host restart.')
+print(ident)
+"""
+    ident=subprocess.check_output([sys.executable,"-c",writer,str(tmp_path)],env=environment,text=True).strip()
+    reader="""import json,sys
+from lib import podcast_history
+print(json.dumps(podcast_history.get(sys.argv[1])))
+"""
+    value=json.loads(subprocess.check_output([sys.executable,"-c",reader,ident],env=environment,text=True))
+    assert value["events"][0]["text"] == "This question must survive a Host restart."
+    assert value["source"]["title"] == "Original plan"
+    assert value["context"]["paused_seconds"] == 5
+    assert value["status"] == "interrupted" and value["closed_at"] is None
