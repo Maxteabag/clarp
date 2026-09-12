@@ -2,6 +2,7 @@
 #include "app/AppController.h"
 #include "network/SseClient.h"
 #include <QGuiApplication>
+#include <QDebug>
 #include <QQuickWindow>
 #include <QQuickItem>
 #include <QSaveFile>
@@ -18,7 +19,7 @@ inline void startVoiceViewportSmokeCheck(QGuiApplication& application, QQuickWin
     if (QGuiApplication::platformName() != QStringLiteral("offscreen") || !window || !controller) {
         application.exit(EXIT_FAILURE); return;
     }
-    struct State { int step = 0; bool passed = true; QString anchor; qreal anchorY = 0; qreal height = 0; QJsonArray observations; };
+    struct State { int step = 0; int baselineAttempts = 0; int stableSamples = 0; bool passed = true; QString anchor; qreal anchorY = 0; qreal height = 0; QJsonArray observations; };
     auto state = std::make_shared<State>();
     auto* timer = new QTimer(&application); timer->setInterval(150);
     QObject::connect(timer, &QTimer::timeout, &application, [&application, window, controller, timer, state] {
@@ -70,16 +71,34 @@ inline void startVoiceViewportSmokeCheck(QGuiApplication& application, QQuickWin
             transcript->setProperty("contentY", transcript->property("originY").toReal() + 900);
             break;
         case 2: {
-            if (!transcript) { application.exit(EXIT_FAILURE); timer->stop(); return; }
-            const qreal top = transcript->mapToScene(QPointF{}).y();
-            for (int i = 0; i < 80; ++i) {
-                auto* row = find(QStringLiteral("voice-row-%1").arg(i));
-                if (row && row->mapToScene(QPointF{}).y() > top + 120 && row->mapToScene(QPointF{}).y() < top + transcript->height() - 100) {
-                    state->anchor = row->property("messageId").toString(); state->anchorY = row->mapToScene(QPointF{}).y(); break;
+            // ListView creates and measures delegates lazily. Establish a stable
+            // reader anchor before injecting events; a fixed 150ms delay is not
+            // enough on sanitizer/CI builds.
+            ++state->baselineAttempts;
+            if (transcript && state->anchor.isEmpty()) {
+                const qreal top = transcript->mapToScene(QPointF{}).y();
+                for (int i = 0; i < 80; ++i) {
+                    auto* row = find(QStringLiteral("voice-row-%1").arg(i));
+                    if (row && row->mapToScene(QPointF{}).y() > top + 120 && row->mapToScene(QPointF{}).y() < top + transcript->height() - 100) {
+                        state->anchor = row->property("messageId").toString(); break;
+                    }
                 }
             }
-            if (state->anchor.isEmpty()) { application.exit(EXIT_FAILURE); timer->stop(); return; }
-            state->height = transcript->height(); capture("before");
+            auto* anchor = find(state->anchor);
+            const qreal y = anchor ? anchor->mapToScene(QPointF{}).y() : -99999;
+            const qreal height = transcript ? transcript->height() : 0;
+            if (anchor && height > 0 && std::abs(y - state->anchorY) < 0.5 && std::abs(height - state->height) < 0.5)
+                ++state->stableSamples;
+            else state->stableSamples = 0;
+            state->anchorY = y; state->height = height;
+            if (state->stableSamples < 3) {
+                if (state->baselineAttempts >= 25) {
+                    qCritical("Reader baseline never settled before voice injection");
+                    application.exit(EXIT_FAILURE); timer->stop(); return;
+                }
+                --state->step; break;
+            }
+            capture("before");
             state->passed = inject(other) && state->passed;
             break;
         }
@@ -100,7 +119,7 @@ inline void startVoiceViewportSmokeCheck(QGuiApplication& application, QQuickWin
             QSaveFile output(qEnvironmentVariable("CLARP_VOICE_VIEWPORT_TRACE"));
             if (output.open(QIODevice::WriteOnly)) { output.write(QJsonDocument(QJsonObject{{"passed", state->passed}, {"observations", state->observations}}).toJson()); output.commit(); }
             window->setProperty("voiceViewportVerified", state->passed); timer->stop();
-            if (!state->passed) { qCritical("Voice event changed the reader viewport or leaked another session error"); application.exit(EXIT_FAILURE); }
+            if (!state->passed) { qCritical().noquote() << "Voice event changed the reader viewport or leaked another session error:" << QJsonDocument(state->observations).toJson(QJsonDocument::Compact); application.exit(EXIT_FAILURE); }
             break;
         }
         }
