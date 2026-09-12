@@ -7,7 +7,7 @@ This adapter does not launch providers or retry unknown spend automatically.
 from concurrent.futures import ThreadPoolExecutor
 from . import janitor_builtins
 
-def execute_partitions(partitions, compute, *, workers=2):
+def execute_partitions(partitions, compute, *, workers=2, use_model_chain=False):
     if type(workers) is not int or not 1 <= workers <= 8:
         raise ValueError('workers must be 1 through 8')
     targets=[p['target_agent_id'] for p in partitions]
@@ -23,12 +23,27 @@ def execute_partitions(partitions, compute, *, workers=2):
             if not janitor_builtins.claim_run(run['run_id']):
                 results.append({'request_id':request['request_id'],'status':'claimed_elsewhere'});continue
             try:
-                result=compute(request)
+                if use_model_chain:
+                    from .janitor_design_policy import compute_with_model_chain
+                    result, model_trace = compute_with_model_chain(run['session'], request, compute)
+                else:
+                    result=compute(request)
             except Exception:
                 # Record bounded metadata; arbitrary provider exception text can contain secrets.
                 janitor_builtins.complete_run(run['run_id'],'failed',error='Computation failed; inspect authorized diagnostics')
                 results.append({'request_id':request['request_id'],'status':'failed'});continue
-            accepted=janitor_builtins.complete_run(run['run_id'],result=result)
+            if use_model_chain:
+                from .janitor_design_policy import effective_chain
+                from . import janitors
+                with janitors._write() as connection:
+                    current = effective_chain(run['session'])
+                    if current['source'] != model_trace['source'] or current['revision'] != model_trace['revision']:
+                        janitor_builtins.complete_run(run['run_id'], 'cancelled', result={'reason':'Model policy changed during computation'}, connection=connection)
+                        results.append({'request_id':request['request_id'],'status':'stale_rejected'})
+                        continue
+                    accepted=janitor_builtins.complete_run(run['run_id'],result=result, connection=connection)
+            else:
+                accepted=janitor_builtins.complete_run(run['run_id'],result=result)
             results.append({'request_id':request['request_id'],'status':'accepted' if accepted else 'stale_rejected'})
         return results
     with ThreadPoolExecutor(max_workers=workers) as pool:

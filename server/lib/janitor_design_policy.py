@@ -80,3 +80,23 @@ def inspect_receipt(run_id, target_session):
     if not config or not janitors._in_scope(config['scope'],dict(target)):
         raise janitors.JanitorError('Receipt unavailable',403,'scope_denied')
     return {'run_id':run_id,'results':[r for r in run['results'] if r['target_agent_id']==target['agent_id']]}
+
+class ModelUnavailableBeforeExecution(Exception):
+    """Adapter certifies no model execution/effect began; a next model is safe."""
+
+def compute_with_model_chain(session, request, compute):
+    """Ordered model fallback. Unknown failures never authorize another attempt.
+
+    The outer demand run owns the single claim and publication transaction;
+    this function only selects computation adapters under that frozen claim.
+    """
+    chain=effective_chain(session)
+    if not chain['chain']:raise ValueError('No effective model configured')
+    attempts=[]
+    for model in chain['chain']:
+        try:
+            result=compute(request,dict(model))
+            return result, {'source':chain['source'],'revision':chain['revision'],'attempts':attempts+[{'model':model,'outcome':'completed'}]}
+        except ModelUnavailableBeforeExecution:
+            attempts.append({'model':model,'outcome':'unavailable_before_execution'})
+    raise ModelUnavailableBeforeExecution('Every eligible model unavailable before execution')
