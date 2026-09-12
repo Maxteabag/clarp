@@ -162,6 +162,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/ActivityExplanation.qml
         qml/components/TeamsPanel.qml
         qml/components/UpdatesPanel.qml
+        qml/components/ArtifactSummaryCard.qml
         qml/components/VoiceDialog.qml
         qml/components/Workspace.qml
     RESOURCES

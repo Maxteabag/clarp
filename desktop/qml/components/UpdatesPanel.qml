@@ -283,62 +283,13 @@ Rectangle {
                 Repeater {
                     model: root.controller.updateArtifacts
 
-                    Rectangle {
-                        id: artifact
+                    ArtifactSummaryCard {
                         required property var modelData
                         Layout.fillWidth: true
-                        implicitHeight: artifactRow.implicitHeight + 16
-                        radius: 0
-                        color: "transparent"
-                        border.width: 0
-
-                        RowLayout {
-                            id: artifactRow
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.margins: 8
-                            spacing: 9
-                            TuiText {
-                                text: String(artifact.modelData.type || "item").toUpperCase()
-                                color: "#858baa"
-                                font.family: "JetBrains Mono"
-                                font.pixelSize: 11
-                            }
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 2
-                                TuiText {
-                                    Layout.fillWidth: true
-                                    text: String(artifact.modelData.title || "Artifact")
-                                    color: "#c3c6da"
-                                    font.pixelSize: 13
-                                    elide: Text.ElideRight
-                                }
-                                TuiText {
-                                    Layout.fillWidth: true
-                                    text: String(artifact.modelData.summary || "")
-                                    color: "#6b6f86"
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
-                                }
-                            }
-                            TuiButton {
-                                objectName: "artifactViewReport"
-                                // Reports open in the native viewer, not a browser.
-                                visible: root.controller.artifactIsViewableReport(artifact.modelData)
-                                text: "View"
-                                implicitHeight: 27
-                                onClicked: root.openReport(
-                                    String(artifact.modelData.artifact_id || ""))
-                            }
-                            TuiButton {
-                                visible: String(artifact.modelData.session || "").length > 0
-                                text: "Open chat"
-                                implicitHeight: 27
-                                onClicked: root.openChat(String(artifact.modelData.session))
-                            }
-                        }
+                        artifact: modelData
+                        readable: root.controller.artifactIsViewableReport(modelData)
+                        onOpenRequested: artifactId => root.openReport(artifactId)
+                        onChatRequested: session => root.openChat(session)
                     }
                 }
 
