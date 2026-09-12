@@ -16,6 +16,7 @@ add_executable(clarp-desktop-tests
     ../src/app/CredentialStore.h
     ../src/app/AppController.cpp
     ../src/app/AppController.h
+    ../src/app/AvatarMotionClock.h
     ../src/app/WorkspaceContext.cpp
     ../src/app/WorkspaceContext.h
     ../src/app/TranscriptCache.cpp
