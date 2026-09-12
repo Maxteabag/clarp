@@ -8,7 +8,7 @@ with tempfile.TemporaryDirectory() as tmp:
  def proposal(**kw):
   e=base|kw;ledger.seed(e,owner="worker",generation=1,revision=2,reader="worker");e['producerEvent']=ledger.produce(e);return e
  def test(name,e,expected,delta=0,**kw):
-  before=ledger.count();got=ledger.apply(e,name,**kw);after=ledger.count();rows.append(dict(case=name,actual=got,expected=expected,effectDelta=after-before,expectedEffectDelta=delta,passed=got==expected and after-before==delta))
+  before=ledger.count();caller=kw.pop('caller','worker');got=ledger.apply(e,name,caller=caller,**kw);after=ledger.count();rows.append(dict(case=name,actual=got,expected=expected,effectDelta=after-before,expectedEffectDelta=delta,passed=got==expected and after-before==delta))
  e=proposal();test('initial',e,'accepted',1);test('new-transport-envelope-same-effect',e,'replay')
  resumed=proposal();rows.append(dict(case='producer-restart-stable-event',passed=resumed['producerEvent']==e['producerEvent']))
  test('conflict',e|{'fact':'written'},'conflict')
@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory() as tmp:
  p=proposal(message='before');test('rollback',p,'rollback_before_commit',fault='before');test('retry-rollback',p,'accepted',1)
  p=proposal(message='after');test('lost-ack',p,'lost_ack_after_commit',1,fault='after');test('retry-lost-ack',p,'replay')
  p=proposal(message='race');before=ledger.count()
- with concurrent.futures.ThreadPoolExecutor(2) as pool:got=sorted(pool.map(lambda n:ledger.apply(p,n),['race1','race2']))
+ with concurrent.futures.ThreadPoolExecutor(2) as pool:got=sorted(pool.map(lambda n:ledger.apply(p,n,caller="worker"),['race1','race2']))
  rows.append(dict(case='two-writers',actual=got,effectDelta=ledger.count()-before,passed=got==['accepted','replay'] and ledger.count()-before==1))
  print(json.dumps({'scope':'Candidate audio_fact_ledger API, disposable SQLite; no live ingestion/provider','checks':rows,'passed':sum(r['passed'] for r in rows),'total':len(rows)},indent=2))
  assert all(r['passed'] for r in rows)

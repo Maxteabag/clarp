@@ -27,7 +27,7 @@ class AudioFactLedger:
    c.execute('INSERT OR IGNORE INTO producer VALUES(?,?)',(key,'producer:'+key));return c.execute('SELECT event FROM producer WHERE k=?',(key,)).fetchone()[0]
  def count(self):
   with self.conn() as c:return c.execute('SELECT count(*) FROM effects').fetchone()[0]
- def apply(self,e,envelope,caller='worker',fault=None):
+ def apply(self,e,envelope,*,caller,fault=None):
   with self.conn() as c:
    c.execute('BEGIN IMMEDIATE');state=c.execute('SELECT owner,generation,revision,cancelled,reader FROM authority WHERE k=?',(self.scope(e),)).fetchone()
    if not state or caller!=state[4]:return 'denied'
