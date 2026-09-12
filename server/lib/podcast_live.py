@@ -63,6 +63,9 @@ def validate_episode(value):
             previous = row["start"]
     if not isinstance(value.get("corrections", ""), str) or len(value.get("corrections", "")) > 4000:
         raise ValueError("Invalid podcast corrections")
+    if (not isinstance(value.get("source_artifact_id", ""), str)
+            or len(value.get("source_artifact_id", "")) > 160):
+        raise ValueError("Invalid podcast source artifact")
     if value.get("notebook_url"):
         url = urlsplit(str(value["notebook_url"]))
         if (url.scheme != "https" or url.netloc != "notebooklm.google.com"
@@ -71,7 +74,7 @@ def validate_episode(value):
     return value
 
 
-def context_for(episode, position, duration):
+def context_for(episode, position, duration, source=None):
     validate_episode(episode)
     if not _number(position) or not _number(duration) or not 0 < duration <= 86400 or position > duration:
         raise ValueError("Invalid podcast playhead")
@@ -81,11 +84,34 @@ def context_for(episode, position, duration):
     chapter = chapters[-1] if chapters else min(episode["chapters"], key=lambda r: abs(r["start"]-position))
     # Bounded below the Live startup context limit. Upcoming text is explicitly
     # marked unheard so the companion cannot silently move the user's playhead.
-    return json.dumps({"audio_revision": episode["revision"], "paused_seconds": position,
+    context = {"audio_revision": episode["revision"], "paused_seconds": position,
         "recent_transcript_approximate_alignment": " ".join(r["text"] for r in heard)[-6000:],
         "next_passage_not_yet_heard": (upcoming or {}).get("text", "")[:1000],
         "source_chapter": chapter["title"], "authoritative_source": chapter["source"][:12000],
-        "editorial_corrections": episode.get("corrections", "")[:4000]}, ensure_ascii=False)
+        "editorial_corrections": episode.get("corrections", "")[:4000]}
+    if source:
+        from html.parser import HTMLParser
+        class TextOnly(HTMLParser):
+            def __init__(self):
+                super().__init__(); self.parts = []; self.hidden = 0
+            def handle_starttag(self, tag, attrs):
+                if tag in {"script", "style"}: self.hidden += 1
+            def handle_endtag(self, tag):
+                if tag in {"script", "style"}: self.hidden = max(0, self.hidden - 1)
+            def handle_data(self, data):
+                if not self.hidden: self.parts.append(data)
+        payload = source.get("payload", {})
+        parser = TextOnly()
+        parser.feed(str(payload.get("content", "")))
+        text = " ".join(parser.parts) if source["type"] == "html_form" else str(payload.get("content", ""))
+        text = source.get("summary", "") + "\n" + text
+        if source.get("plan"):
+            text += "\n" + json.dumps(source["plan"], ensure_ascii=False)
+        context["linked_source"] = {"artifact_id": source["artifact_id"], "title": source["title"],
+            "updated_at": source.get("updated_at"), "excerpt": text[:6000],
+            "excerpt_truncated": len(text) > 6000,
+            "relationship": "Selected for this conversation; not necessarily the source used to record the audio."}
+    return json.dumps(context, ensure_ascii=False)
 
 
 def session_config(context):
@@ -184,7 +210,7 @@ def generate_image(*, api_key, context, question, review=review_image, plan=imag
 
 class PodcastConversation(Conversation):
     def __init__(self, upstream, downstream, api_key, context, *, images=False,
-                 clock=time.monotonic, generate=generate_image):
+                 clock=time.monotonic, generate=generate_image, history_id=None, media_dir=None):
         # Satisfies the transport's lifecycle without any agent operations.
         tools = SimpleNamespace(lock=threading.Lock(), delegations={}, results=lambda: [])
         super().__init__(upstream, downstream, tools, api_key, clock)
@@ -196,8 +222,28 @@ class PodcastConversation(Conversation):
         self.image_count = 0
         self.image_pending = False
         self.started = clock()
+        self.history_id = history_id
+        self.media_dir = media_dir
+        self.last_question_event_id = 0
 
     def receive(self, event):
+        with self.lock:
+            self._receive_saved(event)
+
+    def _receive_saved(self, event):
+        if self.history_id:
+            from . import podcast_history
+            try:
+                saved_event = podcast_history.record(self.history_id, event)
+            except Exception:
+                self.downstream({"type": "podcast.history_error", "message":
+                    "Conversation saving failed. The companion stopped; previously saved history remains available."})
+                self.stop.set()
+                raise
+            if saved_event:
+                if event.get("type") == "session.input_transcript.delta":
+                    self.last_question_event_id = saved_event
+                event = {**event, "history_event_id": saved_event, "conversation_id": self.history_id}
         if event.get("type") == "session.delegation.created":
             self.append("commentary", "You have no access to external actions in podcast mode. "
                         "Answer using the supplied source and state any uncertainty.")
@@ -234,16 +280,21 @@ class PodcastConversation(Conversation):
             self.image_count += 1
             self.image_pending = True
             self.downstream({"type": "podcast.image_pending", "question": question, "revision": revision})
-            self.pool.submit(self._image, question, revision)
+            self.pool.submit(self._image, question, revision, self.last_question_event_id)
 
-    def _image(self, question, revision):
+    def _image(self, question, revision, question_event_id=0):
         try:
             encoded = self.generate(api_key=self.api_key, context=self.context, question=question,
                                     should_continue=lambda: not self.stop.is_set() and self.revision == revision)
             with self.lock:
                 if not self.stop.is_set() and self.revision == revision:
+                    saved = {}
+                    if self.history_id:
+                        from . import podcast_history
+                        saved = podcast_history.save_image(self.history_id, encoded=encoded,
+                            question=question, question_event_id=question_event_id, media_dir=self.media_dir)
                     self.downstream({"type": "podcast.image", "question": question,
-                                     "revision": revision, "jpeg_base64": encoded})
+                                     "revision": revision, "jpeg_base64": encoded, **saved})
         except Exception:
             if not self.stop.is_set():
                 self.downstream({"type": "podcast.image_failed", "revision": revision,

@@ -823,6 +823,9 @@ class Handler(BaseHTTPRequestHandler):
             return janitor_http.handle(self, "GET")
         if path in self._ROOT_STATIC:
             return self._send_root_static(path)
+        if path == "/podcast-history" or path.startswith("/podcast-history/"):
+            from lib import podcast_history_http
+            return podcast_history_http.handle(self, "GET")
         if self._dispatch_exact(self._GET_ROUTES, path):
             return
         if path.startswith("/teams/") and path.endswith("/messages"):
@@ -2545,6 +2548,9 @@ class Handler(BaseHTTPRequestHandler):
                 if path.endswith(suffix):
                     decision_id = unquote(path[len("/decisions/"):-len(suffix)].strip("/"))
                     return getattr(self, "_handle_decision_" + action)(decision_id)
+        if path.startswith("/podcast-history/"):
+            from lib import podcast_history_http
+            return podcast_history_http.handle(self, "POST")
         if path.startswith("/artifacts/"):
             from urllib.parse import unquote
             for action in ("archive", "discard", "submit"):
