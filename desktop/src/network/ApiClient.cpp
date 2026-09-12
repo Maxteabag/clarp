@@ -4,6 +4,7 @@
 #include <QJsonParseError>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <memory>
 
 namespace clarp {
 namespace {
@@ -46,7 +47,7 @@ void ApiClient::get(const QString& tag, const QString& path, const QUrlQuery& qu
     watchJson(tag, m_network.get(requestFor(url)));
 }
 
-void ApiClient::getBytes(const QString& tag, const QString& path) {
+void ApiClient::getBytes(const QString& tag, const QString& path, qint64 maxBytes) {
     const QUrl url = resolve(path);
     const bool sameOrigin = url.isValid() && url.userInfo().isEmpty() &&
                             url.scheme().compare(m_baseUrl.scheme(), Qt::CaseInsensitive) == 0 &&
@@ -62,8 +63,8 @@ void ApiClient::getBytes(const QString& tag, const QString& path) {
     // otherwise "safe" HTTPS redirect to another origin.
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::SameOriginRedirectPolicy);
-    request.setRawHeader("Accept", "image/png,image/jpeg,image/webp,image/gif,image/*");
-    watchBytes(tag, m_network.get(request));
+    request.setRawHeader("Accept", "image/*,video/*,audio/*");
+    watchBytes(tag, m_network.get(request), maxBytes);
 }
 
 void ApiClient::postJson(const QString& tag, const QString& path, const QJsonObject& body, int timeoutMs) {
@@ -144,16 +145,25 @@ void ApiClient::watchJson(const QString& tag, QNetworkReply* reply) {
     });
 }
 
-void ApiClient::watchBytes(const QString& tag, QNetworkReply* reply) {
+void ApiClient::watchBytes(const QString& tag, QNetworkReply* reply, qint64 maxBytes) {
     const quint64 generation = m_endpointGeneration;
-    connect(reply, &QNetworkReply::finished, this, [this, tag, reply, generation] {
+    auto collected = std::make_shared<QByteArray>();
+    if (maxBytes > 0) {
+        reply->setReadBufferSize(64 * 1024);
+        connect(reply, &QIODevice::readyRead, this, [reply, collected, maxBytes] {
+            collected->append(reply->read(maxBytes - collected->size() + 1));
+            if (collected->size() > maxBytes) reply->abort();
+        });
+    }
+    connect(reply, &QNetworkReply::finished, this, [this, tag, reply, generation, collected, maxBytes] {
         if (generation != m_endpointGeneration) {
             reply->deleteLater();
             return;
         }
-        const QByteArray body = reply->readAll();
+        const QByteArray body = maxBytes > 0 ? *collected : reply->readAll();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300) {
+        if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300 ||
+            (maxBytes > 0 && body.size() > maxBytes)) {
             emit requestFailed(tag, reply->errorString(), status);
         } else {
             emit bytesReceived(tag, body, reply->rawHeader("Content-Type"));

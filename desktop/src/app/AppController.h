@@ -536,6 +536,7 @@ class AppController : public QObject {
     QHash<QString, quint64> m_mediaGenerations;
     QHash<QString, QVariantMap> m_mediaListRequests;
     QHash<QString, QVariantMap> m_mediaContentRequests;
+    QSet<QString> m_mediaOpenRequests;
     QHash<QString, QVariantMap> m_pendingUploads;
     QVariantList m_attentionItems;
     QVariantList m_backgroundJobs;

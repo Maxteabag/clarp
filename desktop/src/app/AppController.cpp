@@ -20,6 +20,7 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QMimeDatabase>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QUrlQuery>
@@ -160,6 +161,11 @@ AppController::AppController(QObject* parent)
     connect(&m_api, &ApiClient::jsonReceived, this, &AppController::handleJson);
     m_toolNarrator.setApiClient(&m_api);
     connect(&m_api, &ApiClient::bytesReceived, this, &AppController::handleBytes);
+    // Invalidate even if the user leaves and returns before a download finishes.
+    const auto cancelMediaOpen = [this] { m_mediaOpenRequests.clear(); };
+    connect(this, &AppController::baseUrlChanged, this, cancelMediaOpen);
+    connect(this, &AppController::selectedSessionChanged, this, cancelMediaOpen);
+    connect(&m_panes, &PaneTreeModel::activePaneChanged, this, cancelMediaOpen);
     connect(&m_api, &ApiClient::requestFailed, this, &AppController::handleRequestFailure);
     connect(&m_credentials, &CredentialStore::lookupFinished, this,
             [this](const QString& serverUrl, const QString& token) {
@@ -535,6 +541,27 @@ bool AppController::openLocalReport(const QString& link, const QString& originat
 
 bool AppController::openExternalLink(const QString& link, const QString& originatingHost) {
     const QString target = link.trimmed();
+    // Fetch through the native authenticated client; external handlers receive
+    // only a private local copy, never a Host URL or credential.
+    static const QRegularExpression mediaRoute(
+        QStringLiteral(R"(\A/media/[A-Za-z0-9_-]{1,180}\z)"));
+    if (mediaRoute.match(target).hasMatch()) {
+        if (originatingHost.isEmpty() || normalizedBaseUrl(originatingHost) != m_baseUrl) {
+            setErrorMessage(QStringLiteral("Media links require the originating Host to remain selected"));
+            return false;
+        }
+        const QUrl url = m_api.resolve(target);
+        if ((url.scheme() != QStringLiteral("http") && url.scheme() != QStringLiteral("https")) ||
+            !url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty()) {
+            setErrorMessage(QStringLiteral("Media links require a valid web Host"));
+            return false;
+        }
+        const QString tag = QStringLiteral("media-open:") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+        m_mediaOpenRequests.insert(tag);
+        setErrorMessage({});
+        m_api.getBytes(tag, target, 128 * 1024 * 1024);
+        return true; // Download accepted, not yet presented.
+    }
     if (target.startsWith('/') || QUrl(target).scheme() == QStringLiteral("file"))
         return openLocalReport(target, originatingHost);
     if (!clarp::isOpenableLink(target)) {
@@ -3133,6 +3160,40 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
 
 void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
                                 const QByteArray& contentType) {
+    if (tag.startsWith(QStringLiteral("media-open:"))) {
+        if (!m_mediaOpenRequests.remove(tag)) return;
+        const QByteArray mime = contentType.split(';').first().trimmed().toLower();
+        // Explicit passive media formats only; never turn Host HTML/SVG/script
+        // into a local document with filesystem privileges.
+        static const QHash<QByteArray, QString> extensions{
+            {"video/mp4", "mp4"}, {"video/webm", "webm"},
+            {"audio/mpeg", "mp3"}, {"audio/mp4", "m4a"}, {"audio/ogg", "ogg"},
+            {"audio/wav", "wav"}, {"image/png", "png"}, {"image/jpeg", "jpg"},
+            {"image/gif", "gif"}, {"image/webp", "webp"}};
+        const QString extension = extensions.value(mime);
+        const QString expectedMime = mime == "audio/wav" ? QStringLiteral("audio/x-wav")
+                                                          : QString::fromLatin1(mime);
+        if (extension.isEmpty() || bytes.isEmpty() || bytes.size() > 128 * 1024 * 1024 ||
+            !QMimeDatabase().mimeTypeForData(bytes).inherits(expectedMime)) {
+            setErrorMessage(QStringLiteral("Media is empty, too large, or not a supported image, audio or video format"));
+            return;
+        }
+        if (!m_mediaDirectory.isValid()) {
+            setErrorMessage(QStringLiteral("Unable to cache media locally"));
+            return;
+        }
+        const QString path = QDir(m_mediaDirectory.path()).filePath(
+            QUuid::createUuid().toString(QUuid::WithoutBraces) + u'.' + extension);
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly) ||
+            !file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner) ||
+            file.write(bytes) != bytes.size() || !file.commit()) {
+            setErrorMessage(QStringLiteral("Unable to cache media locally"));
+            return;
+        }
+        openBrowserUrl(QUrl::fromLocalFile(path));
+        return;
+    }
     if (tag.startsWith(QStringLiteral("media-content:"))) {
         const QVariantMap request = m_mediaContentRequests.take(tag);
         const QString assetId = request.value(QStringLiteral("asset_id")).toString();
@@ -3276,6 +3337,11 @@ void AppController::handleRequestFailure(const QString& tag, const QString& mess
     }
     if (tag.startsWith(QStringLiteral("media-list:"))) {
         m_mediaListRequests.remove(tag);
+        return;
+    }
+    if (tag.startsWith(QStringLiteral("media-open:"))) {
+        if (m_mediaOpenRequests.remove(tag))
+            setErrorMessage(QStringLiteral("Unable to download media (HTTP %1)").arg(statusCode));
         return;
     }
     if (tag.startsWith(QStringLiteral("media-content:"))) {
