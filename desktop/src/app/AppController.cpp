@@ -95,7 +95,7 @@ QString sharedFilesystemSettingsKey(const QString& baseUrl) {
 } // namespace
 
 AppController::AppController(QObject* parent)
-    : QObject(parent), m_sse(this), m_credentials(this), m_audio(this), m_toolNarrator(this), m_agents(this),
+    : QObject(parent), m_api(this), m_sse(this), m_credentials(this), m_audio(this), m_toolNarrator(this), m_agents(this),
       m_archivedAgents(true, this), m_contacts(this), m_panes(this), m_voices(this),
       m_emptyConversation(this), m_conversation(&m_emptyConversation),
       m_composerFocusPane(m_panes.activePaneId()),
