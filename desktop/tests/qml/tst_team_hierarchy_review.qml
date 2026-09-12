@@ -25,6 +25,25 @@ TestCase {
   function loadTeams(){}
  }
  Component { id: factory; TeamsPanel { controller:stub; width:900;height:520 } }
+ function test_groupingAndFlat(){
+  const panel=createTemporaryObject(factory,testCase);
+  compare(panel.orderedTeams().map(t=>t.team_id).join(","),"root,visual,security,audit");
+  compare(panel.orderedTeams()[3].treeDepth,2);
+  const toggle=findChild(panel,"teamHierarchyToggle");
+  mouseClick(toggle);
+  compare(panel.hierarchyView,false);
+  compare(panel.orderedTeams()[3].treeDepth,0);
+  stub.selectedTeamId="security";
+  compare(panel.selectedTeam().name,"Security");
+  stub.selectedTeamId="";
+ }
+ function test_malformedCycleRemainsVisible(){
+  const panel=createTemporaryObject(factory,testCase);
+  const previous=stub.teams;
+  stub.teams=[{team_id:"a",parent_team_id:"b",name:"A"},{team_id:"b",parent_team_id:"a",name:"B"}];
+  compare(panel.orderedTeams().length,2);
+  stub.teams=previous;
+ }
  function test_capture(){
   const panel=createTemporaryObject(factory,testCase);
   wait(150);
