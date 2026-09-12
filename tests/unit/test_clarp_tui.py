@@ -196,7 +196,11 @@ def test_installed_tui_preserves_saved_setup_choices(tmp_path, monkeypatch):
 
     async def inspect() -> None:
         app = tui.ClarpAdminApp(first_run=False)
-        app.on_mount = lambda: None
+        # Textual discovers lifecycle handlers on the class; replacing the
+        # instance handler does not reliably suppress these async workers.
+        # This test inspects saved configuration, not live doctor/network state.
+        app.run_admin = lambda *args, **kwargs: None
+        app.load_network_state = lambda: None
         async with app.run_test(size=(120, 50)):
             assert set(app.query_one(
                 "#backends", SelectionList).selected) == {"codex"}

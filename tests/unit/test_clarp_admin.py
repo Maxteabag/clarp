@@ -1024,7 +1024,7 @@ def test_prompt_accepts_explicit_watcher_origin(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         admin, "api_request",
-        lambda method, path, body: captured.update(
+        lambda method, path, body, **_kwargs: captured.update(
             method=method, path=path, body=body) or {"ok": True},
     )
     args = admin.parser().parse_args([

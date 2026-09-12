@@ -227,3 +227,9 @@ target_compile_definitions(clarp-avatar-render-tests PRIVATE CLARP_AVATAR_TEST_Q
 clarp_apply_quality_settings(clarp-avatar-render-tests)
 add_test(NAME clarp-avatar-render COMMAND clarp-avatar-render-tests)
 set_tests_properties(clarp-avatar-render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_FORCE_STDERR_LOGGING=1;QT_IM_MODULE=compose")
+# Native component contract: use the actual model, isolated temporary settings.
+add_executable(clarp-pane-contract ../research/component/panes.cpp ../src/models/PaneTreeModel.cpp ../src/models/PaneTreeModel.h)
+target_include_directories(clarp-pane-contract PRIVATE ../src)
+target_link_libraries(clarp-pane-contract PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+clarp_apply_quality_settings(clarp-pane-contract)
+add_test(NAME clarp-desktop-pane-contract COMMAND clarp-pane-contract)
