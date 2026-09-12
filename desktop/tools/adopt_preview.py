@@ -52,7 +52,9 @@ def verify_session(pid, session, host, title, config, namespace):
         raise ValueError('Host is not the source process configured Host')
     token=env.get('CLARP_TOKEN')
     if not token:
-        try: token=tomllib.loads((config/'clarp'/'config.toml').read_text()).get('auth_token')
+        try:
+            token_config=tomllib.loads((config/'clarp'/'config.toml').read_text())
+            token=token_config.get('auth_token') or token_config.get('server',{}).get('auth_token')
         except (OSError,ValueError): pass
     if not token:
         result=subprocess.run(['secret-tool','lookup','application','com.maxteabag.Clarp','server',host],capture_output=True,text=True,timeout=3)
