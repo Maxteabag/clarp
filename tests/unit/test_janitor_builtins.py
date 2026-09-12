@@ -51,7 +51,7 @@ def test_ensure_installs_real_stable_agents_once_and_preserves_existing_agents()
     first = builtins().ensure_builtins(cwd="/tmp")
     assert first == builtins().ensure_builtins(cwd="/other")
     assert agents.get_by_agent_id(sam) == before
-    assert len(agents.list_agents()) == 3
+    assert len(agents.list_agents()) == 5
     assert not first["message-delegator"]["enabled"]
     assert first["tool-explainer"]["enabled"]
     for role, config in first.items():
@@ -113,7 +113,8 @@ def test_jobs_can_overlap_but_two_label_janitors_still_cannot():
         else:
             with pytest.raises(janitors.JanitorError, match="scope"):
                 janitors.set_enabled(session, config["revision"], True)
-    assert all(v["enabled"] for v in janitors.list_janitors() if v["template_id"] != "task-labels")
+    assert all(v["enabled"] for v in janitors.list_janitors() if v["template_id"] in {"message-delegator", "tool-explainer"})
+    assert all(not v["enabled"] for v in janitors.list_janitors() if v["template_id"] in {"heartbeat-decider", "quota-monitor"})
 
 
 @pytest.mark.parametrize("template,trigger", [("task-labels", "routing-requested"), ("message-delegator", "agent-work-completed"), ("tool-explainer", "routing-requested")])
