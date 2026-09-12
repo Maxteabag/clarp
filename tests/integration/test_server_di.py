@@ -2160,7 +2160,7 @@ def test_limited_device_cannot_read_or_stream_oracle(running_server, monkeypatch
         if token == "limited-token" else None))
     headers = {"Authorization": "Bearer limited-token"}
 
-    for path in ("/oracle/status", "/oracle/delegations", "/oracle/realtime"):
+    for path in ("/oracle/status", "/oracle/delegations", "/oracle/realtime", "/oracle/v2"):
         with pytest.raises(urllib.error.HTTPError) as error:
             _get(base + path, headers=headers)
         assert error.value.code == 403
@@ -2172,6 +2172,7 @@ def test_auth_disabled_server_still_rejects_oracle_routes(running_server):
 
     for method, path in (
         ("get", "/oracle/status"),
+        ("get", "/oracle/v2"),
         ("get", "/oracle/delegations"),
         ("post", "/oracle/delegations"),
     ):
@@ -3244,3 +3245,84 @@ def test_launch_directory_lookup_returns_home_without_creating_agents(running_se
     assert status == 200
     assert result['matches'][0]['path'] == result['home']
     assert len(agents_db.list_agents()) == before
+
+
+def test_oracle_v2_route_preserves_full_device_principal(running_server, monkeypatch):
+    from lib import oracle_live
+    base, ctx, _srv = running_server
+    ctx.auth_token = "administrator-token"
+    seen = []
+    def serve(handler):
+        seen.append((handler._request_principal, handler._request_device_scope))
+        handler._send(200, b'{"v2":true}', "application/json")
+    monkeypatch.setattr(oracle_live, "serve", serve)
+    status, body = _get(base + "/oracle/v2", headers={"Authorization": "Bearer administrator-token"})
+    assert status == 200
+    assert seen == [("administrator", "full")]
+
+
+@pytest.mark.parametrize("podcast", [False, True])
+def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch, podcast):
+    import base64
+    import queue
+    import websocket
+    from lib import config, oracle_realtime, artifacts, oracle_live
+    base, ctx, _srv = running_server
+    ctx.auth_token = "administrator-token"
+    cfg = config.load()
+    class KeyConfig:
+        def openai_key(self): return "fixture-key"
+        def __getattr__(self, name): return getattr(cfg, name)
+    monkeypatch.setattr(config, "load", lambda: KeyConfig())
+    class Upstream:
+        def __init__(self): self.events = queue.Queue(); self.sent = []
+        def settimeout(self, value): pass
+        def send(self, raw):
+            event = json.loads(raw); self.sent.append(event)
+            if event["type"] == "session.start":
+                self.events.put(json.dumps({"type":"session.started"}))
+            elif event["type"] == "session.input_audio.append":
+                self.events.put(json.dumps({"type":"session.output_audio.delta","delta":event["audio"]}))
+            elif event["type"] == "session.close":
+                self.events.put(json.dumps({"type":"session.closed","usage":{"seconds":1}}))
+        def recv(self):
+            try: return self.events.get(timeout=1)
+            except queue.Empty: raise websocket.WebSocketTimeoutException()
+        def close(self): self.events.put("")
+    upstream = Upstream()
+    real_connect = websocket.create_connection
+    def connect(url, **kwargs):
+        assert url == "wss://api.openai.com/v1/live/sessions"
+        assert kwargs["suppress_origin"] is True
+        return upstream
+    monkeypatch.setattr(websocket, "create_connection", connect)
+    suffix = ""
+    if podcast:
+        episode = {"revision": "a"*64,
+            "transcript": [{"start": 0, "end": 10, "text": "Prediction hides delay"}],
+            "chapters": [{"start": 0, "end": 10, "title": "Prediction", "source": "The server remains authoritative"}]}
+        monkeypatch.setattr(artifacts, "get", lambda ident: {"type": "audio", "duration_ms": 10000,
+            "payload": {"podcast": episode}} if ident == "episode" else None)
+        monkeypatch.setattr(oracle_live, "AgentTools", lambda *args, **kwargs: pytest.fail("Podcast must not open agent tools"))
+        suffix = "?podcast_artifact=episode&position=5&revision=" + "a"*64
+    client = real_connect(base.replace("http:", "ws:") + "/oracle/v2" + suffix,
+                          header={"Authorization":"Bearer administrator-token"}, timeout=5)
+    try:
+        assert json.loads(client.recv())["type"] == "session.started"
+        client.send(json.dumps({"type":"session.start","session":{"model":"arbitrary"}}))
+        assert json.loads(client.recv())["type"] == "oracle_v2.notice"
+        client.send(json.dumps({"type":"session.input_audio.append","audio":base64.b64encode(b'\x00\x20'*100).decode()}))
+        assert json.loads(client.recv())["type"] == "session.output_audio.delta"
+        client.send(json.dumps({"type":"session.close"}))
+        assert json.loads(client.recv())["type"] == "session.closed"
+    finally:
+        client.close()
+    assert upstream.sent[0]["session"]["model"] == "gpt-live-1"
+    if podcast:
+        assert "server remains authoritative" in json.dumps(upstream.sent[0]["session"])
+        assert "separate explainer" in upstream.sent[0]["session"]["instructions"]
+    assert sum(e["type"] == "session.start" for e in upstream.sent) == 1
+    deadline = time.monotonic()+3
+    while "administrator" in oracle_realtime._ACTIVE_PRINCIPALS and time.monotonic()<deadline:
+        time.sleep(.01)
+    assert "administrator" not in oracle_realtime._ACTIVE_PRINCIPALS
