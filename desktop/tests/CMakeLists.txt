@@ -211,3 +211,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME clarp-desktop-preview-adoption
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_preview_adoption.py)
 endif()
+
+add_executable(clarp-avatar-motion-tests tst_avatar_motion.cpp ../src/app/AvatarMotionClock.h)
+target_include_directories(clarp-avatar-motion-tests PRIVATE ../src)
+target_link_libraries(clarp-avatar-motion-tests PRIVATE Qt6::Gui)
+clarp_apply_quality_settings(clarp-avatar-motion-tests)
+add_test(NAME clarp-avatar-motion COMMAND clarp-avatar-motion-tests)
+
+set_tests_properties(clarp-avatar-motion PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

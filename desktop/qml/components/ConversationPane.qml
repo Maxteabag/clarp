@@ -80,6 +80,14 @@ Rectangle {
                 anchors.rightMargin: 8
                 spacing: 9
 
+                AvatarActivity {
+                    id: headerAvatarActivity
+                    objectName: "avatar-motion-header"
+                    Layout.preferredWidth: 28; Layout.preferredHeight: 28
+                    controller: root.controller; session: root.session
+                    name: root.controller.agentName(root.session)
+                    working: headerAvatarActivity.authoritativeWorking
+                }
                 HeaderContext {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -93,6 +101,7 @@ Rectangle {
                         return root.controller.agentDetails(root.session);
                     }
                     showRuntime: root.session.length > 0 && !root.pairRoom
+                    ActivitySweep { anchors.fill: parent; working: headerAvatarActivity.authoritativeWorking; reducedMotion: headerAvatarActivity.reducedMotion; phase: headerAvatarActivity.phase }
                 }
 
                 TuiToolButton {
