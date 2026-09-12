@@ -12,6 +12,7 @@ TestCase {
 
     QtObject {
         id: stub
+        property QtObject avatarMotion: QtObject { property bool reducedMotion: false }
         property bool timestampsVisible: false
         property bool anonymousAgents: true
         property bool newAgentOnStartup: true
@@ -154,7 +155,7 @@ TestCase {
         const panel = openPanel();
         const first = findChild(panel, "setting-timestamps");
         const second = findChild(panel, "setting-show-when-ready");
-        const third = findChild(panel, "setting-tools");
+        const third = findChild(panel, "setting-reduce-motion");
         verify(first !== null && second !== null && third !== null);
         tryCompare(first, "activeFocus", true);
         second.enabled = false;
