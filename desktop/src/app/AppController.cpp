@@ -209,6 +209,12 @@ AppController::AppController(QObject* parent)
         const QString session = m_panes.activeSession();
         if (!session.isEmpty() && session != m_selectedSession) {
             selectSession(session);
+        } else if (session.isEmpty() && !m_selectedSession.isEmpty()) {
+            m_selectedSession.clear();
+            m_conversation = &m_emptyConversation;
+            emit selectedSessionChanged();
+            emit conversationChanged();
+            refreshSelectedProperties();
         }
         const QString paneId = m_panes.activePaneId();
         if (!paneId.isEmpty()) {
