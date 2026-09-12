@@ -65,12 +65,19 @@ inline void startVoiceViewportSmokeCheck(QGuiApplication& application, QQuickWin
             controller->conversationForSession(current)->applyLog({{"conversation_id", "voice-fixture"}, {"turns", turns}}, clarp::ConversationModel::LoadKind::Replace);
             break;
         }
-        case 1:
+        case 1: {
             if (!transcript) { application.exit(EXIT_FAILURE); timer->stop(); return; }
+            // This fixture injects events through the real SSE consumer but
+            // has no Host. Stop transport retries before measuring: an offline
+            // reconnect banner must not race the reader/voice assertions.
+            auto* sse = controller->findChild<clarp::SseClient*>();
+            if (sse == nullptr) { application.exit(EXIT_FAILURE); timer->stop(); return; }
+            sse->stop();
             controller->clearError(); controller->conversationForSession(current)->setError({});
             QMetaObject::invokeMethod(transcript, "pauseFollowing");
             transcript->setProperty("contentY", transcript->property("originY").toReal() + 900);
             break;
+        }
         case 2: {
             // ListView creates and measures delegates lazily. Establish a stable
             // reader anchor before injecting events; a fixed 150ms delay is not
@@ -99,13 +106,12 @@ inline void startVoiceViewportSmokeCheck(QGuiApplication& application, QQuickWin
                 }
                 --state->step; break;
             }
-            capture("before");
+            state->passed = capture("before") && controller->errorMessage().isEmpty() && state->passed;
             state->passed = inject(other) && state->passed;
             break;
         }
         case 3:
             state->passed = capture("after-other-session-voice-error") && controller->errorMessage().isEmpty() && controller->conversationForSession(current)->voiceError().isEmpty() && !controller->conversationForSession(other)->voiceError().isEmpty() && state->passed;
-            controller->clearError(); controller->conversationForSession(current)->setError({});
             break;
         case 4:
             state->passed = inject(current) && state->passed;
