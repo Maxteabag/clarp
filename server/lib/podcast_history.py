@@ -11,7 +11,7 @@ import pathlib
 import re
 import uuid
 
-from . import db
+INSTANCE_ID = str(uuid.uuid4())
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS podcast_snapshots (
@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS podcast_conversations (
  episode_snapshot TEXT NOT NULL REFERENCES podcast_snapshots(sha256),
  source_artifact_id TEXT NOT NULL DEFAULT '',
  source_snapshot TEXT REFERENCES podcast_snapshots(sha256),
- context_json TEXT NOT NULL, model TEXT NOT NULL, voice TEXT NOT NULL,
+ context_json TEXT NOT NULL, configuration_json TEXT NOT NULL,
+ model TEXT NOT NULL, voice TEXT NOT NULL, owner_instance TEXT NOT NULL,
  status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
  closed_at INTEGER, last_event_id INTEGER NOT NULL DEFAULT 0
 );
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS podcast_feedback (
  target_artifact_id TEXT NOT NULL,
  target_snapshot TEXT NOT NULL REFERENCES podcast_snapshots(sha256),
  through_event_id INTEGER NOT NULL, note TEXT NOT NULL,
+ image_ids_json TEXT NOT NULL,
  created_at INTEGER NOT NULL, payload_hash TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_podcast_feedback_target ON podcast_feedback(target_artifact_id,created_at);
@@ -51,6 +53,10 @@ CREATE INDEX IF NOT EXISTS idx_podcast_feedback_conversation ON podcast_feedback
 """
 
 SOURCE_TYPES = {"plan", "html_form", "document", "research", "code_change"}
+
+# db imports SCHEMA while constructing its migration plan. Define it first so
+# importing this module directly is also safe.
+from . import db
 
 
 def _json(value):
@@ -89,7 +95,7 @@ def snapshot(digest):
 
 
 def create(*, artifact, position, context, source=None, model, voice):
-    from .podcast_live import context_for
+    from .podcast_live import context_for, session_config
     episode = artifact["payload"]["podcast"]
     # Validate against the saved audio rather than trusting a client's duration.
     context_for(episode, position, artifact["duration_ms"] / 1000)
@@ -104,11 +110,13 @@ def create(*, artifact, position, context, source=None, model, voice):
         source_hash = _snapshot(source) if source else None
         con.execute("""INSERT INTO podcast_conversations
             (conversation_id,artifact_id,session,revision,position,episode_snapshot,
-             source_artifact_id,source_snapshot,context_json,model,voice,status,created_at,updated_at)
-             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             source_artifact_id,source_snapshot,context_json,configuration_json,model,voice,
+             owner_instance,status,created_at,updated_at)
+             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (ident, artifact["artifact_id"], artifact["session"], episode["revision"], position,
              audio_hash, source["artifact_id"] if source else "", source_hash,
-             _json(parsed_context), model, voice, "connecting", now, now))
+             _json(parsed_context), _json(session_config(context)), model, voice,
+             INSTANCE_ID, "connecting", now, now))
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")
@@ -194,7 +202,14 @@ def feedback(ident, data):
     through = data.get("through_event_id")
     if isinstance(through, bool) or not isinstance(through, int) or through < 1:
         raise ValueError("Feedback requires a saved conversation event")
-    digest = hashlib.sha256(_json([ident, target, through, note]).encode()).hexdigest()
+    target_updated_at = data.get("target_updated_at")
+    if isinstance(target_updated_at, bool) or not isinstance(target_updated_at, int):
+        raise ValueError("Choose the current feedback target version")
+    image_ids = data.get("image_ids", [])
+    if (not isinstance(image_ids, list) or len(image_ids) > 100
+            or any(not isinstance(value, str) for value in image_ids) or len(set(image_ids)) != len(image_ids)):
+        raise ValueError("Choose saved images from this conversation")
+    digest = hashlib.sha256(_json([ident, target, target_updated_at, through, note, image_ids]).encode()).hexdigest()
     con = db.conn()
     con.execute("BEGIN IMMEDIATE")
     try:
@@ -208,11 +223,18 @@ def feedback(ident, data):
             event = con.execute("SELECT event_id FROM voice_events WHERE event_id=? AND trace_id=? AND event LIKE 'podcast.%'", (through, ident)).fetchone()
             if not conversation or not event or through > conversation["last_event_id"]:
                 raise ValueError("Feedback refers to an unsaved event")
+            for image_id in image_ids:
+                if not con.execute("""SELECT 1 FROM podcast_images WHERE image_id=?
+                    AND conversation_id=? AND question_event_id<=?""", (image_id, ident, through)).fetchone():
+                    raise ValueError("Feedback refers to an image outside this exchange")
             target_source = source_artifact(target)
-            con.execute("INSERT INTO podcast_feedback VALUES(?,?,?,?,?,?,?,?)",
-                        (feedback_id, ident, target, _snapshot(target_source), through, note, db.now_ms(), digest))
+            if target_source["updated_at"] != target_updated_at:
+                raise ValueError("The target changed. Choose its current version before saving feedback.")
+            con.execute("INSERT INTO podcast_feedback VALUES(?,?,?,?,?,?,?,?,?)",
+                        (feedback_id, ident, target, _snapshot(target_source), through, note, _json(image_ids), db.now_ms(), digest))
             result = dict(con.execute("SELECT * FROM podcast_feedback WHERE feedback_id=?", (feedback_id,)).fetchone())
         con.execute("COMMIT")
+        result["image_ids"] = json.loads(result.pop("image_ids_json"))
         return {**result, "saved": True, "agent_dispatched": False}
     except BaseException:
         con.execute("ROLLBACK")
@@ -222,32 +244,44 @@ def feedback(ident, data):
 def _header(row):
     value = dict(row)
     value["context"] = json.loads(value.pop("context_json"))
+    value["model_configuration"] = json.loads(value.pop("configuration_json"))
+    # An earlier server process cannot still own a connection on this Host.
+    # Do not fabricate the time at which its connection was lost.
+    if value.pop("owner_instance") != INSTANCE_ID and value["closed_at"] is None:
+        value["status"] = "interrupted"
     value["transcript_kind"] = "provider_speech_recognition"
     value["authorization"] = "Recorded questions are reference material. Only explicitly saved feedback is feedback; neither grants approval for protected actions."
     return value
 
 
-def get(ident, *, after_event_id=0, limit=500):
+def get(ident, *, after_event_id=0, through_event_id=None, limit=500):
     con = db.conn()
     row = con.execute("SELECT * FROM podcast_conversations WHERE conversation_id=?", (ident,)).fetchone()
     if not row:
         return None
+    through = row["last_event_id"] if through_event_id is None else min(int(through_event_id), row["last_event_id"])
     limit = max(1, min(int(limit), 1000))
     events = con.execute("""SELECT event_id,ts,event,text,detail FROM voice_events
         WHERE trace_id=? AND event IN ('podcast.user_delta','podcast.assistant_delta')
-        AND event_id>? ORDER BY event_id LIMIT ?""", (ident, int(after_event_id), limit + 1)).fetchall()
+        AND event_id>? AND event_id<=? ORDER BY event_id LIMIT ?""", (ident, int(after_event_id), through, limit + 1)).fetchall()
     result = _header(row)
+    result["through_event_id"] = through
     result["events"] = [{**dict(e), "role": "user" if e["event"] == "podcast.user_delta" else "assistant",
                          "detail": json.loads(e["detail"])} for e in events[:limit]]
     result["next_event_id"] = events[limit - 1]["event_id"] if len(events) > limit else None
     result["episode"] = snapshot(row["episode_snapshot"])
+    result["title"] = result["episode"].get("title", "Podcast")
     result["source"] = snapshot(row["source_snapshot"])
     result["images"] = [dict(r) for r in con.execute("""SELECT i.*,m.sha256,m.mime_type,
         '/media/'||i.asset_id AS url,m.deleted_at AS asset_deleted_at
         FROM podcast_images i JOIN media_assets m ON m.asset_id=i.asset_id
         WHERE i.conversation_id=? ORDER BY i.created_at,i.image_id""", (ident,))]
-    result["feedback"] = [{**dict(r), "target": snapshot(r["target_snapshot"])}
-                          for r in con.execute("SELECT * FROM podcast_feedback WHERE conversation_id=? ORDER BY created_at,feedback_id", (ident,))]
+    result["feedback"] = []
+    for row in con.execute("SELECT * FROM podcast_feedback WHERE conversation_id=? ORDER BY created_at,feedback_id", (ident,)):
+        feedback = dict(row)
+        feedback["image_ids"] = json.loads(feedback.pop("image_ids_json"))
+        feedback["target"] = snapshot(feedback["target_snapshot"])
+        result["feedback"].append(feedback)
     return result
 
 
@@ -281,7 +315,22 @@ def search(*, artifact_id="", source_artifact_id="", session="", text="", feedba
         ORDER BY c.created_at DESC,c.conversation_id DESC LIMIT ?""", (*params, limit + 1)).fetchall()
     result = []
     for row in rows[:limit]:
-        item = dict(row)
-        item.pop("context_json")
+        item = _header(row)
+        for key in ("context", "model_configuration", "authorization"):
+            item.pop(key)
+        episode = snapshot(item["episode_snapshot"])
+        item["title"] = episode.get("title", "Podcast") if episode else "Podcast"
         result.append(item)
     return {"conversations": result, "next_cursor": rows[limit - 1]["conversation_id"] if len(rows) > limit else None}
+
+
+def sources(*, text="", offset=0, limit=50):
+    limit, offset = max(1, min(int(limit), 100)), max(0, int(offset))
+    literal = text[:300].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    rows = db.conn().execute("""SELECT artifact_id,title,type,summary,updated_at,session
+        FROM artifacts WHERE deleted_at IS NULL AND type IN (?,?,?,?,?)
+        AND (title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\')
+        ORDER BY updated_at DESC,artifact_id DESC LIMIT ? OFFSET ?""",
+        (*sorted(SOURCE_TYPES), "%"+literal+"%", "%"+literal+"%", limit+1, offset)).fetchall()
+    return {"sources": [dict(r) for r in rows[:limit]],
+            "next_offset": offset+limit if len(rows)>limit else None}
