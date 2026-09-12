@@ -3261,6 +3261,14 @@ void NativeCoreTest::hostMediaLinksPreserveOriginAndSelection() {
 // Run in a private session with loopback socket permission. No real desktop
 // handler is invoked; the file handed to that handler is read and compared.
 void NativeCoreTest::hostMediaAuthenticatedDownload() {
+    const bool hadToken = qEnvironmentVariableIsSet("CLARP_TOKEN");
+    const QByteArray previousToken = qgetenv("CLARP_TOKEN");
+    qputenv("CLARP_TOKEN", ""); // The first request deliberately has no credential.
+    const auto restoreToken = qScopeGuard([&] {
+        if (hadToken) qputenv("CLARP_TOKEN", previousToken);
+        else qunsetenv("CLARP_TOKEN");
+    });
+
     QTcpServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost, 0));
     const QByteArray token("synthetic-fixture-credential");
