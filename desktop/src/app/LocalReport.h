@@ -19,7 +19,10 @@ inline QUrl localReportUrl(const QString& link) {
     const QString canonical = supplied.canonicalFilePath();
     if (canonical.isEmpty()) return {};
     const QFileInfo file(canonical);
-    if (!file.isFile() || !file.isReadable() || file.isExecutable()) return {};
+    // A privileged process may report a mode-000 file as readable. Respect
+    // the file's explicit read bits as well as effective access permission.
+    const auto readBits = QFileDevice::ReadOwner | QFileDevice::ReadGroup | QFileDevice::ReadOther;
+    if (!file.isFile() || !(file.permissions() & readBits) || !file.isReadable() || file.isExecutable()) return {};
     static const QSet<QString> extensions{"html", "htm", "pdf", "txt", "md", "csv", "log",
                                           "json", "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"};
     if (!extensions.contains(file.suffix().toLower())) return {};
