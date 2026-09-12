@@ -55,7 +55,7 @@ import sqlite3
 db = sqlite3.connect("/data/clarp/state.sqlite")
 rows = db.execute("""SELECT b.role,a.is_janitor FROM janitor_builtins b
     JOIN agents a ON a.agent_id=b.agent_id""").fetchall()
-assert set(rows) == {("message-delegator",1),("tool-explainer",1)}, rows
+assert set(rows) == {("message-delegator",1),("tool-explainer",1),("audio-bookkeeper",1),("heartbeat-decider",1),("quota-monitor",1)}, rows
 assert db.execute("SELECT count(*) FROM agents WHERE is_janitor=0").fetchone()[0] == 0
 assert db.execute("SELECT count(*) FROM runtimes").fetchone()[0] == 0
 '

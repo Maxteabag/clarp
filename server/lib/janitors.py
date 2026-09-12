@@ -76,6 +76,12 @@ def templates() -> list[dict]:
                   "min": 250, "max": 60000, "step": 250},
                  {"key": "voice_id", "label": "Routing voice", "type": "string",
                   "default": "79f8b5fb-2cc8-479a-80df-29f7a7cf1a3e"}]},
+            {"id": "audio-bookkeeper", "name": "Audio bookkeeper",
+             "description": "Record producer and client-reported audio lifecycle facts deterministically; no model or primary-agent skill.",
+             "recommended_backend": "codex", "recommended_model": None, "recommended_effort": None,
+             "allowed_effects": ["audio_lifecycle_receipt"], "creatable": True,
+             "supported_trigger_ids": ["audio-lifecycle-observed"], "default_trigger_id": "audio-lifecycle-observed",
+             "supported_providers": ["codex"], "options": []},
             {"id": "tool-explainer", "name": "Tool explainer",
              "description": "Explain requested tool activity using bounded read-only input.",
              "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
@@ -292,6 +298,10 @@ def _save_attachments(c, agent_id: str, values: list[dict], now: int):
 
 
 def _model(agent: dict, model, effort, *, provider=None):
+    if provider == "local":
+        if model not in (None, "") or effort not in (None, ""):
+            raise JanitorError("Deterministic bookkeeping does not use a model or reasoning effort")
+        return
     if model is not None and (not isinstance(model, str) or len(model) > 160 or not backends.is_valid_model(agent["backend"], model)):
         raise JanitorError("Invalid model for this agent")
     efforts = ("minimal", "low", "medium", "high") if provider == "openai" else backends.valid_efforts(agent["backend"])
@@ -300,6 +310,10 @@ def _model(agent: dict, model, effort, *, provider=None):
 
 
 def _execution(template_id: str, value, backend: str) -> dict:
+    if template_id == "audio-bookkeeper":
+        if value is not None and (not isinstance(value, dict) or set(value) - {"executor", "provider"}):
+            raise JanitorError("Invalid deterministic execution configuration")
+        return {"executor": "deterministic", "provider": "local"}
     if template_id == "task-labels":
         if value not in ({}, None):
             raise JanitorError("Task labels use the managed agent executor")

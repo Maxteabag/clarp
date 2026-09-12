@@ -5684,6 +5684,8 @@ def build_server(ctx: ServerContext, port: int,
         return {"ok": True, "queued": result.queued}
 
     def _janitor_after_tick():
+        from lib.audio_bookkeeper import drain as drain_audio_bookkeeping
+        drain_audio_bookkeeping()
         if janitor_attention.reconcile():
             ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER,
                                   "kind": "janitor-attention"})
