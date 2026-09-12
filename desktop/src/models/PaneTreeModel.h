@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QMap>
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
@@ -20,6 +21,10 @@ class PaneTreeModel : public QObject {
     Q_PROPERTY(QString activePaneId READ activePaneId NOTIFY activePaneChanged)
     Q_PROPERTY(QString activeSession READ activeSession NOTIFY activePaneChanged)
     Q_PROPERTY(QString zoomedPaneId READ zoomedPaneId NOTIFY treeChanged)
+    Q_PROPERTY(QVariantList viewLayout READ viewLayout NOTIFY treeChanged)
+    Q_PROPERTY(QVariantList workspaces READ workspaces NOTIFY treeChanged)
+    Q_PROPERTY(QString activeWorkspace READ activeWorkspace NOTIFY treeChanged)
+    Q_PROPERTY(QString workspaceSaveWarning READ workspaceSaveWarning NOTIFY workspaceSaveWarningChanged)
     Q_PROPERTY(int paneCount READ paneCount NOTIFY treeChanged)
 
   public:
@@ -35,6 +40,16 @@ class PaneTreeModel : public QObject {
     [[nodiscard]] QString zoomedPaneId() const;
     [[nodiscard]] int paneCount() const;
 
+    [[nodiscard]] QVariantList viewLayout() const;
+    [[nodiscard]] QVariantList workspaces() const;
+    [[nodiscard]] QString activeWorkspace() const { return m_activeWorkspace; }
+    [[nodiscard]] QString workspaceSaveWarning() const { return m_workspaceSaveWarning; }
+    Q_INVOKABLE void saveWorkspaceLayoutInstead();
+    Q_INVOKABLE void createWorkspace(const QString& name);
+    Q_INVOKABLE void switchWorkspace(const QString& id);
+    Q_INVOKABLE void moveActiveToWorkspace(const QString& id);
+    Q_INVOKABLE [[nodiscard]] QVariantMap saveState() const;
+    Q_INVOKABLE bool loadState(const QVariantMap& state);
     Q_INVOKABLE void setActiveSession(const QString& session);
     Q_INVOKABLE void setPaneSession(const QString& paneId, const QString& session);
     Q_INVOKABLE void splitActive(const QString& direction, const QString& session = {});
@@ -47,6 +62,7 @@ class PaneTreeModel : public QObject {
     Q_INVOKABLE void equalize();
 
   signals:
+    void workspaceSaveWarningChanged();
     void treeChanged();
     void activePaneChanged();
 
@@ -86,7 +102,15 @@ class PaneTreeModel : public QObject {
     QString m_activePaneId;
     QString m_zoomedPaneId;
     quint64 m_nextId = 0;
+    QByteArray m_lastCollection;
+    QString m_workspaceSaveWarning;
+    QString m_recoveryId;
+    bool m_forceWorkspaceSave = false;
     bool m_persistenceEnabled = false;
+    QString m_activeWorkspace = QStringLiteral("workspace-1");
+    QMap<QString, QVariantMap> m_workspaceStates;
+    QMap<QString, QString> m_workspaceNames{{QStringLiteral("workspace-1"), QStringLiteral("Main")}};
+    void persistWorkspaces();
 };
 
 } // namespace clarp

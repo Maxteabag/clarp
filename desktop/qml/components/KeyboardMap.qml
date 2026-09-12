@@ -1,9 +1,33 @@
 import QtQuick
+import QtCore
 
 // Child bindings override ancestors by action. A blocking state has no parent.
 // Both Shortcut dispatch and footer hints consume the same resolved bindings.
 QtObject {
     id: root
+    property QtObject overrideStore: Settings {id:store;location:StandardPaths.writableLocation(StandardPaths.AppConfigLocation)+"/keymap.ini";category:"keymap";property string encoded:"{}"}
+    property var overrides: {try{return JSON.parse(store.encoded);}catch(e){return {};}}
+    property string error: ""
+    readonly property var editableActions: ["switcher","sidebar","split-right","split-down","zoom","balance","next-workspace"]
+    function exportBindings(){return JSON.stringify({version:1,bindings:overrides},null,2);}
+    function resetBindings(){store.encoded="{}";error="";}
+    function importBindings(text){
+        try {
+            const value=JSON.parse(text);
+            if(!value || typeof value!=="object" || Array.isArray(value) || value.version!==1 || !value.bindings || typeof value.bindings!=="object" || Array.isArray(value.bindings) || Object.keys(value).some(k=>!["version","bindings"].includes(k)))throw Error("Unsupported keymap");
+            const next=value.bindings;
+            for(const action of Object.keys(next)) {
+                if(!editableActions.includes(action)||typeof next[action]!=="string"||!/^Ctrl\+(Alt\+|Shift\+)?[A-Z0-9,]$/.test(next[action]))throw Error("Use a supported action and one Ctrl chord");
+                if(["Ctrl+A","Ctrl+C","Ctrl+V","Ctrl+X","Ctrl+Z","Ctrl+Y"].includes(next[action]))throw Error("Reserved text editing key");
+            }
+            for(const state of Object.keys(states)) {
+                const seen={};
+                for(const e of resolve(state,next,true))for(const key of e.keys){if(seen[key]&&seen[key]!==e.action)throw Error("Conflict in "+state+": "+key);seen[key]=e.action;}
+            }
+            store.encoded=JSON.stringify(next);error="";return true;
+        }catch(e){error=String(e.message||e);return false;}
+    }
+    function setBinding(action,key){const next=Object.assign({},overrides);if(key.trim())next[action]=key.trim();else delete next[action];return importBindings(JSON.stringify({version:1,bindings:next}));}
     property string contextName: "pane"
     property bool hasAgent: false
     property bool hasRows: false
@@ -17,7 +41,9 @@ QtObject {
     }
     readonly property var states: ({
         root: [],
-        main: [binding("update-preview", ["Ctrl+Alt+U"], "Update", false),
+        main: [binding("edit-keymap", ["Ctrl+Alt+,"], "Key bindings", false),
+            binding("next-workspace", ["Ctrl+Alt+W"], "Next workspace", false),
+            binding("update-preview", ["Ctrl+Alt+U"], "Update", false),
             binding("next-attention", ["Ctrl+J"], "Next attention", true, "attention"),
             binding("change-directory", ["Ctrl+Alt+D"], "Change directory", false),
             binding("switcher", ["Ctrl+K"], "Commands"),
@@ -50,7 +76,7 @@ QtObject {
             binding("balance", ["Ctrl+Alt+="], "Balance panes", false),
             binding("agent-terminal", ["Ctrl+Alt+T"], "Terminal", false, "agent"),
             binding("release-agent", ["Ctrl+Shift+R"], "Release", false, "agent"),
-            binding("stop-agent", ["Ctrl+."], "Stop", false, "agent"),
+            binding("stop-agent", ["Ctrl+.", "Ctrl+C"], "Stop", false, "agent"),
             binding("talk", ["Ctrl+Shift+Space"], "Talk", false, "agent")],
         navigation: [binding("next-attention", ["N", "Ctrl+J"], "Next attention", true, "attention"),
             binding("focus-sidebar", ["E"], "Agents"),
@@ -93,7 +119,7 @@ QtObject {
         return entry.guard === "attention" ? hasAttention : entry.guard === "agent" ? hasAgent : entry.guard === "rows" ? hasRows
             : entry.guard === "send" ? canSend : true;
     }
-    function resolve(state) {
+    function resolve(state, custom=overrides, ignoreGuards=false) {
         let result = [];
         let seen = {};
         let current = state;
@@ -101,7 +127,7 @@ QtObject {
             for (const entry of states[current] || []) {
                 if (seen[entry.action]) continue;
                 seen[entry.action] = true;
-                if (allowed(entry)) result.push(entry);
+                if (ignoreGuards || allowed(entry)) result.push(custom[entry.action] ? Object.assign({},entry,{keys:[custom[entry.action]]}) : entry);
             }
             current = parents[current] || "";
         }

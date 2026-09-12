@@ -27,6 +27,36 @@ TestCase {
         function loadMessageToolDetails(session, id) {}
     }
 
+
+    Rectangle { anchors.fill: parent; color: "#1b191f"; z: -1 }
+    function test_deliveryStates_data() {
+        return [
+            {tag:"sent pair", delivery:"sent", group:true, expected:""},
+            {tag:"sent direct", delivery:"sent", group:false, expected:"Reply to Beacon"},
+            {tag:"pending", delivery:"pending", group:true, expected:"Sending to Beacon"},
+            {tag:"failed", delivery:"failed", group:true, expected:"Not delivered to Beacon"},
+            {tag:"unknown", delivery:"", group:true, expected:"Delivery unknown"}
+        ];
+    }
+    function test_deliveryStates(data) {
+        const row=createTemporaryObject(factory,testCase,{
+            authorRole:"assistant",origin:"agent",body:"Summary",replyToName:"Beacon",
+            groupView:data.group,delivery:data.delivery});
+        compare(row.replyMarkerText,data.expected);
+        compare(findChild(row,"groupReplyMarker").visible,data.group && data.expected.length>0);
+    }
+    function test_capturePairReply() {
+        const row = createTemporaryObject(factory, testCase, {
+            groupView: true, authorRole: "assistant", origin: "agent",
+            body: "The summary is ready for review.", senderName: "Atlas",
+            senderAgentId: "atlas", replyToAgentId: "beacon",
+            replyToName: "Beacon", delivery: "private"});
+        wait(120);
+        const capture = grabImage(testCase);
+        capture.save("/var/tmp/teams-native-pair.png");
+        verify(capture.width > 0);
+    }
+
     Component {
         id: factory
         MessageDelegate {
@@ -81,8 +111,8 @@ TestCase {
         verify(avatar === null || !avatar.visible);
         const marker = findChild(row, "replyMarker");
         verify(marker !== null && marker.visible);
-        verify(marker.text.indexOf("Replying to C++ Junior") >= 0);
-        verify(marker.text.indexOf("private reply") >= 0);
+        verify(marker.text.indexOf("Not sent to C++ Junior") >= 0);
+        verify(marker.text.indexOf("private reply") < 0);
         // The marker never duplicates the quoted text of the answered message.
         verify(marker.text.indexOf("Status: survey done") < 0);
     }
@@ -116,7 +146,7 @@ TestCase {
         compare(findChild(answer, "groupAuthorName").text, "Hugo");
         const groupMarker = findChild(answer, "groupReplyMarker");
         verify(groupMarker.visible);
-        verify(groupMarker.text.indexOf("Replying to C++ Junior") >= 0);
+        verify(groupMarker.text.indexOf("Not sent to C++ Junior") >= 0);
         // In the room view the inline marker is not duplicated.
         const inline = findChild(answer, "replyMarker");
         verify(inline === null || !inline.visible);

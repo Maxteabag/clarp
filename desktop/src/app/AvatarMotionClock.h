@@ -33,9 +33,9 @@ class AvatarMotionClock final : public QObject {
             emit changed();
         });
     }
-    bool ticking() const { return m_timer.isActive(); }
+    [[nodiscard]] bool ticking() const { return m_timer.isActive(); }
     Q_INVOKABLE void observe(QObject* owner, bool visible) {
-        if (!owner)
+        if (owner == nullptr)
             return;
         if (visible) {
             if (!m_observers.contains(owner)) {
@@ -49,12 +49,13 @@ class AvatarMotionClock final : public QObject {
                     });
                 }
             }
-        } else
+        } else {
             m_observers.remove(owner);
+        }
         schedule();
     }
-    quint64 revision() const { return m_revision; }
-    bool reducedMotion() const { return m_reduced; }
+    [[nodiscard]] quint64 revision() const { return m_revision; }
+    [[nodiscard]] bool reducedMotion() const { return m_reduced; }
     void setReducedMotion(bool value) {
         if (value == m_reduced)
             return;
@@ -78,8 +79,8 @@ class AvatarMotionClock final : public QObject {
         ++m_revision;
         emit changed();
     }
-    Q_INVOKABLE bool working(const QString& session) const { return m_epochs.contains(session); }
-    Q_INVOKABLE double phase(const QString& session) const {
+    Q_INVOKABLE [[nodiscard]] bool working(const QString& session) const { return m_epochs.contains(session); }
+    Q_INVOKABLE [[nodiscard]] double phase(const QString& session) const {
         if (m_reduced || !m_foreground || !m_epochs.contains(session))
             return 0;
         return static_cast<double>((m_elapsed.elapsed() - m_epochs.value(session)) % 2400) / 2400.0;
