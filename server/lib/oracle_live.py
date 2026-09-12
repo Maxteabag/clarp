@@ -315,19 +315,23 @@ def serve(handler):
         return _send_http_error(handler, 503, "Oracle v2 needs an OpenAI key on this Host")
     query = parse_qs(urlparse(handler.path).query)
     podcast_context = None
+    podcast_source = None
+    history_id = None
     if "podcast_artifact" in query:
-        from . import artifacts, podcast_live
+        from . import artifacts, podcast_live, podcast_history
         try:
             artifact = artifacts.get(query["podcast_artifact"][0])
             if not artifact or artifact["type"] != "audio":
                 raise ValueError("Podcast artifact not found")
             episode = artifact.get("payload", {}).get("podcast")
+            podcast_source = podcast_history.source_artifact(
+                query.get("source_artifact", [episode.get("source_artifact_id", "")])[0])
             podcast_context = podcast_live.context_for(
                 episode, float(query.get("position", ["0"])[0]),
-                float(artifact.get("duration_ms", 0))/1000)
+                float(artifact.get("duration_ms", 0))/1000, source=podcast_source)
             if query.get("revision", [""])[0] != episode["revision"]:
                 raise ValueError("Podcast audio revision changed; reopen the episode")
-        except (ValueError, TypeError, KeyError):
+        except (ValueError, TypeError, KeyError, AttributeError):
             return _send_http_error(handler, 400, "Invalid podcast artifact, revision or playhead")
     if not claim_connection(principal):
         return _send_http_error(handler, 409, "An Oracle session is already active")
@@ -339,6 +343,11 @@ def serve(handler):
             handler.wfile.write(ws.text_frame(json.dumps(event)))
             handler.wfile.flush()
     try:
+        if podcast_context is not None:
+            # Persist the exact source/configuration before opening paid audio.
+            history_id = podcast_history.create(artifact=artifact,
+                position=float(query.get("position", ["0"])[0]), context=podcast_context,
+                source=podcast_source, model=MODEL, voice=VOICE)
         import websocket
         upstream = websocket.create_connection("wss://api.openai.com/v1/live/sessions",
             header={"Authorization": "Bearer "+key}, suppress_origin=True, timeout=20)
@@ -347,8 +356,14 @@ def serve(handler):
         handler.wfile.flush()
         handler.connection.settimeout(None)
         if podcast_context is not None:
+            import pathlib
+            from .paths import RuntimePaths
+            media_dir = getattr(handler.ctx, "media_dir", None) or RuntimePaths.from_home(pathlib.Path.home()).media_dir
             conversation = podcast_live.PodcastConversation(upstream, downstream, key,
-                podcast_context, images=query.get("images", ["0"])[0] == "1")
+                podcast_context, images=query.get("images", ["0"])[0] == "1",
+                history_id=history_id, media_dir=media_dir)
+            downstream({"type": "podcast.history", "conversation_id": history_id,
+                        "saved": True, "position": float(query.get("position", ["0"])[0])})
         else:
             fallback = query.get("oracle_session", [""])[0][:160]
             tools = AgentTools(handler.ctx, principal, fallback,
@@ -423,4 +438,12 @@ def serve(handler):
                 conversation.journal.close()
         if upstream:
             upstream.close()
+        if history_id:
+            try:
+                podcast_history.finish(history_id,
+                    "failed" if conversation is None else "closed" if conversation.closed.is_set() else "interrupted")
+            except Exception:
+                # A failed terminal write leaves an unconfirmed/interrupted record;
+                # existing transcript commits remain durable.
+                pass
         release_connection(principal)

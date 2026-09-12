@@ -8,6 +8,15 @@ description: Register, check, finish, and cancel durable Clarp background jobs. 
 Use the installed helper at
 `clarp-agent-bg`.
 
+```sh
+clarp-agent-bg SESSION job-upsert STABLE_ID KIND "Job title"
+clarp-agent-bg SESSION job-heartbeat RETURNED_HANDLE
+clarp-agent-bg SESSION job-active RETURNED_HANDLE
+```
+
+`KIND` is required (for example `implementation` or `research`). Reuse the
+generation-specific handle printed by `job-upsert` in subsequent operations.
+
 Register one stable job id per independently cancellable target. Check
 the generation-specific handle printed by `job-upsert` with `job-active`
 before delivery or another irreversible action, and call `job-heartbeat` at
