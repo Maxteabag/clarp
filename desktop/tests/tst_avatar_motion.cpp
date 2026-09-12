@@ -3,7 +3,7 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QThread>
-#include <cassert>
+#define CHECK(condition) do { if (!(condition)) qFatal("Check failed: %s", #condition); } while (false)
 int main(int argc, char** argv) {
     QGuiApplication app(argc, argv);
     QTemporaryDir config;
@@ -16,27 +16,27 @@ int main(int argc, char** argv) {
     app.applicationStateChanged(Qt::ApplicationActive);
     clock.setReducedMotion(false);
     clock.reconcile({QStringLiteral("A")});
-    assert(!clock.ticking());
+    CHECK(!clock.ticking());
     clock.observe(&observer, true);
-    assert(clock.ticking());
+    CHECK(clock.ticking());
     QThread::msleep(35);
     const auto p = clock.phase(QStringLiteral("A"));
     clock.reconcile({QStringLiteral("A")});
-    assert(clock.phase(QStringLiteral("A")) >= p);
+    CHECK(clock.phase(QStringLiteral("A")) >= p);
     clock.setReducedMotion(true);
-    assert(!clock.ticking());
-    assert(clock.phase(QStringLiteral("A")) == 0);
+    CHECK(!clock.ticking());
+    CHECK(clock.phase(QStringLiteral("A")) == 0);
     clock.setReducedMotion(false);
-    assert(clock.ticking());
+    CHECK(clock.ticking());
     app.applicationStateChanged(Qt::ApplicationInactive);
-    assert(!clock.ticking());
+    CHECK(!clock.ticking());
     app.applicationStateChanged(Qt::ApplicationActive);
-    assert(clock.ticking());
+    CHECK(clock.ticking());
     clock.observe(&observer, false);
-    assert(!clock.ticking());
+    CHECK(!clock.ticking());
     clock.observe(&observer, true);
     clock.reconcile({});
-    assert(!clock.ticking());
-    assert(!clock.working(QStringLiteral("A")));
+    CHECK(!clock.ticking());
+    CHECK(!clock.working(QStringLiteral("A")));
     return 0;
 }
