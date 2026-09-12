@@ -19,10 +19,11 @@ class Adoption(unittest.TestCase):
 
     def test_one_shot_context_and_private_settings(self):
         r={'config_home':'/private/config','host':'http://fixture','session':'exact-session'}
-        env=a.launch_environment(r,{'CLARP_SCREENSHOT_PATH':'old.png','CLARP_RESTORE_SESSION':'wrong','UNRELATED':'keep'})
+        env=a.launch_environment(r,{'CLARP_SCREENSHOT_PATH':'old.png','CLARP_RESTORE_SESSION':'wrong','UNRELATED':'keep','XDG_ACTIVATION_TOKEN':'stale','DESKTOP_STARTUP_ID':'stale','CLARP_INSTANCE_NAME':'old'})
         self.assertEqual(env['CLARP_RESTORE_SESSION'],'exact-session');self.assertEqual(env['CLARP_RESTORE_DESKTOP'],'1')
         self.assertEqual(env['XDG_CONFIG_HOME'],'/private/config');self.assertNotIn('CLARP_SCREENSHOT_PATH',env)
         self.assertEqual(env['UNRELATED'],'keep')
+        for key in ('XDG_ACTIVATION_TOKEN','DESKTOP_STARTUP_ID','CLARP_INSTANCE_NAME'):self.assertNotIn(key,env)
 
     def test_source_title_requires_unique_host_session(self):
         import io,json

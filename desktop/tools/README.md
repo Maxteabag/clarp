@@ -18,8 +18,9 @@ and requires exactly one persona/session matching that window title. Generic or
 duplicate titles fail closed. It rechecks process start time/hash, window identity,
 settings hash and installed binary hash before execution. It rejects changed drafts
 instead of replacing them with an older snapshot. It preserves the source window's
-workspace and requests `noinitialfocus`, but the tested Qt launch still takes
-keyboard focus. Invoke it only when ready to switch to the new window.
+workspace and uses `no_initial_focus on` on Hyprland 0.54. The isolated test
+verifies typing focus remains in the original window, and the adopted window
+can then be focused normally. Activation-token variables are cleared.
 No model, transcript, token or draft content is placed in command arguments or Git.
 
 This preserves persisted data; it cannot recover an old binary's unpersisted
