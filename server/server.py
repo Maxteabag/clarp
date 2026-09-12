@@ -348,6 +348,7 @@ class Handler(BaseHTTPRequestHandler):
         "/task-plan": "_handle_task_plan",
         "/artifacts": "_handle_artifacts_list",
         "/attention": "_handle_attention",
+        "/attention/inbox": "_handle_attention_inbox",
         "/voices": "_handle_voices",
         "/voice-catalog": "_handle_voice_catalog",
         "/voice-preview": "_handle_voice_preview",
@@ -4229,6 +4230,19 @@ class Handler(BaseHTTPRequestHandler):
         self._broadcast_artifact(row)
         return self._send(200, json.dumps({"artifact": row, "changed": changed}).encode(),
                           "application/json")
+
+    def _handle_attention_inbox(self):
+        from urllib.parse import parse_qs, urlparse
+        from lib import attention_index
+        query = parse_qs(urlparse(self.path).query)
+        try:
+            result = attention_index.page(limit=int(query.get("limit", ["100"])[0]),
+                                          cursor=query.get("cursor", [""])[0])
+        except attention_index.StaleCursor as exc:
+            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+        except (ValueError, TypeError):
+            return self._send(400, b'{"error":"invalid attention query"}', "application/json")
+        return self._send(200, json.dumps(result).encode(), "application/json")
 
     def _handle_attention(self):
         from urllib.parse import parse_qs, urlparse
