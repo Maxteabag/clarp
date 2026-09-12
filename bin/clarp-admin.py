@@ -1716,6 +1716,7 @@ def cmd_uninstall(args) -> int:
     # Clarp installs exactly one thing outside its own directories.
     for root, names in ((HOME / ".local/bin", [
             "clarp-admin", "clarp-tui", "clarp-agent-tasks", "clarp-agent-artifacts",
+            "clarp-podcast-history",
             "clarp-media-publish", "clarp-agent-bg", "clarp-message-watch",
             "clarp-github-workflow-artifact"]),):
         for name in names:

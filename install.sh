@@ -117,6 +117,7 @@ cp "$REPO_DIR/scripts/transcription_model_job.py" "$STAGE/scripts/transcription_
 cp "$REPO_DIR/scripts/portrait_generation_job.py" "$STAGE/scripts/portrait_generation_job.py"
 cp "$REPO_DIR/scripts/agent_tasks.py" "$STAGE/scripts/agent_tasks.py"
 cp "$REPO_DIR/scripts/agent_artifacts.py" "$STAGE/scripts/agent_artifacts.py"
+cp "$REPO_DIR/scripts/podcast_history.py" "$STAGE/scripts/podcast_history.py"
 cp "$REPO_DIR/scripts/github_workflow_artifact.py" "$STAGE/scripts/github_workflow_artifact.py"
 cp "$REPO_DIR/scripts/live_console.py" "$STAGE/scripts/live_console.py"
 cp "$REPO_DIR/scripts/leader_decision.py" "$STAGE/scripts/leader_decision.py"
@@ -300,6 +301,7 @@ PY
 backup_external "$BIN/clarp-admin"
 backup_external "$BIN/clarp-agent-tasks"
 backup_external "$BIN/clarp-agent-artifacts"
+backup_external "$BIN/clarp-podcast-history"
 backup_external "$BIN/clarp-media-publish"
 backup_external "$BIN/clarp-agent-bg"
 backup_external "$BIN/clarp-github-workflow-artifact"
@@ -383,6 +385,7 @@ echo ">> installing bin scripts"
 chmod 700 "$SHARE/current/bin/clarp-admin.py" "$SHARE/current/bin/clarp-tui.py"
 chmod 700 "$SHARE/current/scripts/agent_tasks.py" \
           "$SHARE/current/scripts/agent_artifacts.py" \
+          "$SHARE/current/scripts/podcast_history.py" \
           "$SHARE/current/scripts/clarp-media-publish.py" \
           "$SHARE/current/scripts/agent_bg.py" \
           "$SHARE/current/scripts/github_workflow_artifact.py"
@@ -427,6 +430,7 @@ write_python_wrapper clarp-admin bin/clarp-admin.py
 write_python_wrapper clarp-tui bin/clarp-tui.py
 write_python_wrapper clarp-agent-tasks scripts/agent_tasks.py
 write_python_wrapper clarp-agent-artifacts scripts/agent_artifacts.py
+write_python_wrapper clarp-podcast-history scripts/podcast_history.py
 write_python_wrapper clarp-media-publish scripts/clarp-media-publish.py
 write_python_wrapper clarp-agent-bg scripts/agent_bg.py
 write_python_wrapper clarp-github-workflow-artifact scripts/github_workflow_artifact.py
@@ -434,6 +438,7 @@ write_python_wrapper clarp-message-watch skills/clarp-message-watch/scripts/watc
 write_python_wrapper clarp-runtime-service runtime.py
 mkdir -p "$SHARE/bin"
 for _helper in clarp-admin clarp-tui clarp-agent-tasks clarp-agent-artifacts \
+        clarp-podcast-history \
         clarp-media-publish clarp-agent-bg clarp-github-workflow-artifact \
         clarp-message-watch clarp-runtime-service; do
     cp "$BIN/$_helper" "$SHARE/bin/$_helper"
