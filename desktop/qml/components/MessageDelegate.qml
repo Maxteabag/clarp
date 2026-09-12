@@ -62,6 +62,7 @@ Item {
     onForceActivityInlineChanged: Qt.callLater(root.loadInlineDetails)
     onToolDetailsAvailableChanged: Qt.callLater(root.loadInlineDetails)
     onMessageIdChanged: {
+        root.groupedExpanded = false;
         root.activityExpanded = false;
         Qt.callLater(root.loadInlineDetails);
     }
