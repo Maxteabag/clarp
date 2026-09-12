@@ -125,7 +125,8 @@ def launch_environment(receipt, environment):
     for key in list(env):
         if key.startswith('CLARP_SCREENSHOT_'):
             env.pop(key)
-    env.pop('CLARP_INSTANCE_NAME',None)
+    for key in ('CLARP_INSTANCE_NAME','XDG_ACTIVATION_TOKEN','DESKTOP_STARTUP_ID'):
+        env.pop(key,None)
     env.update(XDG_CONFIG_HOME=receipt['config_home'],CLARP_BASE_URL=receipt['host'],
                CLARP_RESTORE_DESKTOP='1',CLARP_RESTORE_SESSION=receipt['session'])
     return env
@@ -176,7 +177,7 @@ def main():
         if args.launch:
             validate(receipt)
             command=shlex.join([sys.executable,str(Path(__file__).resolve()),'--execute',str(manifest)])
-            subprocess.run(['hyprctl','dispatch','exec',f"[workspace {receipt['workspace']} silent; noinitialfocus] "+command],check=True,capture_output=True,timeout=3)
+            subprocess.run(['hyprctl','dispatch','exec',f"[workspace {receipt['workspace']} silent; no_initial_focus on] "+command],check=True,capture_output=True,timeout=3)
         print(json.dumps({'manifest':str(manifest),'launched':args.launch,**receipt},indent=2))
         return 0
     except (OSError,ValueError,subprocess.SubprocessError) as error:
