@@ -161,7 +161,7 @@ def test_upgrade_preserves_old_voice_events_and_adds_history(tmp_path, old_versi
     db._migrate(con)
     assert con.execute("SELECT text FROM voice_events WHERE event_id=?",(event,)).fetchone()[0] == "Existing speech"
     assert con.execute("SELECT count(*) FROM podcast_conversations").fetchone()[0] == 0
-    assert con.execute("PRAGMA user_version").fetchone()[0] == 83
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     assert con.execute("SELECT name FROM sqlite_master WHERE name='fixture_existing_voice_index'").fetchone()
 
 

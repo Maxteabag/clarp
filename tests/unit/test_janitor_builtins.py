@@ -51,16 +51,16 @@ def test_ensure_installs_real_stable_agents_once_and_preserves_existing_agents()
     first = builtins().ensure_builtins(cwd="/tmp")
     assert first == builtins().ensure_builtins(cwd="/other")
     assert agents.get_by_agent_id(sam) == before
-    assert len(agents.list_agents()) == 3
+    assert len(agents.list_agents()) == 1 + len(builtins().ROLES)
     assert not first["message-delegator"]["enabled"]
     assert first["tool-explainer"]["enabled"]
     for role, config in first.items():
         identity = agents.get_by_agent_id(config["agent_id"])
         assert identity["is_janitor"] == 1
-        assert identity["model"] == "gpt-5.3-codex-spark"
+        assert identity["model"] == ("" if role == "audio-bookkeeper" else "gpt-5.3-codex-spark")
         assert not identity["heartbeat_enabled"] and not identity["dreaming_enabled"]
         assert config["builtin_role"] == role
-        assert config["execution"] == {"executor": "ephemeral", "provider": "codex"}
+        assert config["execution"] == ({"executor": "deterministic", "provider": "local"} if role == "audio-bookkeeper" else {"executor": "ephemeral", "provider": "codex"})
         assert len(config["supported_trigger_ids"]) == 1
         assert not config["capabilities"]["can_release"]
         assert not agents.interaction_capabilities(identity)["can_chat"]
