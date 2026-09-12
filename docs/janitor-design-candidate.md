@@ -2,10 +2,10 @@
 
 This is an opt-in candidate, not a deployed feature. Authenticated Host routes:
 
-- `GET /janitors/design-policy`: current revision and defaults.
-- `POST /janitors/design-policy`: `{expected_revision, configuration}`; atomic compare-and-swap. Supports `heartbeat_gate`, quota threshold/TTL and an ordered model chain. Existing explicit Janitor model configuration wins over global fallback configuration.
+- `GET /janitor-policy`: current revision and defaults.
+- `POST /janitor-policy`: `{expected_revision, configuration}`; atomic compare-and-swap. Supports `heartbeat_gate`, quota threshold/TTL and an ordered model chain. Existing explicit Janitor model configuration wins over global fallback configuration.
 - `GET /janitors/SESSION/effective-model-chain`: effective source and ordered model list.
-- `POST /janitors/quota-observation`: account/window-attributed remaining percent and observed timestamp. It persists one crossing outcome and rejects duplicate/out-of-order observations. Stale/future values remain unknown. This route does not probe providers or send push notifications.
+- `POST /janitor-quota-observation`: account/window-attributed remaining percent and observed timestamp. It persists one crossing outcome and rejects duplicate/out-of-order observations. Stale/future values remain unknown. This route does not probe providers or send push notifications.
 - `GET /janitor-runs/RUN/receipt?target=SESSION`: current Janitor target scope must still permit the receipt. Host authentication is the outer boundary. This candidate does not implement a multiuser ACL system or replace every legacy read route.
 
 When `heartbeat_gate` is enabled, periodic admission requires an actual active durable plan with a pending or in-progress item. Default false preserves existing scheduler behavior. A blocked item, leftover failed job or missing plan does not create a commitment. This conservative first slice does not introduce an atomic dispatch outbox or resume background-job-only commitments; existing restart recovery remains separate.
