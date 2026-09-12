@@ -638,6 +638,8 @@ class NativeCoreTest final : public QObject {
     void previewRestartCapturesContextAndRejectsBusy();
     void restoredSessionDoesNotFallBackToAnotherAgent();
     void localReportsRequireOriginAndSafeReadableFiles();
+    void hostMediaLinksPreserveOriginAndSelection();
+    void hostMediaAuthenticatedDownload();
     void leadingDayTracksVisibleHistory();
     void oldActivityGroupsAreLazyAndVisitScoped();
     void consecutiveExplanationsCollapseWithoutChangingTranscript();
@@ -3231,6 +3233,154 @@ void NativeCoreTest::pairConversationRoomsAreReadOnlyProjections() {
     QCOMPARE(controller.selectedSession(), room);
 }
 
+
+void NativeCoreTest::hostMediaLinksPreserveOriginAndSelection() {
+    ReportUrlCapture capture;
+    QDesktopServices::setUrlHandler("file", &capture, "capture");
+    const auto cleanup = qScopeGuard([] { QDesktopServices::unsetUrlHandler("file"); });
+    AppController controller;
+    controller.setBaseUrl(QStringLiteral("https://fixture.invalid/clarp"));
+    const QString origin = controller.baseUrl();
+    const QString session = controller.selectedSession();
+    const QString pane = controller.panes()->activePaneId();
+    controller.setSharedFilesystem(false);
+    for (const QString& invalid : QStringList{
+             "/media/", "/media/../settings", "/media/%2e%2e", "/media/id/extra",
+             "/media/id?token=untrusted", "/media/id#fragment", "//evil.invalid/media/id",
+             "javascript:alert(1)", "data:text/html,bad", "exec:bad"}) {
+        QVERIFY2(!controller.openExternalLink(invalid, origin), qPrintable(invalid));
+    }
+    QVERIFY(!controller.openExternalLink("/media/asset_demo", {}));
+    QVERIFY(!controller.openExternalLink("/media/asset_demo", "https://different.invalid/clarp"));
+    QVERIFY(!controller.openExternalLink("/media/asset_demo", "https://fixture.invalid/other"));
+    QCOMPARE(controller.selectedSession(), session);
+    QCOMPARE(controller.panes()->activePaneId(), pane);
+    QVERIFY(capture.opened.isEmpty());
+}
+
+// Run in a private session with loopback socket permission. No real desktop
+// handler is invoked; the file handed to that handler is read and compared.
+void NativeCoreTest::hostMediaAuthenticatedDownload() {
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    const QByteArray token("synthetic-fixture-credential");
+    const QByteArray payload = QByteArray::fromHex("00000018667479706d703432000000006d70343269736f6d");
+    QByteArray responseBody = payload;
+    QList<QByteArray> requests;
+    QList<QTcpSocket*> pending;
+    bool defer = false;
+    QByteArray mime("video/mp4");
+    const auto respond = [&](QTcpSocket* socket, bool authorized) {
+        const QByteArray body = authorized ? responseBody : QByteArray("unauthorized");
+        socket->write(QByteArray("HTTP/1.1 ") + (authorized ? "200 OK" : "401 Unauthorized") +
+                      "\r\nContent-Type: " + mime + "\r\nContent-Length: " +
+                      QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+        socket->disconnectFromHost();
+    };
+    connect(&server, &QTcpServer::newConnection, &server, [&] {
+        while (server.hasPendingConnections()) {
+            auto* socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, &server, [&, socket] {
+                QByteArray request = socket->property("request").toByteArray() + socket->readAll();
+                socket->setProperty("request", request);
+                if (!request.contains("\r\n\r\n")) return;
+                disconnect(socket, &QTcpSocket::readyRead, &server, nullptr);
+                // Session restoration also sends control-plane JSON requests.
+                // They are not media downloads and must not pollute this fixture's
+                // authentication counts or deferred-media response queue.
+                if (!request.startsWith("GET /clarp/media/")) {
+                    socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                  "Content-Length: 2\r\nConnection: close\r\n\r\n{}");
+                    socket->disconnectFromHost();
+                    return;
+                }
+                requests.append(request);
+                if (defer) pending.append(socket);
+                else respond(socket, request.contains("Authorization: Bearer " + token + "\r\n"));
+            });
+        }
+    });
+    ReportUrlCapture capture;
+    for (const auto& scheme : {"file", "http", "https"})
+        QDesktopServices::setUrlHandler(scheme, &capture, "capture");
+    const auto cleanup = qScopeGuard([] {
+        for (const auto& scheme : {"file", "http", "https"}) QDesktopServices::unsetUrlHandler(scheme);
+    });
+    AppController controller;
+    const QString origin = QStringLiteral("http://127.0.0.1:%1/clarp").arg(server.serverPort());
+    controller.setBaseUrl(origin);
+    auto* api = controller.findChild<ApiClient*>();
+    QVERIFY(api);
+    api->setEndpoint(QUrl(origin), {});
+    controller.restoreDesktopSession(QStringLiteral("media-origin"));
+    const QString firstPane = controller.panes()->activePaneId();
+    controller.panes()->splitActive(QStringLiteral("horizontal"), QStringLiteral("media-origin"));
+    QSignalSpy failures(api, &ApiClient::requestFailed);
+    QSignalSpy received(api, &ApiClient::bytesReceived);
+    QVERIFY(controller.openExternalLink("/media/asset_demo", origin));
+    QTRY_COMPARE(failures.size(), 1);
+    QCOMPARE(failures.first().at(2).toInt(), 401);
+    QVERIFY(capture.opened.isEmpty());
+    QVERIFY(!controller.errorMessage().isEmpty());
+    api->setEndpoint(QUrl(origin), QString::fromLatin1(token));
+    const QString session = controller.selectedSession();
+    const QString pane = controller.panes()->activePaneId();
+    for (const bool shared : {false, true}) {
+        controller.setSharedFilesystem(shared);
+        QVERIFY(controller.openExternalLink("/media/asset_demo", origin));
+        QTRY_COMPARE(capture.opened.size(), shared ? 2 : 1);
+        const QUrl local = capture.opened.last();
+        QVERIFY(local.isLocalFile());
+        QVERIFY(!local.toEncoded().contains(token));
+        QVERIFY(local.query().isEmpty());
+        QVERIFY(local.toLocalFile().endsWith(".mp4"));
+        QFile file(local.toLocalFile());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), payload);
+        QVERIFY(!(file.permissions() & (QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOwner)));
+        QCOMPARE(controller.selectedSession(), session);
+        QCOMPARE(controller.panes()->activePaneId(), pane);
+        QVERIFY(requests.last().startsWith("GET /clarp/media/asset_demo HTTP/1.1\r\n"));
+        QVERIFY(requests.last().contains("Authorization: Bearer " + token + "\r\n"));
+        QVERIFY(!requests.last().split('\n').first().contains(token));
+    }
+    // Reject active content instead of exporting it as a local document.
+    mime = "text/html";
+    QVERIFY(controller.openExternalLink("/media/asset_demo", origin));
+    QTRY_COMPARE(received.size(), 3);
+    QCOMPARE(capture.opened.size(), 2);
+    QVERIFY(!controller.errorMessage().isEmpty());
+    mime = "video/mp4";
+    responseBody = "<!DOCTYPE html><html><script>alert(1)</script></html>";
+    QVERIFY(controller.openExternalLink("/media/asset_demo", origin));
+    QTRY_COMPARE(received.size(), 4);
+    QCOMPARE(capture.opened.size(), 2);
+    responseBody = payload;
+    api->getBytes(QStringLiteral("limit-probe"), QStringLiteral("/media/asset_demo"), 4);
+    QTRY_COMPARE(failures.size(), 2);
+    QCOMPARE(received.size(), 4);
+    defer = true;
+    for (int change = 0; change < 3; ++change) {
+        const auto count = requests.size();
+        const auto replies = received.size();
+        QVERIFY(controller.openExternalLink("/media/asset_demo", origin));
+        QTRY_COMPARE(requests.size(), count + 1);
+        if (change == 0) {
+            controller.restoreDesktopSession(QStringLiteral("other-session"));
+            controller.restoreDesktopSession(session);
+        } else if (change == 1) {
+            controller.panes()->focusPane(firstPane);
+            controller.panes()->focusPane(pane);
+        } else {
+            controller.setBaseUrl("http://different.invalid");
+            controller.setBaseUrl(origin);
+        }
+        respond(pending.takeFirst(), true);
+        if (change < 2) QTRY_COMPARE(received.size(), replies + 1);
+        else QTest::qWait(100); // ApiClient drops the old endpoint generation.
+        QCOMPARE(capture.opened.size(), 2);
+    }
+}
 
 void NativeCoreTest::localReportsRequireOriginAndSafeReadableFiles() {
     QTemporaryDir dir;

@@ -123,6 +123,23 @@ TestCase {
         stubController.baseUrl = "http://origin.example";
     }
 
+    function test_hostMediaMarkdownUsesCapturedOrigin() {
+        stubController.baseUrl = "http://origin.example";
+        stubController.opened = [];
+        stubController.openedOrigins = [];
+        const message = createTemporaryObject(linkMessage, testCase, {
+            body: "[Watch 27-second demo](/media/asset_demo-123)"
+        });
+        waitForRendering(message);
+        const editor = findChild(message, "messageTextBlock");
+        const spot = firstLinkPoint(editor);
+        verify(spot !== null);
+        compare(spot.link, "/media/asset_demo-123");
+        mouseClick(editor, spot.x, spot.y);
+        tryCompare(stubController, "opened", ["/media/asset_demo-123"]);
+        compare(stubController.openedOrigins, ["http://origin.example"]);
+    }
+
     function test_bareUrlIsHoverableClickableAndCopyable() {
         stubController.opened = [];
         stubController.copied = [];

@@ -20,7 +20,7 @@ class ApiClient final : public QObject {
     [[nodiscard]] QUrl resolve(const QString& path) const;
 
     void get(const QString& tag, const QString& path, const QUrlQuery& query = {});
-    void getBytes(const QString& tag, const QString& path);
+    void getBytes(const QString& tag, const QString& path, qint64 maxBytes = 0);
     void postJson(const QString& tag, const QString& path, const QJsonObject& body, int timeoutMs = 0);
     void putJson(const QString& tag, const QString& path, const QJsonObject& body);
     void deleteResource(const QString& tag, const QString& path);
@@ -36,7 +36,7 @@ class ApiClient final : public QObject {
   private:
     [[nodiscard]] QNetworkRequest requestFor(const QUrl& url) const;
     void watchJson(const QString& tag, QNetworkReply* reply);
-    void watchBytes(const QString& tag, QNetworkReply* reply);
+    void watchBytes(const QString& tag, QNetworkReply* reply, qint64 maxBytes);
 
     QNetworkAccessManager m_network;
     QUrl m_baseUrl;
