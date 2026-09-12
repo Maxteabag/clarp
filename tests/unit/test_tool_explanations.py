@@ -171,17 +171,24 @@ def test_releasing_running_activity_keeps_completed_cache():
         assert result['status']=='ready'
 
 
-def test_failure_can_be_retried_after_cooldown():
+def test_failure_can_be_retried_after_cooldown(monkeypatch):
+    from lib import tool_explanation_cache as cache
+    clock = [cache.now_ms()]
+    monkeypatch.setattr(cache, "now_ms", lambda: clock[0])
     calls = []
     def recover(level, items):
         calls.append(1)
         if len(calls) == 1:
             raise RuntimeError("temporary")
         return {i["id"]: "List the files." for i in items}
-    with ToolExplanations(translate=recover, debounce=.001, failure_ttl=.02) as service:
+    with ToolExplanations(translate=recover, debounce=0, failure_ttl=60) as service:
         assert wait_ready(service)["status"] == "failed"
-        time.sleep(.03)
+        clock[0] += 59_999
+        assert wait_ready(service)["status"] == "failed"
+        assert len(calls) == 1
+        clock[0] += 1
         assert wait_ready(service)["status"] == "ready"
+        assert len(calls) == 2
 
 
 def test_provider_failure_uses_configured_fallback_and_caches_only_final_text(monkeypatch):
