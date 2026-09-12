@@ -64,6 +64,8 @@ Rectangle {
         }
     }
     readonly property var commands: [
+        {kind:"command",label:"Customize key bindings",action:"edit-keymap",key:"Ctrl+Alt+,",group:"view"},
+        {kind:"command",label:"Next workspace",action:"next-workspace",key:"Ctrl+Alt+W",group:"view"},
         { kind: "command", label: "New contact & chat", action: "quick-new-agent", key: "Ctrl+Shift+N", group: "agent" },
         { kind: "command", label: "Rename contact", action: "rename-agent", key: "F2", group: "agent", keywords: "rename name title relabel persona" },
         { kind: "command", label: "Preview versions · update or roll back", action: "preview-versions", key: "", group: "settings", keywords: "previous installs rollback downgrade" },

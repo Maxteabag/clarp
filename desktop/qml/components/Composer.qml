@@ -248,6 +248,7 @@ Rectangle {
                     opacity: root.active ? 1 : 0.58
                     wrapMode: TextArea.Wrap
                     color: "#c7c9dc"
+                    Accessible.name: "Message to " + root.controller.agentName(root.session)
                     placeholderTextColor: "#55586c"
                     font.family: "JetBrains Mono"
                     font.pixelSize: 15
