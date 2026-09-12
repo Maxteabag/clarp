@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import urllib.error
 import urllib.request
 import urllib.parse
 import time
@@ -137,16 +138,43 @@ def server_connection() -> tuple[str, str]:
         server.get("auth_token", "") or "")
 
 
-def api_request(method: str, path: str, body=None):
+# ``/send`` answers 503 while the HTTP server cannot reach the agent runtime
+# (a restart, or a saturated runtime socket).  A scheduled ``prompt --delay``
+# runs as a one-shot unit, so without a retry that continuation is simply
+# lost (2026-09-12: an agent's self-scheduled follow-up died on one 503 and it
+# sat idle).  Six attempts with doubling delays wait roughly 45 seconds.
+SEND_RETRIES = 6
+RETRYABLE_HTTP = {502, 503, 504}
+RETRY_DELAY_MAX = 16.0
+
+
+def api_request(method: str, path: str, body=None, *, retries: int = 0,
+                retry_delay: float = 1.0, sleep=time.sleep):
     base, token = server_connection()
     data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(
-        base + path, data=data, method=method,
-        headers={"Content-Type": "application/json"})
-    if token: request.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(request, timeout=15) as response:
-        raw = response.read()
-    return json.loads(raw) if raw else {}
+    attempt, delay = 0, retry_delay
+    while True:
+        request = urllib.request.Request(
+            base + path, data=data, method=method,
+            headers={"Content-Type": "application/json"})
+        if token: request.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                raw = response.read()
+            return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as exc:
+            if exc.code not in RETRYABLE_HTTP or attempt >= retries:
+                raise
+            reason = f"HTTP {exc.code}"
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as exc:
+            if attempt >= retries:
+                raise
+            reason = str(getattr(exc, "reason", None) or exc)
+        attempt += 1
+        print(f"clarp-admin: {method} {path} failed ({reason}); "
+              f"retry {attempt}/{retries} in {delay:g}s", file=sys.stderr)
+        sleep(delay)
+        delay = min(delay * 2, RETRY_DELAY_MAX)
 
 
 def load_manifest() -> dict:
@@ -1487,6 +1515,9 @@ def cmd_prompt(args) -> int:
     payload = {
         "session": args.to, "text": args.text, "force_session": True,
         "synthesize_audio": False, "hands_free": False, "origin": origin,
+        # Stable across retries so a message the server did admit before the
+        # connection dropped is deduplicated instead of delivered twice.
+        "client_msg_id": f"clarp-admin-{secrets.token_hex(8)}",
     }
     if args.from_session: payload["sender"] = args.from_session
     if args.server:
@@ -1496,7 +1527,7 @@ def cmd_prompt(args) -> int:
         from lib.server_peers import send
         result = send(args.server, payload)
     else:
-        result = api_request("POST", "/send", payload)
+        result = api_request("POST", "/send", payload, retries=SEND_RETRIES)
     print(json.dumps(result, indent=2))
     return 0
 
