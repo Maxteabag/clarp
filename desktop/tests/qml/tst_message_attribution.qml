@@ -27,6 +27,20 @@ TestCase {
         function loadMessageToolDetails(session, id) {}
     }
 
+
+    Rectangle { anchors.fill: parent; color: "#1b191f"; z: -1 }
+    function test_capturePairReply() {
+        const row = createTemporaryObject(factory, testCase, {
+            groupView: true, authorRole: "assistant", origin: "agent",
+            body: "The summary is ready for review.", senderName: "Atlas",
+            senderAgentId: "atlas", replyToAgentId: "beacon",
+            replyToName: "Beacon", delivery: "private"});
+        wait(120);
+        const capture = grabImage(testCase);
+        capture.save("/var/tmp/teams-native-pair.png");
+        verify(capture.width > 0);
+    }
+
     Component {
         id: factory
         MessageDelegate {
