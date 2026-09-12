@@ -94,3 +94,9 @@ def test_excluded_pending_target_does_not_starve_eligible_target(setup):
     clip(other,'/tmp/eligible.mp3')
     assert audio_bookkeeper.drain(limit=2)==2
     assert db.conn().execute('SELECT COUNT(*) FROM audio_bookkeeping_events WHERE agent_id=? AND completed_at IS NULL',(target,)).fetchone()[0]==40
+
+
+def test_deterministic_role_cannot_admit_provider_work(setup):
+    _,target=setup
+    assert janitor_builtins.begin_run('audio-bookkeeper','no-model',target_agent_id=target) is None
+    assert db.conn().execute('SELECT COUNT(*) FROM janitor_demand_claims').fetchone()[0]==0

@@ -20,7 +20,7 @@ def restore_persisted_agents(ctx) -> None:
     agents = load_agents(ctx.agents_path)
     demand_sessions = {row[0] for row in conn().execute("""SELECT a.session
         FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id
-        WHERE a.is_janitor=1 AND json_extract(j.execution_json,'$.executor')='ephemeral'""")}
+        WHERE a.is_janitor=1 AND json_extract(j.execution_json,'$.executor') IN ('ephemeral','deterministic')""")}
     agents = {session: row for session, row in agents.items() if session not in demand_sessions}
     if not agents:
         return
