@@ -59,7 +59,7 @@ _CONN_LOCK = threading.Lock()
 _MIGRATED = False
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 83
+_SCHEMA_VERSION = 85
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1512,6 +1512,13 @@ def _migrate(con: sqlite3.Connection) -> None:
             if version < 83:
                 for statement in _PODCAST_HISTORY_SCHEMA.split(";"):
                     if statement.strip(): con.execute(statement)
+        if version < 84:
+            from .audio_bookkeeper import SCHEMA_STATEMENTS
+            for statement in SCHEMA_STATEMENTS: con.execute(statement)
+        if version < 85:
+            from .janitor_autonomy import SCHEMA
+            for statement in SCHEMA.split(";"):
+                if statement.strip(): con.execute(statement)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -2098,3 +2105,6 @@ def _migrate_to_v76(con: sqlite3.Connection) -> None:
             con.execute(statement)
             statement = ""
     assert not statement.strip()
+
+from .audio_bookkeeper import SCHEMA_STATEMENTS as _AUDIO_BOOKKEEPING_SCHEMA
+_SCHEMA_SQL += ";\n".join(_AUDIO_BOOKKEEPING_SCHEMA) + ";"
