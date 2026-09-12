@@ -74,8 +74,8 @@ def _write():
 def validate(models):
     from . import backends
 
-    if not isinstance(models, list) or len(models) > 4:
-        raise ValueError("fallback models must be an array of at most four models")
+    if not isinstance(models, list):
+        raise ValueError("fallback models must be an array")
     result = []
     for item in models:
         if not isinstance(item, dict) or set(item) - {"backend", "model", "effort"}:
@@ -125,6 +125,14 @@ def get(agent_id):
         .execute("SELECT * FROM agent_model_fallbacks WHERE agent_id=?", (agent_id,))
         .fetchone()
     )
+    from . import agents, janitor_design_policy
+    agent = agents.get_by_agent_id(agent_id)
+    if agent and agent.get("is_janitor"):
+        effective = janitor_design_policy.effective_chain(agent["session"])
+        if effective["source"] == "global":
+            chain = effective["chain"]
+            return {"models":[{"backend":v["provider"],"model":v["model"],"effort":""} for v in chain[1:]],
+                    "revision": "global:"+str(effective["revision"]), "source":"global", "supported_backends":supported_backends(agent_id)}
     return {
         "models": json.loads(row["models_json"]) if row else [],
         "revision": row["revision"] if row else 0,

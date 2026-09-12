@@ -420,31 +420,10 @@ def test_fallback_settings_work_for_normal_agents_and_janitors_without_client_ch
         assert (after["backend"],after["model"],after["effort"])==(before["backend"],before["model"],before["effort"])
 
 
-def test_design_policy_requires_auth_and_persists_ordered_models(host):
-    path='/janitor-policy'
-    assert request(host,path,auth=False)[0]==401
-    status,initial=request(host,path)
-    assert status==200 and initial['revision']==0
-    chain=[{'provider':'codex','model':f'model-{n}'} for n in range(30)]
-    status,saved=request(host,path,{'expected_revision':0,'configuration':{'model_chain':chain,'heartbeat_gate':True}})
-    assert status==200 and saved['model_chain']==chain
-    assert request(host,path)[1]==saved
-    assert request(host,path,{'expected_revision':0,'configuration':{'heartbeat_gate':False}})[0]==409
-    assert request(host,'/janitor-quota-observation',{'provider':'codex','account_id':'fixture','window_id':'5h','remaining_percent':25,'observed_at_ms':db.now_ms()})[1]['notify']
-
-
-def test_design_policy_runtime_receipts(host, tmp_path):
-    """Capture safe actual loopback responses for the implementation review."""
-    from lib import janitor_design_policy
-    unauthorized=request(host,'/janitor-policy',auth=False)[0]
-    before=request(host,'/janitor-policy')[1]
-    chain=[{'provider':'codex','model':'fixture-primary'},{'provider':'codex','model':'fixture-fallback'}]
-    saved=request(host,'/janitor-policy',{'expected_revision':0,'configuration':{'heartbeat_gate':True,'model_chain':chain}})[1]
-    observation={'provider':'codex','account_id':'synthetic-account','window_id':'synthetic-window','remaining_percent':25,'observed_at_ms':db.now_ms()}
-    crossing=request(host,'/janitor-quota-observation',observation)[1]
-    duplicate=request(host,'/janitor-quota-observation',observation)[1]
-    assert unauthorized==401 and saved['revision']==1 and crossing['notify'] and not duplicate['notify']
-    import os
-    output=os.environ.get('JANITOR_SAFE_PROOF_OUTPUT')
-    if output:
-        Path(output).write_text(json.dumps({'method':'Actual isolated Host HTTP responses; synthetic account/model identifiers; no provider calls','unauthorized_status':unauthorized,'before':before,'saved':saved,'threshold_crossing':crossing,'duplicate':duplicate},indent=2))
+def test_global_policy_requires_auth_and_preserves_long_chain(host):
+    assert request(host,"/janitor-policy",auth=False)[0]==401
+    chain=[{"provider":"codex","model":f"model-{n}"}for n in range(30)]
+    status,saved=request(host,"/janitor-policy",{"expected_revision":0,"configuration":{"model_chain":chain}})
+    assert status==200 and saved["model_chain"]==chain
+    assert request(host,"/janitor-policy")[1]==saved
+    assert request(host,"/janitor-policy",{"expected_revision":0,"configuration":{"model_chain":chain}})[0]==409

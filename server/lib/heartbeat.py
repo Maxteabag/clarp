@@ -506,9 +506,6 @@ def _skip_reason(*, agent: dict, state: _HeartbeatState, now: float) -> str:
         return str(latest_kind)
     if latest_kind == AgentState.INTERRUPTED and _is_user_stopped(latest):
         return str(latest_kind)
-    from .janitor_design_policy import heartbeat_allowed
-    if not heartbeat_allowed(agent_id):
-        return 'no-actionable-commitment'
     if agents_db.is_busy(agent_id):
         return "busy"
     if backends.active_handles(agent.get("backend"), agent_id):
@@ -819,6 +816,10 @@ class HeartbeatScheduler:
             self._thread.join(timeout=timeout)
 
     def run_once(self) -> int:
+        from . import janitor_builtins
+        if settings_store.get_bool("heartbeat.janitor_adopted") or janitor_builtins.resolve("heartbeat-decider"):
+            # The decision Janitor now owns periodic continuity. Restart recovery is separate.
+            return 0
         now = self.now()
         sent = 0
         for agent in pending_heartbeat_agents(now=now):

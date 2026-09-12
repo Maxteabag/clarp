@@ -42,6 +42,14 @@ BACKOFF_BASE_SEC = 1.0
 #   _QUEUED:   agent_id -> list of _TurnSpec waiting to run, in order
 _TURN_LOCK = threading.RLock()
 _CLAUDE_FAILOVER = ClaudeFailover(_TURN_LOCK)
+_CODEX_FAILOVER = ClaudeFailover(_TURN_LOCK)
+
+def account_failover(backend):
+    return _CODEX_FAILOVER if backend == backends.CODEX else _CLAUDE_FAILOVER
+
+def account_selector(backend):
+    return config.load().codex_account_switch_command if backend == backends.CODEX else config.load().claude_account_switch_command
+
 _INFLIGHT: dict[str, str] = {}
 _QUEUED: dict[str, list] = {}
 _CLAIMED_AT: dict[str, float] = {}
@@ -83,6 +91,7 @@ def runtime_status() -> dict[str, Any]:
             },
             "compactions": compaction.active_sessions(),
             "claude_account_recovery": _CLAUDE_FAILOVER.status(),
+            "codex_account_recovery": _CODEX_FAILOVER.status(),
         }
 
 
@@ -170,6 +179,13 @@ def _resolve_llm(agent: dict, backend: str) -> tuple[str, str]:
     the global [agents] config default, else the CLI's own default ("").
     Effort is validated against what the backend's CLI accepts."""
     cfg = config.load()
+    if agent.get("is_janitor"):
+        from .janitor_design_policy import effective_chain
+        chain = effective_chain(agent["session"])
+        if chain["source"] == "global" and chain["chain"]:
+            primary = chain["chain"][0]
+            if primary["provider"] == backend:
+                return primary["model"], agent.get("effort") or ""
     model = (agent.get("model") or "").strip()
     effort = (agent.get("effort") or "").strip()
     default_model, default_effort = backends.default_model_effort(backend, cfg)
@@ -397,6 +413,10 @@ class TurnDispatchService:
                  unheard_audio_sessions: tuple[str, ...] = (),
                  allow_paused_queue: bool = False,
                  janitor_run_id: str = "") -> DispatchResult:
+        if origin == "heartbeat" and client_msg_id.startswith("janitor-demand-"):
+            from .janitor_autonomy import validate_dispatch
+            if not validate_dispatch(requested_session, client_msg_id):
+                raise DispatchError(409, "Heartbeat decision authority changed")
         runtime = getattr(self.ctx, "runtime_client", None)
         if runtime is not None:
             try:
@@ -565,6 +585,10 @@ class TurnDispatchService:
             database.execute("BEGIN IMMEDIATE")
             try:
                 request_id = spec.client_msg_id or spec.trace_id
+                if spec.origin == "heartbeat" and request_id.startswith("janitor-demand-"):
+                    from .janitor_autonomy import validate_dispatch
+                    if not validate_dispatch(spec.session, request_id):
+                        raise DispatchError(409, "Heartbeat decision authority changed before admission")
                 existing_queue_status = turn_queue.status(request_id)
                 if existing_queue_status:
                     database.execute("COMMIT")
@@ -884,7 +908,7 @@ class TurnDispatchService:
         with _TURN_LOCK:
             if _INFLIGHT.get(agent_id) != spec.trace_id:
                 return  # not the current turn — already drained / superseded
-            _CLAUDE_FAILOVER.discard(agent_id, spec.trace_id)
+            account_failover(spec.backend).discard(agent_id, spec.trace_id)
             queue = _QUEUED.get(agent_id)
             next_spec = queue.pop(0) if queue else None
             if next_spec is None:
@@ -961,7 +985,7 @@ class TurnDispatchService:
 
     def _mark_spawned(self, spec: _TurnSpec) -> None:
         with _TURN_LOCK:
-            recovering = _CLAUDE_FAILOVER.attempts.get(spec.agent_id)
+            recovering = account_failover(spec.backend).attempts.get(spec.agent_id)
             if (recovering and recovering.trace_id == spec.trace_id
                     and recovering.state.get("account_recovery")):
                 return
@@ -1117,15 +1141,15 @@ class TurnDispatchService:
                 or self._superseded(spec)):
             return
         bsid = state.get("backend_session_id") or spec.backend_session_id
-        transcript = find_latest_jsonl(
-            bsid, projects_root=self.home / ".claude" / "projects") if bsid else None
+        transcript = (bool(bsid) if spec.backend == backends.CODEX else find_latest_jsonl(
+            bsid, projects_root=self.home / ".claude" / "projects") if bsid else None)
         interrupted = (state.get("spawn_started") or attempt > 1
                        or bool(spec.recovery_text))
         resume_spec = replace(
             spec, backend_session_id=bsid,
             is_new_session=spec.is_new_session and transcript is None,
             recovery_text=(
-                "Clarp recovered from a Claude account usage limit. Continue "
+                f"Clarp recovered from a {spec.backend} account usage limit. Continue "
                 "the unfinished request from the existing conversation. Check "
                 "the results of interrupted operations before retrying them; "
                 "do not repeat work or external actions already completed. "
@@ -1171,16 +1195,15 @@ class TurnDispatchService:
         # A retry of a never-initialised new session must keep --session-id.
         state = {"saw_init": False, "backend_session_id": spec.backend_session_id, "spawn_ready": threading.Event()}
         account_attempt = None
-        if (spec.backend == self.backends.CLAUDE
-                and (config.load().claude_account_switch_command
-                     or _CLAUDE_FAILOVER.recovering)):
+        if (spec.backend in {backends.CLAUDE, backends.CODEX}
+                and (account_selector(spec.backend) or account_failover(spec.backend).recovering)):
             def pause():
                 _CLAIMED_AT[spec.agent_id] = time.monotonic()
                 agents_db.record_state(
                     spec.agent_id, AgentState.THINKING,
                     {"dispatch": spec.backend, "trace_id": spec.trace_id,
                      "account_recovery": "waiting",
-                     "message": "Waiting for a Claude account with available usage"})
+                     "message": f"Waiting for a {spec.backend} account with available usage"})
 
             account_attempt = ClaudeAttempt(
                 agent_id=spec.agent_id, trace_id=spec.trace_id, model=spec.model,
@@ -1188,7 +1211,7 @@ class TurnDispatchService:
                     _INFLIGHT.get(spec.agent_id) == spec.trace_id
                     and not self._superseded(spec)), pause=pause,
                 resume=lambda: self._resume_after_account_switch(spec, attempt, state))
-            if _CLAUDE_FAILOVER.register(account_attempt):
+            if account_failover(spec.backend).register(account_attempt):
                 return
         on_init, on_result, on_error = self._attempt_callbacks(spec, attempt, state)
         def run_if_owned(action) -> bool:
@@ -1426,10 +1449,9 @@ class TurnDispatchService:
         if self._start_model_fallback(spec, state, category, msg):
             return
         if (category == error_classify.USAGE_LIMIT
-                and spec.backend == self.backends.CLAUDE
-                and _CLAUDE_FAILOVER.request(
-                    spec.agent_id, spec.trace_id,
-                    config.load().claude_account_switch_command)):
+                and spec.backend in {backends.CLAUDE,backends.CODEX}
+                and account_failover(spec.backend).request(
+                    spec.agent_id, spec.trace_id, account_selector(spec.backend))):
             eventlog.emit("server", "claudeAccountRecovery", context=spec.context,
                           detail={"reason": "usage_limit"})
             return
@@ -1875,6 +1897,7 @@ def _cancel_fenced_janitor_run(ctx, run: dict, agent: dict, backend_registry) ->
         turn_queue.set_paused(agent_id, queue_was_paused)
         with _TURN_LOCK:
             _CLAUDE_FAILOVER.discard(agent_id, run_id)
+            _CODEX_FAILOVER.discard(agent_id, run_id)
             _record_janitor_cancelled(ctx, agent_id, run["session"], run_id)
     finally:
         complete_stop(ctx, agent_id, snapshot, {run_id}, backend_registry=backend_registry)
@@ -1888,7 +1911,7 @@ def snapshot_stop_state(agent_id: str) -> dict:
             "trace_id": value if value not in {None, _STOPPING_SENTINEL} else "",
             "claimed_at": _CLAIMED_AT.get(agent_id),
             "queued": list(_QUEUED.get(agent_id) or []),
-            "account_recovery_parked": _CLAUDE_FAILOVER.parked(agent_id, value),
+            "account_recovery_parked": (_CLAUDE_FAILOVER.parked(agent_id, value) or _CODEX_FAILOVER.parked(agent_id, value)),
         }
 
 
@@ -1900,7 +1923,7 @@ def begin_stop(agent_id: str) -> tuple[dict, int, bool]:
             "trace_id": value if value not in {None, _STOPPING_SENTINEL} else "",
             "claimed_at": _CLAIMED_AT.get(agent_id),
             "queued": list(_QUEUED.get(agent_id) or []),
-            "account_recovery_parked": _CLAUDE_FAILOVER.parked(agent_id, value),
+            "account_recovery_parked": (_CLAUDE_FAILOVER.parked(agent_id, value) or _CODEX_FAILOVER.parked(agent_id, value)),
         }
         queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
         turn_queue.set_paused(agent_id, True)

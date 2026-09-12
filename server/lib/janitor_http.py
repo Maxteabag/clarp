@@ -10,7 +10,7 @@ from .protocol import SSEType
 
 
 def handles(path: str) -> bool:
-    return (path in {"/janitors", "/janitor-triggers", "/janitor-policy", "/janitor-quota-observation"}
+    return (path in {"/janitors", "/janitor-triggers", "/janitor-policy"}
             or path.startswith("/janitor-triggers/")
             or path.startswith("/janitors/")
             or path.startswith("/janitor-runs/"))
@@ -110,13 +110,9 @@ def handle(handler, method: str) -> None:
             return _send(handler, 200, design.configuration())
         if method == "GET" and len(parts) == 3 and parts[0] == "janitors" and parts[2] == "effective-model-chain":
             return _send(handler, 200, design.effective_chain(parts[1]))
-        if method == "GET" and len(parts) == 3 and parts[0] == "janitor-runs" and parts[2] == "receipt":
-            return _send(handler, 200, design.inspect_receipt(parts[1], query.get("target", [""])[0]))
         if method == "POST" and path == "/janitor-policy":
             body = handler._read_json() or {}
             return _send(handler, 200, design.configure(body.get("configuration"), body.get("expected_revision")))
-        if method == "POST" and path == "/janitor-quota-observation":
-            return _send(handler, 200, design.observe_quota(handler._read_json()))
         if method == "GET":
             if path == "/janitors":
                 from .orchestrator import provider_options
