@@ -1,5 +1,11 @@
 #include "models/ConversationPresentationModel.h"
 #include <QTextDocument>
+#include <QDesktopServices>
+#include <QClipboard>
+#include <QMimeData>
+#include "app/PreviewRelaunch.h"
+#include "app/PreviewVersions.h"
+#include "app/LocalReport.h"
 #include <QStandardItemModel>
 #include "app/AppController.h"
 #include "app/CredentialStore.h"
@@ -37,6 +43,13 @@
 #include <cmath>
 
 using namespace clarp;
+class ReportUrlCapture : public QObject {
+    Q_OBJECT
+public:
+    QList<QUrl> opened;
+    Q_SLOT void capture(const QUrl& url) { opened.append(url); }
+};
+
 
 namespace {
 
@@ -101,7 +114,7 @@ class FakeClarpServer final : public QTcpServer {
     }
 
     void holdNextSnapshot() { m_holdSnapshot = true; }
-    bool hasHeldSnapshot() const { return m_heldSnapshot != nullptr; }
+    [[nodiscard]] bool hasHeldSnapshot() const { return m_heldSnapshot != nullptr; }
     void releaseHeldSnapshot(const QJsonObject& body) {
         if (m_heldSnapshot) { respond(m_heldSnapshot, 200, body); m_heldSnapshot = nullptr; }
     }
@@ -618,6 +631,14 @@ class NativeCoreTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void spawnedLifecycleNeverBecomesTranscriptTool();
+    void voiceErrorsStayInTheirSession();
+    void clipboardImageBecomesAttachmentWithoutSending();
+    void relaunchPreservesHostSessionAndDraft();
+    void previewRestartCapturesContextAndRejectsBusy();
+    void restoredSessionDoesNotFallBackToAnotherAgent();
+    void localReportsRequireOriginAndSafeReadableFiles();
+    void leadingDayTracksVisibleHistory();
     void oldActivityGroupsAreLazyAndVisitScoped();
     void consecutiveExplanationsCollapseWithoutChangingTranscript();
     void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
@@ -643,6 +664,7 @@ class NativeCoreTest final : public QObject {
     void olderHistoryPrependsWithoutReorderingTheTail();
     void growingReplyRejectsStaleRevision();
     void optimisticDeliveryStaysVisibleUntilConfirmed();
+    void emptyStartupWaitsForExplicitChoiceAndRetryTargetsLatestFailure();
     void conversationChangeRequestsReplacement();
     void clipSourcePrecedenceMatchesContract();
     void wavEncodingProducesAValidPcmHeader();
@@ -1098,7 +1120,8 @@ void NativeCoreTest::idleContactStartsFreshWithSavedDefaults() {
 void NativeCoreTest::newAgentWaitsForOwnRosterAndRejectsLateSnapshots() {
     FakeClarpServer server;
     QVERIFY(server.listenLocal());
-    const auto oldBase = qgetenv("CLARP_BASE_URL"), oldToken = qgetenv("CLARP_TOKEN");
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
     const auto restore = qScopeGuard([&] { qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken); });
     qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN", "test-token");
     AppController controller;
@@ -1136,7 +1159,8 @@ void NativeCoreTest::newAgentWaitsForOwnRosterAndRejectsLateSnapshots() {
 
 void NativeCoreTest::fastLaunchOpensWithoutWaitingForFleet() {
     FakeClarpServer server; QVERIFY(server.listenLocal());
-    const auto oldBase=qgetenv("CLARP_BASE_URL"), oldToken=qgetenv("CLARP_TOKEN");
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
     const auto oldLaunch=qApp->property("clarpLaunchMode");
     const auto restore=qScopeGuard([&] { qputenv("CLARP_BASE_URL",oldBase); qputenv("CLARP_TOKEN",oldToken); qApp->setProperty("clarpLaunchMode",oldLaunch); });
     qputenv("CLARP_BASE_URL",server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN","test-token");
@@ -1177,7 +1201,8 @@ void NativeCoreTest::fastLaunchOpensWithoutWaitingForFleet() {
 
 void NativeCoreTest::resumeLaunchOpensExactSessionWithoutFleet() {
     FakeClarpServer server; QVERIFY(server.listenLocal());
-    const auto oldBase=qgetenv("CLARP_BASE_URL"), oldToken=qgetenv("CLARP_TOKEN");
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
     const auto oldLaunch=qApp->property("clarpLaunchMode");
     const auto restore=qScopeGuard([&] { qputenv("CLARP_BASE_URL",oldBase); qputenv("CLARP_TOKEN",oldToken); qApp->setProperty("clarpLaunchMode",oldLaunch); });
     qputenv("CLARP_BASE_URL",server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN","test-token");
@@ -1945,6 +1970,43 @@ void NativeCoreTest::growingReplyRejectsStaleRevision() {
                    ConversationModel::LoadKind::Delta);
 
     QCOMPARE(messageBodies(model), QStringList({QStringLiteral("go"), QStringLiteral("Hello")}));
+}
+
+void NativeCoreTest::emptyStartupWaitsForExplicitChoiceAndRetryTargetsLatestFailure() {
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
+    const QVariant oldEmpty = QCoreApplication::instance()->property("clarpEmptyStartup");
+    const auto restore = qScopeGuard([&] {
+        qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken);
+        QCoreApplication::instance()->setProperty("clarpEmptyStartup", oldEmpty);
+    });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
+    qputenv("CLARP_TOKEN", "test-token");
+    QCoreApplication::instance()->setProperty("clarpEmptyStartup", true);
+    AppController controller;
+    QTRY_COMPARE(controller.agents()->rowCount(), 1);
+    QVERIFY(controller.selectedSession().isEmpty());
+    QVERIFY(controller.panes()->activeSession().isEmpty());
+    QCOMPARE(server.requestCount(QStringLiteral("POST"), QStringLiteral("/select")), 0);
+    controller.selectSession(QStringLiteral("rachel"));
+    QTRY_VERIFY(server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/select")));
+    QCOMPARE(controller.selectedSession(), QStringLiteral("rachel"));
+    auto* model = controller.conversationForSession(QStringLiteral("rachel"));
+    model->addOptimistic(QStringLiteral("older-failure"), QStringLiteral("Earlier failed text"));
+    model->markDeliveryFailed(QStringLiteral("older-failure"));
+    model->addOptimistic(QStringLiteral("latest-failure"), QStringLiteral("Latest failed text"));
+    model->markDeliveryFailed(QStringLiteral("latest-failure"));
+    auto* other = controller.conversationForSession(QStringLiteral("other"));
+    other->addOptimistic(QStringLiteral("other-failure"), QStringLiteral("Other chat text"));
+    other->markDeliveryFailed(QStringLiteral("other-failure"));
+    controller.retryLatestFailedMessage();
+    QTRY_VERIFY(server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/send")));
+    QCOMPARE(server.requestJson(QStringLiteral("POST"), QStringLiteral("/send")).value(QStringLiteral("text")).toString(), QStringLiteral("Latest failed text"));
+    QCOMPARE(server.requestJson(QStringLiteral("POST"), QStringLiteral("/send")).value(QStringLiteral("session")).toString(), QStringLiteral("rachel"));
+    QVERIFY(model->indexOfMessage(QStringLiteral("u-older-failure")) >= 0);
+    QVERIFY(other->indexOfMessage(QStringLiteral("u-other-failure")) >= 0);
 }
 
 void NativeCoreTest::optimisticDeliveryStaysVisibleUntilConfirmed() {
@@ -3150,6 +3212,216 @@ void NativeCoreTest::pairConversationRoomsAreReadOnlyProjections() {
     QCOMPARE(controller.selectedSession(), room);
 }
 
+
+void NativeCoreTest::localReportsRequireOriginAndSafeReadableFiles() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ReportUrlCapture capture;
+    QDesktopServices::setUrlHandler("file", &capture, "capture");
+    const auto cleanup = qScopeGuard([] { QDesktopServices::unsetUrlHandler("file"); });
+    const auto write = [&](const QString& name, const QByteArray& body) {
+        QString path = dir.filePath(name);
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly) || file.write(body) != body.size()) return QString{};
+        file.close();
+        file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        return path;
+    };
+    const QString html = write("report with spaces.html", "<html><body>Report</body></html>");
+    QVERIFY(!html.isEmpty());
+    AppController controller;
+    const QString origin = controller.baseUrl();
+    controller.setSharedFilesystem(false);
+    QVERIFY(!controller.openLocalReport(html, origin));
+    controller.setSharedFilesystem(true);
+    QVERIFY(!controller.openLocalReport(html, "http://different.invalid"));
+    QVERIFY(!controller.openLocalReport(html, {}));
+    QVERIFY(!controller.openLocalReport(dir.filePath("missing.txt"), origin));
+    QVERIFY(!controller.openLocalReport(dir.path(), origin));
+    QVERIFY(!controller.openLocalReport(write("launcher.desktop", "[Desktop Entry]\nExec=bad"), origin));
+    QVERIFY(!controller.openLocalReport(write("hidden.txt", "[Desktop Entry]\nExec=bad"), origin));
+    QVERIFY(!controller.openLocalReport(write("program.txt", "#!/bin/sh\necho bad"), origin));
+    QVERIFY(!controller.openLocalReport(write("unknown.xyz", "plain text"), origin));
+    const QString executable = write("executable.html", "<html>Report</html>");
+    QVERIFY(QFile::setPermissions(executable, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+    QVERIFY(!controller.openLocalReport(executable, origin));
+    const QString unreadable = write("unreadable.txt", "text");
+    QVERIFY(QFile::setPermissions(unreadable, QFileDevice::WriteOwner));
+    QVERIFY(!controller.openLocalReport(unreadable, origin));
+    QVERIFY(!controller.openLocalReport("file://remote/report.html", origin));
+    QVERIFY(!controller.openLocalReport("javascript:alert(1)", origin));
+    QCOMPARE(capture.opened.size(), 0);
+    QVERIFY(controller.openExternalLink(html, origin));
+    QCOMPARE(capture.opened.last(), QUrl::fromLocalFile(QFileInfo(html).canonicalFilePath()));
+    const QString alias = dir.filePath("alias.html");
+    QVERIFY(QFile::link(html, alias));
+    QVERIFY(controller.openLocalReport(QUrl::fromLocalFile(alias).toString(), origin));
+    QCOMPARE(capture.opened.last(), QUrl::fromLocalFile(QFileInfo(html).canonicalFilePath()));
+    for (const auto& pair : QList<QPair<QString,QByteArray>>{{"report.pdf", "%PDF-1.4\n"}, {"report.txt", "plain text"}, {"report.svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"}}) {
+        QVERIFY(controller.openLocalReport(write(pair.first, pair.second), origin));
+    }
+    QVERIFY(!isOpenableLink(html));
+    QVERIFY(!isOpenableLink(QUrl::fromLocalFile(html).toString()));
+    QVERIFY(isOpenableLink("https://example.com/report"));
+    controller.setSharedFilesystem(false);
+}
+
+void NativeCoreTest::leadingDayTracksVisibleHistory() {
+  QStandardItemModel rows; ConversationPresentationModel view;view.setSourceModel(&rows);
+  QSignalSpy changed(&view,&ConversationPresentationModel::leadingDayLabelChanged);
+  auto add=[&](const QString& day,bool prepend=false){auto *r=new QStandardItem;r->setData(day,ConversationModel::DayLabelRole);r->setData("user",ConversationModel::AuthorRole);if(prepend)rows.insertRow(0,r);else rows.appendRow(r);};
+  QCOMPARE(view.leadingDayLabel(),QString{}); // empty: no heading
+  add("Today");QCOMPARE(view.leadingDayLabel(),QString("Today"));QVERIFY(changed.count()>0);
+  add("Today");QCOMPARE(view.leadingDayLabel(),QString("Today")); // one current day: suppress initial heading
+  changed.clear();add("Yesterday",true);QCOMPARE(view.leadingDayLabel(),QString("Yesterday"));QVERIFY(changed.count()>0); // prepend exposes useful Today transition
+  QCOMPARE(view.index(1,0).data(ConversationModel::DayLabelRole).toString(),QString("Today")); // roles unchanged
+  rows.removeRow(0);QCOMPARE(view.leadingDayLabel(),QString("Today"));
+  changed.clear();rows.item(0)->setData("Yesterday",ConversationModel::DayLabelRole);QCOMPARE(view.leadingDayLabel(),QString("Yesterday"));QVERIFY(changed.count()>0);
+  rows.clear();QCOMPARE(view.leadingDayLabel(),QString{});
+  add("");add("Today");QCOMPARE(view.leadingDayLabel(),QString("Today")); // pending row without timestamp
+  rows.clear();add("12 June");add("Yesterday");add("Today");QCOMPARE(view.leadingDayLabel(),QString("12 June")); // loaded multi-day history
+  rows.clear();add("Yesterday");QCOMPARE(view.leadingDayLabel(),QString("Yesterday")); // preserve old-day context
+}
+
+
+void NativeCoreTest::clipboardImageBecomesAttachmentWithoutSending() {
+    QVERIFY(QGuiApplication::platformName() == QStringLiteral("offscreen"));
+    auto* clipboard = QGuiApplication::clipboard();
+    const auto cleanup = qScopeGuard([clipboard] { clipboard->clear(); });
+    AppController controller;
+    const QString session = QStringLiteral("paste-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    controller.restoreDesktopSession(session);
+    controller.setSharedFilesystem(true);
+    const QString pane = controller.panes()->activePaneId();
+    controller.setPaneDraft(pane, session, QStringLiteral("Keep this draft"));
+    clipboard->setText(QStringLiteral("plain paste"));
+    QVERIFY(!controller.pasteClipboardImage(pane, session));
+    QImage image(3, 2, QImage::Format_ARGB32);
+    image.fill(QColor(Qt::red));
+    clipboard->setImage(image);
+    QVERIFY(controller.pasteClipboardImage(pane, session));
+    const auto attachments = controller.composerAttachments(pane, session);
+    QCOMPARE(attachments.size(), 1);
+    const auto attachment = attachments.first().toMap();
+    const QString path = attachment.value(QStringLiteral("path")).toString();
+    QCOMPARE(QImage(path), image);
+    QCOMPARE(attachment.value(QStringLiteral("status")).toString(), QStringLiteral("ready"));
+    QCOMPARE(controller.paneDraft(pane, session), QStringLiteral("Keep this draft"));
+    QVERIFY(!controller.sending());
+    QVERIFY(controller.pasteClipboardImage(QStringLiteral("wrong-pane"), session));
+    QCOMPARE(controller.composerAttachments(pane, session).size(), 1);
+    controller.removeComposerAttachment(pane, session, attachment.value(QStringLiteral("id")).toString());
+    QVERIFY(QFile::remove(path));
+    controller.setPaneDraft(pane, session, {});
+    controller.setSharedFilesystem(false);
+}
+
+void NativeCoreTest::relaunchPreservesHostSessionAndDraft() {
+    QProcessEnvironment env;
+    env.insert(QStringLiteral("UNRELATED"), QStringLiteral("retained"));
+    const auto next = previewRelaunchEnvironment(env, QStringLiteral("http://host.example:7682"), QStringLiteral("agent-exact"));
+    QCOMPARE(next.value(QStringLiteral("CLARP_RESTORE_SESSION")), QStringLiteral("agent-exact"));
+    QCOMPARE(next.value(QStringLiteral("CLARP_BASE_URL")), QStringLiteral("http://host.example:7682"));
+    QCOMPARE(next.value(QStringLiteral("CLARP_RESTORE_DESKTOP")), QStringLiteral("1"));
+    QCOMPARE(next.value(QStringLiteral("UNRELATED")), QStringLiteral("retained"));
+    QCOMPARE(previewRelaunchArguments(QStringLiteral("/helper.py"), 123),
+             QStringList({QStringLiteral("/helper.py"), QStringLiteral("--restart-after"), QStringLiteral("123")}));
+    AppController first;
+    first.restoreDesktopSession(QStringLiteral("restore-exact"));
+    const auto pane = first.panes()->activePaneId();
+    first.setPaneDraft(pane, QStringLiteral("restore-exact"), QStringLiteral("unsent draft"));
+    QSettings().sync();
+    AppController nextController;
+    nextController.restoreDesktopSession(QStringLiteral("restore-exact"));
+    QCOMPARE(nextController.selectedSession(), QStringLiteral("restore-exact"));
+    QCOMPARE(nextController.panes()->activeSession(), QStringLiteral("restore-exact"));
+    QCOMPARE(nextController.paneDraft(nextController.panes()->activePaneId(), QStringLiteral("restore-exact")), QStringLiteral("unsent draft"));
+    first.setPaneDraft(pane, QStringLiteral("restore-exact"), {});
+}
+
+
+void NativeCoreTest::previewRestartCapturesContextAndRejectsBusy() {
+    const auto oldPath = qgetenv("CLARP_SCREENSHOT_PATH");
+    const auto oldScenario = qgetenv("CLARP_SCREENSHOT_SCENARIO");
+    const auto restore = qScopeGuard([&] {
+        oldPath.isNull() ? qunsetenv("CLARP_SCREENSHOT_PATH") : qputenv("CLARP_SCREENSHOT_PATH", oldPath);
+        oldScenario.isNull() ? qunsetenv("CLARP_SCREENSHOT_SCENARIO") : qputenv("CLARP_SCREENSHOT_SCENARIO", oldScenario);
+    });
+    qputenv("CLARP_SCREENSHOT_PATH", "/dev/null");
+    qputenv("CLARP_SCREENSHOT_SCENARIO", "preview-versions");
+    PreviewVersions versions;
+    versions.setProperty("selectedHost", "http://origin.example");
+    versions.setProperty("selectedSession", "exact-selected-session");
+    versions.setProperty("restartAllowed", false);
+    versions.selectVersion("new");
+    QVERIFY(versions.restartContext().value("session").toString().isEmpty());
+    QVERIFY(!versions.error().isEmpty());
+    versions.setProperty("restartAllowed", true);
+    versions.selectVersion("new");
+    QCOMPARE(versions.restartContext().value("session").toString(), QString("exact-selected-session"));
+    QCOMPARE(versions.restartContext().value("host").toString(), QString("http://origin.example"));
+    QVERIFY(versions.restartContext().value("arguments").toStringList().contains("--restart-after"));
+}
+void NativeCoreTest::restoredSessionDoesNotFallBackToAnotherAgent() {
+    FakeClarpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
+    const auto restore = qScopeGuard([&] {
+        oldBase.isNull() ? qunsetenv("CLARP_BASE_URL") : qputenv("CLARP_BASE_URL", oldBase);
+        oldToken.isNull() ? qunsetenv("CLARP_TOKEN") : qputenv("CLARP_TOKEN", oldToken);
+    });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN", "fixture-token");
+    AppController controller;
+    controller.restoreDesktopSession("missing-restored-target");
+    QTRY_VERIFY_WITH_TIMEOUT(controller.agents()->rowCount() > 0, 3000);
+    QCOMPARE(controller.selectedSession(), QString("missing-restored-target"));
+    QVERIFY(controller.errorMessage().contains("before updating"));
+    controller.selectSession("rachel");
+    QCOMPARE(controller.selectedSession(), QString("rachel"));
+}
+
+
+void NativeCoreTest::spawnedLifecycleNeverBecomesTranscriptTool() {
+    ConversationModel model;
+    // Reconstructed from the retained event preceding the incident capture.
+    model.applyActivityEvent({{"type", "agent-activity"}, {"kind", "spawned"},
+        {"phase", "spawned"}, {"status", "ok"}, {"action", "started"}, {"summary", "Started"}});
+    QCOMPARE(model.rowCount(), 0);
+    model.applyActivityEvent({{"activity_kind", "spawned"}, {"activity_phase", "spawned"},
+        {"activity_status", "ok"}, {"activity_action", "started"}, {"activity_summary", "Started"}});
+    QCOMPARE(model.rowCount(), 0);
+    model.addOptimistic("real-user", "Start the task session.");
+    QCOMPARE(model.rowCount(), 1); // The literal remains valid user content.
+    model.applyActivityEvent({{"kind", "tool"}, {"phase", "tool"}, {"status", "running"},
+        {"tool", "Bash"}, {"action", "started"}, {"summary", "Run tests"}});
+    QCOMPARE(model.rowCount(), 2); // Real tool activity is not suppressed.
+}
+
 QTEST_MAIN(NativeCoreTest)
 
 #include "tst_native_core.moc"
+
+void NativeCoreTest::voiceErrorsStayInTheirSession() {
+    FakeClarpServer server; QVERIFY(server.listenLocal());
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
+    const auto restore = qScopeGuard([&] { qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken); });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN", "test-token");
+    AppController controller;
+    QTRY_VERIFY(controller.connected());
+    auto* current = controller.conversationForSession("current");
+    auto* other = controller.conversationForSession("other");
+    server.sendEvent({{"type", "tts-error"}, {"session", "other"}, {"message", "Other voice failed"}});
+    QTRY_COMPARE(other->voiceError(), QStringLiteral("Other voice failed"));
+    QVERIFY(current->voiceError().isEmpty()); QVERIFY(controller.errorMessage().isEmpty());
+    server.sendEvent({{"type", "tts-error"}, {"session", "current"}, {"message", "Current voice failed"}});
+    QTRY_COMPARE(current->voiceError(), QStringLiteral("Current voice failed"));
+    QVERIFY(controller.errorMessage().isEmpty()); QVERIFY(current->error().isEmpty());
+    current->setVoiceError({});
+    QCOMPARE(other->voiceError(), QStringLiteral("Other voice failed"));
+    server.sendEvent({{"type", "audio"}, {"session", "other"}});
+    QTRY_VERIFY(other->voiceError().isEmpty());
+    server.sendEvent({{"type", "tts-error"}, {"message", "Unscoped voice failed"}});
+    QTRY_COMPARE(controller.errorMessage(), QStringLiteral("Unscoped voice failed"));
+}
