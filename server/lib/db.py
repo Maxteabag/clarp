@@ -57,7 +57,9 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-_SCHEMA_VERSION = 80
+# Versions 81 and 82 also exist on installed Hosts with additive indexing
+# migrations. History must run when upgrading those Hosts, not only main's v80.
+_SCHEMA_VERSION = 83
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1441,6 +1443,8 @@ from .html_forms import SCHEMA as _HTML_FORMS_SCHEMA
 _SCHEMA_SQL += _HTML_FORMS_SCHEMA
 from .model_fallbacks import SCHEMA as _MODEL_FALLBACK_SCHEMA
 _SCHEMA_SQL += _MODEL_FALLBACK_SCHEMA
+from .podcast_history import SCHEMA as _PODCAST_HISTORY_SCHEMA
+_SCHEMA_SQL += _PODCAST_HISTORY_SCHEMA
 
 
 def _migrate(con: sqlite3.Connection) -> None:
@@ -1505,6 +1509,9 @@ def _migrate(con: sqlite3.Connection) -> None:
                 _migrate_to_v79(con)
             if version < 80:
                 _migrate_to_v80(con)
+            if version < 83:
+                for statement in _PODCAST_HISTORY_SCHEMA.split(";"):
+                    if statement.strip(): con.execute(statement)
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:

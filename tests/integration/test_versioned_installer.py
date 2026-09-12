@@ -98,6 +98,7 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     assert (current / "skills/manifest.json").is_file()
     assert (current / "scripts/agent_tasks.py").is_file()
     assert (current / "scripts/agent_artifacts.py").is_file()
+    assert (current / "scripts/podcast_history.py").is_file()
     assert (current / "scripts/github_workflow_artifact.py").is_file()
     assert (current / "scripts/server_update_job.py").is_file()
     assert (current / "scripts/transcription_model_job.py").is_file()
@@ -117,6 +118,7 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     assert (home / ".config/systemd/user/clarp-runtime.service").is_file()
     for name in (
         "clarp-admin", "clarp-tui", "clarp-agent-tasks", "clarp-agent-artifacts",
+        "clarp-podcast-history",
         "clarp-media-publish", "clarp-agent-bg",
         "clarp-runtime-service",
     ):
