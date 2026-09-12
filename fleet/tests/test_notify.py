@@ -97,3 +97,15 @@ class NotifyTests(unittest.TestCase):
             with patch('fleet.notify.send_notice') as send:
                 self.assertEqual(deliver(self.job(), path)['delivery'], 'unknown')
                 send.assert_not_called()
+
+    def test_background_registration_retries_only_database_contention(self):
+        from fleet.notify import bg
+        locked = subprocess.CompletedProcess([], 1, '', 'sqlite3.OperationalError: database is locked')
+        okay = subprocess.CompletedProcess([], 0, 'bg1:1:owned', '')
+        with patch('fleet.notify.subprocess.run', side_effect=[locked, okay]) as call, patch('fleet.notify.time.sleep'):
+            self.assertEqual(bg('parent', 'job-upsert', 'owned'), 'bg1:1:owned')
+            self.assertEqual(call.call_count, 2)
+        with patch('fleet.notify.subprocess.run', return_value=subprocess.CompletedProcess([], 1, '', '')) as call:
+            with self.assertRaises(subprocess.CalledProcessError):
+                bg('parent', 'job-active', 'bg1:1:cancelled')
+            self.assertEqual(call.call_count, 1)

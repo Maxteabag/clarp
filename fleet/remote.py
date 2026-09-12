@@ -196,7 +196,7 @@ def argv_for(job,directory):
         task=('Work only in this isolated job directory. Do not publish, send external messages, access visible UI, or modify system/user configuration. '
               'Return the requested result and evidence. Write ALL deliverables (report.md, result.json, fix.patch, logs) to the absolute output directory: '+str(out)+'. '
               'This absolute path overrides any ambiguous relative output path in the task.\n\n'+task)
-        return ['codex','exec','--ephemeral','--skip-git-repo-check','--sandbox','workspace-write','--model',job['model'],'-c','model_reasoning_effort='+json.dumps(job['effort']),'--output-last-message',str(out/'answer.md'),task]
+        return ['codex','exec','--ephemeral','--skip-git-repo-check','--sandbox','workspace-write','--add-dir',str(out),'--model',job['model'],'-c','model_reasoning_effort='+json.dumps(job['effort']),'--output-last-message',str(out/'answer.md'),task]
     raise ValueError('Unknown profile')
 
 

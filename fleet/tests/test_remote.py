@@ -34,4 +34,12 @@ class RemoteTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.m.start({**self.req,'broker':'d'*32})
         with self.assertRaises(ValueError):self.m.rpc({'action':'status','broker':'d'*32,'attempt':self.attempt})
 
+    def test_agent_can_write_only_the_explicit_result_directory(self):
+        directory=self.root/'owned';(directory/'source').mkdir(parents=True);(directory/'result').mkdir()
+        (directory/'source/task.md').write_text('Return a report.')
+        argv=self.m.argv_for({'profile':'agent','resources':{'cpu':1},'model':'gpt-5.6-luna','effort':'medium'},directory)
+        self.assertEqual(argv[argv.index('--add-dir')+1],str(directory/'result'))
+        self.assertIn(str(directory/'result'),argv[-1])
+        self.assertEqual(argv[argv.index('--sandbox')+1],'workspace-write')
+
 if __name__=='__main__':unittest.main()
