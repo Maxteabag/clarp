@@ -149,17 +149,20 @@ def test_sources_http_and_full_device_boundary(saved):
     assert podcast_history_http.handle(handler,"GET")[0] == 403
 
 
-def test_v80_upgrade_preserves_old_voice_events_and_adds_history(tmp_path):
+@pytest.mark.parametrize("old_version", [80, 81, 82])
+def test_upgrade_preserves_old_voice_events_and_adds_history(tmp_path, old_version):
     con=db.conn()
     from lib import voice_events
     event=voice_events.record("transcript", text="Existing speech")
     for table in ("podcast_feedback", "podcast_images", "podcast_conversations", "podcast_snapshots"):
         con.execute("DROP TABLE "+table)
-    con.execute("PRAGMA user_version=80")
+    con.execute("CREATE INDEX fixture_existing_voice_index ON voice_events(session)")
+    con.execute(f"PRAGMA user_version={old_version}")
     db._migrate(con)
     assert con.execute("SELECT text FROM voice_events WHERE event_id=?",(event,)).fetchone()[0] == "Existing speech"
     assert con.execute("SELECT count(*) FROM podcast_conversations").fetchone()[0] == 0
-    assert con.execute("PRAGMA user_version").fetchone()[0] == 81
+    assert con.execute("PRAGMA user_version").fetchone()[0] == 83
+    assert con.execute("SELECT name FROM sqlite_master WHERE name='fixture_existing_voice_index'").fetchone()
 
 
 def test_voice_connection_persists_context_before_provider_and_closes(saved, tmp_path, monkeypatch):
