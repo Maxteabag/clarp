@@ -132,7 +132,7 @@ def get(agent_id):
         if effective["source"] == "global":
             chain = effective["chain"]
             return {"models":[{"backend":v["provider"],"model":v["model"],"effort":""} for v in chain[1:]],
-                    "revision": "global:"+str(effective["revision"]), "source":"global", "supported_backends":supported_backends(agent_id)}
+                    "revision": -(effective["revision"]+1), "source":"global", "supported_backends":supported_backends(agent_id)}
     return {
         "models": json.loads(row["models_json"]) if row else [],
         "revision": row["revision"] if row else 0,
@@ -154,6 +154,8 @@ def configure(agent_id, models, *, expected_revision):
         ).fetchone():
             raise ValueError("agent not found")
         prior = get(agent_id)
+        if prior.get("source") == "global":
+            raise ValueError("This Janitor inherits global models; edit Janitor models or disable inheritance first")
         if prior["revision"] != expected_revision:
             raise Conflict("fallback settings changed; reload")
         c.execute(

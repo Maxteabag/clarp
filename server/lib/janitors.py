@@ -697,6 +697,8 @@ def create_run(attachment_id: str, generation: int, candidates: list[dict], run_
         frozen = {"template_id": _config(c, attachment["agent_id"])["template_id"],
                   "scope": _decode(attachment["scope_json"], {}), "trigger_id": attachment["trigger_id"],
                   "trigger_version": attachment["trigger_version"], "config": _decode(attachment["config_json"], {})}
+        from .janitor_design_policy import effective_chain
+        frozen["effective_chain"] = effective_chain(attachment["session"])
         frozen["options"] = option_values(frozen["template_id"], _decode(_config(c, attachment["agent_id"])["options_json"], {}))
         c.execute("INSERT INTO janitor_runs(run_id,agent_id,session,attachment_id,generation,trace_id,candidates_json,configuration_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)", (run_id, attachment["agent_id"], attachment["session"], attachment_id, generation, run_id, _json(candidates), _json(frozen), db.now_ms()))
         if progress is not None:
@@ -750,6 +752,11 @@ def _active_run(c, run_id):
         raise JanitorError("This maintenance run is no longer active", 409, "run_terminal")
     _active_attachment(c, row["attachment_id"], row["generation"])
     configured = _config(c, row["agent_id"])
+    frozen_chain = _decode(row["configuration_json"], {}).get("effective_chain")
+    if frozen_chain:
+        from .janitor_design_policy import effective_chain
+        if effective_chain(row["session"]) != frozen_chain:
+            raise JanitorError("This maintenance run's model policy changed", 409, "stale_generation")
     if _decode(row["configuration_json"], {}).get("options", {}) != option_values(configured["template_id"], _decode(configured["options_json"], {})):
         raise JanitorError("This maintenance run's options were superseded", 409, "stale_generation")
     return row
