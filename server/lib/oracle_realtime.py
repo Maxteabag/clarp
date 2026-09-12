@@ -105,6 +105,7 @@ def capability() -> dict:
         "voice": cfg.openai_realtime_voice,
         "transport": "clarp-websocket-proxy",
         "webrtc": True,
+        "v2": {"available": bool(cfg.openai_key()), "model": "gpt-live-1", "voice": "marin", "podcast": True},
     }
 
 

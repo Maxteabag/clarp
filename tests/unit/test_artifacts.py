@@ -20,6 +20,25 @@ def _media(tmp_path, mime: str, name: str) -> dict:
                                media_dir=tmp_path / "media")
 
 
+def test_podcast_metadata_is_published_only_with_matching_audio_revision(tmp_path):
+    _agent(tmp_path)
+    audio = _media(tmp_path, "audio/mpeg", "sample.mp3")
+    episode = {"version": 1, "revision": media_store.get(audio["asset_id"])["sha256"],
+        "transcript": [{"start": 0, "end": 10, "text": "Illustration"}],
+        "chapters": [{"start": 0, "end": 10, "title": "Chapter", "source": "Actual source"}],
+        "corrections": "Transcript is approximate"}
+    payload = {"url": audio["url"], "mime_type": "audio/mpeg", "file_name": "sample.mp3",
+               "duration_ms": 10000, "podcast": episode}
+    created = artifacts.create(session="mike", type="audio", title="Podcast", payload=payload)
+    assert created["podcast"] == episode
+    assert artifacts.get(created["artifact_id"])["podcast"] == episode
+    with pytest.raises(ValueError, match="revision"):
+        artifacts.create(session="mike", type="audio", title="Wrong audio", payload={
+            **payload, "podcast": {**episode, "revision": "0"*64}})
+    with pytest.raises(ValueError, match="duration"):
+        artifacts.create(session="mike", type="audio", title="No duration", payload={**payload, "duration_ms": 0})
+
+
 def test_artifact_round_trip_and_validation(tmp_path):
     _agent(tmp_path)
     created = artifacts.create(
