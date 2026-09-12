@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 Rectangle {
     id: root
@@ -9,8 +8,8 @@ Rectangle {
     signal openRequested(string artifactId)
     signal chatRequested(string session)
     readonly property string kind: String(artifact.type || "item")
-    readonly property string state: String(artifact.conclusion || artifact.status || "unknown")
-    readonly property bool failed: ["failed", "failure", "timed_out", "action_required"].includes(state)
+    readonly property string outcomeState: String(artifact.conclusion || artifact.status || "unknown")
+    readonly property bool failed: ["failed", "failure", "timed_out", "action_required"].includes(outcomeState)
     readonly property var plan: artifact.plan || ({})
     readonly property int total: Math.max(0, Number(kind === "plan" ? plan.total_count || 0 : artifact.total_steps || 0))
     readonly property int completed: Math.max(0, Number(kind === "plan" ? plan.completed_count || 0 : artifact.completed_steps || 0))
@@ -27,7 +26,7 @@ Rectangle {
             Layout.fillWidth: true
             TuiText { text: root.kind.replace(/_/g, " ").toUpperCase(); color: "#929bb3"; font.pixelSize: 11 }
             Item { Layout.fillWidth: true }
-            TuiText { objectName: "artifactOutcome"; text: root.state; color: root.failed ? "#f2a39a" : "#a5c6a8" }
+            TuiText { objectName: "artifactOutcome"; text: root.outcomeState; color: root.failed ? "#f2a39a" : "#a5c6a8" }
         }
         TuiText {
             objectName: "artifactTitle"
@@ -43,7 +42,7 @@ Rectangle {
         TuiText {
             objectName: "artifactProgress"
             visible: ["plan", "workflow_run"].includes(root.kind)
-            text: root.total > 0 ? root.completed + " / " + root.total + " completed" : (root.state === "active" ? "In progress" : "")
+            text: root.total > 0 ? root.completed + " / " + root.total + " completed" : (root.outcomeState === "active" ? "In progress" : "")
             color: "#b5c7b8"
         }
         TuiText {
