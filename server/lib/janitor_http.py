@@ -105,6 +105,18 @@ def handle(handler, method: str) -> None:
     try:
         if any("/" in part or not part for part in parts):
             raise ValueError("Invalid Janitor route")
+        from . import janitor_design_policy as design
+        if method == "GET" and path == "/janitors/design-policy":
+            return _send(handler, 200, design.configuration())
+        if method == "GET" and len(parts) == 3 and parts[0] == "janitors" and parts[2] == "effective-model-chain":
+            return _send(handler, 200, design.effective_chain(parts[1]))
+        if method == "GET" and len(parts) == 3 and parts[0] == "janitor-runs" and parts[2] == "receipt":
+            return _send(handler, 200, design.inspect_receipt(parts[1], query.get("target", [""])[0]))
+        if method == "POST" and path == "/janitors/design-policy":
+            body = handler._read_json() or {}
+            return _send(handler, 200, design.configure(body.get("configuration"), body.get("expected_revision")))
+        if method == "POST" and path == "/janitors/quota-observation":
+            return _send(handler, 200, design.observe_quota(handler._read_json()))
         if method == "GET":
             if path == "/janitors":
                 from .orchestrator import provider_options

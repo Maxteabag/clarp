@@ -418,3 +418,16 @@ def test_fallback_settings_work_for_normal_agents_and_janitors_without_client_ch
         assert status==200 and loaded==result
         after=agents.get_by_session(session)
         assert (after["backend"],after["model"],after["effort"])==(before["backend"],before["model"],before["effort"])
+
+
+def test_design_policy_requires_auth_and_persists_ordered_models(host):
+    path='/janitors/design-policy'
+    assert request(host,path,auth=False)[0]==401
+    status,initial=request(host,path)
+    assert status==200 and initial['revision']==0
+    chain=[{'provider':'codex','model':f'model-{n}'} for n in range(30)]
+    status,saved=request(host,path,{'expected_revision':0,'configuration':{'model_chain':chain,'heartbeat_gate':True}})
+    assert status==200 and saved['model_chain']==chain
+    assert request(host,path)[1]==saved
+    assert request(host,path,{'expected_revision':0,'configuration':{'heartbeat_gate':False}})[0]==409
+    assert request(host,'/janitors/quota-observation',{'provider':'codex','account_id':'fixture','window_id':'5h','remaining_percent':25,'observed_at_ms':db.now_ms()})[1]['notify']

@@ -506,6 +506,9 @@ def _skip_reason(*, agent: dict, state: _HeartbeatState, now: float) -> str:
         return str(latest_kind)
     if latest_kind == AgentState.INTERRUPTED and _is_user_stopped(latest):
         return str(latest_kind)
+    from .janitor_design_policy import heartbeat_allowed
+    if not heartbeat_allowed(agent_id):
+        return 'no-actionable-commitment'
     if agents_db.is_busy(agent_id):
         return "busy"
     if backends.active_handles(agent.get("backend"), agent_id):
