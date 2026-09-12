@@ -421,7 +421,7 @@ def test_fallback_settings_work_for_normal_agents_and_janitors_without_client_ch
 
 
 def test_design_policy_requires_auth_and_persists_ordered_models(host):
-    path='/janitors/design-policy'
+    path='/janitor-policy'
     assert request(host,path,auth=False)[0]==401
     status,initial=request(host,path)
     assert status==200 and initial['revision']==0
@@ -430,19 +430,19 @@ def test_design_policy_requires_auth_and_persists_ordered_models(host):
     assert status==200 and saved['model_chain']==chain
     assert request(host,path)[1]==saved
     assert request(host,path,{'expected_revision':0,'configuration':{'heartbeat_gate':False}})[0]==409
-    assert request(host,'/janitors/quota-observation',{'provider':'codex','account_id':'fixture','window_id':'5h','remaining_percent':25,'observed_at_ms':db.now_ms()})[1]['notify']
+    assert request(host,'/janitor-quota-observation',{'provider':'codex','account_id':'fixture','window_id':'5h','remaining_percent':25,'observed_at_ms':db.now_ms()})[1]['notify']
 
 
 def test_design_policy_runtime_receipts(host, tmp_path):
     """Capture safe actual loopback responses for the implementation review."""
     from lib import janitor_design_policy
-    unauthorized=request(host,'/janitors/design-policy',auth=False)[0]
-    before=request(host,'/janitors/design-policy')[1]
+    unauthorized=request(host,'/janitor-policy',auth=False)[0]
+    before=request(host,'/janitor-policy')[1]
     chain=[{'provider':'codex','model':'fixture-primary'},{'provider':'codex','model':'fixture-fallback'}]
-    saved=request(host,'/janitors/design-policy',{'expected_revision':0,'configuration':{'heartbeat_gate':True,'model_chain':chain}})[1]
+    saved=request(host,'/janitor-policy',{'expected_revision':0,'configuration':{'heartbeat_gate':True,'model_chain':chain}})[1]
     observation={'provider':'codex','account_id':'synthetic-account','window_id':'synthetic-window','remaining_percent':25,'observed_at_ms':db.now_ms()}
-    crossing=request(host,'/janitors/quota-observation',observation)[1]
-    duplicate=request(host,'/janitors/quota-observation',observation)[1]
+    crossing=request(host,'/janitor-quota-observation',observation)[1]
+    duplicate=request(host,'/janitor-quota-observation',observation)[1]
     assert unauthorized==401 and saved['revision']==1 and crossing['notify'] and not duplicate['notify']
     import os
     output=os.environ.get('JANITOR_SAFE_PROOF_OUTPUT')
