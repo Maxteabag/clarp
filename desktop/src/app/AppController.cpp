@@ -95,7 +95,7 @@ QString sharedFilesystemSettingsKey(const QString& baseUrl) {
 } // namespace
 
 AppController::AppController(QObject* parent)
-    : QObject(parent), m_credentials(this), m_audio(this), m_toolNarrator(this), m_agents(this),
+    : QObject(parent), m_sse(this), m_credentials(this), m_audio(this), m_toolNarrator(this), m_agents(this),
       m_archivedAgents(true, this), m_contacts(this), m_panes(this), m_voices(this),
       m_emptyConversation(this), m_conversation(&m_emptyConversation),
       m_composerFocusPane(m_panes.activePaneId()),
@@ -529,12 +529,7 @@ bool AppController::openLocalReport(const QString& link, const QString& originat
         setErrorMessage(QStringLiteral("Local report must be a readable, non-executable HTML, PDF, text or image file"));
         return false;
     }
-    if (!QDesktopServices::openUrl(url)) {
-        setErrorMessage(QStringLiteral("No application is available to open this local report"));
-        return false;
-    }
-    setErrorMessage({});
-    return true;
+    return openBrowserUrl(url);
 }
 
 bool AppController::openExternalLink(const QString& link, const QString& originatingHost) {
@@ -549,11 +544,41 @@ bool AppController::openExternalLink(const QString& link, const QString& origina
                             .arg(target.left(120)));
         return false;
     }
-    if (!QDesktopServices::openUrl(QUrl(target, QUrl::StrictMode))) {
-        setErrorMessage(QStringLiteral("No application is available to open that link"));
+    return openBrowserUrl(QUrl(target, QUrl::StrictMode));
+}
+
+bool AppController::openBrowserUrl(const QUrl& url) {
+    if (url.scheme() == QStringLiteral("mailto") ||
+        QGuiApplication::platformName() != QStringLiteral("wayland") ||
+        qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")) {
+        if (!QDesktopServices::openUrl(url)) {
+            setErrorMessage(QStringLiteral("No application is available to open that link"));
+            return false;
+        }
+        setErrorMessage({});
+        return true;
+    }
+    const QString helper = QStandardPaths::findExecutable(QStringLiteral("fuck"));
+    if (helper.isEmpty()) {
+        setErrorMessage(QStringLiteral("Workspace browser helper is unavailable"));
         return false;
     }
+    auto* process = new QProcess(this);
+    const QString session = m_selectedSession, host = m_baseUrl;
+    const auto fail = [this, session, host](const QString& message) {
+        if (session == m_selectedSession && host == m_baseUrl) setErrorMessage(message);
+    };
+    connect(process, &QProcess::errorOccurred, this, [process, fail] {
+        fail(QStringLiteral("Could not start workspace browser helper")); process->deleteLater();
+    });
+    connect(process, &QProcess::finished, this, [process, fail](int code, QProcess::ExitStatus status) {
+        if (code != 0 || status != QProcess::NormalExit)
+            fail(QStringLiteral("Link opening failed: %1").arg(QString::fromUtf8(process->readAllStandardError()).trimmed().left(240)));
+        process->deleteLater();
+    });
     setErrorMessage({});
+    process->start(helper, {QStringLiteral("open-link"), url.toString(QUrl::FullyEncoded),
+                           QStringLiteral("--requester-pid"), QString::number(QCoreApplication::applicationPid())});
     return true;
 }
 
@@ -3442,11 +3467,14 @@ void AppController::handleSseEvent(const QJsonObject& event) {
                                        event.value(QStringLiteral("preview")).toString());
         }
     } else if (type == QStringLiteral("audio")) {
+        if (!session.isEmpty()) ensureConversation(session)->setVoiceError({});
         m_audio.enqueueClip(event);
     } else if (type == QStringLiteral("tts-error")) {
         if (m_launchMode) return; // A launch screen has no speech request to report.
-        setErrorMessage(event.value(QStringLiteral("message"))
-                            .toString(event.value(QStringLiteral("error")).toString()));
+        const QString message = event.value(QStringLiteral("message"))
+                                    .toString(event.value(QStringLiteral("error")).toString());
+        if (!session.isEmpty()) ensureConversation(session)->setVoiceError(message);
+        else setErrorMessage(message);
     } else if (type == QStringLiteral("server-version")) {
         const QString version = event.value(QStringLiteral("version")).toString();
         if (!version.isEmpty() && version != m_serverVersion) {

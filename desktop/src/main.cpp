@@ -2,6 +2,7 @@
 #include "app/PairSidebarSmokeCheck.h"
 #include "app/ReadyReplySmokeCheck.h"
 #include "app/KeyboardSmokeCheck.h"
+#include "app/VoiceViewportSmokeCheck.h"
 #include "app/LaunchKeyboardSmokeCheck.h"
 #include "app/AppController.h"
 #include "app/DesktopPalette.h"
@@ -15,6 +16,9 @@
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QJsonDocument>
+#include <QSaveFile>
+#include <QCryptographicHash>
 #include <QKeyEvent>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
@@ -540,6 +544,14 @@ int main(int argc, char* argv[]) {
         });
     }
     if (!screenshotPath.isEmpty()) {
+        if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_VOICE_VIEWPORT"))
+            startVoiceViewportSmokeCheck(application, rootWindow, controller);
+        if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_OPEN_LINK")) {
+            const QString fixtureLink = qEnvironmentVariable("CLARP_SCREENSHOT_OPEN_LINK");
+            QTimer::singleShot(1800, &application, [controller, fixtureLink] {
+                controller->openExternalLink(fixtureLink, controller->baseUrl());
+            });
+        }
         if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_READY_REPLY"))
             startReadyReplySmokeCheck(application, rootWindow, controller, screenshotPath);
         if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_CONTEXT_KEYBOARD"))
@@ -670,11 +682,27 @@ int main(int argc, char* argv[]) {
             : screenshotScenario.isEmpty() ? 2'000 : 2'400;
         QTimer::singleShot(captureDelay, &application, [&application, rootWindow, screenshotPath, sidebarToggles, sidebarWidth, controller, restoreDesktop, restoreSession] {
             if (rootWindow != nullptr) {
+                if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_VOICE_VIEWPORT") && !rootWindow->property("voiceViewportVerified").toBool()) {
+                    qCritical("Voice viewport verification did not complete"); application.exit(EXIT_FAILURE); return;
+                }
                 if (restoreDesktop && (!controller || controller->selectedSession() != restoreSession || application.property("clarpLaunchMode").toBool())) {
                     qCritical("Update relaunch did not retain the exact conversation or entered new-agent mode");
                     application.exit(EXIT_FAILURE); return;
                 }
                 if (restoreDesktop) qInfo("Update relaunch preserved session=%s without new-agent mode", qPrintable(restoreSession));
+                if (restoreDesktop && qEnvironmentVariableIsSet("CLARP_ADOPTION_TRACE")) {
+                    const QString pane = controller->panes()->activePaneId();
+                    const QByteArray draft = controller->paneDraft(pane, restoreSession).toUtf8();
+                    QSaveFile trace(qEnvironmentVariable("CLARP_ADOPTION_TRACE"));
+                    if (trace.open(QIODevice::WriteOnly)) {
+                        trace.write(QJsonDocument(QJsonObject{{"session", controller->selectedSession()},
+                            {"host", controller->baseUrl()}, {"pane_session", controller->panes()->activeSession()},
+                            {"draft_sha256", QString::fromLatin1(QCryptographicHash::hash(draft, QCryptographicHash::Sha256).toHex())},
+                            {"attachments", controller->composerAttachments(pane, restoreSession).size()},
+                            {"launch_mode", application.property("clarpLaunchMode").toBool()}}).toJson());
+                        trace.commit();
+                    }
+                }
                 if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_MINIMAL_UI")) {
                     auto* button = rootWindow->findChild<QQuickItem*>(QStringLiteral("sidebarHideButton"));
                     const bool minimal = qEnvironmentVariableIntValue("CLARP_SCREENSHOT_MINIMAL_UI") != 0;

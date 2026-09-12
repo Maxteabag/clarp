@@ -372,6 +372,34 @@ Rectangle {
         }
     }
 
+    // Voice failures belong to this session and must not resize the reader.
+    Rectangle {
+        objectName: "voiceErrorOverlay"
+        visible: (root.conversationModel.voiceError || "").length > 0
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: transcript.y
+        height: 38
+        z: 40
+        color: "#2b2028"
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 16
+            anchors.rightMargin: 8
+            TuiText {
+                Layout.fillWidth: true
+                text: root.conversationModel.voiceError || ""
+                color: "#c9959e"
+                font.pixelSize: 11
+                elide: Text.ElideRight
+            }
+            TuiToolButton {
+                text: "Dismiss · Esc"
+                onClicked: root.conversationModel.voiceError = ""
+            }
+        }
+    }
+
     TuiToolButton {
         objectName: "jumpToLatestButton"
         visible: !transcript.followLatest

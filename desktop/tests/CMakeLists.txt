@@ -201,3 +201,13 @@ target_include_directories(clarp-workspace-context-tests PRIVATE ../src)
 target_link_libraries(clarp-workspace-context-tests PRIVATE Qt6::Core Qt6::Test)
 clarp_apply_quality_settings(clarp-workspace-context-tests)
 add_test(NAME clarp-desktop-workspace-context COMMAND clarp-workspace-context-tests)
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/voice-viewport/config")
+add_test(NAME clarp-desktop-voice-viewport COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-voice-viewport PROPERTIES TIMEOUT 15
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=voice-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/voice-viewport/config;CLARP_SCREENSHOT_SCENARIO=tool-spacing;CLARP_SCREENSHOT_VOICE_VIEWPORT=1;CLARP_SCREENSHOT_DELAY_MS=6000;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/voice-viewport/capture.png;CLARP_VOICE_VIEWPORT_TRACE=${CMAKE_CURRENT_BINARY_DIR}/voice-viewport/trace.json")
+
+if(Python3_Interpreter_FOUND)
+    add_test(NAME clarp-desktop-preview-adoption
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_preview_adoption.py)
+endif()
