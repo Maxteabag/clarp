@@ -48,5 +48,8 @@ TestCase {
   const panel=createTemporaryObject(factory,testCase);
   wait(150);
   grabImage(panel).save("/var/tmp/teams-native-hierarchy.png");
+  panel.hierarchyView=false;
+  wait(100);
+  grabImage(panel).save("/var/tmp/teams-native-flat.png");
  }
 }
