@@ -148,3 +148,25 @@ def test_runtime_dispatch_rejects_forged_heartbeat_request(env):
     with pytest.raises(DispatchError) as e:
         TurnDispatchService(SimpleNamespace()).dispatch(text='wake',requested_session='task',trace_id='janitor-demand-forged',client_msg_id='janitor-demand-forged',origin='heartbeat')
     assert e.value.status==409
+
+def test_global_fallback_wire_revision_stays_integer_and_override_is_explicit(env):
+    _,owners=env
+    from lib import janitor_design_policy,model_fallbacks
+    owner=owners['heartbeat-decider']
+    janitor_design_policy.configure({'model_chain':[{'provider':'codex','model':'gpt-primary'},{'provider':'codex','model':'gpt-fallback'}],'inherit_sessions':[owner['session']]},0)
+    value=model_fallbacks.get(owner['agent_id']);assert type(value['revision'])is int
+    with pytest.raises(ValueError,match='inherits global'):
+        model_fallbacks.configure(owner['agent_id'],[],expected_revision=value['revision'])
+
+def test_managed_label_effect_is_fenced_by_global_model_revision(monkeypatch):
+    import test_janitor_store as fixture
+    from lib import janitor_design_policy
+    monkeypatch.setattr(service.backends,'active_handles',lambda *a:[])
+    _,_,config=fixture.setup()
+    janitor_design_policy.configure({'model_chain':[{'provider':'codex','model':'gpt-first'}],'inherit_sessions':['sam']},0)
+    run=fixture.admit(config)
+    assert janitors.validate_dispatch('sam',run['run_id'],run['trace_id'])
+    janitor_design_policy.configure({'model_chain':[{'provider':'codex','model':'gpt-second'}]},1)
+    assert not janitors.validate_dispatch('sam',run['run_id'],run['trace_id'])
+    with pytest.raises(janitors.JanitorError):fixture.review(run)
+    assert not db.conn().execute('SELECT 1 FROM janitor_effects').fetchone()
