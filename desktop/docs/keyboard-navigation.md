@@ -97,3 +97,8 @@ Ctrl+K → Dismiss conversation error clears that conversation's voice error too
 `--no-new-agent` opens one empty pane with the session sidebar visible, ignoring
 the persisted pane tree and automatic first-agent selection until the user chooses
 a session. Explicit update/adoption restoration keeps its requested session.
+
+New agents default to the Host home directory (`~`), including model-specific
+launches and quick contact creation. Explicit launcher directories are preserved.
+Use **Ctrl+K → Change directory** or **Ctrl+Alt+D** to choose a directory for a
+new launch. This opens the launch picker and does not restart an existing chat.

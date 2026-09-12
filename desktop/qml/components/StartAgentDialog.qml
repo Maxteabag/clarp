@@ -51,7 +51,7 @@ Rectangle {
         selectedMcpServers = replaceSession.length > 0
             ? Array.from(root.controller.agentDetails(replaceSession).mcp_servers || []) : [];
         setLaunchMode("fresh");
-        workspaceField.text = replaceSession.length > 0 ? root.controller.agentWorkingDirectory(replaceSession) : root.controller.lastWorkingDirectory;
+        workspaceField.text = replaceSession.length > 0 ? root.controller.agentWorkingDirectory(replaceSession) : "~";
         if (workspaceField.text.length === 0)
             workspaceField.text = "~";
         root.controller.loadFavoritePaths();

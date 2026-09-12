@@ -30,6 +30,17 @@ TestCase {
     }
     Component { id: factory; LaunchAgentPage { controller: stub; visible: false; width: 700; height: 700 } }
     function init() { stub.starts = 0; stub.creates = 0; stub.connected = true; stub.errorMessage = ""; }
+    function test_homeDefaultAndDirectoryOverride() {
+        const dialog = createTemporaryObject(factory, testCase);
+        dialog.open("", "", "", undefined, ""); wait(20);
+        compare(dialog.directory, "~"); compare(dialog.choosingDirectory, false);
+        dialog.changeDirectory(); wait(20);
+        compare(dialog.choosingDirectory, true); compare(stub.starts, 0);
+        dialog.open("codex", "", "", undefined, ""); wait(20);
+        compare(dialog.directory, "~"); compare(stub.starts, 1);
+        dialog.open("", "", "", undefined, "/explicit"); wait(20);
+        compare(dialog.directory, "/explicit");
+    }
     function test_anonymousSettingAndFlags() {
         const dialog = createTemporaryObject(factory, testCase);
         stub.anonymousAgents = true;

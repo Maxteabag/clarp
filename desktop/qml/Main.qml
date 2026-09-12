@@ -141,6 +141,9 @@ ApplicationWindow {
         } else if (action === "assign-agent" || action === "auto-assign-agent") {
             if (app.selectedSession.length > 0 && !app.isPairSession(app.selectedSession))
                 assignAgent.open(app.selectedSession, action === "auto-assign-agent", root.composerOwnsFocus());
+        } else if (action === "change-directory") {
+            if (!launchAgent.visible) launchAgent.open("", "", "", undefined, "~");
+            launchAgent.changeDirectory();
         } else if (action === "quick-new-agent") {
             quickNewAgent.visible = true;
         } else if (action === "rename-agent") {
@@ -325,7 +328,8 @@ ApplicationWindow {
     KeyboardMap {
         id: keyboard
         objectName: "keyboardMap"
-        contextName: settingsPanel.dialogOpen ? "blocked" : root.overlayVisible() ? "modal"
+        contextName: settingsPanel.dialogOpen ? "blocked"
+            : launchAgent.visible && !quickSwitcher.visible ? "launch" : root.overlayVisible() ? "modal"
             : root.selectedSurface !== "chats" ? root.selectedSurface
             : rail.searchOwnsFocus ? "search"
             : root.composerOwnsFocus() ? "composer"

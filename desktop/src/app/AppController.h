@@ -301,7 +301,7 @@ class AppController : public QObject {
     [[nodiscard]] bool launchDirectoriesLoading() const { return m_launchDirectoriesLoading; }
     Q_INVOKABLE void loadLaunchDirectories(const QString& query);
     Q_INVOKABLE void setLaunchDirectory(const QString& path) { m_launchDirectory = path.trimmed(); }
-    [[nodiscard]] QString launchDirectory() const { return m_launchDirectory.isEmpty() ? m_lastWorkingDirectory : m_launchDirectory; }
+    [[nodiscard]] QString launchDirectory() const { return m_launchDirectory.isEmpty() ? QStringLiteral("~") : m_launchDirectory; }
     Q_INVOKABLE void loadDirectorySuggestions(const QString& path);
     Q_INVOKABLE void loadFavoritePaths();
     Q_INVOKABLE void refreshAgents();

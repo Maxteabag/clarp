@@ -34,6 +34,12 @@ TestCase {
         map.contextName = "blocked";
         compare(keys(), []);
     }
+    function test_launchDirectoryShortcuts() {
+        map.contextName = "launch";
+        verify(keys().includes("Ctrl+K"));
+        verify(keys().includes("Ctrl+Alt+D"));
+        verify(!keys().includes("Ctrl+J"));
+    }
     function test_guardsAndFooterUseSameResolution() {
         verify(keys().includes("N"));
         map.hasAttention = false;

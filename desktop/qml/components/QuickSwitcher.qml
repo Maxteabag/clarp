@@ -85,6 +85,7 @@ Rectangle {
         { kind: "command", label: "Jump to latest", action: "jump-latest", key: "Ctrl+End", group: "view", keywords: "bottom newest scroll follow" },
         { kind: "command", label: "Retry latest failed message", action: "retry-message", key: "Ctrl+Alt+R", group: "view", keywords: "resend send delivery not delivered" },
         { kind: "command", label: "Dismiss conversation error", action: "dismiss-error", key: "Esc", group: "view", keywords: "clear close error warning banner voice synthesis failed" },
+        { kind: "command", label: "Change directory", action: "change-directory", key: "Ctrl+Alt+D", group: "agent", keywords: "folder workspace cwd new chat" },
         { kind: "command", label: "Refresh conversation", action: "refresh", key: "Ctrl+R", group: "view" },
         { kind: "command", label: "Agent overview", action: "overview", key: "Ctrl+Shift+O", group: "view" },
         { kind: "command", label: "Chats", action: "chats", key: "Ctrl+1", group: "destination" },
@@ -123,7 +124,7 @@ Rectangle {
         const contactRows = controller.matchingContacts(query).map(contact => ({
             kind: "contact", name: String(contact.name),
             backend: controller.quickStartBackend(),
-            directory: controller.lastWorkingDirectory || "~"
+            directory: "~"
         }));
         if (root.contactsOnly) return contactRows;
         return needle.length > 0 ? agentRows.concat(contactRows, commandRows)
