@@ -17,6 +17,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'server'))
 from lib import db, viz_learning, viz_library
 from server import Handler as ProductionHandler
+from viz_reload import revisions
 
 
 def main():
@@ -24,10 +25,13 @@ def main():
     p.add_argument('--db', type=pathlib.Path, required=True)
     p.add_argument('--port', type=int, default=7699)
     p.add_argument('--library', type=pathlib.Path)
+    p.add_argument('--reload', action='store_true', help='Auto-refresh frontend edits and use checkout renderer sources (development only)')
     p.add_argument("--learn", action="store_true", help="Enable autonomous source development; requires --library")
     a = p.parse_args()
     if a.learn and not a.library:
         p.error("--learn requires an explicit persistent --library path")
+    if a.reload and a.learn:
+        p.error('--reload uses checkout source and cannot be combined with --learn')
     # Only this process sees these DI overrides. No migrate() or server workers.
     def connection():
         con = getattr(db._LOCAL, 'conn', None)
@@ -46,7 +50,20 @@ def main():
     else:
         viz_library.load = viz_library.seed
 
+    if a.reload:
+        read_library = viz_library.load
+        def source_library():
+            library = dict(read_library())
+            for key in ('program', 'previous_program', 'view_programs'):
+                library.pop(key, None)
+            return library
+        viz_library.load = source_library
+
     class Handler(SimpleHTTPRequestHandler):
+        def end_headers(self):
+            if a.reload:
+                self.send_header('Cache-Control', 'no-store')
+            super().end_headers()
         def _send(self, status, body, content_type='text/plain'):
             self.send_response(status)
             self.send_header('Content-Type', content_type)
@@ -78,7 +95,20 @@ def main():
             self.send_error(405)
 
         def do_GET(self):
-            if self.path.split('?')[0] == '/viz/events':
+            if a.reload and 'If-Modified-Since' in self.headers:
+                del self.headers['If-Modified-Since']
+            if urlsplit(self.path).path == '/viz/dev-revision' and a.reload:
+                self._send(200,json.dumps(revisions(ROOT)).encode(),'application/json')
+            elif urlsplit(self.path).path == '/viz/activity':
+                try:ProductionHandler._handle_viz_activity(self)
+                finally:db.close_local()
+            elif urlsplit(self.path).path in ('/viz/recap', '/viz/recap/artifact'):
+                try:
+                    handler = ProductionHandler._handle_viz_recap_artifact if urlsplit(self.path).path.endswith('/artifact') else ProductionHandler._handle_viz_recap
+                    handler(self)
+                finally:
+                    db.close_local()
+            elif self.path.split('?')[0] == '/viz/events':
                 try:
                     ProductionHandler._handle_viz_events(self)
                 finally:
@@ -133,7 +163,11 @@ def main():
                 finally:
                     db.close_local()
             elif urlsplit(self.path).path == '/viz':
-                self._send(200, (ROOT / 'static/viz.html').read_bytes(), 'text/html')
+                revision=revisions(ROOT) if a.reload else None
+                body=(ROOT / 'static/viz.html').read_bytes()
+                if a.reload:
+                    body += ('<script type="application/json" id="viz-dev-revision">'+json.dumps(revision)+'</script><script type="module" src="/static/lib/viz-dev-reload.js"></script>').encode()
+                self._send(200, body, 'text/html')
             elif self.path.startswith('/static/'):
                 target=(ROOT/unquote(urlsplit(self.path).path).lstrip('/')).resolve()
                 if not target.is_relative_to((ROOT/'static').resolve()) or not target.is_file():

@@ -1,0 +1,90 @@
+import {it,expect} from 'vitest';
+import {activityHeat,HEAT_WINDOW,densityGrid,heatColor,HEAT_SIGMA,pixelHeat} from '../../static/lib/viz-heatmap.js';
+const hits=[{id:'file',x:0,y:0,w:40,h:40},{id:'other',x:1000,y:0,w:40,h:40}];
+const event=(id,ts=1000)=>({id,ts,agent_id:'a',world_target:'file'});
+it('remembers repeated activity across time without giving one burst the same history credit',()=>{
+ const steady=Array.from({length:10},(_,i)=>event(String(i),(i+1)*60000));
+ const burst=Array.from({length:10},(_,i)=>event(String(i),600000));
+ const recurrent=activityHeat(steady,hits,1200000).spots[0],isolated=activityHeat(burst,hits,1200000).spots[0];
+ expect(recurrent.historyWeight).toBeGreaterThan(0);expect(isolated.historyWeight).toBe(0);
+ expect(recurrent.weight).toBeGreaterThan(isolated.weight);
+ expect(activityHeat(steady,hits,1800000).spots[0].weight).toBeLessThan(recurrent.weight);
+ expect(activityHeat(steady,hits,600000+HEAT_WINDOW).spots).toEqual([]);
+ expect(activityHeat([...steady,...steady],hits,1200000)).toEqual(activityHeat(steady,hits,1200000));
+});
+it('gets warmer with repeated events and cools without renormalizing',()=>{
+ const single=activityHeat([event('a')],hits,1000),many=activityHeat([event('a'),event('b')],hits,1000);
+ expect(many.spots[0].weight).toBeGreaterThan(single.spots[0].weight);
+ expect(activityHeat([event('a')],hits,181000).spots[0].weight).toBeLessThan(single.spots[0].weight);
+ expect(activityHeat([event('a')],hits,1000+HEAT_WINDOW).spots).toEqual([]);
+});
+const grid=spots=>densityGrid(spots,{x:0,y:0,k:1},300,240);
+it('pixelated display samples the same density and anchors cells to world coordinates while panning',()=>{
+ const spots=[{x:120,y:120,weight:2}],a={x:0,y:0,k:1},b={x:11,y:7,k:1};
+ const ga=densityGrid(spots,a,300,240),gb=densityGrid(spots,b,300,240);
+ const blocks=pixelHeat(ga,a,300,240),shifted=pixelHeat(gb,b,300,240);
+ const first=blocks.find(c=>c.x===0&&c.y===0),second=shifted.find(c=>c.x===0&&c.y===0);
+ expect(first.size).toBe(second.size);expect(Math.abs(first.value-second.value)).toBeLessThan(.05);
+ expect(ga.density).toEqual(densityGrid(spots,a,300,240).density);
+});
+const at=(g,x,y)=>g.density[Math.round((y-g.originY)/g.cell)*g.cols+Math.round((x-g.originX)/g.cell)];
+it('matches the Gaussian profile and adds overlapping density before coloring',()=>{
+ const a=densityGrid([{x:120,y:120,weight:1}],{x:0,y:0,k:1},900,600),b=densityGrid([{x:120,y:120,weight:2}],{x:0,y:0,k:1},900,600);
+ expect(at(a,120,120)).toBeCloseTo(1,5);
+ expect(at(a,120+HEAT_SIGMA,120)).toBeCloseTo(Math.exp(-.5),5);
+ for(let i=0;i<a.density.length;i++)expect(b.density[i]).toBeCloseTo(2*a.density[i],5);
+ expect(heatColor(at(b,120,120))).not.toEqual(heatColor(at(a,120,120)));
+});
+it('does not introduce the old 80-unit bin boundary color discontinuity',()=>{
+ const a=grid([{x:38,y:120,weight:1},{x:39,y:120,weight:1}]);
+ const b=grid([{x:39,y:120,weight:1},{x:41,y:120,weight:1}]);
+ const peak=g=>Math.max(...g.density);
+ expect(Math.abs(peak(a)-peak(b))/peak(a)).toBeLessThan(.02);
+});
+it('uses the same density and color domain across pixel ratios and pans',()=>{
+ const points=[{x:120,y:120,weight:3}];const a=grid(points);
+ const retina=densityGrid(points,{x:0,y:0,k:2},600,480,2);
+ expect(retina.density).toEqual(a.density);
+ const panned=densityGrid(points,{x:24,y:0,k:1},300,240);
+ expect(at(panned,120,120)).toBeCloseTo(at(a,120,120),5);
+ const zoomed=densityGrid(points,{x:0,y:0,k:2},600,480);
+ expect(at(zoomed,120,120)).toBeCloseTo(at(a,120,120),5);
+});
+it('keeps overlapping heat, contour width and pixel blocks absolute across zoom',()=>{
+ const spots=[{x:120,y:120,weight:2},{x:180,y:120,weight:3}];
+ let reference;
+ for(const k of [.5,1,2]){
+  const camera={x:0,y:0,k},g=densityGrid(spots,camera,600,400);
+  const values=[120,150,180,210].map(x=>at(g,x,120));
+  const block=pixelHeat(g,camera,600,400).find(b=>b.x===0&&b.y===0);
+  if(reference){values.forEach((v,i)=>expect(v).toBeCloseTo(reference.values[i],5));expect(block).toEqual(reference.block);}
+  else reference={values,block};
+ }
+});
+it('keeps contributions at viewport edges and retains more than 128 locations',()=>{
+ const edge=grid([{x:-6,y:120,weight:1}]);expect(at(edge,0,120)).toBeCloseTo(Math.exp(-.5*(6/HEAT_SIGMA)**2),5);
+ const hs=Array.from({length:160},(_,i)=>({id:String(i),x:i*100,y:0,w:10,h:10}));
+ const es=hs.map(h=>({...event(h.id),world_target:h.id}));
+ expect(activityHeat(es,hs,1000).spots).toHaveLength(160);
+ const huge=densityGrid([],{x:0,y:0,k:1},8000,5000);expect(huge.density.length).toBeLessThan(90000);
+});
+it('color varies continuously on a fixed scale and fades to transparent',()=>{
+ expect(heatColor(0)[3]).toBe(0);expect(heatColor(2)[3]).toBeGreaterThan(heatColor(1)[3]);
+ const below=heatColor(3.99),above=heatColor(4.01);
+ for(let i=0;i<4;i++)expect(Math.abs(below[i]-above[i])).toBeLessThan(3);
+ expect(heatColor(100)).toEqual(heatColor(8));
+});
+it('deduplicates records and excludes future replay events',()=>{
+ const e=event('same');expect(activityHeat([e,e,event('future',2000)],hits,1000).located).toBe(1);
+ expect(activityHeat([e,e],hits,1000)).toEqual(activityHeat([e],hits,1000));
+});
+it('does not invent positions for missing targets or use current agent locations',()=>{
+ const e={...event('a'),world_target:'unknown'};
+ const result=activityHeat([e],[...hits,{id:'agent:a',x:100,y:100,w:10,h:10}],1000);
+ expect(result.spots).toEqual([]);expect(result.unlocated).toBe(1);
+ expect(activityHeat([{...e,workspace_target:'file'}],hits,1000).located).toBe(1);
+});
+it('splits one multi-target event without multiplying its total weight',()=>{
+ const result=activityHeat([{...event('a'),world_targets:['file','other','file']}],hits,1000);
+ expect(result.spots).toHaveLength(2);expect(result.spots.reduce((n,s)=>n+s.weight,0)).toBeCloseTo(1);
+});
