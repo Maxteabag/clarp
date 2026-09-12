@@ -452,6 +452,7 @@ class AppController : public QObject {
     void setConnecting(bool connecting);
     void setConnectionState(const QString& state);
     void setErrorMessage(const QString& message);
+    bool openBrowserUrl(const QUrl& url);
     void handleJson(const QString& tag, const QJsonObject& object);
     void handleBytes(const QString& tag, const QByteArray& bytes, const QByteArray& contentType);
     void handleRequestFailure(const QString& tag, const QString& message, int statusCode);

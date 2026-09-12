@@ -18,6 +18,7 @@ class ConversationModel : public QAbstractListModel {
     Q_PROPERTY(qint64 latestRevision READ latestRevision NOTIFY latestRevisionChanged)
     Q_PROPERTY(bool hasMore READ hasMore NOTIFY hasMoreChanged)
     Q_PROPERTY(bool loading READ loading WRITE setLoading NOTIFY loadingChanged)
+    Q_PROPERTY(QString voiceError READ voiceError WRITE setVoiceError NOTIFY voiceErrorChanged)
     Q_PROPERTY(QString error READ error WRITE setError NOTIFY errorChanged)
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
 
@@ -66,6 +67,8 @@ class ConversationModel : public QAbstractListModel {
     [[nodiscard]] bool hasMore() const;
     [[nodiscard]] bool loading() const;
     [[nodiscard]] QString error() const;
+    [[nodiscard]] QString voiceError() const { return m_voiceError; }
+    void setVoiceError(const QString& error);
     Q_INVOKABLE [[nodiscard]] int indexOfMessage(const QString& id) const { return m_byId.value(id, -1); }
 
     void openSession(const QString& session);
@@ -90,6 +93,7 @@ class ConversationModel : public QAbstractListModel {
     void hasMoreChanged();
     void loadingChanged();
     void errorChanged();
+    void voiceErrorChanged();
     void countChanged();
     void rowsAppended(bool fromCurrentUser);
     void rowsPrepended();
@@ -109,6 +113,7 @@ class ConversationModel : public QAbstractListModel {
     bool m_hasMore = false;
     bool m_loading = false;
     QString m_error;
+    QString m_voiceError;
     QVector<Message> m_messages;
     QHash<QString, int> m_byId;
     quint64 m_activityCounter = 0;

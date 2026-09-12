@@ -270,10 +270,10 @@ ApplicationWindow {
         if (root.selectedSurface !== "chats") return false;
         const model = app.selectedSession.length > 0
             ? app.conversationForSession(app.selectedSession) : null;
-        if (app.errorMessage.length === 0 && (!model || model.error.length === 0))
+        if (app.errorMessage.length === 0 && (!model || (model.error.length === 0 && model.voiceError.length === 0)))
             return false;
         app.clearError();
-        if (model) model.error = "";
+        if (model) { model.error = ""; model.voiceError = ""; }
         return true;
     }
 

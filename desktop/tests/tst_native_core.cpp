@@ -632,6 +632,8 @@ class NativeCoreTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void spawnedLifecycleNeverBecomesTranscriptTool();
+    void voiceErrorsStayInTheirSession();
     void clipboardImageBecomesAttachmentWithoutSending();
     void relaunchPreservesHostSessionAndDraft();
     void previewRestartCapturesContextAndRejectsBusy();
@@ -3338,6 +3340,46 @@ void NativeCoreTest::restoredSessionDoesNotFallBackToAnotherAgent() {
     QCOMPARE(controller.selectedSession(), QString("rachel"));
 }
 
+
+void NativeCoreTest::spawnedLifecycleNeverBecomesTranscriptTool() {
+    ConversationModel model;
+    // Reconstructed from the retained event preceding the incident capture.
+    model.applyActivityEvent({{"type", "agent-activity"}, {"kind", "spawned"},
+        {"phase", "spawned"}, {"status", "ok"}, {"action", "started"}, {"summary", "Started"}});
+    QCOMPARE(model.rowCount(), 0);
+    model.applyActivityEvent({{"activity_kind", "spawned"}, {"activity_phase", "spawned"},
+        {"activity_status", "ok"}, {"activity_action", "started"}, {"activity_summary", "Started"}});
+    QCOMPARE(model.rowCount(), 0);
+    model.addOptimistic("real-user", "Start the task session.");
+    QCOMPARE(model.rowCount(), 1); // The literal remains valid user content.
+    model.applyActivityEvent({{"kind", "tool"}, {"phase", "tool"}, {"status", "running"},
+        {"tool", "Bash"}, {"action", "started"}, {"summary", "Run tests"}});
+    QCOMPARE(model.rowCount(), 2); // Real tool activity is not suppressed.
+}
+
 QTEST_MAIN(NativeCoreTest)
 
 #include "tst_native_core.moc"
+
+void NativeCoreTest::voiceErrorsStayInTheirSession() {
+    FakeClarpServer server; QVERIFY(server.listenLocal());
+    const auto oldBase = qgetenv("CLARP_BASE_URL"), oldToken = qgetenv("CLARP_TOKEN");
+    const auto restore = qScopeGuard([&] { qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken); });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN", "test-token");
+    AppController controller;
+    QTRY_VERIFY(controller.connected());
+    auto* current = controller.conversationForSession("current");
+    auto* other = controller.conversationForSession("other");
+    server.sendEvent({{"type", "tts-error"}, {"session", "other"}, {"message", "Other voice failed"}});
+    QTRY_COMPARE(other->voiceError(), QStringLiteral("Other voice failed"));
+    QVERIFY(current->voiceError().isEmpty()); QVERIFY(controller.errorMessage().isEmpty());
+    server.sendEvent({{"type", "tts-error"}, {"session", "current"}, {"message", "Current voice failed"}});
+    QTRY_COMPARE(current->voiceError(), QStringLiteral("Current voice failed"));
+    QVERIFY(controller.errorMessage().isEmpty()); QVERIFY(current->error().isEmpty());
+    current->setVoiceError({});
+    QCOMPARE(other->voiceError(), QStringLiteral("Other voice failed"));
+    server.sendEvent({{"type", "audio"}, {"session", "other"}});
+    QTRY_VERIFY(other->voiceError().isEmpty());
+    server.sendEvent({{"type", "tts-error"}, {"message", "Unscoped voice failed"}});
+    QTRY_COMPARE(controller.errorMessage(), QStringLiteral("Unscoped voice failed"));
+}
