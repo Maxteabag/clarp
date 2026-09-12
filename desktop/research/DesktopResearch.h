@@ -73,9 +73,6 @@ inline void startDesktopResearch(QGuiApplication& app, QQuickWindow* window, cla
         });
         QTimer::singleShot(2350,frames,[frames]{frames->start();});
     }
-    QTimer::singleShot(2900,&app,[window,scenario,output]{
-
-    });
     QTimer::singleShot(3550,&app,[window,controller,scenario,output]{
 
         if(scenario==QStringLiteral("zoom")) {
