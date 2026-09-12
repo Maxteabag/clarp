@@ -45,7 +45,7 @@ TestCase {
         compare(picker.results.length, 2);
         compare(picker.results[0].kind, "contact");
         compare(picker.results[0].backend, "codex");
-        compare(picker.results[0].directory, "/work/project");
+        compare(picker.results[0].directory, "~");
         picker.query = "theo";
         compare(picker.results.length, 1);
         picker.choose(0);
