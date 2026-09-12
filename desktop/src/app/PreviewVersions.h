@@ -26,7 +26,7 @@ public:
     [[nodiscard]] QVariantMap catalog() const { return m_catalog; }
     [[nodiscard]] QString error() const { return m_error; }
     [[nodiscard]] QString notice() const { return m_notice; }
-    Q_INVOKABLE QVariantMap restartContext() const;
+    Q_INVOKABLE [[nodiscard]] QVariantMap restartContext() const;
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void selectVersion(const QString& hash);
 signals:

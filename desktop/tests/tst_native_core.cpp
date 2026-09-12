@@ -47,8 +47,7 @@ class ReportUrlCapture : public QObject {
     Q_OBJECT
 public:
     QList<QUrl> opened;
-public slots:
-    void capture(const QUrl& url) { opened.append(url); }
+    Q_SLOT void capture(const QUrl& url) { opened.append(url); }
 };
 
 
@@ -115,7 +114,7 @@ class FakeClarpServer final : public QTcpServer {
     }
 
     void holdNextSnapshot() { m_holdSnapshot = true; }
-    bool hasHeldSnapshot() const { return m_heldSnapshot != nullptr; }
+    [[nodiscard]] bool hasHeldSnapshot() const { return m_heldSnapshot != nullptr; }
     void releaseHeldSnapshot(const QJsonObject& body) {
         if (m_heldSnapshot) { respond(m_heldSnapshot, 200, body); m_heldSnapshot = nullptr; }
     }
@@ -1120,7 +1119,8 @@ void NativeCoreTest::idleContactStartsFreshWithSavedDefaults() {
 void NativeCoreTest::newAgentWaitsForOwnRosterAndRejectsLateSnapshots() {
     FakeClarpServer server;
     QVERIFY(server.listenLocal());
-    const auto oldBase = qgetenv("CLARP_BASE_URL"), oldToken = qgetenv("CLARP_TOKEN");
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
     const auto restore = qScopeGuard([&] { qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken); });
     qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN", "test-token");
     AppController controller;
@@ -1158,7 +1158,8 @@ void NativeCoreTest::newAgentWaitsForOwnRosterAndRejectsLateSnapshots() {
 
 void NativeCoreTest::fastLaunchOpensWithoutWaitingForFleet() {
     FakeClarpServer server; QVERIFY(server.listenLocal());
-    const auto oldBase=qgetenv("CLARP_BASE_URL"), oldToken=qgetenv("CLARP_TOKEN");
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
     const auto oldLaunch=qApp->property("clarpLaunchMode");
     const auto restore=qScopeGuard([&] { qputenv("CLARP_BASE_URL",oldBase); qputenv("CLARP_TOKEN",oldToken); qApp->setProperty("clarpLaunchMode",oldLaunch); });
     qputenv("CLARP_BASE_URL",server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN","test-token");
@@ -1199,7 +1200,8 @@ void NativeCoreTest::fastLaunchOpensWithoutWaitingForFleet() {
 
 void NativeCoreTest::resumeLaunchOpensExactSessionWithoutFleet() {
     FakeClarpServer server; QVERIFY(server.listenLocal());
-    const auto oldBase=qgetenv("CLARP_BASE_URL"), oldToken=qgetenv("CLARP_TOKEN");
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
     const auto oldLaunch=qApp->property("clarpLaunchMode");
     const auto restore=qScopeGuard([&] { qputenv("CLARP_BASE_URL",oldBase); qputenv("CLARP_TOKEN",oldToken); qApp->setProperty("clarpLaunchMode",oldLaunch); });
     qputenv("CLARP_BASE_URL",server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN","test-token");
@@ -3180,7 +3182,7 @@ void NativeCoreTest::localReportsRequireOriginAndSafeReadableFiles() {
     QDesktopServices::setUrlHandler("file", &capture, "capture");
     const auto cleanup = qScopeGuard([] { QDesktopServices::unsetUrlHandler("file"); });
     const auto write = [&](const QString& name, const QByteArray& body) {
-        const QString path = dir.filePath(name);
+        QString path = dir.filePath(name);
         QFile file(path);
         if (!file.open(QIODevice::WriteOnly) || file.write(body) != body.size()) return QString{};
         file.close();
@@ -3325,7 +3327,8 @@ void NativeCoreTest::previewRestartCapturesContextAndRejectsBusy() {
 void NativeCoreTest::restoredSessionDoesNotFallBackToAnotherAgent() {
     FakeClarpServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost, 0));
-    const auto oldBase = qgetenv("CLARP_BASE_URL"), oldToken = qgetenv("CLARP_TOKEN");
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
     const auto restore = qScopeGuard([&] {
         oldBase.isNull() ? qunsetenv("CLARP_BASE_URL") : qputenv("CLARP_BASE_URL", oldBase);
         oldToken.isNull() ? qunsetenv("CLARP_TOKEN") : qputenv("CLARP_TOKEN", oldToken);
@@ -3363,7 +3366,8 @@ QTEST_MAIN(NativeCoreTest)
 
 void NativeCoreTest::voiceErrorsStayInTheirSession() {
     FakeClarpServer server; QVERIFY(server.listenLocal());
-    const auto oldBase = qgetenv("CLARP_BASE_URL"), oldToken = qgetenv("CLARP_TOKEN");
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
     const auto restore = qScopeGuard([&] { qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken); });
     qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8()); qputenv("CLARP_TOKEN", "test-token");
     AppController controller;

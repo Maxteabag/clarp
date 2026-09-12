@@ -564,7 +564,8 @@ bool AppController::openBrowserUrl(const QUrl& url) {
         return false;
     }
     auto* process = new QProcess(this);
-    const QString session = m_selectedSession, host = m_baseUrl;
+    const QString session = m_selectedSession;
+    const QString host = m_baseUrl;
     const auto fail = [this, session, host](const QString& message) {
         if (session == m_selectedSession && host == m_baseUrl) setErrorMessage(message);
     };
@@ -2851,7 +2852,7 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         m_contacts.applySnapshot(object, activeNames);
         m_agentConversationsRefresh.start();
         if (!m_pendingCreatedSession.isEmpty()) {
-            if (!m_agents.find(m_pendingCreatedSession)) {
+            if (m_agents.find(m_pendingCreatedSession) == nullptr) {
                 if (++m_createdSnapshotAttempts <= 5) {
                     const QString expected = m_pendingCreatedSession;
                     QTimer::singleShot(200, this, [this, expected] {

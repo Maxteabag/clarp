@@ -28,7 +28,7 @@ inline void startLaunchKeyboardSmokeCheck(QQuickWindow* window) {
         {QStringLiteral("Escape"), Qt::Key_Escape}};
     const QStringList input = sequence.split(u',');
     for (const QString& name : input) {
-        if (name != QStringLiteral("WaitHistory") && !keys.contains(name) && !(name.startsWith(QStringLiteral("Text=")) && name.size() <= 517)) { qCritical("Unknown simulated key"); QCoreApplication::exit(EXIT_FAILURE); return; }
+        if (name != QStringLiteral("WaitHistory") && !keys.contains(name) && (!name.startsWith(QStringLiteral("Text=")) || name.size() > 517)) { qCritical("Unknown simulated key"); QCoreApplication::exit(EXIT_FAILURE); return; }
     }
     QTimer::singleShot(1200, window, [window, input, keys] {
         const auto* shell = window->findChild<QObject*>(QStringLiteral("desktopShell"));
@@ -50,7 +50,7 @@ inline void startLaunchKeyboardSmokeCheck(QQuickWindow* window) {
         timer->setInterval(120);
         QObject::connect(timer, &QTimer::timeout, window, [window, timer, input, keys, index = 0]() mutable {
             if (index >= input.size()) { timer->stop(); timer->deleteLater(); return; }
-            const QString keyName = input.at(index);
+            const QString& keyName = input.at(index);
             if (keyName == QStringLiteral("WaitHistory")) {
                 const auto* launchPage = window->findChild<QObject*>(QStringLiteral("launchAgent"));
                 if (launchPage && launchPage->property("historyLoading").toBool()) return;
