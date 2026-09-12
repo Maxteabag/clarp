@@ -243,3 +243,21 @@ def test_non_integer_clip_id_rejected_with_400(server_with_clip):
                         "status": ClipStatus.BROADCAST})
     assert code == 400
     assert "bad clip_id" in (body.get("error") or "")
+
+
+def test_real_host_ack_is_bookkept_by_background_janitor(server_with_clip):
+    base, clip_id, url = server_with_clip
+    from lib import db, janitor_builtins, janitors
+    owner = janitor_builtins.get_builtin('audio-bookkeeper')
+    assert owner is not None and owner['enabled']
+    _post(base + '/clips/ack', {'clip_id':clip_id,'url':url,'status':'play-ok'})
+    deadline=time.monotonic()+8
+    row=None
+    while time.monotonic()<deadline:
+        row=db.conn().execute("SELECT run_id,completed_at FROM audio_bookkeeping_events WHERE clip_id=? AND stage='client:play-ok'",(clip_id,)).fetchone()
+        if row and row['completed_at']:break
+        time.sleep(.05)
+    assert row and row['completed_at'], 'Actual Host lifecycle worker must drain the observation'
+    run=janitors.get_run(row['run_id'])
+    assert run['agent_id']==owner['agent_id'] and run['status']=='completed'
+    assert db.conn().execute('SELECT COUNT(*) FROM queued_turns').fetchone()[0]==0
