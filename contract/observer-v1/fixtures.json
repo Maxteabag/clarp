@@ -1,0 +1,142 @@
+{
+  "cases": [
+    {
+      "name": "tool-finished-still-busy",
+      "snapshot": {
+        "version": 1,
+        "type": "snapshot",
+        "host_id": "host-example",
+        "observed_at_ms": 1700000001001,
+        "agents": [
+          {
+            "agent_id": "agent-a",
+            "session": "a",
+            "name": "Example A",
+            "alive": true,
+            "busy": true,
+            "state": "tool",
+            "state_at_ms": 1700000001000,
+            "activity": {
+              "at_ms": 1700000001000,
+              "category": "reading",
+              "status": "running"
+            }
+          }
+        ]
+      },
+      "events": [
+        {
+          "version": 1,
+          "type": "agent-activity",
+          "host_id": "host-example",
+          "cursor": "2",
+          "agent_id": "agent-a",
+          "activity": {
+            "at_ms": 1700000002000,
+            "category": "reading",
+            "status": "ok"
+          }
+        }
+      ],
+      "expected": {
+        "state": "tool",
+        "busy": true,
+        "current_activity": false
+      }
+    },
+    {
+      "name": "late-tool-after-done",
+      "snapshot": {
+        "version": 1,
+        "type": "snapshot",
+        "host_id": "host-example",
+        "observed_at_ms": 1700000001001,
+        "agents": [
+          {
+            "agent_id": "agent-a",
+            "session": "a",
+            "name": "Example A",
+            "alive": true,
+            "busy": true,
+            "state": "tool",
+            "state_at_ms": 1700000001000,
+            "activity": {
+              "at_ms": 1700000001000,
+              "category": "reading",
+              "status": "running"
+            }
+          }
+        ]
+      },
+      "events": [
+        {
+          "version": 1,
+          "type": "agent-state",
+          "host_id": "host-example",
+          "cursor": "3",
+          "agent_id": "agent-a",
+          "state": "done",
+          "at_ms": 1700000003000
+        },
+        {
+          "version": 1,
+          "type": "agent-activity",
+          "host_id": "host-example",
+          "cursor": "4",
+          "agent_id": "agent-a",
+          "activity": {
+            "at_ms": 1700000002000,
+            "category": "reading",
+            "status": "running"
+          }
+        }
+      ],
+      "expected": {
+        "state": "done",
+        "busy": false,
+        "current_activity": false
+      }
+    },
+    {
+      "name": "unknown-is-not-idle",
+      "snapshot": {
+        "version": 1,
+        "type": "snapshot",
+        "host_id": "host-example",
+        "observed_at_ms": 1700000001001,
+        "agents": [
+          {
+            "agent_id": "agent-a",
+            "session": "a",
+            "name": "Example A",
+            "alive": true,
+            "busy": true,
+            "state": "tool",
+            "state_at_ms": 1700000001000,
+            "activity": {
+              "at_ms": 1700000001000,
+              "category": "reading",
+              "status": "running"
+            }
+          }
+        ]
+      },
+      "events": [
+        {
+          "version": 1,
+          "type": "agent-state",
+          "host_id": "host-example",
+          "cursor": "5",
+          "agent_id": "agent-a",
+          "state": "future-phase",
+          "at_ms": 1700000003000
+        }
+      ],
+      "expected": {
+        "state": "future-phase",
+        "busy": false,
+        "current_activity": false
+      }
+    }
+  ]
+}
