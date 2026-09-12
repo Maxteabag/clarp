@@ -206,7 +206,10 @@ def test_voice_connection_persists_context_before_provider_and_closes(saved, tmp
         assert len(history.search()["conversations"]) == 2
         return upstream
     monkeypatch.setattr(websocket,"create_connection",connect)
-    monkeypatch.setattr(oracle_live.config,"load",lambda:SimpleNamespace(openai_key=lambda:"fixture"))
+    monkeypatch.setattr(oracle_live.config,"load",lambda:SimpleNamespace(openai_key=lambda:"fixture", oracle_diagnostics=True))
+    if hasattr(oracle_live, "OracleJournal"):
+        journal = oracle_live.OracleJournal
+        monkeypatch.setattr(oracle_live, "OracleJournal", lambda: journal(directory=tmp_path/"oracle-journal"))
     original_read=ws.read_frame
     # Only the client's rfile is injected. Outgoing frames use the real parser.
     marker=object()
