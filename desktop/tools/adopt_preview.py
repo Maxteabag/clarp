@@ -155,7 +155,7 @@ def main():
     parser.add_argument('--expect-title')
     parser.add_argument('--binary',type=Path,default=Path.home()/'.local/lib/clarp-desktop-preview/clarp-desktop')
     parser.add_argument('--root',type=Path,default=Path.home()/'.local/state/clarp/preview-adoptions')
-    parser.add_argument('--launch',action='store_true',help='Open the preserved copy on the same workspace without taking focus')
+    parser.add_argument('--launch',action='store_true',help='Open the preserved copy on the same workspace; the new window may take focus')
     parser.add_argument('--execute',type=Path,help=argparse.SUPPRESS)
     args=parser.parse_args()
     try:

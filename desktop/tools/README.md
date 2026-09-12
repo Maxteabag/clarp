@@ -18,7 +18,8 @@ and requires exactly one persona/session matching that window title. Generic or
 duplicate titles fail closed. It rechecks process start time/hash, window identity,
 settings hash and installed binary hash before execution. It rejects changed drafts
 instead of replacing them with an older snapshot. It preserves the source window's
-workspace and uses `noinitialfocus` so the new window does not take keyboard focus.
+workspace and requests `noinitialfocus`, but the tested Qt launch still takes
+keyboard focus. Invoke it only when ready to switch to the new window.
 No model, transcript, token or draft content is placed in command arguments or Git.
 
 This preserves persisted data; it cannot recover an old binary's unpersisted
