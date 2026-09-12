@@ -11,7 +11,7 @@ QtObject {
     property bool hasAttention: false
     readonly property var parents: ({main: "root", workspace: "main", navigation: "workspace",
         pane: "navigation", sidebar: "navigation", composer: "workspace", search: "workspace",
-        settings: "main", updates: "main", teams: "main", modal: "root", blocked: "root"})
+        settings: "main", updates: "main", teams: "main", modal: "root", launch: "root", blocked: "root"})
     function binding(action, keys, label, hint = true, guard = "", native = false) {
         return {action: action, keys: keys, label: label, hint: hint, guard: guard, native: native};
     }
@@ -19,6 +19,7 @@ QtObject {
         root: [],
         main: [binding("update-preview", ["Ctrl+Alt+U"], "Update", false),
             binding("next-attention", ["Ctrl+J"], "Next attention", true, "attention"),
+            binding("change-directory", ["Ctrl+Alt+D"], "Change directory", false),
             binding("switcher", ["Ctrl+K"], "Commands"),
             binding("sidebar", ["Ctrl+B"], "Show/hide sidebar", false),
             binding("shortcut-bar", ["Ctrl+Shift+K"], "Show/hide keybindings", false),
@@ -82,6 +83,9 @@ QtObject {
             binding("escape", ["Escape"], "Back")],
         updates: [binding("refresh", ["Ctrl+R"], "Refresh"), binding("escape", ["Escape"], "Chats")],
         teams: [binding("escape", ["Escape"], "Chats")],
+        launch: [binding("switcher", ["Ctrl+K"], "Commands"),
+            binding("change-directory", ["Ctrl+Alt+D"], "Change directory"),
+            binding("escape", ["Escape"], "Back")],
         modal: [binding("escape", ["Escape"], "Close")],
         blocked: []
     })

@@ -472,7 +472,7 @@ bool AppController::quickStartContact(const QString& name, const QString& backen
     m_startingBackend = backend.isEmpty() ? quickStartBackend() : backend;
     emit contactLaunchChanged();
     QJsonObject body{{QStringLiteral("name"), contactName},
-         {QStringLiteral("cwd"), m_lastWorkingDirectory.isEmpty() ? QStringLiteral("~") : m_lastWorkingDirectory},
+         {QStringLiteral("cwd"), QStringLiteral("~")},
          {QStringLiteral("backend"), backend.isEmpty() ? quickStartBackend() : backend},
          {QStringLiteral("synthesize_audio"), !m_muted}};
     if (!model.isEmpty()) body.insert(QStringLiteral("model"), model);

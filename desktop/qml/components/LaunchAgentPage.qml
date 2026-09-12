@@ -75,10 +75,16 @@ Rectangle {
         else if (choosingDirectory) directoryPicker.back();
         else { choosingDirectory = true; Qt.callLater(focusSelected); }
     }
+    function changeDirectory() {
+        if (submitting) return;
+        autoStart = false; choosingDirectory = true;
+        choosingSessions = false; continueLatest = false; resumeId = "";
+        directoryPicker.open();
+    }
     function cancel() { if (!submitting) { autoStart = false; closeRequested(); } }
     function open(wantedBackend, wantedModel, wantedEffort, anonymousMode, wantedDirectory) {
         directory = wantedDirectory || "~"; directoryLabel = directory;
-        choosingDirectory = !wantedDirectory;
+        choosingDirectory = false;
         controller.setLaunchDirectory(directory);
         anonymous = anonymousMode === 1 ? true : anonymousMode === 0 ? false : controller.anonymousAgents;
         const saved = controller.lastBackend || "codex";

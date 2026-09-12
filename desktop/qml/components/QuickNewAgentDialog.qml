@@ -13,7 +13,7 @@ Rectangle {
         if (submitting || nameField.text.trim().length === 0 || !controller.connected) return;
         submitting = true;
         controller.clearError();
-        controller.createAgent(nameField.text.trim(), controller.lastWorkingDirectory || "~",
+        controller.createAgent(nameField.text.trim(), "~",
             controller.quickStartBackend(), "", "", "", "fresh", "", []);
     }
     onVisibleChanged: {
@@ -56,7 +56,7 @@ Rectangle {
             }
             TuiText {
                 Layout.fillWidth: true
-                text: root.controller.quickStartBackend() + " · " + (root.controller.lastWorkingDirectory || "~")
+                text: root.controller.quickStartBackend() + " · " + "~"
                 color: "#9ca1bd"
                 elide: Text.ElideMiddle
                 font.pixelSize: 12

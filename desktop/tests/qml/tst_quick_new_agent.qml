@@ -37,7 +37,7 @@ TestCase {
         name.text = "  New Friend  ";
         keyClick(Qt.Key_Return);
         compare(stub.calls, 1);
-        compare(stub.captured, ["New Friend", "/work/project", "codex", "", "", "", "fresh", "", []]);
+        compare(stub.captured, ["New Friend", "~", "codex", "", "", "", "fresh", "", []]);
         dialog.submit(); compare(stub.calls, 1);
         compare(closed.count, 0);
         stub.errorMessage = "Name already in use";

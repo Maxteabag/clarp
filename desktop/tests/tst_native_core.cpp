@@ -1090,7 +1090,7 @@ void NativeCoreTest::idleContactStartsFreshWithSavedDefaults() {
     QTRY_VERIFY_WITH_TIMEOUT(server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/agents")), 3000);
     const QJsonObject request = server.requestJson(QStringLiteral("POST"), QStringLiteral("/agents"));
     QCOMPARE(request.value(QStringLiteral("name")).toString(), QStringLiteral("Bella"));
-    QCOMPARE(request.value(QStringLiteral("cwd")).toString(), QStringLiteral("/tmp/contact-workspace"));
+    QCOMPARE(request.value(QStringLiteral("cwd")).toString(), QStringLiteral("~"));
     QCOMPARE(request.value(QStringLiteral("backend")).toString(), QStringLiteral("codex"));
     QVERIFY(!request.contains(QStringLiteral("session")));
     QVERIFY(!request.contains(QStringLiteral("replace_sid")));
