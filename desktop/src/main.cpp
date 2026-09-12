@@ -151,7 +151,7 @@ int main(int argc, char* argv[]) {
     }
     const QString screenshotPath = qEnvironmentVariable("CLARP_SCREENSHOT_PATH");
     if (!screenshotPath.isEmpty() && rootWindow != nullptr) startLaunchKeyboardSmokeCheck(rootWindow);
-    if (!screenshotPath.isEmpty() && rootWindow && controller) startDesktopResearch(application, rootWindow, controller);
+    if (!screenshotPath.isEmpty() && rootWindow != nullptr && controller != nullptr) startDesktopResearch(application, rootWindow, controller);
     if (!screenshotPath.isEmpty() && controller != nullptr && qEnvironmentVariableIsSet("CLARP_SCREENSHOT_MINIMAL_UI"))
         controller->setMinimalUi(qEnvironmentVariableIntValue("CLARP_SCREENSHOT_MINIMAL_UI") != 0);
     const QString screenshotLayout = qEnvironmentVariable("CLARP_SCREENSHOT_LAYOUT");
