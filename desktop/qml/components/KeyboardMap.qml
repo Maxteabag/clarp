@@ -50,7 +50,7 @@ QtObject {
             binding("balance", ["Ctrl+Alt+="], "Balance panes", false),
             binding("agent-terminal", ["Ctrl+Alt+T"], "Terminal", false, "agent"),
             binding("release-agent", ["Ctrl+Shift+R"], "Release", false, "agent"),
-            binding("stop-agent", ["Ctrl+."], "Stop", false, "agent"),
+            binding("stop-agent", ["Ctrl+.", "Ctrl+C"], "Stop", false, "agent"),
             binding("talk", ["Ctrl+Shift+Space"], "Talk", false, "agent")],
         navigation: [binding("next-attention", ["N", "Ctrl+J"], "Next attention", true, "attention"),
             binding("focus-sidebar", ["E"], "Agents"),
