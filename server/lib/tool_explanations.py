@@ -271,6 +271,10 @@ class ToolExplanations:
                     if not janitor_builtins.is_current(run["run_id"]):
                         raise RuntimeError("Janitor configuration changed")
                     primary = {key: run["configuration"][key] for key in ("backend", "model", "effort")}
+                    effective=run["configuration"].get("effective_chain",{})
+                    if effective.get("source")=="global" and effective.get("chain"):
+                        first=effective["chain"][0]
+                        primary={"backend":first["provider"],"model":first["model"],"effort":""}
                     def translate(model):
                         if self._translate is not None:
                             value = self._translate(level, requests)

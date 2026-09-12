@@ -211,6 +211,10 @@ class RuntimeClient:
             raise RuntimeProtocolError(
                 str(response.get("error") or "runtime stop lease failed"))
 
+    def recover_janitor_quota(self, provider, owner_id, generation, approval_id=""):
+        response = self._request("recover_janitor_quota", {"provider":provider,"owner_id":owner_id,"generation":generation,"approval_id":approval_id})
+        return response.get("result", {"status":"runtime_unavailable"})
+
     def cancel_janitor_run(self, run_id: str) -> dict[str, Any]:
         response = self._request("cancel_janitor_run", {"run_id": run_id})
         if not response.get("ok"):
@@ -334,6 +338,9 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             if agent and not agents_db.interaction_capabilities(agent)["can_restart"]:
                 return {"ok": False, "status": 409,
                         "error": "Janitors are managed from their maintenance configuration"}
+        if method == "recover_janitor_quota":
+            from .janitor_autonomy import runtime_recover
+            return {"ok":True,"result":runtime_recover(str(params.get("provider") or ""),str(params.get("owner_id") or ""),params.get("generation"),str(params.get("approval_id") or ""))}
         if method == "cancel_janitor_run":
             from . import turn_dispatch
             try:
