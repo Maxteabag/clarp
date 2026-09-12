@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from lib.tool_explanations import ToolExplanations, normalize_activity
+from lib.tool_explanations import ToolExplanations, normalize_activity, validate_explanation
 
 
 @pytest.fixture(autouse=True)
@@ -18,10 +18,10 @@ def test_refined_prompts_match_user_selected_lab_and_keep_low(monkeypatch):
     from pathlib import Path
     from lib import tool_explanations as module
     expected = {
-        1: '6affcc6f06e4a2362da99a56d37c2cc83f402e2c12bdf3ac31fb95f361f5d898',
-        2: 'da2571dc9fcc80e1ec34e390f9b8f5e2f7c6a0b989ab8c61d85905a1259d3d94',
-        3: 'e26fa022c6f04baf94fe943fe56e285ba4d4b6b7b4e03b1f6b9ace6eb5227507',
-        4: '79b52c28db2bb285ba1410e2b851119d3fe93c6eaeb91743a9f1429a9fe55463',
+        1: '60a7b0d7ddec32024635c902e86f11d06ec26161ac9a70a1c6c9f7d617619cba',
+        2: 'fe45831aeaa27346fb9e5236a15ab138460ad3a56b45e48c0713eb7e6bc83b69',
+        3: '632c35b6a3c7bc55fd5f2dbc79e0aeef1e5766c446aa6047f476deecf94dd6bf',
+        4: 'ada3b07954a6efe00ebbe2ef52df8f6bfc1cb0130978724035d483ec41ea6879',
     }
     class Captured(Exception): pass
     captured=[]
@@ -80,6 +80,13 @@ def test_developer_never_invokes_model_and_rejects_invalid_input():
                 service.request(level, [])
         with pytest.raises(ValueError):
             service.request(3, [{"id": "x", "activity": {}}] * 9)
+
+
+def test_explanation_must_be_specific_to_activity_evidence():
+    activity = {"command": "ls workspace"}
+    assert not validate_explanation("Complete the current task", activity)
+    assert validate_explanation("List the files.", activity)
+    assert not validate_explanation("Build the desktop preview.", activity)
 
 
 def test_failure_is_explicit_not_fabricated_or_retried_by_polling():
@@ -202,3 +209,8 @@ def test_provider_failure_uses_configured_fallback_and_caches_only_final_text(mo
         assert wait_ready(service)["text"]=="List the files."
         assert wait_ready(service)["status"]=="ready"
     assert calls==["primary","gemini-3.8-flash-low"]
+
+
+def test_plural_generic_labels_are_rejected_even_when_metadata_mentions_tasks():
+    assert not validate_explanation("Complete the current tasks", {"summary": "current tasks"})
+    assert validate_explanation("Read file contents.", {"command": "head notes.md"})

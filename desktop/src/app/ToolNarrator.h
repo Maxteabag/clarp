@@ -99,6 +99,7 @@ class ToolNarrator : public QObject {
     QSet<QString> m_requested;
     QSet<QString> m_batchKeys;
     QHash<QString, QString> m_batchIds;
+    QHash<QString, QJsonObject> m_batchActivities;
     int m_batchLevel = 0;
     QHash<QString, QString> m_cache;
     QQueue<QString> m_cacheOrder;

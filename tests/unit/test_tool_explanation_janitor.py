@@ -46,7 +46,30 @@ def ready(service, item=ITEM, *, target_agent_id=None):
 
 
 def translate(level, items):
-    return {item["id"]: "List the files." for item in items}
+    return {item["id"]: (
+        "Inspect the private activity." if "private-script" in item["activity"].get("command", "")
+        else "List the files.") for item in items}
+
+
+def test_content_free_explanations_are_rejected_and_evidence_is_required():
+    activity = {"command": "cmake --build desktop/build/dev"}
+    assert not tool_explanations.validate_explanation("Complete the current task", activity)
+    assert tool_explanations.validate_explanation("Build the desktop preview.", activity)
+    assert not tool_explanations.validate_explanation("Search the grocery catalogue.", activity)
+    assert tool_explanations.validate_explanation("The purpose is unknown from the evidence.", {})
+
+
+def test_content_free_explanation_is_not_cached():
+    config = seed()
+
+    with tool_explanations.ToolExplanations(
+            translate=lambda level, items: {item["id"]: "Complete the current task" for item in items},
+            debounce=0) as service:
+        result = wait_for(lambda: (
+            row if (row := service.request(3, [ITEM])["items"][0])["status"] == "failed" else None))
+        assert result["reason"] == "translator_failed"
+        assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == 0
+    assert janitors.list_runs(config["session"])[0]["status"] == "failed"
 
 
 def test_missing_janitor_disables_admission_without_creating_an_identity():
@@ -69,7 +92,7 @@ def test_success_records_bounded_history_without_raw_activity_or_a_chat():
     config = seed(model="configured-model", effort="medium")
     item = {**ITEM, "activity": {"command": "private-script --token=do-not-persist", "summary": "private activity marker"}}
     with tool_explanations.ToolExplanations(translate=translate, debounce=0) as service:
-        assert ready(service, item)["text"] == "List the files."
+        assert ready(service, item)["text"] == "Inspect the private activity."
         assert service.request(3, [item])["model"] == "configured-model"
     runs = janitors.list_runs(config["session"])
     assert len(runs) == 1
@@ -180,9 +203,9 @@ def test_reconfiguration_and_replacement_get_fresh_cache_and_frozen_model(change
     calls = []
     def capture(level, items):
         calls.append(1)
-        return {item["id"]: f"Explanation {len(calls)}." for item in items}
+        return {item["id"]: f"List the files (run {len(calls)})." for item in items}
     with tool_explanations.ToolExplanations(translate=capture, debounce=0) as service:
-        assert ready(service)["text"] == "Explanation 1."
+        assert ready(service)["text"] == "List the files (run 1)."
         if change == "configure":
             config = janitors.configure(config["session"], config["revision"], model="new-model", effort="medium")
             if not config["enabled"]:
@@ -195,7 +218,7 @@ def test_reconfiguration_and_replacement_get_fresh_cache_and_frozen_model(change
             config = janitors.create("custom-explainer", template_id="tool-explainer")
             config = janitors.configure(config["session"], config["revision"], options={"detail_level": 3})
             config = janitors.set_enabled(config["session"], config["revision"], True)
-        assert ready(service)["text"] == "Explanation 2."
+        assert ready(service)["text"] == "List the files (run 2)."
         assert service.request(3, [ITEM])["model"] == "new-model"
     assert len(calls) == 2
     assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == 2
@@ -390,12 +413,12 @@ def test_same_scoped_owner_keeps_distinct_targets_out_of_shared_batches_and_cach
         running = next(run for run in janitors.list_runs(config["session"]) if run["status"] == "running")
         target = running["configuration"]["target_agent_id"]
         calls.append((target, len(items)))
-        return {item["id"]: f"Explanation for {target}." for item in items}
+        return {item["id"]: f"List the files for {target}." for item in items}
     with tool_explanations.ToolExplanations(translate=capture, debounce=.1) as first, tool_explanations.ToolExplanations(translate=capture, debounce=.1) as second:
         first.request(3, [ITEM], target_agent_id=targets[0])
         second.request(3, [ITEM], target_agent_id=targets[1])
         for service, target in zip([first, second], targets):
-            assert ready(service, target_agent_id=target)["text"] == f"Explanation for {target}."
+            assert ready(service, target_agent_id=target)["text"] == f"List the files for {target}."
     assert sorted(calls) == sorted((target, 1) for target in targets)
     assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == 2
     assert len(janitors.list_runs(config["session"])) == 2
@@ -551,12 +574,12 @@ def test_owner_detail_change_invalidates_cache_and_changes_prompt_audience():
     calls = []
     def capture(level, items):
         calls.append(level)
-        return {item["id"]: f"Audience {level}." for item in items}
+        return {item["id"]: f"List the files (audience {level})." for item in items}
     with tool_explanations.ToolExplanations(translate=capture, debounce=0) as service:
-        assert ready(service)["text"] == "Audience 3."
+        assert ready(service)["text"] == "List the files (audience 3)."
         old_keys = {row[0] for row in db.conn().execute("SELECT cache_key FROM tool_explanation_cache")}
         config = configure_detail(config, 4)
-        assert ready(service)["text"] == "Audience 4."
+        assert ready(service)["text"] == "List the files (audience 4)."
         keys = {row[0] for row in db.conn().execute("SELECT cache_key FROM tool_explanation_cache")}
         assert len(keys - old_keys) == 1
     assert calls == [3, 4]
