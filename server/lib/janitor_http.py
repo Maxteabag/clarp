@@ -143,7 +143,7 @@ def handle(handler, method: str) -> None:
             if data is None:
                 raise ValueError("Expected a JSON object")
             if path == "/janitors":
-                if data.get("template_id", "task-labels") == "task-labels":
+                if data.get("template_id", "task-labels") in {"task-labels", "custom-task"}:
                     _require_runtime(handler.ctx)
                 fields = {key: data[key] for key in ("template_id", "scope", "attachments", "options", "execution") if key in data}
                 session = str(data.get("session") or "").strip()
@@ -188,7 +188,7 @@ def handle(handler, method: str) -> None:
                 elif action == "enabled":
                     if not isinstance(data.get("enabled"), bool):
                         raise ValueError("enabled must be true or false")
-                    if data["enabled"] and janitors.get(session)["template_id"] == "task-labels":
+                    if data["enabled"] and janitors.get(session)["template_id"] in {"task-labels", "custom-task"}:
                         _require_runtime(handler.ctx)
                     result = janitors.set_enabled(session, revision, data["enabled"])
                 elif action == "import-pilot":
