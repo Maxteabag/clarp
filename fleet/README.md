@@ -45,7 +45,7 @@ clarp-fleet cancel BUILD_ID
 clarp-fleet transcribe /absolute/pcm.wav --engine auto --json
 ```
 
-For agent jobs use profile `agent`, file `prompt.txt=/absolute/task.txt`, model and
+For agent jobs use profile `agent`, file `task.md=/absolute/task.md`, model and
  effort explicitly. Provide source with `--repo PATH --commit SHA`; the 32 MiB
 bundle cap requires small jobs. No automatic distribution of every existing agent
 command, live agent migration, or provider quota scheduling is implemented.

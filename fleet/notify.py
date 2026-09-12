@@ -106,8 +106,16 @@ def start_watcher(job_id, parent):
 
 def bg(session, action, *values):
     env = dict(os.environ, CLARP_BACKGROUND_WORKER_PID=str(os.getpid()))
-    return subprocess.check_output(['clarp-agent-bg', session, action, *values], env=env,
-                                   text=True, timeout=20).strip()
+    command = ['clarp-agent-bg', session, action, *values]
+    for attempt in range(12):
+        result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=20)
+        if result.returncode == 0:
+            return result.stdout.strip()
+        if 'database is locked' not in result.stderr or attempt == 11:
+            raise subprocess.CalledProcessError(result.returncode, command, result.stdout, result.stderr)
+        # Each operation is fenced by stable job/generation/worker identity.
+        # A busy Host database is transient; cancellation remains terminal.
+        time.sleep(min(5, .25 * (attempt + 1)))
 
 
 def main():
