@@ -16,7 +16,9 @@ Item {
     readonly property var motionClock: controller.avatarMotion
     readonly property bool authoritativeWorking: { motionClock.revision; return motionClock.working(session); }
     property real phase: { motionClock.revision; return motionClock.phase(session); }
-    function updateObservation() { motionClock.observe(root, root.visible && root.working && root.authoritativeWorking); }
+    readonly property bool windowVisible: root.Window.window !== null && root.Window.window.visibility !== Window.Hidden && root.Window.window.visibility !== Window.Minimized
+    onWindowVisibleChanged: updateObservation()
+    function updateObservation() { motionClock.observe(root, root.visible && root.windowVisible && root.working && root.authoritativeWorking); }
     Component.onCompleted: updateObservation()
     Component.onDestruction: motionClock.observe(root, false)
     onVisibleChanged: updateObservation()
