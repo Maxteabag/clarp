@@ -57,6 +57,8 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
+# Versions 81 and 82 also exist on installed Hosts with additive indexing
+# migrations. History must run when upgrading those Hosts, not only main's v80.
 _SCHEMA_VERSION = 83
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
