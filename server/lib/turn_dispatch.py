@@ -400,7 +400,7 @@ class TurnDispatchService:
         runtime = getattr(self.ctx, "runtime_client", None)
         if runtime is not None:
             try:
-                return runtime.dispatch(
+                result = runtime.dispatch(
                     text=text,
                     requested_session=requested_session,
                     trace_id=trace_id,
@@ -424,6 +424,12 @@ class TurnDispatchService:
                 if isinstance(exc, RuntimeUnavailable):
                     raise DispatchError(503, str(exc)) from exc
                 raise
+            # The runtime's active map just changed; do not let a shared
+            # status window older than this dispatch answer for it.
+            invalidate = getattr(self.backends, "invalidate_runtime_status", None)
+            if invalidate is not None:
+                invalidate()
+            return result
         # NB: the live session->trace mapping is set only when a turn actually
         # spawns (see below / _finish_turn), NOT here — a message that merely
         # queues behind a busy agent must not move the trace, or the running
