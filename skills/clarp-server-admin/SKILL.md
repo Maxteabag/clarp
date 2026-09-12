@@ -102,35 +102,25 @@ Once installation starts, the installer owns rollback; cancelling the tracking
 job is not an emergency stop for the installer. Verify the deployed SHA, schema,
 runtime availability, and `clarp-admin doctor` afterwards.
 
-## Installing does not deploy runner code
+## Verify HTTP and runner adoption separately
 
-`install_and_restart` runs `systemctl --user enable --now
-clarp-runtime.service` and `restart clarp.service`. `enable --now` does not
-restart an already-running runtime, and nothing in the server automatically
-adopts a new release, so **the runtime keeps its old code until someone
-restarts it**. Verified on 2026-09-07: no drain-to-new-release mechanism exists
-in `runtime.py` or `service_manager.py`.
+The installer restarts the HTTP service. An already running agent runtime can
+continue on its previous release while turns are active. Current `runtime.py`
+wires `RuntimeReleaseMonitor`: after `RUNTIME_READY` appears with a different
+release identity, it calls `begin_drain_if_idle`, writes a clean handoff marker
+and shuts down for the service manager to start the new release. It does not
+interrupt busy turns merely because installation completed. The behavior is
+covered by `tests/unit/test_runtime_release.py` and the runtime bridge tests.
 
-That split decides whether your change is actually live:
+Check the installed and running versions rather than assuming every Host has
+this mechanism. Older runtimes without the monitor need a separate restart.
+HTTP-only features can be verified through their endpoints immediately; runner
+changes require proof that the running runtime adopted the candidate release.
 
-| Where the code lives | Live after `install.sh`? |
-|---|---|
-| HTTP endpoints (`server.py`), schema migrations | yes |
-| Runner/turn code (`turn_dispatch.py`, `*_runner.py`) | **no** |
-
-Confirm which side you changed, then check whether the runtime predates the
-deploy:
-
-```bash
-ps -o lstart= -p $(systemctl --user show clarp-runtime.service -p MainPID --value)
-stat -c %y ~/.local/share/clarp/current
-```
-
-Restarting the runtime interrupts **every in-flight turn on the host**,
-including the calling agent's own turn, so it cannot be done silently from
-inside a turn that still needs to report. Check `/agents/snapshot` for `busy`
-agents and queued turns, then ask for explicit approval with `clarp-decisions`
-rather than restarting unannounced.
+Never force a shared runtime restart while agent turns are active. Inspect its
+status and allow supported idle adoption. If a manual restart is required,
+explain the interruption and obtain explicit approval before doing it; a queued
+or installed release does not prove new runner behavior is active.
 
 ## Docker Container Administration
 
