@@ -3174,6 +3174,25 @@ void NativeCoreTest::pairConversationRoomsAreReadOnlyProjections() {
     QCOMPARE(controller.agentName(room), QStringLiteral("C++ Junior & Rachel"));
     QVERIFY(controller.agentConversation(QStringLiteral("pair:nope:nada")).isEmpty());
 
+    // Identical Host snapshots must not invalidate the QML room list.
+    QSignalSpy roomsChanged(&controller, &AppController::agentConversationsChanged);
+    for (int refresh = 0; refresh < 5; ++refresh) {
+        const auto before = server.requestCount(QStringLiteral("GET"), QStringLiteral("/agent-conversations"));
+        controller.loadAgentConversations();
+        QTRY_VERIFY_WITH_TIMEOUT(server.requestCount(QStringLiteral("GET"), QStringLiteral("/agent-conversations")) > before, 3'000);
+        QTest::qWait(100);
+    }
+    QCOMPARE(roomsChanged.count(), 0);
+    listedRoom.insert(QStringLiteral("title"), QStringLiteral("Renamed pair"));
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agent-conversations"), 200,
+        QJsonObject{{QStringLiteral("conversations"), QJsonArray{listedRoom}}});
+    controller.loadAgentConversations();
+    QTRY_COMPARE_WITH_TIMEOUT(roomsChanged.count(), 1, 3'000);
+    QCOMPARE(controller.agentName(room), QStringLiteral("Renamed pair"));
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agent-conversations"), 200, roomsResponse);
+    controller.loadAgentConversations();
+    QTRY_COMPARE_WITH_TIMEOUT(roomsChanged.count(), 2, 3'000);
+
     // Opening a room reads its timeline but never claims Host focus for it,
     // and never resolves it to an agent record.
     const qsizetype selectsBefore = server.requestCount(QStringLiteral("POST"), QStringLiteral("/select"));
