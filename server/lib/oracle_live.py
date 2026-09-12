@@ -21,6 +21,35 @@ from . import config, oracle_delegations, ws
 from .oracle_calls import AgentTools, session_config as realtime_config
 from .oracle_realtime import _claim, _release, _send_http_error
 
+_CLOSING = set()
+_CLOSING_CONDITION = threading.Condition()
+
+
+def claim_connection(principal, timeout=3.0):
+    """Wait only for a closing session; never take over live ownership."""
+    deadline = time.monotonic() + timeout
+    with _CLOSING_CONDITION:
+        while True:
+            if _claim(principal):
+                return True
+            remaining = deadline - time.monotonic()
+            if principal not in _CLOSING or remaining <= 0:
+                return False
+            _CLOSING_CONDITION.wait(remaining)
+
+
+def mark_closing(principal):
+    with _CLOSING_CONDITION:
+        _CLOSING.add(principal)
+
+
+def release_connection(principal):
+    with _CLOSING_CONDITION:
+        _release(principal)
+        _CLOSING.discard(principal)
+        _CLOSING_CONDITION.notify_all()
+
+
 MODEL = "gpt-live-1"
 VOICE = "marin"
 ROUTER = "gpt-5.6-luna"
@@ -263,7 +292,7 @@ def serve(handler):
     key = config.load().openai_key()
     if not key:
         return _send_http_error(handler, 503, "Oracle v2 needs an OpenAI key on this Host")
-    if not _claim(principal):
+    if not claim_connection(principal):
         return _send_http_error(handler, 409, "An Oracle session is already active")
     upstream = None
     conversation = None
@@ -328,6 +357,8 @@ def serve(handler):
             elif opcode == ws.OP_TEXT:
                 event = client_event(payload.decode("utf-8"))
                 if event is not None:
+                    if event["type"] == "session.close":
+                        mark_closing(principal)
                     conversation.input(event)
                 else:
                     downstream({"type": "oracle_v2.notice", "message": "Unsupported Oracle v2 command"})
@@ -335,6 +366,7 @@ def serve(handler):
         if conversation is None:
             _send_http_error(handler, 502, "Oracle v2 upstream unavailable")
     finally:
+        mark_closing(principal)
         if conversation:
             try:
                 conversation.send({"type": "session.close"})
@@ -345,4 +377,4 @@ def serve(handler):
             conversation.pool.shutdown(wait=False, cancel_futures=True)
         if upstream:
             upstream.close()
-        _release(principal)
+        release_connection(principal)
