@@ -211,3 +211,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME clarp-desktop-preview-adoption
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_preview_adoption.py)
 endif()
+
+# Native component contract: use the actual model, isolated temporary settings.
+add_executable(clarp-pane-contract ../research/component/panes.cpp ../src/models/PaneTreeModel.cpp ../src/models/PaneTreeModel.h)
+target_include_directories(clarp-pane-contract PRIVATE ../src)
+target_link_libraries(clarp-pane-contract PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+clarp_apply_quality_settings(clarp-pane-contract)
+add_test(NAME clarp-desktop-pane-contract COMMAND clarp-pane-contract)

@@ -148,6 +148,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/QuickSwitcher.qml
         qml/components/ReportView.qml
         qml/components/QueueDialog.qml
+        qml/components/KeymapEditor.qml
         qml/components/KeyboardMap.qml
         qml/components/ShortcutBar.qml
         qml/components/SettingsPanel.qml

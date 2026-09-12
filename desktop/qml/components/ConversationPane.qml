@@ -96,6 +96,12 @@ Rectangle {
                 }
 
                 TuiToolButton {
+                    text: root.controller.panes.zoomedPaneId === root.paneId ? "Restore" : "Maximize"
+                    visible: root.active
+                    Accessible.name: text + " pane"
+                    onClicked: root.controller.panes.toggleZoom()
+                }
+                TuiToolButton {
                     id: paneMenuButton
                     visible: root.active && root.session.length > 0 && !root.pairRoom
                         && (headerHover.hovered || paneMenu.visible)
