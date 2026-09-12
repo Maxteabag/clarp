@@ -3307,6 +3307,12 @@ void NativeCoreTest::hostMediaAuthenticatedDownload() {
         for (const auto& scheme : {"file", "http", "https"}) QDesktopServices::unsetUrlHandler(scheme);
     });
     AppController controller;
+    // Supply synthetic credentials directly below. The constructor's deferred
+    // desktop-keyring lookup is unrelated to this fixture and can otherwise
+    // reconnect the API midway through its deliberately unauthenticated probe.
+    auto* credentials = controller.findChild<clarp::CredentialStore*>();
+    QVERIFY(credentials);
+    QObject::disconnect(credentials, nullptr, &controller, nullptr);
     const QString origin = QStringLiteral("http://127.0.0.1:%1/clarp").arg(server.serverPort());
     controller.setBaseUrl(origin);
     auto* api = controller.findChild<ApiClient*>();
