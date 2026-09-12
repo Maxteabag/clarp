@@ -36,7 +36,7 @@ TestCase {
     Component { id: factory; LaunchAgentPage { controller:stub; visible:false; width:820; height:720 } }
     function init() { stub.starts=0; stub.args=[]; stub.launchDirectories=[]; stub.launchDirectoriesLoading=false; stub.errorMessage=""; }
     function open(backend) {
-        const page=createTemporaryObject(factory,testCase);page.open(backend || "","","");wait(30);
+        const page=createTemporaryObject(factory,testCase);page.open(backend || "","","");page.changeDirectory();wait(30);
         tryCompare(findChild(page,"launchDirectorySearch"),"activeFocus",true);
         return page;
     }
@@ -62,9 +62,11 @@ TestCase {
         verify(!page.choosingDirectory);keyClick(Qt.Key_Return);
         compare(stub.args,["codex","/work/clarp"]);
     }
-    function test_backendShortcutStillAsksDirectory() {
-        const page=open("claude");compare(stub.starts,0);
-        keyClick(Qt.Key_Return);wait(20);compare(stub.args,["claude","~"]);
+    function test_backendShortcutStartsAtHome() {
+        const page=createTemporaryObject(factory,testCase);
+        page.open("claude","","");wait(30);
+        compare(stub.starts,1);compare(stub.args,["claude","~"]);
+        verify(!page.choosingDirectory);
     }
     function test_explicitDirectorySkipsPicker() {
         const page=createTemporaryObject(factory,testCase);page.open("codex","","",undefined,"/explicit");wait(20);
