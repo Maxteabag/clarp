@@ -56,6 +56,7 @@ int fakeCodex(const QStringList& args) {
             {QStringLiteral("text"), behavior == QStringLiteral("generic")
                 ? QStringLiteral("Complete the current task")
                 : (behavior == QStringLiteral("read") ? QStringLiteral("Read file contents.")
+                   : behavior == QStringLiteral("script") ? QStringLiteral("Run the script; its purpose is unknown.")
                    : QStringLiteral("Build the desktop preview."))}});
     }
     const qsizetype outputIndex = args.indexOf(QStringLiteral("--output-last-message"));
@@ -118,7 +119,7 @@ void ToolNarratorTest::sharedHostPollsWithoutStartingLocalCodex() {
             const auto answer = QJsonDocument(QJsonObject{{QStringLiteral("items"), QJsonArray{
                 QJsonObject{{QStringLiteral("id"), item.value(QStringLiteral("id"))},
                     {QStringLiteral("status"), calls == 1 ? QStringLiteral("pending") : QStringLiteral("ready")},
-                    {QStringLiteral("text"), QStringLiteral("Build the desktop preview.")}}}}}).toJson(QJsonDocument::Compact);
+                    {QStringLiteral("text"), QStringLiteral("Inspect release signing.")}}}}}).toJson(QJsonDocument::Compact);
             socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: " + QByteArray::number(answer.size()) + "\r\n\r\n" + answer);
             socket->disconnectFromHost();
             buffer.clear();
@@ -135,7 +136,7 @@ void ToolNarratorTest::sharedHostPollsWithoutStartingLocalCodex() {
     QCOMPARE(calls, 0);
     narrator.setDetailLevel(3);
     narrator.request(activity);
-    QTRY_COMPARE_WITH_TIMEOUT(narrator.explanation(activity), QStringLiteral("Build the desktop preview."), 3000);
+    QTRY_COMPARE_WITH_TIMEOUT(narrator.explanation(activity), QStringLiteral("Inspect release signing."), 3000);
     QCOMPARE(calls, 2);
     narrator.request(activity);
     QTest::qWait(200);
@@ -292,7 +293,7 @@ void ToolNarratorTest::scriptContextIsOptInBoundedAndInvalidatesCache() {
     const QVariantMap activity{{QStringLiteral("name"), QStringLiteral("Bash")},
         {QStringLiteral("command"), QStringLiteral("node meat_search.js")}};
     ToolNarrator narrator(nullptr, QCoreApplication::applicationFilePath(),
-        {QStringLiteral("--fake-codex"), capture, QStringLiteral("ok")});
+        {QStringLiteral("--fake-codex"), capture, QStringLiteral("script")});
     narrator.setEnabled(true);
     narrator.request(activity, directory.path(), false);
     QTRY_VERIFY_WITH_TIMEOUT(!narrator.explanation(activity, directory.path(), false).isEmpty(), 3'000);

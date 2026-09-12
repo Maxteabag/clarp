@@ -235,7 +235,9 @@ void ToolNarrator::setApiClient(ApiClient* api) {
             if (state == QStringLiteral("ready")) {
                 const auto text = value.value(QStringLiteral("text")).toString().trimmed();
                 if (text.isEmpty() || text.size() > 240
-                    || !supportedExplanation(text, item.toObject().value(QStringLiteral("activity")).toObject())) {
+                    || explanationTerms(text).isEmpty()) {
+                    // The Host can enrich activity with script evidence unavailable to this client.
+                    // Check content-free text here; evidence validation belongs to that Host.
                     fail(QStringLiteral("Unsupported Host explanation text; original tool details are unchanged.")); return;
                 }
                 m_cache.insert(id, text);
