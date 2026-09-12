@@ -90,6 +90,9 @@ def _payload(value: Any, *, preserve_html: bool = False) -> dict:
         value["content"] = strip_hidden_blocks(value["content"])
     if "all_day" in value and not isinstance(value["all_day"], bool):
         raise ValueError("payload all_day must be a boolean")
+    if "podcast" in value:
+        from .podcast_live import validate_episode
+        validate_episode(value["podcast"])
     return value
 
 
@@ -176,6 +179,11 @@ def _require_payload(type: str, payload: dict, artifact_id: str, session: str = 
         asset = media_store.get(match.group(1))
         if not asset or (session and asset["session"] != session):
             raise ValueError(f"{type} artifact media asset not found for this session")
+        if "podcast" in payload:
+            if type != "audio" or payload["podcast"]["revision"] != asset["sha256"]:
+                raise ValueError("Podcast revision must match its audio media asset")
+            if not 0 < payload.get("duration_ms", 0) <= 86400000:
+                raise ValueError("Podcast requires an audio duration")
         if asset["mime_type"] != payload["mime_type"]:
             raise ValueError(f"{type} artifact mime_type must match its media asset")
         if asset["source_name"] != payload["file_name"]:
@@ -294,7 +302,7 @@ def _public(row) -> dict:
                 "version", "build", "environment", "files_changed", "additions",
                 "deletions", "diff", "path_label", "artifact_ids", "asset_id", "asset_ids",
                 "root", "relative_path", "provider", "run_id", "run_url", "workflow_name",
-                "current_step", "conclusion", "total_steps", "completed_steps"):
+                "current_step", "conclusion", "total_steps", "completed_steps", "podcast"):
         if key in item["payload"] and _public_field_valid(key, item["payload"][key]):
             item[key] = item["payload"][key]
     if item["type"] in {"decision", "question"}:
@@ -309,6 +317,13 @@ def _public(row) -> dict:
 
 
 def _public_field_valid(key: str, value: Any) -> bool:
+    if key == "podcast":
+        from .podcast_live import validate_episode
+        try:
+            validate_episode(value)
+            return True
+        except (ValueError, TypeError):
+            return False
     strings = {"target_at", "url", "thumbnail_url", "mime_type", "file_name", "content", "source_url",
                "commit", "branch", "repository", "subject", "starts_at", "ends_at",
                "time_zone", "location", "notes", "version", "build", "environment",

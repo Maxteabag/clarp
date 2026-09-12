@@ -3261,11 +3261,12 @@ def test_oracle_v2_route_preserves_full_device_principal(running_server, monkeyp
     assert seen == [("administrator", "full")]
 
 
-def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch):
+@pytest.mark.parametrize("podcast", [False, True])
+def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch, podcast):
     import base64
     import queue
     import websocket
-    from lib import config, oracle_realtime
+    from lib import config, oracle_realtime, artifacts, oracle_live
     base, ctx, _srv = running_server
     ctx.auth_token = "administrator-token"
     cfg = config.load()
@@ -3295,7 +3296,16 @@ def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch)
         assert kwargs["suppress_origin"] is True
         return upstream
     monkeypatch.setattr(websocket, "create_connection", connect)
-    client = real_connect(base.replace("http:", "ws:") + "/oracle/v2",
+    suffix = ""
+    if podcast:
+        episode = {"revision": "a"*64,
+            "transcript": [{"start": 0, "end": 10, "text": "Prediction hides delay"}],
+            "chapters": [{"start": 0, "end": 10, "title": "Prediction", "source": "The server remains authoritative"}]}
+        monkeypatch.setattr(artifacts, "get", lambda ident: {"type": "audio", "duration_ms": 10000,
+            "payload": {"podcast": episode}} if ident == "episode" else None)
+        monkeypatch.setattr(oracle_live, "AgentTools", lambda *args, **kwargs: pytest.fail("Podcast must not open agent tools"))
+        suffix = "?podcast_artifact=episode&position=5&revision=" + "a"*64
+    client = real_connect(base.replace("http:", "ws:") + "/oracle/v2" + suffix,
                           header={"Authorization":"Bearer administrator-token"}, timeout=5)
     try:
         assert json.loads(client.recv())["type"] == "session.started"
@@ -3308,6 +3318,9 @@ def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch)
     finally:
         client.close()
     assert upstream.sent[0]["session"]["model"] == "gpt-live-1"
+    if podcast:
+        assert "server remains authoritative" in json.dumps(upstream.sent[0]["session"])
+        assert "separate explainer" in upstream.sent[0]["session"]["instructions"]
     assert sum(e["type"] == "session.start" for e in upstream.sent) == 1
     deadline = time.monotonic()+3
     while "administrator" in oracle_realtime._ACTIVE_PRINCIPALS and time.monotonic()<deadline:

@@ -292,6 +292,22 @@ def serve(handler):
     key = config.load().openai_key()
     if not key:
         return _send_http_error(handler, 503, "Oracle v2 needs an OpenAI key on this Host")
+    query = parse_qs(urlparse(handler.path).query)
+    podcast_context = None
+    if "podcast_artifact" in query:
+        from . import artifacts, podcast_live
+        try:
+            artifact = artifacts.get(query["podcast_artifact"][0])
+            if not artifact or artifact["type"] != "audio":
+                raise ValueError("Podcast artifact not found")
+            episode = artifact.get("payload", {}).get("podcast")
+            podcast_context = podcast_live.context_for(
+                episode, float(query.get("position", ["0"])[0]),
+                float(artifact.get("duration_ms", 0))/1000)
+            if query.get("revision", [""])[0] != episode["revision"]:
+                raise ValueError("Podcast audio revision changed; reopen the episode")
+        except (ValueError, TypeError, KeyError):
+            return _send_http_error(handler, 400, "Invalid podcast artifact, revision or playhead")
     if not claim_connection(principal):
         return _send_http_error(handler, 409, "An Oracle session is already active")
     upstream = None
@@ -309,10 +325,14 @@ def serve(handler):
         handler.wfile.write(ws.handshake_response(headers["sec-websocket-key"]))
         handler.wfile.flush()
         handler.connection.settimeout(None)
-        fallback = parse_qs(urlparse(handler.path).query).get("oracle_session", [""])[0][:160]
-        tools = AgentTools(handler.ctx, principal, fallback,
-            lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
-        conversation = Conversation(upstream, downstream, tools, key)
+        if podcast_context is not None:
+            conversation = podcast_live.PodcastConversation(upstream, downstream, key,
+                podcast_context, images=query.get("images", ["0"])[0] == "1")
+        else:
+            fallback = query.get("oracle_session", [""])[0][:160]
+            tools = AgentTools(handler.ctx, principal, fallback,
+                lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
+            conversation = Conversation(upstream, downstream, tools, key)
         def pump():
             try:
                 while not conversation.stop.is_set():
@@ -345,7 +365,8 @@ def serve(handler):
                     conversation.stop.set()
         threading.Thread(target=pump, daemon=True, name="oracle-v2-receive").start()
         threading.Thread(target=poll, daemon=True, name="oracle-v2-results").start()
-        conversation.send({"type": "session.start", "session": live_config()})
+        conversation.send({"type": "session.start", "session":
+            podcast_live.session_config(podcast_context) if podcast_context is not None else live_config()})
         while not conversation.stop.is_set():
             frame = ws.read_frame(handler.rfile)
             if frame is None or frame[0] == ws.OP_CLOSE:
