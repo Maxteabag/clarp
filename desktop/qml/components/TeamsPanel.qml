@@ -203,7 +203,8 @@ Rectangle {
                             TuiText {
                                 Layout.fillWidth: true
                                 text: (teamRow.modelData.parent_team_id ? "Subteam · " : "")
-                                    + String((teamRow.modelData.member_agent_ids || []).length) + " members"
+                                    + (String(teamRow.modelData.latest_message || "")
+                                       || String((teamRow.modelData.member_agent_ids || []).length) + " members")
                                 color: "#6c7188"
                                 font.pixelSize: 11
                                 elide: Text.ElideRight
