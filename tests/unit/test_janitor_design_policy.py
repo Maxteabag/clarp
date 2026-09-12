@@ -74,3 +74,48 @@ def test_partition_executor_overlaps_targets_and_replays_without_recompute(monke
     assert [r['status'] for r in again]==['receipt','receipt']
     assert len(calls)==2
     with pytest.raises(ValueError):execute_partitions([parts[0],parts[0]],compute)
+
+def test_model_chain_order_and_ambiguous_failure_never_falls_through(monkeypatch):
+    from lib import backends
+    monkeypatch.setattr(backends,'active_handles',lambda *a:[])
+    agent('worker-models');janitors.create('worker-models')
+    chain=[{'provider':'codex','model':f'm-{n}'} for n in range(25)]
+    policy.configure({'model_chain':chain},0)
+    called=[]
+    def compute(request, model):
+        called.append(model['model'])
+        if model['model']!='m-24':raise policy.ModelUnavailableBeforeExecution()
+        return {'summary':'Fallback computation'}
+    result,trace=policy.compute_with_model_chain('worker-models',{},compute)
+    assert called==[x['model'] for x in chain]
+    assert result['summary']=='Fallback computation' and len(trace['attempts'])==25
+    called.clear()
+    def unknown(request,model):
+        called.append(model)
+        raise RuntimeError('Outcome unknown')
+    with pytest.raises(RuntimeError):policy.compute_with_model_chain('worker-models',{},unknown)
+    assert len(called)==1
+
+def test_partition_model_fallback_commits_once_and_fences_global_policy_change(monkeypatch):
+    from lib import backends
+    from lib.janitor_partition_executor import execute_partitions
+    monkeypatch.setattr(backends,'active_handles',lambda *a:[])
+    target=agent('fallback-target');agent('fallback-worker')
+    config=janitors.create('fallback-worker',template_id='tool-explainer',scope={'agent_ids':[target]})
+    janitors.set_enabled(config['session'],config['revision'],True)
+    chain=[{'provider':'codex','model':'first'},{'provider':'codex','model':'second'}]
+    policy.configure({'model_chain':chain},0)
+    parts=[{'target_agent_id':target,'requests':[{'request_id':'fallback-once'}]}];calls=[]
+    def compute(request,model):
+        calls.append(model['model'])
+        if model['model']=='first':raise policy.ModelUnavailableBeforeExecution()
+        return {'summary':'Accepted fallback'}
+    assert execute_partitions(parts,compute,use_model_chain=True)[0]['status']=='accepted'
+    assert calls==['first','second']
+    assert execute_partitions(parts,lambda *_:pytest.fail('Already committed'),use_model_chain=True)[0]['status']=='receipt'
+    parts[0]['requests']=[{'request_id':'policy-changed'}]
+    def changed(request,model):
+        policy.configure({'model_chain':[chain[1]]},1)
+        return {'summary':'Must not publish'}
+    assert execute_partitions(parts,changed,use_model_chain=True)[0]['status']=='stale_rejected'
+    assert not db.conn().execute("SELECT 1 FROM janitor_demand_results WHERE result_json LIKE '%Must not publish%'").fetchone()
