@@ -1,4 +1,5 @@
 #pragma once
+#include "AvatarMotionClock.h"
 #include "app/WorkspaceContext.h"
 
 #include "app/CredentialStore.h"
@@ -46,6 +47,7 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList backendOptions READ backendOptions NOTIFY modelCatalogChanged)
     Q_PROPERTY(QVariantList availableMcpServers READ availableMcpServers NOTIFY agentRevisionChanged)
     Q_PROPERTY(quint64 agentRevision READ agentRevision NOTIFY agentRevisionChanged)
+    Q_PROPERTY(QObject* avatarMotion READ avatarMotion CONSTANT)
     Q_PROPERTY(quint64 avatarRevision READ avatarRevision NOTIFY avatarRevisionChanged)
     Q_PROPERTY(quint64 mediaRevision READ mediaRevision NOTIFY mediaChanged)
     Q_PROPERTY(QVariantList pastSessions READ pastSessions NOTIFY pastSessionsChanged)
@@ -120,6 +122,7 @@ class AppController : public QObject {
     Q_PROPERTY(int unreadAgentConversations READ unreadAgentConversations NOTIFY agentConversationsChanged)
 
   public:
+    QObject* avatarMotion() { return &m_avatarMotion; }
     explicit AppController(QObject* parent = nullptr);
     ~AppController() override;
 
@@ -476,6 +479,7 @@ class AppController : public QObject {
     QTemporaryDir m_mediaDirectory;
     AudioController m_audio;
     ToolNarrator m_toolNarrator;
+    AvatarMotionClock m_avatarMotion;
     AgentListModel m_agents;
     AgentListModel m_archivedAgents;
     ContactListModel m_contacts;

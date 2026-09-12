@@ -219,6 +219,12 @@ AppController::AppController(QObject* parent)
     connect(this, &AppController::selectedSessionChanged, this, &AppController::nextAttentionChanged);
     connect(this, &AppController::updatesChanged, this, &AppController::nextAttentionChanged);
     const auto bumpAgentRevision = [this] {
+        QSet<QString> active;
+        for(const auto& session : m_agents.sessions()) {
+            const QString state = m_agents.displayState(session);
+            if(state == QStringLiteral("thinking") || state == QStringLiteral("tool") || state == QStringLiteral("compacting") || state == QStringLiteral("running")) active.insert(session);
+        }
+        m_avatarMotion.reconcile(active);
         ++m_agentRevision;
         emit agentRevisionChanged();
     };

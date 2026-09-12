@@ -120,7 +120,9 @@ Rectangle {
                             Layout.fillWidth: true
                             spacing: 9
 
-                            AgentAvatar {
+                            AvatarActivity {
+                                id: overviewAvatarActivity
+                                working: card.busy
                                 Layout.preferredWidth: 34
                                 Layout.preferredHeight: 34
                                 controller: root.controller
@@ -145,6 +147,7 @@ Rectangle {
                                 TuiText {
                                     Layout.fillWidth: true
                                     text: card.lastMessage || card.statusText || card.agentState
+                                    ActivitySweep { anchors.fill: parent; working: overviewAvatarActivity.authoritativeWorking; reducedMotion: overviewAvatarActivity.reducedMotion; phase: overviewAvatarActivity.phase }
                                     color: "#686b80"
                                     font.pixelSize: 12
                                     elide: Text.ElideRight

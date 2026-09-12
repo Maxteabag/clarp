@@ -63,7 +63,9 @@ ItemDelegate {
     contentItem: RowLayout {
         spacing: 12
 
-        AgentAvatar {
+        AvatarActivity {
+            id: activityAvatar
+            working: row.busy
             Layout.alignment: Qt.AlignTop | Qt.AlignHCenter
             controller: row.controller
             name: row.name
@@ -163,6 +165,7 @@ ItemDelegate {
                 visible: !row.archived && row.activityLine.length > 0
                 Layout.fillWidth: true
                 text: row.activityLine
+                ActivitySweep { anchors.fill: parent; working: activityAvatar.authoritativeWorking; reducedMotion: activityAvatar.reducedMotion; phase: activityAvatar.phase }
                 color: row.busy ? "#dba163" : "#8d93b0"
                 font.pixelSize: 10
                 elide: Text.ElideRight
