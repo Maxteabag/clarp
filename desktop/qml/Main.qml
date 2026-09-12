@@ -65,7 +65,7 @@ ApplicationWindow {
     }
 
     function overlayVisible() {
-        return assignAgent.visible || launchAgent.visible || previewVersionPanel.visible || quickNewAgent.visible || renameAgent.visible || quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
+        return keymapEditor.visible || assignAgent.visible || launchAgent.visible || previewVersionPanel.visible || quickNewAgent.visible || renameAgent.visible || quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
             || startAgent.visible || overview.visible || connection.visible
             || queueDialog.visible || profilePanel.visible || reportView.visible
             || settingsPanel.dialogOpen;
@@ -185,6 +185,12 @@ ApplicationWindow {
         } else if (action === "split-down") {
             app.panes.splitActive("horizontal", app.selectedSession);
             layoutChanged = true;
+
+        } else if (action === "edit-keymap") {
+            keymapEditor.visible=true;
+        } else if (action === "next-workspace") {
+            const items=app.panes.workspaces;const index=items.findIndex(w=>w.id===app.panes.activeWorkspace);
+            if(items.length>1)app.panes.switchWorkspace(items[(index+1)%items.length].id);
         } else if (action === "close-pane") {
             app.panes.closePane(app.panes.activePaneId);
             layoutChanged = true;
@@ -233,6 +239,7 @@ ApplicationWindow {
             app.requestComposerFocus(app.panes.activePaneId);
     }
 
+    KeymapEditor {id:keymapEditor;objectName:"keymapEditor";anchors.fill:parent;z:300;keymap:keyboard;onClosed:app.requestComposerFocus(app.panes.activePaneId)}
     AppController {
         id: app
     }
@@ -283,6 +290,7 @@ ApplicationWindow {
     }
 
     function escapeFocus() {
+        if(keymapEditor.visible){keymapEditor.visible=false;keymapEditor.closed();return;}
         if (assignAgent.visible) {
             if (!assignAgent.submitting) assignAgent.closeRequested();
         } else if (launchAgent.visible) {

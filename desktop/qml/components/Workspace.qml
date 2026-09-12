@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls
 
 Rectangle {
     id: root
@@ -10,6 +11,55 @@ Rectangle {
     signal queueRequested(string session)
     signal profileRequested(string session)
     readonly property real paneGap: 4
+    readonly property real toolbarHeight: controller.panes.workspaceSaveWarning ? 76 : 36
+    property int createdViews: 0
+    function syncViews() {
+        const next=controller.panes.viewLayout;
+        for(let i=placements.count-1;i>=0;--i)
+            if(!next.some(p=>p.id===placements.get(i).paneKey)) placements.remove(i);
+        for(const p of next) {
+            let found=-1;for(let i=0;i<placements.count;++i)if(placements.get(i).paneKey===p.id)found=i;
+            const value={paneKey:p.id,paneSession:p.session||"",px:p.x,py:p.y,pw:p.width,ph:p.height,shown:!!p.shown};
+            if(found<0) placements.append(value);else placements.set(found,value);
+        }
+    }
+    ListModel {id:placements}
+    Connections {target:root.controller.panes; function onTreeChanged(){root.syncViews();}}
+    Component.onCompleted: syncViews()
+    ScrollView {
+        width: root.width
+        height: 36
+        z: 50
+        clip: true
+        contentWidth: workspaceBar.implicitWidth
+        contentHeight: 36
+        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+        Row {
+        id:workspaceBar; height:36; spacing:4; z:50
+        Repeater {model:root.controller.panes.workspaces
+            TuiButton {id:workspaceTab;required property var modelData; text:modelData.name; checkable:true
+                contentItem:TuiLabel {text:workspaceTab.text;color:"#e7e1dc";horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}
+                checked:root.controller.panes.activeWorkspace===modelData.id
+                onClicked:root.controller.panes.switchWorkspace(modelData.id)
+            }
+        }
+        TuiButton {text:"+ Workspace"; enabled:root.controller.panes.workspaces.length<8; onClicked:root.controller.panes.createWorkspace("Workspace "+(root.controller.panes.workspaces.length+1))}
+        TuiButton {text:"Move to workspace"; onClicked:moveMenu.open()
+            Menu {id:moveMenu
+                Repeater {model:root.controller.panes.workspaces
+                    MenuItem {required property var modelData;text:modelData.name;enabled:modelData.id!==root.controller.panes.activeWorkspace
+                        onTriggered:root.controller.panes.moveActiveToWorkspace(modelData.id)}
+                }
+            }
+        }
+    }
+    }
+    Row {
+        y: 36; height: 40; width: root.width; spacing: 8; z: 50
+        visible: !!root.controller.panes.workspaceSaveWarning
+        TuiLabel {width:Math.max(100,root.width-saveLayoutButton.width-8);text:root.controller.panes.workspaceSaveWarning;wrapMode:Text.Wrap;color:"#ffcb8c"}
+        TuiButton {id:saveLayoutButton;text:"Save this layout instead";onClicked:root.controller.panes.saveWorkspaceLayoutInstead()}
+    }
     color: "#10121a"
 
     function focusNavigation() { navigationFocus.forceActiveFocus(); }
@@ -24,16 +74,24 @@ Rectangle {
 
     Repeater {
         id: paneViews
-        model: root.controller.panes.paneLayout
+        model: placements
 
         PaneLeaf {
-            required property var modelData
-            x: Math.round(Number(modelData.x) * root.width) + root.paneGap / 2
-            y: Math.round(Number(modelData.y) * root.height) + root.paneGap / 2
-            width: Math.max(1, Math.round(Number(modelData.width) * root.width) - root.paneGap)
-            height: Math.max(1, Math.round(Number(modelData.height) * root.height) - root.paneGap)
+            required property string paneKey
+            required property string paneSession
+            required property real px
+            required property real py
+            required property real pw
+            required property real ph
+            required property bool shown
+            visible: shown
+            x: Math.round(px * root.width) + root.paneGap / 2
+            y: root.toolbarHeight + Math.round(py * (root.height-root.toolbarHeight)) + root.paneGap / 2
+            width: Math.max(1, Math.round(pw * root.width) - root.paneGap)
+            height: Math.max(1, Math.round(ph * (root.height-root.toolbarHeight)) - root.paneGap)
             controller: root.controller
-            node: modelData
+            node: ({id:paneKey,session:paneSession})
+            Component.onCompleted: root.createdViews++
             onOpenConnectionRequested: root.openConnectionRequested()
             onQueueRequested: session => root.queueRequested(session)
             onProfileRequested: session => root.profileRequested(session)
@@ -49,9 +107,9 @@ Rectangle {
             required property var modelData
             readonly property bool vertical: String(modelData.direction) === "vertical"
             readonly property real splitX: Number(modelData.x) * root.width
-            readonly property real splitY: Number(modelData.y) * root.height
+            readonly property real splitY: root.toolbarHeight + Number(modelData.y) * (root.height-root.toolbarHeight)
             readonly property real splitWidth: Number(modelData.width) * root.width
-            readonly property real splitHeight: Number(modelData.height) * root.height
+            readonly property real splitHeight: Number(modelData.height) * (root.height-root.toolbarHeight)
 
             x: vertical ? splitX + splitWidth * Number(modelData.ratio) - width / 2 : splitX
             y: vertical ? splitY : splitY + splitHeight * Number(modelData.ratio) - height / 2
