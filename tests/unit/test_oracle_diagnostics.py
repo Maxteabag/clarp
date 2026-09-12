@@ -39,3 +39,17 @@ def test_transcription_is_host_owned_and_only_enabled_explicitly():
     diagnostic = json.loads(_safe_client_event(raw, model='fixture', voice='cedar',
         transcription_model='gpt-4o-mini-transcribe'))
     assert diagnostic['session']['audio']['input']['transcription']['model'] == 'gpt-4o-mini-transcribe'
+
+
+def test_live_transcripts_and_audio_counts_without_payload(tmp_path):
+    import json
+    from lib.oracle_diagnostics import OracleJournal
+    journal = OracleJournal(tmp_path)
+    journal.event('server', json.dumps({'type':'session.output_transcript.delta','delta':'Hello','start_ms':1,'end_ms':2}))
+    journal.event('client', json.dumps({'type':'session.input_audio.append','audio':'AAAA'}))
+    journal.event('server', json.dumps({'type':'session.output_audio.delta','delta':'BBBB'}))
+    journal.close()
+    text = journal.path.read_text()
+    assert 'Hello' in text and 'start_ms' in text
+    assert 'AAAA' not in text and 'BBBB' not in text
+    assert journal.audio_bytes == {'client':3,'server':3}

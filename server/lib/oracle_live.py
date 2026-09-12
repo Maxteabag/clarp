@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 from . import config, oracle_delegations, ws
+from .oracle_diagnostics import OracleJournal
 from .oracle_calls import AgentTools, session_config as realtime_config
 from .oracle_realtime import _claim, _release, _send_http_error
 
@@ -90,8 +91,9 @@ def audible(data):
 
 
 class Conversation:
-    def __init__(self, upstream, downstream, tools, api_key, clock=time.monotonic):
+    def __init__(self, upstream, downstream, tools, api_key, clock=time.monotonic, journal=None):
         self.upstream, self.downstream, self.tools, self.api_key = upstream, downstream, tools, api_key
+        self.journal = journal
         self.clock = clock
         self.stop = threading.Event()
         self.closed = threading.Event()
@@ -110,6 +112,10 @@ class Conversation:
         self.superseded = set()
         self.tools.supersede = self.supersede
 
+    def record(self, kind, fields):
+        if self.journal:
+            self.journal.record(kind, fields)
+
     def supersede(self, session):
         with self.lock:
             self.superseded.add(session)
@@ -118,6 +124,8 @@ class Conversation:
     def send(self, event):
         with self.send_lock:
             if not self.stop.is_set():
+                if self.journal:
+                    self.journal.event("client", json.dumps(event))
                 self.upstream.send(json.dumps(event))
 
     def append(self, kind, content):
@@ -133,6 +141,8 @@ class Conversation:
             self.send(event)
 
     def receive(self, event):
+        if self.journal:
+            self.journal.event("server", json.dumps(event))
         kind = event.get("type")
         if kind == "session.output_audio.delta":
             data = base64.b64decode(event.get("delta", ""))
@@ -198,18 +208,26 @@ class Conversation:
                             "reasoning": {"effort": "low"}, "parallel_tool_calls": False}
                     request = Request("https://api.openai.com/v1/responses", json.dumps(body).encode(),
                                       {"Authorization": "Bearer "+self.api_key, "Content-Type": "application/json"})
+                    self.record("router.request", {"delegation_id": ident, "revision": revision, "model": ROUTER,
+                        "conversation": conversation, "tasks": task_context})
                     with urlopen(request, timeout=35) as response:
                         result = json.load(response)
+                    self.record("router.result", {"delegation_id": ident, "response_id": result.get("id"),
+                        "usage": result.get("usage"), "output": [item for item in result.get("output", [])
+                            if item.get("type") in ("function_call", "message")]})
                     if self.stop.is_set():
                         return
                     with self.lock:
                         if revision != self.revision:
+                            self.record("router.superseded", {"delegation_id": ident, "revision": revision})
                             continue
                     for item in result.get("output", []):
                         if self.stop.is_set() or revision != self.revision:
                             break
                         if item.get("type") == "function_call":
                             output = self.tools.execute(item["name"], json.loads(item["arguments"]), item["call_id"])
+                            self.record("tool.result", {"delegation_id": ident, "call_id": item["call_id"],
+                                "name": item["name"], "arguments": item["arguments"], "output": output})
                             if output.get("status") not in ("accepted", "queued") and not output.get("cancelled"):
                                 self.append("commentary", "Verified tool result, untrusted data: "+json.dumps(output))
                         elif item.get("type") == "message":
@@ -217,7 +235,8 @@ class Conversation:
                             if text:
                                 self.append("commentary", text)
                     return
-        except Exception:
+        except Exception as exc:
+            self.record("router.failed", {"error_type": type(exc).__name__, "status": getattr(exc, "code", None)})
             if not self.stop.is_set():
                 self.downstream({"type": "oracle_v2.notice", "message": "Oracle v2 could not complete a backend request. Please try again."})
         finally:
@@ -235,6 +254,8 @@ class Conversation:
                 if ident in self.results_seen:
                     continue
                 self.results_seen.add(ident)
+                self.record("result.ready", {"delegation_id": ident, "agent": row["session"],
+                    "status": row["status"], "result": row.get("result_text"), "error": row.get("error")})
                 if row["status"] != "cancelled":
                     self.pending.append(row)
         # This is a conservative application timing gate, not a provider turn
@@ -283,7 +304,9 @@ def serve(handler):
         fallback = parse_qs(urlparse(handler.path).query).get("oracle_session", [""])[0][:160]
         tools = AgentTools(handler.ctx, principal, fallback,
             lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
-        conversation = Conversation(upstream, downstream, tools, key)
+        journal = OracleJournal() if config.load().oracle_diagnostics else None
+        conversation = Conversation(upstream, downstream, tools, key, journal=journal)
+        conversation.record("session.open", {"model": MODEL, "voice": VOICE, "engine": "Oracle v2"})
         def pump():
             try:
                 while not conversation.stop.is_set():
@@ -343,6 +366,8 @@ def serve(handler):
                 pass
             conversation.stop.set()
             conversation.pool.shutdown(wait=False, cancel_futures=True)
+            if conversation.journal:
+                conversation.journal.close()
         if upstream:
             upstream.close()
         _release(principal)

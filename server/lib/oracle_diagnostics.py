@@ -37,8 +37,10 @@ class OracleJournal:
             return
         fields = {k: value[k] for k in (
             "event_id", "item_id", "response_id", "call_id", "name", "arguments",
-            "transcript", "delta", "audio_start_ms", "audio_end_ms") if k in value}
-        if kind in {"input_audio_buffer.append", "response.output_audio.delta"}:
+            "transcript", "delta", "audio_start_ms", "audio_end_ms",
+            "start_ms", "end_ms", "offset_ms", "delegation_id", "client_event_id", "reason", "usage", "delegation") if k in value}
+        if kind in {"input_audio_buffer.append", "response.output_audio.delta",
+                    "session.input_audio.append", "session.output_audio.delta"}:
             # Only count encoded lengths: do not copy/serialize audio payloads.
             encoded = value.get("audio", value.get("delta", ""))
             with self.lock:
