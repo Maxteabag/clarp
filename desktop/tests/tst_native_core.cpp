@@ -664,6 +664,7 @@ class NativeCoreTest final : public QObject {
     void olderHistoryPrependsWithoutReorderingTheTail();
     void growingReplyRejectsStaleRevision();
     void optimisticDeliveryStaysVisibleUntilConfirmed();
+    void emptyStartupWaitsForExplicitChoiceAndRetryTargetsLatestFailure();
     void conversationChangeRequestsReplacement();
     void clipSourcePrecedenceMatchesContract();
     void wavEncodingProducesAValidPcmHeader();
@@ -1969,6 +1970,43 @@ void NativeCoreTest::growingReplyRejectsStaleRevision() {
                    ConversationModel::LoadKind::Delta);
 
     QCOMPARE(messageBodies(model), QStringList({QStringLiteral("go"), QStringLiteral("Hello")}));
+}
+
+void NativeCoreTest::emptyStartupWaitsForExplicitChoiceAndRetryTargetsLatestFailure() {
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
+    const QVariant oldEmpty = QCoreApplication::instance()->property("clarpEmptyStartup");
+    const auto restore = qScopeGuard([&] {
+        qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken);
+        QCoreApplication::instance()->setProperty("clarpEmptyStartup", oldEmpty);
+    });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
+    qputenv("CLARP_TOKEN", "test-token");
+    QCoreApplication::instance()->setProperty("clarpEmptyStartup", true);
+    AppController controller;
+    QTRY_COMPARE(controller.agents()->rowCount(), 1);
+    QVERIFY(controller.selectedSession().isEmpty());
+    QVERIFY(controller.panes()->activeSession().isEmpty());
+    QCOMPARE(server.requestCount(QStringLiteral("POST"), QStringLiteral("/select")), 0);
+    controller.selectSession(QStringLiteral("rachel"));
+    QTRY_VERIFY(server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/select")));
+    QCOMPARE(controller.selectedSession(), QStringLiteral("rachel"));
+    auto* model = controller.conversationForSession(QStringLiteral("rachel"));
+    model->addOptimistic(QStringLiteral("older-failure"), QStringLiteral("Earlier failed text"));
+    model->markDeliveryFailed(QStringLiteral("older-failure"));
+    model->addOptimistic(QStringLiteral("latest-failure"), QStringLiteral("Latest failed text"));
+    model->markDeliveryFailed(QStringLiteral("latest-failure"));
+    auto* other = controller.conversationForSession(QStringLiteral("other"));
+    other->addOptimistic(QStringLiteral("other-failure"), QStringLiteral("Other chat text"));
+    other->markDeliveryFailed(QStringLiteral("other-failure"));
+    controller.retryLatestFailedMessage();
+    QTRY_VERIFY(server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/send")));
+    QCOMPARE(server.requestJson(QStringLiteral("POST"), QStringLiteral("/send")).value(QStringLiteral("text")).toString(), QStringLiteral("Latest failed text"));
+    QCOMPARE(server.requestJson(QStringLiteral("POST"), QStringLiteral("/send")).value(QStringLiteral("session")).toString(), QStringLiteral("rachel"));
+    QVERIFY(model->indexOfMessage(QStringLiteral("u-older-failure")) >= 0);
+    QVERIFY(other->indexOfMessage(QStringLiteral("u-other-failure")) >= 0);
 }
 
 void NativeCoreTest::optimisticDeliveryStaysVisibleUntilConfirmed() {

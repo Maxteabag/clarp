@@ -102,6 +102,7 @@ AppController::AppController(QObject* parent)
       m_cacheEnabled(!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SCENARIO")) {
     if (auto* application = QCoreApplication::instance())
         m_launchMode = application->property("clarpLaunchMode").toBool();
+    m_waitingForSessionChoice = QCoreApplication::instance()->property("clarpEmptyStartup").toBool();
     m_agentConversationsRefresh.setSingleShot(true);
     m_agentConversationsRefresh.setInterval(400);
     connect(&m_agentConversationsRefresh, &QTimer::timeout, this, &AppController::loadAgentConversations);
@@ -1068,6 +1069,7 @@ void AppController::selectSession(const QString& session) {
     if (session.isEmpty()) {
         return;
     }
+    m_waitingForSessionChoice = false;
     m_restoredSession.clear();
     const bool changed = m_selectedSession != session;
     m_selectedSession = session;
@@ -1212,6 +1214,18 @@ void AppController::sendMessage(const QString& text, bool queueIfBusy) {
 
 void AppController::sendMessageTo(const QString& session, const QString& text, bool queueIfBusy) {
     sendMessageInternal(session, text, queueIfBusy, {}, {}, false);
+}
+
+void AppController::retryLatestFailedMessage() {
+    if (m_selectedSession.isEmpty() || m_sending) return;
+    ConversationModel* model = ensureConversation(m_selectedSession);
+    for (int row = model->rowCount() - 1; row >= 0; --row) {
+        const QModelIndex item = model->index(row, 0);
+        if (model->data(item, ConversationModel::DeliveryFailedRole).toBool()) {
+            retryFailedMessage(m_selectedSession, model->data(item, ConversationModel::MessageIdRole).toString());
+            return;
+        }
+    }
 }
 
 void AppController::retryFailedMessage(const QString& session, const QString& messageId) {
@@ -2881,7 +2895,7 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         if (m_selectedSession.isEmpty() ||
             (m_agents.find(m_selectedSession) == nullptr && !isPairSession(m_selectedSession))) {
             const QString first = m_agents.firstSession();
-            if (!first.isEmpty()) {
+            if (!first.isEmpty() && !m_waitingForSessionChoice) {
                 selectSession(first);
             } else if (!m_selectedSession.isEmpty()) {
                 m_selectedSession.clear();

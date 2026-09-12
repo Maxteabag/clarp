@@ -105,8 +105,11 @@ int main(int argc, char* argv[]) {
     const bool launchOnStartup = !restoreDesktop && !versionManager && !launchParser.isSet(QStringLiteral("no-new-agent"))
         && (explicitAgentLaunch || (QSettings().value(QStringLiteral("launch/newAgentOnStartup"), true).toBool()
             && !qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")));
+    const bool emptyStartup = !restoreDesktop && !versionManager && launchParser.isSet(QStringLiteral("no-new-agent"));
+    application.setProperty("clarpEmptyStartup", emptyStartup);
     application.setProperty("clarpLaunchMode", launchOnStartup);
-    if (!versionManager) engine.setInitialProperties({{QStringLiteral("launchOnStartup"), launchOnStartup}});
+    if (!versionManager) engine.setInitialProperties({{QStringLiteral("launchOnStartup"), launchOnStartup},
+        {QStringLiteral("sidebarVisible"), emptyStartup}});
     if (versionManager) application.setApplicationName(QStringLiteral("ClarpPreviewVersionManager"));
     engine.loadFromModule("Clarp.Desktop", versionManager ? "PreviewVersionWindow" : "Main");
 

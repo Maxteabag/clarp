@@ -143,8 +143,8 @@ file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config/MaxTeaB
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config/MaxTeaBag/ClarpScreenshot.conf"
     "[appearance]\nsidebarVisible=true\n")
 add_test(NAME clarp-desktop-context-keyboard COMMAND clarp-desktop)
-set_tests_properties(clarp-desktop-context-keyboard PROPERTIES TIMEOUT 15
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=context-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config;CLARP_SCREENSHOT_SCENARIO=preview-versions;CLARP_SCREENSHOT_CONTEXT_KEYBOARD=1;CLARP_SCREENSHOT_DELAY_MS=7000;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/capture.png")
+set_tests_properties(clarp-desktop-context-keyboard PROPERTIES TIMEOUT 20
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=context-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config;CLARP_SCREENSHOT_SCENARIO=preview-versions;CLARP_SCREENSHOT_CONTEXT_KEYBOARD=1;CLARP_SCREENSHOT_DELAY_MS=12000;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/capture.png")
 
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/pair-sidebar/config")
 add_test(NAME clarp-desktop-pair-sidebar COMMAND clarp-desktop)

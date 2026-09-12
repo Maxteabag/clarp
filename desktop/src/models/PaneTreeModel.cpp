@@ -23,7 +23,7 @@ PaneTreeModel::PaneTreeModel(QObject* parent)
     m_root->id = m_activePaneId;
     m_persistenceEnabled = QCoreApplication::organizationName() == QStringLiteral("MaxTeaBag") &&
                            QCoreApplication::applicationName() == QStringLiteral("Clarp");
-    restore();
+    if (!QCoreApplication::instance()->property("clarpEmptyStartup").toBool()) restore();
     connect(this, &PaneTreeModel::treeChanged, this, &PaneTreeModel::persist);
     connect(this, &PaneTreeModel::activePaneChanged, this, &PaneTreeModel::persist);
 }
