@@ -165,6 +165,7 @@ void ConversationModel::openSession(const QString& session) {
     m_latestRevision = 0;
     m_hasMore = false;
     m_error.clear();
+    setVoiceError({});
     m_messages.clear();
     m_byId.clear();
     endResetModel();
@@ -309,6 +310,10 @@ void ConversationModel::applyActivityEvent(const QJsonObject& event) {
                               .toString(event.value(QStringLiteral("phase")).toString());
     const QString kind = event.value(QStringLiteral("activity_kind"))
                              .toString(event.value(QStringLiteral("kind")).toString());
+    // Session creation is lifecycle metadata, not a tool performed for a user
+    // turn. Rendering it here invites the explainer to invent a task instruction.
+    if (kind == QStringLiteral("spawned") || phase == QStringLiteral("spawned")) return;
+
     QString label;
     for (const QString& candidate : {action, phase, tool, kind}) {
         if (!candidate.isEmpty()) {
@@ -671,3 +676,9 @@ void ConversationModel::dropSupersededLiveTurns() {
 }
 
 } // namespace clarp
+
+void clarp::ConversationModel::setVoiceError(const QString& error) {
+    if (m_voiceError == error) return;
+    m_voiceError = error;
+    emit voiceErrorChanged();
+}

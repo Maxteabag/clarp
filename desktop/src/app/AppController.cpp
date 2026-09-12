@@ -1,4 +1,5 @@
 #include "app/AppController.h"
+#include "app/LocalReport.h"
 #include "terminal/TerminalLaunch.h"
 #include "app/TimeFormat.h"
 #include "media/PortraitImage.h"
@@ -11,6 +12,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QClipboard>
+#include <QMimeData>
+#include <QImage>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QMimeDatabase>
@@ -92,13 +95,14 @@ QString sharedFilesystemSettingsKey(const QString& baseUrl) {
 } // namespace
 
 AppController::AppController(QObject* parent)
-    : QObject(parent), m_credentials(this), m_audio(this), m_toolNarrator(this), m_agents(this),
+    : QObject(parent), m_api(this), m_sse(this), m_credentials(this), m_audio(this), m_toolNarrator(this), m_agents(this),
       m_archivedAgents(true, this), m_contacts(this), m_panes(this), m_voices(this),
       m_emptyConversation(this), m_conversation(&m_emptyConversation),
       m_composerFocusPane(m_panes.activePaneId()),
       m_cacheEnabled(!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SCENARIO")) {
     if (auto* application = QCoreApplication::instance())
         m_launchMode = application->property("clarpLaunchMode").toBool();
+    m_waitingForSessionChoice = QCoreApplication::instance()->property("clarpEmptyStartup").toBool();
     m_agentConversationsRefresh.setSingleShot(true);
     m_agentConversationsRefresh.setInterval(400);
     connect(&m_agentConversationsRefresh, &QTimer::timeout, this, &AppController::loadAgentConversations);
@@ -516,8 +520,23 @@ QStringList AppController::markdownDisplayBlocks(const QString& markdown) const 
     return clarp::markdownDisplayBlocks(clarp::markdownWithExplicitAutolinks(markdown));
 }
 
-bool AppController::openExternalLink(const QString& link) {
+bool AppController::openLocalReport(const QString& link, const QString& originatingHost) {
+    if (originatingHost.isEmpty() || normalizedBaseUrl(originatingHost) != m_baseUrl || !m_sharedFilesystem) {
+        setErrorMessage(QStringLiteral("Local reports require the originating Host to share this desktop's filesystem"));
+        return false;
+    }
+    const QUrl url = clarp::localReportUrl(link.trimmed());
+    if (url.isEmpty()) {
+        setErrorMessage(QStringLiteral("Local report must be a readable, non-executable HTML, PDF, text or image file"));
+        return false;
+    }
+    return openBrowserUrl(url);
+}
+
+bool AppController::openExternalLink(const QString& link, const QString& originatingHost) {
     const QString target = link.trimmed();
+    if (target.startsWith('/') || QUrl(target).scheme() == QStringLiteral("file"))
+        return openLocalReport(target, originatingHost);
     if (!clarp::isOpenableLink(target)) {
         // Transcript text is model, tool and web output. Refuse anything that is
         // not a web or mail link rather than handing an arbitrary scheme to the
@@ -526,11 +545,42 @@ bool AppController::openExternalLink(const QString& link) {
                             .arg(target.left(120)));
         return false;
     }
-    if (!QDesktopServices::openUrl(QUrl(target, QUrl::StrictMode))) {
-        setErrorMessage(QStringLiteral("No application is available to open that link"));
+    return openBrowserUrl(QUrl(target, QUrl::StrictMode));
+}
+
+bool AppController::openBrowserUrl(const QUrl& url) {
+    if (url.scheme() == QStringLiteral("mailto") ||
+        QGuiApplication::platformName() != QStringLiteral("wayland") ||
+        qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")) {
+        if (!QDesktopServices::openUrl(url)) {
+            setErrorMessage(QStringLiteral("No application is available to open that link"));
+            return false;
+        }
+        setErrorMessage({});
+        return true;
+    }
+    const QString helper = QStandardPaths::findExecutable(QStringLiteral("fuck"));
+    if (helper.isEmpty()) {
+        setErrorMessage(QStringLiteral("Workspace browser helper is unavailable"));
         return false;
     }
+    auto* process = new QProcess(this);
+    const QString session = m_selectedSession;
+    const QString host = m_baseUrl;
+    const auto fail = [this, session, host](const QString& message) {
+        if (session == m_selectedSession && host == m_baseUrl) setErrorMessage(message);
+    };
+    connect(process, &QProcess::errorOccurred, this, [process, fail] {
+        fail(QStringLiteral("Could not start workspace browser helper")); process->deleteLater();
+    });
+    connect(process, &QProcess::finished, this, [process, fail](int code, QProcess::ExitStatus status) {
+        if (code != 0 || status != QProcess::NormalExit)
+            fail(QStringLiteral("Link opening failed: %1").arg(QString::fromUtf8(process->readAllStandardError()).trimmed().left(240)));
+        process->deleteLater();
+    });
     setErrorMessage({});
+    process->start(helper, {QStringLiteral("open-link"), url.toString(QUrl::FullyEncoded),
+                           QStringLiteral("--requester-pid"), QString::number(QCoreApplication::applicationPid())});
     return true;
 }
 
@@ -781,6 +831,7 @@ void AppController::setBaseUrl(const QString& value) {
     m_archivedAgents.applySnapshot({{QStringLiteral("agents"), QJsonArray{}}});
     m_contacts.applySnapshot({}, {});
     m_selectedSession.clear();
+    m_restoredSession.clear();
     m_conversation = &m_emptyConversation;
     m_emptyConversation.openSession({});
     ++m_composerRevision;
@@ -1002,11 +1053,24 @@ void AppController::resetTransientRequestState() {
     emit pastSessionsChanged();
 }
 
+void AppController::restoreDesktopSession(const QString& session) {
+    if (session.isEmpty()) return;
+    m_restoredSession = session;
+    m_selectedSession = session;
+    m_conversation = ensureConversation(session);
+    m_panes.setActiveSession(session);
+    emit selectedSessionChanged();
+    emit conversationChanged();
+    refreshSelectedProperties();
+}
+
 void AppController::selectSession(const QString& session) {
     if (m_launchMode && session != m_launchSession) return;
     if (session.isEmpty()) {
         return;
     }
+    m_waitingForSessionChoice = false;
+    m_restoredSession.clear();
     const bool changed = m_selectedSession != session;
     m_selectedSession = session;
     m_agents.clearUnread(session);
@@ -1150,6 +1214,18 @@ void AppController::sendMessage(const QString& text, bool queueIfBusy) {
 
 void AppController::sendMessageTo(const QString& session, const QString& text, bool queueIfBusy) {
     sendMessageInternal(session, text, queueIfBusy, {}, {}, false);
+}
+
+void AppController::retryLatestFailedMessage() {
+    if (m_selectedSession.isEmpty() || m_sending) return;
+    ConversationModel* model = ensureConversation(m_selectedSession);
+    for (int row = model->rowCount() - 1; row >= 0; --row) {
+        const QModelIndex item = model->index(row, 0);
+        if (model->data(item, ConversationModel::DeliveryFailedRole).toBool()) {
+            retryFailedMessage(m_selectedSession, model->data(item, ConversationModel::MessageIdRole).toString());
+            return;
+        }
+    }
 }
 
 void AppController::retryFailedMessage(const QString& session, const QString& messageId) {
@@ -1732,6 +1808,36 @@ void AppController::storeComposerAttachments(const QString& session,
     }
     ++m_composerRevision;
     emit composerRevisionChanged();
+}
+
+bool AppController::pasteClipboardImage(const QString& paneId, const QString& session) {
+    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+    if (mime == nullptr || !mime->hasImage()) return false; // Let native text paste proceed.
+    if (paneId != m_panes.activePaneId() || session != m_panes.activeSession() || session.isEmpty()) {
+        setErrorMessage(QStringLiteral("Select a conversation before pasting an image"));
+        return true;
+    }
+    const QImage image = qvariant_cast<QImage>(mime->imageData());
+    if (image.isNull() || image.sizeInBytes() > 256 * 1024 * 1024) {
+        setErrorMessage(QStringLiteral("Clipboard image is empty or too large"));
+        return true;
+    }
+    const QString folder = QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
+        .filePath(QStringLiteral("clipboard-images"));
+    if (!QDir().mkpath(folder)) {
+        setErrorMessage(QStringLiteral("Could not store the pasted image"));
+        return true;
+    }
+    const QString path = QDir(folder).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".png"));
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || !file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)
+        || !image.save(&file, "PNG") || file.size() > MaxComposerUploadBytes || !file.commit()) {
+        file.cancelWriting();
+        setErrorMessage(QStringLiteral("Could not store the pasted image (maximum 50 MB)"));
+        return true;
+    }
+    attachLocalFile(paneId, session, QUrl::fromLocalFile(path));
+    return true;
 }
 
 void AppController::attachLocalFile(const QString& paneId, const QString& session,
@@ -2760,7 +2866,7 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
         m_contacts.applySnapshot(object, activeNames);
         m_agentConversationsRefresh.start();
         if (!m_pendingCreatedSession.isEmpty()) {
-            if (!m_agents.find(m_pendingCreatedSession)) {
+            if (m_agents.find(m_pendingCreatedSession) == nullptr) {
                 if (++m_createdSnapshotAttempts <= 5) {
                     const QString expected = m_pendingCreatedSession;
                     QTimer::singleShot(200, this, [this, expected] {
@@ -2778,10 +2884,18 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
             requestComposerFocus(m_panes.activePaneId());
             emit agentMutationSucceeded(created);
         }
+        if (!m_restoredSession.isEmpty()) {
+            if (m_agents.find(m_restoredSession) == nullptr && !isPairSession(m_restoredSession)) {
+                setErrorMessage(QStringLiteral("The conversation selected before updating is not available on this Host. Choose another conversation or retry."));
+                return; // Never replace the explicitly restored target with the first roster row.
+            }
+            const QString restored = std::exchange(m_restoredSession, {});
+            selectSession(restored);
+        }
         if (m_selectedSession.isEmpty() ||
             (m_agents.find(m_selectedSession) == nullptr && !isPairSession(m_selectedSession))) {
             const QString first = m_agents.firstSession();
-            if (!first.isEmpty()) {
+            if (!first.isEmpty() && !m_waitingForSessionChoice) {
                 selectSession(first);
             } else if (!m_selectedSession.isEmpty()) {
                 m_selectedSession.clear();
@@ -3368,11 +3482,14 @@ void AppController::handleSseEvent(const QJsonObject& event) {
                                        event.value(QStringLiteral("preview")).toString());
         }
     } else if (type == QStringLiteral("audio")) {
+        if (!session.isEmpty()) ensureConversation(session)->setVoiceError({});
         m_audio.enqueueClip(event);
     } else if (type == QStringLiteral("tts-error")) {
         if (m_launchMode) return; // A launch screen has no speech request to report.
-        setErrorMessage(event.value(QStringLiteral("message"))
-                            .toString(event.value(QStringLiteral("error")).toString()));
+        const QString message = event.value(QStringLiteral("message"))
+                                    .toString(event.value(QStringLiteral("error")).toString());
+        if (!session.isEmpty()) ensureConversation(session)->setVoiceError(message);
+        else setErrorMessage(message);
     } else if (type == QStringLiteral("server-version")) {
         const QString version = event.value(QStringLiteral("version")).toString();
         if (!version.isEmpty() && version != m_serverVersion) {

@@ -88,3 +88,12 @@ submission while pending, and retains the name on error. Ctrl+N keeps the full
 configuration form; Ctrl+Alt+N selects an existing idle contact. These are distinct
 operations. `tst_quick_new_agent.qml` covers Enter, cancellation, failure/retry,
 saved defaults and pending submission.
+
+Ctrl+Alt+R retries the latest failed message in the selected conversation without
+changing the composer draft. Ctrl+K → Retry latest failed message does the same.
+It sends at most one failed message and ignores an already pending send.
+Ctrl+K → Dismiss conversation error clears that conversation's voice error too.
+
+`--no-new-agent` opens one empty pane with the session sidebar visible, ignoring
+the persisted pane tree and automatic first-agent selection until the user chooses
+a session. Explicit update/adoption restoration keeps its requested session.

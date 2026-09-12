@@ -5,6 +5,8 @@ import QtQuick.Layouts
 
 Rectangle {
     id: root
+    property string linkOriginHost: ""
+    Component.onCompleted: linkOriginHost = controller && controller.baseUrl ? String(controller.baseUrl) : ""
     objectName: "toolCard"
 
     required property var tool
@@ -130,7 +132,7 @@ Rectangle {
                 selectionColor: "#565d82"
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
-                onLinkActivated: link => root.controller.openExternalLink(link)
+                onLinkActivated: link => root.controller.openExternalLink(link, root.linkOriginHost)
 
                 HoverHandler {
                     objectName: "toolLinkHover"
