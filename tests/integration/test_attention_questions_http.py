@@ -328,3 +328,18 @@ def test_notifications_preserve_active_nonsteerable_turn_and_queue_durably(
     assert turn_queue.status("decision-" + decision_id) == "started"
     backend.spawned[1]["on_result"]({"duration_ms": 3})
     assert agent_id not in turn_dispatch._INFLIGHT
+
+
+def test_attention_index_http_auth_pagination_and_conflict(host):
+    for i in range(3):
+        artifacts.create(session='theo', type='document', title=f'Result {i}', payload={'content':'Safe fixture'})
+    code, _ = _request(host, '/attention/inbox', authenticated=False)
+    assert code == 401
+    code, first = _request(host, '/attention/inbox?limit=2')
+    assert code == 200 and first['total'] == 3 and len(first['artifacts']) == 2
+    from urllib.parse import quote
+    code, second = _request(host, '/attention/inbox?cursor='+quote(first['next_cursor']))
+    assert code == 200 and len(second['artifacts']) == 1
+    artifacts.create(session='theo', type='document', title='New result', payload={'content':'Changed snapshot'})
+    code, conflict = _request(host, '/attention/inbox?cursor='+quote(first['next_cursor']))
+    assert code == 409 and 'restart' in conflict['error']
