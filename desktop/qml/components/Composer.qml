@@ -33,8 +33,6 @@ Rectangle {
         return controller.composerCanSend(paneId, session);
     }
     readonly property string draftScope: paneId + "|" + session
-    readonly property bool revealControls: composerHover.hovered
-        || controller.audio.recording || attachments.length > 0
     signal openConnection
 
     implicitHeight: Math.max(54, Math.min(200, editor.contentHeight + editor.topPadding + editor.bottomPadding + 4)) + (transcriptionCount > 0 ? 25 : 0)
@@ -50,8 +48,6 @@ Rectangle {
         height: 1
         color: root.active ? "#454b6c" : "#272a39"
     }
-
-    HoverHandler { id: composerHover }
 
     function restoreFocus() {
         if (root.visible && root.enabled && root.active && root.controller.composerFocusPane === root.paneId)
@@ -213,17 +209,6 @@ Rectangle {
             Layout.fillHeight: true
             spacing: 0
 
-        TuiToolButton {
-            visible: root.active && root.revealControls
-            text: "Attach"
-            enabled: root.session.length > 0
-            implicitWidth: visible ? 58 : 0
-            implicitHeight: 30
-            onClicked: fileDialog.open()
-            ToolTip.visible: hovered
-            ToolTip.text: "Attach file"
-        }
-
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -332,34 +317,6 @@ Rectangle {
         }
 
         TuiToolButton {
-            id: stopButton
-            visible: {
-                if (!root.active)
-                    return false;
-                root.agentRevision;
-                const state = root.controller.agentState(root.session);
-                return state === "thinking" || state === "tool" || state === "compacting";
-            }
-            text: "Stop"
-            implicitWidth: visible ? 64 : 0
-            implicitHeight: 28
-            onClicked: root.controller.stopSession(root.session)
-            ToolTip.visible: hovered
-            ToolTip.text: "Stop agent · Ctrl+."
-            contentItem: TuiText {
-                text: stopButton.text
-                color: "#9e7d87"
-                font.pixelSize: 12
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
-            background: Rectangle {
-                radius: 0
-                color: stopButton.hovered ? "#242633" : "transparent"
-            }
-        }
-
-        TuiToolButton {
             id: playbackButton
             visible: root.active && (root.controller.audio.playing || root.controller.audio.paused)
             text: "Silence"
@@ -381,28 +338,6 @@ Rectangle {
             }
         }
 
-        TuiToolButton {
-            id: recordButton
-            visible: root.active && root.revealControls
-            text: root.controller.audio.recording ? "Finish" : "Record"
-            enabled: root.session.length > 0
-            implicitWidth: visible ? 64 : 0
-            implicitHeight: 28
-            onClicked: root.controller.toggleRecordingForSession(root.session)
-            ToolTip.visible: hovered
-            ToolTip.text: root.controller.audio.recording ? "Stop and transcribe" : "Talk · Ctrl+Shift+Space"
-            contentItem: TuiText {
-                text: recordButton.text
-                color: root.controller.audio.recording ? "#b98591" : "#74778e"
-                font.pixelSize: 12
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
-            background: Rectangle {
-                radius: 0
-                color: recordButton.hovered ? "#242633" : "transparent"
-            }
-        }
         }
     }
 

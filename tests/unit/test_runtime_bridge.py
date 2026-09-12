@@ -487,3 +487,200 @@ def test_private_janitor_run_id_crosses_runtime_boundary():
     service.dispatch(text="Review candidates", requested_session="sam", forced_session="sam",
                      trace_id="janitor-run", janitor_run_id="janitor-run")
     assert runtime.calls[0][1]["janitor_run_id"] == "janitor-run"
+
+
+# --- listener backlog -------------------------------------------------------
+#
+# 2026-09-12: with ~120 agents the HTTP server's per-agent ``status`` calls
+# overran socketserver's default backlog of 5.  A Unix-stream connect() then
+# fails with EAGAIN immediately, which the client reported as "agent runtime
+# unavailable" thousands of times per ten minutes while the runtime was fine,
+# and ``/send`` answered 503.
+
+import socket as _socket
+import sys as _sys
+import time as _time
+
+_linux_only = pytest.mark.skipif(
+    _sys.platform != "linux",
+    reason="EAGAIN-on-full-backlog is Linux Unix-socket behaviour")
+
+
+def _fill_backlog(path, limit: int = 64) -> list:
+    """Open raw connections until the kernel refuses with EAGAIN."""
+    fillers = []
+    for _ in range(limit):
+        raw = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+        raw.setblocking(False)
+        try:
+            raw.connect(str(path))
+        except BlockingIOError:
+            raw.close()
+            return fillers
+        fillers.append(raw)
+    pytest.fail(f"backlog never filled after {limit} connections")
+
+
+@_linux_only
+def test_runtime_client_waits_out_a_full_listener_backlog(tmp_path):
+    path = tmp_path / "runtime.sock"
+    listener = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    listener.bind(str(path))
+    listener.listen(1)
+    fillers = _fill_backlog(path)
+    served = threading.Event()
+
+    def accept_later():
+        _time.sleep(0.15)  # the client must retry, not fail, meanwhile
+        listener.settimeout(2.0)
+        while not served.is_set():
+            conn, _ = listener.accept()
+            with conn:
+                conn.settimeout(0.2)
+                try:
+                    data = conn.recv(65536)
+                except OSError:
+                    continue  # a filler that never speaks
+                if b'"status"' in data:
+                    conn.sendall(json.dumps({
+                        "ok": True, "result": {"active": {"a": "t"}}}).encode() + b"\n")
+                    served.set()
+
+    thread = threading.Thread(target=accept_later, daemon=True)
+    thread.start()
+    try:
+        assert RuntimeClient(path, timeout=5.0).status() == {"active": {"a": "t"}}
+        assert served.is_set()
+    finally:
+        for raw in fillers:
+            raw.close()
+        listener.close()
+
+
+@_linux_only
+def test_runtime_client_gives_up_within_its_timeout_when_nobody_accepts(tmp_path):
+    path = tmp_path / "runtime.sock"
+    listener = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    listener.bind(str(path))
+    listener.listen(1)
+    fillers = _fill_backlog(path)
+    try:
+        started = _time.monotonic()
+        with pytest.raises(RuntimeUnavailable, match="unavailable"):
+            RuntimeClient(path, timeout=0.4).status()
+        assert _time.monotonic() - started < 2.0
+    finally:
+        for raw in fillers:
+            raw.close()
+        listener.close()
+
+
+@_linux_only
+def test_runtime_rpc_server_accepts_a_fleet_wide_burst_without_eagain(tmp_path):
+    runtime = RuntimeRPCServer(
+        tmp_path / "runtime.sock", dispatch_service=RecordingRuntime())
+    pending = []
+    try:
+        assert RuntimeRPCServer.request_queue_size >= 128
+        # Nobody is accepting; every connect below sits in the kernel backlog.
+        for _ in range(120):
+            raw = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+            raw.settimeout(0.5)
+            raw.connect(str(runtime.socket_path))
+            pending.append(raw)
+    finally:
+        for raw in pending:
+            raw.close()
+        runtime.server_close()
+
+
+# --- shared status window ---------------------------------------------------
+
+
+class _CountingRuntime:
+    def __init__(self, status=None, error=None):
+        self.calls = 0
+        self._status = status or {
+            "active": {"agent-1": "trace-1"}, "spawning": ["agent-2"], "terminals": []}
+        self._error = error
+
+    def status(self):
+        self.calls += 1
+        if self._error is not None:
+            raise self._error
+        return self._status
+
+
+def test_active_handles_shares_one_status_rpc_across_agents():
+    runtime = _CountingRuntime()
+    backends.configure_runtime_client(runtime)
+    try:
+        for _ in range(3):
+            for agent in ("agent-1", "agent-2", "agent-3"):
+                backends.active_handles("codex", agent)
+        assert runtime.calls == 1
+        assert [h.trace_id for h in backends.active_handles("codex", "agent-1")] == ["trace-1"]
+        assert [h.trace_id for h in backends.active_handles("codex", "agent-2")] == ["spawning"]
+        assert backends.active_handles("codex", "agent-3") == []
+        backends.invalidate_runtime_status()
+        backends.active_handles("codex", "agent-1")
+        assert runtime.calls == 2
+    finally:
+        backends.configure_runtime_client(None)
+
+
+def test_status_window_expires_and_follows_client_replacement(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(backends, "_clock", lambda: clock[0])
+    first = _CountingRuntime()
+    backends.configure_runtime_client(first)
+    try:
+        backends.active_handles("codex", "agent-1")
+        backends.active_handles("codex", "agent-2")
+        assert first.calls == 1
+        clock[0] += backends.RUNTIME_STATUS_TTL + 0.01
+        backends.active_handles("codex", "agent-1")
+        assert first.calls == 2
+        second = _CountingRuntime()
+        backends.configure_runtime_client(second)  # a replacement server process
+        backends.active_handles("codex", "agent-1")
+        assert (first.calls, second.calls) == (2, 1)
+    finally:
+        backends.configure_runtime_client(None)
+
+
+def test_status_outage_costs_one_rpc_and_one_log_line_per_window(monkeypatch):
+    from lib import log as log_module
+
+    events = []
+    monkeypatch.setattr(
+        log_module, "log_exception",
+        lambda event, exc, detail="": events.append((event, detail)))
+    runtime = _CountingRuntime(error=RuntimeUnavailable("[Errno 11] backlog full"))
+    backends.configure_runtime_client(runtime)
+    try:
+        for agent in ("agent-1", "agent-2", "agent-3"):
+            assert backends.active_handles("codex", agent) == []  # not busy → nothing
+        assert runtime.calls == 1
+        assert events == [("runtimeStatusUnavailable", "shared-status")]
+    finally:
+        backends.configure_runtime_client(None)
+
+
+def test_dispatch_through_runtime_invalidates_the_status_window():
+    class Runtime(_CountingRuntime):
+        def dispatch(self, **kwargs):
+            self._status = {"active": {"theo-agent": "trace-new"}, "spawning": [], "terminals": []}
+            return DispatchResult(session="theo", backend="codex")
+
+    runtime = Runtime(status={"active": {}, "spawning": [], "terminals": []})
+    backends.configure_runtime_client(runtime)
+    ctx = SimpleNamespace(runtime_client=runtime)
+    service = TurnDispatchService(ctx)
+    try:
+        assert backends.active_handles("codex", "theo-agent") == []
+        assert service.dispatch(text="go", requested_session="theo", trace_id="t-1").session == "theo"
+        assert [h.trace_id for h in backends.active_handles("codex", "theo-agent")] == ["trace-new"]
+        assert runtime.calls == 2
+    finally:
+        backends.configure_runtime_client(None)

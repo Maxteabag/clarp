@@ -108,7 +108,11 @@ ApplicationWindow {
         if (action === "shortcut-bar") { root.shortcutsVisible = !root.shortcutsVisible; return; }
         let layoutChanged = false;
         if (action === "escape") {
-            if (keyboard.contextName === "search") rail.focusCurrentAgent();
+            const selectedState = app.selectedSession.length > 0
+                ? app.agentState(app.selectedSession) : "";
+            if (["thinking", "tool", "compacting"].includes(selectedState))
+                root.runCommand("stop-agent");
+            else if (keyboard.contextName === "search") rail.focusCurrentAgent();
             else if (keyboard.contextName === "sidebar") root.focusConversation();
             else root.escapeFocus();
         } else if (action === "next-attention") {
