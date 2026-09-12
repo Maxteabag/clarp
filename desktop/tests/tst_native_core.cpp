@@ -3264,7 +3264,14 @@ void NativeCoreTest::hostMediaAuthenticatedDownload() {
     QTcpServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost, 0));
     const QByteArray token("synthetic-fixture-credential");
-    const QByteArray payload = QByteArray::fromHex("00000018667479706d703432000000006d70343269736f6d");
+    QByteArray payload = QByteArray::fromHex("00000018667479706d703432000000006d70343269736f6d");
+    const QString mediaFixture = qEnvironmentVariable("CLARP_TEST_MEDIA_PAYLOAD");
+    if (!mediaFixture.isEmpty()) {
+        QFile fixture(mediaFixture);
+        QVERIFY(fixture.open(QIODevice::ReadOnly));
+        payload = fixture.readAll();
+        QVERIFY(!payload.isEmpty());
+    }
     QByteArray responseBody = payload;
     QList<QByteArray> requests;
     QList<QTcpSocket*> pending;
@@ -3343,6 +3350,9 @@ void NativeCoreTest::hostMediaAuthenticatedDownload() {
         QFile file(local.toLocalFile());
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(file.readAll(), payload);
+        const QString exportedFixture = qEnvironmentVariable("CLARP_TEST_MEDIA_EXPORT");
+        if (!shared && !exportedFixture.isEmpty())
+            QVERIFY(QFile::copy(local.toLocalFile(), exportedFixture));
         QVERIFY(!(file.permissions() & (QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOwner)));
         QCOMPARE(controller.selectedSession(), session);
         QCOMPARE(controller.panes()->activePaneId(), pane);
