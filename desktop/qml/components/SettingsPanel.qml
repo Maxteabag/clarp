@@ -13,7 +13,7 @@ Rectangle {
     signal closeRequested
     readonly property bool dialogOpen: ttsDialog.visible
     property int focusedIndex: 0
-    readonly property var actions: [timestampsRow, readyRow, toolsRow, narrationRow, startupRow, anonymousRow, minimalUiRow, spokenRow, mobilePushRow,
+    readonly property var actions: [timestampsRow, readyRow, reducedMotionRow, toolsRow, narrationRow, startupRow, anonymousRow, minimalUiRow, spokenRow, mobilePushRow,
         connectionRow, orchestratorRow, filesystemRow, routingRow]
     color: "#1a1b26"
     objectName: "settingsPanel"
@@ -135,6 +135,14 @@ Rectangle {
                     detail: "Show a typing indicator, then the finished reply"
                     checked: root.controller.showWhenReady
                     onToggled: value => root.controller.showWhenReady = value
+                }
+                SettingsToggle {
+                    id: reducedMotionRow
+                    objectName: "setting-reduce-motion"
+                    label: "Reduce Motion"
+                    detail: "Keep activity indicators still"
+                    checked: root.controller.avatarMotion.reducedMotion
+                    onToggled: value => root.controller.avatarMotion.reducedMotion = value
                 }
                 SettingsAction {
                     id: toolsRow
