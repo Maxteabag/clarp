@@ -3266,7 +3266,7 @@ def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch,
     import base64
     import queue
     import websocket
-    from lib import config, oracle_realtime, artifacts, oracle_live
+    from lib import config, oracle_realtime, artifacts, oracle_live, media_store, podcast_history
     base, ctx, _srv = running_server
     ctx.auth_token = "administrator-token"
     cfg = config.load()
@@ -3282,7 +3282,11 @@ def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch,
             if event["type"] == "session.start":
                 self.events.put(json.dumps({"type":"session.started"}))
             elif event["type"] == "session.input_audio.append":
+                if podcast:
+                    self.events.put(json.dumps({"type":"session.input_transcript.delta","delta":"Explain prediction"}))
                 self.events.put(json.dumps({"type":"session.output_audio.delta","delta":event["audio"]}))
+                if podcast:
+                    self.events.put(json.dumps({"type":"session.output_transcript.delta","delta":"It hides delay."}))
             elif event["type"] == "session.close":
                 self.events.put(json.dumps({"type":"session.closed","usage":{"seconds":1}}))
         def recv(self):
@@ -3298,21 +3302,30 @@ def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch,
     monkeypatch.setattr(websocket, "create_connection", connect)
     suffix = ""
     if podcast:
-        episode = {"revision": "a"*64,
+        asset = media_store.publish(session="claude", blob=b"ID3\x04\x00\x00fixture", source_name="episode.mp3",
+            content_type="audio/mpeg", media_dir=ctx.root/"media")
+        episode = {"revision": media_store.get(asset["asset_id"])["sha256"],
             "transcript": [{"start": 0, "end": 10, "text": "Prediction hides delay"}],
             "chapters": [{"start": 0, "end": 10, "title": "Prediction", "source": "The server remains authoritative"}]}
-        monkeypatch.setattr(artifacts, "get", lambda ident: {"type": "audio", "duration_ms": 10000,
-            "payload": {"podcast": episode}} if ident == "episode" else None)
+        artifacts.create(session="claude", type="audio", title="Transport fixture", artifact_id="episode",
+            payload={"url":asset["url"],"mime_type":"audio/mpeg","file_name":"episode.mp3","duration_ms":10000,"podcast":episode})
         monkeypatch.setattr(oracle_live, "AgentTools", lambda *args, **kwargs: pytest.fail("Podcast must not open agent tools"))
-        suffix = "?podcast_artifact=episode&position=5&revision=" + "a"*64
+        suffix = "?podcast_artifact=episode&position=5&revision=" + episode["revision"]
     client = real_connect(base.replace("http:", "ws:") + "/oracle/v2" + suffix,
                           header={"Authorization":"Bearer administrator-token"}, timeout=5)
     try:
+        if podcast:
+            receipt = json.loads(client.recv())
+            assert receipt["type"] == "podcast.history" and receipt["saved"]
         assert json.loads(client.recv())["type"] == "session.started"
         client.send(json.dumps({"type":"session.start","session":{"model":"arbitrary"}}))
         assert json.loads(client.recv())["type"] == "oracle_v2.notice"
         client.send(json.dumps({"type":"session.input_audio.append","audio":base64.b64encode(b'\x00\x20'*100).decode()}))
+        if podcast:
+            assert json.loads(client.recv())["type"] == "session.input_transcript.delta"
         assert json.loads(client.recv())["type"] == "session.output_audio.delta"
+        if podcast:
+            assert json.loads(client.recv())["type"] == "session.output_transcript.delta"
         client.send(json.dumps({"type":"session.close"}))
         assert json.loads(client.recv())["type"] == "session.closed"
     finally:
@@ -3326,3 +3339,7 @@ def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch,
     while "administrator" in oracle_realtime._ACTIVE_PRINCIPALS and time.monotonic()<deadline:
         time.sleep(.01)
     assert "administrator" not in oracle_realtime._ACTIVE_PRINCIPALS
+    if podcast:
+        saved = podcast_history.get(receipt["conversation_id"])
+        assert saved["status"] == "closed"
+        assert [event["text"] for event in saved["events"]] == ["Explain prediction", "It hides delay."]
