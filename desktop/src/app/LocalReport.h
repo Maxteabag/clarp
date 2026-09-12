@@ -8,8 +8,9 @@ namespace clarp {
 // Explicit local-report action only; never widen the general URL scheme policy.
 inline QUrl localReportUrl(const QString& link) {
     QString path;
-    if (link.startsWith('/') && !link.startsWith("//")) path = link;
-    else {
+    if (link.startsWith('/') && !link.startsWith("//")) {
+        path = link;
+    } else {
         const QUrl url(link, QUrl::StrictMode);
         if (!url.isValid() || url.scheme() != QStringLiteral("file") ||
             !url.host().isEmpty() || url.hasQuery() || url.hasFragment()) return {};

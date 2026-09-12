@@ -28,7 +28,7 @@ class ConversationPresentationModel : public QSortFilterProxyModel {
     Q_INVOKABLE void beginVisit();
     // Lookup is cache-only: grouping must never create explanation demand.
     void setExplanationLookup(std::function<QString(const QVariantMap&)> lookup);
-    Q_INVOKABLE void updateExplanations(QObject* narrator, const QString& session, const QString& directory, bool localFiles);
+    Q_INVOKABLE void updateExplanations(QObject* object, const QString& session, const QString& directory, bool localFiles);
     Q_INVOKABLE void toggleGroup(const QString& id);
   signals:
     void leadingDayLabelChanged();

@@ -16,14 +16,15 @@
 // provider, microphone, playback or visible desktop interaction.
 inline void startVoiceViewportSmokeCheck(QGuiApplication& application, QQuickWindow* window,
                                          clarp::AppController* controller) {
-    if (QGuiApplication::platformName() != QStringLiteral("offscreen") || !window || !controller) {
+    if (QGuiApplication::platformName() != QStringLiteral("offscreen") || window == nullptr || controller == nullptr) {
         application.exit(EXIT_FAILURE); return;
     }
     struct State { int step = 0; int baselineAttempts = 0; int stableSamples = 0; bool passed = true; QString anchor; qreal anchorY = 0; qreal height = 0; QJsonArray observations; };
     auto state = std::make_shared<State>();
     auto* timer = new QTimer(&application); timer->setInterval(150);
     QObject::connect(timer, &QTimer::timeout, &application, [&application, window, controller, timer, state] {
-        const QString current = QStringLiteral("voice-current"), other = QStringLiteral("voice-other");
+        const QString current = QStringLiteral("voice-current");
+        const QString other = QStringLiteral("voice-other");
         const auto find = [window](const QString& name) -> QQuickItem* {
             QList<QQuickItem*> pending{window->contentItem()};
             while (!pending.isEmpty()) {
