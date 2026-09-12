@@ -155,7 +155,7 @@ def begin_run(role: str, request_id: str, *, context=None, target_agent_id: str 
                 raise janitors.JanitorError("Request identity already refers to different work", 409, "run_conflict")
             return janitors.get_run(run_id)
         config = resolve(role, target_agent_id=target_agent_id)
-        if (not config or janitors.has_active_run(config["agent_id"])
+        if (not config or config["execution"].get("executor") != "ephemeral" or janitors.has_active_run(config["agent_id"])
                 or janitors._pending_demand_claim(c, config["agent_id"])):
             return None
         attachment = next(v for v in config["attachments"] if v["enabled"]
