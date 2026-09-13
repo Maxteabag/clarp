@@ -53,3 +53,9 @@ def test_tls_auth_pin_revocation_and_nonblocking_handshake(fake_ctx, tmp_path, m
         assert get(device['token'])[0]==401
     finally:
         pending.close();local.close();owner.server_close()
+
+
+@pytest.mark.parametrize('value,expected', [('192.168.1.2',True),('10.1.2.3',True),('172.31.1.1',True),('100.64.1.2',False),('8.8.8.8',False),('0.0.0.0',False),('127.0.0.1',False)])
+def test_local_listener_accepts_only_private_ipv4_peers(value, expected):
+    from lib.local_transport import private_ipv4
+    assert private_ipv4(value) is expected

@@ -23,6 +23,16 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
 
 
+def private_ipv4(value: str, *, loopback: bool = False) -> bool:
+    try:
+        address = ipaddress.IPv4Address(value)
+    except ValueError:
+        return False
+    return (loopback and address.is_loopback) or any(address in net for net in (
+        ipaddress.ip_network("10.0.0.0/8"), ipaddress.ip_network("172.16.0.0/12"),
+        ipaddress.ip_network("192.168.0.0/16")))
+
+
 def local_ipv4_addresses() -> list[str]:
     import ifaddr
     addresses = set()
@@ -36,9 +46,7 @@ def local_ipv4_addresses() -> list[str]:
                 address = ipaddress.IPv4Address(entry.ip)
             except ValueError:
                 continue
-            if any(address in net for net in (
-                ipaddress.ip_network('10.0.0.0/8'), ipaddress.ip_network('172.16.0.0/12'),
-                ipaddress.ip_network('192.168.0.0/16'))):
+            if private_ipv4(str(address)):
                 addresses.add(str(address))
     return sorted(addresses)
 
@@ -113,6 +121,8 @@ class LocalHTTPS:
 
         class TLSServer(type(owner)):
             slots = threading.BoundedSemaphore(128)
+            def verify_request(self, request, client_address):
+                return private_ipv4(client_address[0], loopback=True)
             def process_request(self, request, client_address):
                 if not self.slots.acquire(blocking=False):
                     self.shutdown_request(request)
