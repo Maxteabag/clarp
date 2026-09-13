@@ -383,6 +383,9 @@ class ClarpAdminApp(App[None]):
         self.server_installed = server_is_installed()
         self.setup_state = installed_setup_state() if self.server_installed else {}
         self.network_mode = "off"
+        self._pair_network_payload = {}
+        self._pair_auth_configured = False
+        self._pair_relay_ready = True
         self.last_pairing_qr: tuple[str, str, int] | None = None
 
     def compose(self) -> ComposeResult:
@@ -492,6 +495,10 @@ class ClarpAdminApp(App[None]):
                             yield Static(
                                 "Loading the configured phone network…",
                                 id="pair-network-status")
+                            yield Button("Refresh status", id="pair-refresh")
+                            yield self._select("Connection", "pair-connection", [
+                                ("Primary network", "primary"),
+                                ("Relay — no VPN needed", "relay")], "primary")
                             yield self._input(
                                 "Computer URL", "pair-url", "",
                                 field_id="pair-url-field")
@@ -582,6 +589,8 @@ class ClarpAdminApp(App[None]):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "network":
             self._sync_network_fields()
+        elif event.select.id == "pair-connection":
+            self._apply_pair_connection()
         elif event.select.id in {"tts", "tts-fallback"}:
             self._sync_credential_fields()
 
@@ -608,14 +617,15 @@ class ClarpAdminApp(App[None]):
             return "A complete http:// or https:// Computer URL is required."
         if parsed.hostname in {"127.0.0.1", "::1", "localhost"}:
             return "The iPhone cannot pair through a loopback-only URL."
-        if mode in {"tailscale", "manual"} and parsed.scheme != "https":
-            return "Tailscale and manual pairing require an HTTPS URL."
+        if mode in {"tailscale", "manual", "relay"} and parsed.scheme != "https":
+            return "Remote pairing requires an HTTPS URL."
         return ""
 
     def _sync_pair_button(self) -> None:
         error = self._pair_url_error(
             self.network_mode, self._value("pair-url"))
-        self.query_one("#pair-create", Button).disabled = bool(error)
+        self.query_one("#pair-create", Button).disabled = bool(
+            error or not self._pair_auth_configured or not self._pair_relay_ready)
 
     @work(thread=True, exclusive=True, group="network-state")
     def load_network_state(self) -> None:
@@ -645,9 +655,32 @@ class ClarpAdminApp(App[None]):
         self.query_one("#pair-create", Button).disabled = True
 
     def _apply_network_state(self, payload: dict) -> None:
+        self._pair_network_payload = payload
+        relay_enabled = bool(payload.get("relay", {}).get("enabled"))
+        self.query_one("#container-pair-connection").display = relay_enabled
+        choice = self.query_one("#pair-connection", Select)
+        if not relay_enabled:
+            choice.value = "primary"
+        elif payload.get("mode") == "off":
+            choice.value = "relay"
+        self._apply_pair_connection()
+
+    def _apply_pair_connection(self) -> None:
+        payload = dict(self._pair_network_payload)
+        if not payload:
+            return
+        if self._value("pair-connection") == "relay":
+            relay = payload.get("relay", {})
+            payload.update(mode="relay" if relay.get("enabled") else "off",
+                           pairing_url=relay.get("pairing_url", ""))
+        self._render_pair_network_state(payload)
+
+    def _render_pair_network_state(self, payload: dict) -> None:
         mode = str(payload.get("mode") or "off")
         url = str(payload.get("pairing_url") or "").strip()
         auth = bool(payload.get("auth_configured"))
+        self._pair_auth_configured = auth
+        self._pair_relay_ready = mode != "relay" or payload.get("relay", {}).get("state") == "connected"
         self.network_mode = mode
         field = self.query_one("#pair-url-field")
         input_widget = self.query_one("#pair-url", Input)
@@ -658,6 +691,9 @@ class ClarpAdminApp(App[None]):
             message = (
                 "Tailscale Serve address loaded from this Computer."
                 if url else "Tailscale is selected but has no reachable URL.")
+        elif mode == "relay":
+            message = ("Relay connected. The iPhone does not need a VPN." if self._pair_relay_ready
+                       else "Relay is not connected yet. Refresh status after it reconnects.")
         elif mode == "manual":
             message = "Confirm or edit the HTTPS address managed by your proxy."
         elif mode == "lan":
@@ -674,9 +710,9 @@ class ClarpAdminApp(App[None]):
         status = self.query_one("#pair-network-status", Static)
         status.update(message)
         status.remove_class("error")
-        if error or not auth:
+        if error or not auth or not self._pair_relay_ready:
             status.add_class("error")
-        self.query_one("#pair-create", Button).disabled = bool(error) or not auth
+        self.query_one("#pair-create", Button).disabled = bool(error) or not auth or not self._pair_relay_ready
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         action = event.button.id
@@ -689,6 +725,8 @@ class ClarpAdminApp(App[None]):
             self.run_admin(["doctor"], "overview-log")
         elif action == "paths":
             self.run_admin(["paths"], "overview-log")
+        elif action == "pair-refresh":
+            self.load_network_state()
         elif action == "pair-list":
             self.run_admin(["pair", "list"], "pair-log")
         elif action == "pair-show":

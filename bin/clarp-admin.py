@@ -761,7 +761,9 @@ def pwa_access_url() -> str:
     """
     cfg = _network_config()
     token = str(cfg.get("server", {}).get("auth_token") or "").strip()
-    base = _pairing_public_url() + "/"
+    # The administrator bootstrap is local; remote devices use one-time pairing.
+    server = cfg.get("server", {})
+    base = f"http://127.0.0.1:{int(server.get('port', 7682))}/"
     if not token:
         return base
     return base + "?" + urllib.parse.urlencode({"token": token})
@@ -1072,8 +1074,14 @@ def cmd_pair(args) -> int:
         print(json.dumps({"devices": list_devices(include_revoked=args.all)}, indent=2))
         return 0
     if args.pair_command == "revoke":
-        if not revoke(args.device_id):
-            raise SystemExit(f"paired device not found: {args.device_id}")
+        try:
+            api_request("POST", "/paired-devices/revoke", {"device_id": args.device_id})
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
+            # Offline Hosts have no live connections to terminate.
+            if not revoke(args.device_id):
+                raise SystemExit(f"paired device not found: {args.device_id}")
         print(f"revoked: {args.device_id}")
         return 0
 
@@ -1082,7 +1090,13 @@ def cmd_pair(args) -> int:
         raise SystemExit(
             "pairing requires server authentication; configure networking/auth "
             "in clarp-tui or set [server] auth_token, then restart Clarp")
-    public_url = _pairing_public_url(args.url)
+    if getattr(args, "relay", False):
+        from lib.relay_settings import load as load_relay
+        if not cfg.get("network", {}).get("relay_enabled", False):
+            raise SystemExit("enable the managed relay before pairing through it")
+        public_url = load_relay(CONFIG_FILE.parent / "relay.json").pairing_url
+    else:
+        public_url = _pairing_public_url(args.url)
     parsed = urllib.parse.urlsplit(public_url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise SystemExit(
@@ -1269,6 +1283,118 @@ def _remove_managed_tailscale_serve(
             port, https_port=https_port, enabled=False)
 
 
+def _legacy_relay_active() -> bool:
+    if service_manager.platform_kind() != "linux":
+        return False
+    return subprocess.run(
+        ["systemctl", "--user", "is-active", "--quiet", "clarp-relay-connector.service"],
+        capture_output=True, check=False).returncode == 0
+
+
+def _legacy_relay_control(action: str) -> None:
+    result = subprocess.run(
+        ["systemctl", "--user", action, "clarp-relay-connector.service"],
+        capture_output=True, check=False)
+    if result.returncode:
+        raise RuntimeError(f"could not {action} the legacy relay connector")
+
+
+def _relay_status(cfg=None) -> dict:
+    from lib.relay_settings import load as load_relay
+    cfg = cfg if cfg is not None else _network_config()
+    enabled = bool(cfg.get("network", {}).get("relay_enabled", False))
+    result = {"configured": False, "enabled": enabled, "state": "disabled"}
+    try:
+        result.update(load_relay(CONFIG_FILE.parent / "relay.json").public_status())
+    except FileNotFoundError:
+        pass
+    except ValueError as error:
+        result.update(state="invalid", error=str(error))
+        return result
+    if enabled:
+        try:
+            result.update(api_request("GET", "/network/relay"))
+        except (OSError, ValueError):
+            result["state"] = "unavailable"
+    return result
+
+
+def cmd_relay(args) -> int:
+    from lib.relay_settings import RelaySettings, load, write, import_legacy
+    action = args.relay_command
+    if action == "status":
+        print(json.dumps(_relay_status(), indent=2))
+        return 0
+    credentials = CONFIG_FILE.parent / "relay.json"
+    previous_config = CONFIG_FILE.read_bytes() if CONFIG_FILE.exists() else None
+    previous_credentials = credentials.read_bytes() if credentials.exists() else None
+    legacy_stopped = False
+    restart_attempted = False
+    try:
+        if action == "configure":
+            import getpass
+            key = sys.stdin.readline().strip() if args.key_stdin else getpass.getpass("Relay connector key: ").strip()
+            settings = RelaySettings(args.url, args.host_id, key)
+            write(credentials, settings)
+            if _network_config().get("network", {}).get("relay_enabled", False):
+                restart_attempted = True
+                service_manager.restart()
+        elif action in {"enable", "migrate"}:
+            if action == "migrate":
+                settings = import_legacy(CONFIG_FILE.parent / "relay.env")
+                write(credentials, settings)
+            else:
+                settings = load(credentials)
+            active = _legacy_relay_active()
+            if active and action != "migrate":
+                raise ValueError("legacy connector is running; use clarp-admin network relay migrate")
+            _ensure_network_auth()
+            set_toml_value(CONFIG_FILE, "network", "relay_enabled", True)
+            if active:
+                _legacy_relay_control("stop")
+                legacy_stopped = True
+            restart_attempted = True
+            service_manager.restart()
+            if legacy_stopped:
+                _legacy_relay_control("disable")
+        elif action == "disable":
+            set_toml_value(CONFIG_FILE, "network", "relay_enabled", False)
+            restart_attempted = True
+            service_manager.restart()
+    except BaseException as original_error:
+        if previous_config is not None:
+            CONFIG_FILE.write_bytes(previous_config)
+            CONFIG_FILE.chmod(0o600)
+        elif CONFIG_FILE.exists():
+            CONFIG_FILE.unlink()
+        if previous_credentials is not None:
+            credentials.write_bytes(previous_credentials)
+            credentials.chmod(0o600)
+        elif credentials.exists():
+            credentials.unlink()
+        # Restore service configuration after a failed mutation. Never restart
+        # for pure validation failures that occurred before a change.
+        errors = []
+        if restart_attempted:
+            try:
+                service_manager.restart()
+            except Exception as error:
+                errors.append(f"Host restart: {type(error).__name__}")
+        if legacy_stopped:
+            try:
+                _legacy_relay_control("start")
+            except Exception as error:
+                errors.append(f"legacy connector restart: {type(error).__name__}")
+        if errors:
+            raise RuntimeError("relay change failed and rollback needs attention: " + "; ".join(errors)) from original_error
+        raise
+    print(json.dumps(_relay_status(), indent=2))
+    if getattr(args, "pair", False):
+        return cmd_pair(argparse.Namespace(pair_command="create", relay=True, url="", name="iPhone",
+                                         scope="full", ttl=600, allow_loopback=False, json=False))
+    return 0
+
+
 def cmd_network(args) -> int:
     cfg = _network_config()
     network = cfg.get("network", {})
@@ -1284,6 +1410,7 @@ def cmd_network(args) -> int:
             "pairing_url": _pairing_public_url() if mode != "off" else "",
             "auth_configured": bool(server.get("auth_token")),
             "tailscale": _tailscale_info(),
+            "relay": _relay_status(cfg),
         }, indent=2))
         return 0
 
@@ -1345,6 +1472,8 @@ def cmd_network(args) -> int:
             set_toml_value(CONFIG_FILE, "server", "public_base_url", "")
             set_toml_value(CONFIG_FILE, "network", "advertise_lan", False)
         set_toml_value(CONFIG_FILE, "network", "mode", mode)
+        if mode == "off":
+            set_toml_value(CONFIG_FILE, "network", "relay_enabled", False)
         service_manager.restart()
         if serve_ports_to_remove:
             _remove_managed_tailscale_serve(
@@ -1985,6 +2114,7 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
         dest="pair_command", required=True)
     pair_create = pair.add_parser("create")
     pair_create.add_argument("--url", default="")
+    pair_create.add_argument("--relay", action="store_true", help="pair through the managed relay")
     pair_create.add_argument("--name", default="iPhone")
     pair_create.add_argument("--scope", choices=("full", "limited"),
                              default="full")
@@ -2002,6 +2132,17 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     network = sub.add_parser("network").add_subparsers(
         dest="network_command", required=True)
     network.add_parser("status").set_defaults(func=cmd_network)
+    relay = network.add_parser("relay").add_subparsers(dest="relay_command", required=True)
+    relay_configure = relay.add_parser("configure")
+    relay_configure.add_argument("--url", required=True)
+    relay_configure.add_argument("--host-id", required=True)
+    relay_configure.add_argument("--key-stdin", action="store_true")
+    relay_configure.set_defaults(func=cmd_relay)
+    for action in ("status", "enable", "disable", "migrate"):
+        command = relay.add_parser(action)
+        if action in {"enable", "migrate"}:
+            command.add_argument("--pair", action="store_true", help="show a one-use phone pairing QR code")
+        command.set_defaults(func=cmd_relay)
     network_use = network.add_parser("use")
     network_use.add_argument(
         "mode", choices=("tailscale", "lan", "manual", "off"))
