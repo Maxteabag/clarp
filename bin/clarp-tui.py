@@ -496,6 +496,8 @@ class ClarpAdminApp(App[None]):
                                 "Loading the configured phone network…",
                                 id="pair-network-status")
                             yield Button("Refresh status", id="pair-refresh")
+                            yield Button("Allow encrypted local connections", id="local-enable")
+                            yield Static("", id="local-status")
                             yield self._select("Connection", "pair-connection", [
                                 ("Primary network", "primary"),
                                 ("Relay — no VPN needed", "relay")], "primary")
@@ -656,6 +658,9 @@ class ClarpAdminApp(App[None]):
 
     def _apply_network_state(self, payload: dict) -> None:
         self._pair_network_payload = payload
+        local_enabled = bool(payload.get("local_connection", {}).get("enabled"))
+        self.query_one("#local-enable", Button).label = ("Disable local connections" if local_enabled else "Allow encrypted local connections")
+        self.query_one("#local-status", Static).update("Direct encrypted Wi-Fi access enabled; remote access stays available." if local_enabled else "Local access is off. Enable it to let paired phones connect directly on Wi-Fi.")
         relay_enabled = bool(payload.get("relay", {}).get("enabled"))
         self.query_one("#container-pair-connection").display = relay_enabled
         choice = self.query_one("#pair-connection", Select)
@@ -725,6 +730,9 @@ class ClarpAdminApp(App[None]):
             self.run_admin(["doctor"], "overview-log")
         elif action == "paths":
             self.run_admin(["paths"], "overview-log")
+        elif action == "local-enable":
+            action = "disable" if self._pair_network_payload.get("local_connection", {}).get("enabled") else "enable"
+            self.change_local_connection(action)
         elif action == "pair-refresh":
             self.load_network_state()
         elif action == "pair-list":
@@ -765,6 +773,13 @@ class ClarpAdminApp(App[None]):
                 "backend": backend,
                 "optional-skills": self._selected("optional-skills"),
             })
+
+    @work(thread=True, exclusive=True, group="local-connection")
+    def change_local_connection(self, action: str) -> None:
+        result = subprocess.run([sys.executable, str(admin_script()), "network", "local", action],
+                                text=True, capture_output=True, check=False)
+        self.call_from_thread(self._replace_log, "pair-log", result.stdout if result.returncode == 0 else result.stderr)
+        self.call_from_thread(self.load_network_state)
 
     @work(thread=True, exclusive=True, group="admin-command")
     def run_admin(self, arguments: list[str], log_id: str,

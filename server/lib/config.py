@@ -301,6 +301,8 @@ class Config:
     public_base_url: str = ""
     network_mode: str = "off"
     network_advertise_lan: bool = False
+    local_enabled: bool = False
+    local_tls_port: int = 7683
     relay_enabled: bool = False
     relay_config_path: str = ""
     eleven_api_key: str = ""             # if set, used for direct HTTP; else env var ELEVEN_API_KEY
@@ -521,7 +523,7 @@ def load(path: pathlib.Path | None = None) -> Config:
     network = data.get("network", {}) or {}
     apns    = data.get("apns", {}) or {}
     if (str(network.get("mode", "off")).strip().lower() != "off"
-            or network.get("relay_enabled", False)) and not str(server.get("auth_token", "")).strip():
+            or network.get("relay_enabled", False) or network.get("local_enabled", False)) and not str(server.get("auth_token", "")).strip():
         raise ConfigError("remote networking requires configured authentication")
     delivery = (os.environ.get("CLAUDE_PWA_DELIVERY")
                 or str(audio.get("delivery", "raw-pcm"))).strip().lower()
@@ -547,6 +549,8 @@ def load(path: pathlib.Path | None = None) -> Config:
         public_base_url = str(server.get("public_base_url", "")).strip().rstrip("/"),
         network_mode    = str(network.get("mode", "off")).strip().lower(),
         network_advertise_lan = bool(network.get("advertise_lan", False)),
+        local_enabled   = bool(network.get("local_enabled", False)),
+        local_tls_port  = int(network.get("local_tls_port", 7683)),
         relay_enabled   = bool(network.get("relay_enabled", False)),
         relay_config_path = str(path.parent / "relay.json"),
         default_session = str(server.get("default_session", "claude")),
