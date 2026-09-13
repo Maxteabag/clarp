@@ -258,6 +258,7 @@ class Conversation:
 
     def input(self, event):
         if event["type"] == "session.close":
+            if self.close_sent: return
             self.close_sent = True
         if event["type"] == "oracle_v2.interrupt":
             self.journal_event("client", event)
@@ -273,6 +274,14 @@ class Conversation:
     def receive(self, event):
         event = self.wire.incoming(event)
         kind = event.get("type")
+        if kind == "session.input_audio.append":
+            # Reflected WebRTC input is observation only. Sending it back over
+            # the sideband would duplicate input and violates the media contract.
+            data = base64.b64decode(event.get("audio", ""))
+            if data and len(data) % 2 == 0 and audible(data):
+                self.last_input = self.clock()
+            self.journal_event("server", event)
+            return
         if self.usage.observe(event):
             snapshot = {"type": "oracle_v2.usage", **self.usage.snapshot()}
             self.downstream(snapshot)
@@ -461,6 +470,8 @@ def serve(handler):
             getattr(handler, "_request_device_scope", "") == "full" and principal):
         return _send_http_error(handler, 401, "Oracle v2 requires full-device authentication")
     cfg = config.load()
+    if getattr(cfg, "oracle_voice_backend", "api") != "api":
+        return _send_http_error(handler, 503, "Oracle subscription voice requires the WebRTC connection")
     key = cfg.openai_key()
     if not key:
         return _send_http_error(handler, 503, "Oracle v2 needs an OpenAI key on this Host")
@@ -600,7 +611,8 @@ def serve(handler):
         if conversation:
             if not conversation.taken_over.is_set():
                 try:
-                    conversation.send({"type": "session.close"})
+                    if not conversation.close_sent:
+                        conversation.input({"type": "session.close"})
                     conversation.closed.wait(2)
                 except Exception:
                     pass
