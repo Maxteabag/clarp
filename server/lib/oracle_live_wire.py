@@ -75,6 +75,8 @@ class LiveWire:
                          source_type=kind)
         elif kind == "output_audio.delta":
             value.update(type="session.output_audio.delta", delta=value.get("audio"), source_type=kind)
+        elif kind == "input_audio.append":
+            value.update(type="session.input_audio.append", source_type=kind)
         elif kind == "turn.done":
             value = {"type": "oracle_v2.provider_turn_done", "source": value}
         if kind in ("session.closed", "session.usage.updated"):

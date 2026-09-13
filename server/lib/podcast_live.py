@@ -212,9 +212,9 @@ def generate_image(*, api_key, context, question, review=review_image, plan=imag
 class PodcastConversation(Conversation):
     def __init__(self, upstream, downstream, api_key, context, *, images=False,
                  tools, router_backend="api", clock=time.monotonic, generate=generate_image,
-                 history_id=None, media_dir=None):
+                 history_id=None, media_dir=None, wire=None):
         super().__init__(upstream, downstream, tools, api_key, clock,
-                         router_backend=router_backend, reference_context=context)
+                         router_backend=router_backend, reference_context=context, wire=wire)
         self.context = context
         self.images = images
         self.generate = generate
@@ -229,7 +229,7 @@ class PodcastConversation(Conversation):
 
     def receive(self, event):
         with self.lock:
-            self._receive_saved(event)
+            self._receive_saved(self.wire.incoming(event))
 
     def _receive_saved(self, event):
         if self.history_id:

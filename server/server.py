@@ -423,6 +423,7 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/realtime": "_handle_oracle_realtime",
         "/oracle/v2": "_handle_oracle_v2",
         "/oracle/calls/status": "_handle_oracle_call_status",
+        "/oracle/v2/calls/status": "_handle_oracle_live_call_status",
         "/agent-schedules": "_handle_agent_schedules_get",
     }
     _ROOT_STATIC = {"/manifest.json", "/styles.css", "/icon.png"}
@@ -506,6 +507,9 @@ class Handler(BaseHTTPRequestHandler):
         "/decisions": "_handle_decision_create",
         "/oracle/calls": "_handle_oracle_call_create",
         "/oracle/calls/close": "_handle_oracle_call_close",
+        "/oracle/v2/calls": "_handle_oracle_live_call_create",
+        "/oracle/v2/calls/close": "_handle_oracle_live_call_close",
+        "/oracle/v2/calls/control": "_handle_oracle_live_call_control",
         "/oracle/delegations": "_handle_oracle_delegation_create",
         "/oracle/delegations/ack": "_handle_oracle_delegation_ack",
         "/oracle/delegations/cancel": "_handle_oracle_delegation_cancel",
@@ -3805,6 +3809,22 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(urlparse(self.path).query)
         rows = oracle_calls.call_results(str(self._request_principal), query.get("attempt_id", [""])[0])
         return self._send(200, json.dumps({"delegations": rows}).encode(), "application/json")
+
+    def _handle_oracle_live_call_status(self):
+        from lib.oracle_live_calls import handle
+        return handle(self, "status")
+
+    def _handle_oracle_live_call_create(self):
+        from lib.oracle_live_calls import handle
+        return handle(self, "create")
+
+    def _handle_oracle_live_call_close(self):
+        from lib.oracle_live_calls import handle
+        return handle(self, "close")
+
+    def _handle_oracle_live_call_control(self):
+        from lib.oracle_live_calls import handle
+        return handle(self, "control")
 
     def _handle_oracle_call_create(self):
         from lib import oracle_calls

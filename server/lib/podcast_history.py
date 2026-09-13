@@ -94,7 +94,7 @@ def snapshot(digest):
     return json.loads(row[0]) if row else None
 
 
-def create(*, artifact, position, context, source=None, model, voice):
+def create(*, artifact, position, context, source=None, model, voice, configuration=None):
     from .podcast_live import context_for, session_config
     episode = artifact["payload"]["podcast"]
     # Validate against the saved audio rather than trusting a client's duration.
@@ -102,6 +102,9 @@ def create(*, artifact, position, context, source=None, model, voice):
     if source and source["type"] not in SOURCE_TYPES:
         raise ValueError("Unsupported podcast source")
     parsed_context = json.loads(context)
+    configuration = configuration if configuration is not None else session_config(context)
+    if configuration.get("model") != model or configuration.get("audio", {}).get("output", {}).get("voice") != voice:
+        raise ValueError("Podcast history must identify the actual voice configuration")
     ident, now = "podcast-" + str(uuid.uuid4()), db.now_ms()
     con = db.conn()
     con.execute("BEGIN IMMEDIATE")
@@ -115,7 +118,7 @@ def create(*, artifact, position, context, source=None, model, voice):
              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (ident, artifact["artifact_id"], artifact["session"], episode["revision"], position,
              audio_hash, source["artifact_id"] if source else "", source_hash,
-             _json(parsed_context), _json(session_config(context)), model, voice,
+             _json(parsed_context), _json(configuration), model, voice,
              INSTANCE_ID, "connecting", now, now))
         con.execute("COMMIT")
     except BaseException:
