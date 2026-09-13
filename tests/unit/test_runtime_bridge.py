@@ -611,7 +611,8 @@ class _CountingRuntime:
         return self._status
 
 
-def test_active_handles_shares_one_status_rpc_across_agents():
+def test_active_handles_shares_one_status_rpc_across_agents(monkeypatch):
+    monkeypatch.setattr(backends, "_clock", lambda: 1000.0)
     runtime = _CountingRuntime()
     backends.configure_runtime_client(runtime)
     try:
@@ -652,6 +653,8 @@ def test_status_window_expires_and_follows_client_replacement(monkeypatch):
 def test_status_outage_costs_one_rpc_and_one_log_line_per_window(monkeypatch):
     from lib import log as log_module
 
+    clock = [1000.0]
+    monkeypatch.setattr(backends, "_clock", lambda: clock[0])
     events = []
     monkeypatch.setattr(
         log_module, "log_exception",
@@ -663,11 +666,16 @@ def test_status_outage_costs_one_rpc_and_one_log_line_per_window(monkeypatch):
             assert backends.active_handles("codex", agent) == []  # not busy → nothing
         assert runtime.calls == 1
         assert events == [("runtimeStatusUnavailable", "shared-status")]
+        clock[0] += backends.RUNTIME_STATUS_TTL + 0.01
+        assert backends.active_handles("codex", "agent-1") == []
+        assert runtime.calls == 2
+        assert events == [("runtimeStatusUnavailable", "shared-status")] * 2
     finally:
         backends.configure_runtime_client(None)
 
 
-def test_dispatch_through_runtime_invalidates_the_status_window():
+def test_dispatch_through_runtime_invalidates_the_status_window(monkeypatch):
+    monkeypatch.setattr(backends, "_clock", lambda: 1000.0)
     class Runtime(_CountingRuntime):
         def dispatch(self, **kwargs):
             self._status = {"active": {"theo-agent": "trace-new"}, "spawning": [], "terminals": []}
