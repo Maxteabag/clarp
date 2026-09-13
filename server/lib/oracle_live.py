@@ -32,10 +32,12 @@ _STOP_HOOKS: dict[str, tuple[str, object]] = {}
 # and the device's claim until TCP gave up (minutes) and every reconnect got
 # 409 meanwhile.
 CLIENT_IDLE_TIMEOUT = 30.0
-# Silence inside a reply is part of the speech: keep forwarding it briefly
-# after the last audible chunk so the phone's playback buffer stays fed
-# between phrases. Sustained silence is still dropped.
-OUTPUT_HANGOVER = 0.35
+# Silence inside a reply is part of the speech: keep forwarding it after the
+# last audible chunk so the phone's playback buffer stays fed between phrases
+# (a measured GPT-Live reply paused a full second between sentences). GPT-Live
+# streams a continuous 24 kHz timeline, so sustained silence after a reply is
+# still dropped rather than costing 64 KB/s for nothing.
+OUTPUT_HANGOVER = 1.2
 
 
 def claim_connection(principal, timeout=3.0):
