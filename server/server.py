@@ -132,6 +132,7 @@ class ContextHTTPServer(ThreadingHTTPServer):
         self._close_callbacks = []
         self.local_tls = False
         self.local_transport = None
+        self.local_transport_error = ""
         self.relay = None
         import weakref
         self._device_connections = weakref.WeakKeyDictionary()
@@ -2142,6 +2143,8 @@ class Handler(BaseHTTPRequestHandler):
         info = get_server_info()
         transport = self.server.local_transport
         info["local_connection"] = transport.description() if transport else {"enabled": False}
+        if self.server.local_transport_error:
+            info["local_connection"]["error"] = self.server.local_transport_error
         return info
 
     def _handle_server_info(self):
@@ -5800,9 +5803,10 @@ def build_server(ctx: ServerContext, port: int,
             srv.local_transport = LocalHTTPS(srv, Handler, ctx.local_tls_directory, ctx.local_tls_port)
             srv.local_transport.start()
             srv.on_close(srv.local_transport.close)
-        except Exception:
-            srv.server_close()
-            raise
+        except Exception as error:
+            srv.local_transport = None
+            srv.local_transport_error = "Local HTTPS listener could not start"
+            log_exception("localHTTPSStartFailed", error)
     return srv
 
 

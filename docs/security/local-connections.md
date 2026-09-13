@@ -9,7 +9,9 @@ clarp-admin network local status
 
 The **Pair iPhone** screen also has **Allow encrypted local connections**.
 Clarp creates a private TLS identity automatically, opens HTTPS on port 7683,
-and advertises `_clarps._tcp` through Bonjour. Tailscale and the relay retain
+and advertises `_clarps._tcp` through Bonjour. If the default port is occupied,
+setup selects and saves an available port automatically. A later local-listener
+startup failure leaves the primary Host running and is reported by local status. Tailscale and the relay retain
 their current settings. No router port forwarding or public DNS is needed.
 For a different port use `enable --port 8763`. Disable with `network local disable`.
 The Host firewall must allow the selected port and Bonjour on the local network;
