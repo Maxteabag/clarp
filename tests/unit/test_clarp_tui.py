@@ -313,3 +313,41 @@ def test_pairing_qr_opens_complete_code_in_scrollable_modal():
                 "#pair-show", Button).display is True
 
     asyncio.run(inspect())
+
+
+def test_pairing_can_choose_relay_without_changing_primary_network():
+    async def run():
+        app = tui.ClarpAdminApp(first_run=True)
+        app.on_mount = lambda: None
+        async with app.run_test(size=(110, 40)) as pilot:
+            app._apply_network_state({
+                'mode': 'tailscale', 'pairing_url': 'https://host.example.ts.net',
+                'auth_configured': True,
+                'relay': {'enabled': True, 'state': 'connected', 'pairing_url': 'https://relay.example/h/host-test'},
+            })
+            app.query_one('#pair-connection', Select).value = 'relay'
+            await pilot.pause()
+            assert app.query_one('#pair-url', Input).value == 'https://relay.example/h/host-test'
+            assert not app.query_one('#pair-create', Button).disabled
+            assert app._pair_network_payload['mode'] == 'tailscale'
+            app.query_one('#pair-connection', Select).value = 'primary'
+            await pilot.pause()
+            assert app.query_one('#pair-url', Input).value == 'https://host.example.ts.net'
+    asyncio.run(run())
+
+
+def test_disconnected_relay_does_not_offer_a_nonworking_pairing_code():
+    async def run():
+        app = tui.ClarpAdminApp(first_run=True)
+        app.on_mount = lambda: None
+        async with app.run_test(size=(110, 40)) as pilot:
+            payload = {'mode': 'off', 'auth_configured': True,
+                       'relay': {'enabled': True, 'state': 'reconnecting', 'pairing_url': 'https://relay.example/h/host-test'}}
+            app._apply_network_state(payload)
+            await pilot.pause()
+            assert app.query_one('#pair-create', Button).disabled
+            payload['relay']['state'] = 'connected'
+            app._apply_network_state(payload)
+            await pilot.pause()
+            assert not app.query_one('#pair-create', Button).disabled
+    asyncio.run(run())

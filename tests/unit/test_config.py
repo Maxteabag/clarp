@@ -87,3 +87,11 @@ def test_claude_account_switch_command_requires_explicit_argv(tmp_path, value, e
     path.write_text(f'[agents]\nclaude_account_switch_command = {value}\n')
     config.reset_cache_for_tests()
     assert config.load(path).claude_account_switch_command == expected
+
+
+@pytest.mark.parametrize('mode', ['tailscale', 'lan', 'manual', 'relay'])
+def test_remote_network_mode_requires_authentication(tmp_path, mode):
+    path = tmp_path / 'config.toml'
+    path.write_text(f'[server]\nauth_token = ""\n[network]\nmode = "{mode}"\n')
+    with pytest.raises(config.ConfigError, match='authentication'):
+        config.load(path)

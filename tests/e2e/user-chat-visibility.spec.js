@@ -41,7 +41,7 @@ test.describe('User chat message immediate visibility & styling', () => {
       json: { ok: true, session: 'nova-one' },
     }));
 
-    await page.goto('/?token=test', { waitUntil: 'domcontentloaded' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
 
     // Initial assistant greeting
     await expect(page.locator('#historyBody')).toContainText('Hello, how can I help you?');
