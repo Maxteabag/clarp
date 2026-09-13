@@ -20,7 +20,7 @@ import weakref
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
 
 
 def local_ipv4_addresses() -> list[str]:
@@ -56,6 +56,9 @@ def ensure_identity(directory: Path, server_id: str) -> tuple[Path, str]:
                 .not_valid_before(now - dt.timedelta(minutes=5))
                 .not_valid_after(now + dt.timedelta(days=3650))
                 .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+                .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+                .add_extension(x509.SubjectAlternativeName([x509.DNSName("clarp-" + hashlib.sha256(server_id.encode()).hexdigest()[:16] + ".local")]), critical=False)
+                .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=False, key_encipherment=False, data_encipherment=False, key_agreement=False, key_cert_sign=False, crl_sign=False, encipher_only=None, decipher_only=None), critical=True)
                 .sign(key, hashes.SHA256()))
         data = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                                  serialization.NoEncryption()) + cert.public_bytes(serialization.Encoding.PEM)
