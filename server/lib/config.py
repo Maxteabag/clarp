@@ -320,6 +320,7 @@ class Config:
     openai_realtime_model: str = "gpt-realtime-2.1"
     openai_realtime_voice: str = "cedar"
     oracle_diagnostics: bool = False
+    oracle_router_backend: str = "api"
     openai_realtime_transcription_model: str = "gpt-4o-mini-transcribe"
     cartesia_model: str = "sonic-3.5"
     cartesia_voices: dict[str, str] = field(
@@ -570,6 +571,7 @@ def load(path: pathlib.Path | None = None) -> Config:
             openai.get("realtime_voice", "cedar")
         ).strip() or "cedar",
         oracle_diagnostics = bool(openai.get("oracle_diagnostics", False)),
+        oracle_router_backend = str(openai.get("oracle_router_backend", "api")).strip(),
         openai_realtime_transcription_model = str(openai.get(
             "realtime_transcription_model", "gpt-4o-mini-transcribe")).strip(),
         cartesia_model  = str(cartesia.get("model", "sonic-3.5")),

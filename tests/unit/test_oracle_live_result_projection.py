@@ -59,3 +59,25 @@ def test_task_scoped_append_preserves_original_provider_delegation_id():
         assert json.loads(sent[0])["delegation_id"] == "provider-delegation-1"
     finally:
         close(c)
+
+
+def test_work_panel_uses_only_owned_ids_and_emits_changes_without_repeating(monkeypatch):
+    import threading
+    down = []
+    rows = {"owned": {"delegation_id": "owned", "session": "mira", "status": "accepted",
+                       "request_text": "Inspect build-42", "created_at": 1},
+            "unowned": {"delegation_id": "unowned", "session": "private", "status": "completed"}}
+    monkeypatch.setattr(oracle_live.oracle_delegations, "get", rows.get)
+    tools = SimpleNamespace(lock=threading.Lock(), delegations={"owned"}, results=lambda: [])
+    c = oracle_live.Conversation(SimpleNamespace(send=lambda _: None), down.append, tools, "fixture")
+    try:
+        c.tick(); c.tick()
+        assert len(down) == 1 and down[0]["items"][0]["id"] == "owned"
+        assert "unowned" not in json.dumps(down)
+        rows["owned"]["status"] = "completed"
+        rows["owned"]["result_text"] = "Signature missing."
+        c.tick()
+        assert len(down) == 2
+        assert down[-1]["items"][0]["result"] == "Signature missing."
+    finally:
+        close(c)
