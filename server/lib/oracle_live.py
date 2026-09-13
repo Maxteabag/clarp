@@ -19,23 +19,58 @@ from urllib.request import Request, urlopen
 
 from . import config, oracle_delegations, ws
 from .oracle_calls import AgentTools, session_config as realtime_config
-from .oracle_realtime import _claim, _release, _send_http_error
+from .oracle_realtime import claim_session, release_session, _send_http_error
 
 _CLOSING = set()
 _CLOSING_CONDITION = threading.Condition()
+# principal -> (claim token, callable that ends that session without blocking)
+_STOP_HOOKS: dict[str, tuple[str, object]] = {}
+
+# The phone streams microphone audio continuously and pings every few seconds
+# while its microphone is paused, so a client silent this long is gone. It
+# also bounds a write toward a dead peer, which otherwise pinned the session
+# and the device's claim until TCP gave up (minutes) and every reconnect got
+# 409 meanwhile.
+CLIENT_IDLE_TIMEOUT = 30.0
+# Silence inside a reply is part of the speech: keep forwarding it briefly
+# after the last audible chunk so the phone's playback buffer stays fed
+# between phrases. Sustained silence is still dropped.
+OUTPUT_HANGOVER = 0.35
 
 
 def claim_connection(principal, timeout=3.0):
-    """Wait only for a closing session; never take over live ownership."""
+    """Claim voice ownership for a device; returns the claim token or None.
+
+    Exactly one Oracle session exists per device credential and the phone runs
+    one client, so a second connection from the same device means the first is
+    stale: a dead cellular path, a suspended app, a socket iOS dropped. That
+    session is told to stop and this call waits (bounded) for its release
+    instead of answering 409 until TCP notices. A session already closing is
+    simply waited for. A classic-proxy session has no stop hook and keeps
+    ownership.
+    """
     deadline = time.monotonic() + timeout
     with _CLOSING_CONDITION:
         while True:
-            if _claim(principal):
-                return True
+            token = claim_session(principal)
+            if token is not None:
+                return token
+            if principal not in _CLOSING:
+                entry = _STOP_HOOKS.get(principal)
+                if entry is None:
+                    return None
+                _CLOSING.add(principal)
+                entry[1]()
             remaining = deadline - time.monotonic()
-            if principal not in _CLOSING or remaining <= 0:
-                return False
+            if remaining <= 0:
+                return None
             _CLOSING_CONDITION.wait(remaining)
+
+
+def register_stop(principal, token, stop):
+    """Let a later connection from the same device supersede this session."""
+    with _CLOSING_CONDITION:
+        _STOP_HOOKS[principal] = (token, stop)
 
 
 def mark_closing(principal):
@@ -43,10 +78,14 @@ def mark_closing(principal):
         _CLOSING.add(principal)
 
 
-def release_connection(principal):
+def release_connection(principal, token):
     with _CLOSING_CONDITION:
-        _release(principal)
+        if not release_session(principal, token):
+            return
         _CLOSING.discard(principal)
+        entry = _STOP_HOOKS.get(principal)
+        if entry is not None and entry[0] == token:
+            del _STOP_HOOKS[principal]
         _CLOSING_CONDITION.notify_all()
 
 
@@ -124,6 +163,9 @@ class Conversation:
         self.clock = clock
         self.stop = threading.Event()
         self.closed = threading.Event()
+        # Set when a newer connection from the same device took over: the
+        # upstream is dropped without waiting for its close receipt.
+        self.taken_over = threading.Event()
         self.lock = threading.RLock()
         self.send_lock = threading.Lock()
         self.route_lock = threading.Lock()
@@ -165,9 +207,12 @@ class Conversation:
         kind = event.get("type")
         if kind == "session.output_audio.delta":
             data = base64.b64decode(event.get("delta", ""))
+            now = self.clock()
             if audible(data):
-                self.last_output = self.clock()
+                self.last_output = now
                 self.last_output_active = True
+                self.downstream(event)
+            elif self.last_output_active and now - self.last_output < OUTPUT_HANGOVER:
                 self.downstream(event)
             return
         if kind in ("session.input_transcript.delta", "session.output_transcript.delta"):
@@ -312,7 +357,8 @@ def serve(handler):
                 raise ValueError("Podcast audio revision changed; reopen the episode")
         except (ValueError, TypeError, KeyError, AttributeError):
             return _send_http_error(handler, 400, "Invalid podcast artifact, revision or playhead")
-    if not claim_connection(principal):
+    token = claim_connection(principal)
+    if token is None:
         return _send_http_error(handler, 409, "An Oracle session is already active")
     upstream = None
     conversation = None
@@ -333,7 +379,7 @@ def serve(handler):
         upstream.settimeout(1)
         handler.wfile.write(ws.handshake_response(headers["sec-websocket-key"]))
         handler.wfile.flush()
-        handler.connection.settimeout(None)
+        handler.connection.settimeout(CLIENT_IDLE_TIMEOUT)
         if podcast_context is not None:
             import pathlib
             from .paths import RuntimePaths
@@ -348,6 +394,16 @@ def serve(handler):
             tools = AgentTools(handler.ctx, principal, fallback,
                 lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
             conversation = Conversation(upstream, downstream, tools, key)
+
+        def stop_session():
+            conversation.taken_over.set()
+            conversation.stop.set()
+            try:
+                handler.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        register_stop(principal, token, stop_session)
+
         def pump():
             try:
                 while not conversation.stop.is_set():
@@ -404,11 +460,12 @@ def serve(handler):
     finally:
         mark_closing(principal)
         if conversation:
-            try:
-                conversation.send({"type": "session.close"})
-                conversation.closed.wait(2)
-            except Exception:
-                pass
+            if not conversation.taken_over.is_set():
+                try:
+                    conversation.send({"type": "session.close"})
+                    conversation.closed.wait(2)
+                except Exception:
+                    pass
             conversation.stop.set()
             conversation.pool.shutdown(wait=False, cancel_futures=True)
         if upstream:
@@ -421,4 +478,4 @@ def serve(handler):
                 # A failed terminal write leaves an unconfirmed/interrupted record;
                 # existing transcript commits remain durable.
                 pass
-        release_connection(principal)
+        release_connection(principal, token)
