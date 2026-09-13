@@ -27,6 +27,13 @@ def test_missing_final_usage_stays_unconfirmed_and_invalid_values_cannot_poison_
     assert usage.seconds == 12 and usage.finalized and not usage.usage_final
 
 
+def test_subscription_seconds_are_not_presented_as_api_dollars():
+    usage = LiveUsage("subscription")
+    usage.observe({"type": "session.closed", "usage": {"seconds": 12}})
+    assert usage.snapshot()["billing"] == "chatgpt_subscription"
+    assert usage.snapshot()["voice_estimate_usd"] is None
+
+
 def test_idle_close_is_once_and_does_not_cancel_agent_work():
     now, sent, down = [0.0], [], []
     tools = SimpleNamespace(results=lambda: [])

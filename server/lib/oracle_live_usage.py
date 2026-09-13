@@ -7,7 +7,10 @@ def _number(value):
 
 
 class LiveUsage:
-    def __init__(self):
+    def __init__(self, mode="api"):
+        if mode not in ("api", "subscription"):
+            raise ValueError("Unsupported Live billing mode")
+        self.mode = mode
         self.seconds = None
         self.context_ratio = None
         self.expires_at = None
@@ -40,5 +43,5 @@ class LiveUsage:
         return {"seconds": self.seconds, "context_ratio": self.context_ratio,
                 "expires_at": self.expires_at, "finalized": self.finalized,
                 "usage_final": self.usage_final, "reason": self.reason,
-                "voice_estimate_usd": round(self.seconds * .05 / 60, 6) if self.seconds is not None else None,
-                "billing": "openai_api", "scope": "voice_only"}
+                "voice_estimate_usd": round(self.seconds * .05 / 60, 6) if self.seconds is not None and self.mode == "api" else None,
+                "billing": "openai_api" if self.mode == "api" else "chatgpt_subscription", "scope": "voice_only"}
