@@ -23,6 +23,18 @@ export default defineConfig({
     extraHTTPHeaders: process.env.CLARP_E2E_TOKEN
       ? { Authorization: `Bearer ${process.env.CLARP_E2E_TOKEN}` }
       : {},
+    // Model the credential storage produced by pairing, including headerless
+    // EventSource/media requests. Test credentials never need a URL parameter.
+    storageState: process.env.CLARP_E2E_TOKEN ? {
+      cookies: [{
+        name: 'claude_pwa_token', value: process.env.CLARP_E2E_TOKEN,
+        domain: new URL(baseURL).hostname, path: '/', expires: -1, httpOnly: false,
+        secure: baseURL.startsWith('https:'), sameSite: 'Lax',
+      }],
+      origins: [{ origin: new URL(baseURL).origin, localStorage: [
+        { name: 'claude-pwa.auth-token', value: process.env.CLARP_E2E_TOKEN },
+      ] }],
+    } : undefined,
     trace: 'on-first-retry',
     // Service-worker activation can reload a page mid-assertion and make
     // unrelated UI checks flaky.
