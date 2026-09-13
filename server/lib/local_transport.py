@@ -135,12 +135,24 @@ class LocalHTTPS:
         self.server._device_connections_lock = owner._device_connections_lock
         self.server.local_transport = self
         self.thread = threading.Thread(target=self.server.serve_forever, name='clarp-local-https', daemon=True)
+        self._stop = threading.Event()
+        self._advertising_thread = threading.Thread(target=self._refresh_advertisement, name="clarp-local-discovery", daemon=True)
         self.advertiser = BonjourAdvertiser(name=str(info['name']), server_id=self.server_id,
             port=self.server.server_port, auth_required=True, secure=True)
 
     def start(self):
         self.thread.start()
         self.advertiser.start()
+        self._advertising_thread.start()
+
+    def _refresh_advertisement(self):
+        previous = local_ipv4_addresses()
+        while not self._stop.wait(15):
+            current = local_ipv4_addresses()
+            if current != previous:
+                self.advertiser.stop()
+                self.advertiser.start()
+                previous = current
 
     def description(self):
         port = self.server.server_port
@@ -149,6 +161,9 @@ class LocalHTTPS:
                 'urls': [f'https://{ip}:{port}' for ip in local_ipv4_addresses()]}
 
     def close(self):
+        self._stop.set()
+        if self._advertising_thread.is_alive():
+            self._advertising_thread.join(timeout=3)
         self.advertiser.stop()
         self.server.shutdown()
         with self.connections_lock:
