@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 from . import config, oracle_delegations, ws
+from .log import log
 from .oracle_calls import AgentTools, session_config as realtime_config
 from .oracle_realtime import claim_session, release_session, _send_http_error
 
@@ -38,6 +39,11 @@ CLIENT_IDLE_TIMEOUT = 30.0
 # streams a continuous 24 kHz timeline, so sustained silence after a reply is
 # still dropped rather than costing 64 KB/s for nothing.
 OUTPUT_HANGOVER = 1.2
+
+_AUDIO_EVENTS = {"session.input_audio.append": "audio", "session.output_audio.delta": "delta"}
+# Journal fields worth keeping per event; audio payloads are counted, never copied.
+_JOURNAL_FIELDS = ("delta", "start_ms", "end_ms", "delegation", "delegation_id", "content",
+                   "usage", "error", "message", "reason", "event_id", "client_event_id", "session_id")
 
 
 def claim_connection(principal, timeout=3.0):
@@ -182,6 +188,33 @@ class Conversation:
         self.pending = []
         self.superseded = set()
         self.tools.supersede = self.supersede
+        # Optional private journal (see docs/oracle-diagnostics.md) and always-on counters.
+        self.journal = None
+        self.counts = {"in_chunks": 0, "out_audible": 0, "out_silence_forwarded": 0, "out_silence_dropped": 0}
+
+    def journal_event(self, direction, event):
+        """Record one event in the private journal: transcript text, timing and
+        identifiers only. Audio events add to byte counters and are otherwise
+        not stored."""
+        journal = self.journal
+        if journal is None or not isinstance(event, dict):
+            return
+        kind = event.get("type")
+        if not isinstance(kind, str):
+            return
+        if kind in _AUDIO_EVENTS:
+            payload = event.get(_AUDIO_EVENTS[kind], "")
+            with journal.lock:
+                journal.audio_bytes[direction] = journal.audio_bytes.get(direction, 0) + (
+                    len(payload) * 3 // 4 if isinstance(payload, str) else 0)
+            return
+        fields = {"direction": direction}
+        for key in _JOURNAL_FIELDS:
+            if key in event:
+                fields[key] = event[key]
+        if kind == "session.start" and isinstance(event.get("session"), dict):
+            fields["model"] = event["session"].get("model")
+        journal.record(kind, fields)
 
     def supersede(self, session):
         with self.lock:
@@ -192,6 +225,8 @@ class Conversation:
         with self.send_lock:
             if not self.stop.is_set():
                 self.upstream.send(json.dumps(event))
+        if event.get("type") not in _AUDIO_EVENTS:
+            self.journal_event("host", event)
 
     def append(self, kind, content):
         self.send({"type": "session."+kind+".append", "delegation_id": None,
@@ -199,10 +234,14 @@ class Conversation:
 
     def input(self, event):
         if event["type"] == "oracle_v2.interrupt":
+            self.journal_event("client", event)
             self.append("instructions", "Stop speaking now and listen. Do not cancel agent work.")
         else:
-            if event["type"] == "session.input_audio.append" and audible(base64.b64decode(event["audio"])):
-                self.last_input = self.clock()
+            if event["type"] == "session.input_audio.append":
+                self.counts["in_chunks"] += 1
+                self.journal_event("client", event)
+                if audible(base64.b64decode(event["audio"])):
+                    self.last_input = self.clock()
             self.send(event)
 
     def receive(self, event):
@@ -213,10 +252,17 @@ class Conversation:
             if audible(data):
                 self.last_output = now
                 self.last_output_active = True
+                self.counts["out_audible"] += 1
+                self.journal_event("server", event)
                 self.downstream(event)
             elif self.last_output_active and now - self.last_output < OUTPUT_HANGOVER:
+                self.counts["out_silence_forwarded"] += 1
+                self.journal_event("server", event)
                 self.downstream(event)
+            else:
+                self.counts["out_silence_dropped"] += 1
             return
+        self.journal_event("server", event)
         if kind in ("session.input_transcript.delta", "session.output_transcript.delta"):
             with self.lock:
                 role = "user" if kind == "session.input_transcript.delta" else "assistant"
@@ -304,6 +350,7 @@ class Conversation:
         now = self.clock()
         if self.last_output_active and now-self.last_output > .5:
             self.last_output_active = False
+            self.journal_event("host", {"type": "oracle_v2.quiet"})
             self.downstream({"type": "oracle_v2.quiet"})
         for row in self.tools.results():
             ident = row["delegation_id"]
@@ -336,7 +383,8 @@ def serve(handler):
     if not (getattr(handler, "_request_auth_validated", False) and
             getattr(handler, "_request_device_scope", "") == "full" and principal):
         return _send_http_error(handler, 401, "Oracle v2 requires full-device authentication")
-    key = config.load().openai_key()
+    cfg = config.load()
+    key = cfg.openai_key()
     if not key:
         return _send_http_error(handler, 503, "Oracle v2 needs an OpenAI key on this Host")
     query = parse_qs(urlparse(handler.path).query)
@@ -396,6 +444,15 @@ def serve(handler):
             tools = AgentTools(handler.ctx, principal, fallback,
                 lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
             conversation = Conversation(upstream, downstream, tools, key)
+        if getattr(cfg, "oracle_diagnostics", False):
+            from .oracle_diagnostics import OracleJournal
+            conversation.journal = OracleJournal()
+            conversation.journal.record("session.open", {
+                "model": MODEL, "voice": VOICE, "transport": "clarp-live-v2",
+                "podcast": podcast_context is not None})
+        opened_at = time.monotonic()
+        log("oracleV2Open", f"model={MODEL} voice={VOICE} podcast={podcast_context is not None}"
+            + (f" journal={conversation.journal.session_id}" if conversation.journal else ""))
 
         def stop_session():
             conversation.taken_over.set()
@@ -472,6 +529,15 @@ def serve(handler):
             conversation.pool.shutdown(wait=False, cancel_futures=True)
         if upstream:
             upstream.close()
+        if conversation:
+            summary = dict(conversation.counts)
+            summary["seconds"] = round(time.monotonic() - opened_at, 1)
+            summary["closed_by_upstream"] = conversation.closed.is_set()
+            summary["taken_over"] = conversation.taken_over.is_set()
+            log("oracleV2Close", " ".join(f"{k}={v}" for k, v in summary.items()))
+            if conversation.journal:
+                conversation.journal.record("session.summary", summary)
+                conversation.journal.close()
         if history_id:
             try:
                 podcast_history.finish(history_id,
