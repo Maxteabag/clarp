@@ -148,11 +148,11 @@ def test_pauses_inside_a_reply_are_forwarded_but_sustained_silence_is_not():
         c.receive(quiet)
         assert down==[], 'Silence before any speech is not forwarded'
         c.receive(loud)
-        now[0]+=.2;c.receive(quiet)
-        assert len(down)==2, 'A pause between phrases keeps the playback buffer fed'
+        now[0]+=1.0;c.receive(quiet)
+        assert len(down)==2, 'A one-second pause between sentences keeps the playback buffer fed'
         now[0]+=.3;c.receive(quiet)
         assert len(down)==2, 'Sustained silence after a reply is dropped'
-        now[0]+=.1;c.tick()
+        c.tick()
         assert down[-1]=={'type':'oracle_v2.quiet'}
     finally:
         c.stop.set();c.pool.shutdown()
