@@ -1399,20 +1399,39 @@ def cmd_local_network(args) -> int:
     if args.local_command == "status":
         print(json.dumps(api_request("GET", "/server-info").get("local_connection", {"enabled": False}), indent=2))
         return 0
-    if args.local_command == "enable" and not 1024 <= args.port <= 65535:
-        raise ValueError("local HTTPS port must be between 1024 and 65535")
+    port = getattr(args, "port", None)
+    if args.local_command == "enable":
+        if port is not None and not 1024 <= port <= 65535:
+            raise ValueError("local HTTPS port must be between 1024 and 65535")
+        if port is None:
+            port = int(_network_config().get("network", {}).get("local_tls_port", 7683))
+            try:
+                current = api_request("GET", "/server-info").get("local_connection", {})
+                if current.get("enabled") and current.get("port") == port:
+                    print(json.dumps(current, indent=2)); return 0
+            except (OSError, ValueError):
+                pass
+            with socket.socket() as probe:
+                try:
+                    probe.bind(("0.0.0.0", port))
+                except OSError:
+                    probe.bind(("0.0.0.0", 0))
+                    port = probe.getsockname()[1]
     old = CONFIG_FILE.read_bytes()
     try:
         if args.local_command == "enable":
             _ensure_network_auth()
-            set_toml_value(CONFIG_FILE, "network", "local_tls_port", args.port)
+            set_toml_value(CONFIG_FILE, "network", "local_tls_port", port)
         set_toml_value(CONFIG_FILE, "network", "local_enabled", args.local_command == "enable")
         service_manager.restart()
+        observed = api_request("GET", "/server-info", retries=6, retry_delay=0.25).get("local_connection", {})
+        if args.local_command == "enable" and (not observed.get("enabled") or observed.get("port") != port):
+            raise RuntimeError("local HTTPS did not start; previous configuration restored")
     except BaseException:
         CONFIG_FILE.write_bytes(old)
         service_manager.restart()
         raise
-    print(json.dumps({"enabled": args.local_command == "enable"}))
+    print(json.dumps({"enabled": args.local_command == "enable", "port": port}))
     return 0
 
 
@@ -2160,7 +2179,7 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     for action in ("enable", "disable", "status"):
         command = local.add_parser(action)
         if action == "enable":
-            command.add_argument("--port", type=int, default=7683)
+            command.add_argument("--port", type=int, default=None, help="default: reuse the local port or choose an available port")
         command.set_defaults(func=cmd_local_network)
     relay = network.add_parser("relay").add_subparsers(dest="relay_command", required=True)
     relay_configure = relay.add_parser("configure")
