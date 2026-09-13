@@ -20,6 +20,7 @@ from . import config, oracle_delegations, oracle_router, ws
 from .log import log
 from .oracle_calls import AgentTools, session_config as realtime_config
 from .oracle_context import context_chunks, result_context
+from .oracle_live_usage import LiveUsage
 from .oracle_realtime import claim_session, release_session, _send_http_error
 
 _CLOSING = set()
@@ -177,6 +178,10 @@ class Conversation:
         self.router_backend = router_backend
         self.route_request = route_request
         self.reference_context = reference_context
+        self.usage = LiveUsage()
+        self.started_at = clock()
+        self.idle_seconds = 180.0
+        self.close_sent = False
         self.stop = threading.Event()
         self.closed = threading.Event()
         # Set when a newer connection from the same device took over: the
@@ -233,7 +238,7 @@ class Conversation:
 
     def send(self, event):
         with self.send_lock:
-            if not self.stop.is_set():
+            if not self.stop.is_set() and (not self.close_sent or event.get("type") == "session.close"):
                 self.upstream.send(json.dumps(event))
         if event.get("type") not in _AUDIO_EVENTS:
             self.journal_event("host", event)
@@ -246,6 +251,8 @@ class Conversation:
                        "event_id": uuid.uuid4().hex, "content": chunk})
 
     def input(self, event):
+        if event["type"] == "session.close":
+            self.close_sent = True
         if event["type"] == "oracle_v2.interrupt":
             self.journal_event("client", event)
             self.append("instructions", "Stop speaking now and listen. Do not cancel agent work.")
@@ -259,6 +266,11 @@ class Conversation:
 
     def receive(self, event):
         kind = event.get("type")
+        if self.usage.observe(event):
+            snapshot = {"type": "oracle_v2.usage", **self.usage.snapshot()}
+            self.downstream(snapshot)
+            if self.journal:
+                self.journal.record("voice.usage", self.usage.snapshot())
         if kind == "session.output_audio.delta":
             data = base64.b64decode(event.get("delta", ""))
             now = self.clock()
@@ -311,7 +323,7 @@ class Conversation:
                 for _ in range(3):
                     while not self.stop.wait(.05) and self.clock()-self.last_transcript < 1.0:
                         pass
-                    if self.stop.is_set():
+                    if self.stop.is_set() or self.close_sent:
                         return
                     with self.lock:
                         revision = self.revision
@@ -344,7 +356,7 @@ class Conversation:
                         if revision != self.revision:
                             continue
                     for item in result.get("output", []):
-                        if self.stop.is_set() or revision != self.revision:
+                        if self.stop.is_set() or self.close_sent or revision != self.revision:
                             break
                         if item.get("type") == "function_call":
                             output = self.tools.execute(item["name"], json.loads(item["arguments"]), item["call_id"])
@@ -379,6 +391,14 @@ class Conversation:
 
     def tick(self):
         now = self.clock()
+        if (not self.close_sent and self.idle_seconds > 0
+                and now-max(self.started_at, self.last_input, self.last_output, self.last_transcript) >= self.idle_seconds):
+            self.close_sent = True
+            self.downstream({"type": "oracle_v2.idle", "message": "Voice paused after inactivity. Agent work continues."})
+            self.send({"type": "session.close", "event_id": uuid.uuid4().hex})
+            return
+        if self.close_sent:
+            return
         self.publish_work()
         if self.last_output_active and now-self.last_output > .5:
             self.last_output_active = False
@@ -586,6 +606,7 @@ def serve(handler):
             summary["seconds"] = round(time.monotonic() - opened_at, 1)
             summary["closed_by_upstream"] = conversation.closed.is_set()
             summary["taken_over"] = conversation.taken_over.is_set()
+            summary["voice_usage"] = conversation.usage.snapshot()
             log("oracleV2Close", " ".join(f"{k}={v}" for k, v in summary.items()))
             if conversation.journal:
                 conversation.journal.record("session.summary", summary)

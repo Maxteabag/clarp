@@ -100,6 +100,7 @@ def _terminate(process):
 
 
 def _codex(body, stop, timeout):
+    started = time.monotonic()
     env = subscription_environment()
     # Check before forced_login_method: Codex logs out mismatching credentials.
     # A Host using API authentication must fail without changing its login.
@@ -109,6 +110,7 @@ def _codex(body, stop, timeout):
         raise RouterError("codex_chatgpt_login_required")
     if stop.is_set():
         raise RouterError("router_cancelled")
+    login_ms = round((time.monotonic() - started)*1000, 1)
     with tempfile.TemporaryDirectory(prefix="clarp-oracle-router-") as directory:
         root = Path(directory)
         schema = proposal_schema(body["tools"])
@@ -171,7 +173,9 @@ def _codex(body, stop, timeout):
                         continue
                     if event.get("type") == "turn.completed":
                         usage = event.get("usage") or {}
-                return {"output": output, "usage": usage}
+                return {"output": output, "usage": usage,
+                        "transport_metrics": {"login_ms": login_ms,
+                            "cli_ms": round((time.monotonic() - started)*1000-login_ms, 1)}}
             finally:
                 _terminate(process)
 
