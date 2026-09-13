@@ -60,6 +60,7 @@ def validate_result(result, tools):
         raise RouterError("invalid_router_output")
     definitions = {tool["name"]: tool["parameters"] for tool in tools}
     actions = 0
+    has_message = False
     for item in result["output"]:
         if not isinstance(item, dict):
             raise RouterError("invalid_router_item")
@@ -81,8 +82,11 @@ def validate_result(result, tools):
                 if (not isinstance(part, dict) or part.get("type") != "output_text"
                         or not isinstance(part.get("text"), str)):
                     raise RouterError("invalid_router_text")
+                has_message = has_message or bool(part["text"].strip())
         elif item.get("type") != "reasoning":
             raise RouterError("unexpected_router_output")
+    if not actions and not has_message:
+        raise RouterError("empty_router_result")
     return result
 
 
