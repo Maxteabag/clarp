@@ -155,6 +155,12 @@ class Call:
                 now = self.clock()
                 if now >= next_tick:
                     next_tick = now + .25
+                    if self.principal.startswith("device_") and not conversation.close_sent:
+                        from . import db
+                        device = db.conn().execute("SELECT scope,revoked_at FROM paired_devices WHERE device_id=?", (self.principal,)).fetchone()
+                        if device is None or device["revoked_at"] is not None or device["scope"] != "full":
+                            self.emit({"type": "oracle_v2.notice", "message": "Voice access for this device was revoked."})
+                            conversation.input({"type": "session.close"})
                     conversation.tick()
                     if now-self.last_control >= CONTROL_TIMEOUT and not conversation.close_sent:
                         self.emit({"type": "oracle_v2.notice", "message": "Voice ended after the phone stopped checking in. Agent work continues."})

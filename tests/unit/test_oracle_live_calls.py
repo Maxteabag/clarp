@@ -141,3 +141,18 @@ def test_post_negotiation_failure_closes_the_paid_session(manager, monkeypatch):
     with pytest.raises(calls.CallError): create(negotiate)
     assert records[0][0].closed
     assert any(event["type"] == "session.close" for event in records[0][0].sent)
+
+
+def test_revoked_device_ends_direct_voice_without_waiting_for_heartbeat(manager):
+    from lib import device_pairing
+    _, records, negotiate = manager
+    code = device_pairing.issue(device_name="Lab phone")["code"]
+    principal = device_pairing.exchange(code)["device_id"]
+    calls.create(ctx=SimpleNamespace(), principal=principal,
+                 data={"attempt_id": "attempt-revoked", "mode": "api", "sdp": SDP},
+                 stop=lambda _: pytest.fail("Voice revocation cancelled a worker"), negotiate=negotiate)
+    call = calls.get(principal, "attempt-revoked")
+    device_pairing.revoke(principal)
+    assert call.finished.wait(2)
+    assert records[0][0].closed
+    assert call.snapshot()["usage"]["finalized"]
