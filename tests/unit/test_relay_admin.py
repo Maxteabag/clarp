@@ -98,6 +98,7 @@ def test_cli_device_revocation_uses_http_to_close_live_connections(configured, m
 
 def test_secure_local_access_preserves_remote_network_and_restores_on_failure(configured, monkeypatch):
     path, calls = configured
+    monkeypatch.setattr(admin, 'api_request', lambda *a, **kw: {'local_connection': {'enabled': True, 'port': 7683}})
     admin.cmd_local_network(argparse.Namespace(local_command='enable', port=7683))
     data=tomllib.loads(path.read_text())
     assert data['network']['local_enabled']
@@ -111,3 +112,19 @@ def test_secure_local_access_preserves_remote_network_and_restores_on_failure(co
     with pytest.raises(RuntimeError,match='port busy'):
         admin.cmd_local_network(argparse.Namespace(local_command='enable',port=7684))
     assert path.read_bytes()==original
+
+
+def test_local_setup_chooses_an_available_port_when_default_is_busy(configured, monkeypatch):
+    import socket
+    path, calls = configured
+    with socket.socket() as busy:
+        busy.bind(('0.0.0.0', 0)); busy.listen()
+        original_port=busy.getsockname()[1]
+        admin.set_toml_value(path,'network','local_tls_port',original_port)
+        def info(*a, **kw):
+            cfg=tomllib.loads(path.read_text())['network']
+            return {'local_connection': {'enabled':cfg.get('local_enabled',False),'port':cfg['local_tls_port']}}
+        monkeypatch.setattr(admin,'api_request',info)
+        admin.cmd_local_network(argparse.Namespace(local_command='enable',port=None))
+        assert tomllib.loads(path.read_text())['network']['local_tls_port'] != original_port
+        assert calls == ['restart']

@@ -59,3 +59,18 @@ def test_tls_auth_pin_revocation_and_nonblocking_handshake(fake_ctx, tmp_path, m
 def test_local_listener_accepts_only_private_ipv4_peers(value, expected):
     from lib.local_transport import private_ipv4
     assert private_ipv4(value) is expected
+
+
+def test_busy_local_port_does_not_take_the_primary_host_offline(fake_ctx, tmp_path):
+    busy=socket.socket();busy.bind(('127.0.0.1',0));busy.listen()
+    fake_ctx.auth_token='local-admin'
+    fake_ctx.local_tls_port=busy.getsockname()[1]
+    fake_ctx.local_tls_directory=tmp_path/'tls'
+    try:
+        server=server_module.build_server(fake_ctx,0,bind_addr='127.0.0.1')
+        try:
+            assert server.server_port > 0
+            assert server.local_transport is None
+            assert server.local_transport_error
+        finally: server.server_close()
+    finally: busy.close()
