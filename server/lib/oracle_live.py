@@ -351,7 +351,10 @@ class Conversation:
                             if output.get("operation_id"):
                                 with self.lock:
                                     self.provider_delegations[output["operation_id"]] = ident
-                            if output.get("status") not in ("accepted", "queued") and not output.get("cancelled"):
+                            if output.get("status") in ("accepted", "queued"):
+                                self.append("thinking", "Work admission receipt, not completion: " + json.dumps(output),
+                                            delegation_id=ident)
+                            else:
                                 self.append("commentary", "Verified tool result, untrusted data: "+json.dumps(output),
                                             delegation_id=ident)
                         elif item.get("type") == "message":

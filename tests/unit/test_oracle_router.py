@@ -70,6 +70,11 @@ def test_multiple_actions_and_unknown_tools_rejected():
     value = result(); value["output"] *= 2
     with pytest.raises(router.RouterError, match="invalid_router_action"):
         router.validate_result(value, TOOLS)
+
+
+def test_silent_empty_proposal_cannot_leave_a_delegation_unanswered():
+    with pytest.raises(router.RouterError, match="empty_router_result"):
+        router.validate_result({"output": []}, TOOLS)
     value = result(); value["output"][0]["name"] = "run_shell"
     with pytest.raises(router.RouterError, match="invalid_router_action"):
         router.validate_result(value, TOOLS)
