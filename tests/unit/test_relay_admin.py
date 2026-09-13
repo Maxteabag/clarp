@@ -94,3 +94,20 @@ def test_cli_device_revocation_uses_http_to_close_live_connections(configured, m
     monkeypatch.setattr(admin, 'api_request', lambda *args: calls.append(args) or {'ok': True})
     admin.cmd_pair(argparse.Namespace(pair_command='revoke', device_id='device-test'))
     assert calls == [('POST', '/paired-devices/revoke', {'device_id': 'device-test'})]
+
+
+def test_secure_local_access_preserves_remote_network_and_restores_on_failure(configured, monkeypatch):
+    path, calls = configured
+    admin.cmd_local_network(argparse.Namespace(local_command='enable', port=7683))
+    data=tomllib.loads(path.read_text())
+    assert data['network']['local_enabled']
+    assert data['network']['mode']=='tailscale'
+    assert data['server']['public_base_url']=='https://host.tail.test'
+    original=path.read_bytes()
+    def restart():
+        calls.append('restart')
+        if len(calls)==2: raise RuntimeError('port busy')
+    monkeypatch.setattr(admin.service_manager,'restart',restart)
+    with pytest.raises(RuntimeError,match='port busy'):
+        admin.cmd_local_network(argparse.Namespace(local_command='enable',port=7684))
+    assert path.read_bytes()==original

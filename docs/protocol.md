@@ -507,3 +507,13 @@ models, `installed`, and `effort_options`; a `POST` with a provider outside
 that list is a 400). Adding a CLI is a server adapter with its
 presentation and flags; no client release is needed for it to look
 intentional.
+
+### Local encrypted transport
+
+`GET /server-info` and the pairing exchange's `server` object include optional
+`local_connection`: `enabled`, HTTPS `port`, `certificate_sha256` (leaf DER SHA-256),
+`urls` (local HTTPS origin candidates) and `service_type` (`_clarps._tcp`). Clients
+learn pins only over an already trusted authenticated HTTPS connection, validate
+the exact certificate before sending credentials, and use `server_id` to confirm
+the paired identity. Bonjour metadata does not authorize certificate trust. The
+local endpoint uses the same device tokens and protocol without a relay prefix.

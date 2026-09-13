@@ -130,6 +130,8 @@ class ContextHTTPServer(ThreadingHTTPServer):
     def __init__(self, addr, handler_cls, ctx: ServerContext):
         self.ctx = ctx
         self._close_callbacks = []
+        self.local_tls = False
+        self.local_transport = None
         self.relay = None
         import weakref
         self._device_connections = weakref.WeakKeyDictionary()
@@ -769,7 +771,8 @@ class Handler(BaseHTTPRequestHandler):
             if bare.startswith(p):
                 return True
         from lib.request_security import local_request
-        self._request_is_local = local_request(self.client_address[0], self.headers)
+        self._request_is_local = (not getattr(self.server, "local_tls", False)
+                                  and local_request(self.client_address[0], self.headers))
         if not token:
             return self._request_is_local
         # Header: Authorization: Bearer <token>
@@ -2134,9 +2137,15 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, json.dumps({"ok": True, "skill": skill}).encode(),
                    "application/json")
 
-    def _handle_server_info(self):
+    def _connection_server_info(self):
         from lib.server_identity import get_server_info
-        self._send(200, json.dumps(get_server_info()).encode(), "application/json")
+        info = get_server_info()
+        transport = self.server.local_transport
+        info["local_connection"] = transport.description() if transport else {"enabled": False}
+        return info
+
+    def _handle_server_info(self):
+        self._send(200, json.dumps(self._connection_server_info()).encode(), "application/json")
 
     def _handle_desktop_presence(self):
         if not getattr(self, "_request_auth_validated", False):
@@ -2206,7 +2215,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 409, json.dumps({"error": str(exc)}).encode(),
                 "application/json")
-        payload = {"device": device, "server": get_server_info()}
+        payload = {"device": device, "server": self._connection_server_info()}
         self._send(201, json.dumps(payload).encode(), "application/json")
 
     def _handle_paired_devices(self):
@@ -5782,6 +5791,18 @@ def build_server(ctx: ServerContext, port: int,
         recovered_queues = 0
     if recovered_queues:
         log("queuedRecovery", f"recovered={recovered_queues}")
+    if ctx.local_tls_port:
+        if not ctx.auth_token or ctx.local_tls_directory is None:
+            srv.server_close()
+            raise ValueError("local HTTPS requires authentication and an identity directory")
+        from lib.local_transport import LocalHTTPS
+        try:
+            srv.local_transport = LocalHTTPS(srv, Handler, ctx.local_tls_directory, ctx.local_tls_port)
+            srv.local_transport.start()
+            srv.on_close(srv.local_transport.close)
+        except Exception:
+            srv.server_close()
+            raise
     return srv
 
 

@@ -9,8 +9,9 @@ from .log import log, log_exception
 
 class BonjourAdvertiser:
     def __init__(self, *, name: str, server_id: str, port: int,
-                 auth_required: bool):
+                 auth_required: bool, secure: bool = False):
         self.name = name
+        self.secure = secure
         self.server_id = server_id
         self.port = int(port)
         self.auth_required = bool(auth_required)
@@ -33,7 +34,11 @@ class BonjourAdvertiser:
             yield socket.inet_aton(address)
 
     def start(self) -> bool:
-        addresses = list(self._addresses())
+        if self.secure:
+            from .local_transport import local_ipv4_addresses
+            addresses = [socket.inet_aton(ip) for ip in local_ipv4_addresses()]
+        else:
+            addresses = list(self._addresses())
         if not addresses:
             log("bonjourSkip", "no non-loopback IPv4 address")
             return False
@@ -42,8 +47,9 @@ class BonjourAdvertiser:
             label = "".join(
                 character if character.isalnum() or character in " -_" else "-"
                 for character in self.name).strip() or "Clarp"
+            service_type = "_clarps._tcp.local." if self.secure else "_clarp._tcp.local."
             self._info = ServiceInfo(
-                "_clarp._tcp.local.", f"{label}._clarp._tcp.local.",
+                service_type, f"{label}.{service_type}",
                 addresses=addresses, port=self.port,
                 properties={
                     b"server_id": self.server_id.encode(),

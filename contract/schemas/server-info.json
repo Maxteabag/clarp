@@ -5,23 +5,87 @@
   "description": "Host identity, version window, and feature gates. capabilities.features is the only feature gate clients may use.",
   "type": "object",
   "additionalProperties": true,
-  "required": ["server_id", "name", "deployment_mode", "version", "default_cwd", "clarp_version", "min_app_version", "capabilities"],
+  "required": [
+    "server_id",
+    "name",
+    "deployment_mode",
+    "version",
+    "default_cwd",
+    "clarp_version",
+    "min_app_version",
+    "capabilities"
+  ],
   "properties": {
-    "server_id": {"type": "string"},
-    "name": {"type": "string"},
-    "deployment_mode": {"type": "string"},
-    "version": {"type": "string"},
-    "image_version": {"type": "string"},
-    "default_cwd": {"type": "string"},
-    "clarp_version": {"type": "string"},
-    "min_app_version": {"type": "string"},
+    "server_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "deployment_mode": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "image_version": {
+      "type": "string"
+    },
+    "default_cwd": {
+      "type": "string"
+    },
+    "clarp_version": {
+      "type": "string"
+    },
+    "min_app_version": {
+      "type": "string"
+    },
     "capabilities": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["version", "features"],
+      "required": [
+        "version",
+        "features"
+      ],
       "properties": {
-        "version": {"type": "integer"},
-        "features": {"type": "array", "items": {"type": "string"}}
+        "version": {
+          "type": "integer"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "local_connection": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535
+        },
+        "certificate_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "urls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "service_type": {
+          "type": "string"
+        }
       }
     }
   }
