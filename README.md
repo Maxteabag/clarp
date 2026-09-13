@@ -203,6 +203,21 @@ logs, URLs, and source control. The example uses limited access; choose
 Revoke a client with `clarp-admin pair revoke DEVICE_ID` to reject future
 requests and close its active connections.
 
+### Prefer direct Wi-Fi access automatically
+
+Once the Host and iPhone are paired through HTTPS, run:
+
+```bash
+clarp-admin network local enable
+```
+
+On the iPhone, leave **Prefer local connection** enabled and allow Local Network
+access. Clarp uses direct encrypted Wi-Fi when available and automatically returns
+to the saved Tailscale/relay address when it is not. No IP entry or certificate
+installation is needed. The computer can use Ethernet on the same LAN.
+See [local connections](docs/security/local-connections.md) for firewall, discovery,
+certificate trust and fallback details.
+
 ## Updating
 
 Use the installed updater:

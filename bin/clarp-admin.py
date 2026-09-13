@@ -1395,6 +1395,27 @@ def cmd_relay(args) -> int:
     return 0
 
 
+def cmd_local_network(args) -> int:
+    if args.local_command == "status":
+        print(json.dumps(api_request("GET", "/server-info").get("local_connection", {"enabled": False}), indent=2))
+        return 0
+    if args.local_command == "enable" and not 1024 <= args.port <= 65535:
+        raise ValueError("local HTTPS port must be between 1024 and 65535")
+    old = CONFIG_FILE.read_bytes()
+    try:
+        if args.local_command == "enable":
+            _ensure_network_auth()
+            set_toml_value(CONFIG_FILE, "network", "local_tls_port", args.port)
+        set_toml_value(CONFIG_FILE, "network", "local_enabled", args.local_command == "enable")
+        service_manager.restart()
+    except BaseException:
+        CONFIG_FILE.write_bytes(old)
+        service_manager.restart()
+        raise
+    print(json.dumps({"enabled": args.local_command == "enable"}))
+    return 0
+
+
 def cmd_network(args) -> int:
     cfg = _network_config()
     network = cfg.get("network", {})
@@ -1411,6 +1432,8 @@ def cmd_network(args) -> int:
             "auth_configured": bool(server.get("auth_token")),
             "tailscale": _tailscale_info(),
             "relay": _relay_status(cfg),
+            "local_connection": {"enabled": bool(network.get("local_enabled", False)),
+                                 "port": int(network.get("local_tls_port", 7683))},
         }, indent=2))
         return 0
 
@@ -1474,6 +1497,7 @@ def cmd_network(args) -> int:
         set_toml_value(CONFIG_FILE, "network", "mode", mode)
         if mode == "off":
             set_toml_value(CONFIG_FILE, "network", "relay_enabled", False)
+            set_toml_value(CONFIG_FILE, "network", "local_enabled", False)
         service_manager.restart()
         if serve_ports_to_remove:
             _remove_managed_tailscale_serve(
@@ -2132,6 +2156,12 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     network = sub.add_parser("network").add_subparsers(
         dest="network_command", required=True)
     network.add_parser("status").set_defaults(func=cmd_network)
+    local = network.add_parser("local").add_subparsers(dest="local_command", required=True)
+    for action in ("enable", "disable", "status"):
+        command = local.add_parser(action)
+        if action == "enable":
+            command.add_argument("--port", type=int, default=7683)
+        command.set_defaults(func=cmd_local_network)
     relay = network.add_parser("relay").add_subparsers(dest="relay_command", required=True)
     relay_configure = relay.add_parser("configure")
     relay_configure.add_argument("--url", required=True)

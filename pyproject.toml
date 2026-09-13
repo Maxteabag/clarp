@@ -20,6 +20,8 @@ dependencies = [
   # onnxruntime) and a macOS Host crashed at startup.
   "numpy>=2,<3",
   "websockets>=15,<17",
+  "cryptography>=43",
+  "ifaddr>=0.2",
 ]
 
 [dependency-groups]
