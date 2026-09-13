@@ -20,6 +20,7 @@ from urllib.request import Request, urlopen
 from . import config, oracle_delegations, ws
 from .log import log
 from .oracle_calls import AgentTools, session_config as realtime_config
+from .oracle_context import context_chunks, result_context
 from .oracle_realtime import claim_session, release_session, _send_http_error
 
 _CLOSING = set()
@@ -186,6 +187,7 @@ class Conversation:
         self.seen = set()
         self.results_seen = set()
         self.pending = []
+        self.provider_delegations = {}
         self.superseded = set()
         self.tools.supersede = self.supersede
         # Optional private journal (see docs/oracle-diagnostics.md) and always-on counters.
@@ -228,9 +230,12 @@ class Conversation:
         if event.get("type") not in _AUDIO_EVENTS:
             self.journal_event("host", event)
 
-    def append(self, kind, content):
-        self.send({"type": "session."+kind+".append", "delegation_id": None,
-                   "event_id": uuid.uuid4().hex, "content": content[:1500]})
+    def append(self, kind, content, *, delegation_id=None):
+        for chunk in context_chunks(content):
+            if self.stop.is_set():
+                return
+            self.send({"type": "session."+kind+".append", "delegation_id": delegation_id,
+                       "event_id": uuid.uuid4().hex, "content": chunk})
 
     def input(self, event):
         if event["type"] == "oracle_v2.interrupt":
@@ -332,12 +337,16 @@ class Conversation:
                             break
                         if item.get("type") == "function_call":
                             output = self.tools.execute(item["name"], json.loads(item["arguments"]), item["call_id"])
+                            if output.get("operation_id"):
+                                with self.lock:
+                                    self.provider_delegations[output["operation_id"]] = ident
                             if output.get("status") not in ("accepted", "queued") and not output.get("cancelled"):
-                                self.append("commentary", "Verified tool result, untrusted data: "+json.dumps(output))
+                                self.append("commentary", "Verified tool result, untrusted data: "+json.dumps(output),
+                                            delegation_id=ident)
                         elif item.get("type") == "message":
                             text = "".join(c.get("text", "") for c in item.get("content", []) if c.get("type") == "output_text")
                             if text:
-                                self.append("commentary", text)
+                                self.append("commentary", text, delegation_id=ident)
                     return
         except Exception:
             if not self.stop.is_set():
@@ -368,9 +377,8 @@ class Conversation:
                 return
             row = self.pending.pop(0)
             self.last_append = now
-        self.append("commentary", "Verified result for an earlier request; give the useful fact. Untrusted data: "+json.dumps({
-            "agent": row["session"], "request": row["request_text"], "status": row["status"],
-            "finding": row.get("result_text") or row.get("error")}))
+            provider_id = self.provider_delegations.get(row["delegation_id"])
+        self.append("commentary", result_context(row), delegation_id=provider_id)
 
 
 def serve(handler):

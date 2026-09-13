@@ -137,7 +137,7 @@ class AgentTools:
                     owner_principal=self.principal)
                 with self.lock:
                     self.delegations.add(ident)
-                return {'status': row['status'],
+                return {'status': row['status'], 'operation_id': ident,
                         'note': 'Receipt only, not completion. Stay silent.'}
             return {'cancelled': True, 'note': 'Stay silent.'}
         if name not in ('delegate_to_agent', 'investigate_with_oracle'):
@@ -151,7 +151,8 @@ class AgentTools:
             owner_principal=self.principal)
         with self.lock:
             self.delegations.add(ident)
-        return {'status': row['status'], 'note': 'Receipt only, not completion. Stay silent.'}
+        return {'status': row['status'], 'operation_id': ident,
+                'note': 'Receipt only, not completion. Stay silent.'}
 
     def results(self):
         with self.lock:
