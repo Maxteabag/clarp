@@ -254,10 +254,7 @@ class PodcastConversation(Conversation):
 
     def tick(self):
         super().tick()
-        if self.clock()-self.started > 8*60:
-            self.downstream({"type": "oracle_v2.notice", "message": "Companion paused after eight minutes. Tap Ask to reconnect."})
-            self.send({"type": "session.close"})
-            self.stop.set()
+        if self.close_sent:
             return
         with self.lock:
             if self.revision == self.processed_revision or self.clock()-self.last_transcript < 2:
