@@ -8,6 +8,10 @@ import pytest
 from lib import podcast_live
 
 
+def fixture_tools():
+    return SimpleNamespace(lock=threading.Lock(), delegations=set(), results=lambda: [])
+
+
 def episode():
     return {"revision": "a" * 64, "transcript": [
         {"start": 0, "end": 10, "text": "Opening"},
@@ -56,7 +60,7 @@ def test_images_do_not_block_voice_and_late_results_are_discarded():
         return base64.b64encode(b"image").decode()
     sent, down, clock = [], [], [0.0]
     c = podcast_live.PodcastConversation(SimpleNamespace(send=sent.append), down.append,
-        "unused", "source", images=True, clock=lambda: clock[0], generate=generate)
+        "unused", "source", tools=fixture_tools(), images=True, clock=lambda: clock[0], generate=generate)
     try:
         c.receive({"type": "session.input_transcript.delta", "delta": "Explain prediction", "end_ms": 100})
         clock[0] = 3
@@ -73,14 +77,21 @@ def test_images_do_not_block_voice_and_late_results_are_discarded():
         c.pool.shutdown(wait=True)
 
 
-def test_podcast_cannot_dispatch_agent_work():
+def test_podcast_delegation_uses_the_same_router_and_host_tools(monkeypatch):
     sent, down = [], []
+    tools = fixture_tools()
+    routed = []
     c = podcast_live.PodcastConversation(SimpleNamespace(send=sent.append), down.append,
-        "unused", "source", images=False)
+        "unused", "source", tools=tools, images=False, router_backend="codex")
+    monkeypatch.setattr(c, "route", routed.append)
     try:
         c.receive({"type": "session.delegation.created", "delegation": {"id": "x"}})
-        assert not c.tools.delegations
-        assert "no access" in sent[-1]
+        c.pool.shutdown(wait=True)
+        assert routed == ["x"]
+        assert c.tools is tools
+        assert c.reference_context == "source"
+        assert c.router_backend == "codex"
+        assert not sent
     finally:
         c.pool.shutdown(wait=True)
 
