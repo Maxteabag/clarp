@@ -58,7 +58,7 @@ test.describe('Agent switching & transcript loading', () => {
       },
     }));
 
-    await page.goto('/?token=test', { waitUntil: 'domcontentloaded' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
 
     // Wait for initial transcript to load Nova's content
     await expect(page.locator('#historyBody')).toContainText('Nova transcript content', { timeout: 5000 });
@@ -98,7 +98,7 @@ test.describe('Agent switching & transcript loading', () => {
     }));
     await page.route(/\/log\?session=atlas-two/, route => route.abort('failed'));
 
-    await page.goto('/?token=test', { waitUntil: 'domcontentloaded' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#historyBody')).toContainText('Nova transcript content');
 
     // Click Atlas, which fails to fetch

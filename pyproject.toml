@@ -19,6 +19,7 @@ dependencies = [
   # dependency the lock only carried Linux wheels (via ctranslate2 /
   # onnxruntime) and a macOS Host crashed at startup.
   "numpy>=2,<3",
+  "websockets>=15,<17",
 ]
 
 [dependency-groups]

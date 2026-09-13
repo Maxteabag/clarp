@@ -4,7 +4,7 @@ from __future__ import annotations
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
-SECRET_QUERY_KEYS = {"token", "auth", "access_token"}
+SECRET_QUERY_KEYS = {"token", "auth", "access_token", "refresh_token", "key", "code", "pairing_code"}
 
 
 def redact_query_secrets(path: str) -> str:

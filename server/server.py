@@ -130,7 +130,42 @@ class ContextHTTPServer(ThreadingHTTPServer):
     def __init__(self, addr, handler_cls, ctx: ServerContext):
         self.ctx = ctx
         self._close_callbacks = []
+        self.relay = None
+        import weakref
+        self._device_connections = weakref.WeakKeyDictionary()
+        self._device_connections_lock = threading.Lock()
+        from lib.request_security import FailureLimiter
+        self.auth_failures = FailureLimiter()
         super().__init__(addr, handler_cls)
+
+    def register_device_connection(self, connection, principal: str = "") -> bool:
+        with self._device_connections_lock:
+            if principal:
+                # Authentication checked existence. Re-check revocation while
+                # holding the registry lock so revoke cannot miss a connection
+                # that was authenticated just before its database update.
+                row = db.conn().execute(
+                    "SELECT revoked_at FROM paired_devices WHERE device_id = ?", (principal,)
+                ).fetchone()
+                if row is not None and row["revoked_at"] is not None:
+                    return False
+                self._device_connections[connection] = principal
+            else:
+                self._device_connections.pop(connection, None)
+            return True
+
+    def disconnect_device(self, device_id: str) -> None:
+        import socket
+        with self._device_connections_lock:
+            connections = [connection for connection, principal in self._device_connections.items()
+                           if principal == device_id]
+            for connection in connections:
+                self._device_connections.pop(connection, None)
+        for connection in connections:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
     def on_close(self, callback) -> None:
         self._close_callbacks.append(callback)
@@ -314,6 +349,7 @@ class Handler(BaseHTTPRequestHandler):
         "/log": "_handle_log",
         "/message-tool-details": "_handle_message_tool_details",
         "/status": "_handle_status",
+        "/network/relay": "_handle_relay_status",
         "/viz/events": "_handle_viz_events",
         "/viz": "_send_viz_page",
         "/diagnostics/health": "_handle_diagnostics_health",
@@ -549,7 +585,11 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # BaseHTTPRequestHandler's stock logger; forward to journal.
         try:
-            print(f"{self.address_string()} {format % args}", flush=True)
+            message = format % args
+            # The access logger receives the raw HTTP request line.
+            if getattr(self, "path", ""):
+                message = message.replace(self.path, redact_query_secrets(self.path))
+            print(f"{self.address_string()} {message}", flush=True)
         except OSError as e:
             log_exception("httpAccessLogFail", e)
 
@@ -695,12 +735,12 @@ class Handler(BaseHTTPRequestHandler):
             self._body_consumed = True
             data = json.loads(self.rfile.read(n)) if n > 0 else {}
         except (ValueError, json.JSONDecodeError) as e:
-            log_exception("requestJsonParseFail", e, detail=self.path)
+            log_exception("requestJsonParseFail", e, detail=redact_query_secrets(self.path))
             return None
         if not isinstance(data, dict):
             # Every handler does data.get(...): a JSON string, array, or
             # number body must read as "bad json", not kill the connection.
-            log("requestJsonNotObject", f"{self.path} {type(data).__name__}")
+            log("requestJsonNotObject", f"{redact_query_secrets(self.path)} {type(data).__name__}")
             return None
         return data
 
@@ -719,15 +759,19 @@ class Handler(BaseHTTPRequestHandler):
         self._request_auth_validated = False
         self._request_device_scope = ""
         self._request_principal = ""
+        if hasattr(self.server, "register_device_connection"):
+            self.server.register_device_connection(self.connection)
         token = getattr(self.ctx, "auth_token", "") or ""
-        if not token:
-            return True  # auth disabled
         bare = self.path.split("?", 1)[0]
         if bare in self._PUBLIC_EXACT:
             return True
         for p in self._PUBLIC_PREFIXES:
             if bare.startswith(p):
                 return True
+        from lib.request_security import local_request
+        self._request_is_local = local_request(self.client_address[0], self.headers)
+        if not token:
+            return self._request_is_local
         # Header: Authorization: Bearer <token>
         auth = (self.headers.get("Authorization") or "").strip()
         if auth.lower().startswith("bearer "):
@@ -745,6 +789,9 @@ class Handler(BaseHTTPRequestHandler):
                 return True
         except Exception as e:  # noqa: BLE001
             log_exception("authCookieParseFail", e)
+        # URL credentials are retained only for local CLI/bootstrap use.
+        if not self._request_is_local:
+            return False
         # Query string: ?token=<token>
         from urllib.parse import parse_qs, urlparse
         qs = parse_qs(urlparse(self.path).query)
@@ -754,7 +801,8 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def _accept_credential(self, supplied: str, admin_token: str) -> bool:
-        if secrets.compare_digest(supplied, admin_token):
+        if (getattr(self, "_request_is_local", False)
+                and secrets.compare_digest(supplied.encode(), admin_token.encode())):
             self._request_auth_validated = True
             self._request_device_scope = "full"
             self._request_principal = "administrator"
@@ -766,13 +814,19 @@ class Handler(BaseHTTPRequestHandler):
         self._request_auth_validated = True
         self._request_device_scope = str(device["scope"])
         self._request_principal = str(device["device_id"])
+        if hasattr(self.server, "register_device_connection"):
+            if not self.server.register_device_connection(self.connection, self._request_principal):
+                self._request_auth_validated = False
+                self._request_device_scope = ""
+                self._request_principal = ""
+                return False
         return True
 
     _DEVICE_FULL_ONLY_PREFIXES = (
         "/backend-auth", "/server-update", "/managed-skills",
         "/orchestrator/", "/herald/", "/personalities/",
         "/automation-settings", "/avatar-settings", "/paired-devices",
-        "/tts/providers",
+        "/tts/providers", "/network/",
         "/oracle/", "/agent-file", "/janitor-runs/",
     )
     _LIMITED_DEVICE_POST_EXACT = frozenset({
@@ -800,7 +854,16 @@ class Handler(BaseHTTPRequestHandler):
         return (path == "/oracle" or path.startswith("/oracle/")) and not bool(
             getattr(self, "_request_auth_validated", False))
 
+    def _auth_failure_retry(self) -> int:
+        from lib.request_security import failure_source
+        return self.server.auth_failures.failure(
+            failure_source(self.client_address[0], self.headers))
+
     def _reject_unauthorized(self) -> None:
+        retry = self._auth_failure_retry()
+        if retry:
+            return self._send(429, b'{"error":"too many authentication failures"}',
+                              "application/json", extra_headers={"Retry-After": str(retry)})
         self._send(401, b'{"error":"unauthorized"}', "application/json")
 
     # --- GET dispatch ----------------------------------------------------
@@ -1301,6 +1364,11 @@ class Handler(BaseHTTPRequestHandler):
     def _send_viz_page(self):
         """The fleet map itself; a static page that reads /viz/events."""
         return self._send_file(self.ctx.static / "viz.html")
+
+    def _handle_relay_status(self):
+        relay = self.server.relay
+        status = relay.status() if relay else {"enabled": False, "state": "disabled"}
+        self._send(200, json.dumps(status).encode(), "application/json")
 
     def _handle_snapshot(self):
         """Unified per-agent read model for the dashboard."""
@@ -2131,6 +2199,10 @@ class Handler(BaseHTTPRequestHandler):
                 device_name=str(data.get("device_name") or ""),
             )
         except PairingError as exc:
+            retry = self._auth_failure_retry()
+            if retry:
+                return self._send(429, b'{"error":"too many pairing failures"}',
+                                  "application/json", extra_headers={"Retry-After": str(retry)})
             return self._send(
                 409, json.dumps({"error": str(exc)}).encode(),
                 "application/json")
@@ -2156,6 +2228,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, b'{"error":"device not found"}',
                               "application/json")
         self._send(200, b'{"ok":true}', "application/json")
+        self.server.disconnect_device(device_id)
 
     def _handle_tts_providers_get(self):
         from lib.tts_providers import status
@@ -5503,11 +5576,17 @@ def build_server(ctx: ServerContext, port: int,
 
     listener_addr = bind_addr or BIND_ADDR
     if listener_addr not in {"127.0.0.1", "::1", "localhost"} and not ctx.auth_token:
-        log("unsafeNetworkConfig",
-            f"bind={listener_addr} has no auth token; restrict the listener or enable auth")
+        raise ValueError("a non-loopback listener requires authentication")
+    if ctx.relay_settings is not None and not ctx.auth_token:
+        raise ValueError("relay networking requires authentication")
     herald = getattr(ctx, "herald", None)
     ctx.stream.start()
     srv = ContextHTTPServer((listener_addr, port), Handler, ctx)
+    if ctx.relay_settings is not None:
+        from lib.relay_connector import ManagedRelay
+        srv.relay = ManagedRelay(ctx.relay_settings, srv.server_port)
+        srv.relay.start()
+        srv.on_close(srv.relay.close)
     if ctx.tool_explanations is None:
         from lib.tool_explanations import ToolExplanations
         ctx.tool_explanations = ToolExplanations()
@@ -5735,4 +5814,7 @@ if __name__ == "__main__":
     srv = build_server(prod_ctx, PORT, restart_recovery=True)
     log("serverStart", f"port={PORT}")
     print(f"claude-pwa listening on :{PORT}", flush=True)
-    srv.serve_forever()
+    try:
+        srv.serve_forever()
+    finally:
+        srv.server_close()
