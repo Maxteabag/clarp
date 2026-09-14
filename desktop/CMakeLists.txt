@@ -57,6 +57,7 @@ target_sources(clarp-desktop PRIVATE
     src/terminal/TerminalLaunch.h
     src/app/AppController.cpp
     src/app/AppController.h
+    src/app/AvatarMotionClock.h
     src/app/WorkspaceContext.cpp
     src/app/WorkspaceContext.h
     src/app/PreviewVersions.cpp
@@ -121,6 +122,8 @@ qt_add_qml_module(clarp-desktop
         qml/components/ChatRow.qml
         qml/components/AgentOverview.qml
         qml/components/AgentAvatar.qml
+        qml/components/AvatarActivity.qml
+        qml/components/ActivitySweep.qml
         qml/components/TypingIndicator.qml
         qml/components/Composer.qml
         qml/components/ConnectionPage.qml
