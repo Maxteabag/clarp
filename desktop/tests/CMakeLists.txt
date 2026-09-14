@@ -16,6 +16,7 @@ add_executable(clarp-desktop-tests
     ../src/app/CredentialStore.h
     ../src/app/AppController.cpp
     ../src/app/AppController.h
+    ../src/app/AvatarMotionClock.h
     ../src/app/WorkspaceContext.cpp
     ../src/app/WorkspaceContext.h
     ../src/app/TranscriptCache.cpp
@@ -177,7 +178,7 @@ target_link_libraries(clarp-desktop-presence-tests PRIVATE Qt6::Quick Qt6::DBus 
 clarp_apply_quality_settings(clarp-desktop-presence-tests)
 add_test(NAME clarp-desktop-presence COMMAND clarp-desktop-presence-tests)
 set_tests_properties(clarp-desktop-presence PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_FORCE_STDERR_LOGGING=1" TIMEOUT 15)
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_FORCE_STDERR_LOGGING=1;QT_IM_MODULE=compose" TIMEOUT 15)
 
 add_test(NAME clarp-desktop-multiple-instances
     COMMAND ${CLARP_DBUS_RUN_SESSION} -- ${Python3_EXECUTABLE}
@@ -212,6 +213,20 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_preview_adoption.py)
 endif()
 
+add_executable(clarp-avatar-motion-tests tst_avatar_motion.cpp ../src/app/AvatarMotionClock.h)
+target_include_directories(clarp-avatar-motion-tests PRIVATE ../src)
+target_link_libraries(clarp-avatar-motion-tests PRIVATE Qt6::Gui)
+clarp_apply_quality_settings(clarp-avatar-motion-tests)
+add_test(NAME clarp-avatar-motion COMMAND clarp-avatar-motion-tests)
+
+set_tests_properties(clarp-avatar-motion PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_IM_MODULE=compose")
+add_executable(clarp-avatar-render-tests tst_avatar_render.cpp ../src/app/AvatarMotionClock.h)
+target_include_directories(clarp-avatar-render-tests PRIVATE ../src)
+target_link_libraries(clarp-avatar-render-tests PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick)
+target_compile_definitions(clarp-avatar-render-tests PRIVATE CLARP_AVATAR_TEST_QML="${CMAKE_CURRENT_SOURCE_DIR}/AvatarRender.qml")
+clarp_apply_quality_settings(clarp-avatar-render-tests)
+add_test(NAME clarp-avatar-render COMMAND clarp-avatar-render-tests)
+set_tests_properties(clarp-avatar-render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_FORCE_STDERR_LOGGING=1;QT_IM_MODULE=compose")
 # Native component contract: use the actual model, isolated temporary settings.
 add_executable(clarp-pane-contract ../research/component/panes.cpp ../src/models/PaneTreeModel.cpp ../src/models/PaneTreeModel.h)
 target_include_directories(clarp-pane-contract PRIVATE ../src)
