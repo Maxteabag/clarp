@@ -249,12 +249,16 @@ class Conversation:
         return True
 
     def append(self, kind, content, *, delegation_id=None):
+        sent_ids = []
         for chunk in context_chunks(content):
             if self.stop.is_set():
-                return
+                return sent_ids
+            event_id = uuid.uuid4().hex
             if not self.send({"type": "session."+kind+".append", "delegation_id": delegation_id,
-                              "event_id": uuid.uuid4().hex, "content": chunk}):
-                return
+                              "event_id": event_id, "content": chunk}):
+                return sent_ids
+            sent_ids.append(event_id)
+        return sent_ids
 
     def input(self, event):
         if event["type"] == "session.close":
@@ -437,7 +441,10 @@ class Conversation:
             row = self.pending.pop(0)
             self.last_append = now
             provider_id = self.provider_delegations.get(row["delegation_id"])
-        self.append("commentary", result_context(row), delegation_id=provider_id)
+        sent = self.append("commentary", result_context(row), delegation_id=provider_id)
+        if sent:
+            self.downstream({"type": "oracle_v2.result_context", "operation_id": row["delegation_id"],
+                             "local_append_ids": sent, "status": "sent_not_heard"})
 
     def publish_work(self):
         """The native panel observes the same owned work that routing can see."""
