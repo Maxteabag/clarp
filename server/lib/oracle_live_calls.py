@@ -11,7 +11,7 @@ import json
 import threading
 import time
 
-from . import config, oracle_delegations, oracle_live, oracle_live_provider
+from . import config, oracle_delegations, oracle_live, oracle_live_provider, oracle_memory
 from .oracle_calls import AgentTools, validate_offer
 from .oracle_live_wire import LiveWire
 
@@ -66,6 +66,7 @@ class Call:
         self.failure = None
         self.created_at = time.time()
         self.history_id = None
+        self.memory = None
 
     def emit(self, event):
         # The media tracks already deliver audio. Never feed a second PCM
@@ -76,12 +77,13 @@ class Call:
             self.events.append({"cursor": self.cursor, "json": json.dumps(event, ensure_ascii=False)})
 
     def open(self, sdp, negotiate):
-        session = oracle_live.live_config(wire=self.wire, webrtc=True)
+        history = self.memory.startup_history(roster=self.tools.execute("list_agents", {}, "startup")) if self.memory else []
+        session = oracle_live.live_config(wire=self.wire, webrtc=True, history=history)
         if self.podcast:
             from . import podcast_live, podcast_history
             session["instructions"] += "\n" + podcast_live.PROMPT
-            session["input" if self.wire.mode == "api" else "initial_items"] = [{"type": "message", "role": "user",
-                "content": [{"type": "input_text", "text": "Reference data for the paused episode:\n" + self.podcast["context"]}]}]
+            session.setdefault("input" if self.wire.mode == "api" else "initial_items", []).append({"type": "message", "role": "user",
+                "content": [{"type": "input_text", "text": "Reference data for the paused episode:\n" + self.podcast["context"]}]})
             self.history_id = podcast_history.create(artifact=self.podcast["artifact"], position=self.podcast["position"],
                 context=self.podcast["context"], source=self.podcast["source"], model=self.wire.model, voice=self.wire.voice,
                 configuration=session)
@@ -91,12 +93,14 @@ class Call:
             from .podcast_live import PodcastConversation
             conversation = PodcastConversation(result["socket"], self.emit, self.cfg.openai_key(), self.podcast["context"],
                 tools=self.tools, router_backend=self.cfg.oracle_router_backend, wire=self.wire,
-                images=self.podcast["images"], history_id=self.history_id, media_dir=getattr(self.ctx, "media_dir", None))
+                images=self.podcast["images"], history_id=self.history_id, media_dir=getattr(self.ctx, "media_dir", None),
+                memory=self.memory, provider_session=result["session_id"])
             self.emit({"type": "podcast.history", "conversation_id": self.history_id, "saved": True,
                        "position": self.podcast["position"]})
         else:
             conversation = oracle_live.Conversation(result["socket"], self.emit, self.tools, self.cfg.openai_key(),
-                router_backend=self.cfg.oracle_router_backend, wire=self.wire)
+                router_backend=self.cfg.oracle_router_backend, wire=self.wire,
+                memory=self.memory, provider_session=result["session_id"])
         self.conversation = conversation
         if self.cfg.oracle_diagnostics:
             from .oracle_diagnostics import OracleJournal
@@ -106,7 +110,11 @@ class Call:
         with self.lock:
             self.conversation = conversation
             self.response = {"sdp": result["sdp"], "session_id": result["session_id"], "attempt_id": self.attempt,
-                             "model": self.wire.model, "voice": self.wire.voice, "mode": self.wire.mode}
+                             "model": self.wire.model, "voice": self.wire.voice, "mode": self.wire.mode,
+                             "thread_id": self.memory.thread_id if self.memory else None}
+        if self.memory:
+            self.emit({"type": "oracle_v2.context", "thread_id": self.memory.thread_id,
+                       "items": self.memory.contexts(), "revision": conversation.revision})
         threading.Thread(target=self.run, daemon=True, name="oracle-live-sideband").start()
         self.reader_started = True
         if self.cancelled.is_set():
@@ -253,6 +261,13 @@ def create(*, ctx, principal, data, stop, negotiate=oracle_live_provider.negotia
         if not token: raise CallError("Another Oracle session is still closing")
         call = Call(principal=principal, attempt=attempt, digest=digest, token=token,
                     wire=wire, tools=tools, cfg=cfg, podcast=podcast, ctx=ctx)
+        try:
+            call.memory = oracle_memory.open_thread(principal, fallback, connection_id=token,
+                thread_id=data.get("thread_id"), fresh=data.get("new_conversation") is True)
+            call.memory.reconcile()
+        except Exception:
+            oracle_live.release_connection(principal, token)
+            raise
         _ATTEMPTS[key] = call
         oracle_live.register_stop(principal, token,
             lambda: threading.Thread(target=call.close, daemon=True).start())
@@ -314,3 +329,17 @@ def handle(handler, action):
         return handler._send(exc.status, json.dumps({"error": str(exc)}).encode(), "application/json")
     except (ValueError, TypeError):
         return handler._send(400, b'{"error":"Invalid Oracle call"}', "application/json")
+
+
+def context_image(handler):
+    if not (getattr(handler, "_request_auth_validated", False) and getattr(handler, "_request_device_scope", "") == "full"):
+        return handler._send(403, b"Forbidden", "text/plain")
+    from urllib.parse import parse_qs, urlparse
+    query = parse_qs(urlparse(handler.path).query)
+    try:
+        store = oracle_memory.ThreadStore(query.get("thread_id", [""])[0], handler._request_principal, "")
+        row = next((row for row in store.contexts(include_images=True) if row["context_id"] == query.get("context_id", [""])[0] and row["image"] is not None), None)
+        if row: return handler._send(200, row["image"], row["mime_type"])
+    except ValueError:
+        pass
+    return handler._send(404, b"Image not found", "text/plain")
