@@ -16,6 +16,7 @@ constants disagree. The iOS repository keeps the mirror table in its own
 
 | Host contract | Min iOS contract | Host release | What changed |
 |---|---|---|---|
+| 2 | 1 | PR112 | Adds authenticated `/attention/inbox` source-owned artifact eligibility and guarded pagination. Older clients/endpoints remain supported. |
 | 1 | 1 | main, 2026-09-14 | Contract handshake introduced. `/server-info` gains `contract` and `client`; the Host reads `X-Clarp-Client`. Baseline for every feature already advertised in `capabilities.features`. |
 
 ## When to bump
