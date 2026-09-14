@@ -18,7 +18,7 @@ from .protocol import AgentState
 
 LABEL_MAX_AGE_MS = 24 * 60 * 60 * 1000
 MAX_PAYLOAD_BYTES = 1024 * 1024
-TERMINAL_OUTCOMES = frozenset({"changed", "same_task", "insufficient_context", "skipped", "error", "cancelled"})
+TERMINAL_OUTCOMES = frozenset({"changed", "same_task", "insufficient_context", "skipped", "error", "cancelled", "completed"})
 _UNSET = object()
 
 
@@ -53,7 +53,16 @@ def _write():
 
 
 def templates() -> list[dict]:
-    return [{"id": "task-labels", "name": "Task labels",
+    return [{"id": "custom-task", "name": "Custom task",
+             "description": "Run your own maintenance instructions using the agent tools on this Host.",
+             "recommended_backend": "codex", "recommended_model": "",
+             "recommended_effort": "low", "allowed_effects": [], "creatable": True,
+             "supported_trigger_ids": ["schedule", "active-interval"],
+             "default_trigger_id": "schedule", "options": [
+                 {"key": "instructions", "label": "Instructions", "type": "text", "default": "",
+                  "max_length": 16000,
+                  "description": "Describe the work and its limits. Reference installed skills or local helpers."}]},
+            {"id": "task-labels", "name": "Task labels",
              "description": "Keep agents' current task labels clear and useful.",
              "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
              "recommended_effort": "low",
@@ -103,6 +112,8 @@ def _validate_option(descriptor: dict, value) -> None:
         valid = (not isinstance(value, bool) and isinstance(value, int if kind == "integer" else (int, float))
                  and descriptor.get("min", -math.inf) <= value <= descriptor.get("max", math.inf)
                  and (isinstance(value, int) or math.isfinite(value)))
+    elif kind == "text":
+        valid = isinstance(value, str) and len(value) <= descriptor.get("max_length", 16000) and "\x00" not in value
     elif kind == "string":
         valid = isinstance(value, str) and len(value) <= 160 and not any(ord(ch) < 32 for ch in value)
     elif kind == "choice":
@@ -281,9 +292,9 @@ def _model(agent: dict, model, effort, *, provider=None):
 
 
 def _execution(template_id: str, value, backend: str) -> dict:
-    if template_id == "task-labels":
+    if template_id in {"task-labels", "custom-task"}:
         if value not in ({}, None):
-            raise JanitorError("Task labels use the managed agent executor")
+            raise JanitorError("This job uses the managed agent executor")
         return {}
     if value is None:
         value = {"executor": "ephemeral", "provider": backend}
@@ -426,7 +437,8 @@ def reset_defaults(session: str, expected_revision: int) -> dict:
     model = template["recommended_model"] if current["backend"] == template["recommended_backend"] else None
     effort = template["recommended_effort"] if model else None
     return configure(session, expected_revision, attachments=attachments, model=model, effort=effort,
-        execution={}, options={item["key"]: item["default"] for item in template["options"]})
+        execution={}, options=(current["options"] if current["template_id"] == "custom-task"
+                 else {item["key"]: item["default"] for item in template["options"]}))
 
 
 def adopt_options(session: str, expected_revision: int, options: dict) -> dict:
@@ -477,6 +489,9 @@ def set_enabled(session: str, expected_revision: int, enabled: bool) -> dict:
                 raise JanitorError("This Janitor was released; convert it again before enabling", 409, "janitor_released")
             if a.get("archived_at"):
                 raise JanitorError("Archived maintenance cannot be enabled", 409, "agent_archived")
+            if row["template_id"] == "custom-task" and not option_values(
+                    "custom-task", _decode(row["options_json"], {}))["instructions"].strip():
+                raise JanitorError("Add instructions before enabling this custom task")
             for other in c.execute("SELECT j.* FROM janitor_configs j JOIN agents a ON a.agent_id=j.agent_id WHERE j.enabled=1 AND j.agent_id!=? AND a.deleted_at IS NULL AND a.archived_at IS NULL", (a["agent_id"],)):
                 if (set(template(row["template_id"])["allowed_effects"]) & set(template(other["template_id"])["allowed_effects"])
                         and _overlap(_decode(row["scope_json"], {}), _decode(other["scope_json"], {}))):
@@ -682,6 +697,32 @@ def create_run(attachment_id: str, generation: int, candidates: list[dict], run_
     return get_run(run_id)
 
 
+def create_custom_run(attachment_id: str, generation: int, *, run_id: str, progress: dict) -> dict:
+    """Freeze user instructions and progress atomically, using the existing run ledger."""
+    with _write() as c:
+        attachment = _active_attachment(c, attachment_id, generation)
+        if attachment["template_id"] != "custom-task":
+            raise JanitorError("This attachment does not run custom tasks", 409, "capability_denied")
+        old = c.execute("SELECT * FROM janitor_runs WHERE run_id=?", (run_id,)).fetchone()
+        if old:
+            if old["attachment_id"] != attachment_id or old["generation"] != generation:
+                raise JanitorError("Run identity already refers to different work", 409, "run_conflict")
+            return get_run(run_id)
+        if has_active_run(attachment["agent_id"]):
+            raise JanitorError("This Janitor already has an active run", 409, "janitor_busy")
+        options = option_values("custom-task", _decode(_config(c, attachment["agent_id"])["options_json"], {}))
+        if not options["instructions"].strip():
+            raise JanitorError("Custom task instructions are empty")
+        frozen = {"template_id": "custom-task", "options": options,
+                  "trigger_id": attachment["trigger_id"], "trigger_version": attachment["trigger_version"],
+                  "config": _decode(attachment["config_json"], {}), "scope": _decode(attachment["scope_json"], {})}
+        c.execute("INSERT INTO janitor_runs(run_id,agent_id,session,attachment_id,generation,trace_id,candidates_json,configuration_json,created_at) VALUES (?,?,?,?,?,?,'[]',?,?)",
+                  (run_id, attachment["agent_id"], attachment["session"], attachment_id, generation,
+                   run_id, _json(frozen), db.now_ms()))
+        _save_progress(c, attachment_id, generation, progress, progress.get("next_run_at"))
+    return get_run(run_id)
+
+
 def _public_run(row) -> dict:
     value = dict(row)
     value["queue_id"] = value["client_msg_id"] = value["run_id"]
@@ -737,7 +778,7 @@ def validate_dispatch(session: str, run_id: str, trace_id: str) -> bool:
     try:
         row = _active_run(db.conn(), run_id)
         if (row["session"] != session or row["trace_id"] != trace_id
-                or _decode(row["configuration_json"], {}).get("template_id") != "task-labels"):
+                or _decode(row["configuration_json"], {}).get("template_id") not in {"task-labels", "custom-task"}):
             return False
         attachment = _active_attachment(db.conn(), row["attachment_id"], row["generation"])
         if row["status"] == "queued" and attachment["trigger_id"] == "active-interval":
@@ -752,7 +793,8 @@ def validate_dispatch(session: str, run_id: str, trace_id: str) -> bool:
 
 def run_context(run_id: str) -> dict:
     row = _active_run(db.conn(), run_id)
-    return {"run_id": run_id, "generation": row["generation"], "candidates": _decode(row["candidates_json"], [])}
+    return {"run_id": run_id, "generation": row["generation"], "candidates": _decode(row["candidates_json"], []),
+            "configuration": _decode(row["configuration_json"], {})}
 
 
 def mark_started(run_id: str) -> dict:
@@ -772,6 +814,16 @@ def finish_run(run_id: str, outcome: str = "", error: str = "") -> dict:
         _active_run(c, run_id)
         if _decode(row["configuration_json"], {}).get("executor") == "ephemeral":
             raise JanitorError("Demand jobs require their guarded result receipt", 409, "capability_denied")
+        if _decode(row["configuration_json"], {}).get("template_id") == "custom-task":
+            if outcome not in {"completed", "error", "cancelled"}:
+                raise JanitorError("Custom task completion requires an explicit terminal outcome")
+            now = db.now_ms()
+            safe_error = str(error)[:500]
+            c.execute("UPDATE janitor_runs SET status=?,outcome=?,finished_at=?,error=? WHERE run_id=?",
+                      ("failed" if outcome == "error" else outcome, outcome, now, safe_error, run_id))
+            c.execute("UPDATE janitor_configs SET last_run_at=?,last_error=?,updated_at=? WHERE agent_id=?",
+                      (now, safe_error, now, row["agent_id"]))
+            return get_run(run_id)
         receipts = list(c.execute("SELECT outcome FROM janitor_effects WHERE run_id=?", (run_id,)))
         if not outcome:
             outcome = ("error" if len(receipts) != len(_decode(row["candidates_json"], [])) or any(r[0] == "error" for r in receipts)
