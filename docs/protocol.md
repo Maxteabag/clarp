@@ -483,14 +483,21 @@ An old client is guaranteed:
 - delivery: a send is delivered if and only if its `u-<client_msg_id>`
   appears in `/log`. HTTP 200 means accepted, not delivered.
 
-The one place a version *is* negotiated is the App Store app, which cannot be
-upgraded in lockstep with the server. `GET /server-info` carries
-`clarp_version` (the server's release, from `pyproject.toml`) and
-`min_app_version` (`server_identity.MIN_APP_VERSION`, the oldest app it still
-speaks to). The app compares those with its own version and
-`HostCompatibilityPolicy.minimumHostVersion` and shows a one-time "update the
-Host" or "update the app" dialog per (Host, Host version, app version). A
-server that predates these fields is treated as older than any minimum.
+The one place compatibility *is* negotiated is the App Store app, which
+cannot be upgraded in lockstep with the server. `GET /server-info` carries
+`contract.host` (the contract this Host implements, `HOST_CONTRACT`),
+`contract.min_ios` (the oldest iOS client contract it still serves,
+`MIN_IOS_CONTRACT`) and `contract.features` (the Host contract at which each
+capability became available). The app carries its own `ClientContract.current`
+and `ClientContract.minimumHost`, sends `X-Clarp-Client: ios/<build>
+contract=<n>` on every request, and the Host echoes its verdict back as
+`client.status` (`compatible`, `client_outdated`, `unknown`). The app shows a
+persistent red banner while either floor is unmet and an amber one while a
+feature the user has turned on is missing from the Host. Every bump is a row
+in `docs/compatibility.md`; `tests/unit/test_client_contract.py` keeps the
+table honest. `clarp_version` and `min_app_version` remain for apps that
+predate the contract; a server that sends no `contract` block is treated as
+contract 0 and therefore older than any app minimum.
 
 Inside that window, features are negotiated per surface rather than by
 version. `/server-info` also carries `capabilities.features`, the product
@@ -507,3 +514,13 @@ models, `installed`, and `effort_options`; a `POST` with a provider outside
 that list is a 400). Adding a CLI is a server adapter with its
 presentation and flags; no client release is needed for it to look
 intentional.
+
+### Local encrypted transport
+
+`GET /server-info` and the pairing exchange's `server` object include optional
+`local_connection`: `enabled`, HTTPS `port`, `certificate_sha256` (leaf DER SHA-256),
+`urls` (local HTTPS origin candidates) and `service_type` (`_clarps._tcp`). Clients
+learn pins only over an already trusted authenticated HTTPS connection, validate
+the exact certificate before sending credentials, and use `server_id` to confirm
+the paired identity. Bonjour metadata does not authorize certificate trust. The
+local endpoint uses the same device tokens and protocol without a relay prefix.

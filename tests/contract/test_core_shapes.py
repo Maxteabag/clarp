@@ -243,6 +243,32 @@ def test_server_info_shape(core_server):
     assert isinstance(body["capabilities"]["features"], list)
 
 
+def test_server_info_client_contract_verdict(core_server):
+    """The Host judges the client from X-Clarp-Client and says so in the body."""
+    from lib import server_identity
+
+    def get_with_client(header: str | None) -> dict:
+        req = urllib.request.Request(core_server["base"] + "/server-info")
+        if header is not None:
+            req.add_header(server_identity.CLIENT_HEADER, header)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+
+    current = get_with_client(f"ios/2620 contract={server_identity.HOST_CONTRACT}")
+    check("server-info", current)
+    assert current["contract"]["host"] == server_identity.HOST_CONTRACT
+    assert current["contract"]["min_ios"] == server_identity.MIN_IOS_CONTRACT
+    assert current["client"]["status"] == "compatible"
+    assert current["client"]["build"] == "2620"
+
+    ancient = get_with_client("ios/2500 contract=0")
+    assert ancient["client"]["status"] == "client_outdated"
+    assert "contract" in ancient["client"]["reason"]
+
+    anonymous = get_with_client(None)
+    assert anonymous["client"]["status"] == "unknown"
+
+
 def test_snapshot_and_log_shapes(core_server):
     base, agent = core_server["base"], core_server["agent"]
     status, missing_body = _get(base, "/log?session=rachel&limit=5")

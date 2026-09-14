@@ -114,6 +114,9 @@ class ServerContext:
 
     # Optional bearer-token guard. Empty = no auth check.
     auth_token: str = ""
+    local_tls_port: int = 0
+    local_tls_directory: pathlib.Path | None = None
+    relay_settings: Any | None = None
 
     # Where client-uploaded files (images/docs from the phone) are written,
     # one subdir per session. Defaulted/derived so existing construction sites
@@ -477,6 +480,7 @@ class ServerContext:
         if connect_runtime:
             from .runtime_bridge import RuntimeClient
             runtime_client = RuntimeClient(paths.runtime_socket)
+        from .relay_settings import load as load_relay_settings
         return cls(
             root=root,
             static=static,
@@ -484,6 +488,10 @@ class ServerContext:
             agents_path=AGENTS_FILE,
             default_session=cfg.default_session,
             auth_token=cfg.auth_token,
+            local_tls_port=cfg.local_tls_port if cfg.local_enabled else 0,
+            local_tls_directory=pathlib.Path(cfg._config_path).parent / "local-tls",
+            relay_settings=(load_relay_settings(
+                pathlib.Path(cfg.relay_config_path)) if cfg.relay_enabled else None),
             uploads_dir=paths.uploads_dir,
             media_dir=paths.media_dir,
             tts=tts,

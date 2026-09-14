@@ -5,6 +5,11 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QSet>
+#include <QLockFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QUuid>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -23,12 +28,262 @@ PaneTreeModel::PaneTreeModel(QObject* parent)
     m_root->id = m_activePaneId;
     m_persistenceEnabled = QCoreApplication::organizationName() == QStringLiteral("MaxTeaBag") &&
                            QCoreApplication::applicationName() == QStringLiteral("Clarp");
-    if (!QCoreApplication::instance()->property("clarpEmptyStartup").toBool()) restore();
+    m_lastCollection = QSettings().value(QStringLiteral("workspace/collectionV1")).toByteArray();
+    m_recoveryId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    if (!QCoreApplication::instance()->property("clarpEmptyStartup").toBool())
+        restore();
     connect(this, &PaneTreeModel::treeChanged, this, &PaneTreeModel::persist);
     connect(this, &PaneTreeModel::activePaneChanged, this, &PaneTreeModel::persist);
+    connect(this, &PaneTreeModel::treeChanged, this, &PaneTreeModel::persistWorkspaces);
+    connect(this, &PaneTreeModel::activePaneChanged, this, &PaneTreeModel::persistWorkspaces);
+    if (m_persistenceEnabled &&
+        !QCoreApplication::instance()->property("clarpEmptyStartup").toBool()) {
+        const auto doc =
+            QJsonDocument::fromJson(
+                QSettings().value(QStringLiteral("workspace/collectionV1")).toByteArray())
+                .object()
+                .toVariantMap();
+        const auto states = doc.value(QStringLiteral("states")).toMap();
+        const auto names = doc.value(QStringLiteral("names")).toMap();
+        const QString active = doc.value(QStringLiteral("active")).toString();
+        if (doc.value(QStringLiteral("version")).toInt() == 1 && !states.isEmpty() &&
+            states.size() <= 8 && states.contains(active)) {
+            bool valid = true;
+            QSet<QString> allIds;
+            for (auto i = states.cbegin(); i != states.cend(); ++i) {
+                int count = 0;
+                quint64 highest = 0;
+                auto tree = deserialize(i.value().toMap().value(QStringLiteral("root")).toMap(), 0,
+                                        count, highest);
+                if (!tree || !names.contains(i.key())) {
+                    valid = false;
+                    break;
+                }
+                std::vector<Node*> leaves;
+                collectLeaves(tree.get(), leaves);
+                for (auto* leaf : leaves) {
+                    if (allIds.contains(leaf->id))
+                        valid = false;
+                    allIds.insert(leaf->id);
+                }
+                const Node* focus = find(
+                    tree.get(), i.value().toMap().value(QStringLiteral("activePaneId")).toString());
+                if (focus == nullptr || focus->kind != Node::Kind::Leaf)
+                    valid = false;
+                m_nextId = std::max(m_nextId, highest);
+            }
+            if (valid) {
+                for (auto i = states.cbegin(); i != states.cend(); ++i)
+                    m_workspaceStates[i.key()] = i.value().toMap();
+                m_workspaceNames.clear();
+                for (auto i = names.cbegin(); i != names.cend(); ++i)
+                    m_workspaceNames[i.key()] = i.value().toString();
+                m_activeWorkspace = active;
+                loadState(states.value(active).toMap());
+            }
+        }
+    }
 }
 
 PaneTreeModel::~PaneTreeModel() = default;
+
+QVariantMap PaneTreeModel::saveState() const {
+    return {{QStringLiteral("root"), rootNode()},
+            {QStringLiteral("activePaneId"), m_activePaneId},
+            {QStringLiteral("zoomedPaneId"), m_zoomedPaneId}};
+}
+bool PaneTreeModel::loadState(const QVariantMap& state) {
+    int count = 0;
+    quint64 highest = 0;
+    auto tree = deserialize(state.value(QStringLiteral("root")).toMap(), 0, count, highest);
+    if (!tree || count == 0)
+        return false;
+    QSet<QString> ids;
+    const auto unique = [&](const auto& self, const Node* node) -> bool {
+        if (!node || ids.contains(node->id))
+            return false;
+        ids.insert(node->id);
+        return node->kind == Node::Kind::Leaf ||
+               (self(self, node->first.get()) && self(self, node->second.get()));
+    };
+    if (!unique(unique, tree.get()))
+        return false;
+    const QString active = state.value(QStringLiteral("activePaneId")).toString();
+    const Node* activeNode = find(tree.get(), active);
+    if (activeNode == nullptr || activeNode->kind != Node::Kind::Leaf)
+        return false;
+    const QString zoom = state.value(QStringLiteral("zoomedPaneId")).toString();
+    const Node* zoomNode = find(tree.get(), zoom);
+    if (!zoom.isEmpty() && (zoomNode == nullptr || zoomNode->kind != Node::Kind::Leaf))
+        return false;
+    m_root = std::move(tree);
+    m_activePaneId = active;
+    m_zoomedPaneId = zoom;
+    m_nextId = std::max(m_nextId, highest);
+    emit treeChanged();
+    emit activePaneChanged();
+    return true;
+}
+QVariantList PaneTreeModel::workspaces() const {
+    QVariantList out;
+    for (auto i = m_workspaceNames.cbegin(); i != m_workspaceNames.cend(); ++i)
+        out.append(
+            QVariantMap{{QStringLiteral("id"), i.key()}, {QStringLiteral("name"), i.value()}});
+    return out;
+}
+QVariantList PaneTreeModel::viewLayout() const {
+    QVariantList out;
+    QVariantList splits;
+    QVariantList current;
+    appendLayout(m_root.get(), 0, 0, 1, 1, current, splits);
+    for (const auto& p : current) {
+        auto row = p.toMap();
+        const QString id = row.value(QStringLiteral("id")).toString();
+        row.insert(QStringLiteral("shown"), m_zoomedPaneId.isEmpty() || m_zoomedPaneId == id);
+        if (m_zoomedPaneId == id) {
+            row[QStringLiteral("x")] = 0;
+            row[QStringLiteral("y")] = 0;
+            row[QStringLiteral("width")] = 1;
+            row[QStringLiteral("height")] = 1;
+        }
+        out.append(row);
+    }
+    for (auto i = m_workspaceStates.cbegin(); i != m_workspaceStates.cend(); ++i) {
+        if (i.key() == m_activeWorkspace)
+            continue;
+        int count = 0;
+        quint64 highest = 0;
+        auto tree = deserialize(i.value().value(QStringLiteral("root")).toMap(), 0, count, highest);
+        QVariantList hidden;
+        splits.clear();
+        appendLayout(tree.get(), 0, 0, 1, 1, hidden, splits);
+        for (const auto& p : hidden) {
+            auto row = p.toMap();
+            row.insert(QStringLiteral("shown"), false);
+            out.append(row);
+        }
+    }
+    return out;
+}
+void PaneTreeModel::createWorkspace(const QString& requestedName) {
+    if (m_workspaceNames.size() >= 8)
+        return;
+    m_workspaceStates[m_activeWorkspace] = saveState();
+    const QString id =
+        QStringLiteral("workspace-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    auto leaf = std::make_unique<Node>();
+    leaf->id = nextId(QStringLiteral("pane"));
+    m_root = std::move(leaf);
+    m_activePaneId = m_root->id;
+    m_zoomedPaneId.clear();
+    m_activeWorkspace = id;
+    m_workspaceNames[id] = requestedName.trimmed().isEmpty() ? QStringLiteral("Workspace")
+                                                             : requestedName.trimmed().left(60);
+    emit treeChanged();
+    emit activePaneChanged();
+}
+void PaneTreeModel::switchWorkspace(const QString& id) {
+    if (id == m_activeWorkspace || !m_workspaceStates.contains(id))
+        return;
+    m_workspaceStates[m_activeWorkspace] = saveState();
+    const auto state = m_workspaceStates.value(id);
+    m_activeWorkspace = id;
+    loadState(state);
+}
+void PaneTreeModel::moveActiveToWorkspace(const QString& id) {
+    if (id == m_activeWorkspace || !m_workspaceStates.contains(id))
+        return;
+    auto* source = find(m_root.get(), m_activePaneId);
+    if (source == nullptr || source->session.isEmpty())
+        return;
+    const QString pane = source->id;
+    const QString session = source->session;
+    int count = 0;
+    quint64 highest = 0;
+    auto target = deserialize(m_workspaceStates.value(id).value(QStringLiteral("root")).toMap(), 0,
+                              count, highest);
+    if (!target || count >= 16)
+        return;
+    auto leaf = std::make_unique<Node>();
+    leaf->id = pane;
+    leaf->session = session;
+    const QString active =
+        m_workspaceStates.value(id).value(QStringLiteral("activePaneId")).toString();
+    QString newActive;
+    if (!split(target, active, QStringLiteral("vertical"), std::move(leaf), newActive,
+               nextId(QStringLiteral("split"))))
+        return;
+    if (paneCount() == 1) {
+        m_root = std::make_unique<Node>();
+        m_root->id = nextId(QStringLiteral("pane"));
+        m_activePaneId = m_root->id;
+    } else {
+        close(m_root, pane);
+        std::vector<Node*> leaves;
+        collectLeaves(m_root.get(), leaves);
+        m_activePaneId = leaves.front()->id;
+    }
+    m_zoomedPaneId.clear();
+    m_workspaceStates[m_activeWorkspace] = saveState();
+    m_root = std::move(target);
+    m_activePaneId = newActive;
+    m_activeWorkspace = id;
+    emit treeChanged();
+    emit activePaneChanged();
+}
+void PaneTreeModel::saveWorkspaceLayoutInstead() {
+    m_forceWorkspaceSave = true;
+    persistWorkspaces();
+    m_forceWorkspaceSave = false;
+}
+
+void PaneTreeModel::persistWorkspaces() {
+    if (!m_persistenceEnabled)
+        return;
+    QVariantMap states;
+    for (auto i = m_workspaceStates.cbegin(); i != m_workspaceStates.cend(); ++i)
+        states[i.key()] = i.value();
+    states[m_activeWorkspace] = saveState();
+    QVariantMap names;
+    for (auto i = m_workspaceNames.cbegin(); i != m_workspaceNames.cend(); ++i)
+        names[i.key()] = i.value();
+    const QByteArray encoded =
+        QJsonDocument::fromVariant(QVariantMap{{QStringLiteral("version"), 1},
+                                               {QStringLiteral("active"), m_activeWorkspace},
+                                               {QStringLiteral("names"), names},
+                                               {QStringLiteral("states"), states}})
+            .toJson(QJsonDocument::Compact);
+    QSettings settings;
+    QDir().mkpath(QFileInfo(settings.fileName()).absolutePath());
+    QLockFile lock(settings.fileName() + QStringLiteral(".workspace-save.lock"));
+    const bool locked = lock.tryLock(0);
+    settings.sync();
+    const QByteArray latest =
+        settings.value(QStringLiteral("workspace/collectionV1")).toByteArray();
+    if (!locked || (!m_forceWorkspaceSave && latest != m_lastCollection)) {
+        // Preserve the unsaved window independently; never overwrite a newer writer.
+        settings.setValue(QStringLiteral("workspace/recovery/") + m_recoveryId, encoded);
+        settings.sync();
+        m_workspaceSaveWarning = QStringLiteral(
+            "Another window saved a newer layout. This window's layout is kept in recovery.");
+        emit workspaceSaveWarningChanged();
+        return;
+    }
+    settings.setValue(QStringLiteral("workspace/collectionV1"), encoded);
+    settings.sync();
+    if (settings.status() != QSettings::NoError) {
+        m_workspaceSaveWarning =
+            QStringLiteral("Workspace layout could not be saved. Check available storage.");
+        emit workspaceSaveWarningChanged();
+        return;
+    }
+    m_lastCollection = encoded;
+    settings.remove(QStringLiteral("workspace/recovery/") + m_recoveryId);
+    if (!m_workspaceSaveWarning.isEmpty()) {
+        m_workspaceSaveWarning.clear();
+        emit workspaceSaveWarningChanged();
+    }
+}
 
 QVariantMap PaneTreeModel::rootNode() const { return serialize(m_root.get()); }
 

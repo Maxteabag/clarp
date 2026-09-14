@@ -3,14 +3,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import agents as agents_db, backends, db
+from . import agents as agents_db, backends, db, roster
 from .config import load as load_config
 
 
 def seed_defaults(backend: str, *, cwd: Path | None = None) -> int:
     database = db.conn()
     selected_backend = backends.normalize(backend)
-    roster = load_config().roster
+    configured_roster = load_config().roster
     root = cwd or Path.home()
     created = 0
     try:
@@ -27,7 +27,9 @@ def seed_defaults(backend: str, *, cwd: Path | None = None) -> int:
             return 0
         first_agent_id = None
         used_sessions: set[str] = set()
-        for name, voice_id in roster.items():
+        for name, voice_id in configured_roster.items():
+            if roster.tier_for_contact(name) == "janitor":
+                continue
             base = "".join(
                 character for character in name.lower()
                 if character.isalnum() or character in "._-"

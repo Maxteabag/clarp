@@ -33,7 +33,7 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: root.active ? 2 : 1
+        anchors.margins: 2
         spacing: 0
 
         ConversationPane {
