@@ -10,7 +10,7 @@ from .protocol import SSEType
 
 
 def handles(path: str) -> bool:
-    return (path in {"/janitors", "/janitor-triggers"}
+    return (path in {"/janitors", "/janitor-triggers", "/janitor-policy"}
             or path.startswith("/janitor-triggers/")
             or path.startswith("/janitors/")
             or path.startswith("/janitor-runs/"))
@@ -105,6 +105,14 @@ def handle(handler, method: str) -> None:
     try:
         if any("/" in part or not part for part in parts):
             raise ValueError("Invalid Janitor route")
+        from . import janitor_design_policy as design
+        if method == "GET" and path == "/janitor-policy":
+            return _send(handler, 200, design.configuration())
+        if method == "GET" and len(parts) == 3 and parts[0] == "janitors" and parts[2] == "effective-model-chain":
+            return _send(handler, 200, design.effective_chain(parts[1]))
+        if method == "POST" and path == "/janitor-policy":
+            body = handler._read_json() or {}
+            return _send(handler, 200, design.configure(body.get("configuration"), body.get("expected_revision")))
         if method == "GET":
             if path == "/janitors":
                 from .orchestrator import provider_options

@@ -15,7 +15,7 @@ import uuid
 from . import agents, backends, db, janitors
 
 
-ROLES = ("message-delegator", "tool-explainer")
+ROLES = ("message-delegator", "tool-explainer", "audio-bookkeeper", "heartbeat-decider", "quota-monitor")
 SEED_VERSION = 1
 DEMAND_RUN_TTL_MS = 180_000  # Two bounded 60-second routing probes plus overhead.
 _METADATA_KEYS = frozenset({"input_hash", "request_hash", "candidate_count", "item_count",
@@ -60,6 +60,8 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
     if not isinstance(initial, dict) or set(initial) - set(ROLES):
         raise janitors.JanitorError("Invalid built-in seed configuration")
     with janitors._write() as c:
+        for trigger, name in [("heartbeat-decision-requested", "When continuity needs review"), ("quota-check-requested", "When provider quota needs checking")]:
+            c.execute("INSERT OR IGNORE INTO janitor_trigger_definitions(trigger_id,version,name,kind,defaults_json) VALUES (?,1,?,'demand','{}')", (trigger,name))
         for role in ROLES:
             if c.execute("SELECT 1 FROM janitor_builtins WHERE role=?", (role,)).fetchone():
                 continue
@@ -67,7 +69,7 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
             seed = initial.get(role, {})
             if not isinstance(seed, dict) or set(seed) - {"enabled", "backend", "model", "effort", "provider", "options"}:
                 raise janitors.JanitorError("Invalid built-in seed configuration")
-            enabled = seed.get("enabled", role == "tool-explainer")
+            enabled = seed.get("enabled", role in {"tool-explainer", "audio-bookkeeper"})
             if not isinstance(enabled, bool):
                 raise janitors.JanitorError("Enabled must be a boolean")
             backend = seed.get("backend", defaults["recommended_backend"])
@@ -89,7 +91,7 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
             now = db.now_ms()
             c.execute("""INSERT INTO agents(agent_id,persona,voice_id,cwd,session,backend,model,effort,
                 is_janitor,heartbeat_enabled,dreaming_enabled,created_at) VALUES (?,?,?,?,?,?,?,?,1,0,0,?)""",
-                (agent_id, defaults["name"], "", cwd or os.getcwd(), session, backend, model, effort, now))
+                (agent_id, defaults["name"], "", cwd or os.getcwd(), session, backend, model or "", effort or "", now))
             agents.record_state(agent_id, "spawned", {"origin": "janitor", "builtin_role": role})
             c.execute("""INSERT INTO janitor_configs(agent_id,template_id,enabled,scope_json,execution_json,options_json,created_at,updated_at)
                 VALUES (?,?,?,'{}',?,?,?,?)""", (agent_id, role, int(enabled), janitors._json(execution), janitors._json(options), now, now))
@@ -155,18 +157,21 @@ def begin_run(role: str, request_id: str, *, context=None, target_agent_id: str 
                 raise janitors.JanitorError("Request identity already refers to different work", 409, "run_conflict")
             return janitors.get_run(run_id)
         config = resolve(role, target_agent_id=target_agent_id)
-        if (not config or janitors.has_active_run(config["agent_id"])
+        if (not config or config["execution"].get("executor") != "ephemeral" or janitors.has_active_run(config["agent_id"])
                 or janitors._pending_demand_claim(c, config["agent_id"])):
             return None
         attachment = next(v for v in config["attachments"] if v["enabled"]
                           and v["trigger_id"] == janitors.template(role)["default_trigger_id"])
         janitors._active_attachment(c, attachment["attachment_id"], config["generation"])
         now = db.now_ms()
+        from .janitor_design_policy import effective_chain
+        effective = effective_chain(config["session"])
         frozen = {"template_id": role, "executor": "ephemeral", "provider": config["execution"]["provider"],
             "backend": config["backend"], "model": config["model"], "effort": config["effort"],
             "scope": config["scope"], "options": config["options"], "trigger_id": attachment["trigger_id"],
             "trigger_version": attachment["trigger_version"], "config": attachment["config"],
-            "context": metadata, "target_agent_id": target_agent_id, "expires_at": now + DEMAND_RUN_TTL_MS}
+            "context": metadata, "target_agent_id": target_agent_id, "expires_at": now + DEMAND_RUN_TTL_MS,
+            "effective_chain": effective}
         c.execute("""INSERT INTO janitor_runs(run_id,agent_id,session,attachment_id,generation,trace_id,status,
             candidates_json,configuration_json,created_at,started_at) VALUES (?,?,?,?,?,?,'running','[]',?,?,?)""",
             (run_id, config["agent_id"], config["session"], attachment["attachment_id"], config["generation"], run_id,
@@ -203,6 +208,9 @@ def is_current(run_id: str, *, connection=None) -> bool:
             return False
         config = c.execute("""SELECT a.backend,a.model,a.effort,j.template_id,j.scope_json,j.execution_json,j.options_json
             FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id WHERE a.agent_id=?""", (run["agent_id"],)).fetchone()
+        from .janitor_design_policy import effective_chain
+        if frozen.get("effective_chain") and effective_chain(run["session"]) != frozen["effective_chain"]:
+            return False
         execution = janitors._decode(config["execution_json"], {})
         if any(config[key] != frozen[key] for key in ("backend", "model", "effort", "template_id")):
             return False
