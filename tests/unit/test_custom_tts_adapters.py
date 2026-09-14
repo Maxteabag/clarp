@@ -94,6 +94,18 @@ def test_adapter_declaring_ssml_receives_break_tags_intact(tmp_path, monkeypatch
     assert _last_request(package)["text"] == SPOKEN
 
 
+def test_ssml_capability_rejects_truthy_non_boolean_values(tmp_path):
+    """The JSON string ``"false"`` must not opt an adapter into raw SSML."""
+    package = _package(tmp_path / "source")
+    path = package / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["ssml"] = "false"
+    path.write_text(json.dumps(manifest))
+
+    with pytest.raises(custom_tts_adapters.AdapterError, match="ssml.*boolean"):
+        custom_tts_adapters.load_manifest(package, portable=True)
+
+
 def test_install_discover_and_test_complete_adapter(tmp_path, monkeypatch):
     source = _package(tmp_path / "source")
     monkeypatch.setattr(custom_tts_adapters, "ROOT", tmp_path / "installed")
