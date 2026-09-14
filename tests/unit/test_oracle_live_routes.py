@@ -70,3 +70,39 @@ def test_three_stale_proposals_admit_nothing_and_release_voice_wait():
         assert all(json.loads(raw)["delegation_id"] == "provider-stale" for raw in sent)
     finally:
         c.stop.set(); c.pool.shutdown()
+
+
+def test_steered_receipts_for_one_native_result_are_not_spoken_twice():
+    c, sent, down = controller()
+    now = [100.0]; c.clock = lambda: now[0]
+    base = {"session": "rowan", "agent_id": "rowan-id", "backend_session_id": "native-conversation",
+            "status": "completed", "result_message_id": "one-native-answer", "result_text": "Cancellation is not checked.",
+            "request_text": "Inspect retries"}
+    c.tools.results = lambda: [{**base, "delegation_id": "original"}, {**base, "delegation_id": "correction"}]
+    c.provider_delegations = {"original": "voice-1", "correction": "voice-2"}
+    try:
+        c.tick(); now[0] += 5; c.tick()
+        events = [json.loads(row) for row in sent]
+        findings = [row for row in events if row["type"] == "session.commentary.append"]
+        assert len(findings) == 1, "One actual native result must not become two spoken announcements"
+        assert c.results_sent == {"original", "correction"}
+        assert {row["delegation_id"] for row in events} == {"voice-1", "voice-2"}
+        aliases = [row for row in down if row.get("shared_finding_of")]
+        assert len(aliases) == 1
+    finally:
+        c.stop.set(); c.pool.shutdown()
+
+
+def test_equal_words_from_independent_workers_are_still_separate_findings():
+    c, sent, _ = controller()
+    now = [100.0]; c.clock = lambda: now[0]
+    base = {"status": "completed", "result_text": "The checksum matches.", "request_text": "Verify the checksum"}
+    c.tools.results = lambda: [{**base, "delegation_id": "mira-1", "session": "mira", "agent_id": "mira",
+                                "backend_session_id": "native-mira", "result_message_id": "answer-mira"},
+                               {**base, "delegation_id": "rowan-1", "session": "rowan", "agent_id": "rowan",
+                                "backend_session_id": "native-rowan", "result_message_id": "answer-rowan"}]
+    try:
+        c.tick(); now[0] += 5; c.tick()
+        assert sum(json.loads(row)["type"] == "session.commentary.append" for row in sent) == 2
+    finally:
+        c.stop.set(); c.pool.shutdown()
