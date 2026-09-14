@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.21)
+project(DesktopComponents LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_AUTOMOC ON)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick)
+add_executable(pane-contract panes.cpp ../../src/models/PaneTreeModel.cpp ../../src/models/PaneTreeModel.h)
+target_include_directories(pane-contract PRIVATE ../../src)
+target_link_libraries(pane-contract PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from lib import agents, db, roster_seed
 from lib.config import DEFAULT_ROSTER
+from lib.roster import tier_for_contact
+
+DEFAULT_CHAT_ROSTER = {name for name in DEFAULT_ROSTER if tier_for_contact(name) != "janitor"}
 
 
 def test_seed_defaults_creates_full_roster_once(tmp_path):
-    assert roster_seed.seed_defaults("codex", cwd=tmp_path) == len(DEFAULT_ROSTER)
+    assert roster_seed.seed_defaults("codex", cwd=tmp_path) == len(DEFAULT_CHAT_ROSTER)
     rows = agents.session_dict()
-    assert set(rows) == {name.lower() for name in DEFAULT_ROSTER}
+    assert set(rows) == {name.lower() for name in DEFAULT_CHAT_ROSTER}
     assert {row["backend"] for row in rows.values()} == {"codex"}
     assert agents.get_focus_session() == "mike"
     assert db.conn().execute("SELECT COUNT(*) FROM runtimes").fetchone()[0] == 0
@@ -37,8 +40,8 @@ def test_seed_defaults_seeds_when_only_janitor_agents_exist(tmp_path):
     c.execute("""INSERT INTO agents(agent_id,persona,voice_id,cwd,session,backend,model,effort,
         is_janitor,heartbeat_enabled,dreaming_enabled,created_at) VALUES (?,?,?,?,?,?,?,?,1,0,0,?)""",
         ("janitor-1", "Message delegator", "", str(tmp_path), "clarp-delegator", "codex", "", "", db.now_ms()))
-    assert roster_seed.seed_defaults("codex", cwd=tmp_path) == len(DEFAULT_ROSTER)
-    assert set(agents.session_dict()) == {name.lower() for name in DEFAULT_ROSTER} | {"clarp-delegator"}
+    assert roster_seed.seed_defaults("codex", cwd=tmp_path) == len(DEFAULT_CHAT_ROSTER)
+    assert set(agents.session_dict()) == {name.lower() for name in DEFAULT_CHAT_ROSTER} | {"clarp-delegator"}
 
 
 def test_builtin_janitors_do_not_make_a_fresh_install_look_used(tmp_path, monkeypatch):

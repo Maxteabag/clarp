@@ -16,3 +16,9 @@ websocket-client>=1.8
 zeroconf>=0.150.4,<1
 
 jsonschema>=4.23,<5
+
+# Managed outbound HTTPS relay connector
+websockets>=15,<17
+# Automatic secure LAN certificate and interface discovery
+cryptography>=43
+ifaddr>=0.2

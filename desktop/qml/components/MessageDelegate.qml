@@ -33,9 +33,13 @@ Item {
     // The current agent's answer to it stays the current agent's own row.
     readonly property bool teamAuthored: root.origin === "agent" && root.authorRole === "user" && !root.groupView
     readonly property bool replyMarkerVisible: !root.activity && root.body.length > 0
-        && root.replyToName.length > 0 && !root.teamAuthored
-    readonly property string replyMarkerText: "↩ Replying to " + root.replyToName
-        + (root.delivery === "private" ? " · private reply" : "")
+        && root.replyToName.length > 0 && root.replyMarkerText.length > 0 && !root.teamAuthored
+    readonly property string replyMarkerText: root.delivery === "private"
+        ? "Not sent to " + root.replyToName
+        : root.delivery === "pending" ? "Sending to " + root.replyToName
+        : root.delivery === "failed" ? "Not delivered to " + root.replyToName
+        : root.delivery === "sent" ? (root.groupView ? "" : "Reply to " + root.replyToName)
+        : "Delivery unknown"
     readonly property bool rightAligned: !root.groupView && (root.userAuthored || root.teamAuthored)
     required property bool pending
     required property bool deliveryFailed
@@ -62,6 +66,7 @@ Item {
     onForceActivityInlineChanged: Qt.callLater(root.loadInlineDetails)
     onToolDetailsAvailableChanged: Qt.callLater(root.loadInlineDetails)
     onMessageIdChanged: {
+        root.groupedExpanded = false;
         root.activityExpanded = false;
         Qt.callLater(root.loadInlineDetails);
     }
@@ -147,7 +152,7 @@ Item {
             }
             TuiText {
                 objectName: "groupReplyMarker"
-                visible: root.replyToName.length > 0
+                visible: root.replyToName.length > 0 && root.replyMarkerText.length > 0
                 text: root.replyMarkerText
                 color: "#8f96bc"
                 font.pixelSize: 11

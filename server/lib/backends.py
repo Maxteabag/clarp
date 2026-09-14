@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import importlib
 import pathlib
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -25,11 +27,59 @@ OPENCODE = AgentBackend.OPENCODE
 DEFAULT = CLAUDE
 _RUNTIME_CLIENT: Any | None = None
 
+# One runtime ``status`` RPC per short window, shared by every caller in this
+# process.  A snapshot asks active_handles() once per agent, so a 120-agent
+# fleet opened 120 runtime connections per poll from dozens of HTTP threads
+# and overran the runtime socket's listen backlog (2026-09-12).  The window is
+# short enough that the spawn/finish race it adds is no wider than the one a
+# point-in-time RPC already had, and dispatch invalidates it explicitly.
+RUNTIME_STATUS_TTL = 0.25
+_STATUS_LOCK = threading.Lock()
+# (client the result came from, monotonic time, result, error)
+_STATUS_CACHE: tuple[Any | None, float, dict | None, BaseException | None] = (
+    None, 0.0, None, None)
+_clock = time.monotonic
+
 
 def configure_runtime_client(client: Any | None) -> None:
     """Route process ownership calls to the external runtime when configured."""
     global _RUNTIME_CLIENT
     _RUNTIME_CLIENT = client
+    invalidate_runtime_status()
+
+
+def invalidate_runtime_status() -> None:
+    """Forget the shared status window, e.g. right after this process dispatched."""
+    global _STATUS_CACHE
+    with _STATUS_LOCK:
+        _STATUS_CACHE = (None, 0.0, None, None)
+
+
+def runtime_status(*, max_age: float | None = None) -> dict:
+    """The runtime's ``status`` result, at most ``max_age`` seconds old.
+
+    Concurrent callers share one in-flight RPC.  A failure is remembered for
+    the same window and logged once, so a runtime outage costs one connection
+    and one journal line per window instead of one per agent.
+    """
+    global _STATUS_CACHE
+    if _RUNTIME_CLIENT is None:
+        raise RuntimeError("no external runtime client configured")
+    ttl = RUNTIME_STATUS_TTL if max_age is None else max_age
+    with _STATUS_LOCK:
+        client, fetched_at, result, error = _STATUS_CACHE
+        if client is not _RUNTIME_CLIENT or _clock() - fetched_at >= ttl:
+            client = _RUNTIME_CLIENT
+            try:
+                result, error = client.status(), None
+            except Exception as exc:  # noqa: BLE001 - remembered for the window
+                result, error = None, exc
+                from .log import log_exception
+                log_exception("runtimeStatusUnavailable", exc, detail="shared-status")
+            _STATUS_CACHE = (client, _clock(), result, error)
+        if error is not None:
+            raise error
+        return result if isinstance(result, dict) else {}
 
 
 @dataclass(frozen=True)
@@ -491,13 +541,11 @@ def interrupt_any(agent_id: str) -> int:
 def active_handles(backend: str, agent_id: str) -> list:
     if _RUNTIME_CLIENT is not None:
         try:
-            status = _RUNTIME_CLIENT.status()
-        except Exception as exc:
+            status = runtime_status()
+        except Exception:  # noqa: BLE001 - already logged once per window
             # During the runtime's short idle rollover, persisted busy state is
             # safer than claiming the process vanished and double-spawning.
             from . import agents as agents_db
-            from .log import log_exception
-            log_exception("runtimeStatusUnavailable", exc, detail=agent_id)
             return ([_RemoteHandle("runtime-status-unknown")]
                     if agents_db.is_busy(agent_id) else [])
         active = status.get("active") or {}

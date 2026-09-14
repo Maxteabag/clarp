@@ -3343,3 +3343,73 @@ def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch,
         saved = podcast_history.get(receipt["conversation_id"])
         assert saved["status"] == "closed"
         assert [event["text"] for event in saved["events"]] == ["Explain prediction", "It hides delay."]
+
+
+def test_authentication_failure_budget_does_not_lock_out_a_paired_phone(running_server):
+    from lib import device_pairing
+    from lib.request_security import FailureLimiter
+    base, ctx, srv = running_server
+    ctx.auth_token = 'local-administrator'
+    srv.auth_failures = FailureLimiter(limit=2)
+    device = device_pairing.exchange(device_pairing.issue()['code'])
+    headers = {'X-Clarp-Transport': 'relay', 'X-Forwarded-For': '192.0.2.20'}
+    for expected in [401, 401, 429]:
+        with pytest.raises(urllib.error.HTTPError) as error:
+            _get(base + '/server-info', headers=headers)
+        assert error.value.code == expected
+        if expected == 429:
+            assert int(error.value.headers['Retry-After']) > 0
+    status, _ = _get(base + '/server-info', headers={**headers, 'Authorization': 'Bearer ' + device['token']})
+    assert status == 200
+
+
+def test_pairing_failure_budget_keeps_valid_single_use_pairing_working(running_server):
+    from lib import device_pairing
+    from lib.request_security import FailureLimiter
+    base, ctx, srv = running_server
+    ctx.auth_token = 'local-administrator'
+    srv.auth_failures = FailureLimiter(limit=2)
+    headers = {'X-Clarp-Transport': 'relay', 'X-Forwarded-For': '192.0.2.10'}
+    for expected in [409, 409, 429]:
+        with pytest.raises(urllib.error.HTTPError) as error:
+            _post_with_headers(base + '/pairing/exchange', {'code': 'invalid'}, headers)
+        assert error.value.code == expected
+    code = device_pairing.issue()['code']
+    status, body = _post_with_headers(base + '/pairing/exchange', {'code': code}, headers)
+    assert status == 201 and json.loads(body)['device']['token'].startswith('cld_')
+
+
+def test_revoking_a_device_closes_its_existing_event_stream(running_server):
+    import http.client
+    from lib import device_pairing
+    base, ctx, _ = running_server
+    ctx.auth_token = 'local-administrator'
+    device = device_pairing.exchange(device_pairing.issue()['code'])
+    target = urlsplit(base)
+    client = http.client.HTTPConnection(target.hostname, target.port, timeout=1)
+    client.request('GET', '/events', headers={'Authorization': 'Bearer ' + device['token'], 'X-Clarp-Transport': 'relay'})
+    response = client.getresponse()
+    assert response.status == 200
+    try:
+        _post_with_headers(base + '/paired-devices/revoke', {'device_id': device['device_id']},
+                           {'Authorization': 'Bearer local-administrator'})
+        response.read()  # Must reach EOF promptly, rather than keep sending events.
+    finally:
+        client.close()
+
+
+def test_revocation_between_authentication_and_stream_registration_is_rejected(running_server, monkeypatch):
+    from lib import device_pairing
+    base, ctx, _ = running_server
+    ctx.auth_token = 'local-administrator'
+    device = device_pairing.exchange(device_pairing.issue()['code'])
+    authenticate = device_pairing.authenticate
+    def race(token):
+        result = authenticate(token)
+        if result:
+            device_pairing.revoke(result['device_id'])
+        return result
+    monkeypatch.setattr(device_pairing, 'authenticate', race)
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _get(base + '/status', headers={'Authorization': 'Bearer ' + device['token']})
+    assert error.value.code == 401

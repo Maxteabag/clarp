@@ -15,11 +15,12 @@ test('holding the agent chip shows the overview with the full roster', async ({ 
   const snapshot = await (await request.get('/agents/snapshot')).json();
   await page.goto('/');
   const opener = page.locator('#historyAgent');
-  await opener.dispatchEvent('pointerdown');
-  await page.waitForTimeout(650);
-  await opener.dispatchEvent('pointerup');
   const overview = page.locator('#overview');
-  await expect(overview).not.toHaveClass(/hidden/);
+  await opener.dispatchEvent('pointerdown');
+  // Keep holding until the browser fires the long-press callback. A fixed
+  // 650 ms wall-clock sleep races the 600 ms timer on a busy CI renderer.
+  try { await expect(overview).toBeVisible(); }
+  finally { await opener.dispatchEvent('pointerup'); }
   const archivedNames = new Set(snapshot.agents
     .filter(agent => agent.archived_at != null)
     .map(agent => agent.persona));
