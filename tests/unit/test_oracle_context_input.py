@@ -90,3 +90,16 @@ def test_worker_reference_is_frozen_even_after_the_active_context_changes(tmp_pa
     store.add_context("typed-2", text="New current screen is different")
     assert files[0].read_bytes() == before
     assert json.loads(before)["contexts"][0]["captured_at"] == 1234
+
+
+def test_original_inspection_request_survives_a_router_value_paraphrase(tmp_path):
+    store = oracle_memory.open_thread("owner", "main", connection_id="connection-1")
+    conversation = [{"role": "user", "text": "Check the invoice I mentioned."},
+                    {"role": "assistant", "text": "Which invoice?"},
+                    {"role": "user", "source": "typed", "text": "invoice_550.json; amount550, not50"}]
+    store.materialize_reference("Verify/use amount550", [], tmp_path, conversation=conversation)
+    snapshot = json.loads(next((tmp_path/"oracle-context"/store.thread_id).glob("*.json")).read_text())
+    assert snapshot["original_user_messages"] == [
+        {"text": "Check the invoice I mentioned."},
+        {"source": "typed", "text": "invoice_550.json; amount550, not50"}]
+    assert snapshot["router_proposal_not_authorization"] is True
