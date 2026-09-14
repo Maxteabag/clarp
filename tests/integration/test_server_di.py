@@ -111,6 +111,50 @@ def _post_with_headers(url, body: dict, headers: dict):
         return r.status, r.read()
 
 
+
+
+
+
+
+
+def test_access_log_redacts_query_credentials(capsys):
+    handler = object.__new__(server_module.Handler)
+    handler.address_string = lambda: "127.0.0.1"
+
+    handler.log_message(
+        '"%s" %s %s',
+        "GET /?token=top-secret-token HTTP/1.1",
+        "200",
+        "-",
+    )
+
+    logged = capsys.readouterr().out
+    assert "top-secret-token" not in logged
+    assert "REDACTED" in logged
+
+
+def test_transcription_provider_errors_remain_valid_json(running_server):
+    base, ctx, _srv = running_server
+
+    class ExplodingSTT(StubSTT):
+        def transcribe_bytes(self, *_args, **_kwargs):
+            raise RuntimeError('provider said "invalid"\nretry later')
+
+    ctx.stt = ExplodingSTT(text="")
+    try:
+        _post_raw(
+            base + "/transcribe",
+            b"voice audio",
+            {"Content-Type": "audio/webm"},
+        )
+        raise AssertionError("transcription error should return HTTP 500")
+    except urllib.error.HTTPError as error:
+        assert error.code == 500
+        payload = json.loads(error.read())
+
+    assert payload == {"error": 'provider said "invalid"\nretry later'}
+
+
 def test_production_startup_requests_restart_heartbeat_recovery(
     fake_ctx, monkeypatch,
 ):
