@@ -102,3 +102,18 @@ New agents default to the Host home directory (`~`), including model-specific
 launches and quick contact creation. Explicit launcher directories are preserved.
 Use **Ctrl+K → Change directory** or **Ctrl+Alt+D** to choose a directory for a
 new launch. This opens the launch picker and does not restart an existing chat.
+
+## Custom bindings and workspaces
+
+Open Customize key bindings from the command picker or Ctrl+Alt+Comma.
+Overrides use the same registry as dispatch and footer hints. Supported actions
+are switcher, sidebar, horizontal/vertical split, zoom, balance and next-workspace.
+Import/export edits version-1 JSON; malformed containers and conflicting chords
+are rejected without changing the previous map. Empty bindings object resets
+all overrides. Native text-editing shortcuts remain reserved.
+
+Workspace tabs keep separate pane trees and active panes. Ctrl+Alt+W cycles
+workspaces; the Move to workspace menu retains the moved pane identity. The
+current slice supports up to eight workspaces; rename, close/archive and drag
+placement are not included. Split shortcuts retain their existing duplication
+behavior. Maximize/Restore projects a pane without rebuilding its transcript.

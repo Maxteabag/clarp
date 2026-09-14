@@ -9,6 +9,27 @@ Rectangle {
 
     required property var controller
     signal openChat(string session)
+    property bool hierarchyView: true
+    function orderedTeams() {
+        const source = Array.from(controller.teams || []);
+        if (!hierarchyView)
+            return source.map(t => Object.assign({}, t, {treeDepth: 0}));
+        const result = [], visited = {};
+        function append(team, depth) {
+            const key = String(team.team_id);
+            if (visited[key]) return;
+            visited[key] = true;
+            result.push(Object.assign({}, team, {treeDepth: depth}));
+            for (const child of source)
+                if (String(child.parent_team_id || "") === key) append(child, depth + 1);
+        }
+        for (const team of source)
+            if (!team.parent_team_id || !source.some(t => t.team_id === team.parent_team_id))
+                append(team, 0);
+        // Malformed cycles remain discoverable, never disappear from the list.
+        for (const team of source) append(team, 0);
+        return result;
+    }
     color: "#1a1b26"
     objectName: "teamsPanel"
 
@@ -54,6 +75,12 @@ Rectangle {
                 font.pixelSize: 11
             }
             Item { Layout.fillWidth: true }
+            TuiButton {
+                objectName: "teamHierarchyToggle"
+                text: root.hierarchyView ? "Grouped" : "Flat"
+                onClicked: root.hierarchyView = !root.hierarchyView
+                Accessible.name: "Switch team grouping"
+            }
             TuiBusyIndicator {
                 visible: root.controller.teamsLoading
                 running: visible
@@ -105,7 +132,7 @@ Rectangle {
                 SplitView.preferredWidth: 280
                 SplitView.minimumWidth: 190
                 SplitView.maximumWidth: 390
-                model: root.controller.teams
+                model: root.orderedTeams()
                 clip: true
                 spacing: 4
                 topMargin: 8
@@ -129,6 +156,7 @@ Rectangle {
                     }
                     contentItem: RowLayout {
                         spacing: 9
+                        Item { Layout.preferredWidth: Math.min(Number(teamRow.modelData.treeDepth || 0), 5) * 14 }
                         Rectangle {
                             Layout.preferredWidth: 34
                             Layout.preferredHeight: 34
@@ -174,9 +202,9 @@ Rectangle {
                             }
                             TuiText {
                                 Layout.fillWidth: true
-                                text: String(teamRow.modelData.latest_message || "")
-                                    || String((teamRow.modelData.member_agent_ids || []).length)
-                                        + " members"
+                                text: (teamRow.modelData.parent_team_id ? "Subteam · " : "")
+                                    + (String(teamRow.modelData.latest_message || "")
+                                       || String((teamRow.modelData.member_agent_ids || []).length) + " members")
                                 color: "#6c7188"
                                 font.pixelSize: 11
                                 elide: Text.ElideRight

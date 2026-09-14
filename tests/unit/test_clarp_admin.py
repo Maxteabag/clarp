@@ -1024,7 +1024,7 @@ def test_prompt_accepts_explicit_watcher_origin(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         admin, "api_request",
-        lambda method, path, body: captured.update(
+        lambda method, path, body, **_kwargs: captured.update(
             method=method, path=path, body=body) or {"ok": True},
     )
     args = admin.parser().parse_args([
@@ -1201,10 +1201,10 @@ def test_pwa_access_url_carries_the_token(tmp_path, monkeypatch):
     assert admin.pwa_access_url() == "http://127.0.0.1:7682/?token=abc%2Fdef%2B1"
 
 
-def test_pwa_access_url_uses_public_base_url(tmp_path, monkeypatch):
+def test_pwa_admin_bootstrap_stays_local_when_public_url_is_configured(tmp_path, monkeypatch):
     _config(tmp_path, monkeypatch,
             '[server]\npublic_base_url = "https://mac.tail.ts.net/"\nauth_token = "tok"\n')
-    assert admin.pwa_access_url() == "https://mac.tail.ts.net/?token=tok"
+    assert admin.pwa_access_url() == "http://127.0.0.1:7682/?token=tok"
 
 
 def test_pwa_access_url_without_auth_is_plain(tmp_path, monkeypatch):

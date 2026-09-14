@@ -308,22 +308,22 @@ def test_lifecycle_service_allows_deleting_last_agent_for_server_move(tmp_path):
 
 def test_lifecycle_service_releases_session_without_deleting_contact(tmp_path):
     ctx = _ctx(tmp_path)
-    personas.create(name="Nova", voice_id='{"cartesia":"voice-1"}')
+    personas.create(name="Custom Nova", voice_id='{"cartesia":"voice-1"}')
     agents_db.create_agent(
-        persona="Nova", voice_id="", cwd=str(tmp_path), session="nova-chat",
+        persona="Custom Nova", voice_id="", cwd=str(tmp_path), session="nova-chat",
     )
 
     AgentLifecycleService(ctx).delete("nova-chat")
 
     assert agents_db.get_by_session("nova-chat") is None
-    assert personas.get("Nova") is not None
+    assert personas.get("Custom Nova") is not None
 
     replacement = AgentLifecycleService(ctx).create({
-        "name": "Nova", "session": "nova-chat", "cwd": str(tmp_path),
+        "name": "Custom Nova", "session": "nova-chat", "cwd": str(tmp_path),
         "synthesize_audio": False, "backend": "codex",
     })
     assert replacement.session != "nova-chat"
-    assert agents_db.get_by_session(replacement.session)["persona"] == "Nova"
+    assert agents_db.get_by_session(replacement.session)["persona"] == "Custom Nova"
 
 
 def test_lifecycle_service_enforces_tier_backend_locking(tmp_path):

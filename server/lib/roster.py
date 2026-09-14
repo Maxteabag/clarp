@@ -5,21 +5,11 @@ unit tests don't have to wire up filesystem fixtures for the simplest cases.
 A future iteration can move them behind a `Config` class.
 """
 
-# Predefined persona name → ElevenLabs voice id.
-# The user creates agents by name from this roster; names outside it are
-# rejected by the create-agent voice intent.
-AGENT_ROSTER: dict[str, str] = {
-    "Mike":   "nPczCjzI2devNBz1zQrb",
-    "Rachel": "21m00Tcm4TlvDq8ikWAM",
-    "Domi":   "AZnzlk1XvdvUeBnXmlld",
-    "Bella":  "EXAVITQu4vr4xnSDxMaL",
-    "Antoni": "ErXwobaYiN019PkySvjV",
-    "Elli":   "MF3mGyEYCl7XYWbV9V6O",
-    "Josh":   "TxGEqnHWrfWFTfGW9XjX",
-    "Arnold": "VR6AewLTigWG4xSOukaG",
-    "Adam":   "pNInz6obpgDQGcFmaJgB",
-    "Sam":    "yoZ06aMxZJJ28mfd3POQ",
-}
+from .config import DEFAULT_ROSTER
+
+# The config roster is the portable source of truth used by creation, persona
+# seeding, and this backend-tier validator.
+AGENT_ROSTER: dict[str, str] = dict(DEFAULT_ROSTER)
 
 
 def lookup_persona(name: str) -> tuple[str | None, str | None]:
@@ -172,4 +162,3 @@ def validate_contact_backend(name: str, backend: str, persona_tier: str = "") ->
         return True, None
     norm_backend = (backend or "").strip().lower()
     return norm_backend == allowed.lower(), allowed
-

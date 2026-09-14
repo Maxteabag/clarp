@@ -282,7 +282,12 @@ time.sleep(60)
     child_pid = int((package / "child-pid").read_text())
     for _ in range(20):
         stat_path = Path(f"/proc/{child_pid}/stat")
-        if stat_path.is_file() and stat_path.read_text().split()[2] == "Z":
+        try:
+            child_state = stat_path.read_text().split()[2]
+        except FileNotFoundError:
+            # Reaped between observation and read: the child is no longer running.
+            break
+        if child_state == "Z":
             break
         try:
             os.kill(child_pid, 0)

@@ -111,6 +111,113 @@ wizard, release, managed-skills, model, update, rollback, and uninstall model.
 never writes Claude settings, and creates a default configuration only when one
 does not already exist.
 
+### Headless setup and pairing (no QR code)
+
+The QR code is just a picture of a one-time pairing link. You can set up a
+headless Host over SSH and pair a phone without a camera, browser, or graphical
+desktop on the Host.
+
+First choose how the phone will reach the Host. The automation example above
+uses `--network off`, so it does not yet allow phone access. For Tailscale,
+after signing the Host into your tailnet:
+
+```bash
+clarp-admin network use tailscale
+```
+
+For a managed relay, use the HTTPS origin, Host ID, and private connector-key
+file supplied by the relay operator. Replace the example values below:
+
+```bash
+clarp-admin network relay configure \
+  --url https://relay.example \
+  --host-id your-host-id \
+  --key-stdin < /path/to/private/relay-key
+clarp-admin network relay enable
+clarp-admin network relay status
+```
+
+Wait for the relay status to say `connected`. These commands require a Host
+version with managed-relay support; see [relay setup and migration](docs/security/relay-authentication.md)
+for details. Enabling the relay preserves an existing Tailscale connection.
+
+On the Host, request JSON instead of displaying a QR code. For the configured
+primary connection, such as Tailscale:
+
+```bash
+clarp-admin pair create --name "My iPhone" --json
+```
+
+For the managed relay:
+
+```bash
+clarp-admin pair create --relay --name "My iPhone" --json
+```
+
+The JSON contains `uri` (the `clarp://pair?...` link), `url` (the Host address),
+and `code` (the one-time pairing secret). Transfer the **`uri` value** to your
+phone through a trusted channel and tap it. The installed Clarp app opens and
+exchanges the code for its own device credential automatically. The code
+expires after ten minutes by default and works only once; create a fresh one
+if it expires or has already been used. Normal reconnects do not need pairing
+again.
+
+#### Fully automated clients
+
+A script can exchange the code directly, without opening a link. On the Host,
+save a pairing record in a private directory:
+
+```bash
+clarp_pairing_dir=$(mktemp -d)
+clarp-admin pair create --relay --name "Automation client" --scope limited --json \
+  > "$clarp_pairing_dir/pairing.json"
+printf 'Pairing record: %s\n' "$clarp_pairing_dir/pairing.json"
+```
+
+Omit `--relay` to use the primary connection. Transfer `pairing.json` securely
+to the client, then run the following in Bash with `curl` and `jq` installed:
+
+```bash
+(
+  set -euo pipefail
+  umask 077
+  clarp_credentials_dir=$(mktemp -d)
+  clarp_pairing_url=$(jq -er '.url' pairing.json)
+  jq '{code, device_name: "Automation client"}' pairing.json |
+    curl --fail --silent --show-error \
+      --header 'Content-Type: application/json' --data-binary @- \
+      "${clarp_pairing_url%/}/pairing/exchange" \
+      > "$clarp_credentials_dir/device.json"
+
+  jq -er '"Authorization: Bearer " + .device.token' "$clarp_credentials_dir/device.json" |
+    curl --fail --silent --show-error --header @- "${clarp_pairing_url%/}/status"
+  printf '\nDevice credentials saved in %s\n' "$clarp_credentials_dir/device.json"
+)
+```
+
+The response's `device.token` is the client's reusable credential. Store it in
+the client's secret store and send it as `Authorization: Bearer <device.token>`
+on subsequent requests. Keep pairing records and device credentials out of
+logs, URLs, and source control. The example uses limited access; choose
+`--scope full` at pairing time only if the client needs Host administration.
+Revoke a client with `clarp-admin pair revoke DEVICE_ID` to reject future
+requests and close its active connections.
+
+### Prefer direct Wi-Fi access automatically
+
+Once the Host and iPhone are paired through HTTPS, run:
+
+```bash
+clarp-admin network local enable
+```
+
+On the iPhone, leave **Prefer local connection** enabled and allow Local Network
+access. Clarp uses direct encrypted Wi-Fi when available and automatically returns
+to the saved Tailscale/relay address when it is not. No IP entry or certificate
+installation is needed. The computer can use Ethernet on the same LAN.
+See [local connections](docs/security/local-connections.md) for firewall, discovery,
+certificate trust and fallback details.
+
 ## Updating
 
 Use the installed updater:
@@ -346,20 +453,17 @@ expose it through Tailscale Serve, another reverse proxy, or a Tailnet address.
   (clarp wraps `claude -p` so we get token-level streaming output natively),
   so a caller can effectively run arbitrary code as the user.
 
-For phone access, use both of these:
+For phone access, configure Tailscale Serve, the managed relay, or an HTTPS
+reverse proxy, and use [one-time device pairing](#headless-setup-and-pairing-no-qr-code).
+The networking commands ensure the Host has an administrator token; keep that
+token local rather than sharing it with phones. Protected remote requests use
+the paired device's bearer token or authentication cookie. Query-string
+credentials and the administrator token are accepted only on direct local
+requests, and reverse proxies must preserve forwarding metadata.
 
-1. Keep `bind_addr = "127.0.0.1"` and put `tailscale serve` (or any other
-   reverse proxy that handles auth) in front of `:7682`, or deliberately bind
-   to this machine's Tailnet address.
-2. Set `auth_token = "<a long random string>"`. Every request then needs
-   `Authorization: Bearer <token>` or `?token=<token>`. The PWA picks the
-   token up from `?token=` on first visit and stores it in `localStorage`,
-   so the URL you bookmark is the one with the token in the query string.
-   Setup prints that link, and `clarp-admin url` (or `clarp-admin url --qr`)
-   prints it again. If the PWA says the server rejected the token, open the
-   link once more.
-
-Generate a token with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+`clarp-admin url` provides local PWA bootstrap access. Do not bookmark or share
+credential-bearing URLs. See [authentication boundaries and relay trust](docs/security/relay-authentication.md#authentication-boundaries)
+for the full policy.
 
 ## Layout
 

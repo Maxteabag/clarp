@@ -49,7 +49,7 @@ test.describe('Modal Keyboard & Split Panes E2E', () => {
       },
     }));
 
-    await page.goto('/?token=test', { waitUntil: 'domcontentloaded' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
 
     // 1. Verify initial state in pane mode with persistent shortcut bar
     const shortcutBar = page.locator('.shortcut-bar');

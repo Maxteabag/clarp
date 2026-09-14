@@ -9,11 +9,13 @@ clients.
 from __future__ import annotations
 
 import dataclasses
+import errno
 import json
 import pathlib
 import socket
 import socketserver
 import threading
+import time
 import uuid
 from typing import Any
 
@@ -89,12 +91,40 @@ class RuntimeClient:
         self.socket_path = pathlib.Path(socket_path)
         self.timeout = timeout
 
+    # A Unix-stream connect() fails with EAGAIN the instant the listener's
+    # backlog is full; Linux neither queues nor blocks the caller.  Under a
+    # status poll storm every HTTP thread saw that as "runtime unavailable"
+    # (2026-09-12: thousands of ``[Errno 11]`` per ten minutes and lost
+    # ``/send`` prompts) although the runtime was healthy.  Retry with a short
+    # backoff inside the caller's timeout budget; a fresh socket per attempt
+    # because a failed connect leaves the old one unusable.
+    _CONNECT_BACKOFF_INITIAL = 0.02
+    _CONNECT_BACKOFF_MAX = 0.25
+
+    def _connect(self) -> socket.socket:
+        deadline = time.monotonic() + self.timeout
+        delay = self._CONNECT_BACKOFF_INITIAL
+        while True:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                client.settimeout(self.timeout)
+                client.connect(str(self.socket_path))
+                return client
+            except OSError as exc:
+                client.close()
+                backlog_full = exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK)
+                if not backlog_full or time.monotonic() + delay > deadline:
+                    raise
+            except BaseException:
+                client.close()
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, self._CONNECT_BACKOFF_MAX)
+
     def _request(self, method: str, params: dict[str, Any] | None = None) -> dict:
         request = encode_request(method, params)
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(self.timeout)
-                client.connect(str(self.socket_path))
+            with self._connect() as client:
                 client.sendall(request)
                 chunks: list[bytes] = []
                 total = 0
@@ -277,6 +307,13 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
 
     daemon_threads = True
     allow_reuse_address = False
+    # socketserver's default listen backlog is 5.  The HTTP server asks for
+    # ``status`` once per agent per snapshot from dozens of threads, so a
+    # 120-agent fleet overran that queue constantly and clients got EAGAIN
+    # (see RuntimeClient._connect).  The kernel caps this at
+    # ``net.core.somaxconn`` (4096 on current Linux); 256 covers a full
+    # fleet-wide burst while the accept loop is starved for a moment.
+    request_queue_size = 256
 
     def __init__(
         self,

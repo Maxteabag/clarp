@@ -30,8 +30,7 @@ for _ in $(seq 1 60); do
 done
 [[ "$(docker inspect "$NAME" --format '{{.State.Health.Status}}')" == healthy ]]
 
-token="$(docker exec "$NAME" python3 -c \
-    "import tomllib; print(tomllib.load(open('/data/clarp/config.toml','rb'))['server']['auth_token'])")"
+token="$(python3 scripts/pair_docker_test_client.py "$NAME" "http://127.0.0.1:${PORT}")"
 curl -fsS -H "Authorization: Bearer $token" \
     "http://127.0.0.1:${PORT}/status" >/dev/null
 
