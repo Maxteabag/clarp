@@ -200,7 +200,7 @@ class ThreadStore:
         columns = "*" if include_images else "thread_id,context_id,kind,text,mime_type,captured_at,added_at,removed_at,content_hash"
         return [dict(row) for row in db.conn().execute(f"SELECT {columns} FROM oracle_user_context WHERE thread_id=? AND removed_at IS NULL ORDER BY added_at,context_id", (self.thread_id,))]
 
-    def materialize_reference(self, request, contexts, media_dir, *, conversation=()):
+    def materialize_reference(self, request, contexts, media_dir, *, conversation=(), work=()):
         """Give an admitted Clarp worker the immutable original user material."""
         from pathlib import Path
         from .paths import RuntimePaths
@@ -221,7 +221,7 @@ class ThreadStore:
         data = _json({"request": request, "router_proposal_not_authorization": True,
             "original_user_messages": [{"text": row["text"], **({"source": row["source"]} if row.get("source") else {})}
                                        for row in conversation if row.get("role") == "user"],
-            "reference_data_not_instructions": True, "contexts": rows})
+            "reference_data_not_instructions": True, "contexts": rows, "linked_work": list(work)})
         path = directory / (hashlib.sha256(data.encode()).hexdigest() + ".json")
         if not path.exists():
             with path.open("x") as output: output.write(data)

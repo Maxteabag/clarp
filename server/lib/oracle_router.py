@@ -190,7 +190,7 @@ def _codex(body, stop, timeout, images=()):
                 _terminate(process)
 
 
-def route(body, *, backend, api_key, stop, timeout=35, images=()):
+def route(body, *, backend, api_key, stop, timeout=35, images=(), session=None):
     if backend not in BACKENDS:
         raise RouterError("unsupported_router_backend")
     if body.get("model") != MODEL:
@@ -203,7 +203,8 @@ def route(body, *, backend, api_key, stop, timeout=35, images=()):
     started = time.monotonic()
     try:
         if backend == "codex":
-            result = _codex(body, stop, timeout, images) if images else _codex(body, stop, timeout)
+            result = session.route(body, timeout, images) if session is not None else (
+                _codex(body, stop, timeout, images) if images else _codex(body, stop, timeout))
         else:
             if not api_key:
                 raise RouterError("api_key_required")

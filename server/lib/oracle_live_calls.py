@@ -94,13 +94,15 @@ class Call:
             conversation = PodcastConversation(result["socket"], self.emit, self.cfg.openai_key(), self.podcast["context"],
                 tools=self.tools, router_backend=self.cfg.oracle_router_backend, wire=self.wire,
                 images=self.podcast["images"], history_id=self.history_id, media_dir=getattr(self.ctx, "media_dir", None),
-                memory=self.memory, provider_session=result["session_id"])
+                memory=self.memory, provider_session=result["session_id"],
+                delegation_strategy=getattr(self.cfg, "oracle_delegation_strategy", "operator"), router_reuse=getattr(self.cfg, "oracle_router_reuse", False))
             self.emit({"type": "podcast.history", "conversation_id": self.history_id, "saved": True,
                        "position": self.podcast["position"]})
         else:
             conversation = oracle_live.Conversation(result["socket"], self.emit, self.tools, self.cfg.openai_key(),
                 router_backend=self.cfg.oracle_router_backend, wire=self.wire,
-                memory=self.memory, provider_session=result["session_id"])
+                memory=self.memory, provider_session=result["session_id"],
+                delegation_strategy=getattr(self.cfg, "oracle_delegation_strategy", "operator"), router_reuse=getattr(self.cfg, "oracle_router_reuse", False))
         self.conversation = conversation
         if self.cfg.oracle_diagnostics:
             from .oracle_diagnostics import OracleJournal
@@ -231,10 +233,12 @@ def create(*, ctx, principal, data, stop, negotiate=oracle_live_provider.negotia
     except ValueError as exc:
         raise CallError(str(exc), 400) from None
     cfg = config.load()
+    if getattr(cfg, "oracle_delegation_strategy", "operator") not in ("operator", "direct_contact"):
+        raise CallError("Unsupported Oracle delegation strategy", 400)
     wire = LiveWire(cfg.oracle_voice_backend)
     if data.get("mode") != wire.mode:
         raise CallError("Oracle voice account changed; refresh the connection settings", 409)
-    if cfg.oracle_router_backend == "api" and not cfg.openai_key():
+    if getattr(cfg, "oracle_delegation_strategy", "operator") == "operator" and cfg.oracle_router_backend == "api" and not cfg.openai_key():
         raise CallError("Oracle API routing requires an OpenAI key on this Host", 503)
     podcast = _podcast(data)
     fallback = str(data.get("oracle_session") or "")
