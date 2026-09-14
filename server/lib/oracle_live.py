@@ -523,7 +523,10 @@ class Conversation:
                         elif item.get("type") == "message" and not any(row.get("type") == "function_call" for row in result.get("output", [])):
                             text = "".join(c.get("text", "") for c in item.get("content", []) if c.get("type") == "output_text")
                             if text:
-                                self.append("commentary", text, delegation_id=ident)
+                                sent = self.append("commentary", text, delegation_id=ident)
+                                if sent:
+                                    self.downstream({"type": "oracle_v2.answer_context", "revision": revision,
+                                                     "local_append_ids": sent, "status": "sent_not_heard"})
                     return
                 self.append("commentary", "The request kept changing before work could start. "
                             "No new work was admitted. Ask the user to finish the correction.", delegation_id=ident)
