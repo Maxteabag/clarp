@@ -89,3 +89,27 @@ and the linked accepted ADRs. The current direction is creative but not disrupti
 extend established concepts; do not interpret ordinary novelty as a redesign request.
 New explicit owner instructions take precedence. Record lasting changes to the vision
 as a new ADR and update the index; do not silently rewrite the rationale to match code.
+
+## Client contract
+
+`server/lib/server_identity.py` carries `HOST_CONTRACT` and
+`MIN_IOS_CONTRACT`, the integers the iOS app uses to decide whether it can
+talk to this Host. When you add or change anything a client may depend on
+(an endpoint, a response field, an SSE event, a feature in `FEATURES`), bump
+`HOST_CONTRACT`, give a new feature its number in `FEATURE_CONTRACTS`, and add
+a row at the top of `docs/compatibility.md`. Bump `MIN_IOS_CONTRACT` only when
+old apps genuinely stop working; it puts a red banner in front of every user
+below it. `tests/unit/test_client_contract.py` fails when the table and the
+constants disagree; keep them in step in the same commit.
+
+## Client contract
+
+`server/lib/server_identity.py` carries `HOST_CONTRACT` and
+`MIN_IOS_CONTRACT`, the integers the iOS app uses to decide whether it can
+talk to this Host. When you add or change anything a client may depend on
+(an endpoint, a response field, an SSE event, a feature in `FEATURES`), bump
+`HOST_CONTRACT`, give a new feature its number in `FEATURE_CONTRACTS`, and add
+a row at the top of `docs/compatibility.md`. Bump `MIN_IOS_CONTRACT` only when
+old apps genuinely stop working; it puts a red banner in front of every user
+below it. `tests/unit/test_client_contract.py` fails when the table and the
+constants disagree; keep them in step in the same commit.
