@@ -1342,3 +1342,24 @@ def test_stop_cancels_codex_connection_retry(tmp_path, monkeypatch, stop_during_
     assert len(backend.spawned) == 1
     if stop_during_probe:
         assert pending == []
+
+def test_codex_account_recovery_preserves_native_identity_and_user_stop(tmp_path,monkeypatch):
+    from dataclasses import replace
+    from lib.claude_failover import ClaudeFailover
+    from unittest.mock import Mock
+    cfg=replace(_td.config.load(),codex_account_switch_command=('codex-selector',))
+    monkeypatch.setattr(_td.config,'load',lambda *args,**kwargs:cfg)
+    scheduled=[];coordinator=ClaudeFailover(_td._TURN_LOCK,switch=Mock(return_value=True),schedule=lambda d,f:scheduled.append((d,f)),now=lambda:100)
+    monkeypatch.setattr(_td,'_CODEX_FAILOVER',coordinator)
+    service,backend,aid=_make_service(tmp_path)
+    agents_db.update_agent(aid,backend='codex')
+    service.dispatch(text='Continue current task',requested_session='mike',trace_id='codex-owned',synthesize_audio=False)
+    previous=backend.spawned[-1][1]
+    previous['on_session_init']('codex-native-conversation')
+    assert coordinator.request(aid,'codex-owned',('codex-selector',))
+    scheduled.pop()[1]()
+    resumed=backend.spawned[-1][1]
+    assert resumed['backend_session_id']=='codex-native-conversation'
+    assert resumed['trace_id']=='codex-owned'
+    assert 'do not repeat work' in resumed['text']
+    assert not resumed['is_new_session']

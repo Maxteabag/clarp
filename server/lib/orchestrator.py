@@ -575,6 +575,10 @@ class OrchestratorService:
         from . import model_fallbacks
         run = janitors.get_run(run_id)
         primary = {"backend": settings.provider, "model": settings.model, "effort": settings.effort}
+        effective=run.get("configuration",{}).get("effective_chain",{})
+        if effective.get("source")=="global" and effective.get("chain"):
+            chosen=effective["chain"][0]
+            primary={"backend":chosen["provider"],"model":chosen["model"],"effort":""}
         def invoke(model):
             selected = replace(settings, provider=model["backend"], model=model["model"], effort=model.get("effort", ""))
             return parse_decision(self.model_call(packet, selected))

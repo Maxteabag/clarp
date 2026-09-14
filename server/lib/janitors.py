@@ -53,7 +53,7 @@ def _write():
 
 
 def templates() -> list[dict]:
-    return [{"id": "task-labels", "name": "Task labels",
+    return autonomy_templates() + [{"id": "task-labels", "name": "Task labels",
              "description": "Keep agents' current task labels clear and useful.",
              "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
              "recommended_effort": "low",
@@ -76,6 +76,12 @@ def templates() -> list[dict]:
                   "min": 250, "max": 60000, "step": 250},
                  {"key": "voice_id", "label": "Routing voice", "type": "string",
                   "default": "79f8b5fb-2cc8-479a-80df-29f7a7cf1a3e"}]},
+            {"id": "audio-bookkeeper", "name": "Audio bookkeeper",
+             "description": "Record producer and client-reported audio lifecycle facts deterministically; no model or primary-agent skill.",
+             "recommended_backend": "codex", "recommended_model": None, "recommended_effort": None,
+             "allowed_effects": ["audio_lifecycle_receipt"], "creatable": True,
+             "supported_trigger_ids": ["audio-lifecycle-observed"], "default_trigger_id": "audio-lifecycle-observed",
+             "supported_providers": ["codex"], "options": []},
             {"id": "tool-explainer", "name": "Tool explainer",
              "description": "Explain requested tool activity using bounded read-only input.",
              "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
@@ -86,6 +92,25 @@ def templates() -> list[dict]:
                  "description": "Choose how requested tool activity is explained. Developer keeps the original activity.",
                  "choices": [{"value": value, "label": label} for value, label in enumerate(
                      ["Developer", "Technical", "Balanced", "Plain English", "Grandma"])]}]}]
+
+
+def autonomy_templates():
+    return [
+        {"id": role, "name": name, "description": description,
+         "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
+         "recommended_effort": "low", "allowed_effects": [effect], "creatable": True,
+         "supported_trigger_ids": [trigger], "default_trigger_id": trigger,
+         "supported_providers": ["openai", *(item.id for item in backends.routing_adapters())],
+         "options": options}
+        for role,name,description,effect,trigger,options in [
+          ("heartbeat-decider", "Heartbeat keeper", "Decide whether, when and how an idle agent should continue current commitments.", "heartbeat_decision", "heartbeat-decision-requested", [
+            {"key":"review_interval_seconds","label":"Minimum review interval (seconds)","type":"integer","default":300,"min":60,"max":86400},
+            {"key":"timeout_ms","label":"Decision timeout (milliseconds)","type":"integer","default":30000,"min":1000,"max":120000}]),
+          ("quota-monitor", "Quota keeper", "Monitor provider quota, notify and coordinate authorized runtime account recovery.", "quota_monitor", "quota-check-requested", [
+            {"key":"interval_seconds","label":"Check interval (seconds)","type":"integer","default":300,"min":60,"max":86400},
+            {"key":"remaining_threshold","label":"Notify at remaining percent","type":"integer","default":25,"min":0,"max":100},
+            {"key":"recovery_mode","label":"Account recovery","type":"choice","default":"notify", "choices":[{"value":"notify","label":"Notify only"},{"value":"ask","label":"Ask before recovery"},{"value":"automatic","label":"Use configured runtime account selector"}]}])
+        ]]
 
 
 def template(value: str) -> dict:
@@ -273,6 +298,10 @@ def _save_attachments(c, agent_id: str, values: list[dict], now: int):
 
 
 def _model(agent: dict, model, effort, *, provider=None):
+    if provider == "local":
+        if model not in (None, "") or effort not in (None, ""):
+            raise JanitorError("Deterministic bookkeeping does not use a model or reasoning effort")
+        return
     if model is not None and (not isinstance(model, str) or len(model) > 160 or not backends.is_valid_model(agent["backend"], model)):
         raise JanitorError("Invalid model for this agent")
     efforts = ("minimal", "low", "medium", "high") if provider == "openai" else backends.valid_efforts(agent["backend"])
@@ -281,6 +310,10 @@ def _model(agent: dict, model, effort, *, provider=None):
 
 
 def _execution(template_id: str, value, backend: str) -> dict:
+    if template_id == "audio-bookkeeper":
+        if value is not None and (not isinstance(value, dict) or set(value) - {"executor", "provider"}):
+            raise JanitorError("Invalid deterministic execution configuration")
+        return {"executor": "deterministic", "provider": "local"}
     if template_id == "task-labels":
         if value not in ({}, None):
             raise JanitorError("Task labels use the managed agent executor")
@@ -484,6 +517,9 @@ def set_enabled(session: str, expected_revision: int, enabled: bool) -> dict:
             if not c.execute("SELECT 1 FROM janitor_attachments WHERE agent_id=? AND enabled=1 AND retired_at IS NULL", (a["agent_id"],)).fetchone():
                 raise JanitorError("Enable at least one trigger first")
         now = db.now_ms()
+        if enabled and row["template_id"] == "heartbeat-decider":
+            from . import settings_store
+            settings_store.set_bool("heartbeat.janitor_adopted", True)
         _fence(c, a["agent_id"], now)
         c.execute("UPDATE janitor_configs SET enabled=?,generation=generation+1,revision=revision+1,last_error='',updated_at=? WHERE agent_id=?", (int(enabled), now, a["agent_id"]))
     return get(session)
@@ -675,6 +711,8 @@ def create_run(attachment_id: str, generation: int, candidates: list[dict], run_
         frozen = {"template_id": _config(c, attachment["agent_id"])["template_id"],
                   "scope": _decode(attachment["scope_json"], {}), "trigger_id": attachment["trigger_id"],
                   "trigger_version": attachment["trigger_version"], "config": _decode(attachment["config_json"], {})}
+        from .janitor_design_policy import effective_chain
+        frozen["effective_chain"] = effective_chain(attachment["session"])
         frozen["options"] = option_values(frozen["template_id"], _decode(_config(c, attachment["agent_id"])["options_json"], {}))
         c.execute("INSERT INTO janitor_runs(run_id,agent_id,session,attachment_id,generation,trace_id,candidates_json,configuration_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)", (run_id, attachment["agent_id"], attachment["session"], attachment_id, generation, run_id, _json(candidates), _json(frozen), db.now_ms()))
         if progress is not None:
@@ -728,6 +766,11 @@ def _active_run(c, run_id):
         raise JanitorError("This maintenance run is no longer active", 409, "run_terminal")
     _active_attachment(c, row["attachment_id"], row["generation"])
     configured = _config(c, row["agent_id"])
+    frozen_chain = _decode(row["configuration_json"], {}).get("effective_chain")
+    if frozen_chain:
+        from .janitor_design_policy import effective_chain
+        if effective_chain(row["session"]) != frozen_chain:
+            raise JanitorError("This maintenance run's model policy changed", 409, "stale_generation")
     if _decode(row["configuration_json"], {}).get("options", {}) != option_values(configured["template_id"], _decode(configured["options_json"], {})):
         raise JanitorError("This maintenance run's options were superseded", 409, "stale_generation")
     return row

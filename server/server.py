@@ -5746,6 +5746,22 @@ def build_server(ctx: ServerContext, port: int,
     heartbeat_scheduler = HeartbeatScheduler(send_heartbeat=_send_agent_heartbeat)
     heartbeat_scheduler.start()
     srv.on_close(heartbeat_scheduler.stop)
+    from lib.janitor_autonomy import AutonomyJanitors
+    from lib import apns
+    def dispatch_decided_heartbeat(session, text, request_id):
+        result = TurnDispatchService(ctx).dispatch(text=text, requested_session=session,
+            forced_session=session, trace_id=request_id, client_msg_id=request_id,
+            synthesize_audio=False, origin="heartbeat", queue_if_busy=False)
+        return result is not None
+    def recover_quota(provider, owner_id, generation, approval_id):
+        runtime = getattr(ctx, "runtime_client", None)
+        if runtime is not None:
+            return runtime.recover_janitor_quota(provider, owner_id, generation, approval_id)
+        from lib.janitor_autonomy import runtime_recover
+        return runtime_recover(provider, owner_id, generation, approval_id)
+    autonomy_janitors = AutonomyJanitors(dispatch_decided_heartbeat, apns.send_user_notification, recover=recover_quota)
+    autonomy_janitors.start()
+    srv.on_close(autonomy_janitors.stop)
     from lib.dreaming import DreamingScheduler
 
     def _send_agent_dream(session: str, text: str) -> bool:
@@ -5794,6 +5810,8 @@ def build_server(ctx: ServerContext, port: int,
         return {"ok": True, "queued": result.queued}
 
     def _janitor_after_tick():
+        from lib.audio_bookkeeper import drain as drain_audio_bookkeeping
+        drain_audio_bookkeeping()
         if janitor_attention.reconcile():
             ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER,
                                   "kind": "janitor-attention"})
