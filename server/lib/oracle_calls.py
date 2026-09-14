@@ -77,6 +77,11 @@ def validate_offer(sdp):
     return sdp
 
 
+def operation_id(principal, call_id, *, replacement=False):
+    key = principal + (":follow:" if replacement else ":") + call_id
+    return "rtc-" + hashlib.sha256(key.encode()).hexdigest()[:40]
+
+
 class AgentTools:
     def __init__(self, ctx, principal, fallback, stop):
         self.ctx, self.principal, self.fallback, self.stop = ctx, principal, fallback, stop
@@ -94,7 +99,7 @@ class AgentTools:
             raise ValueError('Unknown or ambiguous agent; use a session from list_agents')
         return found[0]
 
-    def execute(self, name, arguments, call_id):
+    def execute(self, name, arguments, call_id, *, context_reference=""):
         if name == 'list_agents':
             return {'agents': [{'name': a['persona'], 'session': a['session'],
                                 'backend': a['backend'], 'personality': str(a.get('personality') or '')[:500]}
@@ -129,11 +134,10 @@ class AgentTools:
             if follow:
                 from . import turn_queue
                 turn_queue.set_paused(agent['agent_id'], False)
-                ident = 'rtc-' + hashlib.sha256(
-                    (self.principal + ':follow:' + call_id).encode()).hexdigest()[:40]
+                ident = operation_id(self.principal, call_id, replacement=True)
                 row = oracle_delegations.dispatch(
                     ctx=self.ctx, delegation_id=ident, session=agent['session'],
-                    request_text=follow, authenticated_at_admission=True,
+                    request_text=follow + context_reference, authenticated_at_admission=True,
                     owner_principal=self.principal)
                 with self.lock:
                     self.delegations.add(ident)
@@ -145,9 +149,9 @@ class AgentTools:
         request = str(arguments.get('request') or '').strip()
         if not request or len(request) > 16000:
             raise ValueError('Request must contain 1 to 16000 characters')
-        ident = 'rtc-' + hashlib.sha256((self.principal + ':' + call_id).encode()).hexdigest()[:40]
+        ident = operation_id(self.principal, call_id)
         row = oracle_delegations.dispatch(ctx=self.ctx, delegation_id=ident,
-            session=agent['session'], request_text=request, authenticated_at_admission=True,
+            session=agent['session'], request_text=request + context_reference, authenticated_at_admission=True,
             owner_principal=self.principal)
         with self.lock:
             self.delegations.add(ident)

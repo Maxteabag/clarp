@@ -75,6 +75,13 @@ def test_multiple_actions_and_unknown_tools_rejected():
 def test_silent_empty_proposal_cannot_leave_a_delegation_unanswered():
     with pytest.raises(router.RouterError, match="empty_router_result"):
         router.validate_result({"output": []}, TOOLS)
+
+
+def test_independent_named_agent_actions_can_be_admitted_in_one_plan():
+    value = result()
+    value["output"].append({"type": "function_call", "name": "delegate_to_agent", "call_id": "p-2",
+                            "arguments": json.dumps({"agent": "rowan", "request": "Check staging health"})})
+    assert router.validate_result(value, TOOLS) is value
     value = result(); value["output"][0]["name"] = "run_shell"
     with pytest.raises(router.RouterError, match="invalid_router_action"):
         router.validate_result(value, TOOLS)

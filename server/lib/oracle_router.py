@@ -7,6 +7,7 @@ to the metered API. No token, environment or provider error body is journaled.
 from __future__ import annotations
 
 import json
+import base64
 import os
 from pathlib import Path
 import signal
@@ -47,11 +48,11 @@ def subscription_environment():
 def proposal_schema(tools):
     return {"type": "object", "properties": {
         "message": {"type": "string"},
-        "action": {"anyOf": [{"type": "null"}, {"type": "object", "properties": {
+        "actions": {"type": "array", "maxItems": 8, "items": {"type": "object", "properties": {
             "name": {"type": "string", "enum": [tool["name"] for tool in tools]},
             "arguments": {"type": "string", "description": "JSON object matching the selected tool's parameters"}},
-            "required": ["name", "arguments"], "additionalProperties": False}]}},
-        "required": ["message", "action"], "additionalProperties": False}
+            "required": ["name", "arguments"], "additionalProperties": False}}},
+        "required": ["message", "actions"], "additionalProperties": False}
 
 
 def validate_result(result, tools):
@@ -60,13 +61,14 @@ def validate_result(result, tools):
         raise RouterError("invalid_router_output")
     definitions = {tool["name"]: tool["parameters"] for tool in tools}
     actions = 0
+    seen_actions, seen_ids = set(), set()
     has_message = False
     for item in result["output"]:
         if not isinstance(item, dict):
             raise RouterError("invalid_router_item")
         if item.get("type") == "function_call":
             actions += 1
-            if actions > 1 or item.get("name") not in definitions:
+            if actions > 8 or item.get("name") not in definitions:
                 raise RouterError("invalid_router_action")
             if not isinstance(item.get("call_id"), str) or not item["call_id"]:
                 raise RouterError("invalid_router_call_id")
@@ -75,6 +77,10 @@ def validate_result(result, tools):
                 validate(arguments, definitions[item["name"]])
             except (ValueError, TypeError, KeyError, ValidationError) as exc:
                 raise RouterError("invalid_router_arguments") from exc
+            key = (item["name"], json.dumps(arguments, sort_keys=True))
+            if key in seen_actions or item["call_id"] in seen_ids:
+                raise RouterError("invalid_router_action")
+            seen_actions.add(key); seen_ids.add(item["call_id"])
         elif item.get("type") == "message":
             if not isinstance(item.get("content"), list):
                 raise RouterError("invalid_router_message")
@@ -99,7 +105,7 @@ def _terminate(process):
     process.wait(timeout=5)
 
 
-def _codex(body, stop, timeout):
+def _codex(body, stop, timeout, images=()):
     started = time.monotonic()
     env = subscription_environment()
     # Check before forced_login_method: Codex logs out mismatching credentials.
@@ -116,14 +122,18 @@ def _codex(body, stop, timeout):
         schema = proposal_schema(body["tools"])
         (root / "schema.json").write_text(json.dumps(schema))
         (root / "instructions.txt").write_text(body["instructions"] +
-            "\nReturn one routing proposal matching the schema. Do not execute work yourself. "
-            "Set action to null when answering or clarifying. When choosing an action, "
+            "\nReturn a routing proposal matching the schema. Do not execute work yourself. "
+            "Use an empty actions list when answering or clarifying. Include every independently requested agent action. When choosing actions, "
             "leave message empty; the tool result is not yet known. Tool contracts:\n" +
             json.dumps(body["tools"], ensure_ascii=False))
         args = ["codex", "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral",
             "--skip-git-repo-check", "--sandbox", "read-only", "--json", "--color", "never",
             "--model", MODEL, "--output-schema", str(root / "schema.json"),
             "--output-last-message", str(root / "answer.json")]
+        for index, image in enumerate(images):
+            path = root / (f"context-{index}.png" if image["mime_type"] == "image/png" else f"context-{index}.jpg")
+            path.write_bytes(image["data"])
+            args.extend(["--image", str(path)])
         for setting in ['forced_login_method="chatgpt"', 'approval_policy="never"',
                         'web_search="disabled"', 'project_doc_max_bytes=0', 'mcp_servers={}',
                         'model_reasoning_effort="low"',
@@ -156,11 +166,11 @@ def _codex(body, stop, timeout):
                 proposal = json.loads(answer.read_text())
                 validate(proposal, schema)
                 output = []
-                if proposal["action"]:
+                if proposal["actions"]:
                     if proposal["message"].strip():
                         raise RouterError("unverified_action_commentary")
-                    output.append({"type": "function_call", **proposal["action"],
-                                   "call_id": "codex-" + uuid.uuid4().hex})
+                    output.extend({"type": "function_call", **action, "call_id": "codex-" + uuid.uuid4().hex}
+                                  for action in proposal["actions"])
                 elif proposal["message"].strip():
                     output.append({"type": "message", "content": [
                         {"type": "output_text", "text": proposal["message"]}]})
@@ -180,21 +190,29 @@ def _codex(body, stop, timeout):
                 _terminate(process)
 
 
-def route(body, *, backend, api_key, stop, timeout=35):
+def route(body, *, backend, api_key, stop, timeout=35, images=()):
     if backend not in BACKENDS:
         raise RouterError("unsupported_router_backend")
     if body.get("model") != MODEL:
         raise RouterError("unsupported_router_model")
     if stop.is_set():
         raise RouterError("router_cancelled")
+    if len(images) > 5 or any(image.get("mime_type") not in ("image/png", "image/jpeg")
+                             or not isinstance(image.get("data"), bytes) or len(image["data"]) > 2*1024*1024 for image in images):
+        raise RouterError("invalid_router_images")
     started = time.monotonic()
     try:
         if backend == "codex":
-            result = _codex(body, stop, timeout)
+            result = _codex(body, stop, timeout, images) if images else _codex(body, stop, timeout)
         else:
             if not api_key:
                 raise RouterError("api_key_required")
-            request = Request("https://api.openai.com/v1/responses", json.dumps(body).encode(),
+            payload = body
+            if images:
+                payload = {**body, "input": [{"role": "user", "content": [
+                    {"type": "input_text", "text": body["input"]},
+                    *[{"type": "input_image", "image_url": "data:" + image["mime_type"] + ";base64," + base64.b64encode(image["data"]).decode()} for image in images]]}]}
+            request = Request("https://api.openai.com/v1/responses", json.dumps(payload).encode(),
                 {"Authorization": "Bearer " + api_key, "Content-Type": "application/json"})
             with urlopen(request, timeout=timeout) as response:
                 raw = response.read(MAX_RESULT_BYTES + 1)

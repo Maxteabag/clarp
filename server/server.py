@@ -424,6 +424,7 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/v2": "_handle_oracle_v2",
         "/oracle/calls/status": "_handle_oracle_call_status",
         "/oracle/v2/calls/status": "_handle_oracle_live_call_status",
+        "/oracle/v2/context/image": "_handle_oracle_context_image",
         "/agent-schedules": "_handle_agent_schedules_get",
     }
     _ROOT_STATIC = {"/manifest.json", "/styles.css", "/icon.png"}
@@ -3813,6 +3814,10 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_oracle_live_call_status(self):
         from lib.oracle_live_calls import handle
         return handle(self, "status")
+
+    def _handle_oracle_context_image(self):
+        from lib.oracle_live_calls import context_image
+        return context_image(self)
 
     def _handle_oracle_live_call_create(self):
         from lib.oracle_live_calls import handle

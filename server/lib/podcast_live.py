@@ -212,9 +212,10 @@ def generate_image(*, api_key, context, question, review=review_image, plan=imag
 class PodcastConversation(Conversation):
     def __init__(self, upstream, downstream, api_key, context, *, images=False,
                  tools, router_backend="api", clock=time.monotonic, generate=generate_image,
-                 history_id=None, media_dir=None, wire=None):
+                 history_id=None, media_dir=None, wire=None, memory=None, provider_session=None):
         super().__init__(upstream, downstream, tools, api_key, clock,
-                         router_backend=router_backend, reference_context=context, wire=wire)
+                         router_backend=router_backend, reference_context=context, wire=wire,
+                         memory=memory, provider_session=provider_session)
         self.context = context
         self.images = images
         self.generate = generate
