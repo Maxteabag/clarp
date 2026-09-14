@@ -209,6 +209,12 @@ AppController::AppController(QObject* parent)
         const QString session = m_panes.activeSession();
         if (!session.isEmpty() && session != m_selectedSession) {
             selectSession(session);
+        } else if (session.isEmpty() && !m_selectedSession.isEmpty()) {
+            m_selectedSession.clear();
+            m_conversation = &m_emptyConversation;
+            emit selectedSessionChanged();
+            emit conversationChanged();
+            refreshSelectedProperties();
         }
         const QString paneId = m_panes.activePaneId();
         if (!paneId.isEmpty()) {
@@ -219,6 +225,12 @@ AppController::AppController(QObject* parent)
     connect(this, &AppController::selectedSessionChanged, this, &AppController::nextAttentionChanged);
     connect(this, &AppController::updatesChanged, this, &AppController::nextAttentionChanged);
     const auto bumpAgentRevision = [this] {
+        QSet<QString> active;
+        for(const auto& session : m_agents.sessions()) {
+            const QString state = m_agents.displayState(session);
+            if(state == QStringLiteral("thinking") || state == QStringLiteral("tool") || state == QStringLiteral("compacting") || state == QStringLiteral("running")) active.insert(session);
+        }
+        m_avatarMotion.reconcile(active);
         ++m_agentRevision;
         emit agentRevisionChanged();
     };

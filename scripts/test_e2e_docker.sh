@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the Playwright browser suite against a throwaway Clarp container.
 #
-# The container gets a fresh data volume, a known auth token, and the built-in
+# The container gets a fresh data volume, a paired-device token, and the built-in
 # roster, then is thrown away. Nothing here touches a real Clarp install.
 #
 #   scripts/test_e2e_docker.sh                 # build image, run every spec
@@ -10,7 +10,6 @@
 set -euo pipefail
 
 IMAGE="${CLARP_TEST_IMAGE:-clarp:test}"
-TOKEN="${CLARP_E2E_TOKEN:-test}"
 NAME="clarp-e2e-$$"
 VOLUME="clarp-e2e-$$"
 
@@ -51,16 +50,13 @@ docker volume create "$VOLUME" >/dev/null
 start_node
 wait_healthy
 
-# The specs sign in with a fixed token and expect the built-in roster.
-docker exec -i "$NAME" python3 - "$TOKEN" <<'PY'
+# Seed the test roster while retaining the generated local administrator token.
+docker exec -i "$NAME" python3 - <<'PY'
 import pathlib
 import sys
 
-from lib.config_writer import set_toml_value
-from lib.deployment import LAYOUT
 from lib.roster_seed import seed_defaults
 
-set_toml_value(LAYOUT.config_file, "server", "auth_token", sys.argv[1])
 seed_defaults("claude", cwd=pathlib.Path("/data/workspace"))
 PY
 docker restart "$NAME" >/dev/null
@@ -68,6 +64,6 @@ wait_healthy
 
 port="$(docker port "$NAME" 7682/tcp | head -1 | sed 's/.*://')"
 export CLARP_BASE_URL="http://127.0.0.1:${port}"
-export CLARP_E2E_TOKEN="$TOKEN"
+export CLARP_E2E_TOKEN="$(python3 scripts/pair_docker_test_client.py "$NAME" "$CLARP_BASE_URL")"
 echo "playwright -> $CLARP_BASE_URL (container $NAME)"
 npx playwright test "$@"
