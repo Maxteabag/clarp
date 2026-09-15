@@ -152,6 +152,14 @@ add_test(NAME clarp-desktop-pair-sidebar COMMAND clarp-desktop)
 set_tests_properties(clarp-desktop-pair-sidebar PROPERTIES TIMEOUT 15
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=pair-sidebar-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/pair-sidebar/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_PAIR_SIDEBAR=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/pair-sidebar/capture.png")
 
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/transcript-scroll/config")
+add_test(NAME clarp-desktop-transcript-scroll COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-transcript-scroll PROPERTIES TIMEOUT 25
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=scroll-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/transcript-scroll/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_TRANSCRIPT_SCROLL=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/transcript-scroll/capture.png")
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/transcript-switch/config")
+add_test(NAME clarp-desktop-transcript-switch COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-transcript-switch PROPERTIES TIMEOUT 25
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=switch-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/transcript-switch/config;CLARP_SCREENSHOT_SCENARIO=markdown;CLARP_SCREENSHOT_TRANSCRIPT_SWITCH=1;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/transcript-switch/capture.png")
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ready-reply/config")
 add_test(NAME clarp-desktop-ready-reply COMMAND clarp-desktop)
 set_tests_properties(clarp-desktop-ready-reply PROPERTIES TIMEOUT 15
