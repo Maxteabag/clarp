@@ -120,7 +120,7 @@ def test_production_startup_requests_restart_heartbeat_recovery(
     monkeypatch.setattr(
         heartbeat.HeartbeatScheduler,
         "run_restart_recovery_once",
-        lambda _scheduler: calls.append(True) or 2,
+        lambda _scheduler, interrupted=None: calls.append(True) or 2,
     )
     srv = build_server(
         fake_ctx, _free_port(), bind_addr="127.0.0.1",
@@ -145,7 +145,7 @@ def test_production_startup_marks_restart_interrupted_turns(
     monkeypatch.setattr(
         heartbeat.HeartbeatScheduler,
         "run_restart_recovery_once",
-        lambda _scheduler: order.append("heartbeat") or 0,
+        lambda _scheduler, interrupted=None: order.append("heartbeat") or 0,
     )
     srv = build_server(
         fake_ctx, _free_port(), bind_addr="127.0.0.1",
@@ -165,7 +165,7 @@ def test_injected_test_server_does_not_run_restart_recovery(
     monkeypatch.setattr(
         heartbeat.HeartbeatScheduler,
         "run_restart_recovery_once",
-        lambda _scheduler: calls.append(True) or 2,
+        lambda _scheduler, interrupted=None: calls.append(True) or 2,
     )
     srv = build_server(fake_ctx, _free_port(), bind_addr="127.0.0.1")
     try:

@@ -860,12 +860,23 @@ def routing_cmd(prompt: str, *, model: str = "", effort: str = "") -> list[str]:
 def routing_text(stdout: str) -> str:
     """The final agent message of a ``codex exec --json`` run."""
     final_text = ""
+    failure = ""
     for line in (stdout or "").splitlines():
         try:
             event = json.loads(line)
         except (TypeError, json.JSONDecodeError):
             continue
-        if not isinstance(event, dict) or event.get("type") != "item.completed":
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") in {"turn.failed", "error"}:
+            # The provider's refusal (unsupported model, auth, quota) rides in
+            # these events; surface it instead of a bare "no agent message".
+            detail = event.get("error") if event.get("type") == "turn.failed" else event
+            message = detail.get("message") if isinstance(detail, dict) else None
+            if isinstance(message, str) and message.strip():
+                failure = _codex_failure_message(message)
+            continue
+        if event.get("type") != "item.completed":
             continue
         item = event.get("item")
         if isinstance(item, dict) and item.get("type") == "agent_message":
@@ -873,5 +884,27 @@ def routing_text(stdout: str) -> str:
             if isinstance(candidate, str) and candidate.strip():
                 final_text = candidate
     if not final_text:
+        if failure:
+            raise ValueError(f"codex orchestrator failed: {failure}")
         raise ValueError("codex orchestrator returned no agent message")
     return final_text
+
+
+def _codex_failure_message(message: str) -> str:
+    """Unwrap codex's JSON-in-a-string provider error down to its human text."""
+    text = message.strip()
+    for _ in range(3):
+        try:
+            value = json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            break
+        if isinstance(value, dict):
+            inner = value.get("error")
+            if isinstance(inner, dict) and isinstance(inner.get("message"), str):
+                text = inner["message"].strip()
+                continue
+            if isinstance(value.get("message"), str):
+                text = value["message"].strip()
+                continue
+        break
+    return text[:300]

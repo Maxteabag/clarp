@@ -65,6 +65,12 @@ def decision_model(packet,run):
         return orchestrator._extract_json(runner.routing_text(p.stdout))
     return model_fallbacks.execute(run['agent_id'],run['run_id']+':decision',primary,invoke,current=lambda:janitor_builtins.is_current(run['run_id']))
 
+def decision_failure(exc):
+    """Bounded, readable failure text so the run history says why nobody was woken."""
+    detail=' '.join(str(exc).split())[:300]
+    text='Decision unavailable or invalid; no target was woken'
+    return f'{text}: {type(exc).__name__}: {detail}' if detail else f'{text}: {type(exc).__name__}'
+
 def validate_decision(value):
     if not isinstance(value,dict) or set(value)-{'action','delay_seconds','message','reason'}:raise ValueError('Invalid decision fields')
     if value.get('action') not in ['wake','defer','noop']:raise ValueError('Invalid action')
@@ -104,8 +110,8 @@ class AutonomyJanitors:
             try:
                 if len(json.dumps(snap,default=str).encode())>65536:raise ValueError('Current evidence exceeds decision input budget')
                 decision=validate_decision(self.model_call(snap,run))
-            except Exception:
-                janitor_builtins.complete_run(run['run_id'],'failed',error='Decision unavailable or invalid; no target was woken')
+            except Exception as exc:
+                janitor_builtins.complete_run(run['run_id'],'failed',error=decision_failure(exc))
                 # Backoff is a capacity guard, not a rigid wake decision.
                 db.conn().execute('INSERT OR REPLACE INTO janitor_continuity VALUES (?,?,?,?,?,?)',(agent['agent_id'],fingerprint,run['run_id'],'{}',now+owner['options']['review_interval_seconds']*1000,'failed'))
                 continue
@@ -216,6 +222,52 @@ def quota_crossing(provider,account,window,used,owner,stamp):
     threshold=owner['options']['remaining_threshold'];cross=(remaining<=threshold and (prior is None or prior['remaining']>threshold)) or (remaining==0 and prior is not None and prior['remaining']>0)
     settings_store.set_text(key,json.dumps({'stamp':stamp,'remaining':remaining}))
     return {'remaining':remaining} if cross else None
+
+
+def continuity_status(agent_id, limit=20):
+    """Read-only projection of the keeper's decisions about one target agent.
+
+    Feeds the agent inspector instead of the chat transcript: noop/defer runs
+    never touched the conversation, so they only exist here. Returns
+    ``{"adopted", "keeper", "decision", "history"}`` where history items carry
+    the same ``id/text/timestamp/updated_at`` shape the old message-based
+    history used.
+    """
+    import datetime
+    c=db.conn()
+    adopted=bool(settings_store.get_bool('heartbeat.janitor_adopted') or janitor_builtins.resolve('heartbeat-decider'))
+    owner=janitor_builtins.get_builtin('heartbeat-decider')
+    keeper=({'session':owner['session'],'enabled':bool(owner['enabled']),'health':owner.get('health','')} if owner else None)
+    decision=None
+    if c.execute("SELECT 1 FROM sqlite_master WHERE name='janitor_continuity'").fetchone():
+        row=c.execute('SELECT * FROM janitor_continuity WHERE target_id=?',(agent_id,)).fetchone()
+        if row:
+            value=json.loads(row['decision_json'] or '{}')
+            decision={'status':row['status'],'due_at':row['due_at'],'run_id':row['run_id'],
+                'action':value.get('action',''),'reason':value.get('reason','')}
+    rows=c.execute("""SELECT r.run_id,r.status,r.outcome,r.error,r.created_at,r.finished_at,r.configuration_json,d.result_json
+        FROM janitor_runs r LEFT JOIN janitor_demand_results d ON d.run_id=r.run_id
+        WHERE json_extract(r.configuration_json,'$.template_id')='heartbeat-decider'
+          AND json_extract(r.configuration_json,'$.target_agent_id')=?
+        ORDER BY r.created_at DESC,r.run_id DESC LIMIT ?""",(agent_id,max(1,min(int(limit),100)))).fetchall()
+    history=[]
+    for row in rows:
+        result=json.loads(row['result_json'] or '{}') if row['result_json'] else {}
+        status=result.get('status') or row['outcome'] or row['status'] or ''
+        summary=(result.get('summary') or '').strip()
+        if row['status']=='failed':
+            text='Heartbeat review failed: '+(row['error'] or 'unknown error')
+        elif status=='dispatched':
+            text='Woke the agent: '+(summary or 'continuity instruction sent')
+        elif status in ('noop','defer'):
+            text=('No action needed' if status=='noop' else 'Deferred')+(': '+summary if summary else '.')
+        else:
+            text=(status or 'reviewed')+(': '+summary if summary else '')
+        stamp=int(row['created_at'] or 0)
+        history.append({'id':row['run_id'],'text':text[:600],
+            'timestamp':datetime.datetime.fromtimestamp(stamp/1000,datetime.timezone.utc).isoformat().replace('+00:00','Z') if stamp else '',
+            'updated_at':int(row['finished_at'] or row['created_at'] or 0),'status':row['status'],'outcome':status})
+    return {'adopted':adopted,'keeper':keeper,'decision':decision,'history':history}
 
 
 def validate_dispatch(session, request_id):

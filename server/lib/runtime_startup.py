@@ -64,7 +64,9 @@ def recover_runtime(
 
     A web-server restart never calls this function.  Ordering matters: record
     the dead runtime's busy turns before reconciliation turns stale busy state
-    into idle state.
+    into idle state. ``restart_agents(interrupted)`` maps those marked turns to
+    ``{agent, turn}`` continuity targets; ``restart_prompt(agent, turn)`` writes
+    the prompt for one of them.
     """
     if mark_interrupted is None:
         from .interrupted_turns import recover_after_restart
@@ -73,9 +75,9 @@ def recover_runtime(
         from .reconcile import reconcile_all
         reconcile = reconcile_all
     if restart_agents is None or restart_prompt is None:
-        from .heartbeat import restart_heartbeat_agents, restart_heartbeat_prompt_text
-        restart_agents = restart_agents or restart_heartbeat_agents
-        restart_prompt = restart_prompt or restart_heartbeat_prompt_text
+        from .heartbeat import restart_continuity_prompt_text, restart_continuity_targets
+        restart_agents = restart_agents or restart_continuity_targets
+        restart_prompt = restart_prompt or restart_continuity_prompt_text
 
     with db.busy_timeout(SQLITE_RECOVERY_BUSY_TIMEOUT_MS):
         restore_agents(ctx)
@@ -84,7 +86,10 @@ def recover_runtime(
         reconciled = int(reconcile() or 0)
     sent = 0
     trace_ids: list[str] = []
-    for agent in ([] if clean_handoff else restart_agents()):
+    # Only agents whose real request died with the old process get a
+    # continuity turn. Idle agents were not doing anything to continue.
+    for target in ([] if clean_handoff else restart_agents(interrupted)):
+        agent, turn = target["agent"], target["turn"]
         session = str(agent.get("session") or "")
         if not session:
             continue
@@ -92,7 +97,7 @@ def recover_runtime(
         trace_ids.append(trace_id)
         try:
             dispatch.dispatch(
-                text=restart_prompt(agent),
+                text=restart_prompt(agent, turn),
                 requested_session=session,
                 forced_session=session,
                 trace_id=trace_id,

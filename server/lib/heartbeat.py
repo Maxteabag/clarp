@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Callable
 
 from . import agents as agents_db
-from . import backends, compaction, settings_store
+from . import backends, compaction, origins, settings_store
 from .db import conn, now_ms
 from .log import log, log_exception
 from .protocol import AgentState
@@ -172,16 +172,70 @@ def restart_heartbeat_prompt_text(agent: dict) -> str:
 def restart_heartbeat_agents() -> list[dict]:
     """Agents whose persisted runtime was active when the server restarted.
 
-    This is deliberately independent of the periodic heartbeat opt-in. A
-    restart interrupts every server-owned backend process, so all active,
-    non-archived sessions need one continuity turn even when periodic autonomy
-    is disabled. Stopped/deleted/archived sessions remain untouched.
+    Kept for callers that still want the broad set. Restart continuity itself
+    uses ``restart_continuity_targets`` so idle agents are left alone.
     """
     return [
         agent for agent in agents_db.list_agents()
         if not agent.get("archived_at")
         and agents_db.current_runtime_id(agent["agent_id"]) is not None
     ]
+
+
+# Interrupted turns nobody was waiting on: our own routine automation plus
+# watcher wake-ups. They get no continuity prompt; the agent stays idle.
+_SILENT_CONTINUITY_ORIGINS = frozenset(origins.ROUTINE_AUTOMATION_ORIGINS | {"watcher"})
+CONTINUITY_REQUEST_MAX_CHARS = 1500
+
+
+def restart_continuity_targets(interrupted: list[dict] | None) -> list[dict]:
+    """One continuity target per agent whose real request the restart cut off.
+
+    ``interrupted`` is what ``interrupted_turns.recover_after_restart`` returned
+    for this boot. Idle agents are not in it and get nothing. Interrupted routine
+    automation (heartbeat, leader tick, dreaming, janitor, watcher) is silent.
+    """
+    targets: list[dict] = []
+    seen: set[str] = set()
+    for turn in interrupted or []:
+        agent_id = str(turn.get("agent_id") or "")
+        origin = str(turn.get("origin") or "user").strip() or "user"
+        if not agent_id or agent_id in seen or origin in _SILENT_CONTINUITY_ORIGINS:
+            continue
+        agent = agents_db.get_by_agent_id(agent_id)
+        if not agent or agent.get("archived_at") or agent.get("deleted_at"):
+            continue
+        seen.add(agent_id)
+        targets.append({"agent": agent, "turn": dict(turn)})
+    return targets
+
+
+def _interrupted_request_text(turn: dict) -> str:
+    message_id = str(turn.get("cause_message_id") or "")
+    if not message_id:
+        return ""
+    row = conn().execute(
+        "SELECT text FROM messages WHERE message_id = ?", (message_id,)).fetchone()
+    if not row:
+        return ""
+    from .voice_markup import strip_hidden_blocks
+    text = " ".join(strip_hidden_blocks(str(row["text"] or "")).split())
+    if len(text) > CONTINUITY_REQUEST_MAX_CHARS:
+        text = text[:CONTINUITY_REQUEST_MAX_CHARS - 1].rsplit(" ", 1)[0] + "…"
+    return text
+
+
+def restart_continuity_prompt_text(agent: dict, turn: dict) -> str:
+    """Continue exactly the request the restart cut off; nothing else."""
+    request = _interrupted_request_text(turn)
+    body = (
+        "Check what already completed before redoing anything, and do not "
+        "repeat external actions. If the request is already fulfilled, say so "
+        "briefly and stop."
+    )
+    if request:
+        body += f"\n\nInterrupted request:\n{request}"
+    return RESTART_HEARTBEAT_PREFIX + body
 
 
 def heartbeat_enabled(agent: dict) -> bool:
@@ -834,23 +888,25 @@ class HeartbeatScheduler:
                 log_exception("heartbeatTickFail", e, detail=session)
         return sent
 
-    def run_restart_recovery_once(self) -> int:
-        """Immediately wake each active runtime once for this server process."""
+    def run_restart_recovery_once(self, interrupted: list[dict] | None = None) -> int:
+        """Wake once, this process only, each agent whose request the restart cut off."""
         if self._restart_recovery_done:
             return 0
         self._restart_recovery_done = True
         now = self.now()
         sent = 0
-        for agent in restart_heartbeat_agents():
+        for target in restart_continuity_targets(interrupted):
+            agent, turn = target["agent"], target["turn"]
             agent_id = agent["agent_id"]
             session = agent["session"]
             try:
                 _record_run_start(agent_id, now)
                 self._send_heartbeat(
-                    session, restart_heartbeat_prompt_text(agent))
+                    session, restart_continuity_prompt_text(agent, turn))
                 sent += 1
                 log("heartbeatRestartTick",
-                    f"agent={agent_id} session={session}")
+                    f"agent={agent_id} session={session} "
+                    f"trace={turn.get('trace_id') or '∅'} origin={turn.get('origin')}")
             except Exception as e:  # noqa: BLE001
                 log_exception("heartbeatRestartTickFail", e, detail=session)
         return sent

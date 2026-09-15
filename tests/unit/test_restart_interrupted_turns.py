@@ -183,13 +183,13 @@ def test_restart_heartbeat_still_follows_the_marker(monkeypatch):
     monkeypatch.setenv("CLAUDE_PWA_HEARTBEAT_QUIET_PERIOD_SEC", "0")
     aid, session, bs = _agent(backends.CLAUDE)
     _dispatch(aid, bs, backends.CLAUDE)
-    interrupted_turns.recover_after_restart()
+    interrupted = interrupted_turns.recover_after_restart()
     sent: list[tuple[str, str]] = []
     scheduler = heartbeat.HeartbeatScheduler(
         send_heartbeat=lambda s, text: sent.append((s, text)),
         now=lambda: 1_000.0)
 
-    assert scheduler.run_restart_recovery_once() == 1
+    assert scheduler.run_restart_recovery_once(interrupted) == 1
     assert sent[0][0] == session
     assert sent[0][1].startswith(heartbeat.RESTART_HEARTBEAT_PREFIX)
     # The restart prefix already says the turn may have been cut; do not

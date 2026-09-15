@@ -32,16 +32,18 @@ def test_runtime_recovery_marks_dead_work_before_reconcile_and_continuity():
         mark_interrupted=lambda stream=None: order.append(
             ("interrupt", stream)) or [{"agent_id": "a"}],
         reconcile=lambda: order.append("reconcile") or 1,
-        restart_agents=lambda: [{"session": "theo"}],
-        restart_prompt=lambda _agent: "runtime restarted",
+        restart_agents=lambda interrupted: order.append(("targets", interrupted)) or [
+            {"agent": {"session": "theo"}, "turn": {"trace_id": "t1"}}],
+        restart_prompt=lambda _agent, turn: f"runtime restarted {turn['trace_id']}",
     )
 
     assert order == [
         "restore",
         ("interrupt", "stream"),
         "reconcile",
+        ("targets", [{"agent_id": "a"}]),
         ("dispatch", {
-            "text": "runtime restarted",
+            "text": "runtime restarted t1",
             "requested_session": "theo",
             "forced_session": "theo",
             "trace_id": result["restart_trace_ids"][0],
@@ -70,9 +72,10 @@ def test_runtime_recovery_isolates_one_failed_continuity_prompt():
         restore_agents=lambda _ctx: None,
         mark_interrupted=lambda stream=None: [],
         reconcile=lambda: 0,
-        restart_agents=lambda: [
-            {"session": "broken"}, {"session": "healthy"}],
-        restart_prompt=lambda agent: f"continue {agent['session']}",
+        restart_agents=lambda interrupted: [
+            {"agent": {"session": "broken"}, "turn": {}},
+            {"agent": {"session": "healthy"}, "turn": {}}],
+        restart_prompt=lambda agent, turn: f"continue {agent['session']}",
     )
 
     assert sent == ["broken", "healthy"]
@@ -88,8 +91,8 @@ def test_clean_runtime_handoff_does_not_invent_an_interruption():
         restore_agents=lambda _ctx: order.append("restore"),
         mark_interrupted=lambda stream=None: order.append("interrupt") or [],
         reconcile=lambda: order.append("reconcile") or 0,
-        restart_agents=lambda: order.append("restart-agents") or [],
-        restart_prompt=lambda _agent: "unused",
+        restart_agents=lambda interrupted: order.append("restart-agents") or [],
+        restart_prompt=lambda _agent, _turn: "unused",
     )
 
     assert order == ["restore", "reconcile", "queues"]
@@ -117,7 +120,34 @@ def test_runtime_recovery_raises_sqlite_busy_timeout_during_boot(monkeypatch):
         restore_agents=lambda _ctx: None,
         mark_interrupted=lambda stream=None: [],
         reconcile=lambda: 0,
-        restart_agents=lambda: [],
-        restart_prompt=lambda _agent: "unused",
+        restart_agents=lambda interrupted: [],
+        restart_prompt=lambda _agent, _turn: "unused",
     )
     assert seen == [SQLITE_RECOVERY_BUSY_TIMEOUT_MS]
+
+
+def test_runtime_recovery_defaults_wake_only_the_cut_off_request(tmp_path, monkeypatch):
+    from lib import agents, message_store, runtime_startup
+    busy = agents.create_agent(persona="Theo", voice_id="", cwd=str(tmp_path), session="theo")
+    idle = agents.create_agent(persona="Lena", voice_id="", cwd=str(tmp_path), session="lena")
+    for aid, session in ((busy, "theo"), (idle, "lena")):
+        agents.start_runtime(aid, session)
+    cause = message_store.record_user_message(
+        agent_id=busy, backend_session_id="bs-theo", client_msg_id="c1",
+        text="Finish the release notes", origin="user")["id"]
+    sent = []
+    dispatch = SimpleNamespace(
+        dispatch=lambda **kwargs: sent.append(kwargs),
+        recover_queued=lambda: 0)
+    result = recover_runtime(
+        SimpleNamespace(stream=None), dispatch,
+        restore_agents=lambda _ctx: None,
+        mark_interrupted=lambda stream=None: [
+            {"agent_id": busy, "session": "theo", "origin": "user",
+             "cause_message_id": cause, "trace_id": "t"}],
+        reconcile=lambda: 0,
+    )
+    assert result["restart_heartbeats"] == 1
+    assert [k["requested_session"] for k in sent] == ["theo"]
+    assert "Finish the release notes" in sent[0]["text"]
+    assert sent[0]["origin"] == "heartbeat"
