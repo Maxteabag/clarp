@@ -5,6 +5,7 @@
 #include "../research/DesktopResearch.h"
 #include "app/VoiceViewportSmokeCheck.h"
 #include "app/LaunchKeyboardSmokeCheck.h"
+#include "app/TranscriptScrollSmokeCheck.h"
 #include "app/AppController.h"
 #include "app/DesktopPalette.h"
 #include "platform/DesktopIntegration.h"
@@ -559,6 +560,10 @@ int main(int argc, char* argv[]) {
         }
         if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_READY_REPLY"))
             startReadyReplySmokeCheck(application, rootWindow, controller, screenshotPath);
+        if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_TRANSCRIPT_SCROLL"))
+            startTranscriptScrollSmokeCheck(application, rootWindow, controller);
+        if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_TRANSCRIPT_SWITCH"))
+            startTranscriptSwitchSmokeCheck(application, rootWindow, controller);
         if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_CONTEXT_KEYBOARD"))
             startKeyboardSmokeCheck(application, rootWindow, controller);
         if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PAIR_SIDEBAR"))
@@ -682,6 +687,8 @@ int main(int argc, char* argv[]) {
         const int requestedDelay = qEnvironmentVariableIntValue("CLARP_SCREENSHOT_DELAY_MS");
         const int captureDelay = requestedDelay > 0 ? std::clamp(requestedDelay, 2'400, 60'000)
             : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_READY_REPLY") ? 3'000
+            : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_TRANSCRIPT_SCROLL") ? 8'500
+            : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_TRANSCRIPT_SWITCH") ? 6'500
             : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_CONTEXT_KEYBOARD") ? 4'600
             : qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SETTINGS_KEYBOARD") ? 3'300
             : screenshotScenario.isEmpty() ? 2'000 : 2'400;
@@ -719,6 +726,16 @@ int main(int argc, char* argv[]) {
                 if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_READY_REPLY") &&
                     !rootWindow->property("readyReplyVerified").toBool()) {
                     qCritical("Ready reply verification did not complete");
+                    application.exit(EXIT_FAILURE); return;
+                }
+                if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_TRANSCRIPT_SWITCH") &&
+                    !rootWindow->property("transcriptSwitchVerified").toBool()) {
+                    qCritical("Transcript switch verification did not complete");
+                    application.exit(EXIT_FAILURE); return;
+                }
+                if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_TRANSCRIPT_SCROLL") &&
+                    !rootWindow->property("transcriptScrollVerified").toBool()) {
+                    qCritical("Transcript scroll verification did not complete");
                     application.exit(EXIT_FAILURE); return;
                 }
                 if (qEnvironmentVariableIsSet("CLARP_SCREENSHOT_CONTEXT_KEYBOARD") &&

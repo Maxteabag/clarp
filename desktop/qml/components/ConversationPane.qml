@@ -29,14 +29,23 @@ Rectangle {
         && ["thinking", "tool", "compacting", "running"].includes(root.currentAgentState)
     readonly property string currentAgentState: root.agentRevision >= 0
         ? root.controller.agentState(root.session) : ""
-    onConversationModelChanged: Qt.callLater(() => transcript.scrollToLatest())
+    // The presentation source is rebound here rather than through a binding so
+    // the transcript drops the previous chat's anchor first and lands at the
+    // end of the new chat in the same frame. A binding plus a deferred jump
+    // painted the new chat at the top, then at the old logical offset, then
+    // at the end: the brief unwanted movement when switching agents.
+    function bindConversation() {
+        transcript.resetForConversation();
+        presentation.sourceModel = root.conversationModel;
+        transcript.scrollToLatest();
+    }
+    onConversationModelChanged: bindConversation()
     Connections {
         target: root.conversationModel
         function onConversationIdChanged() { transcript.scrollToLatest(); }
     }
     ConversationPresentationModel {
         id: presentation
-        sourceModel: root.conversationModel
         showWhenReady: root.controller.showWhenReady
         activityMode: root.controller.activityDisplayMode
         function refreshExplanations() {
@@ -169,42 +178,6 @@ Rectangle {
             }
         }
 
-        Rectangle {
-            visible: root.active && (root.controller.errorMessage.length > 0
-                || root.conversationModel.error.length > 0)
-            Layout.fillWidth: true
-            Layout.preferredHeight: visible ? 38 : 0
-            color: "#2b2028"
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 16
-                anchors.rightMargin: 8
-
-                TuiText {
-                    Layout.fillWidth: true
-                    text: root.controller.errorMessage || root.conversationModel.error
-                    color: "#c9959e"
-                    font.family: "JetBrains Mono"
-                    font.pixelSize: 11
-                    elide: Text.ElideRight
-                }
-                TuiButton {
-                    visible: root.conversationModel.error.length > 0
-                    text: "Retry"
-                    implicitHeight: 26
-                    onClicked: root.controller.refreshSession(root.session)
-                }
-                TuiToolButton {
-                    text: "Dismiss · Esc"
-                    onClicked: {
-                        root.controller.clearError();
-                        root.conversationModel.error = "";
-                    }
-                }
-            }
-        }
-
         TranscriptList {
             id: transcript
 
@@ -302,7 +275,11 @@ Rectangle {
 
             footer: Item {
                 width: transcript.width
-                height: root.working ? 46 : root.conversationModel.loading ? 34 : 6
+                // A tail refresh runs on every agent switch and pane focus.
+                // Reserving spinner space for it moved the whole transcript
+                // 28px up and back down each time; only an empty chat shows it.
+                readonly property bool initialLoad: root.conversationModel.loading && transcript.count === 0
+                height: root.working ? 46 : initialLoad ? 34 : 6
 
                 TypingIndicator {
                     anchors.left: parent.left
@@ -311,7 +288,7 @@ Rectangle {
                 }
                 TuiBusyIndicator {
                     anchors.centerIn: parent
-                    running: root.conversationModel.loading && !root.working
+                    running: parent.initialLoad && !root.working
                     visible: running
                     implicitWidth: 22
                     implicitHeight: 22
@@ -376,6 +353,7 @@ Rectangle {
             controller.loadMedia(session);
     }
     Component.onCompleted: {
+        bindConversation();
         if (session.length > 0 && controller.connected)
             controller.loadMedia(session);
     }
@@ -387,13 +365,57 @@ Rectangle {
         }
     }
 
+    // Connection and load errors belong to the active pane, but as an overlay:
+    // a banner in the column resized the transcript by 38px every time pane
+    // focus moved, shifting both panes' content.
+    Rectangle {
+        id: connectionErrorOverlay
+        objectName: "connectionErrorOverlay"
+        visible: root.active && (root.controller.errorMessage.length > 0
+            || root.conversationModel.error.length > 0)
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: transcript.y
+        height: 38
+        z: 41
+        color: "#2b2028"
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 16
+            anchors.rightMargin: 8
+
+            TuiText {
+                Layout.fillWidth: true
+                text: root.controller.errorMessage || root.conversationModel.error
+                color: "#c9959e"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 11
+                elide: Text.ElideRight
+            }
+            TuiButton {
+                visible: root.conversationModel.error.length > 0
+                text: "Retry"
+                implicitHeight: 26
+                onClicked: root.controller.refreshSession(root.session)
+            }
+            TuiToolButton {
+                text: "Dismiss · Esc"
+                onClicked: {
+                    root.controller.clearError();
+                    root.conversationModel.error = "";
+                }
+            }
+        }
+    }
+
     // Voice failures belong to this session and must not resize the reader.
     Rectangle {
         objectName: "voiceErrorOverlay"
         visible: (root.conversationModel.voiceError || "").length > 0
         anchors.left: parent.left
         anchors.right: parent.right
-        y: transcript.y
+        y: transcript.y + (connectionErrorOverlay.visible ? connectionErrorOverlay.height : 0)
         height: 38
         z: 40
         color: "#2b2028"

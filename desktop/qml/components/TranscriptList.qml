@@ -42,8 +42,17 @@ ListView {
         contentY = Math.max(originY - topMargin,
             originY + contentHeight + bottomMargin - height);
     }
+    // Cheap, re-entrancy safe follow for the frame about to be rendered. A
+    // deferred follow alone lets one frame paint at the old position first,
+    // which reads as a flicker whenever the view grows, shrinks or resets.
+    function followNow() {
+        if (!followLatest || userInteracting || !visible) return;
+        contentY = Math.max(originY - topMargin,
+            originY + contentHeight + bottomMargin - height);
+    }
     function scheduleFollow() {
         if (!followLatest || userInteracting) return;
+        followNow();
         followTicket = scrollEpoch;
         Qt.callLater(root.applyFollow);
     }
@@ -54,7 +63,20 @@ ListView {
         userInteracting = false;
         followLatest = true;
         newMessagesBelow = false;
+        followTicket = scrollEpoch;
+        if (visible && count > 0) applyFollow();
         scheduleFollow();
+    }
+    // A different conversation is about to be bound: its position is unrelated
+    // to the anchor or pause state of the one being replaced.
+    function resetForConversation() {
+        savedAnchor = null;
+        scrollEpoch++;
+        cancelFlick();
+        wheelSettle.stop();
+        userInteracting = false;
+        followLatest = true;
+        newMessagesBelow = false;
     }
     function beforeModelReset() {
         savedAnchor = null;
@@ -69,7 +91,14 @@ ListView {
     function afterModelReset() {
         const anchor = savedAnchor;
         savedAnchor = null;
-        if (followLatest) { scheduleFollow(); return; }
+        if (followLatest) {
+            // The view regenerated at the top; land at the end before the
+            // next frame instead of leaving that frame visible.
+            followTicket = scrollEpoch;
+            if (visible && count > 0) applyFollow();
+            scheduleFollow();
+            return;
+        }
         if (!anchor) return;
         Qt.callLater(() => {
             if (anchor.epoch !== root.scrollEpoch || root.followLatest || root.userInteracting) return;
