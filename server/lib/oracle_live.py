@@ -693,7 +693,7 @@ class Conversation:
         if facts is None: return
         sent = self.append("commentary", progress_context(facts))
         if sent:
-            self.progress.offered(now)
+            self.progress.offered(now, facts)
             self.last_append = now
             event = {"type": "oracle_v2.progress_offered", "facts": facts,
                      "local_append_ids": sent, "status": "offered_not_heard"}
