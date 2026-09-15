@@ -3247,16 +3247,18 @@ def test_launch_directory_lookup_returns_home_without_creating_agents(running_se
     assert len(agents_db.list_agents()) == before
 
 
-def test_oracle_v2_route_preserves_full_device_principal(running_server, monkeypatch):
-    from lib import oracle_live
+@pytest.mark.parametrize("tinkered", [False, True])
+def test_oracle_v2_route_preserves_full_device_principal(running_server, monkeypatch, tinkered):
+    from lib import oracle_live, oracle_live_stable
+    implementation = oracle_live if tinkered else oracle_live_stable
     base, ctx, _srv = running_server
     ctx.auth_token = "administrator-token"
     seen = []
     def serve(handler):
         seen.append((handler._request_principal, handler._request_device_scope))
         handler._send(200, b'{"v2":true}', "application/json")
-    monkeypatch.setattr(oracle_live, "serve", serve)
-    status, body = _get(base + "/oracle/v2", headers={"Authorization": "Bearer administrator-token"})
+    monkeypatch.setattr(implementation, "serve", serve)
+    status, body = _get(base + ("/oracle/v2?tinkered=1" if tinkered else "/oracle/v2"), headers={"Authorization": "Bearer administrator-token"})
     assert status == 200
     assert seen == [("administrator", "full")]
 

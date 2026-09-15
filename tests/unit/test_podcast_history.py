@@ -45,7 +45,8 @@ def test_context_text_and_configuration_survive_source_edits_and_reopen(saved):
     assert value["source"]["payload"]["content"] == "Original budget is a proposal."
     assert value["context"]["paused_seconds"] == 5
     configuration = value["model_configuration"]
-    assert configuration["instructions"] == podcast_live.PROMPT
+    from lib.oracle_live import PROMPT as oracle_prompt
+    assert configuration["instructions"] == oracle_prompt + "\n" + podcast_live.PROMPT
     assert json.loads(configuration["input"][0]["content"][0]["text"].split("\n", 1)[1]) == value["context"]
     assert "".join(e["text"] for e in value["events"] if e["role"] == "user") == text
     assert value["events"][-1]["text"] == "The full answer."
@@ -125,7 +126,7 @@ def test_save_failure_stops_forwarding_transcript(saved, monkeypatch):
     ident, *_ = saved
     sent=[]
     conversation=podcast_live.PodcastConversation(SimpleNamespace(send=lambda _:None), sent.append,
-        "fixture", "{}", history_id=ident)
+        "fixture", "{}", history_id=ident, tools=SimpleNamespace(results=lambda: []))
     monkeypatch.setattr(history, "record", lambda *args: (_ for _ in ()).throw(OSError("disk unavailable")))
     try:
         with pytest.raises(OSError):
