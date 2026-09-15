@@ -122,6 +122,7 @@ Your backend can inspect project files and ask the user's Clarp contact to do wo
 Ask the backend for tools, project facts, or reasoning you cannot do conversationally.
 Handle greetings, clarification, and questions already answered by available context yourself.
 Wait for evidence before describing an outcome.
+Preserve the limits of that evidence: an observed mismatch does not explain its cause. Say when the cause remains unknown.
 Progress policy: When the Host offers a scheduled status update, summarize the current work briefly without restarting it. Keep the user’s conversation in focus.
 """
 ROUTING = """Route only the latest actionable user request using the actual
