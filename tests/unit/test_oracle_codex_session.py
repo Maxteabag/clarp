@@ -12,8 +12,8 @@ from lib.oracle_codex_session import CodexRouterSession
 BODY = {"model": oracle_router.MODEL, "instructions": "Route only the current snapshot", "input": "{}", "tools": []}
 
 
-def fake_session(monkeypatch, unexpected=False):
-    stop = threading.Event(); session = CodexRouterSession(stop); calls = []
+def fake_session(monkeypatch, unexpected=False, retain_context=False):
+    stop = threading.Event(); session = CodexRouterSession(stop, retain_context=retain_context); calls = []
     session.directory = tempfile.TemporaryDirectory()
     monkeypatch.setattr(session, "_ensure", lambda deadline: True)
     class Writer:
@@ -37,13 +37,27 @@ def fake_session(monkeypatch, unexpected=False):
 
 
 def test_output_before_rpc_reply_is_retained_and_old_turn_is_ignored(monkeypatch):
-    session, stop, calls = fake_session(monkeypatch)
+    session, stop, calls = fake_session(monkeypatch, retain_context=True)
     try:
         first = session.route(BODY, 1)
         second = session.route(BODY, 1)
         assert first["output"][0]["content"][0]["text"] == "Current answer"
         assert second["transport_metrics"]["thread_reused"] is True
         assert calls.count("thread/start") == 1
+    finally: stop.set(); session.close()
+
+
+def test_warm_process_does_not_reuse_uncommitted_proposals_by_default(monkeypatch):
+    session, stop, calls = fake_session(monkeypatch)
+    process = session.process
+    try:
+        session.route(BODY, 1)
+        second = session.route(BODY, 1)
+        assert session.process is process
+        assert second['transport_metrics']['process_reused'] is True
+        assert second['transport_metrics']['thread_reused'] is False
+        assert calls.count('thread/start') == 2
+        assert calls.count('thread/unsubscribe') == 1
     finally: stop.set(); session.close()
 
 

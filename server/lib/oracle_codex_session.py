@@ -15,8 +15,12 @@ import uuid
 
 
 class CodexRouterSession:
-    def __init__(self, stop):
+    def __init__(self, stop, *, retain_context=False):
         self.stop = stop
+        # Each input already contains authoritative conversation/work state.
+        # Retaining model proposals risks mistaking an abandoned proposal for
+        # an admitted action. Keep process reuse independent of context reuse.
+        self.retain_context = retain_context
         self.lock = threading.RLock()
         self.closed = threading.Event()
         self.process = None
@@ -152,7 +156,7 @@ class CodexRouterSession:
                 image_keys = [hashlib.sha256(image["data"]).hexdigest() for image in images]
                 context_key = hashlib.sha256(json.dumps([instructions, schema, image_keys], sort_keys=True).encode()).hexdigest()
                 # Removing/changing images or policy retires their model context.
-                reuse_thread = bool(self.thread_id and self.context_key == context_key and self.turns < 32 and self.input_tokens < 32000)
+                reuse_thread = bool(self.retain_context and self.thread_id and self.context_key == context_key and self.turns < 32 and self.input_tokens < 32000)
                 if not reuse_thread:
                     if self.thread_id:
                         self._request("thread/unsubscribe", {"threadId": self.thread_id}, deadline)
