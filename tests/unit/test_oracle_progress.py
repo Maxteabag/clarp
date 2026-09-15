@@ -2,6 +2,19 @@ from lib.oracle_progress import ProgressCadence, valid_interval
 from lib import oracle_live
 
 
+def test_first_update_is_prompt_but_unchanged_status_backs_off_and_new_work_resets():
+    c=ProgressCadence();c.configure(10,100)
+    state=dict(items=[{'session':'sage','status':'accepted','request':'Check invoice'}],routing=0,
+               last_user=0,last_output=0,last_append=0,pending_result=False)
+    assert c.opportunity(now=100,**state) is None
+    facts=c.opportunity(now=110,**state);assert facts is not None;c.offered(110,facts)
+    assert c.opportunity(now=120,**state) is None
+    assert c.opportunity(now=130,**state) is not None
+    changed={**state,'items':state['items']+[{'session':'rowan','status':'accepted','request':'Check stock'}]}
+    assert c.opportunity(now=120,**changed) is not None
+    assert c.opportunity(now=130,**{**state,'pending_result':True}) is None
+
+
 def test_preferences_are_bounded_and_cannot_smuggle_model_or_tool_commands():
     import json
     for value in [True,-1,1,9,121,20.0,'20']:
