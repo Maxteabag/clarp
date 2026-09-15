@@ -13,6 +13,18 @@ def _agent(tmp_path):
     return agents.get_by_session("theo")
 
 
+def test_active_peer_context_excludes_other_agents_traces_and_completed_work(tmp_path):
+    agent=_agent(tmp_path)
+    other=agents.create_agent(persona='Peer',voice_id='other',cwd=str(tmp_path),session='peer')
+    for ident, owner, trace in [('wanted',agent['agent_id'],'active'),('old',agent['agent_id'],'old'),('foreign',other,'foreign')]:
+        oracle_delegations.begin(delegation_id=ident,trace_id=trace,client_msg_id=ident,
+            agent_id=owner,session='theo' if owner==agent['agent_id'] else 'peer',request_text=ident)
+    oracle_delegations.attach_steered_trace('foreign','active')
+    assert oracle_delegations.active_requests_for_trace(agent['agent_id'],'active')==[{'delegation_id':'wanted','request':'wanted'}]
+    oracle_delegations.complete_for_trace(trace_id='active',message_id='done',text='Completed')
+    assert oracle_delegations.active_requests_for_trace(agent['agent_id'],'active')==[]
+
+
 def test_delegation_lifecycle_is_durable_and_acknowledged(tmp_path):
     from lib import turn_queue
     agent = _agent(tmp_path)

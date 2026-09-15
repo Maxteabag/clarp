@@ -1280,6 +1280,38 @@ def test_retry_refreshes_team_context_after_communication_disabled(tmp_path):
     assert backend.spawned[1][1]["text"] == "hello"
 
 
+@pytest.mark.parametrize('reject_peer',[False,True])
+def test_peer_steering_keeps_the_active_oracle_assignment_visible(tmp_path,reject_peer):
+    from lib import oracle_delegations
+    agent_id=agents_db.create_agent(persona='Rowan',voice_id='V',cwd=str(tmp_path),session='rowan',backend='codex')
+    peer_id=agents_db.create_agent(persona='Mira',voice_id='W',cwd=str(tmp_path),session='mira',backend='codex')
+    agents_db.start_runtime(agent_id,'rowan')
+    backend=_SteerableBackends()
+    ctx=SimpleNamespace(default_session='rowan',agents_path=tmp_path/'unused',stream=_Stream())
+    service=TurnDispatchService(ctx,backend_registry=backend,home=tmp_path)
+    oracle_delegations.begin(delegation_id='stock',trace_id='oracle-stock',client_msg_id='oracle-stock',
+        agent_id=agent_id,session='rowan',request_text='Inspect current stock. Read-only.')
+    service.dispatch(text='Inspect current stock. Read-only.',requested_session='rowan',trace_id='oracle-stock',
+        client_msg_id='oracle-stock',origin='oracle',queue_if_busy=True,synthesize_audio=False)
+    if reject_peer:
+        backend.steer_turn=lambda *args,**kwargs:False
+        with pytest.raises(DispatchError) as error:
+            service.dispatch(text='Inspect prices independently.',requested_session='rowan',trace_id='peer-prices',
+                origin='agent',sender_agent_id=peer_id,synthesize_audio=False)
+        assert error.value.status==503
+        assert backend.interrupted==[] and len(backend.spawned)==1
+        assert oracle_delegations.get('stock')['status']=='accepted'
+        return
+    service.dispatch(text='Inspect prices independently.',requested_session='rowan',trace_id='peer-prices',
+        origin='agent',sender_agent_id=peer_id,synthesize_audio=False)
+    sent=backend.steered[-1][2]
+    assert 'Inspect current stock. Read-only.' in sent
+    assert 'Inspect prices independently.' in sent
+    assert 'additional collaboration' in sent
+    assert len(backend.spawned)==1 and backend.interrupted==[]
+    assert oracle_delegations.get('stock')['status']=='accepted'
+
+
 def test_oracle_followup_steers_and_tracks_actual_terminal_result(tmp_path):
     from lib import oracle_delegations, turn_queue
     agent_id = agents_db.create_agent(persona="Marcus", voice_id="V", cwd=str(tmp_path),
