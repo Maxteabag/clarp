@@ -156,3 +156,30 @@ def test_revoked_device_ends_direct_voice_without_waiting_for_heartbeat(manager)
     assert call.finished.wait(2)
     assert records[0][0].closed
     assert call.snapshot()["usage"]["finalized"]
+
+
+def test_transport_disconnect_during_close_preserves_unconfirmed_usage(manager, monkeypatch):
+    """Observed native failure: transport closes without a session.closed receipt."""
+    _, records, negotiate = manager
+    def disconnect_without_receipt(self, raw):
+        event = json.loads(raw)
+        self.sent.append(event)
+        if event['type'] == 'session.close':
+            self.incoming.put('disconnect-without-final-usage')
+    original_recv = Socket.recv
+    def receive_disconnect(self):
+        value = original_recv(self)
+        if value == 'disconnect-without-final-usage':
+            raise websocket.WebSocketConnectionClosedException('peer closed')
+        return value
+    monkeypatch.setattr(Socket, 'send', disconnect_without_receipt)
+    monkeypatch.setattr(Socket, 'recv', receive_disconnect)
+    create(negotiate)
+    call = calls.get('owner', 'attempt-1')
+    snapshot = call.close()
+    assert snapshot['closed'] is True
+    assert snapshot['error'] == 'WebSocketConnectionClosedException'
+    assert snapshot['usage']['finalized'] is False
+    assert snapshot['usage']['usage_final'] is False
+    assert len(records) == 1, 'Do not start a replacement session to obtain usage'
+    assert [e['type'] for e in records[0][0].sent] == ['session.close']
