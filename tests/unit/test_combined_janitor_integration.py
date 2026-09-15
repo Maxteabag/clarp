@@ -13,11 +13,11 @@ def test_all_five_roles_and_deterministic_exemption():
     assert janitor_builtins.begin_run('audio-bookkeeper','never-provider') is None
     assert not roles['heartbeat-decider']['enabled'] and not roles['quota-monitor']['enabled']
 
-def test_v84_to_v85_preserves_audio_outbox_and_adds_autonomy():
+def test_v84_to_current_preserves_audio_outbox_and_adds_autonomy():
     c=db.conn();roles=janitor_builtins.ensure_builtins();audio=roles['audio-bookkeeper']
     c.execute('DROP TABLE janitor_continuity');c.execute('DROP TABLE janitor_quota_receipts');c.execute('PRAGMA user_version=84')
     db._migrate(c)
-    assert c.execute('PRAGMA user_version').fetchone()[0]==85
-    for table in ['audio_bookkeeping_events','janitor_continuity','janitor_quota_receipts']:
+    assert c.execute('PRAGMA user_version').fetchone()[0]==db._SCHEMA_VERSION
+    for table in ['audio_bookkeeping_events','janitor_continuity','janitor_quota_receipts','oracle_threads','oracle_user_context']:
         assert c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone()
     assert janitor_builtins.get_builtin('audio-bookkeeper')['agent_id']==audio['agent_id']
