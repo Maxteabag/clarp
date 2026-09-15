@@ -417,6 +417,17 @@ def recent(
     return [_row(row) or {} for row in rows]
 
 
+def active_requests_for_trace(agent_id: str, trace_id: str) -> list[dict]:
+    """Only this worker's currently active Oracle obligations, in admission order."""
+    if not agent_id or not trace_id: return []
+    rows=db.conn().execute("""SELECT delegation_id,request_text FROM oracle_delegations
+        WHERE agent_id=? AND (trace_id=? OR completion_trace_id=?)
+        AND status IN ('accepted','queued') ORDER BY created_at,delegation_id LIMIT 20""",
+        (agent_id,trace_id,trace_id)).fetchall()
+    return [{'delegation_id':r['delegation_id'],
+             'request':r['request_text'].split('\n\n<oracle-reference-data>',1)[0][:8000]} for r in rows]
+
+
 def attach_steered_trace(trace_id: str, active_trace: str) -> None:
     """Keep request identity while following the turn that accepted its text."""
     db.conn().execute(

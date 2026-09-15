@@ -127,6 +127,14 @@ def _release(principal: str) -> None:
 
 def capability() -> dict:
     cfg = config.load()
+    from .oracle_live_wire import LiveWire
+    from .oracle_live_provider import available as voice_available
+    mode = getattr(cfg, "oracle_voice_backend", "api")
+    try:
+        live_wire = LiveWire(mode)
+        live_available = voice_available(mode, cfg) and (getattr(cfg, "oracle_router_backend", "api") == "codex" or bool(cfg.openai_key()))
+    except ValueError:
+        live_wire, live_available = LiveWire(), False
     return {
         "available": bool(cfg.openai_key()),
         "model": cfg.openai_realtime_model,
@@ -134,6 +142,9 @@ def capability() -> dict:
         "transport": "clarp-websocket-proxy",
         "webrtc": True,
         "v2": {"available": bool(cfg.openai_key()), "model": "gpt-live-1", "voice": "marin", "podcast": True, "podcast_history": True},
+        "v2_tinkered": {"available": live_available, "model": live_wire.model, "voice": live_wire.voice,
+               "mode": mode, "webrtc": mode == "subscription" or getattr(cfg, "oracle_live_webrtc", False),
+               "router": getattr(cfg, "oracle_router_backend", "api"), "podcast": True, "podcast_history": True},
     }
 
 
