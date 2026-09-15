@@ -1308,6 +1308,8 @@ def test_peer_steering_keeps_the_active_oracle_assignment_visible(tmp_path,rejec
     assert 'Inspect current stock. Read-only.' in sent
     assert 'Inspect prices independently.' in sent
     assert 'additional collaboration' in sent
+    from lib.message_store import strip_injected_context
+    assert strip_injected_context(sent)=='Inspect prices independently.'
     assert len(backend.spawned)==1 and backend.interrupted==[]
     assert oracle_delegations.get('stock')['status']=='accepted'
 
