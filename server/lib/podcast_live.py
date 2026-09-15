@@ -79,14 +79,18 @@ def context_for(episode, position, duration, source=None):
     validate_episode(episode)
     if not _number(position) or not _number(duration) or not 0 < duration <= 86400 or position > duration:
         raise ValueError("Invalid podcast playhead")
-    heard = [r for r in episode["transcript"] if r["end"] >= max(0, position-60) and r["start"] <= position]
-    upcoming = next((r for r in episode["transcript"] if r["start"] > position), None)
+    heard = [r for r in episode["transcript"] if max(0, position-60) <= r["end"] <= position]
+    partial = [r for r in episode["transcript"] if r["start"] < position < r["end"]]
+    upcoming = next((r for r in episode["transcript"] if r["start"] >= position), None)
     chapters = [r for r in episode["chapters"] if r["start"] <= position < r["end"]]
     chapter = chapters[-1] if chapters else min(episode["chapters"], key=lambda r: abs(r["start"]-position))
     # Bounded below the Live startup context limit. Upcoming text is explicitly
     # marked unheard so the companion cannot silently move the user's playhead.
     context = {"audio_revision": episode["revision"], "paused_seconds": position,
         "recent_transcript_approximate_alignment": " ".join(r["text"] for r in heard)[-6000:],
+        "current_passages_partial_alignment": [{"start": r["start"], "end": r["end"],
+            "text": r["text"][:1000],
+            "heard_extent": "unknown within this segment; text may include unplayed words"} for r in partial[:3]],
         "next_passage_not_yet_heard": (upcoming or {}).get("text", "")[:1000],
         "source_chapter": chapter["title"], "authoritative_source": chapter["source"][:12000],
         "editorial_corrections": episode.get("corrections", "")[:4000]}

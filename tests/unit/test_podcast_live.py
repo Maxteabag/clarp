@@ -128,3 +128,27 @@ def test_cancelled_diagram_does_not_start_a_paid_retry(monkeypatch):
                                    plan=lambda **kwargs: "Draw a conceptual diagram",
                                    should_continue=lambda: active[0])
     assert len(calls) == 1
+
+
+def test_paused_mid_segment_does_not_label_future_words_as_recently_heard():
+    value = episode()
+    value['transcript'] = [
+        {'start': 0, 'end': 10, 'text': 'Completed introduction.'},
+        {'start': 10, 'end': 80, 'text': 'A long passage ending with an unheard warning.'},
+        {'start': 80, 'end': 100, 'text': 'Upcoming conclusion.'},
+    ]
+    context = json.loads(podcast_live.context_for(value, 30, 100))
+    assert context['recent_transcript_approximate_alignment'] == 'Completed introduction.'
+    partial = context['current_passages_partial_alignment']
+    assert len(partial) == 1
+    assert partial[0]['start'] == 10 and partial[0]['end'] == 80
+    assert partial[0]['heard_extent'] == 'unknown within this segment; text may include unplayed words'
+    assert 'unheard warning' in partial[0]['text']
+    assert context['next_passage_not_yet_heard'] == 'Upcoming conclusion.'
+
+
+def test_exact_segment_boundary_is_completed_not_partial():
+    context = json.loads(podcast_live.context_for(episode(), 90, 100))
+    assert 'Prediction hides delay.' in context['recent_transcript_approximate_alignment']
+    assert context['current_passages_partial_alignment'] == []
+    assert context['next_passage_not_yet_heard'] == 'Next sentence'
