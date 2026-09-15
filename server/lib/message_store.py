@@ -1088,6 +1088,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         latest_user_key if current_origin == "heartbeat" else ""
     )
     assistant_ordinal = 0
+    current_request_trace = ""
+    adopted_final_ids: set[str] = set()
     for seq, turn in enumerate(turns):
         role = turn.get("role")
         if role == "assistant":
@@ -1157,6 +1159,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             rows = client_user_provenance.get(key) or []
             if rows:
                 client_msg_id, current_origin, current_sender_agent_id = rows.pop(0)
+                authored = database.execute("SELECT trace_id FROM messages WHERE message_id=?", (client_msg_id,)).fetchone()
+                current_request_trace = (authored["trace_id"] or "") if authored else ""
                 current_heartbeat_key = (
                     client_msg_id if current_origin == "heartbeat" else ""
                 )
@@ -1166,10 +1170,27 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             current_origin, current_sender_agent_id = "user", ""
             current_heartbeat_key = ""
         if role == "user":
+            current_request_trace = str(turn.get("trace_id") or "")
             current_origin, current_sender_agent_id = origin, sender_agent_id
             current_heartbeat_key = msg_id if origin == "heartbeat" else ""
         elif role == "assistant":
             origin, sender_agent_id = current_origin, current_sender_agent_id
+        if role == "assistant" and not turn.get("id"):
+            # Keep the already visible completion identity when its exact
+            # authored request and final text identify this transcript reply.
+            # Never deduplicate equal replies belonging to different requests.
+            slot = database.execute("SELECT message_id FROM messages WHERE agent_id=? AND backend_session_id=? AND source_file=? AND seq=? AND role='assistant'",
+                (agent_id, backend_session_id, source_file, seq)).fetchone()
+            if slot:
+                msg_id = slot["message_id"]
+            elif current_request_trace:
+                candidates = database.execute("SELECT message_id,text FROM messages WHERE agent_id=? AND backend_session_id=? AND source_file=? AND role='assistant'",
+                    (agent_id, backend_session_id, "final:"+current_request_trace)).fetchall()
+                matching = [r for r in candidates if r["message_id"] not in adopted_final_ids
+                            and _strip_voice_markup(r["text"]) == _strip_voice_markup(text)]
+                if len(matching) == 1:
+                    msg_id = matching[0]["message_id"]
+                    adopted_final_ids.add(msg_id)
         timestamp = turn.get("timestamp")
         kind = turn.get("kind")
         tool_name = turn.get("tool_name")
@@ -1205,6 +1226,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(message_id) DO UPDATE SET
                source_file = excluded.source_file,
+               seq = excluded.seq,
                role = excluded.role,
                timestamp = excluded.timestamp,
                text = excluded.text,
