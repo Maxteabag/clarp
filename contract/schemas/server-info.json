@@ -13,7 +13,8 @@
     "default_cwd",
     "clarp_version",
     "min_app_version",
-    "capabilities"
+    "capabilities",
+    "contract"
   ],
   "properties": {
     "server_id": {
@@ -57,6 +58,33 @@
             "type": "string"
           }
         }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "description": "Client contract handshake. host: this Host's contract; min_ios: the oldest iOS client contract it serves; features: the Host contract at which each capability became available.",
+      "additionalProperties": true,
+      "required": ["host", "min_ios", "features"],
+      "properties": {
+        "host": {"type": "integer", "minimum": 1},
+        "min_ios": {"type": "integer", "minimum": 1},
+        "features": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "client": {
+      "type": "object",
+      "description": "Verdict for the requesting client, from its X-Clarp-Client header. status is compatible, client_outdated, or unknown.",
+      "additionalProperties": true,
+      "required": ["status"],
+      "properties": {
+        "platform": {"type": "string"},
+        "build": {"type": "string"},
+        "contract": {"type": "integer"},
+        "status": {"type": "string", "enum": ["compatible", "client_outdated", "unknown"]},
+        "reason": {"type": "string"}
       }
     },
     "local_connection": {

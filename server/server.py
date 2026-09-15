@@ -43,6 +43,21 @@ from lib.controller_events import (  # noqa: E402
 from lib.context import ServerContext  # noqa: E402
 from lib import db  # noqa: E402
 from lib import eventlog  # noqa: E402
+
+_OUTDATED_CLIENTS_NOTED: set[str] = set()
+
+
+def _note_outdated_client(client: dict) -> None:
+    """One diagnostic per (platform, build) so an old app polling every few
+    seconds does not flood the event log."""
+    key = f"{client.get('platform')}/{client.get('build')}"
+    if key in _OUTDATED_CLIENTS_NOTED:
+        return
+    _OUTDATED_CLIENTS_NOTED.add(key)
+    eventlog.emit(
+        "server", "clientContractOutdated", level="warning",
+        detail={"platform": client.get("platform"), "build": client.get("build"),
+                "client_contract": client.get("contract"), "reason": client.get("reason")})
 from lib import audio_metrics, voice_events  # noqa: E402
 from lib import health  # noqa: E402
 from lib import agents as agents_db  # noqa: E402
@@ -387,6 +402,7 @@ class Handler(BaseHTTPRequestHandler):
         "/task-plan": "_handle_task_plan",
         "/artifacts": "_handle_artifacts_list",
         "/attention": "_handle_attention",
+        "/attention/inbox": "_handle_attention_inbox",
         "/voices": "_handle_voices",
         "/voice-catalog": "_handle_voice_catalog",
         "/voice-preview": "_handle_voice_preview",
@@ -2153,7 +2169,13 @@ class Handler(BaseHTTPRequestHandler):
         return info
 
     def _handle_server_info(self):
-        self._send(200, json.dumps(self._connection_server_info()).encode(), "application/json")
+        from lib.server_identity import CLIENT_HEADER, evaluate_client
+        info = self._connection_server_info()
+        client = evaluate_client(self.headers.get(CLIENT_HEADER))
+        info["client"] = client
+        if client["status"] == "client_outdated":
+            _note_outdated_client(client)
+        self._send(200, json.dumps(info).encode(), "application/json")
 
     def _handle_desktop_presence(self):
         if not getattr(self, "_request_auth_validated", False):
@@ -4340,6 +4362,19 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, json.dumps({"artifact": row, "changed": changed}).encode(),
                           "application/json")
 
+    def _handle_attention_inbox(self):
+        from urllib.parse import parse_qs, urlparse
+        from lib import attention_index
+        query = parse_qs(urlparse(self.path).query)
+        try:
+            result = attention_index.page(limit=int(query.get("limit", ["100"])[0]),
+                                          cursor=query.get("cursor", [""])[0])
+        except attention_index.StaleCursor as exc:
+            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+        except (ValueError, TypeError):
+            return self._send(400, b'{"error":"invalid attention query"}', "application/json")
+        return self._send(200, json.dumps(result).encode(), "application/json")
+
     def _handle_attention(self):
         from urllib.parse import parse_qs, urlparse
         from lib import artifacts, janitor_attention
@@ -5736,6 +5771,22 @@ def build_server(ctx: ServerContext, port: int,
     heartbeat_scheduler = HeartbeatScheduler(send_heartbeat=_send_agent_heartbeat)
     heartbeat_scheduler.start()
     srv.on_close(heartbeat_scheduler.stop)
+    from lib.janitor_autonomy import AutonomyJanitors
+    from lib import apns
+    def dispatch_decided_heartbeat(session, text, request_id):
+        result = TurnDispatchService(ctx).dispatch(text=text, requested_session=session,
+            forced_session=session, trace_id=request_id, client_msg_id=request_id,
+            synthesize_audio=False, origin="heartbeat", queue_if_busy=False)
+        return result is not None
+    def recover_quota(provider, owner_id, generation, approval_id):
+        runtime = getattr(ctx, "runtime_client", None)
+        if runtime is not None:
+            return runtime.recover_janitor_quota(provider, owner_id, generation, approval_id)
+        from lib.janitor_autonomy import runtime_recover
+        return runtime_recover(provider, owner_id, generation, approval_id)
+    autonomy_janitors = AutonomyJanitors(dispatch_decided_heartbeat, apns.send_user_notification, recover=recover_quota)
+    autonomy_janitors.start()
+    srv.on_close(autonomy_janitors.stop)
     from lib.dreaming import DreamingScheduler
 
     def _send_agent_dream(session: str, text: str) -> bool:
@@ -5784,6 +5835,8 @@ def build_server(ctx: ServerContext, port: int,
         return {"ok": True, "queued": result.queued}
 
     def _janitor_after_tick():
+        from lib.audio_bookkeeper import drain as drain_audio_bookkeeping
+        drain_audio_bookkeeping()
         if janitor_attention.reconcile():
             ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER,
                                   "kind": "janitor-attention"})

@@ -200,7 +200,7 @@ def test_empty_list_auth_and_paused_conversion_preserve_identity_and_focus(host)
     status, body = request(host, "/janitors")
     assert status == 200 and body["janitors"] == []
     assert {t["trigger_id"] for t in body["triggers"]} == {
-        "agent-work-completed", "schedule", "routing-requested", "tool-explanation-requested", "active-interval"}
+        "agent-work-completed", "schedule", "routing-requested", "tool-explanation-requested", "active-interval", "audio-lifecycle-observed"}
     row = create(host)
     assert row["agent_id"] == host.sam and row["enabled"] is False
     assert agents.get_focus() == host.theo
@@ -418,3 +418,12 @@ def test_fallback_settings_work_for_normal_agents_and_janitors_without_client_ch
         assert status==200 and loaded==result
         after=agents.get_by_session(session)
         assert (after["backend"],after["model"],after["effort"])==(before["backend"],before["model"],before["effort"])
+
+
+def test_global_policy_requires_auth_and_preserves_long_chain(host):
+    assert request(host,"/janitor-policy",auth=False)[0]==401
+    chain=[{"provider":"codex","model":f"model-{n}"}for n in range(30)]
+    status,saved=request(host,"/janitor-policy",{"expected_revision":0,"configuration":{"model_chain":chain}})
+    assert status==200 and saved["model_chain"]==chain
+    assert request(host,"/janitor-policy")[1]==saved
+    assert request(host,"/janitor-policy",{"expected_revision":0,"configuration":{"model_chain":chain}})[0]==409
