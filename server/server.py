@@ -3797,8 +3797,8 @@ class Handler(BaseHTTPRequestHandler):
             200, json.dumps(capability()).encode(), "application/json")
 
     def _handle_oracle_v2(self):
-        from lib.oracle_live import serve
-        return serve(self)
+        from lib.oracle_mode import voice_handler
+        return voice_handler(self.path)(self)
 
     def _handle_oracle_realtime(self):
         from lib.oracle_realtime import serve
