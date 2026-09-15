@@ -81,6 +81,37 @@ def test_new_user_speech_and_active_router_hold_pending_findings():
         c.stop.set();c.pool.shutdown()
 
 
+def test_completed_work_facts_reach_voice_while_audible_delivery_is_held(monkeypatch):
+    import threading
+    rows = {
+        'missing': {'delegation_id': 'missing', 'session': 'mira', 'status': 'completed',
+                    'request_text': 'Inspect release notes', 'result_text': 'The release document is missing.'},
+        'health': {'delegation_id': 'health', 'session': 'rowan', 'status': 'completed',
+                   'request_text': 'Inspect staging health', 'result_text': 'The health file exists. Readiness fails.'},
+    }
+    monkeypatch.setattr(oracle_live.oracle_delegations, 'get', rows.get)
+    sent = []; downstream = []
+    tools = SimpleNamespace(lock=threading.Lock(), delegations=set(rows), results=lambda: list(rows.values()))
+    c = oracle_live.Conversation(SimpleNamespace(send=sent.append), downstream.append, tools, 'unused', lambda: 100)
+    try:
+        c.last_input = c.last_output = 100
+        c.tick()
+        events = [json.loads(raw) for raw in sent]
+        assert events and all(event['type'] == 'session.thinking.append' for event in events)
+        payload = ''.join(event['content'] for event in events)
+        facts = json.loads(payload.split(': ', 1)[1])
+        by_agent = {item['agent']: item for item in facts}
+        assert by_agent['mira']['finding'] == rows['missing']['result_text']
+        assert by_agent['rowan']['finding'] == rows['health']['result_text']
+        assert not c.results_sent, 'Available knowledge is not an audible delivery acknowledgement'
+        assert not any(event['type'] == 'oracle_v2.result_context' for event in downstream)
+        count = len(sent)
+        c.tick()
+        assert len(sent) == count, 'Unchanged silent facts are not repeatedly appended'
+    finally:
+        c.stop.set(); c.pool.shutdown()
+
+
 def test_fixed_config_uses_live_client_delegation():
     cfg=oracle_live.live_config()
     assert cfg['model']=='gpt-live-1'

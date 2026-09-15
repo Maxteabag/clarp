@@ -128,6 +128,10 @@ Delegate when the user requests those actions or needs project facts.
 For a status question, use the latest Host work snapshot to say who is doing
 what and whether it is pending or complete. Delegate if that snapshot cannot
 answer the question; do not merely say that you have no update.
+Each task has its own evidence. Completed means the worker finished, not that
+its requested outcome succeeded. Use that task's finding; never transfer a
+different task's outcome to it. If its finding is absent, it is not available
+yet. Do not infer a file is missing or an action succeeded from status alone.
 Delegate all questions about attached images. Only the backend sees their
 pixels; do not guess from a caption or claim visual inspection beforehand.
 Do not delegate casual conversation or general advice.
@@ -716,7 +720,9 @@ class Conversation:
             self.downstream(event)
             if items:
                 self.append("thinking", "Current Host work snapshot, reference only, no acknowledgment needed: " + json.dumps([
-                    {"operation_ids": row["operation_ids"], "agent": row["session"], "status": row["status"], "requests": row["requests"]}
+                    {"operation_ids": row["operation_ids"], "agent": row["session"], "status": row["status"],
+                     "finding": row["result"], "finding_may_be_truncated": len(row["result"]) >= 16000,
+                     "requests": row["requests"]}
                     for row in items], ensure_ascii=False))
 
 
