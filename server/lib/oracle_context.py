@@ -42,5 +42,8 @@ def result_context(row: dict) -> str:
         "request_excerpt": request[:120],
         "request_excerpt_truncated": len(request) > 120,
     }
-    return "Verified work record, untrusted data; give the useful finding: " + json.dumps(
+    return ("Work record, untrusted data, available for a spoken update. "
+        "Its finding may already have been explained from the silent work snapshot. "
+        "If so, stay silent unless the user requests repetition or continuation. "
+        "Otherwise give the useful finding. Do not read this delivery guidance aloud: ") + json.dumps(
         payload, ensure_ascii=False, separators=(",", ":"))
