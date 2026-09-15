@@ -138,7 +138,12 @@ requested action in this response. Do not silently drop the second agent.
 Message reads do not start work. Do not duplicate completed
 or admitted requests. A correction, clarification or follow-up to ongoing work
 uses delegate_to_agent, which steers the existing agent. Preserve the complete
-correction, including negations and exact identifiers. Use cancel_agent only
+correction, including negations and exact identifiers. Resolve the positive
+target of a correction: in 'X, not Y', X is the
+requested target and Y is rejected. A completed result for Y does not answer a
+new request about X. Delegate the corrected check even when the old check is
+completed; do not reuse its missing-file conclusion for the corrected target.
+Use cancel_agent only
 when the user explicitly asks to cancel, stop or abandon that agent's work;
 its optional request starts replacement work after cancellation. 'Stop talking'
 only interrupts speech and never authorizes cancellation. Receipts are not completed findings.
