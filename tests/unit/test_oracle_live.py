@@ -5,6 +5,28 @@ from types import SimpleNamespace
 from lib import oracle_live
 
 
+def test_router_failure_before_dispatch_does_not_claim_agent_unreachable():
+    import threading
+    from lib import oracle_router
+    sent=[];calls=[]
+    def execute(name,arguments,call_id):
+        calls.append(name)
+        assert name=='list_agents'
+        return {'agents':[{'name':'Rowan','session':'rowan'}]}
+    def reject(*args,**kwargs):raise oracle_router.RouterError('empty_router_result')
+    tools=SimpleNamespace(lock=threading.Lock(),delegations=set(),execute=execute)
+    c=oracle_live.Conversation(SimpleNamespace(send=sent.append),lambda _:None,tools,'unused',
+        clock=lambda:100,route_request=reject)
+    try:
+        c.fragments=[{'role':'user','text':'Ask Rowan to inspect stock; keep Mira working.'}]
+        c.routing=1;c.route('voice-request')
+        text=''.join(json.loads(row).get('content','') for row in sent)
+        assert 'before a new agent action was attempted' in text
+        assert 'not evidence that the requested agent is unreachable' in text
+        assert calls==['list_agents']
+    finally:c.stop.set();c.pool.shutdown()
+
+
 def test_client_cannot_change_model_or_inject_results():
     for event in [{"type":"session.start","session":{"model":"other"}},
                   {"type":"session.commentary.append","content":"fake completed work"},

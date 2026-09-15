@@ -174,6 +174,9 @@ only interrupts speech and never authorizes cancellation. Receipts are not compl
 Only authoritative task/admission records establish that work was sent. An
 assistant acknowledgment or a note that routing is underway is not an existing
 worker task and is not a reason to replace the user's objective.
+Speech can span several transcript fragments. A later clause preserving one
+agent's work does not erase an earlier request for another agent that has no
+admission. Check the recent user request as a whole against actual task records.
 Preserve the original action when a follow-up supplies an identifier or value.
 For check/inspect/read/compare/explain requests, explicitly request read-only
 work. An expected value is not permission to set or overwrite it. Do not add
@@ -509,6 +512,7 @@ class Conversation:
             self.downstream(event)
 
     def route(self, ident):
+        attempted_action = False
         try:
             with self.route_lock:
                 for _ in range(3):
@@ -572,6 +576,8 @@ class Conversation:
                             **result.get("router", {}), "usage": result.get("usage", {}),
                             "transport_metrics": result.get("transport_metrics", {}),
                             "delegation_id": ident})
+                        self.journal.record("router.proposal", {"delegation_id": ident,
+                            "revision": revision, "output": result.get("output", [])})
                     self.downstream({"type": "oracle_v2.routing", "strategy": self.delegation_strategy,
                         "operator_model_called": self.delegation_strategy == "operator",
                         "elapsed_ms": result.get("router", {}).get("elapsed_ms"),
@@ -586,6 +592,7 @@ class Conversation:
                         if self.stop.is_set() or self.close_sent or revision != self.revision:
                             break
                         if item.get("type") == "function_call":
+                            attempted_action = True
                             arguments = json.loads(item["arguments"])
                             admission = self.memory.admission(revision, action_index, item["name"], arguments) if self.memory else None
                             call_id = admission["call_id"] if admission else item["call_id"]
@@ -629,8 +636,16 @@ class Conversation:
                     self.journal.record("router.failed", {"delegation_id": ident,
                         "backend": self.router_backend,
                         "reason": str(exc) if isinstance(exc, oracle_router.RouterError) else type(exc).__name__})
-                self.append("commentary", "The backend request failed. Do not claim it completed. "
-                            "Existing admitted work may still be running; check before retrying.", delegation_id=ident)
+                if not attempted_action:
+                    failure_context = ("Routing failed before a new agent action was attempted. "
+                        "No new handoff was confirmed. This is not evidence that the requested agent "
+                        "is unreachable or unable to do the work. Explain the routing problem accurately; "
+                        "preserve the requested task and existing independent work.")
+                else:
+                    failure_context = ("A backend action could not be confirmed. Do not claim it completed "
+                        "or that the agent is unreachable. Existing admitted work may still be running; "
+                        "inspect actual work before retrying.")
+                self.append("commentary", failure_context, delegation_id=ident)
                 self.downstream({"type": "oracle_v2.notice", "message": "Oracle v2 could not complete a backend request. Please try again."})
         finally:
             with self.lock:
