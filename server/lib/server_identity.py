@@ -23,6 +23,26 @@ MIN_APP_VERSION = "1.0"
 # toggle, and a newer app can hide one this Host has not grown yet. Names are
 # stable ids, not endpoints; add one when a feature ships, never rename.
 CAPABILITIES_VERSION = 1
+
+# Client contract. Marketing versions ("1.0", a git SHA, a container tag) say
+# which build is running, not whether two builds speak the same protocol, so
+# compatibility is negotiated with two monotonic integers on each side:
+#
+#   HOST_CONTRACT     bump whenever this Host adds or changes anything a
+#                     client may depend on (an endpoint, a field, an event, a
+#                     feature). Never decrease.
+#   MIN_IOS_CONTRACT  the oldest iOS client contract this Host still serves.
+#                     Bump only when something older clients rely on is
+#                     removed or changed incompatibly.
+#
+# The iOS app carries the mirror image (ClientContract.current and
+# .minimumHost). A pair is compatible when both floors are met. Every bump
+# adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
+# fails when the table and these constants disagree. Clients identify
+# themselves with the X-Clarp-Client header ("ios/2620 contract=1").
+HOST_CONTRACT = 2
+MIN_IOS_CONTRACT = 1
+CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
     "teams",
     "oracle",
@@ -32,6 +52,7 @@ FEATURES: tuple[str, ...] = (
     "calendar",
     "media",
     "artifacts",
+    "attention_index",
     "background_jobs",
     "herald",
     "personalities",
@@ -51,8 +72,69 @@ FEATURES: tuple[str, ...] = (
 )
 
 
+# The Host contract at which each feature became available, so a client can
+# say "Oracle needs Host contract N" instead of a generic failure. Every
+# feature in FEATURES has an entry; a new feature starts at the contract that
+# introduces it.
+FEATURE_CONTRACTS: dict[str, int] = {feature: 1 for feature in FEATURES}
+FEATURE_CONTRACTS["attention_index"] = 2
+
+
 def capabilities() -> dict[str, object]:
     return {"version": CAPABILITIES_VERSION, "features": list(FEATURES)}
+
+
+def contract() -> dict[str, object]:
+    return {
+        "host": HOST_CONTRACT,
+        "min_ios": MIN_IOS_CONTRACT,
+        "features": dict(FEATURE_CONTRACTS),
+    }
+
+
+def parse_client_header(value: str | None) -> dict[str, object] | None:
+    """`X-Clarp-Client: ios/2620 contract=1` -> platform, build, contract.
+
+    Returns None when the header is absent or unreadable; an app older than
+    the handshake sends nothing and is treated as contract 0.
+    """
+    text = (value or "").strip()
+    if not text:
+        return None
+    platform, _, build = text.split(None, 1)[0].partition("/")
+    contract_value = 0
+    for token in text.split()[1:]:
+        key, _, raw = token.partition("=")
+        if key == "contract":
+            try:
+                contract_value = max(0, int(raw))
+            except ValueError:
+                contract_value = 0
+    if not platform:
+        return None
+    return {"platform": platform.lower(), "build": build, "contract": contract_value}
+
+
+def evaluate_client(header_value: str | None) -> dict[str, object]:
+    """Compatibility verdict for the client that sent `header_value`.
+
+    Only iOS carries a contract today; other or unidentified clients are
+    reported as unknown rather than judged.
+    """
+    client = parse_client_header(header_value)
+    if not client or client["platform"] != "ios":
+        return {"platform": client["platform"] if client else "", "build": "",
+                "contract": 0, "status": "unknown", "reason": ""}
+    verdict = dict(client)
+    if client["contract"] < MIN_IOS_CONTRACT:
+        verdict["status"] = "client_outdated"
+        verdict["reason"] = (
+            f"this Host needs iOS client contract {MIN_IOS_CONTRACT} or newer; "
+            f"the app sent {client['contract']}")
+    else:
+        verdict["status"] = "compatible"
+        verdict["reason"] = ""
+    return verdict
 
 def _pyproject_candidates() -> list[pathlib.Path]:
     """pyproject.toml next to the code, in either layout.
@@ -123,4 +205,5 @@ def get_server_info() -> dict[str, object]:
         "clarp_version": clarp_version(),
         "min_app_version": MIN_APP_VERSION,
         "capabilities": capabilities(),
+        "contract": contract(),
     }

@@ -183,11 +183,10 @@ def test_remove_uses_guarded_archive_route():
         ("DELETE", "/janitors/sam?expected_revision=5", None)]
 
 
-def test_caption_rule_removed_from_shared_persona_but_background_lifecycle_retained():
+def test_shared_persona_prompt_carries_no_bookkeeping_but_skill_keeps_lifecycle():
     from lib.codex_runner import persona_identity_instruction
     text = persona_identity_instruction("Theo", session="theo")
-    assert "Use the installed `clarp-background-jobs` skill" in text
-    assert "work that continues after your final response" in text
+    assert "clarp-background-jobs" not in text
     assert "Detached statuses" not in text
     assert "Never set a visible status" not in text
     skill = (ROOT / "skills/clarp-background-jobs/SKILL.md").read_text()

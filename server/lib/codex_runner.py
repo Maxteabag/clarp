@@ -138,18 +138,17 @@ _NATURAL_SPEECH = (
 
 
 def persona_identity_instruction(persona: str, session: str = "") -> str:
+    """The persona's name plus its personality text; nothing else.
+
+    Session ids reach hooks and skills through CLAUDE_PWA_SESSION, and installed
+    skills advertise themselves through their own descriptions, so neither
+    belongs in the prompt.
+    """
     persona = (persona or "").strip()
     session = (session or "").strip()
     if not persona:
         return ""
-    session_hint = f" The app session id for this agent is `{session}`." if session else ""
-    identity = (
-        f"You are the assistant persona named {persona}.{session_hint} "
-        f"When the user addresses {persona}, they are addressing you. "
-        f"Do not say that you are Claude, Codex, Gemini, or another base model "
-        f"instead of {persona}; keep model/vendor identity secondary unless the "
-        f"user explicitly asks about the underlying model."
-    )
+    identity = f"You are {persona}."
     custom_personality = ""
     if session:
         try:
@@ -166,11 +165,6 @@ def persona_identity_instruction(persona: str, session: str = "") -> str:
     )
     if personality:
         identity = f"{identity} {personality}"
-    if session:
-        identity = (
-            f"{identity} Use the installed `clarp-background-jobs` skill for "
-            f"work that continues after your final response."
-        )
     return identity
 
 

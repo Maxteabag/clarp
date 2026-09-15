@@ -383,6 +383,5 @@ def test_voice_preamble_can_hide_persona_identity():
         persona="Bella",
         session="bella",
     )
-    assert "assistant persona named Bella" in wrapped
-    assert "When the user addresses Bella" in wrapped
+    assert "You are Bella." in wrapped
     assert codex_runner.strip_voice_preamble(wrapped) == msg
