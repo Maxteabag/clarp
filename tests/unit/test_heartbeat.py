@@ -200,28 +200,53 @@ def test_scheduler_doubles_noop_interval_until_cap(monkeypatch):
     assert scheduler.run_once() == 1
 
 
-def test_restart_recovery_wakes_every_active_runtime_once(monkeypatch):
-    _heartbeat_test_env(monkeypatch)
-    enabled = _agent("enabled", enabled=True)
-    disabled = _agent("disabled", enabled=False)
-    stopped = _agent("stopped", enabled=True)
-    archived = _agent("archived", enabled=True)
-    agents_db.start_runtime(enabled, "enabled")
-    agents_db.start_runtime(disabled, "disabled")
-    agents_db.start_runtime(archived, "archived")
-    agents_db.set_archived(archived, True)
-    # A created Agent without a live runtime is stopped/inactive.
-    assert agents_db.current_runtime_id(stopped) is None
-    sent: list[tuple[str, str]] = []
-    now_ref = {"now": 1_000.0}
-    scheduler = _scheduler(now_ref, sent)
+def _interrupted(agent_id: str, *, origin: str = "user", text: str = "") -> dict:
+    cause = ""
+    if text:
+        cause = message_store.record_user_message(
+            agent_id=agent_id, backend_session_id=f"bs-{agent_id}",
+            client_msg_id=f"{agent_id}-cause", text=text, origin=origin)["id"]
+    return {"agent_id": agent_id, "session": agents_db.get_by_agent_id(agent_id)["session"],
+            "origin": origin, "cause_message_id": cause, "trace_id": "t-" + agent_id}
 
-    assert scheduler.run_restart_recovery_once() == 2
-    assert [session for session, _ in sent] == ["enabled", "disabled"]
-    assert all(text.startswith(heartbeat.RESTART_HEARTBEAT_PREFIX)
-               for _, text in sent)
-    assert scheduler.run_restart_recovery_once() == 0
-    assert len(sent) == 2
+
+def test_restart_recovery_wakes_only_interrupted_real_requests(monkeypatch):
+    _heartbeat_test_env(monkeypatch)
+    cut_off = _agent("cutoff", enabled=False)
+    idle = _agent("idle", enabled=True)
+    routine = _agent("routine", enabled=True)
+    archived = _agent("archived", enabled=True)
+    for aid in (cut_off, idle, routine, archived):
+        agents_db.start_runtime(aid, agents_db.get_by_agent_id(aid)["session"])
+    agents_db.set_archived(archived, True)
+    interrupted = [
+        _interrupted(cut_off, text="Deploy the fix to staging and report back"),
+        _interrupted(cut_off, origin="agent"),  # same agent twice: one prompt
+        _interrupted(routine, origin="heartbeat"),
+        _interrupted(archived, text="ignored"),
+    ]
+    sent: list[tuple[str, str]] = []
+    scheduler = _scheduler({"now": 1_000.0}, sent)
+
+    assert scheduler.run_restart_recovery_once(interrupted) == 1
+    assert [session for session, _ in sent] == ["cutoff"]
+    text = sent[0][1]
+    assert text.startswith(heartbeat.RESTART_HEARTBEAT_PREFIX)
+    assert "Deploy the fix to staging and report back" in text
+    # The old broad continuity prompt is gone: no plan review, no HEARTBEAT_OK.
+    assert "HEARTBEAT_OK" not in text and "Durable plan" not in text
+    assert scheduler.run_restart_recovery_once(interrupted) == 0
+    assert len(sent) == 1
+
+
+def test_restart_recovery_without_interrupted_turns_wakes_nobody(monkeypatch):
+    _heartbeat_test_env(monkeypatch)
+    aid = _agent("quiet", enabled=True)
+    agents_db.start_runtime(aid, "quiet")
+    sent: list[tuple[str, str]] = []
+    assert _scheduler({"now": 1_000.0}, sent).run_restart_recovery_once() == 0
+    assert _scheduler({"now": 1_000.0}, sent).run_restart_recovery_once([]) == 0
+    assert sent == []
 
 
 def test_restart_recovery_bypasses_cadence_dormancy_and_recent_activity(monkeypatch):
@@ -235,7 +260,7 @@ def test_restart_recovery_bypasses_cadence_dormancy_and_recent_activity(monkeypa
     sent: list[tuple[str, str]] = []
     scheduler = _scheduler({"now": 1_000.0}, sent)
 
-    assert scheduler.run_restart_recovery_once() == 1
+    assert scheduler.run_restart_recovery_once([_interrupted(aid)]) == 1
     assert sent[0][0] == "resume"
     assert heartbeat._state_for(aid).last_started == 1_000.0  # noqa: SLF001
 

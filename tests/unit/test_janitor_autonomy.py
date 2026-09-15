@@ -83,6 +83,29 @@ def test_empty_or_invalid_model_output_cannot_dispatch(env):
     w=service.AutonomyJanitors(lambda *_:pytest.fail('Invalid proposal dispatched'),lambda _:None,lambda *_:{'action':'wake','delay_seconds':60,'message':''})
     w.heartbeat_once()
     assert db.conn().execute('SELECT status FROM janitor_continuity').fetchone()[0]=='failed'
+    run=janitors.list_runs('clarp-heartbeat-decider')[0]
+    assert run['status']=='failed' and 'ValueError: Wake needs message' in run['error']
+
+def test_provider_refusal_is_recorded_on_the_failed_run(env):
+    def decide(packet,run):
+        raise ValueError("codex orchestrator failed: The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.")
+    w=service.AutonomyJanitors(lambda *_:pytest.fail('Failed decision dispatched'),lambda _:None,decide)
+    w.heartbeat_once()
+    run=janitors.list_runs('clarp-heartbeat-decider')[0]
+    assert run['status']=='failed'
+    assert 'no target was woken' in run['error'] and 'not supported when using Codex with a ChatGPT account' in run['error']
+    assert len(run['error'])<400
+
+def test_codex_routing_text_surfaces_provider_refusal():
+    from lib import codex_runner
+    stdout='\n'.join([
+        '{"type":"thread.started","thread_id":"x"}',
+        '{"type":"error","message":"{\\"type\\":\\"error\\",\\"status\\":400,\\"error\\":{\\"type\\":\\"invalid_request_error\\",\\"message\\":\\"The model is not supported when using Codex with a ChatGPT account.\\"}}"}',
+        '{"type":"turn.failed","error":{"message":"{\\"type\\":\\"error\\",\\"status\\":400,\\"error\\":{\\"type\\":\\"invalid_request_error\\",\\"message\\":\\"The model is not supported when using Codex with a ChatGPT account.\\"}}"}}'])
+    with pytest.raises(ValueError) as info:
+        codex_runner.routing_text(stdout)
+    assert str(info.value)=='codex orchestrator failed: The model is not supported when using Codex with a ChatGPT account.'
+    assert codex_runner.routing_text('{"type":"item.completed","item":{"type":"agent_message","text":"{\\"ok\\":true}"}}')=='{"ok":true}'
 
 def test_codex_and_claude_recovery_use_distinct_owned_coordinators(env,monkeypatch):
     from lib import turn_dispatch,config
@@ -170,3 +193,25 @@ def test_managed_label_effect_is_fenced_by_global_model_revision(monkeypatch):
     assert not janitors.validate_dispatch('sam',run['run_id'],run['trace_id'])
     with pytest.raises(janitors.JanitorError):fixture.review(run)
     assert not db.conn().execute('SELECT 1 FROM janitor_effects').fetchone()
+
+
+def test_continuity_status_reads_run_history_not_chat(env):
+    aid,_=env
+    decisions=iter([
+        {'action':'noop','delay_seconds':600,'message':'','reason':'Nothing pending'},
+        {'action':'wake','delay_seconds':900,'message':'Continue the current task.','reason':'Plan item still open'}])
+    sent=[]
+    w=service.AutonomyJanitors(lambda *args:sent.append(args) or True,lambda _:None,lambda p,r:next(decisions))
+    w.heartbeat_once()
+    status=service.continuity_status(aid)
+    assert status['adopted'] is True and status['keeper']['session']=='clarp-heartbeat-decider'
+    assert status['decision']['action']=='noop' and status['decision']['status']=='noop'
+    assert status['history'][0]['text']=='No action needed: Nothing pending'
+    assert status['history'][0]['timestamp'].endswith('Z') and status['history'][0]['updated_at']>0
+    task_plans.create(session='task',title='Another task',items=[{'id':'x','title':'New evidence'}])
+    w.heartbeat_once()
+    assert len(sent)==1
+    status=service.continuity_status(aid)
+    assert status['history'][0]['text'].startswith('Woke the agent: Plan item still open')
+    assert status['decision']['status']=='delivered'
+    assert db.conn().execute("SELECT count(*) FROM messages WHERE agent_id=?",(aid,)).fetchone()[0]==0

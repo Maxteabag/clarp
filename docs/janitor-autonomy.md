@@ -23,6 +23,33 @@ rigid periodic loop. Restart continuity remains separate. No archived, internal,
 Janitor or user-stopped target is eligible. Changing durable evidence can trigger
 an earlier review than a prior deferral; no old conversation creates authority.
 
+A model or provider failure is recorded on the failed run with the provider's
+own message, for example that the configured model is not supported by the
+signed-in Codex account, so the Janitor inspector says why nobody was woken.
+The recommended default model is only a default: if the account cannot use it,
+configure the keeper with a model the account accepts and enable it again.
+
+## Restart continuity
+
+A runtime restart wakes only agents whose real request the restart cut off.
+`interrupted_turns.recover_after_restart` marks those turns; the continuity
+prompt for each carries the interrupted request text (bounded) and asks the
+agent to check what already completed before redoing anything. Idle agents get
+nothing, and interrupted routine automation (heartbeat, leader tick, dreaming,
+Janitor, watcher) is silent. The old broad continuity turn to every active
+runtime, with its plan review and `HEARTBEAT_OK` contract, is gone.
+
+## Where heartbeat records live
+
+Keeper decisions never enter the conversation: a `noop` or `defer` is a run
+receipt, and only a `wake` becomes a turn, tagged `origin: heartbeat` so the
+clients fold it like other automation. `GET /agent-heartbeat/status?session=`
+serves `history` from those run receipts (falling back to legacy chat rows on
+hosts that never adopted the keeper), plus `keeper` (session, enabled, health)
+and `decision` (status, `due_at`, action, reason). Once the keeper is adopted,
+`schedule.next_heartbeat_at` is the keeper's next review time, not the rigid
+loop's projection.
+
 ## Quota ownership and actual recovery
 
 The Quota keeper owns the periodic existing `backend_usage` collectors and

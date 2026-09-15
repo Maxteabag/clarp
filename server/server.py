@@ -3310,20 +3310,32 @@ class Handler(BaseHTTPRequestHandler):
         agent = agents_db.get_by_session(session)
         if not agent:
             return self._send(404, b'{"error":"no such agent"}', "application/json")
-        rows = db.conn().execute(
-            """SELECT message_id, text, timestamp, updated_at
-                 FROM messages
-                WHERE agent_id=? AND role='assistant' AND origin='heartbeat'
-                ORDER BY updated_at DESC LIMIT 20""",
-            (agent["agent_id"],),
-        ).fetchall()
-        history = [{
-            "id": row["message_id"], "text": row["text"],
-            "timestamp": row["timestamp"], "updated_at": row["updated_at"],
-        } for row in rows]
+        from lib import janitor_autonomy
+        continuity = janitor_autonomy.continuity_status(agent["agent_id"])
+        history = continuity["history"]
+        if not history:
+            # Pre-keeper hosts recorded heartbeats as chat rows; keep them readable.
+            rows = db.conn().execute(
+                """SELECT message_id, text, timestamp, updated_at
+                     FROM messages
+                    WHERE agent_id=? AND role='assistant' AND origin='heartbeat'
+                    ORDER BY updated_at DESC LIMIT 20""",
+                (agent["agent_id"],),
+            ).fetchall()
+            history = [{
+                "id": row["message_id"], "text": row["text"],
+                "timestamp": row["timestamp"], "updated_at": row["updated_at"],
+            } for row in rows]
+        schedule = heartbeat.agent_schedule(agent)
+        decision = continuity["decision"]
+        if continuity["adopted"]:
+            # The keeper owns cadence now; the rigid projection would mislead.
+            schedule["next_heartbeat_at"] = (
+                decision["due_at"] if decision and schedule["enabled"] else None)
         return self._send(200, json.dumps({
             "ok": True, "session": session,
-            "schedule": heartbeat.agent_schedule(agent), "history": history,
+            "schedule": schedule, "history": history,
+            "keeper": continuity["keeper"], "decision": decision,
         }).encode(), "application/json")
 
     def _handle_heartbeat_settings_get(self):
@@ -5834,7 +5846,7 @@ def build_server(ctx: ServerContext, port: int,
             stream=getattr(ctx, "stream", None))
         if interrupted:
             log("turnRestartRecovery", f"marked={len(interrupted)}")
-        restart_heartbeats = heartbeat_scheduler.run_restart_recovery_once()
+        restart_heartbeats = heartbeat_scheduler.run_restart_recovery_once(interrupted)
         if restart_heartbeats:
             log("heartbeatRestartRecovery", f"sent={restart_heartbeats}")
     try:
