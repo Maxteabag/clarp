@@ -9,7 +9,7 @@ portrait in `../` so the two are interchangeable at avatar size. The slug is
 the persona name lowercased with everything outside `[a-z0-9_-]` removed.
 
 Families come from the model id, not the CLI: `opus`, `fable`, `sonnet`,
-`haiku`, `gemini`, `grok`, `codex`. An Agent that pins no model falls back to
+`haiku`, `gemini`, `grok`, `codex`, `deepseek`. An Agent that pins no model falls back to
 this Computer's configured default for its CLI, and then to the family the
 CLI itself names — `codex` for Codex, `gemini` for Antigravity, `grok` for
 Grok. The Claude CLI spans four families and so names none; a Claude Agent

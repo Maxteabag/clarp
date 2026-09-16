@@ -34,6 +34,7 @@ FAMILY_TOKENS: tuple[tuple[str, str], ...] = (
     ("gemini", "gemini"),
     ("grok", "grok"),
     ("codex", "codex"),
+    ("deepseek", "deepseek"),
 )
 
 # The family a CLI names when the Agent pins no model of its own. Claude and
@@ -43,6 +44,7 @@ BACKEND_FAMILIES: dict[str, str] = {
     backends.CODEX: "codex",
     backends.AGY: "gemini",
     backends.GROK: "grok",
+    backends.DEEPSEEK: "deepseek",
 }
 
 _SLUG = re.compile(r"[^a-z0-9_-]")

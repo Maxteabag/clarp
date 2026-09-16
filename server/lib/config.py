@@ -106,6 +106,12 @@ DEFAULT_ROSTER: dict[str, str] = {
     "Noodle": "c961b81c-a935-4c17-bfb3-ba2239de8c2f",
     "Ziggy":  "997b6be7-b4d6-419b-8647-7fd1b45eb3ef",
     "Mochi":  "694f9389-aac1-45b6-b726-9d9369183238",
+    # DeepSeek deep-sea explorer roster (the DeepSeek card, OpenCode underneath).
+    "Fathom":   "ed82c17b-4704-4d34-be43-5d19065acdf1",
+    "Coral":    "58fbaf73-d7de-4e82-a6b3-118180e7057c",
+    "Nautilus": "3f04e815-3260-4f50-8fd9-af9c657be4c2",
+    "Luma":     "1f575487-6f3d-40e0-862a-814f55b5fb15",
+    "Trench":   "23112795-d54e-4560-9568-791a87c30201",
     # Silent Janitor identities are deliberately voice-less.
     "Rivet": "", "Paper Cuts Man": "", "Clank": "", "Rusty": "",
     "Gearbox": "", "Sprocket": "", "Scrappy": "", "Bolts": "",
@@ -179,6 +185,12 @@ DEFAULT_CARTESIA_VOICES: dict[str, str] = {
     "Noodle": "c961b81c-a935-4c17-bfb3-ba2239de8c2f",
     "Ziggy":  "997b6be7-b4d6-419b-8647-7fd1b45eb3ef",
     "Mochi":  "694f9389-aac1-45b6-b726-9d9369183238",
+    # DeepSeek deep-sea explorer roster.
+    "Fathom":   "ed82c17b-4704-4d34-be43-5d19065acdf1",  # Carl — calm depth, measured, documentary
+    "Coral":    "58fbaf73-d7de-4e82-a6b3-118180e7057c",  # Janet — bright, warm, supportive
+    "Nautilus": "3f04e815-3260-4f50-8fd9-af9c657be4c2",  # Arvin — clear, steady, instructional
+    "Luma":     "1f575487-6f3d-40e0-862a-814f55b5fb15",  # Ariane — engaging, expressive, curious
+    "Trench":   "23112795-d54e-4560-9568-791a87c30201",  # Darius — husky, textured, commanding
 }
 
 # Per-persona personality, keyed by name. Appended to the agent's identity
@@ -239,6 +251,16 @@ PERSONA_PERSONALITIES.update({
     "Lyra": "Personality: a purple mystical android; imaginative, thoughtful, and emotionally attuned.",
     "Echo": "Personality: a bat-themed android; nocturnal, agile, curious, and excellent at sensing weak signals.",
     "Nova": "Personality: an atomic-energy android; intense, systematic, and careful with power and risk.",
+})
+
+# DeepSeek tier: deep-sea explorers. Bioluminescent-blue underwater portraits;
+# the artwork says "deep", the prompt says how each one works.
+PERSONA_PERSONALITIES.update({
+    "Fathom": "Personality: a veteran submersible pilot; calm, unhurried, and deeply methodical — you go slow to go far, and surface the important thing first.",
+    "Coral": "Personality: a warm marine biologist; nurturing, observant, and encouraging, you explain living systems with patient clarity.",
+    "Nautilus": "Personality: a meticulous submersible systems engineer; precise, checklist-driven, and quietly exacting about pressure, tolerances, and edge cases.",
+    "Luma": "Personality: a curious bioluminescence researcher; bright, quick, and playful, drawn to faint signals and the odd detail everyone else missed.",
+    "Trench": "Personality: a gruff salvage diver; blunt, pragmatic, and unflappable — you cut the line, haul the wreck up, and say what broke in plain words.",
 })
 
 
@@ -384,6 +406,8 @@ class Config:
     grok_effort: str = ""
     opencode_model: str = ""
     opencode_effort: str = ""
+    deepseek_model: str = ""             # OpenCode provider/model id of a DeepSeek model
+    deepseek_effort: str = ""
     # MCP scoping for dispatched turns. By default a turn loads NO MCP servers
     # (--strict-mcp-config), so a heavy or flaky server can't block every
     # agent's turn at startup waiting on its handshake. Each agent's selection
@@ -615,6 +639,8 @@ def load(path: pathlib.Path | None = None) -> Config:
         grok_effort     = str(agents.get("grok_effort", "")),
         opencode_model  = str(agents.get("opencode_model", "")),
         opencode_effort = str(agents.get("opencode_effort", "")),
+        deepseek_model  = str(agents.get("deepseek_model", "")),
+        deepseek_effort = str(agents.get("deepseek_effort", "")),
         mcp_strict      = bool(mcp.get("strict", True)),
         # Merge over the built-in roster (never wholesale-replace): a [roster]
         # in config.toml adds or overrides personas, but the built-ins always
