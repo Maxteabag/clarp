@@ -44,6 +44,14 @@
           id, label: id, supported_efforts: ['low', 'medium', 'high', 'max'],
         })),
       },
+      deepseek: {
+        models: [
+          'fireworks-ai/accounts/fireworks/routers/deepseek-pro-latest',
+          'fireworks-ai/accounts/fireworks/routers/deepseek-flash-latest',
+        ].map(id => ({
+          id, label: id, supported_efforts: ['low', 'medium', 'high', 'max'],
+        })),
+      },
     },
   };
 
