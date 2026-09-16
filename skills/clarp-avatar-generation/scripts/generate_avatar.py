@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate, crop, and downsample Clarp agent avatars using OpenAI gpt-image-2.
+"""Generate, crop, and downsample Clarp agent avatars using OpenAI gpt-image-2.5 (Sunburst).
 
 Standardized pipeline:
 1. Native 1024x1024 generation with photorealistic/archetype prompt structure.
@@ -53,6 +53,14 @@ TIER_TEMPLATES = {
         "Deep cosmic indigo skin, glowing ethereal eyes, holding a brilliantly glowing four-pointed Gemini spark star that radiates crystalline violet and cyan light. "
         "Clean artistic mastery, majestic celestial lighting, centered square composition, no text, no borders."
     ),
+    "deepseek": (
+        "A cinematic underwater photograph of {name}, a deep-sea explorer. "
+        "Wearing a matte charcoal technical dive suit with a small silver whale insignia on the collar. "
+        "Lit from below by cold electric-blue bioluminescent light on wet skin, tiny drifting plankton particles, "
+        "the huge dark silhouette of a whale passing in the black water far behind. "
+        "Centered square head-and-shoulders portrait, candid three-quarter angle, realistic skin texture, shallow depth of field, "
+        "8k photograph, no CGI plastic sheen, no goggles covering the eyes, no text, no borders."
+    ),
     "janitor": (
         "Detailed 3D character render of {name}, a classic vintage industrial cleanup bot. "
         "Built from heavy riveted cast iron and brushed brass with weathered seafoam-turquoise enamel patina and light grease smudges. "
@@ -70,7 +78,7 @@ TIER_TEMPLATES = {
 }
 
 def generate_avatar(name: str, tier: str = "codex", custom_prompt: str = "",
-                    model: str = "gpt-image-2", out_dir: pathlib.Path = None,
+                    model: str = "gpt-image-2.5-sunburst", out_dir: pathlib.Path = None,
                     copy_to_static: bool = False, static_dir: pathlib.Path = None) -> bool:
     slug = re.sub(r'[^a-z0-9]+', '-', name.strip().lower()).strip('-')
     if not slug:
@@ -148,10 +156,10 @@ def generate_avatar(name: str, tier: str = "codex", custom_prompt: str = "",
 def main():
     parser = argparse.ArgumentParser(description="Generate and downsample Clarp agent avatars.")
     parser.add_argument("--name", required=True, help="Character or contact name")
-    parser.add_argument("--tier", default="codex", choices=["claude", "codex", "grok", "gemini", "janitor", "clarp"],
+    parser.add_argument("--tier", default="codex", choices=["claude", "codex", "grok", "gemini", "deepseek", "janitor", "clarp"],
                         help="Character archetype tier")
     parser.add_argument("--prompt", default="", help="Custom prompt override")
-    parser.add_argument("--model", default="gpt-image-2", help="OpenAI image generation model")
+    parser.add_argument("--model", default="gpt-image-2.5-sunburst", help="OpenAI image generation model")
     parser.add_argument("--out-dir", type=pathlib.Path, default=pathlib.Path("/home/peter/.cache/clarp/avatar-staging"),
                         help="Output staging directory")
     parser.add_argument("--save-static", action="store_true", help="Copy 512px output to clarp/static/avatars/")

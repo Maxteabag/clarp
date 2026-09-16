@@ -62,6 +62,11 @@ explicitly confirmed in the conversation are marked `confirmed` below.
 | Noodle | agy | c961b81c-a935-4c17-bfb3-ba2239de8c2f | recovered minimalist cartoon |
 | Ziggy | agy | 997b6be7-b4d6-419b-8647-7fd1b45eb3ef | recovered minimalist cartoon |
 | Mochi | agy | 694f9389-aac1-45b6-b726-9d9369183238 | recovered minimalist cartoon |
+| Fathom | deepseek | ed82c17b-4704-4d34-be43-5d19065acdf1 | deep-sea explorer, gpt-image-2.5 |
+| Coral | deepseek | 58fbaf73-d7de-4e82-a6b3-118180e7057c | deep-sea explorer, gpt-image-2.5 |
+| Nautilus | deepseek | 3f04e815-3260-4f50-8fd9-af9c657be4c2 | deep-sea explorer, gpt-image-2.5 |
+| Luma | deepseek | 1f575487-6f3d-40e0-862a-814f55b5fb15 | deep-sea explorer, gpt-image-2.5 |
+| Trench | deepseek | 23112795-d54e-4560-9568-791a87c30201 | deep-sea explorer, gpt-image-2.5 |
 | Rivet | codex | none | recovered silent janitor robot |
 | Paper Cuts Man | codex | none | recovered silent janitor robot |
 | Clank | codex | none | recovered silent janitor robot |

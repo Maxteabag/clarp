@@ -27,9 +27,10 @@ export const AgentBackend = Object.freeze({
   AGY: 'agy',
   GROK: 'grok',
   OPENCODE: 'opencode',
+  DEEPSEEK: 'deepseek',
   // Branded ids this client ships marks for. Not the wire allow-list —
   // `/agent-model-options` is. Extra Host providers still render.
-  VALID: new Set(['claude', 'codex', 'agy', 'grok', 'opencode']),
+  VALID: new Set(['claude', 'codex', 'agy', 'grok', 'opencode', 'deepseek']),
 });
 
 export const AgentState = Object.freeze({

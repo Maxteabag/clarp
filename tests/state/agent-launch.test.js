@@ -65,7 +65,7 @@ describe('catalogue-driven chooser', () => {
       providers: { grok: { installed: false }, claude: { installed: false } },
     };
     expect(catalogBackendIds(nothingInstalled)).toEqual(['grok', 'claude']);
-    expect(catalogBackendIds(null)).toEqual(['claude', 'codex', 'agy', 'grok', 'opencode']);
+    expect(catalogBackendIds(null)).toEqual(['claude', 'codex', 'agy', 'grok', 'opencode', 'deepseek']);
   });
 
   it('treats a missing flag as the old-Host default, never as "no"', () => {

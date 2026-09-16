@@ -61,7 +61,7 @@ int main(int argc, char* argv[]) {
     launchParser.addOption({QStringLiteral("contact"), QStringLiteral("Start with an available contact, overriding Settings")});
     launchParser.addOption({QStringLiteral("new-agent"), QStringLiteral("Start an agent; prompt for backend if omitted")});
     launchParser.addOption({QStringLiteral("no-new-agent"), QStringLiteral("Open the desktop without starting an agent, overriding Settings")});
-    launchParser.addOption({QStringLiteral("backend"), QStringLiteral("Start with claude, codex, grok, agy, or opencode (implies --new-agent)"), QStringLiteral("backend")});
+    launchParser.addOption({QStringLiteral("backend"), QStringLiteral("Start with claude, codex, grok, agy, opencode, or deepseek (implies --new-agent)"), QStringLiteral("backend")});
     launchParser.addOption({QStringLiteral("cwd"), QStringLiteral("Workspace directory; skip directory selection"), QStringLiteral("directory")});
     launchParser.addOption({QStringLiteral("model"), QStringLiteral("Use this backend model ID"), QStringLiteral("model")});
     launchParser.addOption({QStringLiteral("effort"), QStringLiteral("Use this model reasoning effort"), QStringLiteral("effort")});
@@ -76,7 +76,7 @@ int main(int argc, char* argv[]) {
         || (explicitAgentLaunch && launchParser.isSet(QStringLiteral("no-new-agent")))
         || (launchParser.isSet(QStringLiteral("backend")) && !QStringList{
             QStringLiteral("claude"), QStringLiteral("codex"), QStringLiteral("grok"),
-            QStringLiteral("agy"), QStringLiteral("opencode")}.contains(launchBackend))) {
+            QStringLiteral("agy"), QStringLiteral("opencode"), QStringLiteral("deepseek")}.contains(launchBackend))) {
         qCritical("Invalid backend or conflicting agent launch flags. See --help.");
         return EXIT_FAILURE;
     }

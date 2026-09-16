@@ -46,10 +46,11 @@ class AgentBackend:
     AGY = "agy"
     GROK = "grok"
     OPENCODE = "opencode"
+    DEEPSEEK = "deepseek"
 
     @classmethod
     def valid(cls) -> set[str]:
-        return {cls.CLAUDE, cls.CODEX, cls.AGY, cls.GROK, cls.OPENCODE}
+        return {cls.CLAUDE, cls.CODEX, cls.AGY, cls.GROK, cls.OPENCODE, cls.DEEPSEEK}
 
 
 class ClipStatus:

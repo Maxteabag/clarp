@@ -5,7 +5,7 @@ description: Prompt formulas, negative constraints, photography standards, and d
 
 # Clarp Avatar Generation
 
-Standardized procedure for generating, refining, and downsampling persona avatars across all Clarp fleet tiers (Claude, Codex, Grok, Gemini, Janitors, and the Clarp host companion).
+Standardized procedure for generating, refining, and downsampling persona avatars across all Clarp fleet tiers (Claude, Codex, Grok, Gemini, DeepSeek, Janitors, and the Clarp host companion).
 
 ## 1. Archetype Aesthetic Formulas
 
@@ -39,6 +39,13 @@ Every Clarp tier adheres to a distinct visual archetype with strict styling rule
 - **Style**: Stylized digital art portrait or clean vector illustration.
 - **Archetype**: Celestial indigo genie / cosmic sage holding a brilliantly glowing four-pointed Gemini spark star emitting crystalline violet and cyan luminescence against nebula starlight.
 
+### DeepSeek Tier (Deep-Sea Explorers)
+- **Style**: Cinematic underwater photograph, photorealistic, cold electric-blue palette against black water.
+- **Archetype**: Submersible pilots, marine biologists, salvage divers and abyssal researchers in matte charcoal technical dive suits with a small silver whale insignia on the collar.
+- **Lighting**: Bioluminescent blue light from below on wet skin, drifting plankton particles, the huge dark silhouette of a whale passing far behind.
+- **Negative Constraints**: NO goggles or masks covering the eyes, NO CGI plastic sheen, NO scuba regulator in the mouth.
+- **Backend**: the `deepseek` card (OpenCode binary, DeepSeek models only); tier id `deepseek`.
+
 ### Janitor Tier (Maintenance Droids)
 - **Style**: Detailed 3D character render of vintage utilitarian industrial robots.
 - **Materials**: Weathered riveted iron, brushed brass, oxidized seafoam-turquoise enamel patina, light grease smudges.
@@ -53,7 +60,7 @@ Every Clarp tier adheres to a distinct visual archetype with strict styling rule
 
 ## 2. Universal Prompt Template
 
-Use this baseline structure when generating portraits with OpenAI `gpt-image-2`:
+Use this baseline structure when generating portraits with OpenAI `gpt-image-2.5-sunburst` (the quality variant; `gpt-image-2.5-flare` is the fast one):
 
 ```text
 A photorealistic candid 35mm photograph of {Name}, a {Archetype Description}.

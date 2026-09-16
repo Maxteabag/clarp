@@ -650,7 +650,10 @@ def test_provider_options_list_every_routing_backend_plus_openai(monkeypatch):
                         lambda name: f"/bin/{name}" if name in {"claude", "grok"} else None)
     options = orchestrator.provider_options()
     ids = [row["id"] for row in options]
-    assert ids == ["claude", "codex", "agy", "grok", "opencode", "openai"]
+    assert ids == ["claude", "codex", "agy", "grok", "opencode", "deepseek", "openai"]
+    # DeepSeek fronts the OpenCode binary, so it is installed exactly when OpenCode is.
+    by_id_probe = {row["id"]: row for row in options}
+    assert by_id_probe["deepseek"]["installed"] is by_id_probe["opencode"]["installed"]
     by_id = {row["id"]: row for row in options}
     assert by_id["grok"]["installed"] is True and by_id["codex"]["installed"] is False
     assert by_id["grok"]["kind"] == "backend" and by_id["grok"]["catalog_backend"] == "grok"

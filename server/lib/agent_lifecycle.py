@@ -91,7 +91,7 @@ class AgentLifecycleService:
                 raise AgentLifecycleError(400, "anonymous launch must be fresh")
             data = dict(data)
             backend_name = backends.normalize(data.get("backend"))
-            label = {"codex": "Codex", "claude": "Claude", "grok": "Grok", "agy": "AGY", "opencode": "OpenCode"}.get(backend_name, backend_name)
+            label = {"codex": "Codex", "claude": "Claude", "grok": "Grok", "agy": "AGY", "opencode": "OpenCode", "deepseek": "DeepSeek"}.get(backend_name, backend_name)
             occupied = {str(a["persona"]).casefold() for a in agents_db.list_agents()}
             while True:
                 name = f"{label}-{secrets.token_hex(2)}"

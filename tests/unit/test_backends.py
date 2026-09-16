@@ -21,6 +21,8 @@ def test_normalize_known_and_unknown():
     assert backends.normalize("AGY") == "agy"
     assert backends.normalize("grok") == "grok"
     assert backends.normalize("opencode") == "opencode"
+    assert backends.normalize("deepseek") == "deepseek"
+    assert backends.normalize("deep-seek") == "deepseek"
     assert backends.normalize("antigravity") == "agy"
     # Unknown / empty / None all fall back to the default so a malformed
     # agent row can never strand the user on a backend with no runner.
@@ -34,12 +36,14 @@ def test_is_valid_and_label():
     assert backends.is_valid("agy") is True
     assert backends.is_valid("grok") is True
     assert backends.is_valid("opencode") is True
+    assert backends.is_valid("deepseek") is True
     assert backends.is_valid("nope") is False
     assert backends.label("codex") == "Codex"
     assert backends.label("claude") == "Claude"
     assert backends.label("agy") == "Antigravity"
     assert backends.label("grok") == "Grok"
     assert backends.label("opencode") == "OpenCode"
+    assert backends.label("deepseek") == "DeepSeek"
     assert backends.label("junk") == "Claude"   # falls back to default label
 
 
@@ -53,7 +57,8 @@ def test_capabilities_are_explicit_per_backend():
     assert backends.capabilities("agy").supports_transcript_streaming is False
     assert backends.capabilities("grok").required_binary == "grok"
     assert backends.capabilities("opencode").required_binary == "opencode"
-    assert backends.ids() == ("claude", "codex", "agy", "grok", "opencode")
+    assert backends.capabilities("deepseek").required_binary == "opencode"
+    assert backends.ids() == ("claude", "codex", "agy", "grok", "opencode", "deepseek")
 
 
 def test_claude_capability_uses_configured_cli(monkeypatch):

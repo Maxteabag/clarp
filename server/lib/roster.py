@@ -108,6 +108,16 @@ CONTACT_TIERS: dict[str, str] = {
     "ziggy": "gemini",
     "mochi": "gemini",
 
+    # DeepSeek Tier
+    "deepseek": "deepseek",
+    "deepseek default": "deepseek",
+    "default deepseek": "deepseek",
+    "fathom": "deepseek",
+    "coral": "deepseek",
+    "nautilus": "deepseek",
+    "luma": "deepseek",
+    "trench": "deepseek",
+
     # Janitor Tier
     "janitor": "janitor",
     "janitor default": "janitor",
@@ -131,13 +141,14 @@ TIER_BACKENDS: dict[str, str] = {
     "codex": "codex",
     "grok": "grok",
     "gemini": "agy",
+    "deepseek": "deepseek",
     "janitor": "codex",
     "janitors": "codex",
 }
 
 
 def tier_for_contact(name: str) -> str | None:
-    """Return the tier ('claude', 'codex', 'grok', 'gemini', 'janitor') for a contact name, or None."""
+    """Return the tier ('claude', 'codex', 'grok', 'gemini', 'deepseek', 'janitor') for a contact name, or None."""
     if not name:
         return None
     return CONTACT_TIERS.get(name.strip().casefold())

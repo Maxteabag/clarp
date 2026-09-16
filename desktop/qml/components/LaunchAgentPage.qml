@@ -25,7 +25,8 @@ Rectangle {
     readonly property bool canResume: catalogRevision === 0 || controller.backendSupportsResume(backend)
     readonly property var providers: [
         {id:"claude",label:"Claude"}, {id:"codex",label:"Codex"},
-        {id:"grok",label:"Grok"}, {id:"agy",label:"AGY"}, {id:"opencode",label:"OpenCode"}
+        {id:"grok",label:"Grok"}, {id:"agy",label:"AGY"}, {id:"opencode",label:"OpenCode"},
+        {id:"deepseek",label:"DeepSeek"}
     ]
     readonly property int selectedIndex: Math.max(0, providers.findIndex(p => p.id === backend))
     readonly property var modelChoices: {

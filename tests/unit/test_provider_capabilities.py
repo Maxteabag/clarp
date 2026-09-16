@@ -158,6 +158,7 @@ def test_missing_cli_is_explicitly_unavailable_but_model_fallback_is_unknown():
     assert "opencode" in result["providers"]
     assert result["providers"]["grok"]["label"] == "Grok"
     assert result["providers"]["opencode"]["label"] == "OpenCode"
+    assert result["providers"]["deepseek"]["label"] == "DeepSeek"
 
 
 def test_parse_grok_and_opencode_models():
@@ -173,6 +174,24 @@ def test_parse_grok_and_opencode_models():
     )
     assert [item["id"] for item in opencode] == [
         "anthropic/claude-sonnet-4-5", "opencode/gpt-5.4"]
+
+
+def test_parse_deepseek_models_keeps_only_deepseek_rows_with_provider_labels():
+    raw = (
+        "anthropic/claude-sonnet-4-5\n"
+        "fireworks-ai/accounts/fireworks/routers/deepseek-pro-latest\n"
+        "huggingface/deepseek-ai/DeepSeek-V4-Pro\n"
+        "openai/gpt-5.4\n"
+    )
+    rows = capabilities.parse_deepseek_models(raw, observed_at="2026-09-16T00:00:00Z")
+    assert [item["id"] for item in rows] == [
+        "fireworks-ai/accounts/fireworks/routers/deepseek-pro-latest",
+        "huggingface/deepseek-ai/DeepSeek-V4-Pro",
+    ]
+    assert [item["label"] for item in rows] == [
+        "deepseek-pro-latest (Fireworks)", "DeepSeek-V4-Pro (Hugging Face)"]
+    assert rows[0]["source"]["detail"] == "opencode models (deepseek)"
+    assert rows[0]["supported_efforts"] == ["low", "medium", "high", "max"]
 
 
 def test_claude_resolution_honors_configured_runtime_binary(monkeypatch):
@@ -254,8 +273,66 @@ def test_cache_reuses_one_observation_until_forced(monkeypatch):
     capabilities.clear_cache()
 
 
+def _opencode_only(provider_id):
+    # The resolver is keyed by provider; DeepSeek fronts the OpenCode binary.
+    return "/bin/opencode" if provider_id in ("opencode", "deepseek") else None
+
+
+def test_slow_opencode_probe_uses_remembered_listing_and_refreshes_in_background(monkeypatch):
+    from lib import settings_store
+    settings_store.set_text(
+        capabilities._OPENCODE_LAST_CATALOG_KEY,
+        '{"observed_at":"2026-09-15T10:00:00Z","raw":"openai/gpt-5.4\\n'
+        'fireworks-ai/accounts/fireworks/routers/deepseek-pro-latest\\n"}',
+    )
+    scheduled: list[str] = []
+    monkeypatch.setattr(
+        capabilities, "_refresh_opencode_models_in_background", scheduled.append)
+
+    def slow_run(argv, *, timeout):
+        if argv[1:] == ["models"]:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return subprocess.CompletedProcess(argv, 0, stdout="opencode 1.0\n", stderr="")
+
+    result = capabilities._build_catalog(
+        wall_time=1787738400, which=_opencode_only, run=slow_run)
+
+    deepseek = result["providers"]["deepseek"]
+    assert deepseek["installed"] is True
+    assert [m["id"] for m in deepseek["models"]] == [
+        "fireworks-ai/accounts/fireworks/routers/deepseek-pro-latest"]
+    assert deepseek["models"][0]["source"]["kind"] == "cli_cache"
+    assert deepseek["models"][0]["source"]["freshness"] == "stale"
+    assert deepseek["source"]["detail"] == "opencode models (deepseek), remembered"
+    opencode = result["providers"]["opencode"]
+    assert [m["id"] for m in opencode["models"]] == [
+        "openai/gpt-5.4", "fireworks-ai/accounts/fireworks/routers/deepseek-pro-latest"]
+    # One background refresh per card sharing the binary is fine; none is not.
+    assert scheduled and set(scheduled) == {"/bin/opencode"}
+
+
+def test_quick_opencode_probe_is_remembered_for_the_next_slow_one(monkeypatch):
+    from lib import settings_store
+    settings_store.set_text(capabilities._OPENCODE_LAST_CATALOG_KEY, "")
+
+    def quick_run(argv, *, timeout):
+        if argv[1:] == ["models"]:
+            return subprocess.CompletedProcess(
+                argv, 0, stdout="huggingface/deepseek-ai/DeepSeek-V4-Pro\n", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout="opencode 1.0\n", stderr="")
+
+    result = capabilities._build_catalog(
+        wall_time=1787738400, which=_opencode_only, run=quick_run)
+    deepseek = result["providers"]["deepseek"]
+    assert deepseek["models"][0]["source"]["kind"] == "cli_probe"
+    assert deepseek["models"][0]["source"]["freshness"] == "fresh"
+    raw, observed_at = capabilities._remembered_opencode_models()
+    assert raw == "huggingface/deepseek-ai/DeepSeek-V4-Pro\n"
+    assert observed_at == capabilities._iso_now(1787738400)
+
+
 def test_provider_discovery_runs_concurrently():
-    barrier = threading.Barrier(5)
+    barrier = threading.Barrier(6)
     seen: list[str] = []
 
     def resolve(provider_id: str):
@@ -269,7 +346,7 @@ def test_provider_discovery_runs_concurrently():
         run=lambda *_args, **_kwargs: None,
     )
 
-    assert set(seen) == {"claude", "codex", "agy", "grok", "opencode"}
+    assert set(seen) == {"claude", "codex", "agy", "grok", "opencode", "deepseek"}
 
 
 def test_cache_refresh_is_single_flight_for_concurrent_callers(monkeypatch):
