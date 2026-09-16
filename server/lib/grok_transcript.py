@@ -4,8 +4,12 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import urllib.parse
 from typing import Any
+
+from .codex_runner import strip_voice_preamble
+from .transcript_log import summarise_tool, truncate
 
 
 def grok_home() -> pathlib.Path:
@@ -37,7 +41,107 @@ def _text_of(value: Any) -> str:
     return ""
 
 
+# Grok Build tool names → the Claude-shaped names the clients already render
+# with rich cards (transcript_log.summarise_tool). Argument names are mapped
+# alongside so the summariser sees the fields it expects.
+_TOOL_NAMES = {
+    "run_terminal_command": "Bash",
+    "read_file": "Read",
+    "write": "Write",
+    "search_replace": "Edit",
+    "grep": "Grep",
+    "list_dir": "Glob",
+    "todo_write": "TodoWrite",
+    "web_search": "WebSearch",
+    "web_fetch": "WebFetch",
+}
+_ARG_NAMES = {
+    "target_file": "file_path",
+    "target_directory": "path",
+}
+_USER_QUERY_RE = re.compile(r"^\s*<user_query>\s*(.*?)\s*</user_query>\s*$", re.DOTALL)
+# Grok seeds every session with a ``<user_info>`` bootstrap row and injects
+# ``<system-reminder>`` rows (marked ``synthetic_reason``) between prompts.
+# Neither is something the user typed.
+_BOOTSTRAP_PREFIXES = ("<user_info>", "<system-reminder>")
+
+
+def _arguments(call: dict) -> dict:
+    raw = call.get("arguments")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return {"arguments": raw}
+    if not isinstance(raw, dict):
+        return {}
+    return {_ARG_NAMES.get(str(k), str(k)): v for k, v in raw.items()}
+
+
+def _tool_from_call(call: dict) -> dict:
+    raw_name = str(call.get("name") or "tool")
+    name = _TOOL_NAMES.get(raw_name, raw_name)
+    tool = summarise_tool(name, _arguments(call), str(call.get("id") or ""))
+    tool["status"] = "pending"
+    return tool
+
+
+def _result_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+            elif isinstance(item, str):
+                parts.append(item)
+        return "\n".join(part for part in parts if part)
+    return ""
+
+
+_EXIT_RE = re.compile(r"^exit: (-?\d+)\n?")
+
+
+def _apply_tool_result(turns: list[dict], row: dict) -> None:
+    call_id = str(row.get("tool_call_id") or row.get("tool_use_id") or "")
+    text = _result_text(row.get("content"))
+    is_error = bool(row.get("is_error") or row.get("error"))
+    match = _EXIT_RE.match(text)
+    if match:
+        is_error = is_error or match.group(1) != "0"
+        text = text[match.end():]
+    for turn in reversed(turns):
+        for tool in reversed(turn.get("tools") or []):
+            if call_id and tool.get("id") != call_id:
+                continue
+            if tool.get("status") in ("ok", "error"):
+                continue
+            tool["status"] = "error" if is_error else "ok"
+            if text.strip():
+                tool["result"] = truncate(text, 300)
+            return
+
+
+def _user_text(row: dict) -> str:
+    if row.get("synthetic_reason"):
+        return ""
+    text = _text_of(row.get("content")).strip()
+    if not text or text.startswith(_BOOTSTRAP_PREFIXES):
+        return ""
+    match = _USER_QUERY_RE.match(text)
+    if match:
+        text = match.group(1)
+    return strip_voice_preamble(text).strip()
+
+
 def parse_turns(path) -> list[dict]:
+    """Read a Grok Build ``chat_history.jsonl`` into user/assistant turns.
+
+    One ``assistant`` row per model call (text plus ``tool_calls``);
+    ``tool_result`` rows carry the output back by ``tool_call_id``. Reasoning
+    rows and the system/bootstrap rows are not part of the conversation.
+    """
     path = pathlib.Path(path)
     turns: list[dict] = []
     pending_tools: list[dict] = []
@@ -58,9 +162,9 @@ def parse_turns(path) -> list[dict]:
         kind = str(row.get("type") or row.get("role") or "")
         if kind == "user":
             if pending_tools and turns and turns[-1]["role"] == "assistant":
-                turns[-1]["tools"] = pending_tools
+                turns[-1]["tools"].extend(pending_tools)
                 pending_tools = []
-            text = _text_of(row.get("content"))
+            text = _user_text(row)
             if text:
                 turns.append({"role": "user", "text": text, "tools": [],
                               "timestamp": str(row.get("ts") or "")})
@@ -70,15 +174,13 @@ def parse_turns(path) -> list[dict]:
             tools = list(pending_tools)
             pending_tools = []
             for call in row.get("tool_calls") or []:
-                if not isinstance(call, dict):
-                    continue
-                tools.append({
-                    "name": str(call.get("name") or "tool"),
-                    "status": "ok",
-                    "input": call.get("arguments") or {},
-                })
+                if isinstance(call, dict):
+                    tools.append(_tool_from_call(call))
             turns.append({"role": "assistant", "text": text, "tools": tools,
                           "timestamp": str(row.get("ts") or "")})
+            continue
+        if kind == "tool_result":
+            _apply_tool_result(turns, row)
             continue
         if kind in {"backend_tool_call", "tool_use"}:
             pending_tools.append({
@@ -89,7 +191,7 @@ def parse_turns(path) -> list[dict]:
                 "input": {},
             })
     if pending_tools and turns and turns[-1]["role"] == "assistant":
-        turns[-1]["tools"] = pending_tools
+        turns[-1]["tools"].extend(pending_tools)
     return turns
 
 
