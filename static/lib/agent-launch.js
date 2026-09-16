@@ -1,6 +1,6 @@
 import { AgentBackend } from './protocol.js';
 
-const ALIASES = { antigravity: AgentBackend.AGY, 'open-code': AgentBackend.OPENCODE };
+const ALIASES = { antigravity: AgentBackend.AGY, 'open-code': AgentBackend.OPENCODE, 'deep-seek': AgentBackend.DEEPSEEK };
 
 export function normalizeBackend(raw) {
   const value = String(raw || '').trim().toLowerCase();
@@ -76,6 +76,7 @@ export function backendLabel(raw, catalogue) {
   if (backend === AgentBackend.AGY) return 'Antigravity';
   if (backend === AgentBackend.GROK) return 'Grok';
   if (backend === AgentBackend.OPENCODE) return 'OpenCode';
+  if (backend === AgentBackend.DEEPSEEK) return 'DeepSeek';
   return backend;
 }
 
@@ -86,7 +87,7 @@ export function backendDetail(raw, catalogue) {
 }
 
 const BUNDLED_IDS = [AgentBackend.CLAUDE, AgentBackend.CODEX, AgentBackend.AGY,
-                     AgentBackend.GROK, AgentBackend.OPENCODE];
+                     AgentBackend.GROK, AgentBackend.OPENCODE, AgentBackend.DEEPSEEK];
 
 // The backends a chooser offers: catalogue rows that are installed on this
 // Host and not hidden, plus `current` (the backend an existing agent already
@@ -142,6 +143,10 @@ export const CONTACT_TIERS = {
   gemini: 'gemini', 'gemini default': 'gemini', 'default gemini': 'gemini',
   pip: 'gemini', bloop: 'gemini', noodle: 'gemini', ziggy: 'gemini', mochi: 'gemini',
 
+  // DeepSeek Tier
+  deepseek: 'deepseek', 'deepseek default': 'deepseek', 'default deepseek': 'deepseek',
+  fathom: 'deepseek', coral: 'deepseek', nautilus: 'deepseek', luma: 'deepseek', trench: 'deepseek',
+
   // Janitor Tier
   janitor: 'janitor', 'janitor default': 'janitor', 'default janitor': 'janitor',
   rivet: 'janitor', 'paper cuts man': 'janitor', papercutsman: 'janitor',
@@ -154,6 +159,7 @@ export const TIER_BACKENDS = {
   codex: AgentBackend.CODEX,
   grok: AgentBackend.GROK,
   gemini: AgentBackend.AGY,
+  deepseek: AgentBackend.DEEPSEEK,
   janitor: AgentBackend.CODEX,
   janitors: AgentBackend.CODEX,
 };

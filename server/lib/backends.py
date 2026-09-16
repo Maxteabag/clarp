@@ -24,6 +24,7 @@ CODEX = AgentBackend.CODEX
 AGY = AgentBackend.AGY
 GROK = AgentBackend.GROK
 OPENCODE = AgentBackend.OPENCODE
+DEEPSEEK = AgentBackend.DEEPSEEK
 DEFAULT = CLAUDE
 _RUNTIME_CLIENT: Any | None = None
 
@@ -376,6 +377,32 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
             ("opencode/gpt-5.4", "GPT-5.4"),
             ("anthropic/claude-sonnet-4-5", "Claude Sonnet 4.5"),
             ("openai/gpt-5.4", "GPT-5.4 (OpenAI)"),
+        ),
+    ),
+    # DeepSeek is a model family, not a CLI: the card runs through the
+    # OpenCode binary but its catalogue is only the DeepSeek models OpenCode
+    # exposes (Fireworks, Hugging Face, ...), so the chooser reads
+    # "DeepSeek -> model" instead of "OpenCode -> provider -> model".
+    BackendAdapter(
+        id=DEEPSEEK, label="DeepSeek", required_binary="opencode",
+        efforts=("low", "medium", "high", "max"),
+        aliases=("deep-seek",),
+        badge="BackendDeepSeek",
+        detail="Runs DeepSeek models through OpenCode.",
+        symbol="water.waves",
+        brand=BackendBrand("#4d6bfe", "#2b47d6", "#6f88ff", "#3554e6"),
+        routing_module="opencode_runner",
+        runner_module="opencode_runner",
+        transcript_module="opencode_transcript",
+        config_model_field="deepseek_model",
+        config_effort_field="deepseek_effort",
+        fallback_models=(
+            ("fireworks-ai/accounts/fireworks/routers/deepseek-pro-latest", "DeepSeek Pro (latest, Fireworks)"),
+            ("fireworks-ai/accounts/fireworks/routers/deepseek-flash-latest", "DeepSeek Flash (latest, Fireworks)"),
+            ("fireworks-ai/accounts/fireworks/models/deepseek-v4-pro", "DeepSeek V4 Pro (Fireworks)"),
+            ("fireworks-ai/accounts/fireworks/models/deepseek-v4p1-flash", "DeepSeek V4.1 Flash (Fireworks)"),
+            ("huggingface/deepseek-ai/DeepSeek-V4-Pro", "DeepSeek V4 Pro (Hugging Face)"),
+            ("huggingface/deepseek-ai/DeepSeek-V4.1-Flash", "DeepSeek V4.1 Flash (Hugging Face)"),
         ),
     ),
 )

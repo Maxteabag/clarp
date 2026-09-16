@@ -180,6 +180,7 @@ qt_add_qml_module(clarp-desktop
         resources/backends/grok.png
         resources/backends/agy.png
         resources/backends/opencode.png
+        resources/backends/deepseek.png
 )
 
 target_include_directories(clarp-desktop PRIVATE src src/app src/models)

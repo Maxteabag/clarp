@@ -28,6 +28,15 @@ from . import settings_store
 SCHEMA_VERSION = 2
 CACHE_TTL_SECONDS = 300
 _AGY_LAST_CATALOG_KEY = "provider.agy.last_observed_model_ids"
+# ``opencode models`` walks every configured provider's remote catalogue and
+# takes 10-15s on a healthy machine, far past the per-request probe budget.
+# The last complete listing is remembered so the OpenCode and DeepSeek cards
+# show real models while a background probe refreshes it.
+_OPENCODE_LAST_CATALOG_KEY = "provider.opencode.last_observed_models"
+OPENCODE_PROBE_TIMEOUT = 5.0
+OPENCODE_BACKGROUND_TIMEOUT = 60.0
+_opencode_refresh_lock = threading.Lock()
+_opencode_refresh_thread: threading.Thread | None = None
 
 
 def _provider_ids() -> tuple[str, ...]:
@@ -314,9 +323,11 @@ def parse_grok_models(raw: str, *, observed_at: str) -> list[dict[str, Any]]:
     return out
 
 
-def parse_opencode_models(raw: str, *, observed_at: str) -> list[dict[str, Any]]:
+def parse_opencode_models(
+    raw: str, *, observed_at: str, source: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """Parse ``opencode models`` provider/model lines."""
-    source = _source("cli_probe", "opencode models", observed_at, "fresh")
+    source = source or _source("cli_probe", "opencode models", observed_at, "fresh")
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     efforts = _static_efforts("opencode")
@@ -335,6 +346,121 @@ def parse_opencode_models(raw: str, *, observed_at: str) -> list[dict[str, Any]]
             source=dict(source),
         ))
     return out
+
+
+_DEEPSEEK_PROVIDER_LABELS = {
+    "fireworks-ai": "Fireworks",
+    "huggingface": "Hugging Face",
+    "deepseek": "DeepSeek",
+    "opencode": "OpenCode",
+    "openrouter": "OpenRouter",
+}
+
+
+def parse_deepseek_models(
+    raw: str, *, observed_at: str, source: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """The DeepSeek subset of ``opencode models``, labelled by hosting provider.
+
+    OpenCode ids read ``provider/path/to/model``; the DeepSeek card keeps the
+    id verbatim (it is what ``opencode run --model`` needs) and labels it
+    ``<model tail> (<provider>)`` so the chooser reads as a model list.
+    """
+    source = source or _source("cli_probe", "opencode models (deepseek)", observed_at, "fresh")
+    efforts = _static_efforts("deepseek")
+    out: list[dict[str, Any]] = []
+    for item in parse_opencode_models(raw, observed_at=observed_at):
+        model_id = item["id"]
+        if "deepseek" not in model_id.lower():
+            continue
+        provider, _, rest = model_id.partition("/")
+        tail = rest.rsplit("/", 1)[-1] or model_id
+        provider_label = _DEEPSEEK_PROVIDER_LABELS.get(provider, provider)
+        out.append(_model(
+            model_id, f"{tail} ({provider_label})", default_effort=None,
+            supported_efforts=list(efforts) if efforts else None,
+            source=dict(source),
+        ))
+    return out
+
+
+def _remember_opencode_models(raw: str, observed_at: str) -> None:
+    try:
+        settings_store.set_text(
+            _OPENCODE_LAST_CATALOG_KEY,
+            json.dumps({"observed_at": observed_at, "raw": raw}, separators=(",", ":")),
+        )
+    except Exception:  # noqa: BLE001 - discovery remains available
+        pass
+
+
+def _remembered_opencode_models() -> tuple[str, str]:
+    """(raw listing, observed_at) from the last complete probe, or ("", "")."""
+    try:
+        payload = json.loads(settings_store.get_text(_OPENCODE_LAST_CATALOG_KEY) or "{}")
+    except (TypeError, ValueError, Exception):  # noqa: BLE001
+        return "", ""
+    if not isinstance(payload, dict):
+        return "", ""
+    return str(payload.get("raw") or ""), str(payload.get("observed_at") or "")
+
+
+def _expire_cache() -> None:
+    """Make the next catalogue call rebuild without disturbing a refresh in flight."""
+    global _cache
+    with _cache_condition:
+        if _cache is not None:
+            _cache = (float("-inf"), _cache[1])
+
+
+def _refresh_opencode_models_in_background(executable: str) -> None:
+    """One slow ``opencode models`` at a time; its result is remembered."""
+    global _opencode_refresh_thread
+
+    def work() -> None:
+        global _opencode_refresh_thread
+        try:
+            result = _run([executable, "models"], timeout=OPENCODE_BACKGROUND_TIMEOUT)
+            if result.returncode == 0 and parse_opencode_models(result.stdout, observed_at=""):
+                _remember_opencode_models(result.stdout, _iso_now())
+                _expire_cache()
+        except (OSError, subprocess.SubprocessError):
+            pass
+        finally:
+            with _opencode_refresh_lock:
+                _opencode_refresh_thread = None
+
+    with _opencode_refresh_lock:
+        if _opencode_refresh_thread is not None and _opencode_refresh_thread.is_alive():
+            return
+        _opencode_refresh_thread = threading.Thread(
+            target=work, name="opencode-models-refresh", daemon=True)
+        _opencode_refresh_thread.start()
+
+
+def _opencode_models_listing(
+    executable: str, observed_at: str, *, run: Callable[..., Any],
+) -> tuple[str, dict[str, Any] | None]:
+    """The ``opencode models`` text plus the source it came from.
+
+    Live within the request budget when the CLI is quick; otherwise the last
+    remembered listing (marked stale) while a background probe refreshes it.
+    """
+    try:
+        result = run([executable, "models"], timeout=OPENCODE_PROBE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        _refresh_opencode_models_in_background(executable)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    else:
+        if result is not None and result.returncode == 0 and (result.stdout or "").strip():
+            _remember_opencode_models(result.stdout, observed_at)
+            return result.stdout, None
+    raw, remembered_at = _remembered_opencode_models()
+    if not raw:
+        return "", None
+    return raw, _source("cli_cache", "opencode models (remembered)",
+                        remembered_at or observed_at, "stale")
 
 
 def is_agy_model_id(value: Any) -> bool:
@@ -391,7 +517,10 @@ def _run(argv: list[str], *, timeout: float = 2.5) -> subprocess.CompletedProces
 
 def _resolve_executable(provider_id: str) -> str | None:
     """Resolve the same executable name the runtime uses for this provider."""
-    binary = provider_id
+    adapter = _adapter(provider_id)
+    # A card that fronts another CLI (DeepSeek runs through OpenCode) is
+    # installed exactly when that CLI is.
+    binary = adapter.required_binary if adapter and adapter.required_binary else provider_id
     if provider_id == "claude":
         # clarp_runner supports a configured Claude-compatible executable.
         # Import lazily so provider discovery remains independent of startup.
@@ -451,6 +580,7 @@ def _discover_provider(
         observed_at, "unknown")
     models: list[dict[str, Any]] = []
     probe_detail = ""
+    catalog_source_override: dict[str, Any] | None = None
     if executable:
         # Version and model discovery are independent.  Running them together
         # bounds a cold provider probe by the slower command, not their sum.
@@ -496,15 +626,18 @@ def _discover_provider(
                             result.stdout, observed_at=observed_at)
                 except (OSError, subprocess.SubprocessError):
                     pass
-            elif provider_id == "opencode":
-                probe_detail = "opencode models"
-                try:
-                    result = run([executable, "models"], timeout=5.0)
-                    if result.returncode == 0:
-                        models = parse_opencode_models(
-                            result.stdout, observed_at=observed_at)
-                except (OSError, subprocess.SubprocessError):
-                    pass
+            elif provider_id in ("opencode", "deepseek"):
+                # Same binary for both cards; DeepSeek keeps only its rows.
+                probe_detail = ("opencode models" if provider_id == "opencode"
+                                else "opencode models (deepseek)")
+                raw, remembered = _opencode_models_listing(
+                    executable, observed_at, run=run)
+                parse = (parse_opencode_models if provider_id == "opencode"
+                         else parse_deepseek_models)
+                if remembered is not None:
+                    remembered = dict(remembered, detail=probe_detail + ", remembered")
+                    catalog_source_override = dict(remembered)
+                models = parse(raw, observed_at=observed_at, source=remembered)
             cli_version, version_source = version_future.result()
 
     observed_catalog = bool(models)
@@ -532,7 +665,10 @@ def _discover_provider(
     else:
         availability = "available" if observed_catalog else "unknown"
 
-    if observed_catalog:
+    if observed_catalog and catalog_source_override is not None:
+        # A remembered OpenCode listing: real models, but from an earlier run.
+        catalog_source = catalog_source_override
+    elif observed_catalog:
         # Claude's catalog is read from the CLI's account cache, not from a
         # command that enumerates models; say which one it was.
         kind = "cli_cache" if provider_id == "claude" else "cli_probe"
