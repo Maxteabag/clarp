@@ -5714,6 +5714,9 @@ def build_server(ctx: ServerContext, port: int,
     maintenance_worker = MaintenanceWorker(audio_dir=_paths.audio_dir)
     maintenance_worker.start()
     srv.on_close(maintenance_worker.stop)
+    usage_refresh = backend_usage.UsageRefreshWorker(stream=ctx.stream)
+    usage_refresh.start()
+    srv.on_close(usage_refresh.stop)
     from lib.resource_telemetry import ResourceTelemetryWorker
     resource_telemetry = ResourceTelemetryWorker()
     resource_telemetry.start()

@@ -94,6 +94,8 @@ function normalizeAgent(row) {
     queued_turn_count: Number(row.queued_turn_count) || 0,
     queued_turn_revision: Number(row.queued_turn_revision) || 0,
     queue_paused: !!row.queue_paused,
+    backend_quota: row.backend_quota && row.backend_quota.state === 'exhausted'
+      ? { ...row.backend_quota } : null,
     activity,
     activity_summary: activity ? activity.summary : '',
     activity_action: activity ? activity.action : '',

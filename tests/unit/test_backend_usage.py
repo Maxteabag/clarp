@@ -704,3 +704,83 @@ def test_codex_usage_url_accepts_exact_approved_origins():
     assert backend_usage._codex_usage_url(
         "https://chat.openai.com:443/backend-api/") \
         == "https://chat.openai.com/backend-api/wham/usage"
+
+
+_WEEKLY_SPENT = {
+    "rateLimits": {
+        "primary": {"usedPercent": 100, "windowDurationMins": 10_080,
+                    "resetsAt": 1_900_000_000},
+        "secondary": {"usedPercent": 12, "windowDurationMins": 300,
+                      "resetsAt": 1_800_010_000},
+    }
+}
+
+
+def test_spent_weekly_window_marks_codex_exhausted_until_its_reset(monkeypatch):
+    """The case that prompted this: weekly credits gone, five-hour window fine.
+
+    Weekly windows raise no limit event, so nothing told a client the next
+    send would fail.
+    """
+    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    backend_usage.capture_codex_rate_limits(
+        _WEEKLY_SPENT, identity=("auth-a", "account-a"),
+        source_detail="account/rateLimits/read")
+
+    assert backend_usage.exhausted_backends() == {"codex": {
+        "state": "exhausted", "provider_id": "codex", "window": "seven_day",
+        "resets_at": "2030-03-17T17:46:40Z",
+        "observed_at": "2027-01-15T08:00:00Z",
+    }}
+
+
+def test_stale_evidence_never_claims_exhaustion(monkeypatch):
+    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    backend_usage.capture_codex_rate_limits(
+        _WEEKLY_SPENT, identity=("auth-a", "account-a"),
+        source_detail="account/rateLimits/read")
+
+    later = 1_800_000_000_000 + backend_usage.CODEX_FRESH_MS + 1
+    assert backend_usage.exhausted_backends(later) == {}
+
+
+def test_classified_out_of_credits_is_exhausted_without_reset(monkeypatch):
+    monkeypatch.setattr(
+        backend_usage, "_read_codex_auth", lambda: ("token", "account"))
+    backend_usage.record_classified_usage_limit("codex")
+
+    quota = backend_usage.exhausted_backends()["codex"]
+    assert quota["window"] == "unknown"
+    assert quota["resets_at"] is None
+
+
+def test_healthy_providers_are_not_listed(monkeypatch):
+    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    backend_usage.capture_codex_rate_limits({
+        "rateLimits": {"primary": {
+            "usedPercent": 55, "windowDurationMins": 10_080,
+            "resetsAt": 1_900_000_000}},
+    }, identity=("auth-a", "account-a"))
+
+    assert backend_usage.exhausted_backends() == {}
+
+
+def test_refresh_worker_announces_only_a_changed_quota_picture(monkeypatch):
+    sent = []
+
+    class Stream:
+        def broadcast(self, event): sent.append(event)
+
+    picture = {"codex": {"window": "seven_day", "resets_at": "R"}}
+    monkeypatch.setattr(
+        backend_usage, "get_backend_usage", lambda: {"limit_events": []})
+    monkeypatch.setattr(
+        backend_usage, "exhausted_backends", lambda: dict(picture))
+    worker = backend_usage.UsageRefreshWorker(stream=Stream())
+
+    worker.run_once()          # first look: clients load the snapshot anyway
+    worker.run_once()          # unchanged
+    assert sent == []
+    picture.clear()
+    worker.run_once()          # recovered
+    assert sent == [{"type": "agent-roster", "kind": "backend-quota"}]

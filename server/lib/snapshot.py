@@ -5,7 +5,8 @@ from typing import Any
 
 import json
 
-from . import (agents as agents_db, avatar_settings, backends, compaction, db,
+from . import (agents as agents_db, avatar_settings, backend_usage, backends,
+               compaction, db,
                config, message_store, model_avatars, team_store,
                turn_queue, scheduler, janitors)
 from . import reconcile
@@ -16,6 +17,43 @@ from .log import log_exception
 from .activity import state_activity_event
 from .transcript_log import context_tokens_from_jsonl, find_latest_jsonl
 from .protocol import AgentBackend, AgentState
+
+
+def _exhausted_backends() -> dict[str, dict[str, Any]]:
+    try:
+        return backend_usage.exhausted_backends()
+    except Exception as exc:  # noqa: BLE001
+        log_exception("snapshotBackendQuotaFail", exc)
+        return {}
+
+
+def _fallback_chains() -> dict[str, list[dict[str, Any]]]:
+    chains: dict[str, list[dict[str, Any]]] = {}
+    try:
+        for row in db.conn().execute(
+                "SELECT agent_id, models_json FROM agent_model_fallbacks"):
+            models = json.loads(row["models_json"] or "[]")
+            if isinstance(models, list):
+                chains[row["agent_id"]] = [m for m in models if isinstance(m, dict)]
+    except Exception as exc:  # noqa: BLE001
+        log_exception("snapshotFallbackChainsFail", exc)
+    return chains
+
+
+def _backend_quota(backend: str, exhausted: dict[str, dict[str, Any]],
+                   fallbacks: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Why this agent's next turn is expected to fail, or None when it is not."""
+    quota = exhausted.get(backends.normalize(backend))
+    if not quota:
+        return None
+    rescue = next(
+        (m for m in fallbacks
+         if backends.normalize(m.get("backend")) not in exhausted), None)
+    return {
+        **quota,
+        "fallback_backend": rescue.get("backend") if rescue else None,
+        "fallback_model": rescue.get("model") if rescue else None,
+    }
 
 
 def build_agent_snapshot(ctx) -> dict[str, Any]:
@@ -41,6 +79,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     visible_labels = janitors.visible_labels()
     janitor_templates = {row["agent_id"]: row["template_id"] for row in
                          db.conn().execute("SELECT agent_id,template_id FROM janitor_configs")}
+    exhausted = _exhausted_backends()
+    fallback_chains = _fallback_chains() if exhausted else {}
     for a in agents_db.list_agents():
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
@@ -173,6 +213,10 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "queued_turn_count": queue_states.get(agent_id, {}).get("count", 0),
             "queued_turn_revision": queue_states.get(agent_id, {}).get("revision", 0),
             "queue_paused": bool(queue_states.get(agent_id, {}).get("paused", False)),
+            # Advisory only: a send is never refused, because a fallback
+            # model or an account switch may still serve it.
+            "backend_quota": _backend_quota(
+                backend, exhausted, fallback_chains.get(agent_id, [])),
             "activity":       state_activity_event(
                 agent_id=agent_id,
                 session=a["session"],
