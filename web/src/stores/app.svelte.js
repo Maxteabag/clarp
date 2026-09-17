@@ -164,7 +164,12 @@ export function quotaMessage(quota, now = new Date()) {
   const next = quota.fallback_model
     ? `Messages will run on ${quota.fallback_model} instead.`
     : 'A message sent now will likely fail.';
-  return `${name} is out of quota${until}. ${next}`;
+  // Spent credits need a refill, not patience; the reset only restores the
+  // plan's included usage.
+  const what = quota.reason === 'credits_depleted'
+    ? `${name} workspace is out of credits${until ? until.replace(' until ', ' · included usage resets ') : ''}`
+    : `${name} is out of quota${until}`;
+  return `${what}. ${next}`;
 }
 
 export function bannerFor(sid) {

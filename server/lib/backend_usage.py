@@ -1065,7 +1065,15 @@ def exhausted_backends(now_ms: int | None = None) -> dict[str, dict[str, Any]]:
             hard = (window.get("limit") or {}).get("state") == "hard_limit"
             if hard or (used is not None and float(used) >= 100.0):
                 blocking.append(window)
+        block = _fresh_codex_block(now) if provider_id == CODEX else None
+        if not blocking and block is None:
+            continue
         if not blocking:
+            out[provider_id] = {
+                "state": "exhausted", "provider_id": provider_id,
+                "reason": block["reason"], "window": "unknown",
+                "resets_at": block.get("resets_at"), "observed_at": None,
+            }
             continue
         # The provider is usable again only once its last blocking window
         # resets; one window without a reset time makes the whole answer
@@ -1079,8 +1087,12 @@ def exhausted_backends(now_ms: int | None = None) -> dict[str, dict[str, Any]]:
         out[provider_id] = {
             "state": "exhausted",
             "provider_id": provider_id,
+            # credits_depleted: refill the workspace. usage_limit: wait.
+            "reason": block["reason"] if block else "usage_limit",
             "window": named.get("kind") or "unknown",
-            "resets_at": resets_at,
+            # A failed turn records a limit without a reset time; the
+            # provider's own statement usually has one.
+            "resets_at": resets_at or (block or {}).get("resets_at"),
             "observed_at": named.get("observed_at"),
         }
     return out
@@ -1320,16 +1332,25 @@ def capture_codex_rate_limits(
         token, account_id = _read_codex_auth()
         identity = _codex_identity(token, account_id)
     auth_generation_id, account_scope_ref = identity
-    snapshot = _codex_snapshot_from_payload(payload)
+    authoritative_refresh = source_detail in {
+        "/wham/usage", "/api/codex/usage", "account/rateLimits/read",
+    }
+    block = _codex_block_from_payload(payload) if authoritative_refresh else None
+    try:
+        snapshot = _codex_snapshot_from_payload(payload)
+    except RuntimeError:
+        # A workspace without credits can report no window at all. The
+        # provider still says turns are refused, which is what matters.
+        if block is None:
+            raise
+        snapshot = {"used_percentage": None,
+                    "resets_at": block["resets_at"] or "", "windows": {}}
     five_hour_observed = _window_by_duration(snapshot, 300) is not None
     weekly_observed = _window_by_duration(snapshot, 10_080) is not None
     rotation_events = _observe_auth_generation(
         provider_instance_id=_provider_instance_id(CODEX),
         auth_generation_id=auth_generation_id,
         observed_at=_now_ms())
-    authoritative_refresh = source_detail in {
-        "/wham/usage", "/api/codex/usage", "account/rateLimits/read",
-    }
     observed_kinds: set[str] = set()
     if five_hour_observed:
         observed_kinds.add("five_hour")
@@ -1359,6 +1380,10 @@ def capture_codex_rate_limits(
     snapshot["used_percentage"] = preferred.get("used_percentage")
     snapshot["resets_at"] = preferred.get("resets_at") or ""
     current_legacy = _row(CODEX)
+    # Only an authoritative read can set or clear the block; a sparse
+    # notification says nothing about it either way.
+    blocked = block if authoritative_refresh else (
+        existing_raw.get("blocked") if same_identity else None)
     legacy_fetched_at = (
         None if authoritative_refresh
         else int((current_legacy or {}).get("fetched_at") or 1)
@@ -1375,6 +1400,7 @@ def capture_codex_rate_limits(
             "url_path": source_detail,
             "auth_generation_id": auth_generation_id,
             "account_scope_ref": account_scope_ref,
+            "blocked": blocked,
         },
         fetched_at=legacy_fetched_at,
     )
@@ -1395,6 +1421,45 @@ def capture_codex_rate_limits(
             account_scope_ref=account_scope_ref,
             source_detail=source_detail)
     return snapshot
+
+
+def _codex_block_from_payload(payload: Any) -> dict[str, Any] | None:
+    """The provider's own statement that new turns are refused, if it makes one.
+
+    `/wham/usage` answers `rate_limit.allowed: false` together with
+    `rate_limit_reached_type.type` (e.g. workspace_member_credits_depleted)
+    and `rate_limit_upsell.reset_at`. Percentages alone cannot tell spent
+    credits from a spent window, and the two need different fixes.
+    """
+    if not isinstance(payload, dict):
+        return None
+    rate_limit = payload.get("rate_limit")
+    if not isinstance(rate_limit, dict):
+        return None
+    if rate_limit.get("allowed") is not False and rate_limit.get("limit_reached") is not True:
+        return None
+    reached = payload.get("rate_limit_reached_type")
+    kind = str(reached.get("type") or "") if isinstance(reached, dict) else ""
+    upsell = payload.get("rate_limit_upsell")
+    reset = upsell.get("reset_at") if isinstance(upsell, dict) else None
+    return {
+        "reason": "credits_depleted" if "credit" in kind.lower() else "usage_limit",
+        "provider_reason": kind,
+        "resets_at": _iso_from_epoch_seconds(reset) or None,
+    }
+
+
+def _fresh_codex_block(now_ms: int) -> dict[str, Any] | None:
+    row = _row(CODEX)
+    block = _decode_raw(row).get("blocked")
+    if not row or not isinstance(block, dict):
+        return None
+    if now_ms - int(row.get("fetched_at") or 0) > CODEX_FRESH_MS:
+        return None
+    reset_ms = _iso_to_ms(block.get("resets_at"))
+    if reset_ms is not None and now_ms >= reset_ms:
+        return None
+    return block
 
 
 def _codex_snapshot_from_payload(payload: dict[str, Any]) -> dict[str, Any]:

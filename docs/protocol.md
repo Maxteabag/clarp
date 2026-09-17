@@ -119,7 +119,8 @@ Rules:
   it can never replace an uploaded or generated picture.
 - `backend_quota` is `null` unless fresh provider evidence says this agent's
   backend cannot serve a new turn. Otherwise it is `{"state": "exhausted",
-  "provider_id", "window" (five_hour | seven_day | unknown), "resets_at"
+  "provider_id", "reason" (credits_depleted: the workspace must be refilled |
+  usage_limit: wait for the reset), "window" (five_hour | seven_day | unknown), "resets_at"
   (ISO time or null when the provider gave none), "observed_at",
   "fallback_backend", "fallback_model"}`. The fallback fields name the first
   configured fallback model on a provider that is not itself exhausted, or

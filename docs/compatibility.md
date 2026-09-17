@@ -16,6 +16,7 @@ constants disagree. The iOS repository keeps the mirror table in its own
 
 | Host contract | Min iOS contract | Host release | What changed |
 |---|---|---|---|
+| 4 | 1 | quota-notice-followups | `backend_quota` gains `reason` (`credits_depleted` or `usage_limit`), read from the provider's own refusal, and keeps a reset time when the provider reports no usage window. Clients that ignore `reason` keep working. |
 | 3 | 1 | backend-quota-notice | Each `/agents/snapshot` row gains `backend_quota` (null, or why the next turn is expected to fail and when the provider resets). `agent-roster` with `kind: "backend-quota"` asks clients to refetch. Feature `backend_quota`. Older clients ignore both. |
 | 2 | 1 | PR112 | Adds authenticated `/attention/inbox` source-owned artifact eligibility and guarded pagination. Older clients/endpoints remain supported. |
 | 1 | 1 | main, 2026-09-14 | Contract handshake introduced. `/server-info` gains `contract` and `client`; the Host reads `X-Clarp-Client`. Baseline for every feature already advertised in `capabilities.features`. |
