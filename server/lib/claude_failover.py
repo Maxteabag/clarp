@@ -17,6 +17,12 @@ from typing import Callable
 from .log import log
 
 RECHECK_SECONDS = 60.0
+# Owned work is never left parked silently for ever. A turn released into a real
+# usage limit fails visibly and the app shows why; a turn parked indefinitely
+# just looks like the agent stopped answering, with nothing for the user to act
+# on. Verified 2026-09-17: a selector that could not reach its usage API held
+# every Claude agent on this Host for three and a half hours.
+MAX_PARK_SECONDS = 1800.0
 
 
 def finish_owned_group(handle) -> None:
@@ -50,8 +56,16 @@ def finish_owned_group(handle) -> None:
         time.sleep(0.05)
 
 
-def switch_account(command: tuple[str, ...], models: list[str]) -> bool:
-    """Invoke the local account selector without a shell or logging its output."""
+def switch_account(command: tuple[str, ...], models: list[str]) -> bool | None:
+    """Invoke the local account selector without a shell or logging its output.
+
+    Three answers, which the caller must keep apart:
+      True   an account serves every requested model.
+      False  the selector checked and none does - wait for a reset.
+      None   no verdict: it timed out, exited non-zero, answered in a shape we
+             cannot read, or reported its own failure. That says nothing about
+             quota, so it must never be read as "no quota".
+    """
     proc = subprocess.Popen(
         command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, start_new_session=os.name == "posix")
@@ -63,14 +77,23 @@ def switch_account(command: tuple[str, ...], models: list[str]) -> bool:
         else:
             proc.kill()
         proc.communicate()
-        return False
+        return None
     if proc.returncode != 0:
-        return False
+        return None
     try:
         result = json.loads(stdout)
     except (ValueError, TypeError):
+        return None
+    if not isinstance(result, dict):
+        return None
+    available = result.get("available")
+    if available is True:
+        return True
+    # The selector reports its own crash as {"available": false, "error": ...}.
+    # Only a bare false is evidence about quota.
+    if available is False and not result.get("error"):
         return False
-    return isinstance(result, dict) and result.get("available") is True
+    return None
 
 
 @dataclass
@@ -98,6 +121,7 @@ class ClaudeFailover:
         self.recovering = False
         self.command: tuple[str, ...] = ()
         self.next_check = 0.0
+        self.parked_since = 0.0
 
     @staticmethod
     def _schedule(delay, callback):
@@ -139,6 +163,7 @@ class ClaudeFailover:
             if self.recovering:
                 return True
             self.recovering = True
+            self.parked_since = self.now()
             self.command = tuple(command)
             for attempt in self.attempts.values():
                 if attempt.owned():
@@ -194,30 +219,50 @@ class ClaudeFailover:
                     return
                 models = sorted({attempt.model for attempt in pending})
                 self.next_check = self.now() + RECHECK_SECONDS
-            available = self.switch(self.command, models)
-            if available:
+            verdict = self.switch(self.command, models)
+            resumed = verdict is True
+            if resumed:
                 with self.lock:
                     pending = self._pending()
                     # New arrivals can introduce a model that was not checked.
                     # Keep them parked for another complete account check.
                     if any(item.model not in models for item in pending):
-                        available = False
+                        resumed = False
                     else:
                         self.attempts.clear()
                         self.recovering = False
                         for attempt in pending:
                             if attempt.owned():
                                 attempt.resume()
-                if available:
+                if resumed:
                     log("claudeAccountRecovered", f"turns={len(pending)}")
                     return
-            log("claudeAccountWaiting", "No verified account; turns remain paused")
+            elif verdict is None:
+                log("claudeAccountCheckInconclusive",
+                    "selector returned no verdict; quota is unknown")
+            if verdict is not None:
+                log("claudeAccountWaiting", "No verified account; turns remain paused")
         except Exception as exc:  # Keep the owned work parked for a later check.
             log("claudeAccountRecoveryFail", type(exc).__name__)
+        # Every exit from a failed check lands here, including a raised one, so
+        # this is the one place that can guarantee work is not parked for ever.
         with self.lock:
-            if not self._pending():
+            pending = self._pending()
+            if not pending:
                 self.recovering = False
                 return
+            expired = self.now() - self.parked_since >= MAX_PARK_SECONDS
+            if expired:
+                self.attempts.clear()
+                self.recovering = False
+        if expired:
+            log("claudeAccountParkExpired",
+                f"released={len(pending)} after {MAX_PARK_SECONDS:.0f}s without a "
+                "usable account; the turns run and fail visibly instead")
+            for attempt in pending:
+                if attempt.owned():
+                    attempt.resume()
+            return
         self.schedule(RECHECK_SECONDS, self.recover)
 
     def status(self):

@@ -6,7 +6,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from lib.claude_failover import Attempt, ClaudeFailover, switch_account
+from lib.claude_failover import (
+    MAX_PARK_SECONDS, RECHECK_SECONDS, Attempt, ClaudeFailover, switch_account)
 
 
 def make_attempt(agent="a", *, model="sonnet"):
@@ -43,6 +44,71 @@ def test_simultaneous_limits_stop_and_drain_all_before_switching_once():
     b.resume.assert_called_once()
     assert a.state["account_recovery"]  # old callbacks stay fenced
     assert coordinator.recovering is False
+
+
+def make_clocked_coordinator(switch):
+    """A coordinator whose clock the test advances, to drive many recheck cycles."""
+    clock = {"t": 100.0}
+    scheduled = []
+    coordinator = ClaudeFailover(
+        threading.RLock(), switch=switch,
+        schedule=lambda delay, callback: scheduled.append((delay, callback)),
+        now=lambda: clock["t"])
+    return coordinator, scheduled, clock
+
+
+def drive_past_the_cap(scheduled, clock):
+    """Run recheck cycles until the parking cap has elapsed, then one more."""
+    deadline = clock["t"] + MAX_PARK_SECONDS
+    while scheduled and clock["t"] <= deadline:
+        _delay, callback = scheduled.pop()
+        clock["t"] += RECHECK_SECONDS
+        callback()
+
+
+def test_a_selector_that_cannot_answer_does_not_park_the_fleet_for_ever():
+    """A selector that crashes, times out or answers unreadably has told us
+    nothing about quota. Parking on that indefinitely is how the whole Claude
+    fleet went silent for hours: every agent waits, nothing is logged to the
+    user, and no turn ever fails visibly."""
+    coordinator, scheduled, clock = make_clocked_coordinator(Mock(return_value=None))
+    item = make_attempt()
+    coordinator.register(item)
+    coordinator.request("a", "trace-a", ("selector",))
+    scheduled.pop()[1]()
+    item.resume.assert_not_called()          # one inconclusive check may wait
+
+    drive_past_the_cap(scheduled, clock)
+    assert item.resume.called, "parked work must be released, never frozen for ever"
+    assert not coordinator.recovering
+    assert not scheduled
+
+
+def test_a_selector_that_keeps_raising_also_releases_the_work():
+    coordinator, scheduled, clock = make_clocked_coordinator(
+        Mock(side_effect=RuntimeError("selector exploded")))
+    item = make_attempt()
+    coordinator.register(item)
+    coordinator.request("a", "trace-a", ("selector",))
+    scheduled.pop()[1]()
+    drive_past_the_cap(scheduled, clock)
+    assert item.resume.called, "a failing recovery must not hold the turn for ever"
+    assert not coordinator.recovering
+
+
+def test_a_definite_no_quota_still_parks_before_the_cap():
+    """Waiting out a real usage limit is the point of parking; only the
+    unbounded part is the bug."""
+    coordinator, scheduled, clock = make_clocked_coordinator(Mock(return_value=False))
+    item = make_attempt()
+    coordinator.register(item)
+    coordinator.request("a", "trace-a", ("selector",))
+    scheduled.pop()[1]()
+    assert coordinator.recovering
+    item.resume.assert_not_called()
+    clock["t"] += RECHECK_SECONDS
+    scheduled.pop()[1]()
+    item.resume.assert_not_called()          # still parked well inside the cap
 
 
 def test_no_capacity_keeps_work_parked_and_stop_cancels_it():
@@ -114,9 +180,15 @@ def test_kill_unresponsive_owned_process_before_resume():
 
 
 @pytest.mark.parametrize("payload,exit_code,expected", [
-    ('{"available": true}', 0, True), ('{"available": false}', 0, False),
-    ('{"available": "true"}', 0, False), ('{"available": true}', 1, False),
-    ('not json', 0, False), ('[]', 0, False),
+    ('{"available": true}', 0, True),
+    # A read verdict of "no account serves these models" is definite.
+    ('{"available": false}', 0, False),
+    # Everything below is the selector failing to answer, which says nothing
+    # about quota and must not be mistaken for "no quota".
+    ('{"available": "true"}', 0, None),
+    ('{"available": true}', 1, None),
+    ('not json', 0, None), ('[]', 0, None),
+    ('{"available": false, "error": "HTTPError"}', 0, None),
 ])
 def test_selector_requires_successful_explicit_json(payload, exit_code, expected):
     code = "import sys; print(sys.argv[1]); sys.exit(int(sys.argv[2]))"
