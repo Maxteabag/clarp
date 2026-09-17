@@ -55,6 +55,10 @@ def invoke(registry, spec, model, prompt, owned):
         session=spec.session,
         agent_id=spec.agent_id,
         isolated=True,
+        # Claude's UserPromptSubmit hook resolves the agent from the session
+        # and binds the run's UUID to it. An empty hook session keeps this
+        # throwaway conversation from replacing the primary's.
+        hook_session="",
         on_session_init=lambda _: owned(lambda: None),
         on_result=success,
         on_error=error,
