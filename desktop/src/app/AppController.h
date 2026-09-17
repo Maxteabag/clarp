@@ -266,6 +266,7 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] QString agentName(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentState(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] int agentQueueCount(const QString& session) const;
+    Q_INVOKABLE [[nodiscard]] QString agentQuotaNotice(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QVariantMap agentDetails(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentBackend(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentWorkingDirectory(const QString& session) const;

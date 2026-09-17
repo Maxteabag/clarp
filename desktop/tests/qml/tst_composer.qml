@@ -19,6 +19,8 @@ TestCase {
         property string composerFocusPane: ""
         signal draftChanged(string session, string text, string originPaneId)
         function agentQueueCount(session) { return 0; }
+        property string quotaNotice: ""
+        function agentQuotaNotice(session) { return quotaNotice; }
         function composerAttachments(pane, session) { return []; }
         function composerCanSend(pane, session) { return true; }
         function paneDraft(pane, session) { return ""; }
@@ -81,6 +83,44 @@ TestCase {
         tryVerify(() => cursor.opacity > 0);
         compare(editor.text, "a");
         editor.clear();
+    }
+
+    function test_backendQuotaNoticeShowsAboveTheEditorAndGrowsTheComposer() {
+        const notice = findChild(composer, "backendQuotaNotice");
+        verify(notice !== null);
+        compare(notice.visible, false);
+        tryCompare(composer, "height", 54);
+
+        controller.quotaNotice = "Codex workspace is out of credits  ·  included usage resets in 5d 5h  ·  a message will likely fail";
+        controller.agentRevision += 1;
+        tryCompare(notice, "visible", true);
+        verify(notice.text.indexOf("out of credits") >= 0);
+        tryCompare(composer, "height", 54 + 25);
+        // The composer keeps working: a warning, not a lock.
+        const editor = findChild(composer, "paneComposerEditor");
+        verify(editor.enabled);
+        controller.quotaNotice = "";
+        controller.agentRevision += 1;
+        tryCompare(notice, "visible", false);
+        tryCompare(composer, "height", 54);
+        editor.clear();
+        testCase.forceActiveFocus();
+    }
+
+    // Last on purpose: grabbing the scene leaves the window's focus behind
+    // and the click tests before it depend on a clean focus chain.
+    function test_zzz_backendQuotaNoticeScreenshot() {
+        controller.quotaNotice = "Codex workspace is out of credits  ·  included usage resets in 5d 5h  ·  a message will likely fail";
+        controller.agentRevision += 1;
+        tryCompare(composer, "height", 54 + 25);
+        const dir = Qt.resolvedUrl(".").toString().replace("file://", "");
+        let saved = false;
+        composer.grabToImage(function(result) {
+            saved = result.saveToFile(dir + "../../build/dev/tests/composer-quota-notice.png");
+        });
+        tryVerify(() => saved, 3000);
+        controller.quotaNotice = "";
+        controller.agentRevision += 1;
     }
 
     function test_growthAndSend() {

@@ -94,6 +94,10 @@ Agent Agent::fromJson(const QJsonObject& object) {
     if (object.value(QStringLiteral("team_ids")).isArray()) {
         agent.teamIds = object.value(QStringLiteral("team_ids")).toArray();
     }
+    const QJsonObject quota = object.value(QStringLiteral("backend_quota")).toObject();
+    if (quota.value(QStringLiteral("state")).toString() == QStringLiteral("exhausted")) {
+        agent.backendQuota = quota;
+    }
     agent.latestStateTimestamp = integerValue(object, "latest_state_ts");
     agent.lastActivity = integerValue(object, "last_activity");
     agent.headRevision = integerValue(object, "head_revision");
@@ -110,6 +114,42 @@ Agent Agent::fromJson(const QJsonObject& object) {
     agent.archived = !object.value(QStringLiteral("archived_at")).isNull() &&
                      !object.value(QStringLiteral("archived_at")).isUndefined();
     return agent;
+}
+
+QString Agent::quotaNotice(const QDateTime& now) const {
+    if (backendQuota.isEmpty() || busy) {
+        return {};
+    }
+    const QString provider = backendQuota.value(QStringLiteral("provider_id")).toString();
+    QString name = provider;
+    if (provider == QStringLiteral("codex")) {
+        name = QStringLiteral("Codex");
+    } else if (provider == QStringLiteral("claude")) {
+        name = QStringLiteral("Claude");
+    } else if (provider == QStringLiteral("agy")) {
+        name = QStringLiteral("Antigravity");
+    } else if (provider.isEmpty()) {
+        name = QStringLiteral("This backend");
+    }
+    const bool credits = backendQuota.value(QStringLiteral("reason")).toString() ==
+                         QStringLiteral("credits_depleted");
+    QString text = credits ? name + QStringLiteral(" workspace is out of credits")
+                           : name + QStringLiteral(" is out of quota");
+    const QDateTime reset = QDateTime::fromString(
+        backendQuota.value(QStringLiteral("resets_at")).toString(), Qt::ISODate);
+    if (reset.isValid() && reset > now) {
+        const qint64 seconds = now.secsTo(reset);
+        const QString wait =
+            seconds >= 86400
+                ? QStringLiteral("%1d %2h").arg(seconds / 86400).arg((seconds % 86400) / 3600)
+                : QStringLiteral("%1h %2m").arg(seconds / 3600).arg((seconds % 3600) / 60);
+        text += (credits ? QStringLiteral("  ·  included usage resets in ")
+                         : QStringLiteral("  ·  resets in ")) + wait;
+    }
+    const QString fallback = backendQuota.value(QStringLiteral("fallback_model")).toString();
+    text += fallback.isEmpty() ? QStringLiteral("  ·  a message will likely fail")
+                               : QStringLiteral("  ·  runs on ") + fallback;
+    return text;
 }
 
 Message Message::fromJson(const QJsonObject& object) {

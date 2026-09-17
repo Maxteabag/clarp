@@ -39,4 +39,12 @@ describe('agent recovery banner', () => {
     expect(quotaMessage({ provider_id: 'codex', resets_at: '2026-09-01T00:00:00Z' }, now))
       .toBe('Codex is out of quota. A message sent now will likely fail.');
   });
+  it('says credits are gone rather than promising a reset will fix it', () => {
+    const now = new Date('2026-09-17T06:00:00Z');
+    const msg = quotaMessage({ provider_id: 'codex', reason: 'credits_depleted',
+      resets_at: '2026-09-22T11:08:49Z', fallback_model: null }, now);
+    expect(msg).toMatch(/^Codex workspace is out of credits · included usage resets .*22.*\. A message sent now will likely fail\.$/);
+    expect(quotaMessage({ provider_id: 'codex', reason: 'credits_depleted' }, now))
+      .toBe('Codex workspace is out of credits. A message sent now will likely fail.');
+  });
 });

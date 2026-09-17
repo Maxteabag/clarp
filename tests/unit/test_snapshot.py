@@ -318,7 +318,7 @@ def test_snapshot_flags_agents_whose_backend_is_out_of_quota(tmp_path, monkeypat
         rescued, [{"backend": "claude", "model": "claude-sonnet-4-6",
                    "effort": ""}], expected_revision=0)
     quota = {"state": "exhausted", "provider_id": "codex",
-             "window": "seven_day", "resets_at": "2030-03-17T17:46:40Z",
+             "reason": "credits_depleted", "window": "seven_day", "resets_at": "2030-03-17T17:46:40Z",
              "observed_at": "2027-01-15T08:00:00Z"}
     monkeypatch.setattr(
         backend_usage, "exhausted_backends", lambda: {"codex": quota})

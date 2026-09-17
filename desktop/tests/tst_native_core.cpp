@@ -658,6 +658,7 @@ class NativeCoreTest final : public QObject {
     void sseCursorIsScopedToOneHost();
     void snapshotFiltersArchivedAgentsAndPatchesEvents();
     void agentSnapshotDiffsInPlaceAndRejectsStaleState();
+    void backendQuotaNoticeNamesReasonResetAndFallback();
     void tailThenDeltaMatchesGoldenFixture();
     void streamingRowsUpdateInPlaceAndRetireWhenFinalized();
     void activityRowsUpdateInPlaceBySemanticIdentity();
@@ -1662,6 +1663,49 @@ void NativeCoreTest::snapshotFiltersArchivedAgentsAndPatchesEvents() {
     QCOMPARE(model.data(model.index(0, 0), AgentListModel::StateRole).toString(),
              QStringLiteral("offline"));
     QVERIFY(!model.data(model.index(0, 0), AgentListModel::BusyRole).toBool());
+}
+
+void NativeCoreTest::backendQuotaNoticeNamesReasonResetAndFallback() {
+    const QDateTime now = QDateTime::fromString(QStringLiteral("2026-09-17T06:00:00Z"), Qt::ISODate);
+    QJsonObject base{{QStringLiteral("agent_id"), QStringLiteral("a")},
+                     {QStringLiteral("session"), QStringLiteral("gordon")},
+                     {QStringLiteral("backend"), QStringLiteral("codex")},
+                     {QStringLiteral("latest_state"), QStringLiteral("interrupted")}};
+
+    QCOMPARE(Agent::fromJson(base).quotaNotice(now), QString{});
+    base.insert(QStringLiteral("backend_quota"), QJsonValue::Null);
+    QCOMPARE(Agent::fromJson(base).quotaNotice(now), QString{});
+
+    base.insert(QStringLiteral("backend_quota"),
+                QJsonObject{{QStringLiteral("state"), QStringLiteral("exhausted")},
+                            {QStringLiteral("provider_id"), QStringLiteral("codex")},
+                            {QStringLiteral("reason"), QStringLiteral("credits_depleted")},
+                            {QStringLiteral("window"), QStringLiteral("seven_day")},
+                            {QStringLiteral("resets_at"), QStringLiteral("2026-09-22T11:30:00Z")},
+                            {QStringLiteral("fallback_model"), QJsonValue::Null}});
+    QCOMPARE(Agent::fromJson(base).quotaNotice(now),
+             QStringLiteral("Codex workspace is out of credits  ·  included usage resets in 5d 5h"
+                            "  ·  a message will likely fail"));
+
+    base.insert(QStringLiteral("backend_quota"),
+                QJsonObject{{QStringLiteral("state"), QStringLiteral("exhausted")},
+                            {QStringLiteral("provider_id"), QStringLiteral("codex")},
+                            {QStringLiteral("reason"), QStringLiteral("usage_limit")},
+                            {QStringLiteral("window"), QStringLiteral("unknown")},
+                            {QStringLiteral("resets_at"), QJsonValue::Null},
+                            {QStringLiteral("fallback_model"), QStringLiteral("claude-sonnet-5")}});
+    QCOMPARE(Agent::fromJson(base).quotaNotice(now),
+             QStringLiteral("Codex is out of quota  ·  runs on claude-sonnet-5"));
+
+    // A running turn is not a moment to warn about the next one.
+    base.insert(QStringLiteral("busy"), true);
+    QCOMPARE(Agent::fromJson(base).quotaNotice(now), QString{});
+
+    // A state this build does not know is not a warning.
+    base.insert(QStringLiteral("busy"), false);
+    base.insert(QStringLiteral("backend_quota"),
+                QJsonObject{{QStringLiteral("state"), QStringLiteral("throttled")}});
+    QCOMPARE(Agent::fromJson(base).quotaNotice(now), QString{});
 }
 
 void NativeCoreTest::agentSnapshotDiffsInPlaceAndRejectsStaleState() {
