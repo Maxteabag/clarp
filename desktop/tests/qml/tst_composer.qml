@@ -1,3 +1,4 @@
+import QtCore
 import QtQuick
 import QtTest
 import "../../qml/components"
@@ -113,10 +114,13 @@ TestCase {
         controller.quotaNotice = "Codex workspace is out of credits  ·  included usage resets in 5d 5h  ·  a message will likely fail";
         controller.agentRevision += 1;
         tryCompare(composer, "height", 54 + 25);
-        const dir = Qt.resolvedUrl(".").toString().replace("file://", "");
+        // The build directory differs per machine; the temp location always exists.
+        const path = StandardPaths.writableLocation(StandardPaths.TempLocation)
+            + "/composer-quota-notice.png";
         let saved = false;
         composer.grabToImage(function(result) {
-            saved = result.saveToFile(dir + "../../build/dev/tests/composer-quota-notice.png");
+            saved = result.saveToFile(path);
+            if (saved) console.log("quota notice screenshot: " + path);
         });
         tryVerify(() => saved, 3000);
         controller.quotaNotice = "";
