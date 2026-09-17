@@ -70,7 +70,7 @@ docker exec "$NAME" sh -lc 'claude --version && codex --version'
 docker exec "$NAME" clarp-admin doctor >/dev/null
 docker exec "$NAME" sh -lc '
   command -v clarp-tui clarp-agent-tasks clarp-agent-artifacts clarp-media-publish \
-    clarp-agent-bg clarp-github-workflow-artifact clarp-message-watch >/dev/null
+    clarp-agent-bg clarp-github-workflow-artifact clarp-message-watch clarp-adopt >/dev/null
   clarp-agent-tasks show mike >/dev/null
   python3 -c "from lib import service_manager; ok,error=service_manager.launch_detached([\"/bin/true\"],unit=\"clarp-smoke\"); assert ok, error"
 '

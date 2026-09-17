@@ -259,6 +259,7 @@ Default core:
 
 - `clarp-media`
 - `clarp-sessions`
+- `clarp-adopt`
 - `clarp-self-prompt`
 - `clarp-background-jobs`
 - `clarp-agent-communication`
