@@ -306,6 +306,7 @@ backup_external "$BIN/clarp-media-publish"
 backup_external "$BIN/clarp-agent-bg"
 backup_external "$BIN/clarp-github-workflow-artifact"
 backup_external "$BIN/clarp-message-watch"
+backup_external "$BIN/clarp-adopt"
 backup_external "$BIN/clarp-runtime-service"
 backup_external "$HOME/.claude/settings.json"
 backup_external "$CFG_DIR/user-values.md"
@@ -390,6 +391,7 @@ chmod 700 "$SHARE/current/scripts/agent_tasks.py" \
           "$SHARE/current/scripts/agent_bg.py" \
           "$SHARE/current/scripts/github_workflow_artifact.py"
 chmod 700 "$SHARE/current/skills/clarp-message-watch/scripts/watch_messages.py"
+chmod 700 "$SHARE/current/skills/clarp-adopt/scripts/adopt_session.py"
 write_python_wrapper() {
     "$PYTHON" - "$BIN/$1" "$SHARE" "$CFG_DIR" "$CACHE_DIR" \
         "$RELEASE" "$2" <<'PY'
@@ -435,12 +437,13 @@ write_python_wrapper clarp-media-publish scripts/clarp-media-publish.py
 write_python_wrapper clarp-agent-bg scripts/agent_bg.py
 write_python_wrapper clarp-github-workflow-artifact scripts/github_workflow_artifact.py
 write_python_wrapper clarp-message-watch skills/clarp-message-watch/scripts/watch_messages.py
+write_python_wrapper clarp-adopt skills/clarp-adopt/scripts/adopt_session.py
 write_python_wrapper clarp-runtime-service runtime.py
 mkdir -p "$SHARE/bin"
 for _helper in clarp-admin clarp-tui clarp-agent-tasks clarp-agent-artifacts \
         clarp-podcast-history \
         clarp-media-publish clarp-agent-bg clarp-github-workflow-artifact \
-        clarp-message-watch clarp-runtime-service; do
+        clarp-message-watch clarp-adopt clarp-runtime-service; do
     cp "$BIN/$_helper" "$SHARE/bin/$_helper"
 done
 chmod 700 "$SHARE/bin" "$SHARE/bin"/*

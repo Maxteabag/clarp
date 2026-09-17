@@ -13,3 +13,6 @@ clarp-admin sessions
 
 Use the `session` slug for Clarp API requests. Do not guess a session from a
 persona when more than one row could match.
+
+To resume an existing terminal conversation as a Clarp agent, use the
+`clarp-adopt` skill.

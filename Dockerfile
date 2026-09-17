@@ -101,6 +101,7 @@ RUN mkdir -p /data /tmp/clarp-cache /home/clarp \
       /opt/clarp/scripts/agent_bg.py \
       /opt/clarp/scripts/github_workflow_artifact.py \
       /opt/clarp/skills/clarp-message-watch/scripts/watch_messages.py \
+      /opt/clarp/skills/clarp-adopt/scripts/adopt_session.py \
     && ln -s /opt/clarp/bin/clarp-admin.py /usr/local/bin/clarp-admin \
     && ln -s /opt/clarp/bin/clarp-tui.py /usr/local/bin/clarp-tui \
     && ln -s /opt/clarp/scripts/agent_tasks.py /usr/local/bin/clarp-agent-tasks \
@@ -108,7 +109,8 @@ RUN mkdir -p /data /tmp/clarp-cache /home/clarp \
     && ln -s /opt/clarp/scripts/clarp-media-publish.py /usr/local/bin/clarp-media-publish \
     && ln -s /opt/clarp/scripts/agent_bg.py /usr/local/bin/clarp-agent-bg \
     && ln -s /opt/clarp/scripts/github_workflow_artifact.py /usr/local/bin/clarp-github-workflow-artifact \
-    && ln -s /opt/clarp/skills/clarp-message-watch/scripts/watch_messages.py /usr/local/bin/clarp-message-watch
+    && ln -s /opt/clarp/skills/clarp-message-watch/scripts/watch_messages.py /usr/local/bin/clarp-message-watch \
+    && ln -s /opt/clarp/skills/clarp-adopt/scripts/adopt_session.py /usr/local/bin/clarp-adopt
 
 USER 10001:10001
 VOLUME ["/data"]
