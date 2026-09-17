@@ -52,6 +52,18 @@ def codex_status(value: str) -> str:
     return _TO_CODEX.get(value, value)
 
 
+def _epoch_ms(value: Any) -> int | None:
+    """Codex reports goal timestamps in whole seconds; the rest of Clarp (and
+    the app) reads epoch milliseconds, so a raw value renders as 1970."""
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError):
+        return None
+    if number <= 0:
+        return None
+    return number * 1000 if number < 100_000_000_000 else number
+
+
 def from_codex(goal: dict[str, Any]) -> dict[str, Any]:
     """The ``ThreadGoal`` shape the app-server reports, as a table row."""
     return {
@@ -60,8 +72,8 @@ def from_codex(goal: dict[str, Any]) -> dict[str, Any]:
         "token_budget": goal.get("tokenBudget"),
         "tokens_used": int(goal.get("tokensUsed") or 0),
         "time_used_seconds": int(goal.get("timeUsedSeconds") or 0),
-        "created_at": int(goal.get("createdAt") or 0) or None,
-        "updated_at": int(goal.get("updatedAt") or 0) or None,
+        "created_at": _epoch_ms(goal.get("createdAt")),
+        "updated_at": _epoch_ms(goal.get("updatedAt")),
     }
 
 

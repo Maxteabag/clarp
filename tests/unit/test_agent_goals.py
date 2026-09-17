@@ -34,21 +34,35 @@ def test_table_round_trip_normalizes_codex_states(tmp_path):
         "objective": "make the tests pass", "status": "usageLimited",
         "tokensUsed": 1200, "timeUsedSeconds": 30, "createdAt": 5, "updatedAt": 9}))
     assert row["status"] == "usage_limited"
+    # Codex counts in seconds; a raw value would render as 1970 in the app.
+    assert row["created_at"] == 5000 and row["updated_at"] == 9000
     public = agent_goals.public(row)
     assert public == {
         "objective": "make the tests pass", "status": "usage_limited", "token_budget": None,
         "tokens_used": 1200, "time_used_seconds": 30, "native": True, "backend": "codex",
-        "created_at": 5, "updated_at": 9}
+        "created_at": 5000, "updated_at": 9000}
     assert agent_goals.by_agent()[agent_id]["objective"] == "make the tests pass"
     # A later update keeps the original start time when Codex omits it.
     again = agent_goals.upsert(agent_id, session="theo", backend="codex",
                                goal={"objective": "make the tests pass", "status": "active"})
-    assert again["created_at"] == 5 and again["updated_at"] >= 9
+    assert again["created_at"] == 5000 and again["updated_at"] >= 9000
     assert agent_goals.clear(agent_id) and agent_goals.get(agent_id) is None
     assert agent_goals.public(None) is None
     with pytest.raises(ValueError):
         agent_goals.upsert(agent_id, session="theo", backend="codex",
                            goal={"objective": "x", "status": "sideways"})
+
+
+def test_codex_second_timestamps_become_milliseconds():
+    """A real 0.154 goal: createdAt/updatedAt are epoch seconds."""
+    row = agent_goals.from_codex({"objective": "x", "status": "active",
+                                  "createdAt": 1789631121, "updatedAt": 1789631123})
+    assert row["created_at"] == 1789631121000
+    assert row["updated_at"] == 1789631123000
+    # Already-millisecond values and junk are left alone.
+    assert agent_goals.from_codex({"createdAt": 1789631121000})["created_at"] == 1789631121000
+    assert agent_goals.from_codex({})["created_at"] is None
+    assert agent_goals.from_codex({"createdAt": "soon"})["created_at"] is None
 
 
 def _client(stream=None):
