@@ -10,6 +10,9 @@ import argparse
 import glob
 import json
 import os
+import re
+import sqlite3
+import subprocess
 import sys
 import time
 import tomllib
@@ -20,8 +23,15 @@ from pathlib import Path
 
 BACKENDS = ('claude', 'codex', 'grok', 'opencode')
 # Environment variables a running CLI exports for its own conversation.
-SELF_ID_ENV = (('codex', 'CODEX_THREAD_ID'), ('codex', 'CODEX_SESSION_ID'),
-               ('claude', 'CLAUDE_CODE_SESSION_ID'))
+# OpenCode exports none; see opencode_running_session.
+SELF_ID_ENV = {'codex': ('CODEX_THREAD_ID', 'CODEX_SESSION_ID'),
+               'claude': ('CLAUDE_CODE_SESSION_ID',),
+               'grok': ('GROK_SESSION_ID',)}
+# `grok` resolves to a versioned binary (grok-1.0.34-linux-x86_64); a file that
+# merely starts with a CLI's name (claude-notes.md) must not match.
+_CLI_NAME = re.compile(r'^(claude|codex|grok|opencode)(?:-\d[\w.-]*)?$')
+# How long ago the CLI may have started the tool call that is running us.
+_RUNNING_WINDOW_MS = 10 * 60 * 1000
 
 
 class AdoptError(Exception):
@@ -78,12 +88,91 @@ class Api:
         return self.call('/log?' + query)
 
 
-def detect_self():
-    for backend, name in SELF_ID_ENV:
-        value = os.environ.get(name, '').strip()
-        if value:
-            return backend, value
+def _ancestor_commands():
+    """argv of each ancestor process, nearest first. `ps` rather than /proc so
+    this also works on macOS."""
+    pid, seen = os.getppid(), set()
+    while pid > 1 and pid not in seen and len(seen) < 32:
+        seen.add(pid)
+        try:
+            out = subprocess.run(['ps', '-o', 'ppid=', '-o', 'args=', '-p', str(pid)],
+                                 capture_output=True, text=True, timeout=5,
+                                 check=False).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return
+        if not out:
+            return
+        parent, _, args = out.partition(' ')
+        yield args.split()
+        try:
+            pid = int(parent)
+        except ValueError:
+            return
+
+
+def enclosing_cli():
+    """The backend of the nearest CLI this command runs inside, if any.
+
+    Session variables are inherited, so a CLI started from inside another one
+    sees both ids (Grok launched from a Claude session has CLAUDE_CODE_SESSION_ID
+    and GROK_SESSION_ID). The innermost process is the conversation that asked.
+    """
+    for argv in _ancestor_commands():
+        for word in argv[:2]:
+            match = _CLI_NAME.match(os.path.basename(word))
+            if match:
+                return match.group(1)
     return None
+
+
+def opencode_running_session(home=None, now_ms=None):
+    """OpenCode exports no session id, but it records every tool call in its
+    database as `running`, with the command, before the command starts. The
+    conversation that is running `clarp-adopt` right now is therefore the one
+    to adopt. Anything other than exactly one such conversation is refused."""
+    db = Path(home or os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share') / 'opencode/opencode.db'
+    now_ms = now_ms or int(time.time() * 1000)
+    try:
+        con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+        try:
+            rows = con.execute(
+                "SELECT DISTINCT session_id FROM part "
+                "WHERE json_extract(data, '$.type') = 'tool' "
+                "AND json_extract(data, '$.state.status') = 'running' "
+                "AND json_extract(data, '$.state.input.command') LIKE '%clarp-adopt%' "
+                "AND json_extract(data, '$.state.time.start') BETWEEN ? AND ?",
+                (now_ms - _RUNNING_WINDOW_MS, now_ms + 5000)).fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error as error:
+        raise AdoptError(f'Cannot read the OpenCode database to identify this '
+                         f'conversation ({error}); pass --id.') from error
+    if len(rows) != 1:
+        raise AdoptError(
+            f'{len(rows)} OpenCode conversations are running clarp-adopt right now, so this '
+            'one cannot be identified safely. Use --all to pick it, or pass --id.')
+    return rows[0][0]
+
+
+def detect_self():
+    """(backend, native id) of the conversation running this command, or None
+    from a plain shell. Raises rather than guessing when the evidence conflicts."""
+    backend = enclosing_cli()
+    if backend == 'opencode':
+        return backend, opencode_running_session()
+    found = {b: os.environ[name].strip() for b, names in SELF_ID_ENV.items()
+             for name in reversed(names) if os.environ.get(name, '').strip()}
+    if backend:
+        if backend in found:
+            return backend, found[backend]
+        raise AdoptError(f'Running inside {backend}, but it exported no session id. '
+                         'Use --all to pick the conversation, or pass --id.')
+    if len(found) > 1:
+        # No CLI among our ancestors (or `ps` is unavailable) and ids from more
+        # than one: one of them is inherited and there is no telling which.
+        raise AdoptError('Session ids from ' + ', '.join(sorted(found)) + ' are both set and '
+                         'the enclosing CLI could not be determined. Pass --backend with --id.')
+    return next(iter(found.items()), None)
 
 
 def candidates(api, backends, cwd, all_projects):
@@ -122,6 +211,7 @@ def find_source(api, args, owners):
     """Return (backend, native id, agent cwd, catalog row or None)."""
     here = str(Path(args.cwd).expanduser().resolve()) if args.cwd else os.getcwd()
     own = None if (args.id or args.pick or args.all) else detect_self()
+    args.own = own
     if own and args.backend in (None, own[0]):
         backend, native_id = own
     elif args.id:
@@ -207,7 +297,7 @@ def main(argv=None):
         backend, native_id, cwd, row = find_source(api, args, owners)
         owner = next((a for a in live if a.get('backend_session_id') == native_id), None)
         result = {'backend': backend, 'native_id': native_id, 'cwd': cwd,
-                  'source': describe(row) if row else 'this conversation' if detect_self() == (backend, native_id) else 'given id'}
+                  'source': describe(row) if row else 'this conversation' if getattr(args, 'own', None) == (backend, native_id) else 'given id'}
         if owner:
             result.update(session=owner['session'], name=owner['persona'], created=False)
         else:
