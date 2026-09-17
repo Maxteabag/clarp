@@ -728,7 +728,8 @@ def test_spent_weekly_window_marks_codex_exhausted_until_its_reset(monkeypatch):
         source_detail="account/rateLimits/read")
 
     assert backend_usage.exhausted_backends() == {"codex": {
-        "state": "exhausted", "provider_id": "codex", "window": "seven_day",
+        "state": "exhausted", "provider_id": "codex",
+        "reason": "usage_limit", "window": "seven_day",
         "resets_at": "2030-03-17T17:46:40Z",
         "observed_at": "2027-01-15T08:00:00Z",
     }}
@@ -784,3 +785,86 @@ def test_refresh_worker_announces_only_a_changed_quota_picture(monkeypatch):
     picture.clear()
     worker.run_once()          # recovered
     assert sent == [{"type": "agent-roster", "kind": "backend-quota"}]
+
+
+def _depleted(rate_limit):
+    """The shape /wham/usage answered for a workspace without credits."""
+    return {
+        "plan_type": "self_serve_business_prolite",
+        "rate_limit": rate_limit,
+        "credits": {"has_credits": False, "unlimited": False, "balance": None},
+        "rate_limit_reached_type": {
+            "type": "workspace_member_credits_depleted", "details": None},
+        "rate_limit_upsell": {"reset_at": 1_900_000_000},
+    }
+
+
+def test_depleted_credits_are_told_apart_from_a_spent_window(monkeypatch):
+    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    backend_usage.capture_codex_rate_limits(_depleted({
+        "allowed": False, "limit_reached": True,
+        "primary_window": {"used_percent": 100, "limit_window_seconds": 604_800,
+                           "reset_at": 1_900_000_000},
+        "secondary_window": None,
+    }), identity=("auth-a", "account-a"), source_detail="/wham/usage")
+
+    quota = backend_usage.exhausted_backends()["codex"]
+    assert quota["reason"] == "credits_depleted"
+    assert quota["window"] == "seven_day"
+    assert quota["resets_at"] == "2030-03-17T17:46:40Z"
+
+
+def test_blocked_response_without_any_window_is_still_exhausted(monkeypatch):
+    """This used to raise "no usable windows" and record nothing at all."""
+    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    backend_usage.capture_codex_rate_limits(_depleted({
+        "allowed": False, "limit_reached": True,
+        "primary_window": None, "secondary_window": None,
+    }), identity=("auth-a", "account-a"), source_detail="/wham/usage")
+
+    assert backend_usage.exhausted_backends()["codex"] == {
+        "state": "exhausted", "provider_id": "codex",
+        "reason": "credits_depleted", "window": "unknown",
+        "resets_at": "2030-03-17T17:46:40Z", "observed_at": None,
+    }
+    later = 1_800_000_000_000 + backend_usage.CODEX_FRESH_MS + 1
+    assert backend_usage.exhausted_backends(later) == {}
+
+
+def test_windowless_response_that_is_not_blocked_still_fails(monkeypatch):
+    with pytest.raises(RuntimeError, match="no usable windows"):
+        backend_usage.capture_codex_rate_limits(
+            {"rate_limit": {"allowed": True, "primary_window": None}},
+            identity=("auth-a", "account-a"), source_detail="/wham/usage")
+
+
+def test_failed_turn_borrows_the_reset_time_the_provider_stated(monkeypatch):
+    """A classified usage-limit failure knows no reset time on its own."""
+    now = [1_800_000_000_000]
+    monkeypatch.setattr(backend_usage, "_now_ms", lambda: now[0])
+    monkeypatch.setattr(backend_usage, "_read_codex_auth", lambda: ("token", "account"))
+    identity = backend_usage._codex_identity("token", "account")
+    backend_usage.capture_codex_rate_limits(_depleted({
+        "allowed": False, "limit_reached": True,
+        "primary_window": None, "secondary_window": None,
+    }), identity=identity, source_detail="/wham/usage")
+    backend_usage.record_classified_usage_limit("codex")
+
+    quota = backend_usage.exhausted_backends()["codex"]
+    assert quota["reason"] == "credits_depleted"
+    assert quota["resets_at"] == "2030-03-17T17:46:40Z"
+
+
+def test_refilled_account_clears_the_block(monkeypatch):
+    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    backend_usage.capture_codex_rate_limits(_depleted({
+        "allowed": False, "limit_reached": True,
+        "primary_window": None, "secondary_window": None,
+    }), identity=("auth-a", "account-a"), source_detail="/wham/usage")
+    backend_usage.capture_codex_rate_limits({"rate_limit": {
+        "allowed": True, "limit_reached": False,
+        "primary_window": {"used_percent": 3, "limit_window_seconds": 604_800,
+                           "reset_at": 1_900_000_000},
+    }}, identity=("auth-a", "account-a"), source_detail="/wham/usage")
+
+    assert backend_usage.exhausted_backends() == {}

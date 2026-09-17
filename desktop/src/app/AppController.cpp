@@ -1351,6 +1351,11 @@ int AppController::agentQueueCount(const QString& session) const {
     return agent == nullptr ? 0 : agent->queuedTurnCount;
 }
 
+QString AppController::agentQuotaNotice(const QString& session) const {
+    const Agent* agent = m_agents.find(session);
+    return agent == nullptr ? QString{} : agent->quotaNotice(QDateTime::currentDateTimeUtc());
+}
+
 QVariantMap AppController::agentDetails(const QString& session) const {
     const Agent* agent = m_agents.find(session);
     if (agent == nullptr) {

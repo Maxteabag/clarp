@@ -27,6 +27,8 @@ struct Agent {
     QJsonArray schedules;
     QJsonArray mcpServers;
     QJsonArray teamIds;
+    // Empty unless the Host says this agent's provider cannot serve a turn.
+    QJsonObject backendQuota;
     qint64 latestStateTimestamp = 0;
     qint64 lastActivity = 0;
     qint64 headRevision = 0;
@@ -44,6 +46,9 @@ struct Agent {
     bool unread = false;
 
     [[nodiscard]] static Agent fromJson(const QJsonObject& object);
+    // The warning shown above the composer before a send; empty when the
+    // provider is usable or the Host is too old to say. Advisory only.
+    [[nodiscard]] QString quotaNotice(const QDateTime& now) const;
 };
 
 struct Message {
