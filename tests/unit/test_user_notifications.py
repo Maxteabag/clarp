@@ -28,16 +28,20 @@ def _turn(agent_id: str, *, origin: str, assistant: str,
           backend_session_id: str = "bs-1", done_ts: int | None = None,
           sender_agent_id: str = ""
           ) -> int:
-    now = db.now_ms()
     suffix = next(_IDS)
     message_store.record_user_message(
         agent_id=agent_id,
         backend_session_id=backend_session_id,
-        client_msg_id=f"u-{origin}-{now}-{suffix}",
+        client_msg_id=f"u-{origin}-{db.now_ms()}-{suffix}",
         text="prompt",
         origin=origin,
         sender_agent_id=sender_agent_id,
     )
+    # Read the clock *after* the user row is stamped. Taking it before left the
+    # row only 2ms to be written before `done_ts`, so on a loaded machine the
+    # classifier could not find its causing row and reported
+    # "missing-causing-row" instead of the notification under test.
+    now = db.now_ms()
     db.conn().execute(
         """INSERT INTO messages (
                message_id, agent_id, backend_session_id, seq, role, text,
