@@ -94,3 +94,39 @@ def test_non_app_turn_emits_no_context():
     """A turn the app didn't dispatch (e.g. third-party local terminal) and
     isn't voiced gets no injected context at all."""
     assert pwa_source_flag._build_additional_context(app_dispatched=False, voiced=False) == ""
+
+
+def _run_hook(monkeypatch, session, claude_uuid):
+    import io
+    import json
+    monkeypatch.setenv("CLAUDE_PWA_SESSION", session)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(
+        {"session_id": claude_uuid, "prompt": "hi"})))
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+    pwa_source_flag.main()
+
+
+def test_claude_fallback_uuid_never_replaces_a_codex_agents_thread(
+        tmp_path, monkeypatch):
+    """Gordon (Codex) answered through a Claude fallback, and the hook bound
+    Claude's UUID over his Codex thread: the chat emptied and the thread was
+    no longer resumable."""
+    from lib import agents as agents_db
+    agent_id = agents_db.create_agent(
+        persona="Gordon", voice_id="V", cwd=str(tmp_path), session="gordon",
+        backend="codex")
+    agents_db.bind_backend_session(agent_id, "codex-thread")
+
+    _run_hook(monkeypatch, "gordon", "claude-fallback-uuid")
+
+    assert agents_db.live_backend_session(agent_id) == "codex-thread"
+
+
+def test_claude_agent_is_still_bound_by_the_hook(tmp_path, monkeypatch):
+    from lib import agents as agents_db
+    agent_id = agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
+
+    _run_hook(monkeypatch, "rachel", "claude-uuid")
+
+    assert agents_db.live_backend_session(agent_id) == "claude-uuid"

@@ -479,3 +479,36 @@ def test_record_clip_rejects_unknown_playback_status(tmp_path):
         "SELECT status FROM clips WHERE clip_id = ?", (clip_id,)
     ).fetchone()
     assert row["status"] == ClipStatus.SYNTHESIZED
+
+
+def test_a_turn_owned_by_a_client_row_leaves_no_stale_row_in_its_slot(tmp_path):
+    """The parser began hiding Codex's AGENTS.md block, so every later turn
+    moved down one slot. The user's message landed on the slot the block used
+    to hold, is never written there (the client row stands in for it), and the
+    block stayed in the chat."""
+    from lib import message_store
+    agent_id = agents_db.create_agent(
+        persona="Gordon", voice_id="V", cwd=str(tmp_path), session="gordon",
+        backend="codex")
+    common = dict(agent_id=agent_id, backend_session_id="thread",
+                  source_file="rollout.jsonl")
+    message_store.record_user_message(
+        agent_id=agent_id, backend_session_id="thread",
+        client_msg_id="c1", text="Purest yerba mate?")
+    agents_db.store_transcript_turns(**common, turns=[
+        {"role": "assistant", "text": "Earlier answer.", "timestamp": "t0"},
+        {"role": "user", "text": "# AGENTS.md instructions\n\n<INSTRUCTIONS>",
+         "timestamp": "t1"},
+        {"role": "user", "text": "Purest yerba mate?", "timestamp": "t2"},
+    ])
+    before = agents_db.list_messages(agent_id=agent_id, backend_session_id="thread")
+    assert any(m["text"].startswith("# AGENTS.md") for m in before)
+
+    agents_db.store_transcript_turns(**common, turns=[
+        {"role": "assistant", "text": "Earlier answer.", "timestamp": "t0"},
+        {"role": "user", "text": "Purest yerba mate?", "timestamp": "t2"},
+    ])
+
+    after = agents_db.list_messages(agent_id=agent_id, backend_session_id="thread")
+    assert sorted(m["text"] for m in after) == [
+        "Earlier answer.", "Purest yerba mate?"]

@@ -522,3 +522,33 @@ def test_context_stops_once_the_agents_own_model_answers_again(tmp_path):
                 "timestamp": "2026-09-07T12:00:00Z"}])
 
     assert model_fallbacks.continuation_context(agent_id) == ""
+
+
+def test_fallback_turn_hides_the_primary_session_from_provider_hooks():
+    """hook_session="" is what keeps Claude's prompt hook from binding the
+    throwaway fallback conversation onto the primary agent."""
+    from types import SimpleNamespace
+    from lib import turn_model_fallback
+
+    seen = {}
+
+    class Handle:
+        def is_alive(self): return False
+        def wait(self, timeout=None): return 0
+        def kill(self): pass
+
+    class Registry:
+        def spawn_turn(self, backend, **kwargs):
+            seen.update(kwargs)
+            kwargs["on_result"]({"result": "ok", "is_error": False})
+            return Handle()
+
+    spec = SimpleNamespace(
+        cwd="/tmp", session="gordon", agent_id="agent-1", trace_id="t1")
+    turn_model_fallback.invoke(
+        Registry(), spec, {"backend": "claude", "model": "claude-sonnet-5"},
+        "prompt", lambda fn: (fn(), True)[1])
+
+    assert seen["hook_session"] == ""
+    assert seen["isolated"] is True
+    assert seen["backend_session_id"] == ""

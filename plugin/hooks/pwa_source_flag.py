@@ -126,7 +126,11 @@ def main() -> int:
     agent_id = agent["agent_id"]
     try:
         # Stamp the live runtime row with the backend_session_id UUID. Idempotent.
-        if backend_session_id:
+        # Only Claude agents converse in a Claude session. A Codex or AGY
+        # agent reaches this hook through a Claude fallback model, whose UUID
+        # must never replace the agent's own thread.
+        claude_agent = (agent.get("backend") or "claude") == "claude"
+        if backend_session_id and claude_agent:
             try:
                 _agents.bind_backend_session(agent_id, backend_session_id)
             except _agents.SessionAlreadyBound as bind_err:
