@@ -20,6 +20,11 @@ Rectangle {
         agentRevision;
         return controller.agentQueueCount(session);
     }
+    readonly property string quotaNotice: {
+        agentRevision;
+        quotaClock.ticks;
+        return controller.agentQuotaNotice(session);
+    }
     readonly property int transcriptionCount: {
         controller.audio.transcriptionsInFlight;
         return controller.audio.transcriptionsForSession(session);
@@ -35,8 +40,17 @@ Rectangle {
     readonly property string draftScope: paneId + "|" + session
     signal openConnection
 
+    Timer {
+        id: quotaClock
+        property int ticks: 0
+        interval: 60000
+        repeat: true
+        running: root.quotaNotice.length > 0
+        onTriggered: ticks += 1
+    }
+
     implicitHeight: Math.max(54, Math.min(200, editor.contentHeight + editor.topPadding + editor.bottomPadding + 4)) + (transcriptionCount > 0 ? 25 : 0)
-        + (queueCount > 0 ? 25 : 0) + (attachments.length > 0 ? 31 : 0)
+        + (queueCount > 0 ? 25 : 0) + (quotaNotice.length > 0 ? 25 : 0) + (attachments.length > 0 ? 31 : 0)
         + (root.active && root.controller.startingContact.length > 0 ? 25 : 0)
     color: root.active ? "#1a1b26" : "#1a1b26"
     border.color: root.active ? "#454b6c" : "#272a39"
@@ -122,6 +136,22 @@ Rectangle {
                 ToolTip.visible: hovered
                 ToolTip.text: "Cancel background transcription"
             }
+        }
+
+        TuiText {
+            // Said before the send, so an exhausted provider is not
+            // discovered through a failed reply. Sending stays possible.
+            objectName: "backendQuotaNotice"
+            visible: root.quotaNotice.length > 0
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? 19 : 0
+            text: "! " + root.quotaNotice
+            color: "#e0af68"
+            font.family: "JetBrains Mono"
+            font.pixelSize: 12
+            elide: Text.ElideRight
+            verticalAlignment: Text.AlignVCenter
+            Accessible.name: root.quotaNotice
         }
 
         TuiText {
