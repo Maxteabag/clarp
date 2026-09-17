@@ -201,7 +201,8 @@ class TranscriptStreamer:
                     turns=turns,
                 )
 
-            transcript_import_cache.import_if_changed(latest, import_latest)
+            transcript_import_cache.import_if_changed(
+                latest, import_latest, owner=agent["agent_id"])
         except Exception as e:
             log_exception("transcriptStreamerImportFail", e,
                           detail=agent.get("agent_id"))

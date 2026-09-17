@@ -38,14 +38,21 @@ def _signature(path: pathlib.Path) -> tuple[int, int]:
     return stat.st_mtime_ns, stat.st_size
 
 
-def import_if_changed(path: pathlib.Path, importer: Callable[[], None]) -> bool:
-    """Run importer once for the current file version.
+def import_if_changed(path: pathlib.Path, importer: Callable[[], None],
+                      *, owner: str = "") -> bool:
+    """Run importer once per owner for the current file version.
+
+    ``owner`` is the agent the turns are stored under. The import writes rows
+    for that agent, so a file already imported for one agent is still unread
+    for another: an agent created on an existing conversation (resume, restore)
+    would otherwise be skipped and open with an empty history until the
+    transcript next changed.
 
     A per-path lock prevents /log and the inotify thread from parsing the same
     growing transcript concurrently. Failed imports are deliberately not
     cached, so the next watcher tick or request retries them.
     """
-    key = str(path)
+    key = f"{owner}\0{path}"
     with _guard:
         path_lock = _path_locks.setdefault(key, threading.Lock())
     with path_lock:
