@@ -48,6 +48,19 @@ Check for uncommitted changes before running `git checkout` on a path. This is a
 shared working tree; if the file is dirty, the checkout destroys work that
 exists nowhere else.
 
+## A test run is green only when you read its result
+
+`make test` / `pytest` is the gate before pushing. When you run it in the
+background through a wrapper such as `pytest > log; echo "exit=$?" >> log`,
+the wrapper exits 0 whether or not the suite failed, so a harness "completed
+(exit code 0)" notification says nothing about the tests. Read the recorded
+`exit=` line and grep the log for `^FAILED`, or run the suite in the
+foreground. Two commits were pushed and deployed from a false green this way.
+
+`tests/unit/test_dashboard_projection.py` and `test_model_fallbacks.py` are
+load-sensitive under `pytest-xdist`: confirm a failure by running that test
+alone before treating it as a regression, and say which it was.
+
 ## Uncommitted work needs a decision artifact
 
 Never end a turn by silently leaving the work you produced uncommitted. If your
