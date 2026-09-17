@@ -1475,8 +1475,11 @@ def _is_injected_user_context(text: str) -> bool:
     User. A real question that quotes one remains visible because it starts
     with the user's own prose rather than an injected block marker.
     """
+    # Codex wrote "# AGENTS.md instructions for <cwd>" until it moved the
+    # path out of the heading; newer rollouts start with the bare heading.
     return text.startswith((
         "# AGENTS.md instructions for ",
+        "# AGENTS.md instructions\n",
         "<environment_context>",
         "<recommended_plugins>",
     ))
