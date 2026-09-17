@@ -43,7 +43,10 @@ def test_idle_snapshot_query_count_does_not_grow_with_roster():
             db.conn().set_trace_callback(None)
         counts.append(len(statements))
     assert counts[1] == counts[0]
-    assert counts[1] <= 20
+    # 20 roster-independent reads plus two for the backend quota projection,
+    # which must come from the database: the runtime process records limits
+    # and this process serves the snapshot.
+    assert counts[1] <= 22
 
 
 def test_cached_busy_state_cannot_overwrite_a_new_background_state():
