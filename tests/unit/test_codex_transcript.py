@@ -115,6 +115,38 @@ def test_parse_turns_response_item_messages_from_resumed_app_server(tmp_path):
     assert turns[1]["kind"] == "final_answer"
 
 
+def test_parse_turns_hides_agents_md_bootstrap_in_both_heading_forms(tmp_path):
+    """Newer Codex dropped the " for <cwd>" suffix from the AGENTS.md heading.
+
+    The bare heading slipped past the filter, so a turn that died before any
+    reply left the instructions as the newest message in the chat.
+    """
+    f = tmp_path / "rollout.jsonl"
+    body = "\n\n<INSTRUCTIONS>\nBe brief.\n</INSTRUCTIONS>"
+    _write_rollout(f, [
+        {"timestamp": "t0", "type": "response_item", "payload": {
+            "type": "message", "role": "user",
+            "content": [{"type": "input_text",
+                         "text": "# AGENTS.md instructions for /home" + body}],
+        }},
+        {"timestamp": "t1", "type": "response_item", "payload": {
+            "type": "message", "role": "user",
+            "content": [{"type": "input_text",
+                         "text": "# AGENTS.md instructions" + body}],
+        }},
+        {"timestamp": "t2", "type": "response_item", "payload": {
+            "type": "message", "role": "user",
+            "content": [{"type": "input_text", "text": "Purest yerba mate?"}],
+        }},
+    ])
+
+    turns = codex_transcript.parse_turns(f)
+
+    assert [(turn["role"], turn["text"]) for turn in turns] == [
+        ("user", "Purest yerba mate?"),
+    ]
+
+
 def test_parse_turns_keeps_user_question_that_quotes_environment_context(tmp_path):
     f = tmp_path / "rollout.jsonl"
     question = "Why does <environment_context> appear in my chat?"
