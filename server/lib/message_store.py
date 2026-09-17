@@ -1090,6 +1090,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     assistant_ordinal = 0
     current_request_trace = ""
     adopted_final_ids: set[str] = set()
+    skipped_slot_removed = False
     for seq, turn in enumerate(turns):
         role = turn.get("role")
         if role == "assistant":
@@ -1166,6 +1167,16 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 )
                 if not rows:
                     client_user_provenance.pop(key, None)
+                # Nothing is written at this position, so whatever an earlier
+                # import left here would outlive it. When the parser starts
+                # hiding a message every later turn shifts down, and the old
+                # occupant of this slot stayed visible as a duplicate.
+                removed = database.execute(
+                    """DELETE FROM messages
+                        WHERE agent_id = ? AND backend_session_id = ?
+                          AND source_file = ? AND seq = ?""",
+                    (agent_id, backend_session_id, source_file, seq)).rowcount
+                skipped_slot_removed = skipped_slot_removed or removed > 0
                 continue
             current_origin, current_sender_agent_id = "user", ""
             current_heartbeat_key = ""
@@ -1315,7 +1326,9 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
               AND source_file NOT LIKE 'final:%'""",
         (agent_id, backend_session_id, len(turns)),
     )
-    stale_replace_revision = _next_revision(database) if stale is not None else 0
+    stale_replace_revision = (
+        _next_revision(database)
+        if stale is not None or skipped_slot_removed else 0)
     replace_revision = max(stale_replace_revision, live_replace_revision)
     latest_revision = max(latest_revision, replace_revision)
     database.execute(
