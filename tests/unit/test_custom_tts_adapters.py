@@ -277,10 +277,13 @@ time.sleep(60)
 
     with pytest.raises(custom_tts_adapters.AdapterError, match="timed out"):
         custom_tts_adapters._request(
-            manifest, {"schema_version": 1, "operation": "voices"}, timeout=0.1)
+            # Long enough that a loaded machine still reaches the pid file the
+            # assertion below reads (0.1s killed the adapter mid-startup), and
+            # far short of the adapter's own 60s sleep, so it still times out.
+            manifest, {"schema_version": 1, "operation": "voices"}, timeout=2.0)
 
     child_pid = int((package / "child-pid").read_text())
-    for _ in range(20):
+    for _ in range(250):
         stat_path = Path(f"/proc/{child_pid}/stat")
         try:
             child_state = stat_path.read_text().split()[2]

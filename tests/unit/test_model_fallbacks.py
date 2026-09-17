@@ -21,6 +21,51 @@ def agent():
     return agents.get_by_session("robot")
 
 
+def test_context_survives_its_own_delivered_reply_landing_later(agent):
+    """The fallback's answer is stored as an assistant message too. It must not
+    count as "the agent's own model has spoken again", or the very next turn
+    loses the note saying this work is already done and repeats it.
+
+    Live rows used to be written with a NULL trace_id, so the exclusion by
+    trace never matched and the context vanished as soon as the delivered row's
+    millisecond timestamp passed the attempt's. Both land in the same
+    millisecond on an idle machine, which is why this only bit under load.
+    """
+    from lib import agents as agents_db
+    from lib import db, message_store
+
+    agent_id = agent["agent_id"]
+    agents_db.start_runtime(agent_id, "robot")
+    agents_db.bind_backend_session(agent_id, "bs-1")
+    trace = "recover"
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id=trace)
+    fallback.claim(agent_id, trace, 0, GEMINI, "usage limit reached")
+    fallback.finish(agent_id, trace, 0, status="completed",
+                    result={"text": "Recovered without repeating completed work"})
+
+    # The delivered answer reaches the transcript strictly after the attempt row.
+    time.sleep(0.005)
+    assert message_store.finalize_live_assistant_message(
+        agent_id=agent_id, backend_session_id="bs-1", trace_id=trace,
+        text="Recovered without repeating completed work") is not None
+    stored = db.conn().execute(
+        "SELECT trace_id, updated_at FROM messages"
+        " WHERE agent_id=? AND role='assistant' ORDER BY updated_at DESC LIMIT 1",
+        (agent_id,)).fetchone()
+    assert stored["trace_id"] == trace, "the delivered row must record the trace that wrote it"
+
+    assert "Recovered without repeating" in fallback.continuation_context(agent_id)
+
+    # Once the agent's own model answers again, the context is correctly dropped.
+    db.conn().execute(
+        """INSERT INTO messages (message_id, agent_id, backend_session_id, seq,
+               role, text, tools_json, updated_at, origin, trace_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("own-reply", agent_id, "bs-1", 5, "assistant", "My own answer", "[]",
+         stored["updated_at"] + 1000, "user", "a-later-turn"))
+    assert fallback.continuation_context(agent_id) == ""
+
+
 def test_round_trip_and_revision_guard(agent):
     saved = fallback.configure(agent["agent_id"], [GEMINI], expected_revision=0)
     assert saved["models"] == [GEMINI]

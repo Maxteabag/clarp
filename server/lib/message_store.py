@@ -584,11 +584,15 @@ def _insert_live_message_atomic(
                    message_id, agent_id, backend_session_id, source_file, seq,
                    role, timestamp, text, kind, tool_name, tools_json,
                    display_cells_json, updated_at, revision, origin,
-                   sender_agent_id
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   sender_agent_id, trace_id
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            # The trace was only ever encoded into source_file, leaving this
+            # column NULL on every live row, so nothing could tell the agent's
+            # own reply apart from the one this trace had just delivered. See
+            # model_fallbacks._superseded_by_own_reply.
             (msg_id, agent_id, backend_session_id, f"live:{trace_id or msg_id}",
              -900000, "assistant", timestamp, text, "live", None, "[]", "[]",
-             timestamp_ms, revision, origin, sender_agent_id),
+             timestamp_ms, revision, origin, sender_agent_id, trace_id or None),
         )
         database.execute(
             """INSERT INTO conversation_heads (
@@ -628,10 +632,11 @@ def _update_live_message_atomic(
         revision = _next_revision(database)
         changed = database.execute(
             """UPDATE messages
-                  SET text=?, updated_at=?, revision=?, origin=?, sender_agent_id=?
+                  SET text=?, updated_at=?, revision=?, origin=?, sender_agent_id=?,
+                      trace_id=COALESCE(?, trace_id)
                 WHERE message_id=? AND agent_id=? AND backend_session_id=?""",
-            (text, timestamp_ms, revision, origin, sender_agent_id, msg_id,
-             agent_id, backend_session_id),
+            (text, timestamp_ms, revision, origin, sender_agent_id,
+             trace_id or None, msg_id, agent_id, backend_session_id),
         ).rowcount > 0
         if not changed:
             database.execute("ROLLBACK")

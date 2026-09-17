@@ -532,9 +532,13 @@ def test_runtime_client_waits_out_a_full_listener_backlog(tmp_path):
 
     def accept_later():
         _time.sleep(0.15)  # the client must retry, not fail, meanwhile
-        listener.settimeout(2.0)
-        while not served.is_set():
-            conn, _ = listener.accept()
+        listener.settimeout(0.5)
+        deadline = _time.monotonic() + 30
+        while not served.is_set() and _time.monotonic() < deadline:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                continue  # an accept timeout is not the end of the helper
             with conn:
                 conn.settimeout(0.2)
                 try:
