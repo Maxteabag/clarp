@@ -260,6 +260,18 @@ class RuntimeClient:
                 str(response.get("error") or "runtime release failed"))
         return int(response.get("result") or 0)
 
+    def goal(self, agent_id: str, action: str, *, objective: str = ""):
+        response = self._request("goal", {
+            "agent_id": agent_id, "action": action, "objective": objective})
+        if not response.get("ok"):
+            status = int(response.get("status") or 500)
+            message = str(response.get("error") or "runtime goal request failed")
+            if status == 501:
+                from .backends import GoalUnsupported
+                raise GoalUnsupported(message)
+            raise RuntimeError(message)
+        return response.get("result")
+
     def compact(self, session: str) -> dict[str, Any]:
         response = self._request("compact", {"session": session})
         if not response.get("ok"):
@@ -484,6 +496,28 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             terminated = int(backends.interrupt_any(agent_id) or 0)
             agents_db.soft_delete(agent_id)
             return {"ok": True, "result": terminated}
+        if method == "goal":
+            from . import agents as agents_db
+            from . import backends
+            agent_id = str(params.get("agent_id") or "")
+            agent = agents_db.get_by_agent_id(agent_id)
+            if not agent:
+                return {"ok": False, "status": 404, "error": "no such agent"}
+            try:
+                result = backends.goal(
+                    str(agent.get("backend") or ""), agent_id,
+                    str(params.get("action") or ""),
+                    objective=str(params.get("objective") or ""),
+                    stream=self.dispatch_service.ctx.stream)
+            except backends.GoalUnsupported as exc:
+                return {"ok": False, "status": 501, "error": str(exc)}
+            except ValueError as exc:
+                return {"ok": False, "status": 400, "error": str(exc)}
+            except Exception as exc:  # noqa: BLE001 - the app-server answer is the message
+                from .log import log_exception
+                log_exception("runtimeGoalFail", exc, detail=agent_id)
+                return {"ok": False, "status": 502, "error": str(exc)}
+            return {"ok": True, "result": result}
         if method == "compact":
             from . import compaction
             session = str(params.get("session") or "").strip()

@@ -32,6 +32,10 @@ class SSEType:
     # An agent asked the app to create an Apple Calendar event. The iOS app owns
     # OS permission and writes the event after the user has granted calendar access.
     CALENDAR_REQUEST = "calendar-request"
+    # An agent's goal (objective it keeps working toward on its own) changed:
+    # started, paused, resumed, blocked, limited, completed or cleared. Carries
+    # the new goal (or null) so clients need no snapshot round trip.
+    GOAL_UPDATED = "goal-updated"
 
 
 class AgentBackend:

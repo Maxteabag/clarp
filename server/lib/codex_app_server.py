@@ -18,14 +18,14 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import agents as agents_db, backend_usage, tts_queue
+from . import agent_goals, agents as agents_db, backend_usage, eventlog, tts_queue
 from . import codex_runner
 from .codex_runner import (
     _TurnState, _broadcast_transcript, _handle_item, _record_state,
     _persist_live_text, _speak, app_turn_instructions, persona_identity_instruction,
 )
 from .log import log, log_exception
-from .protocol import AgentState
+from .protocol import AgentState, TurnSource
 
 
 def _codex_argv() -> list[str]:
@@ -112,6 +112,9 @@ class _Client:
         self.active: _ActiveTurn | None = None
         self._actives: dict[str, _ActiveTurn] = {}
         self.thread_id = ""
+        # Threads this process has resumed or started, so goal calls on an
+        # idle agent do not resume the same thread again.
+        self._loaded_threads: set[str] = set()
         self.stream = stream
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
@@ -249,6 +252,16 @@ class _Client:
                 log_exception("codexRateLimitsUpdateFail", exc,
                               detail=self.agent_id)
             return
+        if method in ("thread/goal/updated", "thread/goal/cleared"):
+            self._mirror_goal(str(params.get("threadId") or ""),
+                              params.get("goal") if method.endswith("updated") else None)
+            return
+        if active is None and method == "turn/started":
+            # Codex starts continuation turns for an active goal on its own.
+            # Nobody in Clarp asked for this turn, so nothing is listening yet;
+            # adopt it so it streams, records state and marks the agent busy
+            # like any other turn instead of being dropped on the floor.
+            active = self._adopt_server_turn(params)
         if active is None:
             return
         if method == "turn/started":
@@ -319,6 +332,129 @@ class _Client:
                 })
             _broadcast_transcript(active.stream, active.agent_id, active.session)
 
+    def _mirror_goal(self, thread_id: str, goal: dict | None) -> None:
+        """Keep Clarp's goal table and clients in step with the app-server."""
+        if not thread_id:
+            return
+        try:
+            agent = agents_db.get_by_backend_session(thread_id)
+            if not agent:
+                return
+            if goal:
+                row = agent_goals.upsert(
+                    agent["agent_id"], session=agent["session"],
+                    backend=str(agent.get("backend") or "codex"),
+                    goal=agent_goals.from_codex(goal))
+            else:
+                agent_goals.clear(agent["agent_id"])
+                row = None
+            stream = getattr(self, "stream", None)
+            if stream is not None:
+                stream.broadcast(agent_goals.event(agent, row))
+        except Exception as exc:  # noqa: BLE001 - a mirror failure must not stop the reader
+            log_exception("codexGoalMirrorFail", exc, detail=thread_id)
+
+    def _adopt_server_turn(self, params: dict) -> _ActiveTurn | None:
+        turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        thread_id = str(params.get("threadId") or turn.get("threadId") or "")
+        turn_id = str(turn.get("id") or "")
+        if not thread_id:
+            return None
+        agent = agents_db.get_by_backend_session(thread_id)
+        if not agent:
+            return None
+        agent_id, session = agent["agent_id"], agent["session"]
+        trace_id = f"goal-{turn_id[:8] or 'turn'}"
+        try:
+            db_turn = agents_db.open_turn(agent_id=agent_id, source=TurnSource.LOCAL,
+                                          trace_id=trace_id, synthesize_audio=False)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("codexGoalTurnOpenFail", exc, detail=agent_id)
+            db_turn = None
+
+        def finish(kind: str, detail: dict) -> None:
+            if db_turn is not None:
+                try:
+                    agents_db.close_turn(db_turn)
+                except Exception as exc:  # noqa: BLE001
+                    log_exception("codexGoalTurnCloseFail", exc, detail=agent_id)
+            _record_state(agent_id, kind, {**detail, "dispatch": "codex-goal",
+                                           "trace_id": trace_id})
+            eventlog.emit("server", "codexGoalTurnDone", session=session,
+                          agent_id=agent_id, backend_session_id=thread_id,
+                          detail={"trace_id": trace_id, "state": kind, **detail})
+
+        def on_result(event: dict) -> None:
+            usage = event.get("usage") or {}
+            finish(AgentState.DONE, {"tokens_in": usage.get("input_tokens"),
+                                     "tokens_out": usage.get("output_tokens")})
+
+        def on_error(message: str) -> None:
+            finish(AgentState.INTERRUPTED, {"error": str(message)[:300]})
+
+        handle = AppTurnHandle(self, agent_id=agent_id)
+        active = _ActiveTurn(
+            turn_id, thread_id, agent_id, session, trace_id,
+            _TurnState(live_backend_session_id=thread_id),
+            handle, on_result, on_error, getattr(self, "stream", None),
+            tts_queue.enqueue, False,
+        )
+        if not hasattr(self, "_actives"):
+            self._actives = {}
+        self._actives[agent_id] = active
+        log("codexGoalTurnAdopted", f"agent={agent_id} thread={thread_id} turn={turn_id}")
+        return active
+
+    def goal(self, agent: dict, action: str, objective: str = "") -> dict | None:
+        """Drive ``thread/goal/*`` for one agent and mirror the answer.
+
+        ``action`` is start, pause, resume, clear or get. The thread must exist:
+        a goal runs inside a conversation, and Codex rejects ephemeral threads.
+        """
+        agent_id = agent["agent_id"]
+        thread_id = agents_db.live_backend_session(agent_id)
+        if not thread_id:
+            raise ValueError("Send the agent a message first; a goal needs a conversation to run in.")
+        if action == "start" and not objective.strip():
+            raise ValueError("objective required")
+        if action not in ("start", "pause", "resume", "clear", "get"):
+            raise ValueError(f"unknown goal action: {action}")
+        if action == "get":
+            result = self.request("thread/goal/get", {"threadId": thread_id})
+        else:
+            self._ensure_loaded(agent, thread_id)
+            if action == "clear":
+                self.request("thread/goal/clear", {"threadId": thread_id})
+                result = {"goal": None}
+            else:
+                params: dict = {"threadId": thread_id, "status": {
+                    "start": "active", "resume": "active", "pause": "paused"}[action]}
+                if action == "start":
+                    params["objective"] = objective.strip()
+                result = self.request("thread/goal/set", params)
+        goal = result.get("goal") if isinstance(result, dict) else None
+        self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+        return agent_goals.public(agent_goals.get(agent_id))
+
+    def _ensure_loaded(self, agent: dict, thread_id: str) -> None:
+        """A goal call needs the thread open in this process; a live turn or an
+        earlier resume already did that."""
+        if thread_id in self._loaded_threads:
+            return
+        for active in list(getattr(self, "_actives", {}).values()):
+            if active.thread_id == thread_id:
+                self._loaded_threads.add(thread_id)
+                return
+        cwd = pathlib.Path(os.path.expanduser(str(agent.get("cwd") or "~"))).resolve()
+        self.request("thread/resume", {
+            "threadId": thread_id, "cwd": str(cwd),
+            "approvalPolicy": "never", "sandbox": "danger-full-access",
+            "developerInstructions": persona_identity_instruction(
+                str(agent.get("persona") or ""), agent["session"]),
+            **({"model": agent["model"]} if agent.get("model") else {}),
+        })
+        self._loaded_threads.add(thread_id)
+
     def start(self, *, text: str, cwd: pathlib.Path, backend_session_id: str,
               is_new_session: bool, session: str, trace_id: str, model: str,
               effort: str, voice: bool, persona: str,
@@ -360,6 +496,7 @@ class _Client:
             if not thread_id:
                 raise RuntimeError("Codex app-server returned no thread id")
             self.thread_id = thread_id
+            self._loaded_threads.add(thread_id)
             active.thread_id = thread_id
             active.state.live_backend_session_id = thread_id
             if on_session_init:
@@ -419,6 +556,7 @@ class _Client:
     def interrupt_active(self, agent_id: str = "") -> None:
         active = self._actives.get(agent_id) if agent_id else self.active
         if active:
+            self._pause_goal_for_stop(active)
             if not active.turn_id:
                 if len(getattr(self, "_actives", {})) <= 1:
                     self.proc.terminate()
@@ -426,6 +564,21 @@ class _Client:
             self.request("turn/interrupt", {
                 "threadId": active.thread_id, "turnId": active.turn_id,
             })
+
+    def _pause_goal_for_stop(self, active: _ActiveTurn) -> None:
+        """Stop means stop. Codex keeps an active goal going after
+        ``turn/interrupt`` (only progress is accounted), so a user's Stop would
+        otherwise be undone by the next continuation turn. Pause it first."""
+        try:
+            row = agent_goals.get(active.agent_id)
+            if not row or row.get("status") != agent_goals.ACTIVE or not active.thread_id:
+                return
+            result = self.request("thread/goal/set", {
+                "threadId": active.thread_id, "status": "paused"}, timeout=10)
+            goal = result.get("goal") if isinstance(result, dict) else None
+            self._mirror_goal(active.thread_id, goal if isinstance(goal, dict) else None)
+        except Exception as exc:  # noqa: BLE001 - the interrupt itself must still go out
+            log_exception("codexGoalPauseFail", exc, detail=active.agent_id)
 
     def shutdown(self) -> None:
         """EOF stdin so the stdio app-server exits and drops its writer lock."""
@@ -615,6 +768,16 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
         log("codexAppTurnStart", f"agent={agent_id} thread={client.thread_id} trace={trace_id}")
         return handle
 
+
+
+def goal(agent_id: str, action: str, *, objective: str = "", stream=None) -> dict | None:
+    """Start, pause, resume, clear or read a Codex agent's goal (see _Client.goal)."""
+    agent = agents_db.get_by_agent_id(agent_id)
+    if not agent:
+        raise ValueError("no such agent")
+    with _LOCK:
+        client = _client(agent_id, agent["session"], stream=stream)
+    return client.goal(agent, action, objective)
 
 
 def _shared_client() -> _Client | None:
