@@ -27,6 +27,7 @@ import pathlib
 import subprocess
 import select
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -36,6 +37,7 @@ from urllib.parse import urlsplit
 
 from . import db, server_identity
 from .log import log, log_exception
+from .protocol import SSEType
 
 
 CLAUDE = "claude"
@@ -1041,6 +1043,98 @@ def get_backend_usage(*, refresh_codex: bool = True,
             _response_row(CODEX, now),
         ]
     }
+
+
+def exhausted_backends(now_ms: int | None = None) -> dict[str, dict[str, Any]]:
+    """Providers that current evidence says cannot serve a new turn.
+
+    Reads stored observations only, so the agent snapshot can call it on every
+    build. A provider is listed when a fresh window is at or past 100% or
+    carries an open hard limit; stale evidence never claims exhaustion, which
+    keeps a refilled or switched account from staying flagged. Absent
+    providers are either usable or unknown.
+    """
+    now = _now_ms() if now_ms is None else now_ms
+    out: dict[str, dict[str, Any]] = {}
+    for provider_id in PROVIDER_COLLECTORS:
+        blocking = []
+        for window in _structured_provider(provider_id, now)["windows"]:
+            if window.get("freshness") != "fresh":
+                continue
+            used = window.get("used_percentage")
+            hard = (window.get("limit") or {}).get("state") == "hard_limit"
+            if hard or (used is not None and float(used) >= 100.0):
+                blocking.append(window)
+        if not blocking:
+            continue
+        # The provider is usable again only once its last blocking window
+        # resets; one window without a reset time makes the whole answer
+        # unknown rather than optimistic.
+        resets = [window.get("resets_at") for window in blocking]
+        resets_at = (
+            max(resets, key=lambda value: _iso_to_ms(value) or 0)
+            if all(resets) else None)
+        named = next(
+            (w for w in blocking if w.get("resets_at") == resets_at), blocking[0])
+        out[provider_id] = {
+            "state": "exhausted",
+            "provider_id": provider_id,
+            "window": named.get("kind") or "unknown",
+            "resets_at": resets_at,
+            "observed_at": named.get("observed_at"),
+        }
+    return out
+
+
+class UsageRefreshWorker:
+    """Keeps provider usage current so exhaustion is known before a send.
+
+    Usage was only fetched when a client opened the usage screen, so a
+    provider could be out of quota for hours while every chat looked ready.
+    """
+
+    def __init__(self, *, stream, interval_s: float = 300.0) -> None:
+        self._stream = stream
+        self._interval_s = interval_s
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._last: dict[str, Any] | None = None
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._loop, daemon=True, name="usage-refresh")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _loop(self) -> None:
+        # Let startup settle before the first provider round-trip.
+        delay = 20.0
+        while not self._stop.wait(delay):
+            delay = self._interval_s
+            self.run_once()
+
+    def run_once(self) -> None:
+        try:
+            payload = get_backend_usage()
+            for event in payload.get("limit_events") or []:
+                self._stream.broadcast(event)
+            current = {
+                provider: (row["window"], row["resets_at"])
+                for provider, row in exhausted_backends().items()
+            }
+            if self._last is not None and current != self._last:
+                # Snapshot rows carry the projection; this makes clients
+                # refetch them instead of learning on the next failed send.
+                self._stream.broadcast({
+                    "type": SSEType.AGENT_ROSTER, "kind": "backend-quota"})
+            self._last = current
+        except Exception as exc:  # noqa: BLE001
+            log_exception("usageRefreshWorkerFail", exc)
 
 
 def _claude_needs_refresh() -> bool:
