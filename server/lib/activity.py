@@ -158,9 +158,21 @@ def state_activity_event(
         summary = summary or tool_summary["summary"]
         file_path = file_path or tool_summary["file_path"]
     elif kind == AgentState.THINKING:
-        phase = "thinking"
-        action = action or "thinking"
-        summary = summary or "Thinking"
+        # A turn parked by Claude account failover records THINKING so the turn
+        # keeps its place, but it is not thinking: it is queued behind a provider
+        # limit and makes no progress until an account frees up. Describing that
+        # as plain "Thinking" is indistinguishable from real work — on
+        # 2026-09-17 five heartbeat turns read as working for four and a half
+        # hours. The reason is already in the detail; carry it through.
+        if detail.get("account_recovery"):
+            phase = "account_recovery"
+            action = action or "waiting for account"
+            summary = (summary or truncate(detail.get("message"), 140)
+                       or "Waiting for an account with available usage")
+        else:
+            phase = "thinking"
+            action = action or "thinking"
+            summary = summary or "Thinking"
         status = ActivityStatus.RUNNING
     elif kind == AgentState.COMPACTING:
         phase = "compacting"

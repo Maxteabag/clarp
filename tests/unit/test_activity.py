@@ -53,3 +53,56 @@ def test_state_activity_event_makes_waiting_readable():
     assert ev["phase"] == "waiting"
     assert ev["status"] == ActivityStatus.ERROR
     assert ev["summary"] == "Approve Bash?"
+
+
+def test_thinking_stays_thinking_without_an_account_park():
+    ev = state_activity_event(
+        agent_id="a1",
+        session="claude",
+        persona="Mike",
+        kind=AgentState.THINKING,
+        ts=123,
+        detail={"dispatch": "claude", "trace_id": "t1"},
+    )
+    assert ev["phase"] == "thinking"
+    assert ev["action"] == "thinking"
+    assert ev["summary"] == "Thinking"
+    assert ev["status"] == ActivityStatus.RUNNING
+
+
+def test_account_parked_turn_is_not_presented_as_thinking():
+    """A turn queued behind a provider limit must say so.
+
+    It records THINKING to hold its place in dispatch, but it makes no
+    progress, and "Thinking" made that indistinguishable from real work.
+    """
+    ev = state_activity_event(
+        agent_id="a1",
+        session="rachel",
+        persona="Rachel",
+        kind=AgentState.THINKING,
+        ts=123,
+        detail={
+            "dispatch": "claude",
+            "trace_id": "t1",
+            "account_recovery": "waiting",
+            "message": "Waiting for a Claude account with available usage",
+        },
+    )
+    assert ev["phase"] == "account_recovery"
+    assert ev["action"] == "waiting for account"
+    assert ev["summary"] == "Waiting for a Claude account with available usage"
+    assert ev["status"] == ActivityStatus.RUNNING
+
+
+def test_account_parked_turn_without_a_message_still_explains_itself():
+    ev = state_activity_event(
+        agent_id="a1",
+        session="rachel",
+        persona="Rachel",
+        kind=AgentState.THINKING,
+        ts=123,
+        detail={"account_recovery": "waiting"},
+    )
+    assert ev["phase"] == "account_recovery"
+    assert ev["summary"] == "Waiting for an account with available usage"
