@@ -2527,6 +2527,10 @@ details.tool.error { border-color: rgba(200, 65, 42, .45); }
   background: rgba(168, 53, 36, 0.10);
   border-color: rgba(168, 53, 36, 0.45);
 }
+.agent-banner.quota {
+  background: rgba(184, 134, 90, 0.12);
+  border-color: rgba(184, 134, 90, 0.45);
+}
 .agent-banner.interrupted {
   background: rgba(168, 53, 36, 0.10);
   border-color: rgba(168, 53, 36, 0.45);

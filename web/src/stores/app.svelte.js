@@ -149,6 +149,24 @@ export function rememberUserNotification(ev) {
 
 // ---- agent banner -------------------------------------------------------
 
+const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude', agy: 'Antigravity' };
+
+export function quotaMessage(quota, now = new Date()) {
+  const name = PROVIDER_LABELS[quota.provider_id] || quota.provider_id || 'This backend';
+  const reset = quota.resets_at ? new Date(quota.resets_at) : null;
+  let until = '';
+  if (reset && !Number.isNaN(reset.getTime()) && reset > now) {
+    const sameDay = reset.toDateString() === now.toDateString();
+    until = ' until ' + reset.toLocaleString(undefined, sameDay
+      ? { hour: '2-digit', minute: '2-digit' }
+      : { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+  const next = quota.fallback_model
+    ? `Messages will run on ${quota.fallback_model} instead.`
+    : 'A message sent now will likely fail.';
+  return `${name} is out of quota${until}. ${next}`;
+}
+
 export function bannerFor(sid) {
   const s = statusFor(sid);
   const kind = s.latest_state || '';
@@ -171,6 +189,11 @@ export function bannerFor(sid) {
       icon: '!',
       msg: shortActivityText(s) || s.waiting_message || 'Needs your attention',
     };
+  }
+  // Shown before the user sends, so an exhausted provider is not discovered
+  // through a failed reply. Advisory: the send itself is never blocked.
+  if (s.backend_quota && !s.busy) {
+    return { cls: 'quota', icon: '!', msg: quotaMessage(s.backend_quota) };
   }
   if (kind === AgentState.INTERRUPTED) {
     return {

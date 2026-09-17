@@ -292,3 +292,56 @@ def test_janitor_personas_stay_out_of_the_switchable_roster(tmp_path, monkeypatc
     janitors = {row["persona"] for row in snap["agents"] if row["is_janitor"]}
     assert janitors, "expected the built-in Janitors in the agent rows"
     assert not janitors & set(snap["roster"])
+
+
+def _quota_ctx(tmp_path):
+    return ServerContext(
+        root=tmp_path, static=tmp_path, audio_dir=tmp_path / "audio",
+        agents_path=tmp_path / "agents.json", default_session="gordon",
+        tts=FakeTTSEngine(tmp_path / "audio"),
+        stream=AudioStream(tmp_path / "audio"), stt=StubSTT(),
+        roster_names=("Mike",),
+    )
+
+
+def test_snapshot_flags_agents_whose_backend_is_out_of_quota(tmp_path, monkeypatch):
+    from lib import backend_usage, model_fallbacks
+    agents_db.create_agent(
+        persona="Gordon", voice_id="V", cwd=str(tmp_path), session="gordon",
+        backend="codex")
+    rescued = agents_db.create_agent(
+        persona="Axel", voice_id="V2", cwd=str(tmp_path), session="axel",
+        backend="codex")
+    agents_db.create_agent(
+        persona="Rachel", voice_id="V3", cwd=str(tmp_path), session="rachel")
+    model_fallbacks.configure(
+        rescued, [{"backend": "claude", "model": "claude-sonnet-4-6",
+                   "effort": ""}], expected_revision=0)
+    quota = {"state": "exhausted", "provider_id": "codex",
+             "window": "seven_day", "resets_at": "2030-03-17T17:46:40Z",
+             "observed_at": "2027-01-15T08:00:00Z"}
+    monkeypatch.setattr(
+        backend_usage, "exhausted_backends", lambda: {"codex": quota})
+
+    rows = {row["session"]: row
+            for row in build_agent_snapshot(_quota_ctx(tmp_path))["agents"]}
+
+    assert rows["gordon"]["backend_quota"] == {
+        **quota, "fallback_backend": None, "fallback_model": None}
+    assert rows["axel"]["backend_quota"]["fallback_model"] == "claude-sonnet-4-6"
+    assert rows["axel"]["backend_quota"]["fallback_backend"] == "claude"
+    assert rows["rachel"]["backend_quota"] is None
+
+
+def test_snapshot_survives_a_failing_quota_projection(tmp_path, monkeypatch):
+    from lib import backend_usage
+    agents_db.create_agent(
+        persona="Gordon", voice_id="V", cwd=str(tmp_path), session="gordon",
+        backend="codex")
+
+    def boom():
+        raise RuntimeError("usage tables unavailable")
+    monkeypatch.setattr(backend_usage, "exhausted_backends", boom)
+
+    snap = build_agent_snapshot(_quota_ctx(tmp_path))
+    assert snap["agents"][0]["backend_quota"] is None
