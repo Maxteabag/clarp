@@ -434,6 +434,7 @@ class Handler(BaseHTTPRequestHandler):
         "/heartbeat/settings": "_handle_heartbeat_settings_get",
         "/diagnostics/settings": "_handle_diagnostics_settings_get",
         "/agent-heartbeat/status": "_handle_agent_heartbeat_status",
+        "/agent-goal": "_handle_agent_goal_get",
         "/oracle/status": "_handle_oracle_status",
         "/oracle/delegations": "_handle_oracle_delegations_get",
         "/oracle/realtime": "_handle_oracle_realtime",
@@ -493,6 +494,10 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-fallbacks": "_handle_agent_fallbacks_post",
         "/agent-mcp": "_handle_agent_mcp",
         "/agent-heartbeat": "_handle_agent_heartbeat",
+        "/agent-goal": "_handle_agent_goal_start",
+        "/agent-goal/pause": "_handle_agent_goal_pause",
+        "/agent-goal/resume": "_handle_agent_goal_resume",
+        "/agent-goal/clear": "_handle_agent_goal_clear",
         "/agent-archive": "_handle_agent_archive",
         "/heartbeat/settings": "_handle_heartbeat_settings_post",
         "/diagnostics/settings": "_handle_diagnostics_settings_post",
@@ -3304,6 +3309,76 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, json.dumps({"ok": True, "session": session,
                                            "archived": archived}).encode(),
                           "application/json")
+
+    def _handle_agent_goal_get(self):
+        """The goal an agent is working toward on its own, or null."""
+        from urllib.parse import parse_qs, urlparse
+        from lib import agent_goals, agents as agents_db
+        query = parse_qs(urlparse(self.path).query)
+        session = (query.get("session", [""])[0] or "").strip()
+        if not session:
+            return self._send(400, b'{"error":"session required"}', "application/json")
+        agent = agents_db.get_by_session(session)
+        if not agent:
+            return self._send(404, b'{"error":"no such agent"}', "application/json")
+        return self._send(200, json.dumps({
+            "session": session,
+            "goal": agent_goals.public(agent_goals.get(agent["agent_id"])),
+        }).encode(), "application/json")
+
+    def _handle_agent_goal_start(self):
+        return self._goal_action("start")
+
+    def _handle_agent_goal_pause(self):
+        return self._goal_action("pause")
+
+    def _handle_agent_goal_resume(self):
+        return self._goal_action("resume")
+
+    def _handle_agent_goal_clear(self):
+        return self._goal_action("clear")
+
+    def _goal_action(self, action: str):
+        """Start, pause, resume or clear an agent's goal.
+
+        Body: {"session": "...", "objective": "..."} (objective for start only).
+        The backend owns the goal (Codex: thread/goal/*), so the call goes to
+        the runtime that holds the app-server connection; the answer is the
+        goal as the backend now reports it. Backends without goal control
+        answer 501 rather than pretending.
+        """
+        from lib import agents as agents_db, backends
+        data = self._read_json()
+        if self._reject_janitor_control(data):
+            return
+        if data is None:
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        session = (data.get("session") or "").strip()
+        if not session:
+            return self._send(400, b'{"error":"session required"}', "application/json")
+        objective = str(data.get("objective") or "").strip()
+        if action == "start" and not objective:
+            return self._send(400, b'{"error":"objective required"}', "application/json")
+        agent = agents_db.get_by_session(session)
+        if not agent:
+            return self._send(404, b'{"error":"no such agent"}', "application/json")
+        try:
+            goal = backends.goal(
+                str(agent.get("backend") or ""), agent["agent_id"], action,
+                objective=objective, stream=self.ctx.stream)
+        except backends.GoalUnsupported as exc:
+            return self._send(501, json.dumps({"error": str(exc)}).encode(),
+                              "application/json")
+        except ValueError as exc:
+            return self._send(400, json.dumps({"error": str(exc)}).encode(),
+                              "application/json")
+        except Exception as exc:  # noqa: BLE001 - relay the backend's own refusal
+            log_exception("agentGoalFail", exc, detail=f"{session}:{action}")
+            return self._send(502, json.dumps({"error": str(exc)}).encode(),
+                              "application/json")
+        return self._send(200, json.dumps({
+            "ok": True, "session": session, "action": action, "goal": goal,
+        }).encode(), "application/json")
 
     def _handle_agent_heartbeat_status(self):
         """Return one Agent's scheduler projection and recent heartbeat outcomes."""

@@ -589,6 +589,28 @@ def active_handles(backend: str, agent_id: str) -> list:
     return list(runner.active_handles(agent_id) or []) + REGISTRY.active_handles(agent_id)
 
 
+class GoalUnsupported(RuntimeError):
+    """This backend has no goal control Clarp can drive yet."""
+
+
+def goal(backend: str, agent_id: str, action: str, *, objective: str = "",
+         stream=None) -> dict | None:
+    """Start, pause, resume, clear or read the agent's goal.
+
+    Returns the goal as ``agent_goals.public`` shapes it, or None when there is
+    none. Only Codex has a protocol for this today; the others raise
+    GoalUnsupported so the caller can say so instead of pretending.
+    """
+    if _RUNTIME_CLIENT is not None:
+        return _RUNTIME_CLIENT.goal(agent_id, action, objective=objective)
+    adapter = get(normalize(backend))
+    if adapter is None or not adapter.uses_codex_app_server:
+        raise GoalUnsupported(
+            f"{label(backend)} has no goal control Clarp can drive yet.")
+    from . import codex_app_server
+    return codex_app_server.goal(agent_id, action, objective=objective, stream=stream)
+
+
 def steer_turn(backend: str, agent_id: str, text: str, *,
                client_msg_id: str = "", synthesize_audio: bool = False) -> bool:
     if _RUNTIME_CLIENT is not None:

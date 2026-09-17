@@ -44,6 +44,34 @@ def app_server():
     quota_mode = quota_file.read_text().strip() if quota_file.exists() else ""
     cancel_by_turn = {}
     current_thread = str(uuid.uuid4())
+    goals = {}
+
+    def goal_payload(thread_id):
+        goal = goals.get(thread_id)
+        if goal is None:
+            return None
+        return {"threadId": thread_id, "objective": goal["objective"], "status": goal["status"],
+                "tokenBudget": None, "tokensUsed": goal["tokens"], "timeUsedSeconds": 1,
+                "createdAt": goal["created"], "updatedAt": int(time.time() * 1000)}
+
+    def goal_turn(thread_id):
+        """Codex continues an active goal with a turn nobody requested."""
+        time.sleep(0.05)
+        goal = goals.get(thread_id)
+        if goal is None or goal["status"] != "active":
+            return
+        turn_id = str(uuid.uuid4())
+        emit({"method": "turn/started", "params": {
+            "threadId": thread_id, "turn": {"id": turn_id, "threadId": thread_id}}})
+        mid = str(uuid.uuid4())
+        emit({"method": "item/completed", "params": {"threadId": thread_id, "turnId": turn_id,
+              "item": {"id": mid, "type": "agentMessage", "text": "Goal step: " + goal["objective"]}}})
+        goal["tokens"] += 7
+        goal["status"] = "complete"
+        emit({"method": "thread/goal/updated", "params": {
+            "threadId": thread_id, "turnId": turn_id, "goal": goal_payload(thread_id)}})
+        emit({"method": "turn/completed", "params": {
+            "threadId": thread_id, "turn": {"id": turn_id, "threadId": thread_id, "status": "completed"}}})
 
     def persist(thread_id, kind, payload):
         root_env = os.environ.get("CLARP_QA_PROVIDER_ROOT")
@@ -161,6 +189,27 @@ def app_server():
                 ev.set()
         elif method == "turn/steer":
             result = {}
+        elif method == "thread/goal/set":
+            thread_id = params.get("threadId") or current_thread
+            goal = goals.get(thread_id) or {"objective": "", "status": "active", "tokens": 0,
+                                            "created": int(time.time() * 1000)}
+            if params.get("objective"):
+                goal["objective"] = params["objective"]
+            if params.get("status"):
+                goal["status"] = params["status"]
+            goals[thread_id] = goal
+            result = {"goal": goal_payload(thread_id)}
+            emit({"method": "thread/goal/updated", "params": {
+                "threadId": thread_id, "goal": goal_payload(thread_id)}})
+            if goal["status"] == "active":
+                threading.Thread(target=goal_turn, args=(thread_id,), daemon=True).start()
+        elif method == "thread/goal/get":
+            thread_id = params.get("threadId") or current_thread
+            result = {"goal": goal_payload(thread_id)}
+        elif method == "thread/goal/clear":
+            thread_id = params.get("threadId") or current_thread
+            result = {"cleared": goals.pop(thread_id, None) is not None}
+            emit({"method": "thread/goal/cleared", "params": {"threadId": thread_id}})
         emit({"id": request["id"], "result": result})
         if method == "turn/start":
             threading.Thread(

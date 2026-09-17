@@ -59,7 +59,7 @@ _CONN_LOCK = threading.Lock()
 _MIGRATED = False
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 86
+_SCHEMA_VERSION = 87
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1445,8 +1445,10 @@ from .model_fallbacks import SCHEMA as _MODEL_FALLBACK_SCHEMA
 _SCHEMA_SQL += _MODEL_FALLBACK_SCHEMA
 from .podcast_history import SCHEMA as _PODCAST_HISTORY_SCHEMA
 _SCHEMA_SQL += _PODCAST_HISTORY_SCHEMA
+from .agent_goals import SCHEMA as _AGENT_GOALS_SCHEMA
 from .oracle_memory import SCHEMA as _ORACLE_MEMORY_SCHEMA
 _SCHEMA_SQL += _ORACLE_MEMORY_SCHEMA
+_SCHEMA_SQL += _AGENT_GOALS_SCHEMA
 
 
 def _migrate(con: sqlite3.Connection) -> None:
@@ -1523,6 +1525,9 @@ def _migrate(con: sqlite3.Connection) -> None:
                 if statement.strip(): con.execute(statement)
         if version < 86:
             for statement in _ORACLE_MEMORY_SCHEMA.split(";"):
+                if statement.strip(): con.execute(statement)
+        if version < 87:
+            for statement in _AGENT_GOALS_SCHEMA.split(";"):
                 if statement.strip(): con.execute(statement)
 
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")

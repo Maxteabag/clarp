@@ -5,7 +5,7 @@ from typing import Any
 
 import json
 
-from . import (agents as agents_db, avatar_settings, backend_usage, backends,
+from . import (agent_goals, agents as agents_db, avatar_settings, backend_usage, backends,
                compaction, db,
                config, message_store, model_avatars, team_store,
                turn_queue, scheduler, janitors)
@@ -62,6 +62,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     focus = agents_db.get_focus()
     team_memberships = team_store.memberships_by_agent()
     queue_states = turn_queue.states()
+    goals = agent_goals.by_agent()
     states = agents_db.dashboard_states()
     runtimes = agents_db.dashboard_runtimes()
     messages = message_store.dashboard_messages()
@@ -213,6 +214,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "queued_turn_count": queue_states.get(agent_id, {}).get("count", 0),
             "queued_turn_revision": queue_states.get(agent_id, {}).get("revision", 0),
             "queue_paused": bool(queue_states.get(agent_id, {}).get("paused", False)),
+            "goal":           agent_goals.public(goals.get(agent_id)),
             # Advisory only: a send is never refused, because a fallback
             # model or an account switch may still serve it.
             "backend_quota": _backend_quota(
