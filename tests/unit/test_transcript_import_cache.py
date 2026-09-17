@@ -43,3 +43,17 @@ def test_real_file_containing_hash_is_still_a_file(tmp_path):
     path = tmp_path / "odd#name.jsonl"
     path.write_text("x")
     assert transcript_import_cache.source_path(path) == path
+
+
+def test_same_file_is_imported_again_for_a_different_agent(tmp_path):
+    """An agent created on a conversation another agent already imported must
+    still get its own rows; the cache used to skip it as unchanged."""
+    transcript_import_cache.reset_for_tests()
+    path = tmp_path / "session.jsonl"
+    path.write_text("{}\n")
+    calls = []
+    assert transcript_import_cache.import_if_changed(path, lambda: calls.append("a"), owner="a")
+    assert not transcript_import_cache.import_if_changed(path, lambda: calls.append("a"), owner="a")
+    assert transcript_import_cache.import_if_changed(path, lambda: calls.append("b"), owner="b")
+    assert not transcript_import_cache.import_if_changed(path, lambda: calls.append("b"), owner="b")
+    assert calls == ["a", "b"]
