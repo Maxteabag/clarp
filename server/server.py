@@ -413,6 +413,8 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-file": "_handle_agent_file",
         "/orchestrator/settings": "_handle_orchestrator_settings_get",
         "/herald/settings": "_handle_herald_settings_get",
+        "/judgments/settings": "_handle_judgments_settings_get",
+        "/judgments/decisions": "_handle_judgments_decisions_get",
         "/personalities/settings": "_handle_personalities_settings_get",
         "/automation-settings": "_handle_automation_settings_get",
         "/avatar-settings": "_handle_avatar_settings_get",
@@ -511,6 +513,7 @@ class Handler(BaseHTTPRequestHandler):
         "/orchestrator/settings": "_handle_orchestrator_settings_post",
         "/orchestrator/addressing": "_handle_orchestrator_addressing",
         "/herald/settings": "_handle_herald_settings_post",
+        "/judgments/settings": "_handle_judgments_settings_post",
         "/personalities/settings": "_handle_personalities_settings_post",
         "/automation-settings": "_handle_automation_settings_post",
         "/avatar-settings": "_handle_avatar_settings_post",
@@ -1254,6 +1257,43 @@ class Handler(BaseHTTPRequestHandler):
             "recent_decisions": recent_orchestrator_decisions(5),
             "ignored_decisions": recent_orchestrator_ignored_decisions(20),
         }).encode()
+        self._send(200, body, "application/json")
+
+    def _handle_judgments_settings_get(self):
+        from lib import judgments
+        body = json.dumps({
+            "settings": judgments.status(),
+            "sites": list(judgments.SITES),
+            "defaults": {"enabled": False, "timeout_ms": judgments.DEFAULT_TIMEOUT_MS},
+            "limits": {"timeout_ms": [100, judgments.MAX_TIMEOUT_MS]},
+        }).encode()
+        self._send(200, body, "application/json")
+
+    def _handle_judgments_settings_post(self):
+        from lib import judgments
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        try:
+            settings = judgments.update_settings(data)
+        except ValueError as exc:
+            return self._send(400, json.dumps({"error": str(exc)}).encode(),
+                              "application/json")
+        return self._send(200, json.dumps({"ok": True, "settings": settings}).encode(),
+                          "application/json")
+
+    def _handle_judgments_decisions_get(self):
+        from urllib.parse import parse_qs, urlparse
+        from lib import judgments
+        query = parse_qs(urlparse(self.path).query)
+        site = (query.get("site") or [""])[0]
+        try:
+            limit = int((query.get("limit") or ["50"])[0])
+        except (TypeError, ValueError):
+            limit = 50
+        if site and site not in judgments.SITES:
+            return self._send(400, b'{"error":"unknown site"}', "application/json")
+        body = json.dumps({"decisions": judgments.recent(limit=limit, site=site)}).encode()
         self._send(200, body, "application/json")
 
     def _handle_herald_settings_get(self):

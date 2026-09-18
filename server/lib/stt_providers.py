@@ -298,8 +298,8 @@ def transcribe(model_id: str, audio_bytes: bytes, content_type: str,
     text, duration = run(
         audio_bytes=audio_bytes, content_type=content_type, api_key=api_key,
         model=row["model"], keyterms=terms, timeout=timeout)
-    from .hallucinations import is_pure_hallucination
+    from .judgment_sites import is_junk
     text = (text or "").strip()
-    if is_pure_hallucination(text):
+    if is_junk(text):
         text = ""
     return text, ends_terminal(text), float(duration or 0.0)

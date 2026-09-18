@@ -105,6 +105,22 @@ def resolve_agent_by_spoken_name(
     if not address_tokens:
         return None, text
 
+    # 0) Optional judgment. It runs before the spelling matchers because both
+    # of them treat any name in the opening words as an address, which is how
+    # "did Rachel finish?" ends up delivered to Rachel. Switched off, this is a
+    # no-op and the original matchers below decide exactly as before.
+    from .judgment_sites import resolve_spoken_name
+    judged = resolve_spoken_name(text, agents)
+    if judged is not None:
+        judged_session, _ = judged
+        if judged_session is None:
+            return None, text
+        judged_name = _clean_word((agents.get(judged_session) or {}).get("name", "")).lower()
+        for token, _s, token_end in address_tokens:
+            if token == judged_name:
+                return judged_session, _strip_address_prefix(text, token_end)
+        return judged_session, text
+
     # 1) Exact known-agent token in the first addressed words.
     for token, _start, end in address_tokens:
         for persona, session_id in candidates:

@@ -339,6 +339,7 @@ class Config:
     deepgram_api_key: str = ""            # [deepgram] api_key or env DEEPGRAM_API_KEY
     deepgram_model: str = "flux-haley-en"
     openai_api_key: str = ""             # [openai] api_key or env OPENAI_API_KEY
+    typesafe_api_key: str = ""           # [typesafe] api_key or env TYPESAFE_API_KEY
     openai_realtime_model: str = "gpt-realtime-2.1"
     openai_realtime_voice: str = "cedar"
     oracle_diagnostics: bool = False
@@ -449,6 +450,14 @@ class Config:
         """Resolved OpenAI key: config first, env fallback."""
         return self.auth_token_or_env(self.openai_api_key, "OPENAI_API_KEY")
 
+    def typesafe_key(self) -> str:
+        """Resolved TypeSafe key: config first, env fallback.
+
+        Empty means every optional judgment site falls back to its own
+        deterministic code, which is the default state.
+        """
+        return self.auth_token_or_env(self.typesafe_api_key, "TYPESAFE_API_KEY")
+
     def apns_enabled(self) -> bool:
         """True when configured APNs credentials include a readable key file."""
         key_file = self.apns_key_file()
@@ -543,6 +552,7 @@ def load(path: pathlib.Path | None = None) -> Config:
     cartesia = data.get("cartesia", {}) or {}
     deepgram = data.get("deepgram", {}) or {}
     openai  = data.get("openai", {}) or {}
+    typesafe = data.get("typesafe", {}) or {}
     tts     = data.get("tts", {}) or {}
     whisper = data.get("whisper", {}) or {}
     roster  = data.get("roster", {}) or {}
@@ -593,6 +603,7 @@ def load(path: pathlib.Path | None = None) -> Config:
         deepgram_api_key = str(deepgram.get("api_key", "")),
         deepgram_model  = str(deepgram.get("model", "flux-haley-en")),
         openai_api_key  = str(openai.get("api_key", "")),
+        typesafe_api_key = str(typesafe.get("api_key", "")),
         openai_realtime_model = str(
             openai.get("realtime_model", "gpt-realtime-2.1")
         ).strip() or "gpt-realtime-2.1",
