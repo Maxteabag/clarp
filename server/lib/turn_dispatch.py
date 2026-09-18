@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 from . import agents as agents_db
 from . import backend_usage, backends, config, db, error_classify, eventlog, origins
-from . import message_store, team_store, tts_queue, turn_queue
+from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
 from .log import log, log_exception
 from .protocol import AgentState, SSEType
 from .prompt_admissions import PromptAdmission
@@ -1367,7 +1367,8 @@ class TurnDispatchService:
                         spec, attempt, state, error_classify.RUNNER_EXIT,
                         f"backend session bind failed: {state['bind_error']}")
                     return
-                category = error_classify.classify_result(event)
+                category = judgment_sites.classify_error_or_unknown(
+                    _result_error_text(event), error_classify.classify_result(event))
                 if category != error_classify.CLEAN:
                     self._handle_failure(spec, attempt, state, category,
                                          _result_error_text(event))
@@ -1426,7 +1427,8 @@ class TurnDispatchService:
             state["outcome_seen"] = True
             try:
                 category = (error_classify.RUNNER_EXIT if state.get("bind_error")
-                            else error_classify.classify_error(message))
+                            else judgment_sites.classify_error_or_unknown(
+                                message, error_classify.classify_error(message)))
                 if state.get("bind_error"):
                     message = f"backend session bind failed: {state['bind_error']}"
                 self._handle_failure(spec, attempt, state, category, message)

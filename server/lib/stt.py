@@ -20,7 +20,7 @@ import uuid
 import wave
 from typing import Iterable
 
-from .hallucinations import is_pure_hallucination
+from .judgment_sites import is_junk
 from .log import log, log_exception
 
 
@@ -333,7 +333,7 @@ class WhisperSTT:
             finally:
                 self._lock.release()
             raw = _join_confident_segments(segments)
-            text = "" if is_pure_hallucination(raw) else raw
+            text = "" if is_junk(raw) else raw
             dur = time.time() - t0
             log("whisperDone", f"{dur:.2f}s raw={raw!r} kept={text!r}")
         finally:
@@ -409,7 +409,7 @@ class WhisperCppSTT(WhisperSTT):
                     for segment in payload.get("transcription", [])).strip()
         finally:
             self._lock.release()
-        text = "" if is_pure_hallucination(raw) else raw
+        text = "" if is_junk(raw) else raw
         duration = time.time() - started
         log("whisperDone", f"{duration:.2f}s raw={raw!r} kept={text!r}")
         return text, bool(text and text.rstrip()[-1:] in ".!?"), duration
@@ -691,7 +691,7 @@ class OpenAIWhisperSTT:
             finally:
                 self._lock.release()
             raw = str(result.get("text") or "").strip()
-            text = "" if is_pure_hallucination(raw) else raw
+            text = "" if is_junk(raw) else raw
             duration = time.time() - t0
         finally:
             try: os.unlink(path)

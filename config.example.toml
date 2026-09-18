@@ -38,6 +38,13 @@ fallback = "none"
 api_key = ""
 model = "sonic-3.5"
 
+[typesafe]
+# Optional. Typed judgments (TypeSafe Jev) for decisions Clarp otherwise
+# makes with regexes: junk transcripts, spoken-name routing, turn errors.
+# Empty means every site keeps using its existing deterministic code.
+# Falls back to TYPESAFE_API_KEY. Enable sites via /judgments/settings.
+api_key = ""
+
 [deepgram]
 # API key. If empty, falls back to DEEPGRAM_API_KEY.
 api_key = ""
