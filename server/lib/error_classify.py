@@ -83,9 +83,16 @@ _USAGE_LIMIT_RE = re.compile(
     r"out of usage|usage (limit|cap|quota|exhausted|exceeded|reached)|"
     r"session limit|hit your .*limit.*resets|"
     r"out of credits?|workspace is out of credits?|"
-    r"(quota|credits?|credit balance) (exceeded|exhausted|depleted|reached|used up)|"
+    # Grok reports exhaustion as "Grok Build usage balance exhausted"; the
+    # noun there is "balance", qualified by usage/credit/account.
+    r"(quota|credits?|(?:usage|credit|account) balance) "
+    r"(exceeded|exhausted|depleted|reached|used up)|"
     r"insufficient (quota|credits?|credit balance)|"
     r"exceeded your current quota|monthly limit|billing hard limit|"
+    # HTTP 402 is a billing terminal by definition, and is how Grok surfaces
+    # an exhausted balance. Keep it anchored to the status word/number pair so
+    # a stray "402" in unrelated output cannot trip it.
+    r"payment required|status(?: code)? 402\b|\b402 payment\b|"
     r"resource[_ ]exhausted|no credits? remaining|trial quota",
     re.I,
 )

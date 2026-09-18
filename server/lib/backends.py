@@ -346,7 +346,10 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         efforts=("low", "medium", "high"),
         badge="BackendGrok",
         detail="Runs on Grok Build.",
-        symbol="xmark.circle",
+        # The letterform "x", not `xmark.circle` — that one is the system
+        # dismiss/error glyph, so a Grok contact wearing it reads as a broken
+        # or failed avatar rather than a brand mark.
+        symbol="x.circle",
         brand=BackendBrand("#1a1a1a", "#0a0a0a", "#e8e8e8", "#222222"),
         routing_module="grok_runner",
         runner_module="grok_runner",
