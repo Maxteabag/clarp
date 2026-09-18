@@ -101,12 +101,57 @@ def create(*, name: str, voice_id: str, avatar_symbol: str = "",
     return get(name) or {}
 
 
+def _store_avatar(current: dict, avatar_base64: str) -> str:
+    """Persist a new portrait for a persona, or keep the existing one."""
+    avatar_path = str(current.get("avatar_path") or "")
+    if not avatar_base64:
+        return avatar_path
+    raw = base64.b64decode(avatar_base64, validate=True)
+    if len(raw) > 512_000:
+        raise ValueError("Avatar is too large.")
+    folder = LAYOUT.data_root / "avatars"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{current['persona_id']}.jpg"
+    path.write_bytes(raw)
+    return str(path)
+
+
+def update_avatar(*, original_name: str, avatar_symbol: str = "",
+                  avatar_base64: str = "") -> dict:
+    """Change only how a Contact looks, for a builtin as well as a custom one.
+
+    A builtin's name, voice and personality come from config and are rewritten
+    on every boot by `_sync_builtins`, so they stay read-only. Its portrait is
+    not config-managed and nothing else can repair it: `_sync_builtins`
+    promotes a custom row to builtin by name, which froze whatever avatar that
+    row happened to carry (a Grok contact stuck wearing the `xmark.circle`
+    dismiss glyph is how this surfaced) with no way to edit it in the app.
+    """
+    current = get(original_name)
+    if not current:
+        raise ValueError("No such Contact.")
+    avatar_path = _store_avatar(current, avatar_base64)
+    db.conn().execute(
+        """UPDATE personas
+              SET avatar_symbol = ?, avatar_path = ?
+            WHERE persona_id = ? AND deleted_at IS NULL""",
+        (avatar_symbol[:64], avatar_path, current["persona_id"]),
+    )
+    return get(current["name"]) or {}
+
+
 def update(*, original_name: str, name: str, voice_id: str,
            avatar_symbol: str = "", personality: str = "",
            avatar_base64: str = "") -> dict:
     current = get(original_name)
-    if not current or current.get("builtin"):
+    if not current:
         raise ValueError("Only saved custom Contacts can be edited.")
+    if current.get("builtin"):
+        # Everything else on a builtin is config-managed; take the avatar and
+        # leave the rest rather than refusing the whole edit.
+        return update_avatar(original_name=original_name,
+                             avatar_symbol=avatar_symbol,
+                             avatar_base64=avatar_base64)
     name = name.strip()
     if not name or len(name) > 60:
         raise ValueError("A Contact name is required (maximum 60 characters).")
@@ -115,16 +160,7 @@ def update(*, original_name: str, name: str, voice_id: str,
         raise ValueError(f"{name} already exists.")
     if not voice_id:
         raise ValueError("Choose a voice.")
-    avatar_path = str(current.get("avatar_path") or "")
-    if avatar_base64:
-        raw = base64.b64decode(avatar_base64, validate=True)
-        if len(raw) > 512_000:
-            raise ValueError("Avatar is too large.")
-        folder = LAYOUT.data_root / "avatars"
-        folder.mkdir(parents=True, exist_ok=True)
-        path = folder / f"{current['persona_id']}.jpg"
-        path.write_bytes(raw)
-        avatar_path = str(path)
+    avatar_path = _store_avatar(current, avatar_base64)
     db.conn().execute(
         """UPDATE personas
               SET name = ?, voice_id = ?, avatar_symbol = ?, avatar_path = ?,
