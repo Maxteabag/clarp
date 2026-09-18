@@ -261,8 +261,8 @@ def transcribe(
     if not isinstance(raw_text, str):
         raise AdapterError("STT adapter text must be a string")
     text = raw_text.strip()
-    from .hallucinations import is_pure_hallucination
-    if is_pure_hallucination(text):
+    from .judgment_sites import is_junk
+    if is_junk(text):
         text = ""
     if len(text) > 200_000:
         raise AdapterError("STT adapter transcript is too large")

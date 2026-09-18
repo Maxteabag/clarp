@@ -37,6 +37,7 @@ POLICY_OPTION_KEYS = ("fallback_only", "hands_free_only", "confidence_threshold"
 DEFAULT_MODEL = "gpt-5.4-mini"
 DEFAULT_EFFORT = "low"
 OPENAI_PROVIDER = "openai"
+TYPESAFE_PROVIDER = "typesafe"
 _OPENAI_ALIASES = {"openai", "gpt"}
 # Codex is the catalogue that lists GPT models; the OpenAI API path reuses it.
 OPENAI_CATALOG_BACKEND = backends.CODEX
@@ -150,6 +151,8 @@ def normalize_provider(raw: str | None) -> str:
     value = (raw or "").strip().lower()
     if value in _OPENAI_ALIASES:
         return OPENAI_PROVIDER
+    if value in {TYPESAFE_PROVIDER, "jev"}:
+        return TYPESAFE_PROVIDER
     if value == "claude-code":
         return backends.CLAUDE
     adapter = backends.get(value)
@@ -180,6 +183,17 @@ def provider_options() -> list[dict[str, Any]]:
             "effort_options": None,
         })
     rows.append({
+        "id": TYPESAFE_PROVIDER,
+        "label": "TypeSafe Jev",
+        "detail": ("Typed decision model: picks the action and the agent in one "
+                   "call. Falls back to OpenAI when it needs to compose a "
+                   "clarifying question."),
+        "kind": "api",
+        "catalog_backend": "",
+        "installed": bool(config.load().typesafe_key()),
+        "effort_options": [],
+    })
+    rows.append({
         "id": OPENAI_PROVIDER,
         "label": "OpenAI API",
         "detail": "Uses the configured OpenAI API key directly.",
@@ -193,7 +207,7 @@ def provider_options() -> list[dict[str, Any]]:
 
 def is_routing_provider(raw: str | None) -> bool:
     provider = normalize_provider(raw)
-    if provider == OPENAI_PROVIDER:
+    if provider in (OPENAI_PROVIDER, TYPESAFE_PROVIDER):
         return True
     adapter = backends.get(provider)
     return adapter is not None and adapter.supports_routing
@@ -1378,6 +1392,8 @@ def call_model(packet: dict[str, Any], settings: OrchestratorSettings) -> dict[s
     """
     provider = normalize_provider(settings.provider)
     prompt = _model_prompt(packet)
+    if provider == TYPESAFE_PROVIDER:
+        return _call_typesafe(packet, settings, prompt)
     if provider == OPENAI_PROVIDER:
         return _call_openai(prompt, settings)
     adapter = backends.get(provider)
@@ -1497,6 +1513,111 @@ def _model_prompt(packet: dict[str, Any]) -> str:
         "ambiguous with spoken_text.\n"
         f"INPUT:\n{json.dumps(packet, separators=(',', ':'), ensure_ascii=True)}"
     )
+
+
+# Routing thresholds for the typed provider. They are separate from
+# settings.confidence_threshold, which the caller applies to the decision as a
+# whole; these decide whether Jev produced a usable decision at all.
+TYPESAFE_TARGET_MIN = 0.60     # below this no agent is clearly the right one
+TYPESAFE_DECISION_MIN = 0.45   # below this the action itself is unclear
+
+
+def _typesafe_questions(packet: dict[str, Any]) -> dict[str, dict]:
+    from . import judgments
+    agents = packet.get("agents") or []
+    targets: dict[str, str] = {}
+    for agent in agents:
+        recent = (agent.get("recent_agent_messages") or [{}])[0].get("text", "")
+        targets[str(agent.get("session") or "")] = (
+            f"{agent.get('persona') or 'agent'}: {str(recent)[:300]}")
+    targets.pop("", None)
+    targets["none"] = "It is not a message for any of these agents"
+    return {
+        "kind": judgments.choice(
+            "`user_said` was spoken hands-free to a multi-agent voice app. "
+            "What should the app do with it?",
+            {
+                "agent_message": "Deliver it to one agent as a message, instruction "
+                                 "or answer",
+                "status_query": "The user asks the app how agents are doing; nothing "
+                                "should be delivered to an agent",
+                "control": "The user asks to hear the last thing again",
+                "agent_control": "The user asks to stop, relaunch, resume or switch "
+                                 "to an agent",
+                "ignored": "Background speech, talk to a passenger, noise or nonsense "
+                           "unrelated to any agent",
+            }),
+        "target": judgments.choice(
+            "Which agent's recent conversation does `user_said` continue or answer? "
+            "Judge by content only.", targets),
+    }
+
+
+def _typesafe_state(packet: dict[str, Any]) -> dict[str, Any]:
+    """Only the fields the questions refer to; the prompt packet carries more."""
+    return {
+        "user_said": packet.get("utterance") or "",
+        "agents": [
+            {
+                "session": agent.get("session"),
+                "persona": agent.get("persona"),
+                "recent_user_messages": agent.get("recent_user_messages") or [],
+                "recent_agent_messages": agent.get("recent_agent_messages") or [],
+            }
+            for agent in (packet.get("agents") or [])
+        ],
+    }
+
+
+def _call_typesafe(packet: dict[str, Any], settings: OrchestratorSettings,
+                   prompt: str) -> dict[str, Any]:
+    """Route with a typed decision model instead of a chat completion.
+
+    Jev picks; it cannot write. A clarify decision has to speak a question back
+    to the user, so that one branch is handed to OpenAI when a key exists. The
+    returned dict is the same shape `parse_decision` already consumes.
+    """
+    from . import judgments
+    questions = _typesafe_questions(packet)
+    answers = judgments.judge(
+        "router", _typesafe_state(packet), questions,
+        timeout_ms_override=max(250, min(settings.timeout_ms, 5000)),
+        trace_id=str(packet.get("trace_id") or ""))
+    if answers is None:
+        # Switched off, no key, or unreachable: keep the configured fallback.
+        if config.load().openai_key():
+            return _call_openai(prompt, settings)
+        raise RuntimeError("typesafe judgments unavailable and no OpenAI key configured")
+
+    kind = answers.choice("kind")
+    target = answers.choice("target")
+    target_probability = answers.probability("target", target)
+    reason = (f"jev action: {answers.top('kind')} | agent: {answers.top('target')}")
+
+    if kind == "agent_message":
+        # No agent's conversation fits: this is background speech, not a message.
+        if target == "none" and answers.probability("target", "none") >= 0.5:
+            kind, target = "ignored", ""
+        elif target == "none" or target_probability < TYPESAFE_TARGET_MIN:
+            kind = "ambiguous"
+    if answers.confidence("kind") < TYPESAFE_DECISION_MIN:
+        kind = "ambiguous"
+
+    if kind in ("clarify", "ambiguous") and config.load().openai_key():
+        # Asking the user who they meant requires generated speech.
+        decision = _call_openai(prompt, settings)
+        decision.setdefault("reason", reason)
+        return decision
+
+    judgments.record_outcome("router", f"{kind}:{target}" if target else kind)
+    return {
+        "kind": kind,
+        "target_session": target if kind in ("agent_message", "agent_control") else "",
+        "confidence": round(float(answers.confidence("kind")), 4),
+        "addressing": kind == "agent_message",
+        "text_to_send": packet.get("utterance") or "",
+        "reason": reason,
+    }
 
 
 def _extract_json(text: str) -> dict[str, Any]:

@@ -644,13 +644,14 @@ def test_disabled_or_non_hands_free_skips_orchestrator(tmp_path):
     ) is None
 
 
-def test_provider_options_list_every_routing_backend_plus_openai(monkeypatch):
+def test_provider_options_list_every_routing_backend_plus_apis(monkeypatch):
     from lib import orchestrator
     monkeypatch.setattr(orchestrator.shutil, "which",
                         lambda name: f"/bin/{name}" if name in {"claude", "grok"} else None)
     options = orchestrator.provider_options()
     ids = [row["id"] for row in options]
-    assert ids == ["claude", "codex", "agy", "grok", "opencode", "deepseek", "openai"]
+    assert ids == ["claude", "codex", "agy", "grok", "opencode", "deepseek",
+                   "typesafe", "openai"]
     # DeepSeek fronts the OpenCode binary, so it is installed exactly when OpenCode is.
     by_id_probe = {row["id"]: row for row in options}
     assert by_id_probe["deepseek"]["installed"] is by_id_probe["opencode"]["installed"]
@@ -660,6 +661,10 @@ def test_provider_options_list_every_routing_backend_plus_openai(monkeypatch):
     assert by_id["openai"]["kind"] == "api" and by_id["openai"]["catalog_backend"] == "codex"
     assert by_id["openai"]["effort_options"] == ["minimal", "low", "medium", "high"]
     assert by_id["claude"]["detail"] == "Runs an isolated Claude request on this Host."
+    # Jev is an API provider like OpenAI, but it picks rather than writes, so it
+    # exposes no reasoning-effort choice.
+    assert by_id["typesafe"]["kind"] == "api"
+    assert by_id["typesafe"]["effort_options"] == []
 
 
 def test_update_settings_normalizes_aliases_and_rejects_unknown_providers():
