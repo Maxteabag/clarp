@@ -67,14 +67,35 @@ def test_custom_contact_can_be_edited_without_touching_its_chat(tmp_path):
     assert agents.get_by_agent_id(agent_id)["persona"] == "Custom Nova"
 
 
-def test_builtin_contact_cannot_be_edited_in_server_store():
+def test_builtin_contact_keeps_config_managed_fields_on_edit():
     personas.ensure_builtins()
+    before = personas.get("Mike")
 
-    try:
-        personas.update(
-            original_name="Mike", name="Mike",
-            voice_id='{"deepgram":"flux-haley-en"}')
-    except ValueError as error:
-        assert "custom Contacts" in str(error)
-    else:
-        raise AssertionError("built-in server Contact edit should be rejected")
+    personas.update(
+        original_name="Mike", name="Renamed Mike",
+        voice_id='{"deepgram":"flux-haley-en"}',
+        personality="rewritten")
+
+    # Name, voice and personality come from config and are rewritten on every
+    # boot by _sync_builtins, so an edit must not appear to change them.
+    after = personas.get("Mike")
+    assert after is not None, "a builtin must not be renamed"
+    assert personas.get("Renamed Mike") is None
+    assert after["voice_id"] == before["voice_id"]
+    assert after["personality"] == before["personality"]
+
+
+def test_builtin_contact_avatar_can_be_repaired():
+    # _sync_builtins promotes a custom row to builtin by name, freezing the
+    # avatar it carried. Without this the app has no way to fix that symbol.
+    personas.ensure_builtins()
+    db.conn().execute(
+        "UPDATE personas SET avatar_symbol = 'xmark.circle' WHERE name = 'Mike'")
+    assert personas.get("Mike")["avatar_symbol"] == "xmark.circle"
+
+    personas.update(
+        original_name="Mike", name="Mike",
+        voice_id='{"deepgram":"flux-haley-en"}', avatar_symbol="")
+
+    assert personas.get("Mike")["avatar_symbol"] == ""
+    assert personas.get("Mike")["builtin"] == 1
