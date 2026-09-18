@@ -39,8 +39,22 @@ def test_usage_limit_errors_are_user_visible_not_transient():
         "RESOURCE_EXHAUSTED: exceeded your current quota",
         "monthly limit reached",
         "You've hit your session limit · resets 3:20pm (Europe/Oslo)",
+        # Grok Build: an exhausted balance arrives as an HTTP 402 blob. Before
+        # this was recognised the turn classified UNKNOWN, which flips the
+        # agent to IDLE — the chat just went silent with no badge at all.
+        'Internal error: {\n  "message": "API error (status 402 Payment '
+        'Required): Grok Build usage balance exhausted",\n  '
+        '"http_status": 402\n}',
+        "Grok Build usage balance exhausted",
+        "API error (status 402 Payment Required)",
+        "account balance exhausted",
     ]:
         assert ec.classify_error(msg) == ec.USAGE_LIMIT, msg
+
+
+def test_stray_402_is_not_a_usage_limit():
+    # A bare number must not trip the billing rule; only the HTTP status pair.
+    assert ec.classify_error("wrote 402 tokens to the log") == ec.UNKNOWN
 
 
 def test_runner_exit_errors_are_user_visible():
