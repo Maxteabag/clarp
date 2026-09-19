@@ -460,6 +460,10 @@ def record_dream_digest(*, agent_id: str, backend_session_id: str,
     }
 
 
+# Claude Code's reply to its own isMeta "Continue from where you left off."
+# record; never something a user should see. Keep in step with parse_turns.
+CLAUDE_META_REPLY = "No response requested."
+
 def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
                                   trace_id: str = "", text: str
                                   ) -> dict[str, Any] | None:
@@ -472,7 +476,11 @@ def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
     if not agent_id or not backend_session_id:
         return None
     text = strip_hidden_blocks(str(text or ""))
-    if not text.strip():
+    if not text.strip() or text.strip() == CLAUDE_META_REPLY:
+        # Claude Code answers its own injected "Continue from where you left
+        # off." with this line whenever an interrupted session is resumed.
+        # parse_turns drops it from the durable transcript; streaming it here
+        # first showed it as a real bubble on every account-recovery resume.
         return None
     leader_noop_text = text
     skip, text = heartbeat.strip_heartbeat_ack(text)

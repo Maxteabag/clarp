@@ -11,7 +11,8 @@ import json
 import threading
 import time
 
-from . import config, oracle_delegations, oracle_live, oracle_live_provider, oracle_memory
+from . import config, oracle_contact, oracle_delegations, oracle_live, oracle_live_provider, oracle_memory
+from .log import log_exception
 from .oracle_calls import AgentTools, validate_offer
 from .oracle_live_wire import LiveWire
 
@@ -241,9 +242,12 @@ def create(*, ctx, principal, data, stop, negotiate=oracle_live_provider.negotia
     if getattr(cfg, "oracle_delegation_strategy", "operator") == "operator" and cfg.oracle_router_backend == "api" and not cfg.openai_key():
         raise CallError("Oracle API routing requires an OpenAI key on this Host", 503)
     podcast = _podcast(data)
-    fallback = str(data.get("oracle_session") or "")
+    # The Host's contact wins; a client value is honoured only if it names a
+    # live agent. This used to call resolve() and let the ValueError escape,
+    # which the generic handler turned into 400 "Invalid Oracle call" with no
+    # log line -- a deleted contact then failed every WebRTC create for days.
+    fallback = oracle_contact.effective(data.get("oracle_session"), source="live-webrtc")
     tools = AgentTools(ctx, principal, fallback, stop)
-    if fallback: tools.resolve(fallback)
     digest = hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     key = (principal, attempt)
     with _LOCK:
@@ -331,8 +335,11 @@ def handle(handler, action):
         return handler._send(200, json.dumps(result).encode(), "application/json")
     except CallError as exc:
         return handler._send(exc.status, json.dumps({"error": str(exc)}).encode(), "application/json")
-    except (ValueError, TypeError):
-        return handler._send(400, b'{"error":"Invalid Oracle call"}', "application/json")
+    except (ValueError, TypeError) as exc:
+        # A bug or a malformed body, never a normal outcome: say which.
+        log_exception("oracleLiveCallInvalid", exc, detail=action)
+        return handler._send(400, json.dumps({"error": f"Invalid Oracle call: {exc}"}).encode(),
+                             "application/json")
 
 
 def context_image(handler):

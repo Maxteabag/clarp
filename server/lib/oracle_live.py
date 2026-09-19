@@ -18,6 +18,7 @@ import uuid
 from urllib.parse import parse_qs, urlparse
 
 from . import config, oracle_delegations, oracle_router, oracle_memory, oracle_work, ws
+from . import oracle_contact
 from .log import log
 from .oracle_calls import AgentTools, session_config as realtime_config
 from .oracle_context import context_chunks, result_context
@@ -781,7 +782,7 @@ def serve(handler):
             handler.wfile.write(ws.text_frame(json.dumps(event)))
             handler.wfile.flush()
     try:
-        fallback = query.get("oracle_session", [""])[0][:160]
+        fallback = oracle_contact.effective(query.get("oracle_session", [""])[0], source="live-ws")
         tools = AgentTools(handler.ctx, principal, fallback,
             lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
         memory = oracle_memory.open_thread(principal, fallback, connection_id=token,

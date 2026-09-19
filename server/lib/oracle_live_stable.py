@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 from . import config, oracle_delegations, ws
+from . import oracle_contact
 from .log import log
 from .oracle_calls_stable import AgentTools, session_config as realtime_config
 from .oracle_realtime import claim_session, release_session, _send_http_error
@@ -440,7 +441,7 @@ def serve(handler):
             downstream({"type": "podcast.history", "conversation_id": history_id,
                         "saved": True, "position": float(query.get("position", ["0"])[0])})
         else:
-            fallback = query.get("oracle_session", [""])[0][:160]
+            fallback = oracle_contact.effective(query.get("oracle_session", [""])[0], source="live-ws")
             tools = AgentTools(handler.ctx, principal, fallback,
                 lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
             conversation = Conversation(upstream, downstream, tools, key)

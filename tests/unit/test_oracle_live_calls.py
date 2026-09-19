@@ -183,3 +183,50 @@ def test_transport_disconnect_during_close_preserves_unconfirmed_usage(manager, 
     assert snapshot['usage']['usage_final'] is False
     assert len(records) == 1, 'Do not start a replacement session to obtain usage'
     assert [e['type'] for e in records[0][0].sent] == ['session.close']
+
+
+def _live_agent(agent_id, persona, session):
+    from lib import db
+    db.conn().execute(
+        "INSERT INTO agents(agent_id, persona, voice_id, cwd, session, created_at) VALUES (?,?,?,?,?,?)",
+        (agent_id, persona, "v", "/tmp", session, db.now_ms()))
+
+
+def test_stale_client_contact_degrades_to_no_contact_instead_of_a_bare_400(manager):
+    # Recorded 2026-09-19: oracle_session=diego-0cd1 named a deleted agent and
+    # every create answered 400 "Invalid Oracle call" for hours.
+    _, records, negotiate = manager
+    response = create(negotiate, oracle_session="diego-0cd1")
+    assert response["sdp"] == SDP and len(records) == 1
+    call = next(iter(calls._ATTEMPTS.values()))
+    assert call.tools.fallback == ""
+
+
+def test_host_contact_overrides_the_client_contact(manager):
+    from lib import oracle_contact
+    _, _, negotiate = manager
+    _live_agent("a1", "Mike", "mike-cb43")
+    _live_agent("a2", "Lena", "lena-74d2")
+    oracle_contact.set("mike-cb43")
+    create(negotiate, oracle_session="lena-74d2")
+    call = next(iter(calls._ATTEMPTS.values()))
+    assert call.tools.fallback == "mike-cb43"
+
+
+def test_invalid_call_reports_the_reason_and_logs_it(monkeypatch):
+    logged = []
+    monkeypatch.setattr(calls, "log_exception", lambda event, exc, detail="": logged.append((event, str(exc), detail)))
+    sent = []
+    handler = SimpleNamespace(
+        _request_auth_validated=True, _request_device_scope="full", _request_principal="owner",
+        path="/oracle/v2/calls/status?after=notanumber&attempt_id=x",
+        _read_json=lambda: {}, ctx=SimpleNamespace(),
+        _send=lambda status, body, ctype: sent.append((status, json.loads(body))))
+    calls.handle(handler, "status")
+    assert sent == [(400, {"error": "Invalid event cursor"})]
+    # A programming error inside a handler is named, not hidden.
+    handler.path = "/oracle/v2/calls/status?after=0&attempt_id=x"
+    monkeypatch.setattr(calls, "get", lambda principal, attempt: (_ for _ in ()).throw(TypeError("boom")))
+    calls.handle(handler, "status")
+    assert sent[-1][0] == 400 and "boom" in sent[-1][1]["error"]
+    assert logged and logged[-1][0] == "oracleLiveCallInvalid" and logged[-1][2] == "status"

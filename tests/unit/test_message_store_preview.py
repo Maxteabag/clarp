@@ -100,3 +100,16 @@ def test_preview_empty_when_only_routine_automation_rows():
 def test_preview_empty_when_no_messages():
     _agent()
     assert message_store.last_message_preview(agent_id="a1") == ""
+
+
+def test_live_stream_drops_claude_codes_meta_reply_but_keeps_real_text():
+    # Recorded 2026-09-19: every account-recovery resume streamed
+    # "No response requested." into the chat as a real bubble.
+    _agent()
+    assert message_store.upsert_live_assistant_message(
+        agent_id="a1", backend_session_id="bs1", text="No response requested.") is None
+    assert message_store.upsert_live_assistant_message(
+        agent_id="a1", backend_session_id="bs1", text="  No response requested. ") is None
+    row = message_store.upsert_live_assistant_message(
+        agent_id="a1", backend_session_id="bs1", text="On it.")
+    assert row is not None
