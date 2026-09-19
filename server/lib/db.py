@@ -57,9 +57,8 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
-# Versions 81 and 82 also exist on installed Hosts with additive indexing
-# migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 88
+# Versions 81 and 82 were used by historical additive index builds.
+_SCHEMA_VERSION = 89
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1534,6 +1533,9 @@ def _migrate(con: sqlite3.Connection) -> None:
             for statement in judgments_schema.split(";"):
                 if statement.strip(): con.execute(statement)
 
+        if version < 89:
+            _migrate_to_v89(con)
+
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1802,6 +1804,29 @@ def _migrate_to_v65(con: sqlite3.Connection) -> None:
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_trace ON messages(trace_id)"
         " WHERE trace_id IS NOT NULL")
+
+
+_STATE_BOUNDARY_INDEX = """CREATE INDEX IF NOT EXISTS idx_state_log_boundaries
+    ON state_log(agent_id, ts DESC, state_id DESC)
+    WHERE kind IN ('done', 'idle', 'stopped')"""
+_SCHEMA_SQL += _STATE_BOUNDARY_INDEX + ";\n"
+
+
+_PAIR_PROJECTION_INDEX = """CREATE INDEX IF NOT EXISTS idx_messages_pair_projection
+    ON messages(agent_id, sender_agent_id, timestamp, seq)
+    WHERE COALESCE(origin, 'user') = 'agent'
+      AND COALESCE(sender_agent_id, '') != ''
+      AND sender_agent_id != agent_id
+      AND COALESCE(text, '') != ''
+      AND COALESCE(tool_name, '') = ''
+      AND role IN ('user', 'assistant')"""
+_SCHEMA_SQL += _PAIR_PROJECTION_INDEX + ";\n"
+
+
+def _migrate_to_v89(con: sqlite3.Connection) -> None:
+    """Add both performance indexes to current and historical Host schemas."""
+    con.execute(_PAIR_PROJECTION_INDEX)
+    con.execute(_STATE_BOUNDARY_INDEX)
 
 
 def _migrate_to_v79(con: sqlite3.Connection) -> None:
