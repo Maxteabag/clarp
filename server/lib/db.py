@@ -60,7 +60,6 @@ _MIGRATED = False
 # Versions 81 and 82 were used by historical additive index builds.
 _SCHEMA_VERSION = 89
 
-
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
 
@@ -1537,7 +1536,6 @@ def _migrate(con: sqlite3.Connection) -> None:
         if version < 89:
             _migrate_to_v89(con)
 
-
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1814,11 +1812,6 @@ _STATE_BOUNDARY_INDEX = """CREATE INDEX IF NOT EXISTS idx_state_log_boundaries
 _SCHEMA_SQL += _STATE_BOUNDARY_INDEX + ";\n"
 
 
-def _migrate_to_v82(con: sqlite3.Connection) -> None:
-    """Seek completed-turn boundaries without visiting historical tool states."""
-    con.execute(_STATE_BOUNDARY_INDEX)
-
-
 _PAIR_PROJECTION_INDEX = """CREATE INDEX IF NOT EXISTS idx_messages_pair_projection
     ON messages(agent_id, sender_agent_id, timestamp, seq)
     WHERE COALESCE(origin, 'user') = 'agent'
@@ -1831,9 +1824,9 @@ _SCHEMA_SQL += _PAIR_PROJECTION_INDEX + ";\n"
 
 
 def _migrate_to_v89(con: sqlite3.Connection) -> None:
-    """Index only pair messages so sidebar refreshes skip private history."""
+    """Add both performance indexes to current and historical Host schemas."""
     con.execute(_PAIR_PROJECTION_INDEX)
-    _migrate_to_v82(con)
+    con.execute(_STATE_BOUNDARY_INDEX)
 
 
 def _migrate_to_v79(con: sqlite3.Connection) -> None:
