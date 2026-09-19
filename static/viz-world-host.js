@@ -1,5 +1,7 @@
 // Small transport/camera shell. All visual semantics live in replaceable source.
 import {SourceSandbox} from '/static/lib/viz-source-sandbox.js';
+import {activityHeat,drawHeat,composeHeat} from '/static/lib/viz-heatmap.js';
+import {FollowCamera,cameraForBounds,easeCamera} from '/static/lib/viz-follow-camera.js';
 import {AvatarCache} from '/static/lib/viz-avatar-cache.js';
 import {FlowMemory} from '/static/lib/viz-flow-memory.js';
 import {flowDemo,DEMO_LENGTH_MS} from '/static/lib/viz-flow-demo.js';
@@ -11,6 +13,8 @@ let scene={entities:[],relations:[],events:[]},meta={},program=null,sandbox=null
 let pixelRatio=Math.min(devicePixelRatio||1,2);
 let width=innerWidth,height=innerHeight,camera={x:20,y:70,k:.7},revision=0,live=true,playing=false,playhead=Date.now(),tmin=0,tmax=0;
 let frames=0,failure='',loading=false,last=performance.now(),signature='',selected=null;
+let recapOpen=false;
+document.addEventListener('fleet-recap',e=>{recapOpen=!!e.detail;});
 const avatarCache=new AvatarCache(blobs=>sandbox?.setAvatars(blobs));
 // Artifact previews are host-owned thumbnails of recorded media; the demo uses
 // a generated placeholder so the synthetic sequence never resembles live output.
@@ -21,6 +25,28 @@ let programHistory=[];
 let recoveryTimer=null,recoveryAttempts=0,lastFrameTimings={};
 const retryButton=document.getElementById('retry-render');
 const fittedViews=new Set();
+const heatButton=document.getElementById('heatmap'),heatLegend=document.getElementById('heat-legend');
+const heatCanvas=document.createElement('canvas'),heatContext=heatCanvas.getContext('2d');
+const heatStyleButton=document.getElementById('heat-style');let heatStyle='smooth';
+try{if(localStorage.getItem('clarp.fleet.heatStyle')==='pixelated')heatStyle='pixelated';}catch{}
+function heatStyleLabel(){heatStyleButton.textContent=heatStyle==='smooth'?'Smooth heat':'Pixelated heat';heatStyleButton.ariaPressed=String(heatStyle==='pixelated');}
+heatStyleButton.onclick=()=>{heatStyle=heatStyle==='smooth'?'pixelated':'smooth';heatStyleLabel();try{localStorage.setItem('clarp.fleet.heatStyle',heatStyle);}catch{}};
+heatStyleLabel();
+let heatEnabled=false,heatState={spots:[],located:0,unlocated:0};
+try{heatEnabled=localStorage.getItem('clarp.fleet.heatmap')==='true';}catch{}
+function heatLabel(){heatButton.ariaPressed=String(heatEnabled);heatLegend.hidden=!heatEnabled;heatStyleButton.hidden=!heatEnabled;}
+heatButton.onclick=()=>{heatEnabled=!heatEnabled;heatLabel();try{localStorage.setItem('clarp.fleet.heatmap',String(heatEnabled));}catch{}};
+heatLabel();
+const follow=new FollowCamera(),followButton=document.getElementById('follow-activity');
+let followPaused=false;
+try{follow.enabled=localStorage.getItem('clarp.fleet.follow')==='true';}catch{}
+function followLabel(){followButton.ariaPressed=String(follow.enabled&&!followPaused);followButton.textContent=followPaused?'Resume following':follow.enabled?'Following activity':'Follow activity';}
+function pauseFollowing(){if(follow.enabled){followPaused=true;followLabel();}}
+followButton.onclick=()=>{
+  follow.enabled=followPaused?true:!follow.enabled;followPaused=false;follow.reset();followLabel();
+  try{localStorage.setItem('clarp.fleet.follow',String(follow.enabled));}catch{}
+};
+followLabel();
 function fitView(initial=false){
   const b=initial?(meta.focusBounds||meta.bounds):meta.bounds;if(!b)return;
   const top=document.getElementById('hud').getBoundingClientRect().bottom+16;
@@ -58,6 +84,7 @@ function selectProgram(data){
 }
 function selectView(next){
   if(!worldBase||!cabinetBase||!flowBase)return;
+  follow.reset();meta={};
   cameras[view]={...camera};view=next;camera={...cameras[view]};
   base=view==='flow'?flowBase:view==='cabinets'?cabinetBase:worldBase;
   if(demoEnabled){demoEnabled=false;demoButton.ariaPressed='false';live=true;playing=false;liveButton.ariaPressed='true';}
@@ -90,7 +117,17 @@ function use(next){
   sandbox?.destroy();program=next;
   let goodFrames=0;
   sandbox=new SourceSandbox(next,(bitmap,result,timings)=>{
-    ctx.drawImage(bitmap,0,0);bitmap.close();meta=result;frames++;
+    meta=result;frames++;
+    const drawn=sandbox?.lastFrameInput;
+    let heatLayer=null;
+    if(heatEnabled&&drawn&&drawn.width===canvas.width&&drawn.height===canvas.height){
+      heatState=activityHeat(sandbox.scene?.events||[],result.heatTargets||result.hits||[],drawn.playhead);
+      heatCanvas.width=canvas.width;heatCanvas.height=canvas.height;
+      drawHeat(heatContext,heatState,drawn.camera,drawn.pixelRatio,heatStyle);heatLayer=heatCanvas;
+      heatLegend.textContent=heatState.located?'Heat · recent activity + fading history':'Heat · no located activity in the loaded hour';
+      if(heatState.unlocated)heatLegend.textContent+=` · ${heatState.unlocated} unlocated`;
+    }
+    composeHeat(ctx,bitmap,{heat:heatLayer,view,transparent:!!result.heatmapBackground});bitmap.close();
     if(selected&&!document.getElementById('inspector').hidden)inspectHit(meta.hits?.find(h=>h.id===selected));
     lastFrameTimings=timings;
     if(failure)learning.textContent='Rendering resumed';
@@ -161,18 +198,24 @@ function frame(now){
   else if(live)playhead=Date.now();else if(playing){playhead=Math.min(tmax,playhead+dt*120);if(playhead===tmax)playing=false;}
   slider.value=String(1000*(playhead-tmin)/Math.max(1,tmax-tmin));
   document.getElementById('clock').textContent=new Date(playhead).toLocaleTimeString();
-  if(width>0&&height>0&&scene.entities.length)sandbox?.draw({scene,time:now,width:canvas.width,height:canvas.height,pixelRatio,camera:{x:camera.x*pixelRatio,y:camera.y*pixelRatio,k:camera.k*pixelRatio},playhead,interaction:{selected,actionLabels},reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches});
+  if(!recapOpen&&follow.enabled&&!followPaused&&!document.hidden&&!failure){
+    const bounds=follow.update({events:scene.events,meta,playhead,now});
+    const target=cameraForBounds(bounds,{width,top:document.getElementById('hud').getBoundingClientRect().bottom+24,bottom:document.getElementById('bar').getBoundingClientRect().top-40});
+    if(target)camera=easeCamera(camera,target,dt,matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+  if(!recapOpen&&width>0&&height>0&&scene.entities.length)sandbox?.draw({scene,time:now,width:canvas.width,height:canvas.height,pixelRatio,camera:{x:camera.x*pixelRatio,y:camera.y*pixelRatio,k:camera.k*pixelRatio},playhead,interaction:{selected,actionLabels,heatmapBackground:heatEnabled},reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches});
   requestAnimationFrame(frame);
 }
-requestAnimationFrame(frame);init();setInterval(()=>{if(live)load();},5000);
+requestAnimationFrame(frame);init();setInterval(()=>{if(live&&!recapOpen)load();},5000);
 function replay(){live=false;liveButton.ariaPressed='false';}
 liveButton.onclick=()=>{
   // Live means now: drop any historical anchor so polling returns to the present.
   if(untilMs){untilMs=0;const liveURL=new URL(location.href);liveURL.searchParams.delete('until');history.replaceState(null,'',liveURL);}
   demoEnabled=false;demoButton.ariaPressed='false';if(liveScene)scene=view==='flow'?flowScene:liveScene;live=true;playing=false;liveButton.ariaPressed='true';load();};
-slider.oninput=()=>{replay();playing=false;playhead=tmin+(tmax-tmin)*Number(slider.value)/1000;};
+slider.oninput=()=>{pauseFollowing();follow.reset();replay();playing=false;playhead=tmin+(tmax-tmin)*Number(slider.value)/1000;};
 document.getElementById('play').onclick=()=>{replay();if(playhead>=tmax-1000)playhead=tmin;playing=!playing;};
 demoButton.onclick=()=>{
+  follow.reset();meta={};
   demoEnabled=!demoEnabled;demoButton.ariaPressed=String(demoEnabled);selected=null;document.getElementById('inspector').hidden=true;
   if(demoEnabled){
     demoStart=Date.now();demoScene=flowDemo(demoStart);scene=demoScene;tmin=demoStart;tmax=demoStart+DEMO_LENGTH_MS;playhead=tmin;
@@ -185,7 +228,7 @@ demoButton.onclick=()=>{
   fittedViews.delete('flow');programHistory=[];signature='';selectProgram(lastData);
 };
 labelsButton.onclick=()=>{actionLabels=!actionLabels;labelsButton.ariaPressed=String(actionLabels);};
-document.getElementById('fit').onclick=()=>fitView();
+document.getElementById('fit').onclick=()=>{pauseFollowing();fitView();};
 
 function inspectHit(hit){
  if(!hit){document.getElementById('inspector').hidden=true;return;}
@@ -205,6 +248,7 @@ function zoomAt(x,y,factor,nextX=x,nextY=y){
 }
 canvas.onpointerdown=e=>{
  if(e.pointerType==='mouse'&&e.button!==0)return;
+ pauseFollowing();
  if(!pointers.size)gestureMoved=false;else gestureMoved=true;
  pointers.set(e.pointerId,{...point(e),sx:e.clientX,sy:e.clientY});canvas.setPointerCapture(e.pointerId);
 };
@@ -220,16 +264,16 @@ canvas.onpointerup=e=>{
  if(!pointers.has(e.pointerId))return;
  if(pointers.size===1&&!gestureMoved){
   const x=(e.clientX-camera.x)/camera.k,y=(e.clientY-camera.y)/camera.k;
-  const hit=[...(meta.hits||[])].reverse().find(b=>x>=b.x&&y>=b.y&&x<=b.x+b.w&&y<=b.y+b.h);
+  const hit=[...(meta.hits||[])].reverse().sort((a,b)=>(b.priority||0)-(a.priority||0)).find(b=>x>=b.x&&y>=b.y&&x<=b.x+b.w&&y<=b.y+b.h);
   if(hit){selected=hit.id;document.getElementById('inspector').hidden=false;inspectHit(hit);}
  }
  pointers.delete(e.pointerId);
 };
 canvas.onpointercancel=canvas.onlostpointercapture=e=>{pointers.delete(e.pointerId);gestureMoved=true;};
-canvas.onwheel=e=>{e.preventDefault();zoomAt(e.clientX,e.clientY,e.deltaY<0?1.12:1/1.12);};
+canvas.onwheel=e=>{e.preventDefault();pauseFollowing();zoomAt(e.clientX,e.clientY,e.deltaY<0?1.12:1/1.12);};
 document.getElementById('close-inspector').onclick=()=>{document.getElementById('inspector').hidden=true;};
 document.getElementById('redesign').onclick=async()=>{
  const r=await fetch('/viz/supersede',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({world:true,revision,entity_id:selected,reason:'Improve only this selected detail where needed. Keep the Lantern Works concepts, unaffected interactions, layout conventions and visual language. Prefer a compatible expansion or targeted repair; this is not a request for a redesign.'})});
  document.getElementById('design-result').textContent=r.ok?'Astra is improving this detail…':'Could not start development';
 };
-window.fleetWorldSnapshot=()=>({frames,revision,view,demoEnabled,actionLabels,live,playing,playhead,timeline:{since:tmin,until:tmax},camera:{...camera},failure,program:program?.title,frameTimings:lastFrameTimings,meta,scene,previews:Object.keys(currentImages())});
+window.fleetWorldSnapshot=()=>({frames,revision,view,demoEnabled,actionLabels,live,playing,playhead,heat:{enabled:heatEnabled,...heatState},follow:{enabled:follow.enabled,paused:followPaused,phase:follow.phase},timeline:{since:tmin,until:tmax},camera:{...camera},failure,program:program?.title,frameTimings:lastFrameTimings,meta,scene,previews:Object.keys(currentImages())});
