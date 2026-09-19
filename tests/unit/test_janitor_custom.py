@@ -141,3 +141,14 @@ def test_schedule_list_formats_next_run_without_import_error(monkeypatch, capsys
         'prompt':'Read installed skill','enabled':True,'next_run_at':1800000}]})
     assert cli.cmd_schedule(SimpleNamespace(schedule_command='list',session=None)) == 0
     assert '1970-01-01 00:30:00 UTC' in capsys.readouterr().out
+
+
+def test_custom_template_preserves_autonomy_and_audio_execution(lane):
+    """Adding managed custom work must not replace newer built-in workers."""
+    from lib.janitors import autonomy_templates
+    ids = {item['id'] for item in janitors.templates()}
+    assert {item['id'] for item in autonomy_templates()} <= ids
+    assert {'custom-task', 'task-labels', 'audio-bookkeeper'} <= ids
+    assert janitors._execution('audio-bookkeeper', None, 'codex') == {
+        'executor': 'deterministic', 'provider': 'local'}
+    assert janitors.get('custom')['execution'] == {}
