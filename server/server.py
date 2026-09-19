@@ -438,6 +438,7 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-heartbeat/status": "_handle_agent_heartbeat_status",
         "/agent-goal": "_handle_agent_goal_get",
         "/oracle/status": "_handle_oracle_status",
+        "/oracle/contact": "_handle_oracle_contact_get",
         "/oracle/delegations": "_handle_oracle_delegations_get",
         "/oracle/realtime": "_handle_oracle_realtime",
         "/oracle/v2": "_handle_oracle_v2",
@@ -533,6 +534,7 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/calls": "_handle_oracle_call_create",
         "/oracle/calls/close": "_handle_oracle_call_close",
         "/oracle/v2/calls": "_handle_oracle_live_call_create",
+        "/oracle/contact": "_handle_oracle_contact_post",
         "/oracle/v2/calls/close": "_handle_oracle_live_call_close",
         "/oracle/v2/calls/control": "_handle_oracle_live_call_control",
         "/oracle/delegations": "_handle_oracle_delegation_create",
@@ -3911,6 +3913,24 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(
             200, json.dumps(capability()).encode(), "application/json")
 
+    def _handle_oracle_contact_get(self):
+        """The Host-owned Oracle contact, validated against the live roster."""
+        from lib import oracle_contact
+        return self._send(200, json.dumps(oracle_contact.get()).encode(), "application/json")
+
+    def _handle_oracle_contact_post(self):
+        """Set or clear the Oracle contact. Body: {"session": "<session|persona|''>"}."""
+        from lib import oracle_contact
+        data = self._read_json()
+        if data is None:
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        try:
+            result = oracle_contact.set(str(data.get("session") or ""))
+        except ValueError as exc:
+            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+        log("oracleContactSet", f"session={result['session'] or '-'}")
+        return self._send(200, json.dumps(result).encode(), "application/json")
+
     def _handle_oracle_v2(self):
         from lib.oracle_mode import voice_handler
         return voice_handler(self.path)(self)
@@ -3969,7 +3989,7 @@ class Handler(BaseHTTPRequestHandler):
         return handle(self, "control")
 
     def _handle_oracle_call_create(self):
-        from lib import oracle_calls
+        from lib import oracle_calls, oracle_contact
         data = self._read_json()
         if not isinstance(data, dict):
             return self._send(400, b'{"error":"bad json"}', "application/json")
@@ -3977,7 +3997,7 @@ class Handler(BaseHTTPRequestHandler):
             result = oracle_calls.create_call(ctx=self.ctx,
                 principal=str(self._request_principal),
                 attempt_id=str(data.get("attempt_id") or ""), sdp=data.get("sdp"),
-                fallback=str(data.get("oracle_session") or ""),
+                fallback=oracle_contact.effective(data.get("oracle_session"), source="v1-webrtc"),
                 stop=lambda session: self._stop_agent_session(session, strict=True, defer_finish=True)[1])
             return self._send(200, json.dumps(result).encode(), "application/json")
         except ValueError as exc:
