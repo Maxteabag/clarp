@@ -240,3 +240,21 @@ def test_v78_adds_dreaming_columns_and_voice_verbosity(tmp_path):
     assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     # Idempotent: a second pass over an already-repaired database is a no-op.
     db._migrate(upgraded)
+
+
+@pytest.mark.parametrize("existing_indexes", [False, True])
+def test_v88_upgrade_adds_performance_indexes_without_changing_rows(tmp_path, existing_indexes):
+    con = _fresh(tmp_path / "v88.sqlite")
+    if not existing_indexes:
+        con.execute("DROP INDEX idx_messages_pair_projection")
+        con.execute("DROP INDEX idx_state_log_boundaries")
+    tables = _names(con, "table")
+    con.execute("UPDATE message_clock SET revision = 321 WHERE singleton = 0")
+    con.execute("PRAGMA user_version = 88")
+    con.commit()
+    db._migrate(con)
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+    assert _names(con, "table") == tables
+    assert con.execute("SELECT revision FROM message_clock WHERE singleton = 0").fetchone()[0] == 321
+    assert {"idx_messages_pair_projection", "idx_state_log_boundaries"} <= _names(con, "index")
+    assert con.execute("PRAGMA quick_check").fetchone()[0] == "ok"

@@ -170,7 +170,7 @@ def test_pair_index_upgrade_preserves_messages_and_is_idempotent(tmp_path):
     con.execute('DROP INDEX IF EXISTS idx_messages_pair_projection')
     con.execute('PRAGMA user_version = 80')
     db._migrate(con)
-    db._migrate_to_v81(con)
+    db._migrate_to_v89(con)
     assert [tuple(row) for row in con.execute('SELECT * FROM messages ORDER BY message_id')] == before
     assert agent_conversations.list_conversations() == expected
     assert con.execute("SELECT 1 FROM sqlite_master WHERE name='idx_messages_pair_projection'").fetchone()

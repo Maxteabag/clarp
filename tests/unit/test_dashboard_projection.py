@@ -144,6 +144,6 @@ def test_state_boundary_index_upgrade_preserves_history():
     con.execute('DROP INDEX idx_state_log_boundaries')
     con.execute('PRAGMA user_version = 81')
     db._migrate(con)
-    db._migrate_to_v82(con)
+    db._migrate_to_v89(con)
     assert [tuple(row) for row in con.execute('SELECT * FROM state_log ORDER BY state_id')] == before
     assert agents.dashboard_states() == expected
