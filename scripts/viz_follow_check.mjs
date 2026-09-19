@@ -36,6 +36,13 @@ try{
   assert((await snap()).follow.paused,'dragging pauses camera');
   await page.reload();await page.waitForFunction(()=>window.fleetWorldSnapshot?.().frames>5);
   assert((await snap()).follow.enabled,'opt-in survives reload');
+  if(await page.locator('#catch-up').count()){
+   await page.locator('#catch-up').click();await page.waitForTimeout(200);
+   const reading=await snap();await page.waitForTimeout(600);
+   assert.deepEqual((await snap()).camera,reading.camera,'recap holds the camera still');
+   await page.locator('#recap-close').click();
+   assert((await snap()).follow.enabled,'returning from recap retains follow mode');
+  }
   await page.locator('#follow-activity').click();assert(!(await snap()).follow.enabled);
   assert.deepEqual(errors,[]);
   results.push({viewport,close:close.camera,overview:wide.camera,manualPause:true,persistence:true,errors});
