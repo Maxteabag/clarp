@@ -811,8 +811,10 @@ def serve(handler):
             conversation = Conversation(upstream, downstream, tools, key,
                 router_backend=getattr(cfg, "oracle_router_backend", "api"), memory=memory,
                 delegation_strategy=strategy, router_reuse=getattr(cfg, "oracle_router_reuse", False))
-        downstream({"type": "oracle_v2.routing_mode", "strategy": strategy,
-            "primary_contact": selected_contact, "operator_model_called": False})
+        # Legacy operator clients expect session.started as their first frame.
+        if strategy == "direct_contact":
+            downstream({"type": "oracle_v2.routing_mode", "strategy": strategy,
+                "primary_contact": selected_contact, "operator_model_called": False})
         downstream({"type": "oracle_v2.context", "thread_id": memory.thread_id,
                     "items": memory.contexts(), "revision": conversation.revision})
         if getattr(cfg, "oracle_diagnostics", False):
