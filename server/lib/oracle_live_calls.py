@@ -106,8 +106,9 @@ class Call:
                 memory=self.memory, provider_session=result["session_id"],
                 delegation_strategy=self.delegation_strategy, router_reuse=getattr(self.cfg, "oracle_router_reuse", False))
         self.conversation = conversation
-        self.emit({"type": "oracle_v2.routing_mode", "strategy": self.delegation_strategy,
-            "primary_contact": self.tools.fallback, "operator_model_called": False})
+        if self.delegation_strategy == "direct_contact":
+            self.emit({"type": "oracle_v2.routing_mode", "strategy": self.delegation_strategy,
+                "primary_contact": self.tools.fallback, "operator_model_called": False})
         if self.cfg.oracle_diagnostics:
             from .oracle_diagnostics import OracleJournal
             conversation.journal = OracleJournal()

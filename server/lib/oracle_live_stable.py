@@ -562,8 +562,10 @@ def serve(handler):
                     conversation.stop.set()
         threading.Thread(target=pump, daemon=True, name="oracle-v2-receive").start()
         threading.Thread(target=poll, daemon=True, name="oracle-v2-results").start()
-        downstream({"type": "oracle_v2.routing_mode", "strategy": strategy,
-            "primary_contact": selected_contact, "operator_model_called": False})
+        # Legacy operator clients expect session.started as their first frame.
+        if strategy == "direct_contact":
+            downstream({"type": "oracle_v2.routing_mode", "strategy": strategy,
+                "primary_contact": selected_contact, "operator_model_called": False})
         conversation.send({"type": "session.start", "session":
             podcast_live.session_config(podcast_context) if podcast_context is not None
             else live_config(roster=tools.execute("list_agents", {}, "startup"), delegation_strategy=strategy)})
