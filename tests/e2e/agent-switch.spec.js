@@ -32,6 +32,13 @@ const SNAPSHOT = {
 };
 
 test.describe('Agent switching & transcript loading', () => {
+  test.beforeEach(async ({ page }) => {
+    // These tests own a synthetic roster and focus via mocked /select.
+    // Do not mix that state with a real node's asynchronous focus events.
+    await page.route('**/events*', route => route.fulfill({
+      status: 200, contentType: 'text/event-stream', body: ': isolated fixture\n\n',
+    }));
+  });
   test('switches agents cleanly without stuck loading state', async ({ page }) => {
     await page.route('**/agents/snapshot', route => route.fulfill({ json: SNAPSHOT }));
     await page.route('**/sessions', route => route.fulfill({
