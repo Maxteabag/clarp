@@ -670,6 +670,41 @@ def open_turn(*, agent_id: str, source: str, trace_id: str,
     return int(cur.lastrowid or 0)
 
 
+def record_unlaunched_trace(agent_id: str, trace_id: str) -> None:
+    """Historical failure receipt, ordered before any newer turn's state.
+
+    Recording a late launch failure at wall-clock now could replace the
+    THINKING state of a newer owner. Anchor it to the admitted message instead.
+    """
+    row = conn().execute(
+        "SELECT MIN(updated_at) AS ts FROM messages WHERE agent_id=? AND trace_id=? AND role='user'",
+        (agent_id, trace_id)).fetchone()
+    ts = int(row["ts"] or now_ms()) - 1
+    conn().execute(
+        "INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail) VALUES (?, ?, ?, ?, ?)",
+        (agent_id, current_runtime_id(agent_id), ts, AgentState.INTERRUPTED,
+         json.dumps({"trace_id": trace_id, "dispatch_not_started": True,
+                     "message": "Message saved; backend did not start. Retry is safe."})))
+
+
+def trace_launch_status(agent_id: str, trace_id: str) -> str:
+    """Only an explicit pre-launch failure permits replay of a saved message.
+
+    Missing state is ambiguous (e.g. a post-launch write failed), not evidence
+    that a backend never received work.
+    """
+    row = conn().execute(
+        """SELECT detail FROM state_log
+            WHERE agent_id = ? AND json_extract(detail, '$.trace_id') = ?
+            ORDER BY ts DESC, state_id DESC LIMIT 1""",
+        (agent_id, trace_id),
+    ).fetchone()
+    if row is None:
+        return "unknown"
+    detail = json.loads(row["detail"] or "{}")
+    return "retryable" if detail.get("dispatch_not_started") else "observed"
+
+
 def close_turn(turn_id: int) -> None:
     conn().execute("UPDATE turns SET ended_at = ? WHERE turn_id = ?",
                    (now_ms(), turn_id))
