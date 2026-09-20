@@ -3415,3 +3415,43 @@ def test_revocation_between_authentication_and_stream_registration_is_rejected(r
     with pytest.raises(urllib.error.HTTPError) as error:
         _get(base + '/status', headers={'Authorization': 'Bearer ' + device['token']})
     assert error.value.code == 401
+
+
+@pytest.mark.parametrize("credential_kind", ["bearer", "cookie"])
+def test_device_http_auth_survives_database_write_contention(
+    running_server, credential_kind,
+):
+    import sqlite3
+    from lib import db, device_pairing
+
+    base, ctx, _srv = running_server
+    ctx.auth_token = "test-administrator"
+    device = device_pairing.exchange(device_pairing.issue()["code"])
+    db.conn().execute("UPDATE paired_devices SET last_seen_at = 0")
+
+    def request(token):
+        headers = ({"Authorization": f"Bearer {token}"}
+                   if credential_kind == "bearer" else
+                   {"Cookie": f"claude_pwa_token={token}"})
+        return urllib.request.Request(base + "/server-info", headers=headers)
+
+    writer = sqlite3.connect(str(db.DB_PATH), isolation_level=None)
+    try:
+        writer.execute("BEGIN IMMEDIATE")
+        with urllib.request.urlopen(request(device["token"]), timeout=2) as response:
+            assert response.status == 200
+            assert isinstance(json.load(response), dict)
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(request("cld_" + "invalid" * 8), timeout=2)
+        assert error.value.code == 401
+        assert db.conn().execute(
+            "SELECT last_seen_at FROM paired_devices WHERE device_id = ?",
+            (device["device_id"],),
+        ).fetchone()[0] == 0
+    finally:
+        writer.close()
+
+    assert device_pairing.revoke(device["device_id"])
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(request(device["token"]), timeout=2)
+    assert error.value.code == 401
