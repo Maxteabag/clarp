@@ -112,3 +112,17 @@ def test_maintenance_worker_defers_only_the_exclusive_checkpoint(tmp_path):
         assert calls[1] is True
     finally:
         worker.stop(timeout=1.0)
+
+
+def test_prune_database_drops_old_judgment_decisions_only(tmp_path):
+    from lib import judgments
+    c = db.conn()
+    for created in (1, 9_990):
+        c.execute(
+            """INSERT INTO judgment_decisions (site, question_ids, created_at)
+               VALUES ('junk', 'junk', ?)""", (created,))
+    result = maintenance.prune_database(now_ms=10_000, policy=maintenance.Policy(
+        judgment_decisions_max_age_ms=100))
+    assert result["judgment_decisions"] == 1
+    remaining = judgments.recent(limit=10, site="junk")
+    assert [row["created_at"] for row in remaining] == [9_990]

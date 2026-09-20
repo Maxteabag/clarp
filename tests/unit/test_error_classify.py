@@ -105,3 +105,14 @@ def test_error_result_without_recognisable_text_defaults_to_transient():
     assert ec.classify_result(
         {"is_error": True, "result": "???"}
     ) == ec.TRANSIENT
+
+
+def test_expired_sign_in_is_auth_not_transient():
+    # The exact CLI text from the 2026-09-19 reboot, when twelve agents were
+    # dropped as "transient" and never retried.
+    assert ec.classify_error("Failed to authenticate: OAuth session expired and could not be refreshed") == ec.AUTH
+    assert ec.classify_error("Not logged in. Please run /login") == ec.AUTH
+    assert ec.classify_error("token refresh failed: invalid_grant") == ec.AUTH
+    # A usage limit that also mentions a token still counts as a usage limit.
+    assert ec.classify_error("You've hit your usage limit; token expired") == ec.USAGE_LIMIT
+    assert ec.AUTH in ec.NOTIFY
