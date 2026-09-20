@@ -43,3 +43,26 @@ def test_direct_contact_has_no_operator_and_preserves_original_dialogue(monkeypa
 def test_unknown_architecture_is_rejected_before_startup():
     with pytest.raises(ValueError,match="Unsupported"):
         oracle_live.Conversation(None,None,None,"",delegation_strategy="invented")
+
+
+def test_direct_correction_during_materialization_does_not_dispatch(monkeypatch,tmp_path):
+    agents.create_agent(persona='Primary',session='primary',voice_id='fixture',cwd=str(tmp_path))
+    sent=[];calls=[]
+    monkeypatch.setattr(oracle_delegations,'dispatch',lambda **kw:calls.append(kw))
+    tools=oracle_calls.AgentTools(SimpleNamespace(media_dir=tmp_path),'phone','primary',lambda _:None)
+    memory=oracle_memory.open_thread('phone','primary',connection_id='voice')
+    c=oracle_live.Conversation(SimpleNamespace(send=sent.append),lambda e:None,tools,'',clock=lambda:100,
+        delegation_strategy='direct_contact',memory=memory,
+        route_request=lambda *a,**k:pytest.fail('Luna must not run'))
+    original=memory.materialize_reference
+    def correction(*a,**k):
+        result=original(*a,**k)
+        c.receive({'type':'session.input_transcript.delta','delta':'No, only check availability.',
+                   'start_ms':5000,'end_ms':6000})
+        return result
+    monkeypatch.setattr(memory,'materialize_reference',correction)
+    try:
+        c.fragments=[{'role':'user','text':'Book the meeting.','end_ms':100}]
+        c.revision=1;c.routing=1;c.route('request')
+        assert calls==[]
+    finally:c.stop.set();c.pool.shutdown()
