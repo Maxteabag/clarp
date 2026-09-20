@@ -28,6 +28,25 @@ def _client_message_id(client_msg_id: str) -> str:
     return cid if cid.startswith("u-") else f"u-{cid}"
 
 
+def client_message_trace(client_msg_id: str) -> str:
+    """The trace the durable user row was admitted under, or ""."""
+    if not client_msg_id.strip():
+        return ""
+    row = conn().execute(
+        "SELECT trace_id FROM messages WHERE message_id = ? AND role = 'user'",
+        (_client_message_id(client_msg_id),),
+    ).fetchone()
+    return str((row["trace_id"] if row else "") or "")
+
+
+def relink_client_message(client_msg_id: str, *, trace_id: str) -> None:
+    """Hand an admitted-but-never-launched user row to a new attempt."""
+    conn().execute(
+        "UPDATE messages SET trace_id = ? WHERE message_id = ? AND role = 'user'",
+        ((trace_id or "").strip() or None, _client_message_id(client_msg_id)),
+    )
+
+
 def has_client_message(client_msg_id: str) -> bool:
     if not client_msg_id.strip():
         return False
@@ -1052,26 +1071,44 @@ def _strip_block(text: str, opening: str, closing: str) -> str:
     return out
 
 
+# A whole-file import used to hold the write lock for its entire run: a 19 MB
+# Codex transcript took 6-7 s, every other writer hit the 5 s busy timeout,
+# and a /send died mid-launch (2026-09-20). Rows are keyed by position and
+# idempotent, so the import commits every few hundred turns instead.
+IMPORT_COMMIT_EVERY = 200
+
+
 def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                            source_file: str, turns: list[dict[str, Any]]
                            ) -> list[dict[str, Any]]:
+    # Pure text normalization can dominate a large transcript import; do it
+    # before taking SQLite's single writer lock, once per assistant message.
+    final_assistant_texts = []
+    for turn in turns:
+        if turn.get("role") == "assistant":
+            text = _strip_voice_markup(turn.get("text"))
+            if text:
+                final_assistant_texts.append(text)
     database = conn()
     database.execute("BEGIN IMMEDIATE")
     try:
         out = _store_transcript_turns_txn(
             database, agent_id=agent_id,
             backend_session_id=backend_session_id,
-            source_file=source_file, turns=turns)
+            source_file=source_file, turns=turns,
+            final_assistant_texts=final_assistant_texts)
         database.execute("COMMIT")
         return out
     except Exception:
-        database.execute("ROLLBACK")
+        if database.in_transaction:
+            database.execute("ROLLBACK")
         raise
 
 
 def _store_transcript_turns_txn(database, *, agent_id: str,
                                 backend_session_id: str, source_file: str,
-                                turns: list[dict[str, Any]]
+                                turns: list[dict[str, Any]],
+                                final_assistant_texts: list[str]
                                 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     latest_revision = 0
@@ -1105,6 +1142,23 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
     for seq, turn in enumerate(turns):
+        if seq and IMPORT_COMMIT_EVERY > 0 and seq % IMPORT_COMMIT_EVERY == 0:
+            # Publish the revision with each committed chunk, including
+            # removals, so a later lock failure cannot hide durable changes.
+            if skipped_slot_removed:
+                latest_revision = max(latest_revision, _next_revision(database))
+            database.execute(
+                """INSERT INTO conversation_heads
+                       (agent_id, backend_session_id, revision, replace_revision)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                       revision = MAX(conversation_heads.revision, excluded.revision),
+                       replace_revision = MAX(conversation_heads.replace_revision,
+                                              excluded.replace_revision)""",
+                (agent_id, backend_session_id, latest_revision,
+                 latest_revision if skipped_slot_removed else 0))
+            database.execute("COMMIT")
+            database.execute("BEGIN IMMEDIATE")
         role = turn.get("role")
         if role == "assistant":
             authority = database.execute(
@@ -1298,11 +1352,6 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         })
     # Compare markup-normalized so a streamed live row (with <speak>/<vox>/…)
     # still matches its durable copy (markup stripped); raw startswith missed it.
-    final_assistant_texts = [
-        _strip_voice_markup(t.get("text"))
-        for t in turns
-        if t.get("role") == "assistant" and _strip_voice_markup(t.get("text"))
-    ]
     live_replace_revision = 0
     for live in database.execute(
         """SELECT message_id, text FROM messages

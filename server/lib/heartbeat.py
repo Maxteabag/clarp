@@ -21,6 +21,11 @@ from .log import log, log_exception
 from .protocol import AgentState
 
 
+def globally_disabled() -> bool:
+    """Host-wide stop covering periodic, restart and already queued wakes."""
+    return os.environ.get("CLARP_HEARTBEATS_DISABLED", "").lower() in {"1", "true", "yes"}
+
+
 HEARTBEAT_OK = "HEARTBEAT_OK"
 HEARTBEAT_PROMPT = (
     "This is a continuity check, not a new task. Read HEARTBEAT.md if it exists "
@@ -177,6 +182,8 @@ def restart_heartbeat_agents() -> list[dict]:
     non-archived sessions need one continuity turn even when periodic autonomy
     is disabled. Stopped/deleted/archived sessions remain untouched.
     """
+    if globally_disabled():
+        return []
     return [
         agent for agent in agents_db.list_agents()
         if not agent.get("archived_at")
@@ -185,7 +192,7 @@ def restart_heartbeat_agents() -> list[dict]:
 
 
 def heartbeat_enabled(agent: dict) -> bool:
-    return bool(agent.get("heartbeat_enabled"))
+    return not globally_disabled() and bool(agent.get("heartbeat_enabled"))
 
 
 def get_settings() -> HeartbeatSettings:

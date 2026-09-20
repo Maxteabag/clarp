@@ -46,3 +46,45 @@ def test_limited_device_can_be_revoked():
     assert device_pairing.revoke(paired["device_id"]) is True
     assert device_pairing.authenticate(paired["token"]) is None
     assert device_pairing.revoke(paired["device_id"]) is False
+
+
+def test_last_seen_is_written_at_most_once_a_minute(monkeypatch):
+    # Every authenticated request used to UPDATE paired_devices, taking the
+    # write lock behind long imports (2026-09-20). Reads stay lock-free now.
+    issued = device_pairing.issue(ttl_seconds=600)
+    paired = device_pairing.exchange(issued["code"], device_name="iPhone")
+    db.conn().execute("UPDATE paired_devices SET last_seen_at=0")
+    base = db.now_ms()
+    clock = {"now": base}
+    monkeypatch.setattr(db, "now_ms", lambda: clock["now"])
+
+    device_pairing.authenticate(paired["token"])
+    first = db.conn().execute(
+        "SELECT last_seen_at FROM paired_devices").fetchone()["last_seen_at"]
+    assert first == base
+
+    clock["now"] = base + 30_000
+    assert device_pairing.authenticate(paired["token"])["last_seen_at"] == base
+    assert db.conn().execute(
+        "SELECT last_seen_at FROM paired_devices").fetchone()["last_seen_at"] == base
+
+    clock["now"] = base + 61_000
+    assert device_pairing.authenticate(paired["token"])["last_seen_at"] == base + 61_000
+    assert db.conn().execute(
+        "SELECT last_seen_at FROM paired_devices").fetchone()["last_seen_at"] == base + 61_000
+
+
+def test_last_seen_contention_does_not_break_valid_authentication():
+    import sqlite3
+    issued = device_pairing.issue()
+    paired = device_pairing.exchange(issued['code'])
+    db.conn().execute('UPDATE paired_devices SET last_seen_at=0')
+    with sqlite3.connect(str(db.DB_PATH), timeout=1) as writer:
+        writer.execute('BEGIN IMMEDIATE')
+        with db.busy_timeout(20):
+            result = device_pairing.authenticate(paired['token'])
+        assert result['device_id'] == paired['device_id']
+        assert result['last_seen_at'] == 0
+        writer.rollback()
+    device_pairing.revoke(paired['device_id'])
+    assert device_pairing.authenticate(paired['token']) is None

@@ -5,6 +5,8 @@ import pathlib
 import json
 import re
 import threading
+import functools
+import weakref
 import time
 import uuid
 from dataclasses import dataclass, replace
@@ -330,6 +332,36 @@ def _with_delivery_context(text: str, *, unheard_audio: bool = False) -> str:
     )
 
 
+_REQUEST_LOCKS = weakref.WeakValueDictionary()
+_REQUEST_LOCKS_GUARD = threading.Lock()
+
+
+def _serialize_client_retry(method):
+    """Keep one client's concurrent retries together through admission/launch.
+
+    SQLite admission alone ends before the runtime claims the turn. A second
+    request must not reclaim that first request in the intervening gap.
+    Weak entries disappear when the last waiting request finishes.
+    """
+    @functools.wraps(method)
+    def dispatch(self, **kwargs):
+        # The runtime owns admission. Never hold this lock across the RPC:
+        # an embedded runtime can execute the same request on another thread.
+        if getattr(self.ctx, "runtime_client", None) is not None:
+            return method(self, **kwargs)
+        key = kwargs.get("client_msg_id") or kwargs.get("trace_id")
+        if not key:
+            return method(self, **kwargs)
+        with _REQUEST_LOCKS_GUARD:
+            lock = _REQUEST_LOCKS.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                _REQUEST_LOCKS[key] = lock
+        with lock:
+            return method(self, **kwargs)
+    return dispatch
+
+
 class TurnDispatchService:
     def __init__(self, ctx, *, backend_registry=backends,
                  home: pathlib.Path | None = None,
@@ -399,6 +431,7 @@ class TurnDispatchService:
             self.retry_scheduler(1.0, self.recover_queued)
         return recovered
 
+    @_serialize_client_retry
     def dispatch(self, *, text: str, requested_session: str,
                  trace_id: str, synthesize_audio: bool = True,
                  forced_session: str = "",
@@ -499,6 +532,10 @@ class TurnDispatchService:
             unheard_audio = False
         elif origin == "janitor":
             raise JanitorDispatchError(409, "Janitor origin requires an admitted run")
+        if origin == "heartbeat":
+            from . import heartbeat
+            if heartbeat.globally_disabled():
+                raise DispatchError(409, "Heartbeats are disabled on this Host")
         if origin not in origins.ROUTINE_AUTOMATION_ORIGINS:
             self._notify_herald(session)
         if origin == "leader_tick" and not any(
@@ -615,8 +652,11 @@ class TurnDispatchService:
                     )
                 if queue_if_busy:
                     if message_store.has_client_message(request_id):
-                        database.execute("COMMIT")
-                        return DispatchResult(session=session, backend=backend)
+                        if not self._admitted_but_never_launched(spec, request_id):
+                            database.execute("COMMIT")
+                            return DispatchResult(session=session, backend=backend)
+                        message_store.relink_client_message(
+                            request_id, trace_id=spec.trace_id)
                     turn_queue.enqueue(
                         queue_id=spec.queue_id, agent_id=spec.agent_id,
                         session=spec.session, text=spec.text,
@@ -630,6 +670,20 @@ class TurnDispatchService:
                     admission = True
                 else:
                     admission = self._record_user_message(spec)
+                    if admission is False and self._admitted_but_never_launched(
+                            spec, request_id):
+                        # The client is retrying a message this Host admitted
+                        # but never launched (2026-09-20: the launch died on
+                        # "database is locked" after the durable row was
+                        # written, and every retry was answered "already
+                        # sent"). Own the row under this attempt and launch.
+                        message_store.relink_client_message(
+                            request_id, trace_id=spec.trace_id)
+                        eventlog.emit("server", "sendRelaunched", context=spec.context)
+                        log("sendRelaunched",
+                            f"agent={spec.agent_id} client_msg_id={request_id} "
+                            f"trace={spec.trace_id or '∅'}")
+                        admission = True
                 database.execute("COMMIT")
             except BaseException:
                 database.execute("ROLLBACK")
@@ -689,31 +743,77 @@ class TurnDispatchService:
                     session=session, backend=backend, queued=True,
                     queue_depth=queue_state["count"],
                     queue_revision=queue_state["revision"])
-        agents_db.open_turn(
-            agent_id=agent_id, source="pwa", trace_id=trace_id,
-            synthesize_audio=synthesize_audio)
-        # This turn owns the agent's live trace.
-        agents_db.set_trace_for_session(session, trace_id)
+        turn_id = 0
         try:
-            if not self._spawn_attempt(spec, attempt=1):
-                raise DispatchError(409, "turn superseded before spawn")
-        except JanitorDispatchError:
-            self._discard_fenced_janitor(spec)
+            turn_id = agents_db.open_turn(
+                agent_id=agent_id, source="pwa", trace_id=trace_id,
+                synthesize_audio=synthesize_audio)
+            # This turn owns the agent's live trace.
+            agents_db.set_trace_for_session(session, trace_id)
+            try:
+                if not self._spawn_attempt(spec, attempt=1):
+                    raise DispatchError(409, "turn superseded before spawn")
+            except JanitorDispatchError:
+                self._discard_fenced_janitor(spec)
+                raise
+            except DispatchError as exc:
+                if not self._has_live_turn(spec):
+                    self._abandon_unlaunched(spec, turn_id, exc)
+                # Spawn never started: release the in-flight slot (and drain any
+                # message that queued behind it) so the agent isn't wedged.
+                if turn_queue.contains(spec.queue_id):
+                    with _TURN_LOCK:
+                        if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
+                            _INFLIGHT.pop(spec.agent_id, None)
+                            _CLAIMED_AT.pop(spec.agent_id, None)
+                    self.retry_scheduler(1.0, self.recover_queued)
+                else:
+                    self._finish_turn(spec)
+                raise
+        except (DispatchError, JanitorDispatchError):
             raise
-        except DispatchError:
-            # Spawn never started: release the in-flight slot (and drain any
-            # message that queued behind it) so the agent isn't wedged.
-            if turn_queue.contains(spec.queue_id):
-                with _TURN_LOCK:
-                    if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
-                        _INFLIGHT.pop(spec.agent_id, None)
-                        _CLAIMED_AT.pop(spec.agent_id, None)
-                self.retry_scheduler(1.0, self.recover_queued)
-            else:
-                self._finish_turn(spec)
+        except BaseException as e:
+            # Anything else (2026-09-20: sqlite "database is locked" under a
+            # long transcript import) used to leave a phantom in-flight slot
+            # with an open turn row and no process. Codex is steerable, so
+            # every later send for the agent was "steered" into that phantom
+            # and vanished. Give the slot and the turn back before failing.
+            self._abandon_unlaunched(spec, turn_id, e)
             raise
+        # Once the backend has accepted the turn, a bookkeeping failure must
+        # never free its ownership or permit a duplicate launch.
         self._mark_spawned(spec)
         return DispatchResult(session=session, backend=backend)
+
+    def _abandon_unlaunched(self, spec: _TurnSpec, turn_id: int, error: BaseException) -> None:
+        """A turn that was admitted and claimed but never reached the backend."""
+        with _TURN_LOCK:
+            if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
+                _INFLIGHT.pop(spec.agent_id, None)
+                _CLAIMED_AT.pop(spec.agent_id, None)
+        log_exception("spawnAbandonedUnlaunched", error, detail=spec.session)
+        eventlog.emit("server", "spawnAbandonedUnlaunched", context=spec.context,
+                      detail={"error": str(error)[:200]})
+        try:
+            agents_db.record_unlaunched_trace(spec.agent_id, spec.trace_id)
+            if turn_id:
+                agents_db.close_turn(turn_id)
+        except Exception as close_error:  # noqa: BLE001
+            log_exception("spawnAbandonedCloseFail", close_error, detail=spec.session)
+
+    def _admitted_but_never_launched(self, spec: _TurnSpec, client_msg_id: str) -> bool:
+        """Retry only known failed launches; never infer safety from missing logs."""
+        trace = message_store.client_message_trace(client_msg_id)
+        if not trace:
+            return False
+        status = agents_db.trace_launch_status(spec.agent_id, trace)
+        with _TURN_LOCK:
+            in_flight = _INFLIGHT.get(spec.agent_id) == trace
+        if in_flight and (_slot_is_spawning(spec.agent_id) or self._has_live_turn(spec)):
+            return False
+        if status == "unknown":
+            raise DispatchError(503, "message is saved but delivery is unconfirmed; reconciliation required")
+        return status == "retryable"
 
     def dispatch_queued(self, queue_id: str) -> DispatchResult:
         """Explicitly send one durable item while leaving the queue paused."""
@@ -867,6 +967,11 @@ class TurnDispatchService:
             return False
         steer = getattr(self.backends, "steer_turn", None)
         if steer is None:
+            return False
+        # A claimed slot with no live process is a phantom (a launch that
+        # died before the backend started). Steering into it loses the
+        # message; fall through so the busy path reclaims the slot instead.
+        if not self._has_live_turn(spec):
             return False
         protected_peer = spec.origin=='agent' and bool(spec.sender_agent_id)
         try:

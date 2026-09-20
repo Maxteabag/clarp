@@ -16,6 +16,13 @@ from lib.turn_dispatch import (
 import lib.turn_dispatch as _td
 
 
+@pytest.fixture(autouse=True)
+def _local_dispatch_runtime(monkeypatch):
+    # Integration tests may install an RPC client in this process. These unit
+    # tests exercise the local runtime, not a socket from an earlier fixture.
+    monkeypatch.setattr(_td, "_RUNTIME_CLIENT", None)
+
+
 def test_clear_for_agent_frees_slot_and_drops_queue():
     """/stop uses this: a SIGTERM'd turn may not fire its terminal callback, so
     the in-flight slot + queue must be cleared explicitly (else the badge stays
@@ -1419,3 +1426,231 @@ def test_codex_account_recovery_preserves_native_identity_and_user_stop(tmp_path
     assert resumed['trace_id']=='codex-owned'
     assert 'do not repeat work' in resumed['text']
     assert not resumed['is_new_session']
+
+
+class _CodexSteerable(_SteerableBackends):
+    CODEX = "codex"
+
+    def active_handles(self, backend, agent_id):
+        return ["handle"] if self.spawned else []
+
+
+def _codex_service(tmp_path, backends):
+    agent_id = agents_db.create_agent(
+        persona="Cipher", voice_id="V", cwd=str(tmp_path),
+        session="cipher", backend="codex")
+    agents_db.start_runtime(agent_id, "cipher")
+    # An established conversation, as Cipher's was: the durable user row is
+    # written at admission, not deferred to the backend's init callback.
+    agents_db.bind_backend_session(agent_id, "cipher-bsid")
+    ctx = SimpleNamespace(default_session="cipher",
+                          agents_path=tmp_path / "unused.json", stream=_Stream())
+    service = TurnDispatchService(ctx, backend_registry=backends, home=tmp_path,
+                                  uuid_factory=lambda: "backend-session-1")
+    return service, agent_id
+
+
+def _assert_retry_delivers_once(service, backends, agent_id):
+    retried = service.dispatch(text="full control over the pipeline",
+                               requested_session="cipher", trace_id="t-retry",
+                               client_msg_id="u-lost")
+    assert retried.queued is False
+    assert backends.steered == [], "nothing may be steered into a turn that never ran"
+    assert len(backends.spawned) == 1, "the retry launches exactly one turn"
+    rows = agents_db.conn().execute(
+        "SELECT message_id, trace_id FROM messages WHERE role = 'user' AND agent_id = ?",
+        (agent_id,)).fetchall()
+    assert [row["message_id"] for row in rows] == ["u-lost"], "one durable row, no duplicate"
+    assert rows[0]["trace_id"] == "t-retry", "the row now belongs to the attempt that ran"
+    # A further retry, after the launch succeeded, is the ordinary duplicate.
+    again = service.dispatch(text="full control over the pipeline",
+                             requested_session="cipher", trace_id="t-again",
+                             client_msg_id="u-lost")
+    assert again.queued is False
+    assert len(backends.spawned) == 1
+    assert backends.steered == []
+
+
+def test_retry_after_a_launch_that_died_on_a_locked_database_is_delivered_once(tmp_path, monkeypatch):
+    # Reported 2026-09-20: Cipher's user row was admitted and its turn opened;
+    # the very next write ("database is locked" under a 6 s transcript import)
+    # raised straight out of /send as a 500, leaving a phantom in-flight slot.
+    # Codex is steerable, so the app's retries with the same client id were
+    # steered into that phantom: never delivered, never reported.
+    import sqlite3
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    real = agents_db.set_trace_for_session
+    calls = {"n": 0}
+
+    def locked_once(session, trace_id):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        real(session, trace_id)
+
+    monkeypatch.setattr(agents_db, "set_trace_for_session", locked_once)
+    with pytest.raises(sqlite3.OperationalError):
+        service.dispatch(text="full control over the pipeline",
+                         requested_session="cipher", trace_id="t-died",
+                         client_msg_id="u-lost")
+    assert backends.spawned == []
+    assert _td._INFLIGHT.get(agent_id) is None, "a dead launch must not keep the slot"
+    open_turns = agents_db.conn().execute(
+        "SELECT count(*) AS n FROM turns WHERE agent_id = ? AND ended_at IS NULL",
+        (agent_id,)).fetchone()["n"]
+    assert open_turns == 0, "the turn opened for the dead launch is closed"
+    _assert_retry_delivers_once(service, backends, agent_id)
+
+
+def test_retry_after_a_spawn_failure_is_delivered_once(tmp_path):
+    # The same guarantee when the backend itself fails to start (a clean 500).
+    class _SpawnDiesOnce(_CodexSteerable):
+        def __init__(self):
+            super().__init__()
+            self.failures_left = 1
+
+        def spawn_turn(self, backend, **kwargs):
+            if self.failures_left:
+                self.failures_left -= 1
+                raise RuntimeError("codex app-server unreachable")
+            super().spawn_turn(backend, **kwargs)
+
+    backends = _SpawnDiesOnce()
+    service, agent_id = _codex_service(tmp_path, backends)
+    with pytest.raises(DispatchError):
+        service.dispatch(text="full control over the pipeline",
+                         requested_session="cipher", trace_id="t-died",
+                         client_msg_id="u-lost")
+    assert backends.spawned == []
+    assert _td._INFLIGHT.get(agent_id) is None
+    _assert_retry_delivers_once(service, backends, agent_id)
+
+
+def test_phantom_inflight_slot_is_never_steered_into(tmp_path):
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="V", cwd=str(tmp_path),
+        session="mike", backend="codex")
+    agents_db.start_runtime(agent_id, "mike")
+    backends = _SteerableBackends()
+    backends.live = False  # the slot's process is gone
+    ctx = SimpleNamespace(default_session="mike",
+                          agents_path=tmp_path / "unused.json", stream=_Stream())
+    service = TurnDispatchService(ctx, backend_registry=backends, home=tmp_path,
+                                  uuid_factory=lambda: "backend-session-1")
+    with _td._TURN_LOCK:
+        _td._INFLIGHT[agent_id] = "t-phantom"
+    service.dispatch(text="hello?", requested_session="mike", trace_id="t-new",
+                     client_msg_id="u-new")
+    assert backends.steered == []
+    assert len(backends.spawned) == 1
+    assert _td._INFLIGHT.get(agent_id) == "t-new"
+
+
+def test_lock_while_opening_turn_releases_claim_and_retry_runs(tmp_path, monkeypatch):
+    import sqlite3
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    real = agents_db.open_turn
+    def locked(**kwargs):
+        raise sqlite3.OperationalError('database is locked')
+    monkeypatch.setattr(agents_db, 'open_turn', locked)
+    with pytest.raises(sqlite3.OperationalError):
+        service.dispatch(text='full control over the pipeline', requested_session='cipher',
+                         trace_id='t-died', client_msg_id='u-lost')
+    assert _td._INFLIGHT.get(agent_id) is None
+    monkeypatch.setattr(agents_db, 'open_turn', real)
+    _assert_retry_delivers_once(service, backends, agent_id)
+
+
+def test_concurrent_retry_cannot_reclaim_admission_before_first_claim(tmp_path, monkeypatch):
+    import threading
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    entered = threading.Event()
+    release = threading.Event()
+    retry_started = threading.Event()
+    errors = []
+    real = service._enqueue_if_busy
+    def pause_before_claim(spec, **kwargs):
+        if spec.trace_id == 'first':
+            entered.set()
+            assert release.wait(3)
+        return real(spec, **kwargs)
+    monkeypatch.setattr(service, '_enqueue_if_busy', pause_before_claim)
+    def send(trace):
+        try:
+            if trace == 'retry': retry_started.set()
+            service.dispatch(text='same message', requested_session='cipher',
+                             trace_id=trace, client_msg_id='u-concurrent')
+        except BaseException as exc:
+            errors.append(exc)
+    first = threading.Thread(target=send, args=('first',))
+    retry = threading.Thread(target=send, args=('retry',))
+    first.start()
+    try:
+        assert entered.wait(3)
+        retry.start()
+        assert retry_started.wait(3)
+    finally:
+        release.set()
+        first.join(4)
+        if retry.ident: retry.join(4)
+    assert not errors
+    assert len(backends.spawned) == 1
+    assert not backends.steered
+
+
+def test_missing_launch_telemetry_never_authorizes_duplicate_work(tmp_path):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    service.dispatch(text='run once', requested_session='cipher', trace_id='first', client_msg_id='u-once')
+    # Simulate an already-completed turn whose state telemetry was unavailable.
+    _td._INFLIGHT.pop(agent_id, None)
+    agents_db.conn().execute('DELETE FROM state_log WHERE agent_id=?', (agent_id,))
+    with pytest.raises(DispatchError, match='delivery is unconfirmed'):
+        service.dispatch(text='run once', requested_session='cipher', trace_id='retry', client_msg_id='u-once')
+    assert len(backends.spawned) == 1
+
+
+def test_late_prelaunch_failure_does_not_replace_newer_owner_state(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    def superseded(session, trace):
+        _td._INFLIGHT[agent_id] = 'newer'
+        agents_db.record_state(agent_id, AgentState.THINKING, {'trace_id':'newer'})
+        raise RuntimeError('old launch failed')
+    monkeypatch.setattr(agents_db, 'set_trace_for_session', superseded)
+    with pytest.raises(RuntimeError, match='old launch failed'):
+        service.dispatch(text='old', requested_session='cipher', trace_id='old', client_msg_id='u-old')
+    assert _td._INFLIGHT[agent_id] == 'newer'
+    assert agents_db.latest_state(agent_id)['detail']['trace_id'] == 'newer'
+    assert agents_db.trace_launch_status(agent_id, 'old') == 'retryable'
+
+
+def test_failed_direct_send_can_retry_via_durable_queue(tmp_path, monkeypatch):
+    import sqlite3
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    real = agents_db.set_trace_for_session
+    def fail(*args): raise sqlite3.OperationalError('database is locked')
+    monkeypatch.setattr(agents_db, 'set_trace_for_session', fail)
+    with pytest.raises(sqlite3.OperationalError):
+        service.dispatch(text='request', requested_session='cipher', trace_id='failed', client_msg_id='u-queued-retry')
+    monkeypatch.setattr(agents_db, 'set_trace_for_session', real)
+    service.dispatch(text='request', requested_session='cipher', trace_id='retry', client_msg_id='u-queued-retry', queue_if_busy=True)
+    assert len(backends.spawned) == 1
+    assert agents_db.conn().execute("SELECT trace_id FROM messages WHERE message_id='u-queued-retry'").fetchone()[0] == 'retry'
+    service.dispatch(text='request', requested_session='cipher', trace_id='again', client_msg_id='u-queued-retry', queue_if_busy=True)
+    assert len(backends.spawned) == 1
+
+
+def test_host_heartbeat_disable_blocks_dispatch_and_restart(monkeypatch, tmp_path):
+    from lib import heartbeat
+    monkeypatch.setenv('CLARP_HEARTBEATS_DISABLED', '1')
+    service, backends, agent_id = _make_service(tmp_path)
+    assert not heartbeat.heartbeat_enabled({'heartbeat_enabled': True})
+    assert heartbeat.restart_heartbeat_agents() == []
+    with pytest.raises(DispatchError, match='Heartbeats are disabled'):
+        service.dispatch(text='check', requested_session='mike', trace_id='disabled-wake', origin='heartbeat')
+    assert not backends.spawned

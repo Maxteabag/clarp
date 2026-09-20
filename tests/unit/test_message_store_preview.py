@@ -7,7 +7,7 @@ a fallback for legacy rows that have no valid timestamp.
 """
 from __future__ import annotations
 
-from lib import db, message_store
+from lib import agents as agents_db, db, message_store
 
 
 def _agent(agent_id="a1", session="mike"):
@@ -113,3 +113,118 @@ def test_live_stream_drops_claude_codes_meta_reply_but_keeps_real_text():
     row = message_store.upsert_live_assistant_message(
         agent_id="a1", backend_session_id="bs1", text="On it.")
     assert row is not None
+
+
+def test_transcript_import_commits_in_bounded_chunks(tmp_path, monkeypatch):
+    # A 19 MB transcript held the write lock for 6-7 s per import; every
+    # other writer then hit the 5 s busy timeout (2026-09-20).
+    from lib import message_store as ms
+    agent_id = agents_db.create_agent(
+        persona="Cipher", voice_id="V", cwd=str(tmp_path), session="cipher",
+        backend="codex")
+    monkeypatch.setattr(ms, "IMPORT_COMMIT_EVERY", 100)
+    real_conn = ms.conn
+    commits = []
+
+    class _Counting:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def execute(self, sql, *args, **kwargs):
+            if str(sql).strip().upper() == "COMMIT":
+                commits.append(1)
+            return self._inner.execute(sql, *args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    monkeypatch.setattr(ms, "conn", lambda: _Counting(real_conn()))
+    turns = []
+    for i in range(350):
+        turns.append({"role": "user" if i % 2 == 0 else "assistant",
+                      "text": f"turn {i}", "timestamp": f"2026-09-20T10:{i // 60:02d}:{i % 60:02d}Z"})
+    ms.store_transcript_turns(agent_id=agent_id, backend_session_id="bs",
+                              source_file="f", turns=turns)
+    stored = db.conn().execute(
+        "SELECT count(*) AS n FROM messages WHERE agent_id = ? AND seq >= 0",
+        (agent_id,)).fetchone()["n"]
+    assert stored == 350
+    assert len(commits) == 4, f"350 turns commit at 100, 200, 300 and the end: {len(commits)}"
+    # Re-import of the same file is idempotent.
+    ms.store_transcript_turns(agent_id=agent_id, backend_session_id="bs",
+                              source_file="f", turns=turns)
+    assert db.conn().execute(
+        "SELECT count(*) AS n FROM messages WHERE agent_id = ? AND seq >= 0",
+        (agent_id,)).fetchone()["n"] == 350
+
+
+def test_failed_next_import_chunk_keeps_committed_revision_visible(monkeypatch):
+    import sqlite3
+    import pytest
+    _agent()
+    monkeypatch.setattr(message_store, 'IMPORT_COMMIT_EVERY', 2)
+    inner = db.conn()
+    class Interrupted:
+        begins = 0
+        def execute(self, sql, *args):
+            if sql == 'BEGIN IMMEDIATE':
+                self.begins += 1
+                if self.begins == 2:
+                    raise sqlite3.OperationalError('database is locked')
+            return inner.execute(sql, *args)
+        def __getattr__(self, name):
+            return getattr(inner, name)
+    wrapper = Interrupted()
+    monkeypatch.setattr(message_store, 'conn', lambda: wrapper)
+    turns = [{'role':'assistant', 'text':f'answer {i}', 'timestamp':f'2026-09-20T10:00:0{i}Z'} for i in range(3)]
+    with pytest.raises(sqlite3.OperationalError, match='database is locked'):
+        message_store.store_transcript_turns(agent_id='a1', backend_session_id='bs', source_file='f', turns=turns)
+    head = inner.execute('SELECT revision FROM conversation_heads WHERE agent_id=? AND backend_session_id=?', ('a1','bs')).fetchone()
+    highest = inner.execute('SELECT MAX(revision) FROM messages WHERE agent_id=?', ('a1',)).fetchone()[0]
+    assert head is not None and head['revision'] == highest
+
+
+def test_other_writer_can_commit_before_transcript_import_finishes(monkeypatch):
+    import sqlite3
+    import threading
+    _agent()
+    monkeypatch.setattr(message_store, 'IMPORT_COMMIT_EVERY', 2)
+    inner = db.conn()
+    released = threading.Event()
+    wrote = threading.Event()
+    failures = []
+    def writer():
+        try:
+            with sqlite3.connect(str(db.DB_PATH), timeout=1) as other:
+                assert released.wait(3)
+                other.execute("UPDATE agents SET persona='Writer progressed' WHERE agent_id='a1'")
+                other.commit()
+                wrote.set()
+        except BaseException as exc:
+            failures.append(exc)
+            wrote.set()
+    thread = threading.Thread(target=writer)
+    thread.start()
+    class Concurrent:
+        commits = 0
+        def execute(self, sql, *args):
+            result = inner.execute(sql, *args)
+            if sql == 'COMMIT':
+                self.commits += 1
+                if self.commits == 1:
+                    released.set()
+                    assert wrote.wait(3), 'writer remained blocked between import chunks'
+                    assert not failures
+                    assert inner.execute('SELECT COUNT(*) FROM messages').fetchone()[0] == 2
+            return result
+        def __getattr__(self, name):
+            return getattr(inner, name)
+    monkeypatch.setattr(message_store, 'conn', lambda: Concurrent())
+    try:
+        message_store.store_transcript_turns(agent_id='a1', backend_session_id='bs', source_file='f',
+            turns=[{'role':'assistant','text':f'answer {i}'} for i in range(5)])
+    finally:
+        released.set()
+        thread.join(4)
+    assert not failures
+    assert inner.execute("SELECT persona FROM agents WHERE agent_id='a1'").fetchone()[0] == 'Writer progressed'
