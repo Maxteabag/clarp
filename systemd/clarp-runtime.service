@@ -11,6 +11,11 @@ Environment="CLAUDE_PWA_DB=@@DATABASE_ENV@@"
 Environment="CLAUDE_PWA_LOG_DIR=@@LOG_ENV@@"
 @@EXTRA_ENVIRONMENT@@
 UMask=0077
+# The web server runs one thread per request, each with its own SQLite
+# connection (about six descriptors), plus every phone's SSE stream. The
+# default soft limit of 1024 ran out twice on 2026-09-19 during reconnect
+# storms and every new request died with "unable to open database file".
+LimitNOFILE=65536
 ExecStart=@@RUNTIME_LAUNCHER@@
 Restart=always
 RestartSec=2

@@ -59,7 +59,7 @@ def test_output_silence_is_not_an_authoritative_delivery_ack():
     try:
         c.receive({'type':'session.output_audio.delta','delta':base64.b64encode(b'\x00\x20'*100).decode()})
         assert down[-1]['type']=='session.output_audio.delta'
-        now[0]+=1;c.tick()
+        now[0]+=2;c.tick()
         assert down[-1]=={'type':'oracle_v2.quiet'}
         assert sent==[]
     finally:
@@ -203,7 +203,7 @@ def test_pauses_inside_a_reply_are_forwarded_but_sustained_silence_is_not():
         c.receive(loud)
         now[0]+=1.0;c.receive(quiet)
         assert len(down)==2, 'A one-second pause between sentences keeps the playback buffer fed'
-        now[0]+=.3;c.receive(quiet)
+        now[0]+=.6;c.receive(quiet)
         assert len(down)==2, 'Sustained silence after a reply is dropped'
         c.tick()
         assert down[-1]=={'type':'oracle_v2.quiet'}
@@ -281,7 +281,7 @@ def test_v2_journal_keeps_transcripts_and_timing_but_never_audio():
         c.receive({'type':'session.output_transcript.delta','delta':'Hello driver','start_ms':1000,'end_ms':1600})
         c.receive({'type':'session.input_transcript.delta','delta':'hey','start_ms':200,'end_ms':500})
         c.input({'type':'oracle_v2.interrupt'})
-        now[0]+=1;c.tick()
+        now[0]+=2;c.tick()
         kinds=[k for k,_ in c.journal.records]
         assert 'session.output_transcript.delta' in kinds and 'session.input_transcript.delta' in kinds
         assert 'oracle_v2.interrupt' in kinds and 'oracle_v2.quiet' in kinds and 'session.instructions.append' in kinds

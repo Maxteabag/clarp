@@ -368,3 +368,56 @@ def test_router_state_carries_only_what_the_questions_reference():
     assert state["user_said"] == "ship the patch"
     assert {a["session"] for a in state["agents"]} == {"clarp-ios", "clarp-server"}
     assert "trace_id" not in state
+
+
+# ---- diagnostics ----------------------------------------------------------
+
+def test_every_row_keeps_the_question_and_the_judged_state(monkeypatch):
+    _enable(monkeypatch, "junk")
+    _answer(monkeypatch, {"answers": {"junk": {"type": "noul", "noul": 0.08}},
+                          "usage": {"input_tokens": 400, "output_tokens": 20}})
+    question = judgments.noul("Is this message junk?", yes="filler", no="real")
+    judgments.judge("junk", {"text": "Sure, on it."}, {"junk": question}, trace_id="t-1")
+    row = judgments.recent(limit=1, site="junk")[0]
+    import json
+    assert json.loads(row["question_json"]) == {"junk": question}
+    assert json.loads(row["state_json"]) == {"text": "Sure, on it."}
+    assert json.loads(row["answers_json"]) == {"junk": {"type": "noul", "noul": 0.08}}
+    assert row["trace_id"] == "t-1" and row["fallback_used"] == 0
+
+
+def test_failed_calls_are_logged_with_their_input_too(monkeypatch):
+    _enable(monkeypatch, "junk")
+    monkeypatch.setattr(judgments, "_post", lambda *a, **k: (_ for _ in ()).throw(OSError("down")))
+    judgments.judge("junk", {"text": "hello"}, {"junk": judgments.noul("x?")})
+    row = judgments.recent(limit=1, site="junk")[0]
+    assert row["fallback_used"] == 1 and "down" in row["error"]
+    assert '"hello"' in row["state_json"] and '"x?"' in row["question_json"]
+
+
+def test_billing_failure_holds_the_breaker_for_an_hour(monkeypatch):
+    _enable(monkeypatch, "junk")
+
+    class _Response:
+        status_code = 402
+        text = "insufficient credits"
+
+    class _Billing(Exception):
+        response = _Response()
+
+    calls = {"n": 0}
+
+    def broke(*a, **k):
+        calls["n"] += 1
+        raise _Billing("402")
+
+    monkeypatch.setattr(judgments, "_post", broke)
+    assert judgments.judge("junk", {}, {"q": judgments.noul("x?")}) is None
+    assert judgments._breaker_open()
+    with judgments._BREAKER_LOCK:
+        remaining = judgments._open_until - judgments.time.monotonic()
+    assert remaining > judgments.OPEN_SECONDS * 2
+    # One call, not three, was enough; the next call never reaches the wire.
+    assert judgments.judge("junk", {}, {"q": judgments.noul("x?")}) is None
+    assert calls["n"] == 1
+    assert judgments.recent(limit=1, site="junk")[0]["error"] == "breaker open"

@@ -25,6 +25,7 @@ class Policy:
     # Must outlive the longest window lib.turn_usage reports on (7 days).
     turn_usage_max_age_ms: int = 30 * DAY_MS
     background_job_events_max_age_ms: int = 30 * DAY_MS
+    judgment_decisions_max_age_ms: int = 30 * DAY_MS
 
 
 def prune_database(*, now_ms: int | None = None,
@@ -68,6 +69,10 @@ def prune_database(*, now_ms: int | None = None,
     counts["turn_usage"] = c.execute(
         "DELETE FROM turn_usage WHERE at < ?",
         (now_ms - policy.turn_usage_max_age_ms,),
+    ).rowcount
+    counts["judgment_decisions"] = c.execute(
+        "DELETE FROM judgment_decisions WHERE created_at < ?",
+        (now_ms - policy.judgment_decisions_max_age_ms,),
     ).rowcount
     return counts
 

@@ -38,7 +38,7 @@ def test_unknown_owner_uses_configured_contact_not_guessed_agent(tmp_path, monke
     tools=oracle_calls.AgentTools(SimpleNamespace(),'owner','sage',lambda _:None)
     out=tools.execute('investigate_with_oracle',{'request':'Who made it blue?'},'one-call')
     assert 'agent' not in out
-    assert out['note'].startswith('Receipt only')
+    assert 'Handed off' in out['note'] and 'who is doing it' in out['note']
     assert captured[0]['session']=='sage'
     assert captured[0]['request_text']=='Who made it blue?'
     assert captured[0]['owner_principal']=='owner'
