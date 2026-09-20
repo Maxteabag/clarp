@@ -88,3 +88,46 @@ def test_last_seen_contention_does_not_break_valid_authentication():
         writer.rollback()
     device_pairing.revoke(paired['device_id'])
     assert device_pairing.authenticate(paired['token']) is None
+
+
+def test_authentication_survives_another_sqlite_writer(monkeypatch):
+    import sqlite3
+    import time
+
+    paired = device_pairing.exchange(device_pairing.issue()["code"])
+    connection = db.conn()
+    connection.execute("UPDATE paired_devices SET last_seen_at = 0")
+    # Keep the failing baseline quick; the fixed path must not wait even this long.
+    monkeypatch.setattr(db, "SQLITE_BUSY_TIMEOUT_MS", 1000)
+    connection.execute("PRAGMA busy_timeout = 1000")
+    writer = sqlite3.connect(str(db.DB_PATH), isolation_level=None)
+    try:
+        writer.execute("BEGIN IMMEDIATE")
+        start = time.monotonic()
+        authenticated = device_pairing.authenticate(paired["token"])
+        elapsed = time.monotonic() - start
+        assert authenticated["device_id"] == paired["device_id"]
+        assert authenticated["last_seen_at"] == 0
+        assert elapsed < 0.5
+        assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 1000
+    finally:
+        writer.close()
+    assert device_pairing.authenticate(paired["token"])["last_seen_at"] > 0
+
+
+def test_last_seen_is_throttled_without_caching_authentication(monkeypatch):
+    paired = device_pairing.exchange(device_pairing.issue()["code"])
+    connection = db.conn()
+    start = db.now_ms()
+    connection.execute("UPDATE paired_devices SET last_seen_at = ?", (start,))
+    monkeypatch.setattr(db, "now_ms", lambda: start + 1000)
+    before = connection.total_changes
+    for _ in range(10):
+        assert device_pairing.authenticate(paired["token"])["last_seen_at"] == start
+    assert connection.total_changes == before
+    monkeypatch.setattr(db, "now_ms", lambda: start + 60_000)
+    assert device_pairing.authenticate(paired["token"])["last_seen_at"] == start + 60_000
+    assert connection.total_changes == before + 1
+    assert device_pairing.revoke(paired["device_id"])
+    assert device_pairing.authenticate(paired["token"]) is None
+    assert device_pairing.authenticate("cld_" + "invalid" * 8) is None
