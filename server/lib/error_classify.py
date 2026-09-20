@@ -44,13 +44,14 @@ CONNECTION = "connection"
 TRANSIENT = "transient"
 INTERRUPTED = "interrupted"
 USAGE_LIMIT = "usage_limit"
+AUTH = "auth"                     # sign-in expired / refresh failed; account recovery applies
 RUNNER_EXIT = "runner_exit"
 TIMEOUT = "timeout"
 UNKNOWN = "unknown"
 
 # Categories that should flip the agent to the INTERRUPTED badge once we
 # stop trying (connection errors only reach here after retries are spent).
-NOTIFY = frozenset({CONNECTION, TRANSIENT, INTERRUPTED, USAGE_LIMIT, RUNNER_EXIT,
+NOTIFY = frozenset({CONNECTION, TRANSIENT, INTERRUPTED, USAGE_LIMIT, AUTH, RUNNER_EXIT,
                     TIMEOUT})
 
 # Order matters: INTERRUPTED is checked before CONNECTION because a SIGTERM'd
@@ -96,6 +97,18 @@ _USAGE_LIMIT_RE = re.compile(
     r"resource[_ ]exhausted|no credits? remaining|trial quota",
     re.I,
 )
+# The CLI's own wording when its OAuth token is gone. Twelve agents launched
+# together 30 s after a reboot on 2026-09-19 all failed this way; it was
+# classified TRANSIENT, which is never retried, so every heartbeat and the
+# scheduled prompts were silently dropped. The account selector knows how to
+# refresh and switch, so this routes to the same recovery a usage limit does.
+_AUTH_RE = re.compile(
+    r"failed to authenticate|oauth session expired|could not be refreshed|"
+    r"not logged in|invalid_grant|token (has )?expired|"
+    r"\b401\b.*unauthori[sz]ed|unauthori[sz]ed.*\b401\b|"
+    r"please run /login|run `?claude login`?",
+    re.I,
+)
 _RUNNER_EXIT_RE = re.compile(
     r"\b(codex|clarp|agy|claude|agent)\s+exited\s+rc=\d+|"
     r"\b(exit status|exited with code)\s+\d+|"
@@ -118,6 +131,8 @@ def classify_error(message: str | None) -> str:
         return INTERRUPTED
     if _USAGE_LIMIT_RE.search(text):
         return USAGE_LIMIT
+    if _AUTH_RE.search(text):
+        return AUTH
     if _CONNECTION_RE.search(text):
         return CONNECTION
     if _TRANSIENT_RE.search(text):

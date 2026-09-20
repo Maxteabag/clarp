@@ -581,25 +581,47 @@ def test_explicit_queue_waits_for_current_turn_without_interrupting(tmp_path):
     ).fetchone()["text"] == "edited second"
 
 
-def test_stopped_agent_queue_stays_paused_until_manual_send(tmp_path):
+def test_paused_queue_still_holds_automation_but_a_user_message_resumes_it(tmp_path):
+    """Stop parks the follow-ups behind the killed turn. It must not swallow the
+    conversation: recorded 2026-09-20, thirteen agents sat paused after one Stop
+    each and every new message queued silently, with no Resume anywhere."""
     from lib import turn_queue
     service, backends, agent_id = _make_service(tmp_path)
     backends.live = False
     turn_queue.set_paused(agent_id, True)
 
+    # Automation (a resolved decision, an Oracle handoff) waits behind the pause.
     queued = service.dispatch(
         text="wait for me", requested_session="mike", trace_id="t-paused",
-        client_msg_id="q-paused", synthesize_audio=False, queue_if_busy=True)
-
+        client_msg_id="q-paused", synthesize_audio=False, queue_if_busy=True,
+        origin="automation")
     assert queued.queued is True
     assert backends.spawned == []
     assert service.recover_queued() == 0
+    assert turn_queue.is_paused(agent_id) is True
+
+    # The user carrying on lifts the pause and runs at once.
+    sent = service.dispatch(
+        text="are you there", requested_session="mike", trace_id="t-user",
+        client_msg_id="u-user", synthesize_audio=False, queue_if_busy=True)
+    assert sent.queued is not True
+    assert turn_queue.is_paused(agent_id) is False
+    assert [call[1]["text"] for call in backends.spawned] == ["are you there"]
+    # The parked automation item is still there for the drain, not lost.
     assert turn_queue.get("q-paused") is not None
 
-    sent = service.dispatch_queued("q-paused")
 
+def test_manual_send_of_a_paused_item_still_works(tmp_path):
+    from lib import turn_queue
+    service, backends, agent_id = _make_service(tmp_path)
+    backends.live = False
+    turn_queue.set_paused(agent_id, True)
+    service.dispatch(
+        text="wait for me", requested_session="mike", trace_id="t-paused",
+        client_msg_id="q-paused", synthesize_audio=False, queue_if_busy=True,
+        origin="automation")
+    sent = service.dispatch_queued("q-paused")
     assert sent.session == "mike"
-    assert len(backends.spawned) == 1
     assert backends.spawned[0][1]["text"] == "wait for me"
     assert turn_queue.status("q-paused") == "started"
     assert turn_queue.is_paused(agent_id) is False

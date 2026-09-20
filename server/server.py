@@ -2695,6 +2695,8 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/turn-queue/") and path.endswith("/send"):
             queue_id = path[len("/turn-queue/"):-len("/send")].strip("/")
             return self._handle_turn_queue_send(queue_id)
+        if path == "/turn-queue/resume":
+            return self._handle_turn_queue_resume()
         if path.startswith("/teams/"):
             rest = path[len("/teams/"):].strip("/")
             if rest.endswith("/members"):
@@ -4548,6 +4550,36 @@ class Handler(BaseHTTPRequestHandler):
             "paused": state["paused"],
             "revision": state["revision"],
         }).encode(), "application/json")
+
+    def _handle_turn_queue_resume(self):
+        """Lift a Stop's pause and let the waiting messages run in order."""
+        from lib import agents as agents_db
+        from lib import turn_queue
+        data = self._read_json()
+        if data is None:
+            return self._send(400, b'{"error":"bad json"}', "application/json")
+        session = str(data.get("session") or "").strip()
+        agent = agents_db.get_by_session(session) if session else None
+        if not agent:
+            return self._send(404, b'{"error":"agent not found"}', "application/json")
+        changed = turn_queue.set_paused(agent["agent_id"], False)
+        if changed:
+            log("queueResumed", f"session={session}")
+            # The runtime owns turns; when it is reachable let it pick the waiting
+            # items up, otherwise this process dispatches them itself.
+            runtime_client = getattr(self.ctx, "runtime_client", None)
+            try:
+                if runtime_client is not None:
+                    runtime_client.recover_queued()
+                else:
+                    TurnDispatchService(self.ctx).recover_queued()
+            except Exception as e:  # noqa: BLE001
+                log_exception("queueResumeRecoverFail", e, detail=session)
+        self._broadcast_turn_queue(agent["agent_id"], session)
+        state = turn_queue.state(agent["agent_id"])
+        return self._send(200, json.dumps({"session": session, "paused": state["paused"],
+                                           "count": state["count"], "revision": state["revision"]}).encode(),
+                          "application/json")
 
     def _broadcast_turn_queue(self, agent_id: str, session: str) -> None:
         from lib import turn_queue

@@ -46,6 +46,9 @@ MAX_TIMEOUT_MS = 30000
 # timeout. Failures are counted across sites because they share one endpoint.
 FAILURES_BEFORE_OPEN = 3
 OPEN_SECONDS = 120.0
+# HTTP 402 means the account is out of credit; probing it every two minutes
+# only produces a failure log line each time. Hold for an hour instead.
+BILLING_OPEN_SECONDS = 3600.0
 
 _BREAKER_LOCK = threading.Lock()
 _consecutive_failures = 0
@@ -80,6 +83,32 @@ CREATE INDEX IF NOT EXISTS idx_judgment_decisions_site
 CREATE INDEX IF NOT EXISTS idx_judgment_decisions_created
     ON judgment_decisions(created_at DESC);
 """
+
+
+# Columns added after the table shipped. CREATE TABLE IF NOT EXISTS cannot add
+# them, so they are ensured here on first use; ALTER TABLE ADD COLUMN is
+# idempotent when guarded by the pragma check.
+_DIAGNOSTIC_COLUMNS = (
+    ("question_json", "TEXT NOT NULL DEFAULT '{}'"),   # the questions as sent
+    ("state_json", "TEXT NOT NULL DEFAULT ''"),         # the state that was judged
+)
+_COLUMNS_LOCK = threading.Lock()
+STATE_LOG_LIMIT = 4000
+QUESTION_LOG_LIMIT = 2000
+
+
+def _ensure_columns() -> None:
+    """Add the diagnostic columns to a table that predates them.
+
+    Checked per call rather than once per process: the pragma is one cheap
+    read, and a process-wide flag goes stale when the database file is swapped
+    underneath it (tests do this per case; so does a restore from backup).
+    """
+    with _COLUMNS_LOCK:
+        present = {row[1] for row in conn().execute("PRAGMA table_info(judgment_decisions)")}
+        for name, definition in _DIAGNOSTIC_COLUMNS:
+            if name not in present:
+                conn().execute(f"ALTER TABLE judgment_decisions ADD COLUMN {name} {definition}")
 
 
 # ---- question builders -------------------------------------------------
@@ -188,11 +217,15 @@ def _record_success() -> None:
         _open_until = 0.0
 
 
-def _record_failure() -> None:
+def _record_failure(*, hold_seconds: float | None = None) -> None:
+    """Count a failure; `hold_seconds` opens the breaker at once for that long."""
     global _consecutive_failures, _open_until
     with _BREAKER_LOCK:
         _consecutive_failures += 1
-        if _consecutive_failures >= FAILURES_BEFORE_OPEN:
+        if hold_seconds is not None:
+            _open_until = max(_open_until, time.monotonic() + hold_seconds)
+            log("judgmentBreakerOpen", f"billing failure; pausing {hold_seconds:.0f}s")
+        elif _consecutive_failures >= FAILURES_BEFORE_OPEN:
             _open_until = time.monotonic() + OPEN_SECONDS
             log("judgmentBreakerOpen",
                 f"{_consecutive_failures} consecutive failures; pausing {OPEN_SECONDS:.0f}s")
@@ -238,18 +271,28 @@ def _post(payload: dict, key: str, seconds: float) -> dict:
 
 def _log_decision(*, site: str, trace_id: str, question_ids: list[str],
                   outcome: str, answers: dict, latency_ms: float,
-                  usage: dict, fallback_used: bool, error: str) -> None:
+                  usage: dict, fallback_used: bool, error: str,
+                  questions: dict | None = None, state: Any = None) -> None:
+    """One row per call, including failed ones.
+
+    `questions` and `state` are what went over the wire, so a decision can be
+    read later as: this input, this question, this probability, this outcome.
+    Both are bounded; the state is user content and stays on this Host.
+    """
     try:
+        _ensure_columns()
         conn().execute(
             """INSERT INTO judgment_decisions (
                    site, trace_id, question_ids, outcome, answers_json,
                    latency_ms, input_tokens, output_tokens, fallback_used,
-                   error, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   error, created_at, question_json, state_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (site, trace_id, ",".join(question_ids), outcome,
              json.dumps(answers, ensure_ascii=False)[:4000], int(latency_ms),
              int(usage.get("input_tokens") or 0), int(usage.get("output_tokens") or 0),
-             1 if fallback_used else 0, error[:500], now_ms()),
+             1 if fallback_used else 0, error[:500], now_ms(),
+             json.dumps(questions or {}, ensure_ascii=False)[:QUESTION_LOG_LIMIT],
+             json.dumps(state, ensure_ascii=False, default=str)[:STATE_LOG_LIMIT] if state is not None else ""),
         )
     except Exception as e:
         # A log failure must never cost the caller its answer.
@@ -274,7 +317,8 @@ def judge(site: str, state: Any, questions: dict[str, dict], *,
     if _breaker_open():
         _log_decision(site=site, trace_id=trace_id, question_ids=list(questions),
                       outcome="", answers={}, latency_ms=0, usage={},
-                      fallback_used=True, error="breaker open")
+                      fallback_used=True, error="breaker open",
+                      questions=questions, state=state)
         return None
 
     budget_ms = timeout_ms_override if timeout_ms_override is not None else timeout_ms()
@@ -284,12 +328,14 @@ def judge(site: str, state: Any, questions: dict[str, dict], *,
         data = _post(payload, key, max(0.1, budget_ms / 1000.0))
     except Exception as e:                      # timeout, HTTP error, bad JSON
         latency = (time.perf_counter() - started) * 1000
-        _record_failure()
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        _record_failure(hold_seconds=BILLING_OPEN_SECONDS if status == 402 else None)
         detail = str(getattr(getattr(e, "response", None), "text", ""))[:200]
         log_exception(f"judgmentFail:{site}", e)
         _log_decision(site=site, trace_id=trace_id, question_ids=list(questions),
                       outcome="", answers={}, latency_ms=latency, usage={},
-                      fallback_used=True, error=f"{e!r} {detail}".strip())
+                      fallback_used=True, error=f"{e!r} {detail}".strip(),
+                      questions=questions, state=state)
         return None
 
     latency = (time.perf_counter() - started) * 1000
@@ -299,14 +345,15 @@ def judge(site: str, state: Any, questions: dict[str, dict], *,
         _record_failure()
         _log_decision(site=site, trace_id=trace_id, question_ids=list(questions),
                       outcome="", answers={}, latency_ms=latency, usage={},
-                      fallback_used=True, error=f"unexpected response: {str(data)[:200]}")
+                      fallback_used=True, error=f"unexpected response: {str(data)[:200]}",
+                      questions=questions, state=state)
         return None
 
     _record_success()
     usage = data.get("usage") or {}
     _log_decision(site=site, trace_id=trace_id, question_ids=list(questions),
                   outcome=outcome, answers=raw, latency_ms=latency, usage=usage,
-                  fallback_used=False, error="")
+                  fallback_used=False, error="", questions=questions, state=state)
     return Answers(raw, usage)
 
 
@@ -326,6 +373,7 @@ def record_outcome(site: str, outcome: str) -> None:
 
 def recent(limit: int = 50, site: str = "") -> list[dict]:
     """Read the decision log. This is what replaces a shadow-mode comparison."""
+    _ensure_columns()
     sql = "SELECT * FROM judgment_decisions"
     params: list[Any] = []
     if site:

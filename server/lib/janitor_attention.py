@@ -105,18 +105,27 @@ def _description(config, latest, count):
 
 
 def reconcile() -> int:
-    """Return changed artifact count. Repeated polls do not rewrite stable rows."""
+    """Return changed artifact count. Repeated polls do not rewrite stable rows.
+
+    The episode scan over janitor_runs is read-only and runs first, outside the
+    write transaction. Holding BEGIN IMMEDIATE across it starved every other
+    writer for the whole scan (recorded 2026-09-17/18: 38-193 s holds, with
+    decision delivery and the scheduler failing "database is locked").
+    """
     con = db.conn()
+    configs = [dict(r) for r in con.execute("""SELECT j.*,a.session,a.persona,a.is_janitor,
+        a.archived_at AS agent_archived_at,a.deleted_at AS agent_deleted_at
+        FROM janitor_configs j JOIN agents a ON a.agent_id=j.agent_id""")]
+    planned = []
+    for config in configs:
+        active = bool(config["enabled"] and config["is_janitor"] and
+                      not config["agent_archived_at"] and not config["agent_deleted_at"])
+        reference, latest, count = _episode(config) if active else ("", None, 0)
+        planned.append((config, active, reference, latest, count))
     con.execute("BEGIN IMMEDIATE")
     changed = 0
     try:
-        configs = [dict(r) for r in con.execute("""SELECT j.*,a.session,a.persona,a.is_janitor,
-            a.archived_at AS agent_archived_at,a.deleted_at AS agent_deleted_at
-            FROM janitor_configs j JOIN agents a ON a.agent_id=j.agent_id""")]
-        for config in configs:
-            active = bool(config["enabled"] and config["is_janitor"] and
-                          not config["agent_archived_at"] and not config["agent_deleted_at"])
-            reference, latest, count = _episode(config) if active else ("", None, 0)
+        for config, active, reference, latest, count in planned:
             open_rows = list(con.execute("""SELECT artifact_id,reference_id FROM artifacts
                 WHERE agent_id=? AND type='document' AND reference_id LIKE ?
                   AND status='failed' AND deleted_at IS NULL AND json_valid(payload_json)

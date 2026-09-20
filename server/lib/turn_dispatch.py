@@ -642,12 +642,21 @@ class TurnDispatchService:
             return DispatchResult(session=session, backend=backend)
 
         if queue_if_busy and turn_queue.is_paused(spec.agent_id) and not allow_paused_queue:
-            self._broadcast_queue_state(spec, started=False)
-            queue_state = turn_queue.state(spec.agent_id)
-            return DispatchResult(
-                session=session, backend=backend, queued=True,
-                queue_depth=queue_state["count"],
-                queue_revision=queue_state["revision"])
+            if spec.origin == "user":
+                # Stop pauses the queue so the follow-ups behind the killed turn do
+                # not fire on their own. A fresh message from the user is the user
+                # carrying on, so it lifts the pause; nothing else does, and no
+                # Resume existed. Recorded 2026-09-20: thirteen agents sat paused
+                # after one Stop each and every new message queued silently.
+                turn_queue.set_paused(spec.agent_id, False)
+                log("queueResumedBySend", f"agent={spec.agent_id} trace={spec.trace_id or '∅'}")
+            else:
+                self._broadcast_queue_state(spec, started=False)
+                queue_state = turn_queue.state(spec.agent_id)
+                return DispatchResult(
+                    session=session, backend=backend, queued=True,
+                    queue_depth=queue_state["count"],
+                    queue_revision=queue_state["revision"])
 
         # A live Codex turn accepts follow-ups through the official turn/steer
         # protocol. Other backends retain their existing dispatch behavior.
@@ -1478,12 +1487,12 @@ class TurnDispatchService:
                     return
         if self._start_model_fallback(spec, state, category, msg):
             return
-        if (category == error_classify.USAGE_LIMIT
+        if (category in (error_classify.USAGE_LIMIT, error_classify.AUTH)
                 and spec.backend in {backends.CLAUDE,backends.CODEX}
                 and account_failover(spec.backend).request(
                     spec.agent_id, spec.trace_id, account_selector(spec.backend))):
             eventlog.emit("server", "claudeAccountRecovery", context=spec.context,
-                          detail={"reason": "usage_limit"})
+                          detail={"reason": category})
             return
         if category == error_classify.CONNECTION and attempt < MAX_ATTEMPTS:
             self._schedule_retry(spec, attempt, state, msg)
@@ -1632,6 +1641,7 @@ class TurnDispatchService:
             error_classify.TRANSIENT: "API unavailable (overloaded / rate limited)",
             error_classify.INTERRUPTED: "Turn interrupted",
             error_classify.USAGE_LIMIT: "Usage limit reached",
+            error_classify.AUTH: "Sign-in expired — could not refresh the account",
             error_classify.RUNNER_EXIT: "Agent process exited unexpectedly",
             error_classify.TIMEOUT: "Turn timed out — backend stopped responding",
         }.get(category, "Turn interrupted")

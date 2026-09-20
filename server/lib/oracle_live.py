@@ -105,6 +105,7 @@ def release_connection(principal, token):
 MODEL = "gpt-live-1"
 VOICE = "marin"
 ROUTER = oracle_router.MODEL
+from .oracle_live_stable import QUIET_AFTER_SECONDS  # one timer for both engines
 REPORTING = """\n\n<oracle-reporting-guidance>
 Report facts relevant to this request and name the supporting evidence.
 Do not infer amounts, relationships or status solely from names or identifiers.
@@ -114,19 +115,7 @@ For a request to check, inspect, read, compare or explain, do not change files
 or external state. An expected value or corrected identifier does not authorize
 a write. Change data only when the original user request asks for that change.
 </oracle-reporting-guidance>"""
-PROMPT = """You are Oracle, a helpful voice companion for Clarp.
-Talk naturally with the user.
-Backchannel policy: Acknowledge listening briefly when useful.
-Interruption policy: Yield when the user interrupts.
-Delegation policy:
-Your backend can inspect project files and ask the user's Clarp contact to do work or coordinate other agents.
-Ask the backend for tools, project facts, or reasoning you cannot do conversationally.
-Handle greetings, clarification, and questions already answered by available context yourself.
-Wait for evidence before describing an outcome.
-Preserve the limits of that evidence: an observed mismatch does not explain its cause. Say when the cause remains unknown.
-If a user's recap or question conflicts with verified findings, correct that premise before answering. Their wording does not change the recorded facts.
-Progress policy: When the Host offers a scheduled status update, summarize the current work briefly without restarting it. Keep the user’s conversation in focus.
-"""
+from .oracle_prompt import PROMPT  # one voice prompt for every engine
 ROUTING = """Route only the latest actionable user request using the actual
 roster and authoritative task records. Preserve exact filenames and identifiers;
 do not combine names from different requests. Clarify uncertain targets before
@@ -173,7 +162,11 @@ def live_config(*, wire=None, webrtc=False, history=()):
 
 
 def router_tools():
+    from .oracle_realtime import _tool
     tools = realtime_config(model=MODEL, voice=VOICE)["tools"]
+    if not any(t["name"] == "get_agent_status" for t in tools):
+        tools.append(_tool("get_agent_status", "Read what one Clarp agent is doing right now: state, current step, last thing it said.",
+                           {"agent": {"type": "string"}}, ["agent"]))
     for tool in tools:
         if tool["name"] == "investigate_with_oracle":
             tool["description"] = ("Give the full user task to the configured main contact. "
@@ -650,7 +643,7 @@ class Conversation:
         if self.close_sent:
             return
         self.publish_work()
-        if self.last_output_active and now-self.last_output > .5:
+        if self.last_output_active and now-self.last_output > QUIET_AFTER_SECONDS:
             self.last_output_active = False
             self.journal_event("host", {"type": "oracle_v2.quiet"})
             self.downstream({"type": "oracle_v2.quiet"})
