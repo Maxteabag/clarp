@@ -18,7 +18,7 @@ import uuid
 from urllib.parse import parse_qs, urlparse
 
 from . import config, oracle_delegations, oracle_router, oracle_memory, oracle_work, ws
-from . import oracle_contact
+from . import oracle_contact, oracle_strategy
 from .log import log
 from .oracle_calls import AgentTools, session_config as realtime_config
 from .oracle_context import context_chunks, result_context
@@ -157,8 +157,9 @@ capture time and distinguish a captured image from current live state.
 """
 
 
-def live_config(*, wire=None, webrtc=False, history=()):
-    return (wire or LiveWire()).session(PROMPT, webrtc=webrtc, history=history)
+def live_config(*, wire=None, webrtc=False, history=(), delegation_strategy="operator"):
+    prompt = oracle_strategy.DIRECT_INSTRUCTIONS if delegation_strategy == "direct_contact" else PROMPT
+    return (wire or LiveWire()).session(prompt, webrtc=webrtc, history=history)
 
 
 def router_tools():
@@ -461,7 +462,8 @@ class Conversation:
                     self.revision += 1
                     self.last_transcript = self.clock()
                 item_key = self.provider_session + ":" + str(source)
-                previous = next((r for r in reversed(self.fragments) if r["role"] == role and r.get("provider_session") == self.provider_session), None)
+                previous = self.fragments[-1] if (self.fragments and self.fragments[-1]["role"] == role
+                    and self.fragments[-1].get("provider_session") == self.provider_session) else None
                 replacement = next((r for r in self.fragments if any(p["id"] == item_key for p in r.get("parts", []))), None)
                 part = {"id": item_key, "text": text}
                 if replacement is not None:
@@ -535,18 +537,9 @@ class Conversation:
                         if images: options["images"] = images
                     decision_started = time.monotonic()
                     if self.delegation_strategy == "direct_contact":
-                        # No model call or separate operator in this branch.
-                        # The selected contact performs ordinary Clarp work and coordination.
-                        latest = next((row["text"] for row in reversed(conversation) if row["role"] == "user" and row["text"].strip()), "")
-                        if not latest:
-                            result = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "What would you like me to do?"}]}]}
-                        else:
-                            current = latest if len(latest) <= 14000 else "Read the complete latest user request in the attached original_user_messages."
-                            request = ("Handle the current user request using your normal Clarp tools and coordinate agents when needed. "
-                                "Preserve independent ongoing work. Earlier dialogue is context, not permission to repeat old actions. "
-                                "Stopping speech does not cancel worker tasks. Current user message, verbatim:\n" + current)
-                            result = {"output": [{"type": "function_call", "name": "investigate_with_oracle",
-                                "call_id": "direct-"+uuid.uuid4().hex, "arguments": json.dumps({"request": request})}]}
+                        # No model call: named-worker intent remains verbatim for the primary.
+                        result = oracle_strategy.direct_proposal(conversation, self.tools,
+                            "direct-"+uuid.uuid4().hex)
                         result["router"] = {"strategy": "direct_contact", "operator_model_called": False,
                                             "elapsed_ms": round((time.monotonic()-decision_started)*1000,3)}
                     else:
@@ -583,6 +576,9 @@ class Conversation:
                                     getattr(self.tools.ctx, "media_dir", None), conversation=conversation, work=task_context)
                             if arguments.get("request") and hasattr(self.tools, "ctx"):
                                 reference += REPORTING
+                            with self.lock:
+                                if self.stop.is_set() or self.close_sent or revision != self.revision:
+                                    break
                             if reference:
                                 output = self.tools.execute(item["name"], arguments, call_id, context_reference=reference)
                             else:
@@ -736,14 +732,21 @@ def serve(handler):
             getattr(handler, "_request_device_scope", "") == "full" and principal):
         return _send_http_error(handler, 401, "Oracle v2 requires full-device authentication")
     cfg = config.load()
-    if getattr(cfg, "oracle_delegation_strategy", "operator") not in ("operator", "direct_contact"):
-        return _send_http_error(handler, 503, "Unsupported Oracle delegation strategy")
     if getattr(cfg, "oracle_voice_backend", "api") != "api":
         return _send_http_error(handler, 503, "Oracle subscription voice requires the WebRTC connection")
     key = cfg.openai_key()
     if not key:
         return _send_http_error(handler, 503, "Oracle v2 needs an OpenAI key on this Host")
-    query = parse_qs(urlparse(handler.path).query)
+    query = parse_qs(urlparse(handler.path).query, keep_blank_values=True)
+    try:
+        strategy = oracle_strategy.select(query.get("delegation_strategy"),
+            default=getattr(cfg, "oracle_delegation_strategy", "operator"))
+        selected_contact = oracle_strategy.contact(query.get("oracle_session", [""])[0],
+            strategy=strategy, source="live-ws")
+    except ValueError as exc:
+        return _send_http_error(handler, 400, str(exc))
+    if strategy == "direct_contact" and "podcast_artifact" in query:
+        return _send_http_error(handler, 400, "Direct-to-primary is not supported for podcast detours; use an ordinary Oracle session")
     podcast_context = None
     podcast_source = None
     history_id = None
@@ -775,7 +778,7 @@ def serve(handler):
             handler.wfile.write(ws.text_frame(json.dumps(event)))
             handler.wfile.flush()
     try:
-        fallback = oracle_contact.effective(query.get("oracle_session", [""])[0], source="live-ws")
+        fallback = selected_contact
         tools = AgentTools(handler.ctx, principal, fallback,
             lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
         memory = oracle_memory.open_thread(principal, fallback, connection_id=token,
@@ -801,13 +804,15 @@ def serve(handler):
                 podcast_context, images=query.get("images", ["0"])[0] == "1",
                 history_id=history_id, media_dir=media_dir, tools=tools,
                 router_backend=getattr(cfg, "oracle_router_backend", "api"), memory=memory,
-                delegation_strategy=getattr(cfg, "oracle_delegation_strategy", "operator"), router_reuse=getattr(cfg, "oracle_router_reuse", False))
+                delegation_strategy=strategy, router_reuse=getattr(cfg, "oracle_router_reuse", False))
             downstream({"type": "podcast.history", "conversation_id": history_id,
                         "saved": True, "position": float(query.get("position", ["0"])[0])})
         else:
             conversation = Conversation(upstream, downstream, tools, key,
                 router_backend=getattr(cfg, "oracle_router_backend", "api"), memory=memory,
-                delegation_strategy=getattr(cfg, "oracle_delegation_strategy", "operator"), router_reuse=getattr(cfg, "oracle_router_reuse", False))
+                delegation_strategy=strategy, router_reuse=getattr(cfg, "oracle_router_reuse", False))
+        downstream({"type": "oracle_v2.routing_mode", "strategy": strategy,
+            "primary_contact": selected_contact, "operator_model_called": False})
         downstream({"type": "oracle_v2.context", "thread_id": memory.thread_id,
                     "items": memory.contexts(), "revision": conversation.revision})
         if getattr(cfg, "oracle_diagnostics", False):
@@ -861,7 +866,7 @@ def serve(handler):
                     conversation.stop.set()
         threading.Thread(target=pump, daemon=True, name="oracle-v2-receive").start()
         threading.Thread(target=poll, daemon=True, name="oracle-v2-results").start()
-        initial = podcast_live.session_config(podcast_context) if podcast_context is not None else live_config()
+        initial = podcast_live.session_config(podcast_context) if podcast_context is not None else live_config(delegation_strategy=strategy)
         saved = memory.startup_history(roster=tools.execute("list_agents", {}, "startup"))
         initial["input"] = saved + initial.get("input", [])
         conversation.send({"type": "session.start", "session": initial})

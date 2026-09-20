@@ -132,17 +132,18 @@ def capability() -> dict:
     mode = getattr(cfg, "oracle_voice_backend", "api")
     try:
         live_wire = LiveWire(mode)
-        live_available = voice_available(mode, cfg) and (getattr(cfg, "oracle_router_backend", "api") == "codex" or bool(cfg.openai_key()))
+        direct_available = voice_available(mode, cfg)
+        live_available = direct_available and (getattr(cfg, "oracle_router_backend", "api") == "codex" or bool(cfg.openai_key()))
     except ValueError:
-        live_wire, live_available = LiveWire(), False
+        live_wire, live_available, direct_available = LiveWire(), False, False
     return {
         "available": bool(cfg.openai_key()),
         "model": cfg.openai_realtime_model,
         "voice": cfg.openai_realtime_voice,
         "transport": "clarp-websocket-proxy",
         "webrtc": True,
-        "v2": {"available": bool(cfg.openai_key()), "model": "gpt-live-1", "voice": "marin", "podcast": True, "podcast_history": True},
-        "v2_tinkered": {"available": live_available, "model": live_wire.model, "voice": live_wire.voice,
+        "v2": {"direct_contact": True, "direct_contact_available": bool(cfg.openai_key()), "available": bool(cfg.openai_key()), "model": "gpt-live-1", "voice": "marin", "podcast": True, "podcast_history": True},
+        "v2_tinkered": {"direct_contact": True, "direct_contact_available": direct_available, "available": live_available, "model": live_wire.model, "voice": live_wire.voice,
                "mode": mode, "webrtc": mode == "subscription" or getattr(cfg, "oracle_live_webrtc", False),
                "router": getattr(cfg, "oracle_router_backend", "api"), "podcast": True, "podcast_history": True},
     }

@@ -108,6 +108,7 @@ ROUTER = "gpt-5.6-luna"
 # pauses exceeded the old 0.5 s, which ended turns and cut her off.
 QUIET_AFTER_SECONDS = 1.5
 from .oracle_prompt import PROMPT  # one voice prompt for every engine
+from . import oracle_strategy
 ROUTING = """Route only the latest actionable user request using the actual
 roster and authoritative task records. Preserve exact filenames and identifiers;
 do not combine names from different requests. Clarify uncertain targets before
@@ -135,14 +136,14 @@ def router_tools():
     return tools
 
 
-def live_config(*, roster=None):
+def live_config(*, roster=None, delegation_strategy="operator"):
     """Session config; the roster and contact ride in the instructions.
 
     The voice model holds no tools, so unless it is told who the agents are it
     cannot know that "Omar" is someone it can reach. `roster` is the output of
     the list_agents tool.
     """
-    instructions = PROMPT
+    instructions = oracle_strategy.DIRECT_INSTRUCTIONS if delegation_strategy == "direct_contact" else PROMPT
     if roster:
         names = ", ".join(f"{a['name']} ({a['session']})" for a in roster.get("agents", [])[:40])
         contact = roster.get("oracle_contact") or ""
@@ -185,9 +186,12 @@ def audible(data):
 
 
 class Conversation:
-    def __init__(self, upstream, downstream, tools, api_key, clock=time.monotonic):
+    def __init__(self, upstream, downstream, tools, api_key, clock=time.monotonic, *, delegation_strategy="operator"):
         self.upstream, self.downstream, self.tools, self.api_key = upstream, downstream, tools, api_key
         self.clock = clock
+        self.delegation_strategy = oracle_strategy.select(delegation_strategy)
+        self.direct_admitted_revisions = set()
+        self.direct_call_prefix = __import__("uuid").uuid4().hex
         self.stop = threading.Event()
         self.closed = threading.Event()
         # Set when a newer connection from the same device took over: the
@@ -289,9 +293,10 @@ class Conversation:
                 if role == "user" and text.strip():
                     self.revision += 1
                     self.last_transcript = self.clock()
-                previous = next((r for r in reversed(self.fragments) if r["role"] == role), None)
-                if previous and event.get("start_ms", 0) - previous["end_ms"] < 1100:
-                    previous["text"] = (previous["text"] + text)[-8000:]
+                previous = self.fragments[-1] if self.fragments and self.fragments[-1]["role"] == role else None
+                if (previous and event.get("start_ms", 0) - previous["end_ms"] < 1100
+                        and len(previous["text"]) + len(text) <= 32000):
+                    previous["text"] = previous["text"] + text
                     previous["end_ms"] = event.get("end_ms", 0)
                 else:
                     self.fragments.append({"role": role, "text": text,
@@ -337,10 +342,16 @@ class Conversation:
                                 "authoritative_tasks": task_context}, ensure_ascii=False),
                             "tools": tools, "max_output_tokens": 1200,
                             "reasoning": {"effort": "low"}, "parallel_tool_calls": False}
-                    request = Request("https://api.openai.com/v1/responses", json.dumps(body).encode(),
-                                      {"Authorization": "Bearer "+self.api_key, "Content-Type": "application/json"})
-                    with urlopen(request, timeout=35) as response:
-                        result = json.load(response)
+                    if self.delegation_strategy == "direct_contact":
+                        if revision in self.direct_admitted_revisions:
+                            return
+                        result = oracle_strategy.direct_proposal(conversation, self.tools,
+                            "direct-" + self.direct_call_prefix + "-" + str(revision))
+                    else:
+                        request = Request("https://api.openai.com/v1/responses", json.dumps(body).encode(),
+                                          {"Authorization": "Bearer "+self.api_key, "Content-Type": "application/json"})
+                        with urlopen(request, timeout=35) as response:
+                            result = json.load(response)
                     if self.stop.is_set():
                         return
                     with self.lock:
@@ -350,7 +361,36 @@ class Conversation:
                         if self.stop.is_set() or revision != self.revision:
                             break
                         if item.get("type") == "function_call":
-                            output = self.tools.execute(item["name"], json.loads(item["arguments"]), item["call_id"])
+                            arguments = json.loads(item["arguments"])
+                            if self.journal:
+                                self.journal.record("router.proposal", {"delegation_id": ident,
+                                    "revision": revision, "name": item["name"], "arguments": arguments})
+                            if (item["name"] in ("delegate_to_agent", "investigate_with_oracle", "cancel_agent")
+                                    and arguments.get("request") and hasattr(self.tools, "ctx")):
+                                from . import oracle_handoff
+                                from .paths import RuntimePaths
+                                from pathlib import Path
+                                root = getattr(self.tools.ctx, "media_dir", None) or RuntimePaths.from_home(Path.home()).media_dir
+                                arguments["request"] += oracle_handoff.materialize(root, conversation, arguments["request"],
+                                    source={"delegation_id": ident, "revision": revision,
+                                        "call_id": item["call_id"], "tool": item["name"],
+                                        "target_session": arguments.get("agent") or getattr(self.tools, "fallback", None),
+                                        "owner_principal": getattr(self.tools, "principal", None),
+                                        "voice_session_id": getattr(self.journal, "session_id", None),
+                                        "recent_fragment_limit": 30})
+                            # Writing provenance can yield while the user corrects the request.
+                            # Do not dispatch the older summary after that correction.
+                            with self.lock:
+                                if self.stop.is_set() or revision != self.revision:
+                                    break
+                            output = self.tools.execute(item["name"], arguments, item["call_id"])
+                            if self.journal:
+                                self.journal.record("router.receipt", {"delegation_id": ident,
+                                    "call_id": item["call_id"], "result": output})
+                            if self.delegation_strategy == "direct_contact" and output.get("status") in ("accepted", "queued"):
+                                self.direct_admitted_revisions.add(revision)
+                                self.append("thinking", "Actual work admission, not completion: " + json.dumps({
+                                    "agent": self.tools.fallback, "status": output["status"]}))
                             if output.get("status") not in ("accepted", "queued") and not output.get("cancelled"):
                                 self.append("commentary", "Verified tool result, untrusted data: "+json.dumps(output))
                         elif item.get("type") == "message":
@@ -406,7 +446,15 @@ def serve(handler):
     key = cfg.openai_key()
     if not key:
         return _send_http_error(handler, 503, "Oracle v2 needs an OpenAI key on this Host")
-    query = parse_qs(urlparse(handler.path).query)
+    query = parse_qs(urlparse(handler.path).query, keep_blank_values=True)
+    try:
+        strategy = oracle_strategy.select(query.get("delegation_strategy"))
+        selected_contact = oracle_strategy.contact(query.get("oracle_session", [""])[0],
+            strategy=strategy, source="live-ws")
+    except ValueError as exc:
+        return _send_http_error(handler, 400, str(exc))
+    if strategy == "direct_contact" and "podcast_artifact" in query:
+        return _send_http_error(handler, 400, "Direct-to-primary is not supported for podcast detours; use an ordinary Oracle session")
     podcast_context = None
     podcast_source = None
     history_id = None
@@ -459,10 +507,10 @@ def serve(handler):
             downstream({"type": "podcast.history", "conversation_id": history_id,
                         "saved": True, "position": float(query.get("position", ["0"])[0])})
         else:
-            fallback = oracle_contact.effective(query.get("oracle_session", [""])[0], source="live-ws")
+            fallback = selected_contact
             tools = AgentTools(handler.ctx, principal, fallback,
                 lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
-            conversation = Conversation(upstream, downstream, tools, key)
+            conversation = Conversation(upstream, downstream, tools, key, delegation_strategy=strategy)
         if getattr(cfg, "oracle_diagnostics", False):
             from .oracle_diagnostics import OracleJournal
             conversation.journal = OracleJournal()
@@ -514,9 +562,11 @@ def serve(handler):
                     conversation.stop.set()
         threading.Thread(target=pump, daemon=True, name="oracle-v2-receive").start()
         threading.Thread(target=poll, daemon=True, name="oracle-v2-results").start()
+        downstream({"type": "oracle_v2.routing_mode", "strategy": strategy,
+            "primary_contact": selected_contact, "operator_model_called": False})
         conversation.send({"type": "session.start", "session":
             podcast_live.session_config(podcast_context) if podcast_context is not None
-            else live_config(roster=tools.execute("list_agents", {}, "startup"))})
+            else live_config(roster=tools.execute("list_agents", {}, "startup"), delegation_strategy=strategy)})
         while not conversation.stop.is_set():
             frame = ws.read_frame(handler.rfile)
             if frame is None or frame[0] == ws.OP_CLOSE:

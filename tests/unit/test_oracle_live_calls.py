@@ -230,3 +230,40 @@ def test_invalid_call_reports_the_reason_and_logs_it(monkeypatch):
     calls.handle(handler, "status")
     assert sent[-1][0] == 400 and "boom" in sent[-1][1]["error"]
     assert logged and logged[-1][0] == "oracleLiveCallInvalid" and logged[-1][2] == "status"
+
+
+def test_explicit_direct_mode_overrides_config_and_retry_cannot_change_it(manager, tmp_path):
+    from lib import agents
+    _, records, negotiate = manager
+    agents.create_agent(persona='Primary',session='primary',voice_id='fixture',cwd=str(tmp_path))
+    first=create(negotiate,oracle_session='primary',delegation_strategy='direct_contact')
+    assert calls.get('owner','attempt-1').conversation.delegation_strategy=='direct_contact'
+    assert 'Direct-to-primary mode is active' in records[0][1]['session']['instructions']
+    assert create(negotiate,oracle_session='primary',delegation_strategy='direct_contact') == first
+    with pytest.raises(calls.CallError,match='different context'):
+        create(negotiate,oracle_session='primary',delegation_strategy='operator')
+    assert len(records)==1
+
+
+def test_direct_invalid_contact_fails_before_paid_call(manager):
+    _,records,negotiate=manager
+    with pytest.raises(calls.CallError,match='valid selected contact'):
+        create(negotiate,oracle_session='gone',delegation_strategy='direct_contact')
+    assert records==[]
+
+
+def test_explicit_operator_overrides_legacy_direct_config(manager, monkeypatch):
+    cfg,records,negotiate=manager
+    from dataclasses import replace
+    cfg=replace(cfg,oracle_delegation_strategy='direct_contact')
+    monkeypatch.setattr(calls.config,'load',lambda:cfg)
+    create(negotiate,delegation_strategy='operator')
+    assert calls.get('owner','attempt-1').conversation.delegation_strategy=='operator'
+    assert 'Direct-to-primary mode is active' not in records[0][1]['session']['instructions']
+
+
+def test_rtc_direct_podcast_fails_before_paid_call(manager):
+    _,records,negotiate=manager
+    with pytest.raises(calls.CallError,match='podcast detours'):
+        create(negotiate,delegation_strategy='direct_contact',podcast={})
+    assert records==[]

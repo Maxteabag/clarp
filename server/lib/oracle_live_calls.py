@@ -11,7 +11,7 @@ import json
 import threading
 import time
 
-from . import config, oracle_contact, oracle_delegations, oracle_live, oracle_live_provider, oracle_memory
+from . import oracle_strategy, config, oracle_contact, oracle_delegations, oracle_live, oracle_live_provider, oracle_memory
 from .log import log_exception
 from .oracle_calls import AgentTools, validate_offer
 from .oracle_live_wire import LiveWire
@@ -50,10 +50,11 @@ def _podcast(data):
 
 
 class Call:
-    def __init__(self, *, principal, attempt, digest, token, wire, tools, cfg, podcast, ctx, clock=time.monotonic):
+    def __init__(self, *, principal, attempt, digest, token, wire, tools, cfg, podcast, ctx, clock=time.monotonic, delegation_strategy=None):
         self.principal, self.attempt, self.digest, self.token = principal, attempt, digest, token
         self.wire, self.tools, self.cfg, self.podcast, self.ctx = wire, tools, cfg, podcast, ctx
         self.clock = clock
+        self.delegation_strategy = oracle_strategy.select(delegation_strategy, default=getattr(cfg, "oracle_delegation_strategy", "operator"))
         self.lock = threading.RLock()
         self.events = deque(maxlen=512)
         self.cursor = 0
@@ -79,7 +80,7 @@ class Call:
 
     def open(self, sdp, negotiate):
         history = self.memory.startup_history(roster=self.tools.execute("list_agents", {}, "startup")) if self.memory else []
-        session = oracle_live.live_config(wire=self.wire, webrtc=True, history=history)
+        session = oracle_live.live_config(wire=self.wire, webrtc=True, history=history, delegation_strategy=self.delegation_strategy)
         if self.podcast:
             from . import podcast_live, podcast_history
             session["instructions"] += "\n" + podcast_live.PROMPT
@@ -96,15 +97,17 @@ class Call:
                 tools=self.tools, router_backend=self.cfg.oracle_router_backend, wire=self.wire,
                 images=self.podcast["images"], history_id=self.history_id, media_dir=getattr(self.ctx, "media_dir", None),
                 memory=self.memory, provider_session=result["session_id"],
-                delegation_strategy=getattr(self.cfg, "oracle_delegation_strategy", "operator"), router_reuse=getattr(self.cfg, "oracle_router_reuse", False))
+                delegation_strategy=self.delegation_strategy, router_reuse=getattr(self.cfg, "oracle_router_reuse", False))
             self.emit({"type": "podcast.history", "conversation_id": self.history_id, "saved": True,
                        "position": self.podcast["position"]})
         else:
             conversation = oracle_live.Conversation(result["socket"], self.emit, self.tools, self.cfg.openai_key(),
                 router_backend=self.cfg.oracle_router_backend, wire=self.wire,
                 memory=self.memory, provider_session=result["session_id"],
-                delegation_strategy=getattr(self.cfg, "oracle_delegation_strategy", "operator"), router_reuse=getattr(self.cfg, "oracle_router_reuse", False))
+                delegation_strategy=self.delegation_strategy, router_reuse=getattr(self.cfg, "oracle_router_reuse", False))
         self.conversation = conversation
+        self.emit({"type": "oracle_v2.routing_mode", "strategy": self.delegation_strategy,
+            "primary_contact": self.tools.fallback, "operator_model_called": False})
         if self.cfg.oracle_diagnostics:
             from .oracle_diagnostics import OracleJournal
             conversation.journal = OracleJournal()
@@ -234,21 +237,29 @@ def create(*, ctx, principal, data, stop, negotiate=oracle_live_provider.negotia
     except ValueError as exc:
         raise CallError(str(exc), 400) from None
     cfg = config.load()
-    if getattr(cfg, "oracle_delegation_strategy", "operator") not in ("operator", "direct_contact"):
-        raise CallError("Unsupported Oracle delegation strategy", 400)
+    try:
+        strategy = oracle_strategy.select(data.get("delegation_strategy"),
+            default=getattr(cfg, "oracle_delegation_strategy", "operator"))
+    except ValueError as exc:
+        raise CallError(str(exc), 400) from None
     wire = LiveWire(cfg.oracle_voice_backend)
     if data.get("mode") != wire.mode:
         raise CallError("Oracle voice account changed; refresh the connection settings", 409)
-    if getattr(cfg, "oracle_delegation_strategy", "operator") == "operator" and cfg.oracle_router_backend == "api" and not cfg.openai_key():
+    if strategy == "operator" and cfg.oracle_router_backend == "api" and not cfg.openai_key():
         raise CallError("Oracle API routing requires an OpenAI key on this Host", 503)
+    if strategy == "direct_contact" and data.get("podcast") is not None:
+        raise CallError("Direct-to-primary is not supported for podcast detours; use an ordinary Oracle session", 400)
     podcast = _podcast(data)
     # The Host's contact wins; a client value is honoured only if it names a
     # live agent. This used to call resolve() and let the ValueError escape,
     # which the generic handler turned into 400 "Invalid Oracle call" with no
     # log line -- a deleted contact then failed every WebRTC create for days.
-    fallback = oracle_contact.effective(data.get("oracle_session"), source="live-webrtc")
+    try:
+        fallback = oracle_strategy.contact(data.get("oracle_session"), strategy=strategy, source="live-webrtc")
+    except ValueError as exc:
+        raise CallError(str(exc), 400) from None
     tools = AgentTools(ctx, principal, fallback, stop)
-    digest = hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    digest = hashlib.sha256(json.dumps({"request": data, "effective_strategy": strategy, "primary_contact": fallback}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     key = (principal, attempt)
     with _LOCK:
         previous = _ATTEMPTS.get(key)
@@ -268,7 +279,7 @@ def create(*, ctx, principal, data, stop, negotiate=oracle_live_provider.negotia
         token = oracle_live.claim_connection(principal)
         if not token: raise CallError("Another Oracle session is still closing")
         call = Call(principal=principal, attempt=attempt, digest=digest, token=token,
-                    wire=wire, tools=tools, cfg=cfg, podcast=podcast, ctx=ctx)
+                    wire=wire, tools=tools, cfg=cfg, podcast=podcast, ctx=ctx, delegation_strategy=strategy)
         try:
             call.memory = oracle_memory.open_thread(principal, fallback, connection_id=token,
                 thread_id=data.get("thread_id"), fresh=data.get("new_conversation") is True)
