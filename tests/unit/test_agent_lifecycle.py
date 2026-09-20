@@ -326,50 +326,27 @@ def test_lifecycle_service_releases_session_without_deleting_contact(tmp_path):
     assert agents_db.get_by_session(replacement.session)["persona"] == "Custom Nova"
 
 
-def test_lifecycle_service_enforces_tier_backend_locking(tmp_path):
+def test_lifecycle_service_treats_tier_backend_as_a_recommendation(tmp_path):
+    """Requested 2026-09-20: a contact's tier is advice, never a wall.
+
+    The owner may run a Claude-tier contact on Codex (and the reverse); the
+    Host records what was asked for instead of refusing with
+    tier_backend_mismatch."""
     ctx = _ctx(tmp_path)
     service = AgentLifecycleService(ctx)
 
-    # 1. Claude contact rejects non-Claude backend
-    with pytest.raises(AgentLifecycleError) as exc:
-        service.create({
-            "name": "Rachel", "session": "rachel-test", "cwd": str(tmp_path),
-            "backend": "codex",
-        })
-    assert exc.value.code == "tier_backend_mismatch"
-    assert exc.value.status == 400
+    crossed = service.create({
+        "name": "Rachel", "session": "rachel-on-codex", "cwd": str(tmp_path),
+        "backend": "codex",
+    })
+    assert crossed.backend == "codex"
+    assert agents_db.get_by_session("rachel-on-codex")["backend"] == "codex"
 
-    # 2. Codex contact rejects non-Codex backend
-    with pytest.raises(AgentLifecycleError) as exc:
-        service.create({
-            "name": "Axel", "session": "axel-test", "cwd": str(tmp_path),
-            "backend": "claude",
-        })
-    assert exc.value.code == "tier_backend_mismatch"
-
-    # 3. Grok contact rejects non-Grok backend
-    with pytest.raises(AgentLifecycleError) as exc:
-        service.create({
-            "name": "Margrok", "session": "margrok-test", "cwd": str(tmp_path),
-            "backend": "claude",
-        })
-    assert exc.value.code == "tier_backend_mismatch"
-
-    # 4. Gemini contact rejects non-AGY backend
-    with pytest.raises(AgentLifecycleError) as exc:
-        service.create({
-            "name": "Pip", "session": "pip-test", "cwd": str(tmp_path),
-            "backend": "claude",
-        })
-    assert exc.value.code == "tier_backend_mismatch"
-
-    # 5. Janitor contact rejects non-Codex backend
-    with pytest.raises(AgentLifecycleError) as exc:
-        service.create({
-            "name": "Rivet", "session": "rivet-test", "cwd": str(tmp_path),
-            "backend": "claude",
-        })
-    assert exc.value.code == "tier_backend_mismatch"
+    reverse = service.create({
+        "name": "Axel", "session": "axel-on-claude", "cwd": str(tmp_path),
+        "backend": "claude",
+    })
+    assert reverse.backend == "claude"
 
     # 6. Default contacts with matching backends succeed
     claude_res = service.create({

@@ -179,25 +179,15 @@ class AgentLifecycleService:
                     and retained_effort not in backends.valid_efforts(backend)
                 )
 
-        # Enforce tier-to-backend locking: contacts can only run on their matching backend
+        # A contact's tier names the backend it was designed for. That is a
+        # recommendation the clients surface, not a rule: the owner may run
+        # Rachel on Codex or Cipher on Claude (requested 2026-09-20).
         persona_tier = persona_definition.get("tier") if persona_definition else ""
-        is_valid_tier, required_backend = roster.validate_contact_backend(persona, backend, persona_tier)
-        if not is_valid_tier and required_backend:
-            tier_name = persona_tier or roster.tier_for_contact(persona) or "locked"
-            raise AgentLifecycleError(
-                400,
-                "tier_backend_mismatch",
-                message=(
-                    f"Contact '{persona}' ({tier_name.title()} tier) can only run on "
-                    f"the '{required_backend}' backend (received: '{backend}')."
-                ),
-                extra={
-                    "contact": persona,
-                    "tier": tier_name,
-                    "allowed_backend": required_backend,
-                    "backend": backend,
-                },
-            )
+        is_recommended, recommended_backend = roster.validate_contact_backend(persona, backend, persona_tier)
+        if not is_recommended and recommended_backend:
+            log(f"[agents] {persona} starts on '{backend}'; its "
+                f"{(persona_tier or roster.tier_for_contact(persona) or 'listed')} tier "
+                f"recommends '{recommended_backend}'")
 
         occupied = next((
             (sid, info) for sid, info in agents.items()

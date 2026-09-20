@@ -345,3 +345,77 @@ def test_snapshot_survives_a_failing_quota_projection(tmp_path, monkeypatch):
 
     snap = build_agent_snapshot(_quota_ctx(tmp_path))
     assert snap["agents"][0]["backend_quota"] is None
+
+def _ship_static_avatar(static_root, name):
+    folder = static_root / "avatars"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / name).write_bytes(b"\x89PNG\r\n\x1a\n" + name.encode())
+
+
+def test_snapshot_names_the_shipped_persona_portrait_with_a_content_version(tmp_path):
+    # Reported 2026-09-20: Codex contacts (Cipher, Nova, ...) had no face in
+    # the app. Clients guessed /static/avatars/<slug>.png unversioned, so the
+    # portrait was re-downloaded on every reconnect and sat as a placeholder
+    # for seconds behind the relay. The Host now names the file it ships.
+    static_root = tmp_path / "static"
+    _ship_static_avatar(static_root, "cipher.png")
+    agents_db.create_agent(
+        persona="Cipher", voice_id="V", cwd=str(tmp_path), session="cipher",
+        backend="codex", model="")
+
+    snap = build_agent_snapshot(_model_avatar_ctx(tmp_path, static_root))
+
+    url = snap["agents"][0]["avatar_url"]
+    assert url.startswith("/static/avatars/cipher.png?v=")
+    assert len(url.split("?v=", 1)[1]) == 16
+
+
+def test_snapshot_gives_a_faceless_persona_the_backend_default_portrait(tmp_path):
+    # Codex-8194, Astra and any custom name had no PNG at all: the guessed URL
+    # was a 404 the app retried every few seconds. The backend default stands in.
+    static_root = tmp_path / "static"
+    _ship_static_avatar(static_root, "default-codex.png")
+    _ship_static_avatar(static_root, "default-gemini.png")
+    agents_db.create_agent(
+        persona="Codex-8194", voice_id="V", cwd=str(tmp_path), session="c8194",
+        backend="codex", model="")
+    agents_db.create_agent(
+        persona="Pip", voice_id="V", cwd=str(tmp_path), session="pip",
+        backend="agy", model="")
+
+    snap = build_agent_snapshot(_model_avatar_ctx(tmp_path, static_root))
+
+    by_name = {row["persona"]: row["avatar_url"] for row in snap["agents"]}
+    assert by_name["Codex-8194"].startswith("/static/avatars/default-codex.png?v=")
+    # Antigravity's default portrait ships under the gemini name.
+    assert by_name["Pip"].startswith("/static/avatars/default-gemini.png?v=")
+
+
+def test_snapshot_keeps_a_symbol_portrait_faceless_on_purpose(tmp_path):
+    # An SF Symbol the owner configured is the portrait; no PNG may override it.
+    static_root = tmp_path / "static"
+    _ship_static_avatar(static_root, "default-codex.png")
+    agent_id = agents_db.create_agent(
+        persona="Silas", voice_id="V", cwd=str(tmp_path), session="silas",
+        backend="codex", model="")
+    db.conn().execute("UPDATE agents SET avatar_symbol=? WHERE agent_id=?",
+                      ("gauge.with.needle", agent_id))
+
+    snap = build_agent_snapshot(_model_avatar_ctx(tmp_path, static_root))
+
+    assert snap["agents"][0]["avatar_url"] == ""
+    assert snap["agents"][0]["avatar_symbol"] == "gauge.with.needle"
+
+
+def test_snapshot_never_reports_a_busy_agent_as_started_in_1970(tmp_path, monkeypatch):
+    # Reported 2026-09-20: a header read "Working 497194:34:56" because a busy
+    # agent with no recorded turn start was projected with turn_started_at 0.
+    from lib import backends
+    agent_id = agents_db.create_agent(
+        persona="Felix", voice_id="V", cwd=str(tmp_path), session="felix",
+        backend="codex", model="")
+    monkeypatch.setattr(backends, "active_handles", lambda backend, aid: [object()] if aid == agent_id else [])
+    snap = build_agent_snapshot(_model_avatar_ctx(tmp_path, tmp_path / "static"))
+    row = next(r for r in snap["agents"] if r["persona"] == "Felix")
+    assert row["busy"] or row["state"] in {"thinking", "tool", "compacting", "background"}
+    assert row["turn_started_at"] > 1_700_000_000_000

@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 import json
+import time
 
 from . import (agent_goals, agents as agents_db, avatar_settings, backend_usage, backends,
                compaction, db,
@@ -12,7 +13,8 @@ from . import (agent_goals, agents as agents_db, avatar_settings, backend_usage,
 from . import reconcile
 from .session_models import agent_model
 from . import personas as persona_store
-from .avatar_urls import versioned_avatar_url, janitor_avatar_url
+from .avatar_urls import (versioned_avatar_url, janitor_avatar_url,
+                          static_persona_avatar_url)
 from .log import log_exception
 from .activity import state_activity_event
 from .transcript_log import context_tokens_from_jsonl, find_latest_jsonl
@@ -120,6 +122,10 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         turn_started_at = int(state.get('turn_started_at') or 0)
         if active and not turn_started_at:
             turn_started_at = int(rt.get('open_turn_started_at') or 0)
+        if active and turn_started_at <= 0:
+            # Busy with no recorded turn start (a handle adopted mid-turn):
+            # "since now" is honest; 0 read as 1970 in a client's timer.
+            turn_started_at = int(time.time() * 1000)
         message = messages.get(agent_id, {})
         message_head = message.get('head', {'preview': '', 'message_id': ''})
         # Agree with /log's contract: no bound backend session means an empty
@@ -158,7 +164,9 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "avatar_symbol":  a.get("avatar_symbol") or "",
             "avatar_url": janitor_avatar_url(bool(a.get("is_janitor")),
                 janitor_templates.get(agent_id), static_root=static_root) or versioned_avatar_url(
-                "/avatars", agent_id, str(a.get("avatar_path") or "")),
+                "/avatars", agent_id, str(a.get("avatar_path") or "")) or (
+                "" if a.get("avatar_symbol") else static_persona_avatar_url(
+                    a["persona"], backend, static_root=static_root)),
             "model_avatar_url": model_avatar_url,
             "cwd":            a["cwd"],
             "session":        a["session"],
