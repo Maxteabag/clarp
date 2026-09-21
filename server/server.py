@@ -5212,7 +5212,7 @@ class Handler(BaseHTTPRequestHandler):
             log_exception("transcribeReadFail", e)
             self._record_voice_corrupt(utterance_id, client_ts, "bad_content_length")
             return self._send(400, f'{{"error":"{e}"}}'.encode(), "application/json")
-        if n <= 0 or n > 25 * 1024 * 1024:  # cap at 25 MB per clip
+        if n <= 0 or n > 64 * 1024 * 1024:  # bounded long-recording uploads (64 MiB)
             self._record_voice_corrupt(utterance_id, client_ts, "bad_size", bytes=n)
             return self._send(400, b'{"error":"bad size"}', "application/json")
         # Once the body read starts, a disconnect means there is nothing
