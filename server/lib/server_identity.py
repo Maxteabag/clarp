@@ -74,6 +74,7 @@ FEATURES: tuple[str, ...] = (
     "oracle_contact",
     "oracle_direct_contact",
     "turn_queue_resume",
+    "controller_narration",
 )
 
 
@@ -88,6 +89,7 @@ FEATURE_CONTRACTS["backend_quota"] = 3
 FEATURE_CONTRACTS["oracle_contact"] = 7
 FEATURE_CONTRACTS["oracle_direct_contact"] = 8
 FEATURE_CONTRACTS["turn_queue_resume"] = 7
+FEATURE_CONTRACTS["controller_narration"] = 8
 
 
 def capabilities() -> dict[str, object]:
