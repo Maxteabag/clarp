@@ -94,3 +94,24 @@ def test_migration_from_previous_version_keeps_podcast_history():
     assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     assert memory.open_thread("phone", "main", connection_id="one").load()["revision"] == 0
     assert con.execute("SELECT count(*) FROM podcast_conversations").fetchone()[0] == 0
+
+
+def test_plain_handoff_inlines_exact_dialogue_and_keeps_audit(tmp_path):
+    store = memory.open_thread("phone", "main", connection_id="one")
+    rows = [{"role":"user","text":"Use workspace two."},
+            {"role":"assistant","text":"Deploy?"},
+            {"role":"user","text":"No, only inspect the terrace in fullscreen."}]
+    ref = store.materialize_reference("Deploy", [], tmp_path, conversation=rows)
+    assert json.loads(ref.split('\n')[-2]) == rows
+    audit = json.loads(next(tmp_path.rglob('*.json')).read_text())
+    assert audit['conversation'] == rows
+    assert audit['turn_boundaries_verified'] is False
+
+
+def test_linked_work_keeps_mandatory_reference_workflow(tmp_path):
+    store = memory.open_thread("phone", "main", connection_id="one")
+    ref = store.materialize_reference("Status", [], tmp_path,
+        conversation=[{"role":"user","text":"What happened to that task?"}],
+        work=[{"operation_id":"original"}])
+    assert 'without a file read' not in ref
+    assert 'Read relevant material' in ref
