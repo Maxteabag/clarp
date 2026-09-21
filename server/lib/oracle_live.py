@@ -18,7 +18,7 @@ import uuid
 from urllib.parse import parse_qs, urlparse
 
 from . import config, oracle_delegations, oracle_router, oracle_memory, oracle_work, ws
-from . import oracle_contact, oracle_strategy
+from . import oracle_contact, oracle_strategy, oracle_voice_context
 from .log import log
 from .oracle_calls import AgentTools, session_config as realtime_config
 from .oracle_context import context_chunks, result_context
@@ -157,9 +157,9 @@ capture time and distinguish a captured image from current live state.
 """
 
 
-def live_config(*, wire=None, webrtc=False, history=(), delegation_strategy="operator"):
+def live_config(*, wire=None, webrtc=False, history=(), delegation_strategy="operator", voice_context=None):
     prompt = oracle_strategy.DIRECT_INSTRUCTIONS if delegation_strategy == "direct_contact" else PROMPT
-    return (wire or LiveWire()).session(prompt, webrtc=webrtc, history=history)
+    return (wire or LiveWire()).session(prompt + oracle_voice_context.instructions(voice_context), webrtc=webrtc, history=history)
 
 
 def router_tools():
@@ -592,8 +592,11 @@ class Conversation:
                             if output.get("status") in ("accepted", "queued"):
                                 receipt = {**output, "agent": arguments.get("agent") or getattr(self.tools, "fallback", None),
                                            "request": arguments.get("request", "")}
-                                self.append("thinking", "Work admission receipt, not completion: " + json.dumps(receipt),
-                                            delegation_id=ident)
+                                context = (oracle_strategy.admission_context(receipt["agent"],
+                                    output.get("operation_id"), arguments.get("request", ""), output["status"])
+                                    if self.delegation_strategy == "direct_contact" else
+                                    "Work admission receipt, not completion: " + json.dumps(receipt))
+                                self.append("thinking", context, delegation_id=ident)
                             else:
                                 self.append("commentary", "Verified tool result, untrusted data: "+json.dumps(output),
                                             delegation_id=ident)
@@ -663,10 +666,20 @@ class Conversation:
             provider_id = self.provider_delegations.get(row["delegation_id"])
         key = finding_identity(row)
         shared = self.forwarded_findings.get(key) if key else None
+        if self.delegation_strategy == "direct_contact" and shared:
+            self.results_sent.add(row["delegation_id"])
+            self.checkpoint()
+            if self.journal:
+                self.journal.record("result.shared_native_finding", {"operation_id":row["delegation_id"],
+                    "same_finding_as":shared, "provider_reinjected":False})
+            return
         payload = ("Work receipt resolved by an already provided native finding: " + json.dumps({
             "operation_id": row["delegation_id"], "same_finding_as": shared, "status": row["status"],
             "new_finding": False}) if shared else result_context(row))
-        sent = self.append("thinking" if shared else "commentary", payload, delegation_id=provider_id)
+        channel = "thinking" if shared else "commentary"
+        if self.delegation_strategy == "direct_contact" and not shared:
+            payload = oracle_strategy.direct_result_context(row)
+        sent = self.append(channel, payload, delegation_id=provider_id)
         complete = len(sent) == sum(1 for _ in context_chunks(payload))
         if complete:
             self.results_sent.add(row["delegation_id"])
@@ -743,7 +756,8 @@ def serve(handler):
             default=getattr(cfg, "oracle_delegation_strategy", "operator"))
         selected_contact = oracle_strategy.contact(query.get("oracle_session", [""])[0],
             strategy=strategy, source="live-ws")
-    except ValueError as exc:
+        voice_context = oracle_voice_context.load(selected_contact)
+    except (ValueError, OSError, TypeError) as exc:
         return _send_http_error(handler, 400, str(exc))
     if strategy == "direct_contact" and "podcast_artifact" in query:
         return _send_http_error(handler, 400, "Direct-to-primary is not supported for podcast detours; use an ordinary Oracle session")
@@ -822,7 +836,8 @@ def serve(handler):
             conversation.journal = OracleJournal()
             conversation.journal.record("session.open", {
                 "model": MODEL, "voice": VOICE, "transport": "clarp-live-v2",
-                "podcast": podcast_context is not None})
+                "podcast": podcast_context is not None,
+                "voice_context_sha256": (voice_context or {}).get("sidecar_sha256")})
         opened_at = time.monotonic()
         log("oracleV2Open", f"model={MODEL} voice={VOICE} podcast={podcast_context is not None}"
             + (f" journal={conversation.journal.session_id}" if conversation.journal else ""))
@@ -868,7 +883,7 @@ def serve(handler):
                     conversation.stop.set()
         threading.Thread(target=pump, daemon=True, name="oracle-v2-receive").start()
         threading.Thread(target=poll, daemon=True, name="oracle-v2-results").start()
-        initial = podcast_live.session_config(podcast_context) if podcast_context is not None else live_config(delegation_strategy=strategy)
+        initial = podcast_live.session_config(podcast_context) if podcast_context is not None else live_config(delegation_strategy=strategy, voice_context=voice_context)
         saved = memory.startup_history(roster=tools.execute("list_agents", {}, "startup"))
         initial["input"] = saved + initial.get("input", [])
         conversation.send({"type": "session.start", "session": initial})

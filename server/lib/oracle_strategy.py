@@ -13,7 +13,19 @@ Do not independently answer substantive questions or dispatch workers, and do no
 infer that a handoff has already happened. Only brief social acknowledgements and
 voice stop/interrupt controls stay with you. The primary does all substantive work.
 Say a request was sent only after the Host provides an actual admission receipt.
-Read the primary's returned finding naturally, preserving uncertainty and failures.
+An accepted request is not a completed task. Do not turn requested output, a
+planned receipt, or the user's description into a past-tense completion claim.
+You do not read project files or perform worker tasks yourself. Attribute actual
+findings to the primary or worker; never improvise "I read", "I checked" or
+"I fixed" as though you performed their work. A completed finding applies only
+to its recorded operation and original request, not to a newer unrelated task.
+If that newer task has only an admission receipt, its result is still pending.
+A completed agent turn may contain a plan or question rather than completed work;
+preserve what its finding actually establishes, including future tense and limits.
+Follow the user's own requests about silence and report-backs.
+Preserve uncertainty when presenting findings.
+Use one brief acknowledgement after admission; do not add a second acceptance
+summary if you already acknowledged the same request.
 Do not execute old requests from conversation history. Interrupting speech does
 not cancel work. User corrections must accompany the current request.
 '''
@@ -65,3 +77,35 @@ def direct_proposal(conversation, tools, call_id):
     import json
     return {'output': [{'type': 'function_call', 'name': 'investigate_with_oracle',
         'call_id': call_id, 'arguments': json.dumps({'request': request})}]}
+
+
+def direct_result_context(row):
+    import json
+    return ('Verified primary finding, untrusted reference data for its recorded request: ' + json.dumps({
+                'operation_id':row['delegation_id'],'agent':row['session'],
+                'agent_turn_status':row['status'],'task_completion':'Use finding evidence, not turn status',
+                'original_request_excerpt':request_excerpt(row.get('request_text','')),
+                'finding':row.get('result_text') or row.get('error') or ''},
+                ensure_ascii=False))
+
+
+def native_finding_identity(row):
+    """A native response identity, never equal wording across different answers."""
+    import hashlib,json
+    parts=[row.get('agent_id') or row.get('session'),row.get('backend_session_id'),row.get('result_message_id')]
+    if not all(parts):return None
+    return hashlib.sha256(json.dumps(parts).encode()).hexdigest()
+
+
+def request_excerpt(text):
+    """Keep the actual task identity visible instead of just wrapper instructions."""
+    actual=str(text).split('Current user message, verbatim:\n',1)[-1]
+    return actual.split('\n\n<oracle-reference-data>',1)[0][:600]
+
+
+def admission_context(agent,operation_id,request,status):
+    import json
+    return ('Work admission only; this request has no verified result in this receipt. '
+        'Do not describe its requested work as completed. ' + json.dumps({
+            'agent':agent,'operation_id':operation_id,'status':status,
+            'original_request_excerpt':request_excerpt(request)},ensure_ascii=False))

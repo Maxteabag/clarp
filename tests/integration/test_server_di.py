@@ -3320,6 +3320,10 @@ def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch,
             receipt = json.loads(client.recv())
             assert receipt["type"] == "podcast.history" and receipt["saved"]
         assert json.loads(client.recv())["type"] == "session.started"
+        if not podcast:
+            context = json.loads(client.recv())
+            assert context["type"] == "oracle_v2.context"
+            assert context["thread_id"]
         client.send(json.dumps({"type":"session.start","session":{"model":"arbitrary"}}))
         assert json.loads(client.recv())["type"] == "oracle_v2.notice"
         client.send(json.dumps({"type":"session.input_audio.append","audio":base64.b64encode(b'\x00\x20'*100).decode()}))

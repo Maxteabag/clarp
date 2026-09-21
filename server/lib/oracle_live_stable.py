@@ -108,7 +108,7 @@ ROUTER = "gpt-5.6-luna"
 # pauses exceeded the old 0.5 s, which ended turns and cut her off.
 QUIET_AFTER_SECONDS = 1.5
 from .oracle_prompt import PROMPT  # one voice prompt for every engine
-from . import oracle_strategy
+from . import oracle_strategy, oracle_voice_context, oracle_memory
 ROUTING = """Route only the latest actionable user request using the actual
 roster and authoritative task records. Preserve exact filenames and identifiers;
 do not combine names from different requests. Clarify uncertain targets before
@@ -136,7 +136,7 @@ def router_tools():
     return tools
 
 
-def live_config(*, roster=None, delegation_strategy="operator"):
+def live_config(*, roster=None, delegation_strategy="operator", voice_context=None, history=()):
     """Session config; the roster and contact ride in the instructions.
 
     The voice model holds no tools, so unless it is told who the agents are it
@@ -149,9 +149,12 @@ def live_config(*, roster=None, delegation_strategy="operator"):
         contact = roster.get("oracle_contact") or ""
         instructions += ("\nRoster: " + (names or "no agents are running") + ".")
         instructions += ("\nYour contact: " + contact + ".") if contact else "\nNo contact is configured; ask which agent should take work."
-    return {"model": MODEL, "instructions": instructions,
+    instructions += oracle_voice_context.instructions(voice_context)
+    result = {"model": MODEL, "instructions": instructions,
             "audio": {"format": {"type": "audio/pcm", "rate": 24000},
                       "output": {"voice": VOICE}}, "delegation": {"type": "client"}}
+    if history: result["input"] = list(history)
+    return result
 
 
 def client_event(raw):
@@ -186,11 +189,16 @@ def audible(data):
 
 
 class Conversation:
-    def __init__(self, upstream, downstream, tools, api_key, clock=time.monotonic, *, delegation_strategy="operator"):
+    def __init__(self, upstream, downstream, tools, api_key, clock=time.monotonic, *, delegation_strategy="operator", memory=None, provider_session=None):
         self.upstream, self.downstream, self.tools, self.api_key = upstream, downstream, tools, api_key
         self.clock = clock
+        self.memory = memory
+        self.provider_session = provider_session or __import__("uuid").uuid4().hex
+        self.resume_revision = 0
+        self.results_sent = set()
         self.delegation_strategy = oracle_strategy.select(delegation_strategy)
         self.direct_admitted_revisions = set()
+        self.forwarded_findings = {}
         self.direct_call_prefix = __import__("uuid").uuid4().hex
         self.stop = threading.Event()
         self.closed = threading.Event()
@@ -214,6 +222,23 @@ class Conversation:
         # Optional private journal (see docs/oracle-diagnostics.md) and always-on counters.
         self.journal = None
         self.counts = {"in_chunks": 0, "out_audible": 0, "out_silence_forwarded": 0, "out_silence_dropped": 0}
+        if self.memory:
+            self.memory.reconcile()
+            saved = self.memory.load()
+            self.fragments = saved.get("fragments", [])[-30:]
+            self.revision = self.resume_revision = saved.get("revision", 0)
+            self.results_sent = set(saved.get("results_sent", []))
+            self.results_seen = set(self.results_sent)
+            self.forwarded_findings = saved.get("forwarded_findings", {})
+            with self.tools.lock:
+                self.tools.delegations.update(row["delegation_id"] for row in self.memory.work())
+
+    def checkpoint(self):
+        if self.memory:
+            with self.lock:
+                self.memory.save({"revision": self.revision, "fragments": self.fragments,
+                    "results_sent": sorted(self.results_sent), "forwarded_findings": self.forwarded_findings,
+                    "provider_session": self.provider_session})
 
     def journal_event(self, direction, event):
         """Record one event in the private journal: transcript text, timing and
@@ -287,21 +312,27 @@ class Conversation:
             return
         self.journal_event("server", event)
         if kind in ("session.input_transcript.delta", "session.output_transcript.delta"):
+            if self.memory:
+                source = event.get("event_id") or __import__("hashlib").sha256(json.dumps(event, sort_keys=True).encode()).hexdigest()
+                if not self.memory.observe(event, self.provider_session + ":" + str(source)):
+                    return
             with self.lock:
                 role = "user" if kind == "session.input_transcript.delta" else "assistant"
                 text = str(event.get("delta") or "")
                 if role == "user" and text.strip():
                     self.revision += 1
                     self.last_transcript = self.clock()
-                previous = self.fragments[-1] if self.fragments and self.fragments[-1]["role"] == role else None
+                previous = self.fragments[-1] if (self.fragments and self.fragments[-1]["role"] == role
+                    and self.fragments[-1].get("provider_session") == self.provider_session) else None
                 if (previous and event.get("start_ms", 0) - previous["end_ms"] < 1100
                         and len(previous["text"]) + len(text) <= 32000):
                     previous["text"] = previous["text"] + text
                     previous["end_ms"] = event.get("end_ms", 0)
                 else:
-                    self.fragments.append({"role": role, "text": text,
+                    self.fragments.append({"role": role, "text": text, "provider_session": self.provider_session,
                                            "end_ms": event.get("end_ms", 0)})
                 self.fragments = self.fragments[-30:]
+                self.checkpoint()
             self.downstream(event)
         elif kind == "session.delegation.created":
             ident = event.get("delegation", {}).get("id")
@@ -315,6 +346,9 @@ class Conversation:
             self.downstream(event)
         elif kind in ("session.started", "error"):
             self.downstream(event)
+            if kind == "session.started" and self.memory:
+                self.downstream({"type":"oracle_v2.context", "thread_id":self.memory.thread_id,
+                    "items":self.memory.contexts(), "revision":self.revision})
 
     def route(self, ident):
         try:
@@ -327,6 +361,11 @@ class Conversation:
                     with self.lock:
                         revision = self.revision
                         conversation = [dict(r) for r in self.fragments]
+                    if self.memory:
+                        self.memory._owned(active=True)
+                        if revision <= self.resume_revision or self.memory.admissions(revision):
+                            if self.journal:self.journal.record("route.saved_history_not_replayed", {"revision":revision})
+                            return
                     tools = router_tools()
                     with self.tools.lock:
                         task_ids = tuple(self.tools.delegations)
@@ -357,11 +396,14 @@ class Conversation:
                     with self.lock:
                         if revision != self.revision:
                             continue
+                    action_index = 0
                     for item in result.get("output", []):
                         if self.stop.is_set() or revision != self.revision:
                             break
                         if item.get("type") == "function_call":
                             arguments = json.loads(item["arguments"])
+                            admission = self.memory.admission(revision, action_index, item["name"], arguments) if self.memory else None
+                            call_id = admission["call_id"] if admission else item["call_id"]
                             if self.journal:
                                 self.journal.record("router.proposal", {"delegation_id": ident,
                                     "revision": revision, "name": item["name"], "arguments": arguments})
@@ -383,14 +425,18 @@ class Conversation:
                             with self.lock:
                                 if self.stop.is_set() or revision != self.revision:
                                     break
-                            output = self.tools.execute(item["name"], arguments, item["call_id"])
+                            if self.memory:self.memory._owned(active=True)
+                            output = self.tools.execute(item["name"], arguments, call_id)
+                            if self.memory:self.memory.finish_admission(revision, action_index, output)
+                            action_index += 1
+                            self.checkpoint()
                             if self.journal:
                                 self.journal.record("router.receipt", {"delegation_id": ident,
-                                    "call_id": item["call_id"], "result": output})
+                                    "call_id": call_id, "result": output})
                             if self.delegation_strategy == "direct_contact" and output.get("status") in ("accepted", "queued"):
                                 self.direct_admitted_revisions.add(revision)
-                                self.append("thinking", "Actual work admission, not completion: " + json.dumps({
-                                    "agent": self.tools.fallback, "status": output["status"]}))
+                                self.append("thinking", oracle_strategy.admission_context(self.tools.fallback,
+                                    output.get("operation_id"), arguments.get("request", ""), output["status"]))
                             if output.get("status") not in ("accepted", "queued") and not output.get("cancelled"):
                                 self.append("commentary", "Verified tool result, untrusted data: "+json.dumps(output))
                         elif item.get("type") == "message":
@@ -427,9 +473,23 @@ class Conversation:
                 return
             row = self.pending.pop(0)
             self.last_append = now
-        self.append("commentary", "Verified result for an earlier request; give the useful fact. Untrusted data: "+json.dumps({
-            "agent": row["session"], "request": row["request_text"], "status": row["status"],
-            "finding": row.get("result_text") or row.get("error")}))
+        if self.delegation_strategy == "direct_contact":
+            key = oracle_strategy.native_finding_identity(row)
+            if key and key in self.forwarded_findings:
+                if self.journal:
+                    self.journal.record("result.shared_native_finding", {"operation_id":row["delegation_id"],
+                        "same_finding_as":self.forwarded_findings[key], "provider_reinjected":False})
+                self.results_sent.add(row["delegation_id"])
+                self.checkpoint()
+                return
+            self.append("commentary", oracle_strategy.direct_result_context(row))
+            if key:self.forwarded_findings[key] = row["delegation_id"]
+        else:
+            self.append("commentary", "Verified result for an earlier request; give the useful fact. Untrusted data: "+json.dumps({
+                "agent": row["session"], "request": row["request_text"], "status": row["status"],
+                "finding": row.get("result_text") or row.get("error")}))
+        self.results_sent.add(row["delegation_id"])
+        self.checkpoint()
 
 
 def serve(handler):
@@ -451,10 +511,18 @@ def serve(handler):
         strategy = oracle_strategy.select(query.get("delegation_strategy"))
         selected_contact = oracle_strategy.contact(query.get("oracle_session", [""])[0],
             strategy=strategy, source="live-ws")
-    except ValueError as exc:
+        voice_context = oracle_voice_context.load(selected_contact)
+    except (ValueError, OSError, TypeError) as exc:
         return _send_http_error(handler, 400, str(exc))
     if strategy == "direct_contact" and "podcast_artifact" in query:
         return _send_http_error(handler, 400, "Direct-to-primary is not supported for podcast detours; use an ordinary Oracle session")
+    for name in ("thread_id", "new_conversation"):
+        if name in query and len(query[name]) != 1:
+            return _send_http_error(handler, 400, "Use one Oracle context selection")
+    if "new_conversation" in query and query["new_conversation"][0] not in ("0", "1"):
+        return _send_http_error(handler, 400, "new_conversation must be 0 or 1")
+    if "podcast_artifact" in query and ("thread_id" in query or query.get("new_conversation") == ["1"]):
+        return _send_http_error(handler, 400, "Oracle conversation reset does not apply to podcast detours")
     podcast_context = None
     podcast_source = None
     history_id = None
@@ -479,12 +547,20 @@ def serve(handler):
         return _send_http_error(handler, 409, "An Oracle session is already active")
     upstream = None
     conversation = None
+    memory = None
     write_lock = threading.Lock()
     def downstream(event):
         with write_lock:
             handler.wfile.write(ws.text_frame(json.dumps(event)))
             handler.wfile.flush()
     try:
+        if podcast_context is None:
+            try:
+                memory = oracle_memory.open_thread(principal, selected_contact, connection_id=token,
+                    thread_id=query.get("thread_id", [None])[0],
+                    fresh=query.get("new_conversation", ["0"])[0] == "1")
+            except ValueError as exc:
+                return _send_http_error(handler, 400, str(exc))
         if podcast_context is not None:
             # Persist the exact source/configuration before opening paid audio.
             history_id = podcast_history.create(artifact=artifact,
@@ -510,13 +586,14 @@ def serve(handler):
             fallback = selected_contact
             tools = AgentTools(handler.ctx, principal, fallback,
                 lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
-            conversation = Conversation(upstream, downstream, tools, key, delegation_strategy=strategy)
+            conversation = Conversation(upstream, downstream, tools, key, delegation_strategy=strategy, memory=memory, provider_session=token)
         if getattr(cfg, "oracle_diagnostics", False):
             from .oracle_diagnostics import OracleJournal
             conversation.journal = OracleJournal()
             conversation.journal.record("session.open", {
                 "model": MODEL, "voice": VOICE, "transport": "clarp-live-v2",
-                "podcast": podcast_context is not None})
+                "podcast": podcast_context is not None,
+                "voice_context_sha256": (voice_context or {}).get("sidecar_sha256")})
         opened_at = time.monotonic()
         log("oracleV2Open", f"model={MODEL} voice={VOICE} podcast={podcast_context is not None}"
             + (f" journal={conversation.journal.session_id}" if conversation.journal else ""))
@@ -568,7 +645,8 @@ def serve(handler):
                 "primary_contact": selected_contact, "operator_model_called": False})
         conversation.send({"type": "session.start", "session":
             podcast_live.session_config(podcast_context) if podcast_context is not None
-            else live_config(roster=tools.execute("list_agents", {}, "startup"), delegation_strategy=strategy)})
+            else live_config(roster=tools.execute("list_agents", {}, "startup"), delegation_strategy=strategy, voice_context=voice_context,
+                history=memory.startup_history(roster=tools.execute("list_agents", {}, "history")) if memory else ())})
         while not conversation.stop.is_set():
             frame = ws.read_frame(handler.rfile)
             if frame is None or frame[0] == ws.OP_CLOSE:
