@@ -408,6 +408,7 @@ class Handler(BaseHTTPRequestHandler):
         "/voice-preview": "_handle_voice_preview",
         "/cartesia-voices": "_handle_cartesia_voices",
         "/cartesia-voice-preview": "_handle_cartesia_voice_preview",
+        "/controller-narration": "_handle_controller_narration",
         "/tts/providers": "_handle_tts_providers_get",
         "/agent-files": "_handle_agent_files",
         "/agent-file": "_handle_agent_file",
@@ -1192,6 +1193,55 @@ class Handler(BaseHTTPRequestHandler):
                 log_exception("voicePreviewFail", exc,
                               detail=f"{provider}:{voice_id}")
                 return self._send(502, b"preview unavailable")
+        return self._send_file(path)
+
+    def _handle_controller_narration(self):
+        """One spoken line for the iOS Flic tutorial, in the Host's voice.
+
+        Synthesized once per text and cached; a phone rehearsing the same
+        gesture twice costs one Cartesia call. Feature `controller_narration`.
+        """
+        from lib import config as app_config
+        from lib import controller_narration
+        from lib.cartesia_tts import synthesize, CartesiaError
+        text = controller_narration.normalize_text(
+            _raw_query_value(self.path, "text"))
+        if not text:
+            return self._send(400, b"text required (at most 240 characters)")
+        cfg = app_config.load()
+        voice = controller_narration.voice_id(cfg)
+        if not voice or not cfg.cartesia_key():
+            return self._send(503, b"narration voice unavailable")
+        cache = (RuntimePaths.from_home(pathlib.Path.home()).cache_dir
+                 / "controller-narration")
+        if cache.is_symlink():
+            eventlog.emit("server", "controllerNarrationCacheUnsafe",
+                          level="error", detail=str(cache))
+            return self._send(500, b"narration cache unavailable")
+        cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+        key = controller_narration.cache_key(
+            text=text, voice=voice, model=cfg.cartesia_model)
+        path = cache / (key + ".mp3")
+        with _cartesia_preview_lock("narration:" + key):
+            cached = False
+            try:
+                stat = path.stat(follow_symlinks=False)
+                cached = (path.is_file() and not path.is_symlink()
+                          and stat.st_uid == os.geteuid())
+            except FileNotFoundError:
+                pass
+            if not cached:
+                temporary = path.with_name(
+                    f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+                try:
+                    synthesize(text=text, voice_id=voice, out_path=temporary,
+                               api_key=cfg.cartesia_key(), model=cfg.cartesia_model)
+                    temporary.replace(path)
+                except (CartesiaError, OSError) as exc:
+                    try: temporary.unlink()
+                    except OSError: pass
+                    log_exception("controllerNarrationFail", exc, detail=text[:60])
+                    return self._send(502, b"narration unavailable")
         return self._send_file(path)
 
     def _handle_cartesia_voice_preview(self):
