@@ -3455,3 +3455,43 @@ def test_device_http_auth_survives_database_write_contention(
     with pytest.raises(urllib.error.HTTPError) as error:
         urllib.request.urlopen(request(device["token"]), timeout=2)
     assert error.value.code == 401
+
+
+def test_controller_narration_speaks_once_per_text_and_caches(running_server, monkeypatch, tmp_path):
+    # iOS tutorial mode (2026-09-21): every Duo gesture is narrated instead of
+    # performed; the Host synthesizes each line once in its Cartesia voice.
+    from lib import cartesia_tts, config as app_config
+    from lib.paths import RuntimePaths
+    base, _ctx, _srv = running_server
+    monkeypatch.setattr(RuntimePaths, "from_home",
+                        classmethod(lambda cls, home: SimpleNamespace(cache_dir=tmp_path / "cache")))
+    calls = []
+
+    def fake_synthesize(*, text, voice_id, out_path, api_key, model, **_kw):
+        calls.append((text, voice_id))
+        out_path.write_bytes(b"ID3narration")
+
+    monkeypatch.setattr(cartesia_tts, "synthesize", fake_synthesize)
+    real_load = app_config.load
+
+    def loaded():
+        import dataclasses
+        cfg = real_load()
+        monkeypatch.setattr(type(cfg), "cartesia_key", lambda self: "key", raising=False)
+        return dataclasses.replace(
+            cfg, cartesia_voices={**cfg.cartesia_voices, "Rachel": "voice-r"})
+
+    monkeypatch.setattr(app_config, "load", loaded)
+
+    status, body = _get(base + "/controller-narration?text=Skip.%20Drops%20the%20reply.")
+    assert status == 200 and body == b"ID3narration"
+    status, body = _get(base + "/controller-narration?text=Skip.%20Drops%20the%20reply.")
+    assert status == 200 and body == b"ID3narration"
+    assert calls == [("Skip. Drops the reply.", "voice-r")], "the second request is served from the cache"
+
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(base + "/controller-narration")
+    assert exc.value.code == 400
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(base + "/controller-narration?text=" + "x" * 300)
+    assert exc.value.code == 400
