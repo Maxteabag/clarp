@@ -696,14 +696,14 @@ class TurnDispatchService:
             return DispatchResult(session=session, backend=backend)
 
         if queue_if_busy and turn_queue.is_paused(spec.agent_id) and not allow_paused_queue:
-            if spec.origin == "user":
-                # Stop pauses the queue so the follow-ups behind the killed turn do
-                # not fire on their own. A fresh message from the user is the user
-                # carrying on, so it lifts the pause; nothing else does, and no
-                # Resume existed. Recorded 2026-09-20: thirteen agents sat paused
-                # after one Stop each and every new message queued silently.
-                turn_queue.set_paused(spec.agent_id, False)
-                log("queueResumedBySend", f"agent={spec.agent_id} trace={spec.trace_id or '∅'}")
+            if spec.origin in {"user", "oracle"} and not skip_admission:
+                # Stop parks already-admitted follow-ups, not the conversation.
+                # Fresh user intent can arrive through chat OR an Oracle handoff.
+                # Admit this request only: lifting the global pause would also
+                # drain old parked work. Recovery/retries must not grant fresh
+                # intent to a durable item that Stop already fenced.
+                log("pausedQueueBypassedByFreshSend",
+                    f"agent={spec.agent_id} origin={spec.origin} trace={spec.trace_id or '∅'}")
             else:
                 self._broadcast_queue_state(spec, started=False)
                 queue_state = turn_queue.state(spec.agent_id)
