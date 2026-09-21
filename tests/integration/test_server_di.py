@@ -2281,6 +2281,27 @@ def test_post_transcribe_uses_stub_stt(running_server):
     assert ctx.stt.calls[0][2] == ""
 
 
+
+def test_long_phone_recording_above_old_limit_reaches_transcriber(running_server):
+    base, ctx, _srv = running_server
+    # Actual rejected iOS upload size; synthetic bytes, no provider call.
+    audio = b"\x00" * 31436844
+    status, body = _post_raw(base + "/transcribe", audio,
+                             {"Content-Type": "audio/webm"})
+    assert status == 200
+    assert json.loads(body)["text"] == "hello there"
+    assert len(ctx.stt.calls) == 1
+
+
+def test_transcription_still_rejects_above_64_mib(running_server):
+    base, ctx, _srv = running_server
+    status, body = _post_truncated_raw(base + "/transcribe", b"", 64 * 1024 * 1024 + 1,
+                                     {"Content-Type": "audio/webm"})
+    assert status == 400
+    assert json.loads(body)["error"] == "bad size"
+    assert ctx.stt.calls == []
+
+
 def test_post_transcribe_retry_returns_cached_result_without_recomputing(running_server):
     base, ctx, _srv = running_server
     headers = {
