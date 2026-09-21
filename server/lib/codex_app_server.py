@@ -235,6 +235,18 @@ class _Client:
             for active in list(getattr(self, "_actives", {}).values()):
                 if active.thread_id == thread_id:
                     return active
+            # Single-client compatibility still requires the explicitly named thread.
+            if self.active is not None and self.active.thread_id == thread_id:
+                return self.active
+            # Subagents also emit notifications on the shared app-server stream.
+            # An explicit foreign thread must never inherit the last active writer.
+            return None
+        turn_id = str(params.get("turnId") or (turn.get("id") if isinstance(turn, dict) else "") or "")
+        if turn_id:
+            for active in list(getattr(self, "_actives", {}).values()):
+                if active.turn_id == turn_id:
+                    return active
+            return self.active if self.active is not None and self.active.turn_id == turn_id else None
         return self.active
 
     def _notification(self, method: str, params: dict) -> None:
@@ -263,6 +275,11 @@ class _Client:
             # like any other turn instead of being dropped on the floor.
             active = self._adopt_server_turn(params)
         if active is None:
+            return
+        notified_turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        event_turn_id = str(params.get("turnId") or notified_turn.get("id") or "")
+        if (method != "turn/started" and event_turn_id and active.turn_id
+                and event_turn_id != active.turn_id):
             return
         if method == "turn/started":
             notified_turn = params.get("turn") or {}

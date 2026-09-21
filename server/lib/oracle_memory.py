@@ -59,9 +59,13 @@ def open_thread(owner, contact, *, thread_id=None, connection_id, fresh=False):
             row = con.execute("SELECT * FROM oracle_threads WHERE thread_id=? AND owner_principal=?", (_identifier(thread_id), owner)).fetchone()
             if row is None: raise ValueError("Oracle conversation unavailable")
             if row["contact"] != contact: raise ValueError("Oracle contact changed; start a new conversation")
+            if fresh: row = None  # Validate ownership, then explicitly create a new active context.
         elif not fresh:
-            row = con.execute("SELECT * FROM oracle_threads WHERE owner_principal=? AND contact=? ORDER BY updated_at DESC LIMIT 1", (owner, contact)).fetchone()
+            row = con.execute("SELECT * FROM oracle_threads WHERE owner_principal=? AND contact=? ORDER BY (active_connection <> '') DESC, updated_at DESC, rowid DESC LIMIT 1", (owner, contact)).fetchone()
         now = db.now_ms()
+        # One selected context per owner/contact. The active marker makes even
+        # same-millisecond fresh/resume choices deterministic, without deleting history.
+        con.execute("UPDATE oracle_threads SET active_connection='' WHERE owner_principal=? AND contact=?", (owner, contact))
         if row is None:
             thread_id = "oracle-" + uuid.uuid4().hex
             con.execute("INSERT INTO oracle_threads(thread_id,owner_principal,contact,active_connection,created_at,updated_at) VALUES(?,?,?,?,?,?)",
@@ -243,11 +247,13 @@ class ThreadStore:
             "roster": {"agents": names, "oracle_contact": roster.get("oracle_contact"), "is_excerpt": len(roster.get("agents", [])) > 30}}
         # A byte bound is conservative for the8,192-token input limit. Add
         # whole records instead of cutting a constraint or identifier in half.
+        # Retain the latest voice dialogue before potentially large work results.
+        # This is still an excerpt: oversized whole records can be omitted.
         for field, rows in [
-            ("work", [{"operation_id": row["delegation_id"], "agent": row["session"], "status": row["status"],
-                       "request": row["request_text"], "result": row.get("result_text") or row.get("error") or ""} for row in self.work()]),
+            ("recent_conversation", list(reversed(state.get("fragments", [])))),
             ("user_context", self.contexts()),
-            ("recent_conversation", list(reversed(state.get("fragments", []))))]:
+            ("work", [{"operation_id": row["delegation_id"], "agent": row["session"], "status": row["status"],
+                       "request": row["request_text"], "result": row.get("result_text") or row.get("error") or ""} for row in self.work()])]:
             for row in rows:
                 candidate = {**payload, field: payload[field] + [row]}
                 if len(_json(candidate).encode()) > 6500: continue

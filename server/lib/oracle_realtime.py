@@ -142,8 +142,8 @@ def capability() -> dict:
         "voice": cfg.openai_realtime_voice,
         "transport": "clarp-websocket-proxy",
         "webrtc": True,
-        "v2": {"direct_contact": True, "direct_contact_available": bool(cfg.openai_key()), "available": bool(cfg.openai_key()), "model": "gpt-live-1", "voice": "marin", "podcast": True, "podcast_history": True},
-        "v2_tinkered": {"direct_contact": True, "direct_contact_available": direct_available, "available": live_available, "model": live_wire.model, "voice": live_wire.voice,
+        "v2": {"context_memory": True, "context_reset": True, "direct_contact": True, "direct_contact_available": bool(cfg.openai_key()), "available": bool(cfg.openai_key()), "model": "gpt-live-1", "voice": "marin", "podcast": True, "podcast_history": True},
+        "v2_tinkered": {"context_memory": True, "context_reset": True, "direct_contact": True, "direct_contact_available": direct_available, "available": live_available, "model": live_wire.model, "voice": live_wire.voice,
                "mode": mode, "webrtc": mode == "subscription" or getattr(cfg, "oracle_live_webrtc", False),
                "router": getattr(cfg, "oracle_router_backend", "api"), "podcast": True, "podcast_history": True},
     }

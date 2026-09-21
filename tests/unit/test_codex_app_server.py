@@ -411,3 +411,30 @@ def test_failed_other_agent_cannot_refresh_busy_shared_connection(tmp_path, monk
     assert handle.client.proc.poll() is None
     handle.wait(8)
     codex_app_server.recycle_clients()
+
+
+def test_foreign_subagent_answer_cannot_complete_current_primary_turn():
+    agent_id=agents_db.create_agent(persona='Primary',voice_id='v',cwd='/tmp',session='primary',backend='codex')
+    agents_db.open_turn(agent_id=agent_id,source='pwa',trace_id='primary-trace')
+    client=object.__new__(codex_app_server._Client);client.agent_id=agent_id
+    active=codex_app_server._ActiveTurn('primary-turn','primary-thread',agent_id,'primary','primary-trace',
+        _TurnState(live_backend_session_id='primary-thread'),_Handle(),None,None,None,lambda **kw:0)
+    client.active=active;client._actives={agent_id:active}
+    client._notification('item/agentMessage/delta',{'threadId':'report-subagent-thread','turnId':'report-turn',
+        'delta':'Updated report.html with482 links.'})
+    client._notification('turn/completed',{'threadId':'report-subagent-thread',
+        'turn':{'id':'report-turn','status':'completed'}})
+    assert client.active is active and not active.handle._done.is_set()
+    assert active.state.last_agent_message==''
+    assert not agents_db.conn().execute('SELECT 1 FROM messages WHERE agent_id=?',(agent_id,)).fetchone()
+
+
+def test_stale_explicit_turn_event_cannot_replace_current_turn_output():
+    client=object.__new__(codex_app_server._Client);client.agent_id='primary'
+    active=codex_app_server._ActiveTurn('current-turn','primary-thread','primary','primary','trace',
+        _TurnState(),_Handle(),None,None,None,lambda **kw:0)
+    client.active=active;client._actives={'primary':active}
+    client._notification('item/agentMessage/delta',{'threadId':'primary-thread','turnId':'old-turn','delta':'old result'})
+    client._notification('turn/completed',{'threadId':'primary-thread','turn':{'id':'old-turn','status':'completed'}})
+    assert client.active is active and not active.handle._done.is_set()
+    assert active.state.last_agent_message==''

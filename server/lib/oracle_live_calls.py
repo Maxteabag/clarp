@@ -11,7 +11,7 @@ import json
 import threading
 import time
 
-from . import oracle_strategy, config, oracle_contact, oracle_delegations, oracle_live, oracle_live_provider, oracle_memory
+from . import oracle_voice_context, oracle_strategy, config, oracle_contact, oracle_delegations, oracle_live, oracle_live_provider, oracle_memory
 from .log import log_exception
 from .oracle_calls import AgentTools, validate_offer
 from .oracle_live_wire import LiveWire
@@ -50,10 +50,11 @@ def _podcast(data):
 
 
 class Call:
-    def __init__(self, *, principal, attempt, digest, token, wire, tools, cfg, podcast, ctx, clock=time.monotonic, delegation_strategy=None):
+    def __init__(self, *, principal, attempt, digest, token, wire, tools, cfg, podcast, ctx, clock=time.monotonic, delegation_strategy=None, voice_context=None):
         self.principal, self.attempt, self.digest, self.token = principal, attempt, digest, token
         self.wire, self.tools, self.cfg, self.podcast, self.ctx = wire, tools, cfg, podcast, ctx
         self.clock = clock
+        self.voice_context = voice_context
         self.delegation_strategy = oracle_strategy.select(delegation_strategy, default=getattr(cfg, "oracle_delegation_strategy", "operator"))
         self.lock = threading.RLock()
         self.events = deque(maxlen=512)
@@ -80,7 +81,7 @@ class Call:
 
     def open(self, sdp, negotiate):
         history = self.memory.startup_history(roster=self.tools.execute("list_agents", {}, "startup")) if self.memory else []
-        session = oracle_live.live_config(wire=self.wire, webrtc=True, history=history, delegation_strategy=self.delegation_strategy)
+        session = oracle_live.live_config(wire=self.wire, webrtc=True, history=history, delegation_strategy=self.delegation_strategy, voice_context=self.voice_context)
         if self.podcast:
             from . import podcast_live, podcast_history
             session["instructions"] += "\n" + podcast_live.PROMPT
@@ -113,7 +114,8 @@ class Call:
             from .oracle_diagnostics import OracleJournal
             conversation.journal = OracleJournal()
             conversation.journal.record("session.open", {"transport": "live-webrtc", "model": self.wire.model,
-                "voice": self.wire.voice, "mode": self.wire.mode, "attempt_id": self.attempt, "session_id": result["session_id"]})
+                "voice": self.wire.voice, "mode": self.wire.mode, "attempt_id": self.attempt, "session_id": result["session_id"],
+                "voice_context_sha256": (self.voice_context or {}).get("sidecar_sha256")})
         with self.lock:
             self.conversation = conversation
             self.response = {"sdp": result["sdp"], "session_id": result["session_id"], "attempt_id": self.attempt,
@@ -257,10 +259,11 @@ def create(*, ctx, principal, data, stop, negotiate=oracle_live_provider.negotia
     # log line -- a deleted contact then failed every WebRTC create for days.
     try:
         fallback = oracle_strategy.contact(data.get("oracle_session"), strategy=strategy, source="live-webrtc")
-    except ValueError as exc:
+        voice_context = oracle_voice_context.load(fallback)
+    except (ValueError, OSError, TypeError) as exc:
         raise CallError(str(exc), 400) from None
     tools = AgentTools(ctx, principal, fallback, stop)
-    digest = hashlib.sha256(json.dumps({"request": data, "effective_strategy": strategy, "primary_contact": fallback}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    digest = hashlib.sha256(json.dumps({"request": data, "effective_strategy": strategy, "primary_contact": fallback, "voice_context": voice_context}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     key = (principal, attempt)
     with _LOCK:
         previous = _ATTEMPTS.get(key)
@@ -280,7 +283,7 @@ def create(*, ctx, principal, data, stop, negotiate=oracle_live_provider.negotia
         token = oracle_live.claim_connection(principal)
         if not token: raise CallError("Another Oracle session is still closing")
         call = Call(principal=principal, attempt=attempt, digest=digest, token=token,
-                    wire=wire, tools=tools, cfg=cfg, podcast=podcast, ctx=ctx, delegation_strategy=strategy)
+                    wire=wire, tools=tools, cfg=cfg, podcast=podcast, ctx=ctx, delegation_strategy=strategy, voice_context=voice_context)
         try:
             call.memory = oracle_memory.open_thread(principal, fallback, connection_id=token,
                 thread_id=data.get("thread_id"), fresh=data.get("new_conversation") is True)
