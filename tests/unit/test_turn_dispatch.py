@@ -588,7 +588,7 @@ def test_explicit_queue_waits_for_current_turn_without_interrupting(tmp_path):
     ).fetchone()["text"] == "edited second"
 
 
-def test_paused_queue_still_holds_automation_but_a_user_message_resumes_it(tmp_path):
+def test_paused_queue_holds_automation_but_allows_a_fresh_user_message(tmp_path):
     """Stop parks the follow-ups behind the killed turn. It must not swallow the
     conversation: recorded 2026-09-20, thirteen agents sat paused after one Stop
     each and every new message queued silently, with no Resume anywhere."""
@@ -597,7 +597,7 @@ def test_paused_queue_still_holds_automation_but_a_user_message_resumes_it(tmp_p
     backends.live = False
     turn_queue.set_paused(agent_id, True)
 
-    # Automation (a resolved decision, an Oracle handoff) waits behind the pause.
+    # Automation waits behind the pause; fresh Oracle user intent is tested below.
     queued = service.dispatch(
         text="wait for me", requested_session="mike", trace_id="t-paused",
         client_msg_id="q-paused", synthesize_audio=False, queue_if_busy=True,
@@ -607,14 +607,14 @@ def test_paused_queue_still_holds_automation_but_a_user_message_resumes_it(tmp_p
     assert service.recover_queued() == 0
     assert turn_queue.is_paused(agent_id) is True
 
-    # The user carrying on lifts the pause and runs at once.
+    # The user carrying on runs this new request, leaving old work parked.
     sent = service.dispatch(
         text="are you there", requested_session="mike", trace_id="t-user",
         client_msg_id="u-user", synthesize_audio=False, queue_if_busy=True)
     assert sent.queued is not True
-    assert turn_queue.is_paused(agent_id) is False
+    assert turn_queue.is_paused(agent_id) is True
     assert [call[1]["text"] for call in backends.spawned] == ["are you there"]
-    # The parked automation item is still there for the drain, not lost.
+    # The parked automation item remains available for explicit queue resume.
     assert turn_queue.get("q-paused") is not None
 
 
@@ -1654,3 +1654,51 @@ def test_host_heartbeat_disable_blocks_dispatch_and_restart(monkeypatch, tmp_pat
     with pytest.raises(DispatchError, match='Heartbeats are disabled'):
         service.dispatch(text='check', requested_session='mike', trace_id='disabled-wake', origin='heartbeat')
     assert not backends.spawned
+
+@pytest.mark.parametrize('origin', ['user', 'oracle'])
+def test_fresh_intended_send_bypasses_pause_without_draining_old_work(tmp_path, origin):
+    from lib import turn_queue
+    service, backends, agent_id = _make_service(tmp_path)
+    backends.live = False
+    turn_queue.set_paused(agent_id, True)
+    service.dispatch(text='old parked work', requested_session='mike', trace_id='parked',
+                     client_msg_id='parked', origin='automation', queue_if_busy=True,
+                     synthesize_audio=False)
+    result = service.dispatch(text='fresh intended request', requested_session='mike',
+                              trace_id='fresh', client_msg_id='fresh', origin=origin,
+                              queue_if_busy=True, synthesize_audio=False)
+    assert result.queued is not True
+    assert [x[1]['text'] for x in backends.spawned] == ['fresh intended request']
+    assert turn_queue.is_paused(agent_id) is True
+    assert turn_queue.get('parked') is not None
+    service.recover_queued()
+    assert len(backends.spawned) == 1
+    # Duplicate admission must not replay the fresh request.
+    service.dispatch(text='fresh intended request', requested_session='mike',
+                     trace_id='fresh', client_msg_id='fresh', origin=origin,
+                     queue_if_busy=True, synthesize_audio=False)
+    assert len(backends.spawned) == 1
+
+
+def test_oracle_admission_runs_on_empty_stopped_queue_without_resuming_cancelled_operation(tmp_path, monkeypatch):
+    from lib import oracle_delegations, turn_queue
+    service, backends, agent_id = _make_service(tmp_path)
+    backends.live = False
+    monkeypatch.setattr(_td, 'TurnDispatchService', lambda ctx: service)
+    oracle_delegations.begin(delegation_id='cancelled-old', trace_id='oracle-cancelled-old',
+                            client_msg_id='oracle-cancelled-old', agent_id=agent_id,
+                            session='mike', request_text='old request')
+    oracle_delegations.cancel_for_session('mike', stop=lambda: None)
+    turn_queue.set_paused(agent_id, True)
+    row = oracle_delegations.dispatch(ctx=service.ctx, delegation_id='fresh-oracle',
+                                     session='mike', request_text='new voice handoff',
+                                     authenticated_at_admission=True)
+    assert row['status'] == 'accepted'
+    assert turn_queue.status('oracle-fresh-oracle') == 'started'
+    assert [x[1]['text'] for x in backends.spawned] == ['new voice handoff']
+    assert turn_queue.is_paused(agent_id) is False
+    old = oracle_delegations.dispatch(ctx=service.ctx, delegation_id='cancelled-old',
+                                     session='mike', request_text='old request',
+                                     authenticated_at_admission=True)
+    assert old['status'] == 'cancelled'
+    assert len(backends.spawned) == 1
