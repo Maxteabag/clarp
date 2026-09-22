@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import time
 from typing import Any
 
 from .db import conn, now_ms
@@ -1076,6 +1077,8 @@ def _strip_block(text: str, opening: str, closing: str) -> str:
 # and a /send died mid-launch (2026-09-20). Rows are keyed by position and
 # idempotent, so the import commits every few hundred turns instead.
 IMPORT_COMMIT_EVERY = 200
+IMPORT_WRITE_BUDGET_SECONDS = 0.025
+IMPORT_WRITER_YIELD_SECONDS = 0.010
 
 
 def store_transcript_turns(*, agent_id: str, backend_session_id: str,
@@ -1141,8 +1144,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     current_request_trace = ""
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
+    batch_started = time.monotonic()
     for seq, turn in enumerate(turns):
-        if seq and IMPORT_COMMIT_EVERY > 0 and seq % IMPORT_COMMIT_EVERY == 0:
+        if seq and IMPORT_COMMIT_EVERY > 0 and (
+                seq % IMPORT_COMMIT_EVERY == 0
+                or time.monotonic() - batch_started >= IMPORT_WRITE_BUDGET_SECONDS):
             # Publish the revision with each committed chunk, including
             # removals, so a later lock failure cannot hide durable changes.
             if skipped_slot_removed:
@@ -1158,7 +1164,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 (agent_id, backend_session_id, latest_revision,
                  latest_revision if skipped_slot_removed else 0))
             database.execute("COMMIT")
+            # SQLite does not promise fair immediate writer reacquisition.
+            # Yield outside the transaction so admissions can take the writer.
+            time.sleep(IMPORT_WRITER_YIELD_SECONDS)
             database.execute("BEGIN IMMEDIATE")
+            batch_started = time.monotonic()
         role = turn.get("role")
         if role == "assistant":
             authority = database.execute(

@@ -57,3 +57,71 @@ def test_same_file_is_imported_again_for_a_different_agent(tmp_path):
     assert transcript_import_cache.import_if_changed(path, lambda: calls.append("b"), owner="b")
     assert not transcript_import_cache.import_if_changed(path, lambda: calls.append("b"), owner="b")
     assert calls == ["a", "b"]
+
+
+def test_background_coalesces_growth_without_losing_new_version(tmp_path):
+    import threading
+    cache = transcript_import_cache
+    path = tmp_path / 'growing'
+    path.write_text('first')
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+    def importer():
+        calls.append(path.read_text())
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(3)
+    cache.schedule_import(path, importer, owner='one')
+    try:
+        assert entered.wait(1)
+        path.write_text('second version')
+        for _ in range(30):
+            cache.schedule_import(path, importer, owner='one')
+    finally:
+        release.set()
+        assert cache.wait_for_background(4)
+    assert calls == ['first', 'second version']
+    assert not cache.schedule_import(path, importer, owner='one')
+    assert cache.schedule_import(path, importer, owner='other')
+    assert cache.wait_for_background(4)
+    assert calls[-1] == 'second version'
+    assert len(calls) == 3
+
+
+def test_background_failed_import_remains_retryable(tmp_path):
+    cache = transcript_import_cache
+    path = tmp_path / 'retry'
+    path.write_text('retained')
+    def failed():
+        raise OSError('offline fixture failure')
+    cache.schedule_import(path, failed, owner='retry')
+    assert cache.wait_for_background(3)
+    calls = []
+    assert cache.schedule_import(path, lambda: calls.append('ok'), owner='retry')
+    assert cache.wait_for_background(3)
+    assert calls == ['ok']
+
+
+def test_background_queue_is_bounded_and_deferred_owner_can_retry(tmp_path, monkeypatch):
+    import threading
+    cache = transcript_import_cache
+    monkeypatch.setattr(cache, '_BACKGROUND_LIMIT', 1)
+    path = tmp_path / 'bounded'
+    path.write_text('one')
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+    def blocking():
+        entered.set()
+        assert release.wait(3)
+    cache.schedule_import(path, blocking, owner='active')
+    try:
+        assert entered.wait(1)
+        assert cache.schedule_import(path, lambda: calls.append('pending'), owner='pending')
+        assert not cache.schedule_import(path, lambda: calls.append('deferred'), owner='deferred')
+    finally:
+        release.set()
+        assert cache.wait_for_background(4)
+    assert calls == ['pending']
+    assert cache.schedule_import(path, lambda: calls.append('deferred'), owner='deferred')
+    assert cache.wait_for_background(4)
+    assert calls == ['pending', 'deferred']

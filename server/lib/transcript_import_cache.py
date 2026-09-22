@@ -74,3 +74,58 @@ def reset_for_tests() -> None:
     with _guard:
         _path_locks.clear()
         _imported.clear()
+
+
+# One fallback importer per process; coalesce callers by owner/path. Watcher
+# imports share import_if_changed's version lock and remain authoritative.
+_pending: dict[str, tuple[pathlib.Path, Callable[[], None], str]] = {}
+_worker: threading.Thread | None = None
+_BACKGROUND_LIMIT = 64
+
+
+def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: str = '') -> bool:
+    global _worker
+    key = f'{owner}\0{path}'
+    signature = _signature(path)
+    with _guard:
+        if _imported.get(key) == signature:
+            return False
+        if key not in _pending and len(_pending) >= _BACKGROUND_LIMIT:
+            # The next request/watcher can retry; never create unbounded threads.
+            return False
+        _pending[key] = (path, importer, owner)
+        if _worker is None:
+            _worker = threading.Thread(target=_drain_background, name='transcript-import', daemon=True)
+            _worker.start()
+    return True
+
+
+def _drain_background():
+    global _worker
+    from . import db
+    from .log import log_exception
+    try:
+        while True:
+            with _guard:
+                if not _pending:
+                    _worker = None
+                    return
+                key = next(iter(_pending))
+                path, importer, owner = _pending.pop(key)
+            try:
+                import_if_changed(path, importer, owner=owner)
+            except Exception as exc:
+                log_exception('backgroundTranscriptImportFail', exc, detail=owner)
+            finally:
+                db.close_local()
+    finally:
+        db.close_local()
+
+
+def wait_for_background(timeout: float = 5) -> bool:
+    with _guard:
+        worker = _worker
+    if worker:
+        worker.join(timeout)
+        return not worker.is_alive()
+    return True
