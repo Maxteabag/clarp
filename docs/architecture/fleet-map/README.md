@@ -6,6 +6,8 @@ ideas, a task backlog, or an approval queue.
 
 ## Current decisions
 
+Optional camera following is specified in [0013](0013-follow-activity-camera.md).
+
 | Record | Status | Decision |
 | --- | --- | --- |
 | [0001](0001-procedural-visual-software.md) | Accepted | Agents develop executable visual software, not just icons. |
