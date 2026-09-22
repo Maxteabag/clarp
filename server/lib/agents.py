@@ -543,28 +543,40 @@ def is_busy(agent_id: str) -> bool:
 
 
 def dashboard_states() -> dict[str, dict[str, Any]]:
-    """Read state clocks together, preserving state-id ordering for tied times."""
+    """Seek recent state boundaries using the agent/time index, not history sorts.
+
+    Keep one SQL statement and preserve state-id ordering for tied times.
+    """
     rows = conn().execute("""
-        WITH history AS (
-            SELECT s.*, ROW_NUMBER() OVER (
-                       PARTITION BY s.agent_id ORDER BY ts DESC, state_id DESC) AS rank,
-                   LAG(kind) OVER (
-                       PARTITION BY s.agent_id ORDER BY ts, state_id) AS previous,
-                   MAX(CASE WHEN kind IN ('done', 'idle', 'stopped') THEN ts END)
-                       OVER (PARTITION BY s.agent_id) AS last_end
-              FROM state_log s JOIN agents a USING (agent_id)
+        WITH clocks AS MATERIALIZED (
+            SELECT a.agent_id, latest.kind, latest.ts, latest.detail,
+                   (SELECT MAX(ts) FROM state_log ended
+                     WHERE ended.agent_id = a.agent_id
+                       AND ended.kind IN ('done', 'idle', 'stopped')) AS last_end
+              FROM agents a
+              JOIN state_log latest ON latest.state_id = (
+                  SELECT state_id FROM state_log recent
+                   WHERE recent.agent_id = a.agent_id
+                   ORDER BY ts DESC, state_id DESC LIMIT 1)
              WHERE a.deleted_at IS NULL
         )
-        SELECT agent_id,
-               MAX(CASE WHEN rank = 1 THEN kind END) AS kind,
-               MAX(CASE WHEN rank = 1 THEN ts END) AS ts,
-               MAX(CASE WHEN rank = 1 THEN detail END) AS detail,
-               MIN(CASE WHEN kind IN ('thinking', 'tool', 'compacting')
-                         AND ts > COALESCE(last_end, 0) THEN ts END) AS turn_started_at,
-               MAX(CASE WHEN kind = 'done' OR
-                         (kind = 'idle' AND previous IN ('thinking', 'tool'))
-                        THEN ts END) AS last_turn_end
-          FROM history GROUP BY agent_id
+        SELECT c.agent_id, c.kind, c.ts, c.detail,
+               (SELECT MIN(ts) FROM state_log busy
+                 WHERE busy.agent_id = c.agent_id
+                   AND busy.kind IN ('thinking', 'tool', 'compacting')
+                   AND busy.ts > COALESCE(c.last_end, 0)) AS turn_started_at,
+               (SELECT ended.ts FROM state_log ended
+                 WHERE ended.agent_id = c.agent_id
+                   AND ended.kind IN ('done', 'idle', 'stopped')
+                   AND (ended.kind = 'done' OR
+                        (ended.kind = 'idle' AND (
+                            SELECT previous.kind FROM state_log previous
+                             WHERE previous.agent_id = c.agent_id
+                               AND (previous.ts, previous.state_id) < (ended.ts, ended.state_id)
+                             ORDER BY previous.ts DESC, previous.state_id DESC LIMIT 1
+                        ) IN ('thinking', 'tool')))
+                 ORDER BY ended.ts DESC, ended.state_id DESC LIMIT 1) AS last_turn_end
+          FROM clocks c
     """).fetchall()
     result = {}
     for row in rows:
