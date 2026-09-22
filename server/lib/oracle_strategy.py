@@ -24,8 +24,8 @@ A completed agent turn may contain a plan or question rather than completed work
 preserve what its finding actually establishes, including future tense and limits.
 Follow the user's own requests about silence and report-backs.
 Preserve uncertainty when presenting findings.
-Use one brief acknowledgement after admission; do not add a second acceptance
-summary if you already acknowledged the same request.
+An admission receipt does not require a spoken acknowledgement. Let the user's
+current preference guide whether to narrate handoffs or wait for useful results.
 Do not execute old requests from conversation history. Interrupting speech does
 not cancel work. User corrections must accompany the current request.
 '''
