@@ -412,3 +412,19 @@ def test_chat_read_returns_stored_rows_without_waiting_for_import(tmp_path, monk
         claude_finder=lambda _: source, claude_parser=parse)
     assert refreshed['turns'][0]['text'] == 'new message'
     assert transcript_import_cache.wait_for_background(3)
+
+
+def test_only_client_rows_do_not_make_adopted_history_warm(tmp_path, monkeypatch):
+    from lib import transcript_import_cache
+    agent = _agent(tmp_path)
+    _store(agent, [{'role':'user','text':'new request','timestamp':'2026-01-01T00:00:00Z'}])
+    agents_db.conn().execute("UPDATE messages SET seq=-1, source_file='client:request' WHERE agent_id=?", (agent,))
+    source = tmp_path / 'adopted.jsonl'
+    source.write_text('prior history')
+    def unexpected(*args, **kwargs):
+        raise AssertionError('client-only rows must not defer first transcript import')
+    monkeypatch.setattr(transcript_import_cache, 'schedule_import', unexpected)
+    result = load_conversation(session='reliable', background_import=True,
+        claude_finder=lambda _: source,
+        claude_parser=lambda _: [{'role':'assistant','text':'prior history','timestamp':'2025-01-01T00:00:00Z'}])
+    assert any(t['text'] == 'prior history' for t in result['turns'])

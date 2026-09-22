@@ -134,7 +134,7 @@ def load_conversation(*, session: str, after_revision: int = 0,
         # canonical store has rows, refreshes serve that snapshot immediately.
         # Cold imports still use the same time-budgeted, yielding write batches.
         has_stored_history = agents_db.conn().execute(
-            "SELECT 1 FROM messages WHERE agent_id=? AND backend_session_id=? LIMIT 1",
+            "SELECT 1 FROM messages WHERE agent_id=? AND backend_session_id=? AND seq>=0 LIMIT 1",
             (agent_id, backend_session_id)).fetchone() is not None
         importing = (transcript_import_cache.schedule_import
                      if background_import and has_stored_history
