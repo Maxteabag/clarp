@@ -2584,6 +2584,7 @@ class Handler(BaseHTTPRequestHandler):
                 include_automated=include_automated,
                 include_tool_details=include_tool_details,
                 interaction_id=self._interaction_id(),
+                background_import=True,
                 claude_finder=find_latest_jsonl,
                 claude_parser=parse_turns,
             )

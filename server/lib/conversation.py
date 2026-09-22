@@ -63,6 +63,7 @@ def load_conversation(*, session: str, after_revision: int = 0,
                       include_tool_details: bool = True,
                       before_message_id: str = "",
                       interaction_id: str = "",
+                      background_import: bool = False,
                       claude_finder: FindTranscript,
                       claude_parser: ParseTranscript) -> dict[str, Any]:
     # The message store caps reads at 5,000 rows. Reserve one row for the
@@ -129,8 +130,16 @@ def load_conversation(*, session: str, after_revision: int = 0,
                 },
             )
 
-        transcript_import_cache.import_if_changed(
-            latest, import_latest, owner=agent_id)
+        # Preserve first-open history for adopted/restored agents. Once the
+        # canonical store has rows, refreshes serve that snapshot immediately.
+        # Cold imports still use the same time-budgeted, yielding write batches.
+        has_stored_history = agents_db.conn().execute(
+            "SELECT 1 FROM messages WHERE agent_id=? AND backend_session_id=? LIMIT 1",
+            (agent_id, backend_session_id)).fetchone() is not None
+        importing = (transcript_import_cache.schedule_import
+                     if background_import and has_stored_history
+                     else transcript_import_cache.import_if_changed)
+        importing(latest, import_latest, owner=agent_id)
 
     # SQLite is the app-facing source of truth. Backend transcript files are
     # importer inputs only; every client sees one canonical read model.

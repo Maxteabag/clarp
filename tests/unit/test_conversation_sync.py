@@ -369,3 +369,46 @@ def test_a_delta_returns_only_rows_newer_than_the_cursor(tmp_path):
     assert "recovered answer" not in texts
     assert all(int(t.get("revision") or 0) > cursor for t in delta["turns"]), \
         [(t.get("revision"), t["text"][:24]) for t in delta["turns"]]
+
+
+def test_chat_read_returns_stored_rows_without_waiting_for_import(tmp_path, monkeypatch):
+    import threading
+    from lib import backends, transcript_import_cache, db
+    agent = _agent(tmp_path)
+    _store(agent, [{'role':'user','text':'stored message','timestamp':'2026-01-01T00:00:00Z'}])
+    source = tmp_path / 'growing.jsonl'
+    source.write_text('changed')
+    entered, release, returned = threading.Event(), threading.Event(), threading.Event()
+    answers, errors = [], []
+    monkeypatch.setattr(backends, 'find_session_jsonl', lambda *a: source)
+    def parse(*args):
+        entered.set()
+        assert release.wait(3)
+        return [{'role':'user','text':'new message','timestamp':'2026-01-01T00:00:00Z'}]
+    monkeypatch.setattr(backends, 'parse_turns', parse)
+    def reading():
+        try:
+            answers.append(load_conversation(session='reliable', background_import=True,
+                claude_finder=lambda _: source, claude_parser=parse))
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            returned.set()
+            db.close_local()
+    t = threading.Thread(target=reading)
+    t.start()
+    try:
+        assert returned.wait(.5), 'chat read blocked behind transcript import'
+        assert not errors
+        assert answers[0]['turns'][0]['text'] == 'stored message'
+        assert entered.wait(1)
+    finally:
+        release.set()
+        t.join(4)
+        if hasattr(transcript_import_cache, 'wait_for_background'):
+            assert transcript_import_cache.wait_for_background(4)
+
+    refreshed = load_conversation(session='reliable', background_import=True,
+        claude_finder=lambda _: source, claude_parser=parse)
+    assert refreshed['turns'][0]['text'] == 'new message'
+    assert transcript_import_cache.wait_for_background(3)

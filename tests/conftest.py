@@ -184,6 +184,9 @@ def _isolated_db(tmp_path, monkeypatch):
     except (ImportError, AttributeError):
         pass
     yield
+    from lib import transcript_import_cache
+    assert transcript_import_cache.wait_for_background(5), "transcript importer leaked across tests"
+    transcript_import_cache.reset_for_tests()
     for mod_name in ("lib.db",):
         try:
             mod = __import__(mod_name, fromlist=["reset_for_tests"])
