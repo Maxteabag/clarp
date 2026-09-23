@@ -172,3 +172,18 @@ def test_snapshot_includes_schedules(tmp_path: pathlib.Path):
     assert len(alice_snap["schedules"]) == 1
     assert alice_snap["schedules"][0]["name"] == "Nightly Audit"
     assert alice_snap["schedules"][0]["schedule_id"] == sched["schedule_id"]
+
+
+def test_archiving_maintenance_contact_preserves_scheduled_work(tmp_path):
+    from lib import agents
+    aid = agents.create_agent(persona='Maintenance', voice_id='', cwd=str(tmp_path),
+                              session='maintenance', backend='codex')
+    task = scheduler.create_schedule(session='maintenance', name='Maintenance pass',
+                                     cron_expression='* * * * *', prompt='Check quietly')
+    agents.set_archived(aid, True)
+    db.conn().execute('UPDATE agent_schedules SET next_run_at=? WHERE schedule_id=?',
+                      (db.now_ms()-1000, task['schedule_id']))
+    calls = []
+    assert scheduler.AgentScheduleRunner(dispatch_turn=lambda *args: calls.append(args)).tick() == 1
+    assert calls == [('maintenance', 'Check quietly')]
+    assert scheduler.get_schedule(task['schedule_id'])['enabled']

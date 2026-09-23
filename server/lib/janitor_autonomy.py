@@ -145,7 +145,12 @@ class AutonomyJanitors:
         if now-last<owner['options']['interval_seconds']*1000:return
         settings_store.set_int(key,now)
         if self.usage_read is None:
-            from .backend_usage import get_backend_usage
+            from .backend_usage import get_backend_usage, _structured_provider
+            # Read the old cached identity before a refresh replaces its jittery
+            # reset timestamp, preserving the warning already sent pre-upgrade.
+            cached = _structured_provider('claude', now)
+            for window in cached.get('windows', []):
+                seed_quota_window_state('claude', cached['provider_instance_id'], window)
             usage=get_backend_usage()
         else:usage=self.usage_read()
         run=janitor_builtins.begin_run('quota-monitor',digest([owner['agent_id'],now]),context={'input_hash':digest(usage)})
@@ -210,10 +215,38 @@ class AutonomyJanitors:
             result=self.recover(value['provider'],owner['agent_id'],owner['generation'],row['artifact_id'])
             if result.get('status') in ['recovering','nothing_to_resume']:settings_store.set_bool(key,True)
 
+def quota_window_key(provider, account, window):
+    identity = window['window_id']
+    if provider == 'claude' and window.get('kind') and window.get('resets_at'):
+        import datetime
+        try:
+            reset = datetime.datetime.fromisoformat(window['resets_at'].replace('Z', '+00:00'))
+            if reset.tzinfo is not None:
+                # Claude reports the same reset with fractional-second jitter.
+                # Only notification identity is rounded; provider data and
+                # displayed reset times remain exact. Windows are hours/days.
+                reset_minute = int((reset.timestamp() + 30) // 60)
+                identity = ['claude-reset-minute-v1', window['kind'], reset_minute]
+        except (ValueError, TypeError, OverflowError):
+            pass
+    return 'quota-keeper.window.' + digest([provider, account, identity])
+
+
+def seed_quota_window_state(provider, account, window):
+    key = quota_window_key(provider, account, window)
+    legacy = 'quota-keeper.window.' + digest([provider, account, window['window_id']])
+    if key != legacy and not settings_store.get_text(key, default=''):
+        previous = settings_store.get_text(legacy, default='')
+        if previous:
+            settings_store.set_text(key, previous)
+
+
 def quota_crossing(provider,account,window,used,owner,stamp):
     remaining=100-used
     if not 0<=remaining<=100:return None
-    key='quota-keeper.window.'+digest([provider,account,window['window_id']]);prior=json.loads(settings_store.get_text(key,default='null'))
+    seed_quota_window_state(provider, account, window)
+    key=quota_window_key(provider, account, window)
+    prior=json.loads(settings_store.get_text(key,default='null'))
     if prior and stamp<=prior['stamp']:return None
     threshold=owner['options']['remaining_threshold'];cross=(remaining<=threshold and (prior is None or prior['remaining']>threshold)) or (remaining==0 and prior is not None and prior['remaining']>0)
     settings_store.set_text(key,json.dumps({'stamp':stamp,'remaining':remaining}))
