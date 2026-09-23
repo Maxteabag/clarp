@@ -1,5 +1,6 @@
 """Differential checks for the batched read model and its query budget."""
 import json
+import pytest
 
 from lib import agents, db, message_store
 from lib.snapshot import build_agent_snapshot
@@ -94,14 +95,15 @@ def test_completed_preview_is_ranked_independently_of_provisional_rows():
     assert message_store.dashboard_messages()[aid]['completed_head']['preview'] == 'Completed'
 
 
-def test_delegated_reply_preview_and_overview_clock_stay_together():
+@pytest.mark.parametrize("reply_origin", ["agent", "automation", "schedule", "oracle", "user"])
+def test_delegated_reply_preview_and_overview_clock_stay_together(reply_origin):
     """A fresh peer-driven reply must not retain the old direct-chat date."""
     aid = agents.create_agent(persona='Worker', voice_id='', cwd='/tmp', session='worker-recency')
     db.conn().execute('UPDATE agents SET created_at=1 WHERE agent_id=?', (aid,))
     for mid, role, text, origin, timestamp in (
         ('direct', 'user', 'Investigate', 'user', '2026-09-23T10:17:00Z'),
         ('delegation', 'user', 'Continue the investigation', 'agent', '2026-09-23T13:28:00Z'),
-        ('reply', 'assistant', 'Latest investigation finding', 'agent', '2026-09-23T13:29:00Z'),
+        ('reply', 'assistant', 'Latest investigation finding', reply_origin, '2026-09-23T13:29:00Z'),
         ('heartbeat', 'assistant', 'HEARTBEAT_OK', 'heartbeat', '2026-09-23T13:31:00Z'),
     ):
         db.conn().execute('''INSERT INTO messages
@@ -112,5 +114,6 @@ def test_delegated_reply_preview_and_overview_clock_stay_together():
     row = next(r for r in build_agent_snapshot(None)['agents'] if r['agent_id'] == aid)
     assert row['last_message'] == 'Latest investigation finding'
     assert abs(row['last_activity'] - 1790170140000) <= 1  # 13:29 UTC
-    assert abs(agents.last_activity(aid) - 1790158620000) <= 1  # scheduler stays 10:17 UTC
+    expected_engagement = 1790170140000 if reply_origin == 'user' else 1790158620000
+    assert abs(agents.last_activity(aid) - expected_engagement) <= 1
     assert row['last_activity'] == agents.chat_activity(aid)

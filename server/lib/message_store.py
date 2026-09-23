@@ -12,11 +12,6 @@ from . import dreaming, heartbeat, origins, team_leader, team_store
 from .voice_markup import clean_for_display, strip_hidden_blocks
 
 
-_CHAT_ACTIVITY_ORIGINS_SQL = ", ".join(
-    f"'{value}'" for value in sorted(origins.CHAT_ACTIVITY_ORIGINS)
-)
-
-
 def _message_id(agent_id: str, backend_session_id: str, source_file: str,
                 seq: int) -> str:
     raw = f"{agent_id}\0{backend_session_id}\0{seq}"
@@ -216,17 +211,6 @@ def _message_activity_sql() -> str:
         "CAST((julianday(timestamp) - 2440587.5) * 86400000 AS INTEGER), "
         "updated_at)"
     )
-
-
-def _chat_activity_predicate(alias: str = "") -> str:
-    """Visible conversation origins, independent of scheduler engagement.
-
-    Peer-delegated replies are already shown in the overview preview. Requiring
-    a same-trace user admission here leaves their date and sort order behind:
-    a coordinator's continuation has its own authenticated agent-origin trace.
-    """
-    prefix = f"{alias}." if alias else ""
-    return f"COALESCE({prefix}origin, 'user') IN ({_CHAT_ACTIVITY_ORIGINS_SQL})"
 
 
 def record_user_message(*, agent_id: str, backend_session_id: str,
@@ -1577,7 +1561,8 @@ def last_message_head(*, agent_id: str, max_len: int = 80) -> dict[str, Any]:
     routine_origins = tuple(sorted(origins.ROUTINE_AUTOMATION_ORIGINS))
     routine_placeholders = ",".join("?" for _ in routine_origins)
     rows = conn().execute(
-        f"""SELECT message_id, backend_session_id, revision, role, text, origin
+        f"""SELECT message_id, backend_session_id, revision, role, text, origin,
+                     {_message_activity_sql()} AS message_activity
               FROM messages
              WHERE agent_id = ?
                AND COALESCE(text, '') != ''
@@ -1610,14 +1595,14 @@ def _preview_head(rows, max_len: int) -> dict[str, Any]:
 def _format_preview(row, max_len: int) -> dict[str, Any]:
     if not row:
         return {"preview": "", "message_id": "", "revision": 0,
-                "conversation_id": ""}
+                "conversation_id": "", "activity": 0}
     raw_text = _display_text_for_message(
         role=row["role"], origin=row["origin"], text=row["text"],
     )
     text = clean_for_display(raw_text, oneline=True)
     if not text:
         return {"preview": "", "message_id": "", "revision": 0,
-                "conversation_id": ""}
+                "conversation_id": "", "activity": 0}
     preview = ("You: " if row["role"] == "user" else "") + text
     if len(preview) > max_len:
         preview = preview[: max_len - 1].rstrip() + "…"
@@ -1626,6 +1611,7 @@ def _format_preview(row, max_len: int) -> dict[str, Any]:
         "message_id": row["message_id"],
         "revision": int(row["revision"] or 0),
         "conversation_id": row["backend_session_id"] or "",
+        "activity": int(row["message_activity"] or 0),
     }
 
 
@@ -1655,7 +1641,8 @@ def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
               {completed_filter}
               AND COALESCE(origin, 'user') NOT IN ({marks})
         )
-        SELECT m.agent_id, m.message_id, m.backend_session_id, m.revision, m.role, m.text, m.origin
+        SELECT m.agent_id, m.message_id, m.backend_session_id, m.revision, m.role, m.text, m.origin,
+               {_message_activity_sql()} AS message_activity
           FROM candidates c JOIN messages m ON m.message_id = c.message_id
          WHERE c.rank <= 50 ORDER BY c.agent_id, c.rank
     """, routine)
@@ -1667,19 +1654,16 @@ def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
     for row in conn().execute(f"""
         SELECT agent_id,
                MAX(CASE WHEN COALESCE(origin, 'user') = 'user'
-                        THEN {_message_activity_sql()} END) AS activity,
-               MAX(CASE WHEN COALESCE(m.text, '') != ''
-                          AND m.role IN ('user', 'assistant')
-                          AND COALESCE(m.tool_name, '') = ''
-                          AND {_chat_activity_predicate('m')}
-                        THEN {_message_activity_sql()} END) AS chat_activity
+                        THEN {_message_activity_sql()} END) AS activity
           FROM messages m
          WHERE m.agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
          GROUP BY m.agent_id
     """):
         entry = result.setdefault(row['agent_id'], {})
         entry['activity'] = int(row['activity'] or 0)
-        entry['chat_activity'] = int(row['chat_activity'] or 0)
+        # Date/order must describe the same visible message as the preview.
+        # Prompt origin still controls scheduler engagement above.
+        entry['chat_activity'] = int(entry.get('head', {}).get('activity', 0))
     for row in conn().execute("""
         SELECT agent_id, backend_session_id, MAX(revision) AS revision FROM (
             SELECT agent_id, backend_session_id, revision FROM messages
@@ -1749,25 +1733,13 @@ def last_real_message_activity(*, agent_id: str) -> int:
 
 
 def last_chat_message_activity(*, agent_id: str) -> int:
-    """Epoch ms for the latest user-directed visible chat message.
+    """Semantic timestamp of the exact message chosen for the overview preview.
 
-    This is the presentation clock used by the agent overview. It includes
-    Oracle and visible delegated agent messages, while excluding routine
-    automation and tool noise. A transcript cache refresh does not change it.
-    ``last_real_message_activity`` remains the scheduler's user-engagement
-    clock and must not be replaced with this value.
+    A visible completion may originate from an automated continuation or a
+    scheduled task. Its preview and date must agree regardless of that origin.
+    The scheduler's user-engagement clock remains last_real_message_activity.
     """
-    row = conn().execute(
-        f"""SELECT MAX({_message_activity_sql()}) AS t
-              FROM messages m
-             WHERE m.agent_id = ?
-               AND m.role IN ('user', 'assistant')
-               AND COALESCE(m.text, '') != ''
-               AND COALESCE(m.tool_name, '') = ''
-               AND {_chat_activity_predicate('m')}""",
-        (agent_id,),
-    ).fetchone()
-    return int(row["t"] or 0)
+    return int(last_message_head(agent_id=agent_id).get('activity', 0))
 
 
 def latest_revision(*, agent_id: str, backend_session_id: str = "") -> int:
