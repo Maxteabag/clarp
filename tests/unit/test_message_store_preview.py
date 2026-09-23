@@ -17,11 +17,13 @@ def _agent(agent_id="a1", session="mike"):
 
 
 def _msg(mid, seq, text, timestamp, updated_at, role="assistant", agent_id="a1",
-         origin="user"):
+         origin="user", sender_agent_id="", tool_name="", trace_id=""):
     db.conn().execute(
         "INSERT INTO messages (message_id, agent_id, seq, role, timestamp, text,"
-        " tools_json, updated_at, origin) VALUES (?,?,?,?,?,?,?,?,?)",
-        (mid, agent_id, seq, role, timestamp, text, "[]", updated_at, origin))
+        " tools_json, tool_name, updated_at, origin, sender_agent_id, trace_id)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (mid, agent_id, seq, role, timestamp, text, "[]", tool_name,
+         updated_at, origin, sender_agent_id, trace_id))
 
 
 def test_preview_orders_by_parsed_timestamp_not_lexical_timestamp():
@@ -50,6 +52,27 @@ def test_real_message_activity_ignores_automation_origins():
     _msg("m3", 3, "agent reply", "", 3_000, origin="agent")
     assert message_store.last_message_activity(agent_id="a1") == 3_000
     assert message_store.last_real_message_activity(agent_id="a1") == 1_000
+
+
+def test_chat_activity_includes_provenance_backed_oracle_and_delegated_work():
+    _agent()
+    _msg("m-user", 1, "user request", "", 1_000, origin="user")
+    _msg("m-oracle", 2, "Oracle reply", "", 2_000, origin="oracle")
+    _msg("m-unprovenanced-agent", 3, "background agent row", "", 3_000,
+         origin="agent", sender_agent_id="sender-2", trace_id="peer-trace")
+    _msg("m-chain", 4, "delegation admission", "", 3_500, role="user",
+         origin="user", trace_id="delegated-trace")
+    _msg("m-delegated", 5, "Delegated reply", "", 4_000, origin="agent",
+         sender_agent_id="sender-1", trace_id="delegated-trace")
+    _msg("m-tool", 6, "tool payload", "", 5_000, origin="oracle",
+         tool_name="Bash")
+    _msg("m-heartbeat", 7, "Heartbeat check", "", 6_000, origin="heartbeat")
+
+    # Presentation recency follows the latest visible, user-directed message.
+    assert message_store.last_chat_message_activity(agent_id="a1") == 4_000
+    # Scheduler engagement remains strictly user-origin and does not inherit
+    # Oracle/delegated activity.
+    assert 3_499 <= message_store.last_real_message_activity(agent_id="a1") <= 3_500
 
 
 def test_preview_strips_markup_and_picks_latest():

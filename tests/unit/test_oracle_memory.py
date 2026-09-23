@@ -94,3 +94,15 @@ def test_migration_from_previous_version_keeps_podcast_history():
     assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     assert memory.open_thread("phone", "main", connection_id="one").load()["revision"] == 0
     assert con.execute("SELECT count(*) FROM podcast_conversations").fetchone()[0] == 0
+
+
+def test_current_v88_database_gets_context_notification_dedup_table():
+    con = db.conn()
+    con.execute("DROP TABLE oracle_context_notifications")
+    con.execute("PRAGMA user_version=88")
+    db._migrate(con)
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+    columns = {row[1] for row in con.execute(
+        "PRAGMA table_info(oracle_context_notifications)")}
+    assert {"thread_id", "owner_principal", "source_kind", "source_id",
+            "reference_ts", "stale", "sent_at"} <= columns

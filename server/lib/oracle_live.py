@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import array
 import base64
+import collections
 import concurrent.futures
 import hashlib
 import json
@@ -104,6 +105,9 @@ def release_connection(principal, token):
 
 MODEL = "gpt-live-1"
 VOICE = "marin"
+# Append ids retained for rejection matching. Two orders of magnitude above
+# the largest observed single injection burst (148 chunks, 2026-09-23).
+APPEND_LEDGER_LIMIT = 2048
 ROUTER = oracle_router.MODEL
 from .oracle_live_stable import QUIET_AFTER_SECONDS  # one timer for both engines
 REPORTING = """\n\n<oracle-reporting-guidance>
@@ -270,6 +274,15 @@ class Conversation:
         self.pending = []
         self.provider_delegations = {}
         self.forwarded_findings = {}
+        # Append event_id -> delegation_id, registered before the chunk is sent
+        # so a rejection that arrives mid-send still finds its owner, and the
+        # rejected ids themselves, for a rejection that arrives before the
+        # caller has finished deciding the finding was delivered. Both are
+        # bounded: a rejection older than APPEND_LEDGER_LIMIT appends is no
+        # longer actionable, and an unbounded ledger would outlive the session.
+        self.result_append_ids = collections.OrderedDict()
+        self.rejected_appends = collections.OrderedDict()
+        self.injection_failures = 0
         self.work_snapshot = None
         self.progress = ProgressCadence()
         self.superseded = set()
@@ -339,17 +352,73 @@ class Conversation:
             self.journal_event("host", event)
         return True
 
-    def append(self, kind, content, *, delegation_id=None):
+    def append(self, kind, content, *, delegation_id=None, owner=None):
+        """Send `content` as ordered chunks; return the event ids accepted by the socket.
+
+        `owner` is the delegation whose finding this carries. It is registered
+        before each write, not after the loop: the provider answers on the
+        reader thread and a rejection for the first chunk can arrive while the
+        last one is still being written.
+        """
         sent_ids = []
         for chunk in context_chunks(content):
             if self.stop.is_set():
                 return sent_ids
             event_id = uuid.uuid4().hex
+            if owner is not None:
+                with self.lock:
+                    self.result_append_ids[event_id] = owner
+                    self._trim(self.result_append_ids)
             if not self.send({"type": "session."+kind+".append", "delegation_id": delegation_id,
                               "event_id": event_id, "content": chunk}):
+                if owner is not None:
+                    with self.lock:
+                        self.result_append_ids.pop(event_id, None)
                 return sent_ids
             sent_ids.append(event_id)
         return sent_ids
+
+    @staticmethod
+    def _trim(ledger):
+        """Drop the oldest entries once the ledger passes its bound."""
+        while len(ledger) > APPEND_LEDGER_LIMIT:
+            ledger.popitem(last=False)
+
+    def injection_failed(self, event):
+        """Undo delivery bookkeeping when the provider rejected a context append.
+
+        `append()` only knows the chunk reached the socket. The provider answers
+        separately, and `context_injection_incomplete` means it never ingested
+        the append. Without this the finding stays in `results_sent`, the
+        checkpoint persists it, and a reconnected session never re-delivers it:
+        the work is silently lost rather than merely delayed.
+        """
+        error = event.get("error")
+        if not isinstance(error, dict) or error.get("code") != "context_injection_incomplete":
+            return
+        event_id = error.get("client_event_id")
+        with self.lock:
+            self.injection_failures += 1
+            failures = self.injection_failures
+            delegation_id = None
+            if event_id:
+                # Remember the rejection itself as well as resolving its owner.
+                # `publish_result` has not necessarily marked the finding
+                # delivered yet, and an id it cannot see here must still be
+                # able to stop that from happening.
+                self.rejected_appends[event_id] = True
+                self._trim(self.rejected_appends)
+                delegation_id = self.result_append_ids.pop(event_id, None)
+            if delegation_id:
+                self.results_sent.discard(delegation_id)
+                self.forwarded_findings = {key: value for key, value in self.forwarded_findings.items()
+                                           if value != delegation_id}
+        if self.journal:
+            self.journal.record("context.injection_failed", {
+                "client_event_id": event_id, "operation_id": delegation_id,
+                "failures": failures, "transport": self.wire.mode})
+        if delegation_id:
+            self.checkpoint()
 
     def input(self, event):
         if event["type"] == "oracle_v2.preferences":
@@ -492,6 +561,8 @@ class Conversation:
             self.closed.set()
             self.downstream(event)
         elif kind in ("session.started", "error"):
+            if kind == "error":
+                self.injection_failed(event)
             self.downstream(event)
 
     def route(self, ident):
@@ -679,11 +750,19 @@ class Conversation:
         channel = "thinking" if shared else "commentary"
         if self.delegation_strategy == "direct_contact" and not shared:
             payload = oracle_strategy.direct_result_context(row)
-        sent = self.append(channel, payload, delegation_id=provider_id)
+        sent = self.append(channel, payload, delegation_id=provider_id, owner=row["delegation_id"])
         complete = len(sent) == sum(1 for _ in context_chunks(payload))
-        if complete:
-            self.results_sent.add(row["delegation_id"])
-            if key and not shared: self.forwarded_findings[key] = row["delegation_id"]
+        with self.lock:
+            # A rejection for any chunk may already have arrived on the reader
+            # thread. Reconcile before recording delivery, or the race puts the
+            # finding back into exactly the state this method exists to avoid.
+            rejected = any(event_id in self.rejected_appends for event_id in sent)
+            for event_id in sent:
+                self.rejected_appends.pop(event_id, None)
+            if complete and not rejected:
+                self.results_sent.add(row["delegation_id"])
+                if key and not shared: self.forwarded_findings[key] = row["delegation_id"]
+        complete = complete and not rejected
         self.checkpoint()
         if sent:
             self.downstream({"type": "oracle_v2.result_context", "operation_id": row["delegation_id"],

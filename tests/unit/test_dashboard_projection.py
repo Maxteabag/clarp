@@ -15,6 +15,13 @@ def test_batched_clocks_match_individual_queries_with_ties_and_automation():
             message_store.record_user_message(
                 agent_id=aid, backend_session_id=f'conversation-{i}',
                 client_msg_id=f'{i}-{j}', text=f'message {j}', origin=origin)
+        message_store.record_user_message(
+            agent_id=aid, backend_session_id=f'conversation-{i}',
+            client_msg_id=f'{i}-oracle', text='Oracle work', origin='oracle')
+        message_store.record_user_message(
+            agent_id=aid, backend_session_id=f'conversation-{i}',
+            client_msg_id=f'{i}-agent', text='Delegated work', origin='agent',
+            sender_agent_id='peer-agent')
     states = agents.dashboard_states()
     messages = message_store.dashboard_messages()
     for agent in agents.list_agents():
@@ -25,6 +32,7 @@ def test_batched_clocks_match_individual_queries_with_ties_and_automation():
         assert (state['last_turn_end'] or 0) == agents.last_turn_end(aid)
         assert messages[aid]['head'] == message_store.last_message_head(agent_id=aid)
         assert messages[aid]['activity'] == agents.last_activity(aid)
+        assert messages[aid]['chat_activity'] == agents.chat_activity(aid)
         for session, revision in messages[aid]['revisions'].items():
             assert revision == message_store.latest_revision(agent_id=aid, backend_session_id=session)
 

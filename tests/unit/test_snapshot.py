@@ -210,6 +210,59 @@ def test_snapshot_floors_last_activity_at_creation_for_a_spawned_agent(tmp_path)
     assert row["last_activity"] == created
 
 
+def test_snapshot_chat_recency_includes_oracle_and_delegated_activity(tmp_path):
+    agent_id = agents_db.create_agent(
+        persona="Yuki", voice_id="V", cwd=str(tmp_path), session="yuki")
+    db.conn().execute("UPDATE agents SET created_at = 0 WHERE agent_id = ?",
+                      (agent_id,))
+    # Keep scheduler engagement old while newer user-directed work arrives via
+    # Oracle and an explicitly attributed delegated message.
+    db.conn().execute(
+        """INSERT INTO messages
+           (message_id, agent_id, seq, role, timestamp, text, tools_json,
+            updated_at, origin, sender_agent_id, trace_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("yuki-user", agent_id, 1, "assistant", "1970-01-01T00:00:01.000Z",
+         "Old user reply", "[]", 1_000, "user", "", "old-trace"),
+    )
+    db.conn().execute(
+        """INSERT INTO messages
+           (message_id, agent_id, seq, role, timestamp, text, tools_json,
+            updated_at, origin, sender_agent_id, trace_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("yuki-oracle", agent_id, 2, "assistant", "1970-01-01T00:00:04.000Z",
+         "Current Oracle reply", "[]", 4_000, "oracle", "", "oracle-trace"),
+    )
+    db.conn().execute(
+        """INSERT INTO messages
+           (message_id, agent_id, seq, role, timestamp, text, tools_json,
+            updated_at, origin, sender_agent_id, trace_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("yuki-chain", agent_id, 3, "user", "1970-01-01T00:00:04.500Z",
+         "Delegated admission", "[]", 4_500, "user", "", "delegated-trace"),
+    )
+    db.conn().execute(
+        """INSERT INTO messages
+           (message_id, agent_id, seq, role, timestamp, text, tools_json,
+            updated_at, origin, sender_agent_id, trace_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("yuki-agent", agent_id, 4, "assistant", "1970-01-01T00:00:05.000Z",
+         "Current delegated reply", "[]", 5_000, "agent", "sender-1",
+         "delegated-trace"),
+    )
+
+    ctx = ServerContext(
+        root=tmp_path, static=tmp_path, audio_dir=tmp_path / "audio",
+        agents_path=tmp_path / "agents.json", default_session="yuki",
+        tts=FakeTTSEngine(tmp_path / "audio"), stream=AudioStream(tmp_path / "audio"),
+        stt=StubSTT(), roster_names=("Yuki",),
+    )
+    row = next(a for a in build_agent_snapshot(ctx)["agents"]
+               if a["session"] == "yuki")
+    assert row["last_activity"] == 5_000
+    assert 4_499 <= agents_db.last_activity(agent_id) <= 4_500
+
+
 def _model_avatar_ctx(tmp_path, static_root):
     return ServerContext(
         root=tmp_path, static=static_root, audio_dir=tmp_path / "audio",
