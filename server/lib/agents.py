@@ -607,7 +607,7 @@ def last_activity(agent_id: str) -> int:
 def chat_activity(agent_id: str) -> int:
     """Epoch ms for user-directed visible activity shown by chat overview.
 
-    This presentation clock includes provenance-backed Oracle/delegated work;
+    This presentation clock includes visible Oracle/delegated messages;
     ``last_activity`` remains the scheduler's user-engagement clock.
     """
     from .message_store import last_chat_message_activity

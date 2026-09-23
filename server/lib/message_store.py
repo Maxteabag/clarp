@@ -219,33 +219,14 @@ def _message_activity_sql() -> str:
 
 
 def _chat_activity_predicate(alias: str = "") -> str:
-    """SQL predicate for visible activity with a user-origin chain."""
+    """Visible conversation origins, independent of scheduler engagement.
+
+    Peer-delegated replies are already shown in the overview preview. Requiring
+    a same-trace user admission here leaves their date and sort order behind:
+    a coordinator's continuation has its own authenticated agent-origin trace.
+    """
     prefix = f"{alias}." if alias else ""
-    return f"""(
-        COALESCE({prefix}origin, 'user') IN ({_CHAT_ACTIVITY_ORIGINS_SQL})
-        OR (
-            COALESCE({prefix}origin, 'user') = 'agent'
-            AND COALESCE({prefix}sender_agent_id, '') != ''
-            AND COALESCE({prefix}trace_id, '') != ''
-            AND (
-                EXISTS (
-                    SELECT 1 FROM messages provenance
-                     WHERE provenance.agent_id = {prefix}agent_id
-                       AND provenance.trace_id = {prefix}trace_id
-                       AND provenance.role = 'user'
-                       AND COALESCE(provenance.origin, 'user') IN ({_CHAT_ACTIVITY_ORIGINS_SQL})
-                )
-                OR EXISTS (
-                    SELECT 1 FROM prompt_admissions admission
-                     WHERE admission.agent_id = {prefix}agent_id
-                       AND admission.trace_id = {prefix}trace_id
-                       AND admission.authenticated_at_admission = 1
-                       AND admission.sender_agent_id = ''
-                       AND admission.origin IN ({_CHAT_ACTIVITY_ORIGINS_SQL})
-                )
-            )
-        )
-    )"""
+    return f"COALESCE({prefix}origin, 'user') IN ({_CHAT_ACTIVITY_ORIGINS_SQL})"
 
 
 def record_user_message(*, agent_id: str, backend_session_id: str,
@@ -1771,8 +1752,8 @@ def last_chat_message_activity(*, agent_id: str) -> int:
     """Epoch ms for the latest user-directed visible chat message.
 
     This is the presentation clock used by the agent overview. It includes
-    Oracle and delegated agent messages only when their stored provenance
-    identifies that path, and excludes routine/background/tool/import noise.
+    Oracle and visible delegated agent messages, while excluding routine
+    automation and tool noise. A transcript cache refresh does not change it.
     ``last_real_message_activity`` remains the scheduler's user-engagement
     clock and must not be replaced with this value.
     """
