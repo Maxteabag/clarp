@@ -92,3 +92,25 @@ def test_completed_preview_is_ranked_independently_of_provisional_rows():
             (f'history-{number}', aid, number, 'assistant', 'Completed' if number == 0 else 'Partial',
              '[]', number + 1, 'user', 'transcript:old' if number == 0 else f'live:{number}'))
     assert message_store.dashboard_messages()[aid]['completed_head']['preview'] == 'Completed'
+
+
+def test_delegated_reply_preview_and_overview_clock_stay_together():
+    """A fresh peer-driven reply must not retain the old direct-chat date."""
+    aid = agents.create_agent(persona='Worker', voice_id='', cwd='/tmp', session='worker-recency')
+    db.conn().execute('UPDATE agents SET created_at=1 WHERE agent_id=?', (aid,))
+    for mid, role, text, origin, timestamp in (
+        ('direct', 'user', 'Investigate', 'user', '2026-09-23T10:17:00Z'),
+        ('delegation', 'user', 'Continue the investigation', 'agent', '2026-09-23T13:28:00Z'),
+        ('reply', 'assistant', 'Latest investigation finding', 'agent', '2026-09-23T13:29:00Z'),
+        ('heartbeat', 'assistant', 'HEARTBEAT_OK', 'heartbeat', '2026-09-23T13:31:00Z'),
+    ):
+        db.conn().execute('''INSERT INTO messages
+            (message_id, agent_id, role, text, origin, timestamp, updated_at,
+             tools_json, sender_agent_id, source_file, seq)
+            VALUES(?,?,?,?,?,?,9999999999999,'[]','coordinator','transcript:test',0)''',
+            (mid, aid, role, text, origin, timestamp))
+    row = next(r for r in build_agent_snapshot(None)['agents'] if r['agent_id'] == aid)
+    assert row['last_message'] == 'Latest investigation finding'
+    assert abs(row['last_activity'] - 1790170140000) <= 1  # 13:29 UTC
+    assert abs(agents.last_activity(aid) - 1790158620000) <= 1  # scheduler stays 10:17 UTC
+    assert row['last_activity'] == agents.chat_activity(aid)
