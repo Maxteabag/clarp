@@ -170,3 +170,33 @@ def test_managed_label_effect_is_fenced_by_global_model_revision(monkeypatch):
     assert not janitors.validate_dispatch('sam',run['run_id'],run['trace_id'])
     with pytest.raises(janitors.JanitorError):fixture.review(run)
     assert not db.conn().execute('SELECT 1 FROM janitor_effects').fetchone()
+
+
+def test_claude_reset_fraction_jitter_does_not_repeat_warning(env):
+    _, owners = env
+    owner = owners['quota-monitor']
+    window = {'window_id': 'raw-1', 'kind': 'five_hour',
+              'resets_at': '2026-09-23T17:39:59.590572Z'}
+    assert service.quota_crossing('claude', 'account-a', window, 77, owner, 100)
+    changed = {**window, 'window_id': 'raw-2', 'resets_at': '2026-09-23T17:39:59.814595Z'}
+    assert service.quota_crossing('claude', 'account-a', changed, 77, owner, 200) is None
+    assert service.quota_crossing('claude', 'account-a', changed, 100, owner, 300)
+    assert service.quota_crossing('claude', 'account-a', changed, 100, owner, 400) is None
+    assert service.quota_crossing('claude', 'account-b', changed, 77, owner, 500)
+    weekly = {**changed, 'kind': 'seven_day'}
+    assert service.quota_crossing('claude', 'account-a', weekly, 77, owner, 500)
+    renewed = {**changed, 'resets_at': '2026-09-24T17:40:00Z'}
+    assert service.quota_crossing('claude', 'account-a', renewed, 77, owner, 600)
+
+
+def test_cached_legacy_quota_state_survives_identity_migration(env):
+    import json
+    from lib import settings_store
+    _, owners = env
+    window = {'window_id': 'old-raw', 'kind': 'five_hour',
+              'resets_at': '2026-09-23T17:39:59.590572Z'}
+    legacy = 'quota-keeper.window.' + service.digest(['claude', 'account-a', 'old-raw'])
+    settings_store.set_text(legacy, json.dumps({'stamp': 100, 'remaining': 23}))
+    service.seed_quota_window_state('claude', 'account-a', window)
+    changed = {**window, 'window_id': 'new-raw', 'resets_at': '2026-09-23T17:40:00.100Z'}
+    assert service.quota_crossing('claude', 'account-a', changed, 77, owners['quota-monitor'], 200) is None
