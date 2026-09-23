@@ -12,6 +12,11 @@ from . import dreaming, heartbeat, origins, team_leader, team_store
 from .voice_markup import clean_for_display, strip_hidden_blocks
 
 
+_CHAT_ACTIVITY_ORIGINS_SQL = ", ".join(
+    f"'{value}'" for value in sorted(origins.CHAT_ACTIVITY_ORIGINS)
+)
+
+
 def _message_id(agent_id: str, backend_session_id: str, source_file: str,
                 seq: int) -> str:
     raw = f"{agent_id}\0{backend_session_id}\0{seq}"
@@ -211,6 +216,36 @@ def _message_activity_sql() -> str:
         "CAST((julianday(timestamp) - 2440587.5) * 86400000 AS INTEGER), "
         "updated_at)"
     )
+
+
+def _chat_activity_predicate(alias: str = "") -> str:
+    """SQL predicate for visible activity with a user-origin chain."""
+    prefix = f"{alias}." if alias else ""
+    return f"""(
+        COALESCE({prefix}origin, 'user') IN ({_CHAT_ACTIVITY_ORIGINS_SQL})
+        OR (
+            COALESCE({prefix}origin, 'user') = 'agent'
+            AND COALESCE({prefix}sender_agent_id, '') != ''
+            AND COALESCE({prefix}trace_id, '') != ''
+            AND (
+                EXISTS (
+                    SELECT 1 FROM messages provenance
+                     WHERE provenance.agent_id = {prefix}agent_id
+                       AND provenance.trace_id = {prefix}trace_id
+                       AND provenance.role = 'user'
+                       AND COALESCE(provenance.origin, 'user') IN ({_CHAT_ACTIVITY_ORIGINS_SQL})
+                )
+                OR EXISTS (
+                    SELECT 1 FROM prompt_admissions admission
+                     WHERE admission.agent_id = {prefix}agent_id
+                       AND admission.trace_id = {prefix}trace_id
+                       AND admission.authenticated_at_admission = 1
+                       AND admission.sender_agent_id = ''
+                       AND admission.origin IN ({_CHAT_ACTIVITY_ORIGINS_SQL})
+                )
+            )
+        )
+    )"""
 
 
 def record_user_message(*, agent_id: str, backend_session_id: str,
@@ -1649,12 +1684,21 @@ def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
                     role=row['role'], origin=row['origin'], text=row['text']):
                 entry[field] = _format_preview(row, max_len)
     for row in conn().execute(f"""
-        SELECT agent_id, MAX({_message_activity_sql()}) AS activity
-          FROM messages WHERE COALESCE(origin, 'user') = 'user'
-           AND agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
-         GROUP BY agent_id
+        SELECT agent_id,
+               MAX(CASE WHEN COALESCE(origin, 'user') = 'user'
+                        THEN {_message_activity_sql()} END) AS activity,
+               MAX(CASE WHEN COALESCE(m.text, '') != ''
+                          AND m.role IN ('user', 'assistant')
+                          AND COALESCE(m.tool_name, '') = ''
+                          AND {_chat_activity_predicate('m')}
+                        THEN {_message_activity_sql()} END) AS chat_activity
+          FROM messages m
+         WHERE m.agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
+         GROUP BY m.agent_id
     """):
-        result.setdefault(row['agent_id'], {})['activity'] = int(row['activity'] or 0)
+        entry = result.setdefault(row['agent_id'], {})
+        entry['activity'] = int(row['activity'] or 0)
+        entry['chat_activity'] = int(row['chat_activity'] or 0)
     for row in conn().execute("""
         SELECT agent_id, backend_session_id, MAX(revision) AS revision FROM (
             SELECT agent_id, backend_session_id, revision FROM messages
@@ -1718,6 +1762,28 @@ def last_real_message_activity(*, agent_id: str) -> int:
               FROM messages
              WHERE agent_id = ?
                AND COALESCE(origin, 'user') = 'user'""",
+        (agent_id,),
+    ).fetchone()
+    return int(row["t"] or 0)
+
+
+def last_chat_message_activity(*, agent_id: str) -> int:
+    """Epoch ms for the latest user-directed visible chat message.
+
+    This is the presentation clock used by the agent overview. It includes
+    Oracle and delegated agent messages only when their stored provenance
+    identifies that path, and excludes routine/background/tool/import noise.
+    ``last_real_message_activity`` remains the scheduler's user-engagement
+    clock and must not be replaced with this value.
+    """
+    row = conn().execute(
+        f"""SELECT MAX({_message_activity_sql()}) AS t
+              FROM messages m
+             WHERE m.agent_id = ?
+               AND m.role IN ('user', 'assistant')
+               AND COALESCE(m.text, '') != ''
+               AND COALESCE(m.tool_name, '') = ''
+               AND {_chat_activity_predicate('m')}""",
         (agent_id,),
     ).fetchone()
     return int(row["t"] or 0)

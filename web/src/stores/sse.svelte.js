@@ -4,6 +4,7 @@ import { clog, noteSseEvent, withToken } from '../lib/net.js';
 import {
   AgentState, ClientAction, SSEType, Timing,
 } from '@core/protocol.js';
+import { createCoalescedRefresh } from '@core/snapshot-refresh.js';
 import {
   agentSnapshot, app, chipLabel, flash, mirrorFocus, refreshAgentSnapshot,
   rememberUserNotification, setConn, setVersion, syncStatus,
@@ -21,6 +22,9 @@ let es = null;
 let lastMsgAt = 0;
 let staleTimer = null;
 let reconnectMs = Timing.SSE_RECONNECT_BASE_MS;
+const transcriptSnapshotRefresh = createCoalescedRefresh(
+  () => refreshAgentSnapshot(),
+);
 
 /** Injected by App so this module doesn't import the mic store (which imports
  *  back into send/audio). Set once at startup. */
@@ -166,6 +170,11 @@ function handleEvent(ev) {
     mirrorFocus(ev.session || '', ev.agent_id || '');
 
   } else if (ev.type === SSEType.TRANSCRIPT_UPDATED) {
+    // Transcript wakeups cover both user-directed replies and noisy tool or
+    // automation imports. Re-read the canonical snapshot so chat ordering is
+    // driven by the server's provenance-aware message clock; agent-state and
+    // activity events never mutate last_activity locally.
+    transcriptSnapshotRefresh.schedule();
     handleSseEvent(ev);
 
   } else if (ev.type === SSEType.USER_NOTIFICATION) {

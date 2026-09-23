@@ -103,7 +103,23 @@ describe('agent snapshot store', () => {
 
     expect(status.rachel.busy).toBe(true);
     expect(status.rachel.latest_state).toBe('tool');
-    expect(status.rachel.last_activity).toBe(1_770_000_100);
+    // Tool/state timestamps do not represent chat message recency.
+    expect(status.rachel.last_activity).toBe(0);
+  });
+
+  it('does not let activity events reorder a chat', () => {
+    const store = createAgentSnapshotStore();
+    store.replaceFromSnapshot({ agents: [
+      { session: 'rachel', persona: 'Rachel', last_activity: 1_770_000_000 },
+    ] });
+
+    const status = store.patchActivity({
+      type: 'agent-activity', session: 'rachel', kind: 'tool',
+      status: 'running', tool: 'Bash', action: 'running a check',
+      summary: 'pytest', ts: 1_770_000_200_000,
+    });
+
+    expect(status.rachel.last_activity).toBe(1_770_000_000);
   });
 
   it('patches readable activity events and keeps a timeline', () => {

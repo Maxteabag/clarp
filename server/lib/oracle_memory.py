@@ -13,6 +13,18 @@ CREATE TABLE IF NOT EXISTS oracle_threads (
  state_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS oracle_threads_owner ON oracle_threads(owner_principal,contact,updated_at);
+CREATE TABLE IF NOT EXISTS oracle_context_notifications (
+ thread_id TEXT NOT NULL REFERENCES oracle_threads(thread_id),
+ owner_principal TEXT NOT NULL,
+ source_kind TEXT NOT NULL,
+ source_id TEXT NOT NULL,
+ reference_ts INTEGER NOT NULL,
+ stale INTEGER NOT NULL DEFAULT 0,
+ sent_at INTEGER NOT NULL,
+ PRIMARY KEY(thread_id,source_kind,source_id)
+);
+CREATE INDEX IF NOT EXISTS oracle_context_notifications_owner
+ ON oracle_context_notifications(owner_principal,thread_id,sent_at);
 CREATE TABLE IF NOT EXISTS oracle_observations (
  sequence INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL REFERENCES oracle_threads(thread_id),
  source_key TEXT NOT NULL, event_json TEXT NOT NULL, created_at INTEGER NOT NULL,
@@ -119,7 +131,7 @@ class ThreadStore:
         self._owned()
         return [dict(row) for row in db.conn().execute("""SELECT d.* FROM oracle_thread_work w
             JOIN oracle_delegations d ON d.delegation_id=w.operation_id
-            WHERE w.thread_id=? AND d.owner_principal=? ORDER BY d.created_at DESC""", (self.thread_id, self.owner))]
+            WHERE w.thread_id=? AND d.owner_principal=? ORDER BY d.created_at DESC, d.delegation_id DESC""", (self.thread_id, self.owner))]
 
     def admission(self, revision, index, tool, arguments):
         self._owned(active=True)
@@ -240,20 +252,29 @@ class ThreadStore:
     def startup_history(self, *, roster=None):
         """Small explicit excerpt; full observations and facts remain on Host."""
         state = self.load()
+        from .oracle_result_context import result_payload
         roster = roster or {}
+        work = self.work()
+        latest_result = next((row for row in work if row.get("status") in
+            {"completed", "failed", "cancelled"} and (row.get("result_text") or row.get("error"))), None)
+        reserved = [latest_result] if latest_result else work[:1]
+        remaining_work = [row for row in work if not reserved or row["delegation_id"] != reserved[0]["delegation_id"]]
         names = [{"name": row.get("name"), "session": row.get("session")} for row in roster.get("agents", [])[:30]]
         payload = {"thread_id": self.thread_id, "reference_only": True, "await_current_request": True,
             "recent_conversation": [], "work": [], "user_context": [],
+            "replay_guidance": "Voice transcript fragments may end mid-sentence when interrupted. For requests to repeat a task result, use the authoritative work finding, not an incomplete spoken fragment. An excerpt is not a complete answer; retrieve the source when needed. Do not replay tasks.",
             "roster": {"agents": names, "oracle_contact": roster.get("oracle_contact"), "is_excerpt": len(roster.get("agents", [])) > 30}}
         # A byte bound is conservative for the8,192-token input limit. Add
         # whole records instead of cutting a constraint or identifier in half.
-        # Retain the latest voice dialogue before potentially large work results.
+        # Reserve one bounded authoritative result, then retain recent dialogue
+        # before older potentially large work records.
         # This is still an excerpt: oversized whole records can be omitted.
         for field, rows in [
+            ("work", [result_payload(row, budget=1800) for row in reserved]),
             ("recent_conversation", list(reversed(state.get("fragments", [])))),
             ("user_context", self.contexts()),
             ("work", [{"operation_id": row["delegation_id"], "agent": row["session"], "status": row["status"],
-                       "request": row["request_text"], "result": row.get("result_text") or row.get("error") or ""} for row in self.work()])]:
+                       "request": row["request_text"], "result": row.get("result_text") or row.get("error") or ""} for row in remaining_work])]:
             for row in rows:
                 candidate = {**payload, field: payload[field] + [row]}
                 if len(_json(candidate).encode()) > 6500: continue

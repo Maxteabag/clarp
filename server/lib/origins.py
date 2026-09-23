@@ -37,6 +37,15 @@ MARKER_ORIGIN = "system"
 # Axis A — our own scheduled automation, never a real external signal.
 ROUTINE_AUTOMATION_ORIGINS = frozenset({"heartbeat", "leader_tick", "dreaming", "janitor"})
 
+# Conversation activity that is safe to use for chat presentation recency.
+# Oracle turns are admitted from the user's active voice conversation. Agent
+# turns are accepted only when message-store provenance links their trace back
+# to a user/Oracle admission, which distinguishes delegated work from an
+# unlabelled/background import. This deliberately stays separate from
+# ``last_real_message_activity``: scheduler quiet periods use user-origin
+# activity only.
+CHAT_ACTIVITY_ORIGINS = frozenset({"user", "oracle"})
+
 # Origins a client may set on POST /send. ``leader_tick`` and ``janitor``
 # are stamped server-side only, never accepted from a client payload.
 CLIENT_SETTABLE_ORIGINS = frozenset(

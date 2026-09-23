@@ -233,7 +233,10 @@ export function createAgentSnapshotStore() {
       activity_action: activity && activity.action || current.activity_action || '',
       activity_phase: activity && activity.phase || current.activity_phase || '',
       activity_status: activity && activity.status || current.activity_status || '',
-      last_activity: Math.max(current.last_activity || 0, ts || 0),
+      // Message recency comes from the server snapshot. State timestamps are
+      // operational activity and must not reorder chats (tool, heartbeat,
+      // background, and import events have no presentation recency authority).
+      last_activity: current.last_activity || 0,
       last_turn_end: bumpTurnEnd
         ? Math.max(current.last_turn_end || 0, ts || 0)
         : (current.last_turn_end || 0),
@@ -269,7 +272,8 @@ export function createAgentSnapshotStore() {
       busy,
       latest_state: activity.kind || current.latest_state,
       latest_state_ts: activity.ts || current.latest_state_ts,
-      last_activity: Math.max(current.last_activity || 0, activity.ts || 0),
+      // Activity events describe work state, not a user-directed message.
+      last_activity: current.last_activity || 0,
       activity,
       activity_summary: activity.summary,
       activity_action: activity.action,

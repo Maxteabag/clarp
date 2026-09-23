@@ -59,7 +59,7 @@ _CONN_LOCK = threading.Lock()
 _MIGRATED = False
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 88
+_SCHEMA_VERSION = 89
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1533,6 +1533,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             from .judgments import SCHEMA as judgments_schema
             for statement in judgments_schema.split(";"):
                 if statement.strip(): con.execute(statement)
+        if version < 89:
+            _migrate_to_v89(con)
 
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1813,6 +1815,26 @@ def _migrate_to_v79(con: sqlite3.Connection) -> None:
     for statement in _MODEL_FALLBACK_SCHEMA.split(";"):
         if statement.strip():
             con.execute(statement)
+
+
+def _migrate_to_v89(con: sqlite3.Connection) -> None:
+    """Durable owner/thread deduplication for Oracle context notifications."""
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS oracle_context_notifications (
+            thread_id TEXT NOT NULL REFERENCES oracle_threads(thread_id),
+            owner_principal TEXT NOT NULL,
+            source_kind TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            reference_ts INTEGER NOT NULL,
+            stale INTEGER NOT NULL DEFAULT 0,
+            sent_at INTEGER NOT NULL,
+            PRIMARY KEY(thread_id, source_kind, source_id)
+        )
+    """)
+    con.execute(
+        """CREATE INDEX IF NOT EXISTS oracle_context_notifications_owner
+             ON oracle_context_notifications(owner_principal,thread_id,sent_at)"""
+    )
 
 
 def _migrate_to_v78(con: sqlite3.Connection) -> None:

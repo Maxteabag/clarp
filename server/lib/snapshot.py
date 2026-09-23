@@ -191,7 +191,10 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             # Floor the value at creation time: a new agent enters the list at
             # its own age and decays normally, and operational state still never
             # reorders an established conversation.
-            "last_activity":  max(int(message.get('activity', 0) or 0),
+            # Chat ordering uses its own presentation clock. ``activity`` is
+            # retained as the scheduler's user-engagement clock for callers
+            # that need it; never let routine/tool/import state reorder chats.
+            "last_activity":  max(int(message.get('chat_activity', 0) or 0),
                                   int(a.get("created_at") or 0)),
             "last_turn_end":  int(state.get('last_turn_end') or 0),
             # Eager last-message preview for the agent-list overview, so the
