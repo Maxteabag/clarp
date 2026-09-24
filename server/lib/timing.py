@@ -12,6 +12,8 @@ class ServerTiming:
     audio_recent_window_sec: float = 300.0
     audio_retain_sec: float = 600.0
     audio_janitor_interval_sec: float = 60.0
+    # Janitor failure alerts are reconciled on this cadence, not every 2 s tick.
+    janitor_attention_interval_sec: float = 15.0
     # NOTE: the per-turn watchdog (idle/startup/post-init deadlines) was
     # removed in favour of preempt-kill-and-resume — see clarp_runner
     # 'No turn timer'. Its knobs lived here unreferenced until 2026-08-24.

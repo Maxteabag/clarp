@@ -783,6 +783,13 @@ def cancel_for_agent(agent_id: str) -> None:
 
 def _expire_decisions() -> None:
     now = db.now_ms(); con = db.conn()
+    # Polled every few seconds by the delivery worker: only take the write
+    # lock when a pending decision has actually passed its expiry.
+    if con.execute(
+            """SELECT 1 FROM artifact_decisions
+                WHERE status='pending' AND expires_at IS NOT NULL AND expires_at<=? LIMIT 1""",
+            (now,)).fetchone() is None:
+        return
     con.execute("BEGIN IMMEDIATE")
     try:
         rows = con.execute(

@@ -79,6 +79,7 @@ class TranscriptStreamer:
     def reconcile_once(self) -> None:
         """Scan agents + runtimes; subscribe/unsubscribe watchers to match."""
         live = agents_db.list_agents()
+        sessions = _live_backend_sessions()
         live_ids = set()
         for agent in live:
             agent_id = agent["agent_id"]
@@ -86,7 +87,7 @@ class TranscriptStreamer:
             if not backends.capabilities(agent.get("backend")).supports_transcript_streaming:
                 self._unbind(agent_id)
                 continue
-            backend_session_id = _live_backend_session(agent_id)
+            backend_session_id = sessions.get(agent_id)
             if not backend_session_id:
                 # Agent exists but hasn't received its first prompt yet.
                 # Nothing to watch.
@@ -309,6 +310,26 @@ class TranscriptStreamer:
             except Exception as e:
                 health.mark_error("transcript_streamer", e)
                 log_exception("transcriptStreamerReconcileFail", e)
+
+
+def _live_backend_sessions() -> dict[str, str]:
+    """Most recent live runtime's backend_session_id per agent, in one query.
+
+    The reconcile pass runs every second for every agent; one lookup per agent
+    was about a hundred queries a second on a busy host.
+    """
+    try:
+        from . import db
+        rows = db.conn().execute(
+            """SELECT agent_id, backend_session_id FROM runtimes
+                WHERE ended_at IS NULL ORDER BY started_at""").fetchall()
+    except Exception as e:
+        health.mark_error("transcript_streamer", e)
+        log_exception("transcriptStreamerRuntimeLookupFail", e)
+        return {}
+    # Later rows started later, so the last write per agent wins.
+    return {row["agent_id"]: row["backend_session_id"]
+            for row in rows if row["backend_session_id"]}
 
 
 def _live_backend_session(agent_id: str) -> str | None:
