@@ -58,7 +58,10 @@ _QUEUED: dict[str, list] = {}
 _CLAIMED_AT: dict[str, float] = {}
 _RECOVERY_LOCK = threading.Lock()
 _RUNTIME_CLIENT: Any | None = None
-_JANITOR_SPAWN_LOCKS: dict[str, Any] = {}
+# Weak values: a lock lives only while a caller holds it (`with` keeps a strong
+# reference for the duration), so the map cannot grow with every Janitor ever
+# seen. Concurrent callers still receive the same object while it is in use.
+_JANITOR_SPAWN_LOCKS: "weakref.WeakValueDictionary[str, Any]" = weakref.WeakValueDictionary()
 
 # Placeholder trace owning the in-flight slot while an interactive terminal is
 # attached to an agent. A normal turn routed to that agent queues behind it
@@ -273,7 +276,11 @@ def _janitor_spawn_lock(agent_id: str):
     # Separate from the global turn lock: Codex's blocking start RPC needs its
     # read-thread callbacks to take _TURN_LOCK before the response arrives.
     with _TURN_LOCK:
-        return _JANITOR_SPAWN_LOCKS.setdefault(agent_id, threading.RLock())
+        lock = _JANITOR_SPAWN_LOCKS.get(agent_id)
+        if lock is None:
+            lock = threading.RLock()
+            _JANITOR_SPAWN_LOCKS[agent_id] = lock
+        return lock
 
 
 def _remove_queued_run(queue_id: str) -> None:
@@ -625,6 +632,14 @@ class TurnDispatchService:
         if skip_admission:
             admission = True
         else:
+            # Lock order: _TURN_LOCK is taken before SQLite writes everywhere
+            # else (Stop, guarded callbacks, retries). Inside the write
+            # transaction below this thread must therefore never wait for
+            # _TURN_LOCK, or a lock holder blocks on our SQLite lock for the
+            # busy timeout and fails with "database is locked". Read the
+            # in-memory slot up front and pass the snapshot in.
+            slot = self._slot_snapshot(spec)
+            deferred_events: list[dict] = []
             database = db.conn()
             database.execute("BEGIN IMMEDIATE")
             try:
@@ -652,7 +667,8 @@ class TurnDispatchService:
                     )
                 if queue_if_busy:
                     if message_store.has_client_message(request_id):
-                        if not self._admitted_but_never_launched(spec, request_id):
+                        if not self._admitted_but_never_launched(
+                                spec, request_id, slot=slot):
                             database.execute("COMMIT")
                             return DispatchResult(session=session, backend=backend)
                         message_store.relink_client_message(
@@ -669,9 +685,10 @@ class TurnDispatchService:
                     )
                     admission = True
                 else:
-                    admission = self._record_user_message(spec)
+                    admission = self._record_user_message(
+                        spec, deferred=deferred_events)
                     if admission is False and self._admitted_but_never_launched(
-                            spec, request_id):
+                            spec, request_id, slot=slot):
                         # The client is retrying a message this Host admitted
                         # but never launched (2026-09-20: the launch died on
                         # "database is locked" after the durable row was
@@ -688,6 +705,10 @@ class TurnDispatchService:
             except BaseException:
                 database.execute("ROLLBACK")
                 raise
+            # SSE fan-out takes the stream hub locks and writes sse_events;
+            # do it only once the admission is durable and the lock released.
+            for event in deferred_events:
+                self.ctx.stream.broadcast(event)
         if admission is False:
             eventlog.emit("server", "sendDeduplicated", context=spec.context)
             log("sendDeduplicated",
@@ -801,15 +822,31 @@ class TurnDispatchService:
         except Exception as close_error:  # noqa: BLE001
             log_exception("spawnAbandonedCloseFail", close_error, detail=spec.session)
 
-    def _admitted_but_never_launched(self, spec: _TurnSpec, client_msg_id: str) -> bool:
-        """Retry only known failed launches; never infer safety from missing logs."""
+    def _slot_snapshot(self, spec: _TurnSpec) -> tuple[str, bool]:
+        """(in-flight trace, whether that slot is spawning or has a live
+        process) for the agent, read before a write transaction opens so the
+        transaction never has to acquire _TURN_LOCK or call into a backend."""
+        with _TURN_LOCK:
+            in_flight = _INFLIGHT.get(spec.agent_id) or ""
+        if not in_flight:
+            return "", False
+        return in_flight, (_slot_is_spawning(spec.agent_id)
+                           or self._has_live_turn(spec))
+
+    def _admitted_but_never_launched(self, spec: _TurnSpec, client_msg_id: str,
+                                     *, slot: tuple[str, bool] | None = None) -> bool:
+        """Retry only known failed launches; never infer safety from missing logs.
+
+        `slot` is the `_slot_snapshot` taken before the caller's write
+        transaction; without it the slot is read here (no transaction open)."""
         trace = message_store.client_message_trace(client_msg_id)
         if not trace:
             return False
         status = agents_db.trace_launch_status(spec.agent_id, trace)
-        with _TURN_LOCK:
-            in_flight = _INFLIGHT.get(spec.agent_id) == trace
-        if in_flight and (_slot_is_spawning(spec.agent_id) or self._has_live_turn(spec)):
+        if slot is None:
+            slot = self._slot_snapshot(spec)
+        in_flight_trace, live = slot
+        if in_flight_trace == trace and live:
             return False
         if status == "unknown":
             raise DispatchError(503, "message is saved but delivery is unconfirmed; reconciliation required")
@@ -1197,7 +1234,11 @@ class TurnDispatchService:
             "queue_revision": queue_state["revision"],
         })
 
-    def _record_user_message(self, spec: _TurnSpec) -> bool | None:
+    def _record_user_message(self, spec: _TurnSpec, *,
+                             deferred: list[dict] | None = None) -> bool | None:
+        """Durably admit the user row. With `deferred`, the transcript
+        wake-up is appended there for the caller to broadcast after COMMIT
+        instead of fanning out while a write transaction is open."""
         try:
             appended = agents_db.record_user_message(
                 agent_id=spec.agent_id,
@@ -1210,12 +1251,16 @@ class TurnDispatchService:
                 trace_id=spec.trace_id,
             )
             if appended and getattr(self.ctx, "stream", None) is not None:
-                self.ctx.stream.broadcast({
+                event = {
                     "type": SSEType.TRANSCRIPT_UPDATED,
                     "agent_id": spec.agent_id,
                     "session": spec.session,
                     "backend_session_id": spec.backend_session_id,
-                })
+                }
+                if deferred is not None:
+                    deferred.append(event)
+                else:
+                    self.ctx.stream.broadcast(event)
             if appended is None:
                 # A brand-new Codex session does not have its backend UUID yet;
                 # on_init persists this row once that identity is available.

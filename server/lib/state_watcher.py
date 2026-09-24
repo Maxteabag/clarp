@@ -15,7 +15,9 @@ directly from the handler for zero-latency UI updates.
 from __future__ import annotations
 
 import json
+import queue
 import threading
+import time
 
 from .activity import state_activity_event
 from .log import log, log_exception
@@ -31,6 +33,9 @@ def _emit(*a, **kw):
         pass
 
 
+_NOTIFY_STOP = object()
+
+
 class StateLogWatcher:
     INTERVAL_SEC = SERVER_TIMING.state_watcher_poll_sec
 
@@ -39,8 +44,17 @@ class StateLogWatcher:
         self._last_id = 0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # Completed-turn notification policy settles for up to
+        # user_notifications.SETTLE_TIMEOUT_S waiting for the final assistant
+        # row. That wait must not stall the agent-state stream, so DONE rows
+        # are handed to one FIFO worker: it keeps the per-row order the
+        # inline call had, and the poll loop returns immediately.
+        self._notify_queue: queue.Queue = queue.Queue()
+        self._notify_thread: threading.Thread | None = None
+        self._notify_lock = threading.Lock()
 
     def start(self) -> None:
+        self._ensure_notify_worker()
         if self._thread and self._thread.is_alive():
             return
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -50,6 +64,61 @@ class StateLogWatcher:
         self._stop.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
+        with self._notify_lock:
+            worker = self._notify_thread
+            self._notify_thread = None
+        if worker and worker.is_alive():
+            self._notify_queue.put(_NOTIFY_STOP)
+            worker.join(timeout=timeout)
+
+    def wait_for_notifications(self, timeout: float = 5.0) -> bool:
+        """Block until every queued completed-turn classification has run.
+        Returns False on timeout. Intended for tests and shutdown."""
+        deadline = time.monotonic() + timeout
+        while self._notify_queue.unfinished_tasks:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
+        return True
+
+    def _ensure_notify_worker(self) -> None:
+        with self._notify_lock:
+            if self._notify_thread and self._notify_thread.is_alive():
+                return
+            self._notify_thread = threading.Thread(
+                target=self._notify_loop, daemon=True,
+                name="state-watcher-notify")
+            self._notify_thread.start()
+
+    def _notify_loop(self) -> None:
+        while True:
+            item = self._notify_queue.get()
+            try:
+                if item is _NOTIFY_STOP:
+                    return
+                self._classify_completed_turn(**item)
+            except Exception as e:  # noqa: BLE001 — never let a push break the worker
+                log_exception("userNotificationClassifyFail", e)
+            finally:
+                self._notify_queue.task_done()
+
+    def _classify_completed_turn(self, *, agent_id, session, persona, done_ts,
+                                 detail) -> None:
+        from . import apns, user_notifications
+        detail_map = detail if isinstance(detail, dict) else {}
+        notification = user_notifications.classify_completed_turn(
+            agent_id=agent_id,
+            session=session,
+            persona=persona,
+            done_ts=done_ts,
+            backend_session_id=str(
+                detail_map.get("backend_session_id") or ""),
+            trace_id=str(detail_map.get("trace_id") or ""),
+        )
+        if notification.get("notify"):
+            self.stream.broadcast(
+                user_notifications.event_payload(notification))
+            apns.on_user_notification(notification)
 
     def _loop(self) -> None:
         from . import db
@@ -108,24 +177,14 @@ class StateLogWatcher:
                 detail=detail,
             ))
             if r["kind"] == AgentState.DONE:
-                try:
-                    from . import apns, user_notifications
-                    detail_map = detail if isinstance(detail, dict) else {}
-                    notification = user_notifications.classify_completed_turn(
-                        agent_id=r["agent_id"],
-                        session=r["session"],
-                        persona=r["persona"],
-                        done_ts=int(r["ts"]),
-                        backend_session_id=str(
-                            detail_map.get("backend_session_id") or ""),
-                        trace_id=str(detail_map.get("trace_id") or ""),
-                    )
-                    if notification.get("notify"):
-                        self.stream.broadcast(
-                            user_notifications.event_payload(notification))
-                        apns.on_user_notification(notification)
-                except Exception as e:  # noqa: BLE001 — never let a push break the watcher
-                    log_exception("userNotificationClassifyFail", e)
+                self._ensure_notify_worker()
+                self._notify_queue.put({
+                    "agent_id": r["agent_id"],
+                    "session": r["session"],
+                    "persona": r["persona"],
+                    "done_ts": int(r["ts"]),
+                    "detail": detail,
+                })
             self._last_id = int(r["state_id"])
         _emit("state_watcher", "broadcast",
               detail={"count": len(rows), "last_id": self._last_id})

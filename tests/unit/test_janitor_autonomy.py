@@ -200,3 +200,21 @@ def test_cached_legacy_quota_state_survives_identity_migration(env):
     service.seed_quota_window_state('claude', 'account-a', window)
     changed = {**window, 'window_id': 'new-raw', 'resets_at': '2026-09-23T17:40:00.100Z'}
     assert service.quota_crossing('claude', 'account-a', changed, 77, owners['quota-monitor'], 200) is None
+
+
+def test_schema_is_created_once_per_database(env,monkeypatch,tmp_path):
+    """Every 15 s tick used to run executescript(SCHEMA); it must run once."""
+    real_conn=db.conn;scripts=[]
+    class Counting:
+        def __init__(self,inner):self.inner=inner
+        def executescript(self,sql):scripts.append(sql);return self.inner.executescript(sql)
+        def __getattr__(self,name):return getattr(self.inner,name)
+    monkeypatch.setattr(db,'conn',lambda:Counting(real_conn()))
+    monkeypatch.setattr(service,'_SCHEMA_READY_FOR',None)
+    worker=service.AutonomyJanitors(lambda *a:True,lambda _:None,lambda p,r:{'action':'noop','delay_seconds':600,'message':'','reason':'quiet'},lambda:{'providers':{}})
+    service.setup();worker.run_once();worker.run_once();service.setup()
+    assert len(scripts)==1
+    # A different database (a restore or a new test) gets its own tables.
+    db.reset_for_tests(tmp_path/'other.sqlite')
+    service.setup()
+    assert len(scripts)==2
