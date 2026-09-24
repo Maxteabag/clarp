@@ -2737,6 +2737,49 @@ def test_transcription_activation_propagates_loader_error_before_retry(
     assert FakeWhisper.instances == 2
 
 
+def test_transcription_activation_holds_the_swap_lock(monkeypatch):
+    """The read-decide-swap of ctx.stt runs under one module-level lock so two
+    activations cannot both decide against a stale engine."""
+    from lib import config, stt as stt_module
+
+    class Done:
+        def wait(self, timeout):
+            return True
+
+    class FakeWhisper:
+        def __init__(self, model_name, compute, model_source=None):
+            del compute, model_source
+            self.default_model_id = f"faster-whisper:{model_name}"
+            self.load_done = Done()
+            self.load_error = None
+
+        def start_loading(self):
+            assert server_module._STT_ACTIVATION_LOCK.locked()
+
+    class FakeUnavailable(FakeWhisper):
+        pass
+
+    monkeypatch.setattr(stt_module, "WhisperSTT", FakeWhisper)
+    monkeypatch.setattr(stt_module, "UnavailableSTT", FakeUnavailable)
+    monkeypatch.setattr(stt_module, "DisabledSTT", FakeWhisper)
+    monkeypatch.setattr(
+        stt_module, "_installed_model_records",
+        lambda: [{"id": "faster-whisper:small.en", "_local_path": "/model"}],
+    )
+    monkeypatch.setattr(config, "load", lambda: SimpleNamespace(
+        whisper_enabled=True, whisper_model="small.en",
+        whisper_compute="int8", whisper_isolate=False,
+    ))
+    handler = object.__new__(server_module.Handler)
+    handler.server = SimpleNamespace(ctx=SimpleNamespace(
+        stt=FakeUnavailable("small.en", "int8")))
+    assert not server_module._STT_ACTIVATION_LOCK.locked()
+    handler._activate_transcription_if_default("faster-whisper:small.en")
+    assert isinstance(handler.ctx.stt, FakeWhisper)
+    assert not isinstance(handler.ctx.stt, FakeUnavailable)
+    assert not server_module._STT_ACTIVATION_LOCK.locked()
+
+
 def test_post_transcribe_preserves_hands_free_header(running_server):
     base, ctx, _srv = running_server
     from lib.agents import create_agent
