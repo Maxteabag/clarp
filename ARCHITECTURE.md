@@ -47,7 +47,11 @@ wire contract the clients follow is in [docs/protocol.md](docs/protocol.md).
 
 `server/server.py` is the HTTP layer: a `ThreadingHTTPServer` with one route
 table per method, bearer or paired-device auth, SSE, and static files. It
-should hold no business logic; handlers delegate to `server/lib/`.
+should hold no business logic; handlers delegate to `server/lib/`. Its
+`build_server` is the composition root: it seeds startup invariants, starts
+the ordered worker catalog (`_server_workers`, one `lib.workers.Worker` per
+background thread), runs restart recovery, then starts the listeners that
+accept outside requests.
 
 | Area | Modules |
 |---|---|
@@ -57,6 +61,7 @@ should hold no business logic; handlers delegate to `server/lib/`.
 | Backends | `backends.py` (adapter selection), `clarp_runner.py` (Claude), `codex_runner.py` + `codex_app_server.py`, `agy_runner.py`, `provider_capabilities.py` (model catalogue), `backend_auth.py`, `backend_usage.py` |
 | Conversation read model | `message_store.py`, `conversation.py`, `transcript_log.py`, `codex_transcript.py`, `agy_transcript.py`, `transcript_watcher.py` + `transcript_streamer.py` (live text while a turn runs), `activity.py` |
 | Events | `audio_stream.py` (SSE hub + clip janitor), `state_watcher.py`, `eventlog.py` + `telemetry.py` (diagnostics into `telemetry.sqlite`) |
+| Startup and workers | `workers.py` (ordered worker registry: start, `on_close` stop, diagnostics), `dispatch_adapters.py` (the silent forced-session turns every scheduler dispatches, with their origins and idle checks), `decision_delivery.py` (polls answered decisions and HTML forms and wakes the agent) |
 | Voice in | `transcription_pipeline.py` (the uncached `/transcribe` path: engine choice, biasing, error mapping, event rows), `stt.py`, `whispercpp.py`, `transcription_models.py`, `vocab.py` + `vocab_budget.py` + `vocab_generators.py` + `vocab_compile.py` + `vocab_store.py` + `workspace_vocab.py` (budget-fitted context packs for the transcription prompt, every compile recorded in `vocab_runs`), `stt_providers.py` + `deepgram_stt.py` + `eleven_stt.py` + `cartesia_stt.py` (cloud engines and the engine / turn-taking switches), `hallucinations.py`, `custom_stt_adapters.py` |
 | Voice out | `tts_worker.py`, `tts_queue.py`, `tts_engine.py`, `tts_providers.py`, `cartesia_*.py`, `eleven_*.py`, `deepgram_*.py`, `custom_tts_adapters.py`, `voice_markup.py`, `clip_delivery/` (HLS, chunked HTTP, raw PCM), `clip_store.py`, `audio_growing.py` |
 | Routing of spoken input | `routing.py` (name matching), `orchestrator.py` (LLM router for hands-free), `herald.py` (which agent's clip plays when several reply) |
