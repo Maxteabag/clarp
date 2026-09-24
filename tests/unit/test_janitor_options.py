@@ -39,7 +39,7 @@ def test_templates_describe_all_job_options_with_typed_defaults():
 
 def test_unconfigured_options_resolve_defaults_without_claiming_device_preference():
     config = seed("tool-explainer")
-    assert config["options"] == {"detail_level": 0}
+    assert config["options"] == {"detail_level": 0, "explanation_sources": 0}
     assert config["configured_option_keys"] == []
     assert db.conn().execute("SELECT options_json FROM janitor_configs WHERE agent_id=?", (config["agent_id"],)).fetchone()[0] == "{}"
 
@@ -128,7 +128,7 @@ def test_template_change_discards_options_from_the_previous_job():
     config = janitors.create("custom", template_id="message-delegator")
     config = janitors.configure("custom", config["revision"], options={"timeout_ms": 250})
     new = janitors.configure("custom", config["revision"], template_id="tool-explainer")
-    assert new["agent_id"] == aid and new["options"] == {"detail_level": 0}
+    assert new["agent_id"] == aid and new["options"] == {"detail_level": 0, "explanation_sources": 0}
     assert new["configured_option_keys"] == []
 
 

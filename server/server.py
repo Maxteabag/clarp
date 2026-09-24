@@ -2318,7 +2318,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             result = self.ctx.tool_explanations.request(
                 data.get("detail_level"), data.get("items"), cwd=agent.get("cwd"),
-                release=data.get("release"), target_agent_id=agent["agent_id"])
+                release=data.get("release"), target_agent_id=agent["agent_id"],
+                include_provenance=data.get("include_provenance") is True)
         except ValueError as error:
             return self._send(400, json.dumps({"error": str(error)}).encode(), "application/json")
         self._send(200, json.dumps(result).encode(), "application/json")

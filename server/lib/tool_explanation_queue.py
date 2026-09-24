@@ -31,6 +31,17 @@ def _prune(db, now):
     db.execute("DELETE FROM tool_explanation_jobs WHERE status='queued' AND NOT EXISTS (SELECT 1 FROM tool_explanation_demands d WHERE d.cache_key=tool_explanation_jobs.cache_key)")
 
 
+def _ready(row):
+    # The producer is preserved; `cached` is separate provenance of this reply.
+    return {'status':'ready','text':row[0],'source':row[1],'cached':True,'provenance':json.loads(row[2] or '{}')}
+
+
+def released(demands):
+    now=cache.now_ms()
+    db=conn()
+    return {d for d in demands if d and db.execute('SELECT 1 FROM tool_explanation_releases WHERE demand_id=? AND expires_at>?',(d,now)).fetchone()}
+
+
 def request(level, prepared, releases, debounce, *, guard=None):
     now=cache.now_ms()
     responses=[]
@@ -42,10 +53,10 @@ def request(level, prepared, releases, debounce, *, guard=None):
             if demand and db.execute('SELECT 1 FROM tool_explanation_releases WHERE demand_id=? AND expires_at>?',(demand,now)).fetchone():
                 responses.append({'id':identity,'status':'cancelled'})
                 continue
-            ready=db.execute('SELECT explanation FROM tool_explanation_cache WHERE cache_key=? AND expires_at>?',(key,now)).fetchone()
+            ready=db.execute('SELECT explanation,source,provenance_json FROM tool_explanation_cache WHERE cache_key=? AND expires_at>?',(key,now)).fetchone()
             if not ready:
                 break
-            responses.append({'id':identity,'status':'ready','text':ready[0]})
+            responses.append({'id':identity,**_ready(ready)})
         if len(responses)==len(prepared) and (guard is None or guard(db)):
             return responses
         responses=[]
@@ -63,10 +74,10 @@ def request(level, prepared, releases, debounce, *, guard=None):
             elif not admitted:
                 value={'status':'disabled'}
             else:
-                ready=db.execute('SELECT explanation FROM tool_explanation_cache WHERE cache_key=?',(key,)).fetchone()
+                ready=db.execute('SELECT explanation,source,provenance_json FROM tool_explanation_cache WHERE cache_key=?',(key,)).fetchone()
                 job=db.execute('SELECT status,failure_reason FROM tool_explanation_jobs WHERE cache_key=?',(key,)).fetchone()
                 if ready:
-                    value={'status':'ready','text':ready[0]}
+                    value=_ready(ready)
                 elif job and job[0]=='failed':
                     value={'status':'failed','reason':job[1]}
                 elif not job and db.execute("SELECT count(*) FROM tool_explanation_jobs WHERE status='queued'").fetchone()[0]>=64:
@@ -142,7 +153,10 @@ def complete(owner, values, failure_ttl, *, guard=None):
             return False
         for key,value in owned:
             if value['status']=='ready':
-                db.execute('INSERT INTO tool_explanation_cache VALUES(?,?,?,?) ON CONFLICT(cache_key) DO UPDATE SET explanation=excluded.explanation,created_at=excluded.created_at,expires_at=excluded.expires_at',(key,value['text'],now,now+cache.TTL_MS))
+                db.execute('INSERT INTO tool_explanation_cache(cache_key,explanation,created_at,expires_at,source,provenance_json,signature) VALUES(?,?,?,?,?,?,?) '
+                           'ON CONFLICT(cache_key) DO UPDATE SET explanation=excluded.explanation,created_at=excluded.created_at,expires_at=excluded.expires_at,'
+                           'source=excluded.source,provenance_json=excluded.provenance_json,signature=excluded.signature',
+                           (key,value['text'],now,now+cache.TTL_MS,value.get('source','llm'),json.dumps(value.get('provenance',{})),value.get('signature','')))
                 db.execute('DELETE FROM tool_explanation_jobs WHERE cache_key=?',(key,))
             else:
                 db.execute("UPDATE tool_explanation_jobs SET status='failed',activity_json='',owner='',lease_until=0,failure_reason=?,available_at=? WHERE cache_key=?",(value['reason'],now+int(failure_ttl*1000),key))

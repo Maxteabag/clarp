@@ -1,4 +1,8 @@
-"""Ready explanations only. Fixed 24h TTL; never persist tool input or source."""
+"""Ready explanations only. Fixed 24h TTL; never persist tool input or source code.
+
+Each row keeps the producer that wrote it (`scripted`, `jev` or `llm`) and its
+bounded provenance, so a cache hit reports the original producer.
+"""
 import time
 from .db import conn
 
@@ -16,13 +20,14 @@ def get(key):
     return (row[0], row[1]) if row else None
 
 
-def put(key, text):
+def put(key, text, *, source="llm", provenance_json="{}", signature=""):
     created = now_ms()
     expires = created + TTL_MS
     conn().execute(
-        "INSERT INTO tool_explanation_cache(cache_key,explanation,created_at,expires_at) VALUES(?,?,?,?) "
-        "ON CONFLICT(cache_key) DO UPDATE SET explanation=excluded.explanation,created_at=excluded.created_at,expires_at=excluded.expires_at",
-        (key, text, created, expires))
+        "INSERT INTO tool_explanation_cache(cache_key,explanation,created_at,expires_at,source,provenance_json,signature) VALUES(?,?,?,?,?,?,?) "
+        "ON CONFLICT(cache_key) DO UPDATE SET explanation=excluded.explanation,created_at=excluded.created_at,expires_at=excluded.expires_at,"
+        "source=excluded.source,provenance_json=excluded.provenance_json,signature=excluded.signature",
+        (key, text, created, expires, source, provenance_json, signature))
     return expires
 
 
