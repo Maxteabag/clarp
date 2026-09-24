@@ -1,13 +1,13 @@
 """SQLite transcript-message read model."""
 from __future__ import annotations
 
-import datetime as _dt
 import hashlib
 import json
 import time
 from typing import Any
 
-from .db import conn, now_ms
+from .clock import iso_from_ms as _iso_from_ms, now_ms
+from .db import conn
 from . import dreaming, heartbeat, origins, team_leader, team_store
 from .voice_markup import clean_for_display, strip_hidden_blocks
 
@@ -197,10 +197,6 @@ def _client_tools(tools: Any, display_cells: Any) -> list:
         ]
     return tools
 
-
-def _iso_from_ms(ts_ms: int) -> str:
-    dt = _dt.datetime.fromtimestamp(ts_ms / 1000, tz=_dt.timezone.utc)
-    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
 
 
 def _message_activity_sql() -> str:

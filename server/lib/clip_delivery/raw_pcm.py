@@ -4,10 +4,10 @@ from __future__ import annotations
 from .. import clip_store
 
 import pathlib
-import time
 
 from .. import agents as agents_db
 from .. import clips as clips_lib
+from ..clock import now_ms
 from ..log import log_exception
 from ..protocol import ClipProducerStatus
 from . import FinalizeResult
@@ -45,7 +45,7 @@ class RawPcmDelivery:
               text_len: int,
               trace_id: str | None) -> "RawPcmSession":
         audio_dir.mkdir(parents=True, exist_ok=True)
-        target = audio_dir / f"{int(time.time() * 1000)}__{session}.pcm"
+        target = audio_dir / f"{now_ms()}__{session}.pcm"
         clip_id = agents_db.record_clip(
             agent_id=agent["agent_id"],
             path=str(target),

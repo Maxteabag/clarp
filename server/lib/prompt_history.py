@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import datetime as dt
 import hashlib
 import json
 import sqlite3
@@ -11,6 +10,7 @@ import uuid
 from typing import Any
 
 from . import db
+from .clock import iso_from_ms as _iso_from_ms
 from .server_identity import get_server_info
 
 
@@ -37,10 +37,6 @@ def _public_id(computer_id: str, kind: str, local_id: str) -> str:
     opaque = uuid.uuid5(uuid.UUID(computer_id), f"{kind}:{local_id}")
     return f"{computer_id}:{kind}:{opaque}"
 
-
-def _iso_from_ms(value: int) -> str:
-    stamp = dt.datetime.fromtimestamp(value / 1000, tz=dt.timezone.utc)
-    return stamp.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _bounded_utf8(value: str, byte_limit: int) -> str:

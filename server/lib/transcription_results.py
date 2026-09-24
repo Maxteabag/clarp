@@ -6,9 +6,9 @@ import hashlib
 import json
 import re
 import threading
-import time
 
 from . import db
+from .clock import now_ms
 
 
 _VALID_JOB_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
@@ -81,7 +81,7 @@ def load(job_id: str, fingerprint: str) -> dict | None:
 def store(job_id: str, fingerprint: str, response: dict) -> None:
     if not job_id:
         return
-    now = int(time.time() * 1000)
+    now = now_ms()
     payload = json.dumps(response, separators=(",", ":"))
     con = db.conn()
     con.execute(
