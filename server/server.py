@@ -99,6 +99,24 @@ from lib.transcript_log import find_latest_jsonl, parse_turns  # noqa: E402
 from lib.turn_dispatch import DispatchError, TurnDispatchService  # noqa: E402
 from lib.voices import voices_with_availability  # noqa: E402
 
+# Background workers, imported here so tests can monkeypatch them as
+# `server.<Name>`; `_server_workers` looks every one of them up at call time.
+from lib.background_job_watcher import BackgroundJobWatcher  # noqa: E402
+from lib.decision_delivery import DecisionDeliveryWorker  # noqa: E402
+from lib.dispatch_adapters import DispatchAdapters  # noqa: E402
+from lib.dreaming import DreamingScheduler  # noqa: E402
+from lib.heartbeat import HeartbeatScheduler  # noqa: E402
+from lib.janitor_autonomy import AutonomyJanitors  # noqa: E402
+from lib.janitor_runner import JanitorRunner  # noqa: E402
+from lib.maintenance import MaintenanceWorker  # noqa: E402
+from lib.resource_telemetry import ResourceTelemetryWorker  # noqa: E402
+from lib.scheduler import AgentScheduleRunner  # noqa: E402
+from lib.state_watcher import StateLogWatcher  # noqa: E402
+from lib.team_leader import TeamLeaderScheduler  # noqa: E402
+from lib.transcript_streamer import TranscriptStreamer  # noqa: E402
+from lib.tts_worker import TTSWorker  # noqa: E402
+from lib.workers import BOOT, SERVING, Worker, WorkerSet, started  # noqa: E402
+
 
 from lib.config import load as load_config  # noqa: E402
 
@@ -159,6 +177,8 @@ class ContextHTTPServer(ThreadingHTTPServer):
         self.local_transport = None
         self.local_transport_error = ""
         self.relay = None
+        # lib.workers.WorkerSet once build_server has started the workers.
+        self.workers = None
         import weakref
         self._device_connections = weakref.WeakKeyDictionary()
         self._device_connections_lock = threading.Lock()
@@ -4255,22 +4275,7 @@ class Handler(BaseHTTPRequestHandler):
                               "delivery_pending": artifacts.delivery_pending(decision_id)})
 
     def _deliver_pending_decisions(self) -> set[str]:
-        from lib import artifacts
-        delivered: set[str] = set()
-        for pending in artifacts.pending_deliveries():
-            decision_id = pending["decision_id"]
-            text = artifacts.format_delivery_prompt(pending)
-            try:
-                TurnDispatchService(self.ctx).dispatch(
-                    text=text, requested_session=pending["session"], trace_id=_trace.new_id(),
-                    forced_session=pending["session"],
-                    client_msg_id=f"decision-{decision_id}", synthesize_audio=False,
-                    origin="automation", queue_if_busy=_decision_delivery_queues_if_busy(pending))
-                artifacts.mark_delivered(decision_id)
-                delivered.add(decision_id)
-            except Exception as exc:
-                log_exception("decisionWakeFail", exc, detail=decision_id)
-        return delivered
+        return _dispatch_adapters(self.ctx).deliver_pending_decisions()
 
     def _handle_decision_dismiss(self, decision_id: str):
         from lib import artifacts
@@ -5285,86 +5290,68 @@ def _safe_upload_name(raw: str, content_type: str = "") -> str:
     return cleaned[:128]
 
 
-def _decision_delivery_queues_if_busy(pending: dict) -> bool:
-    """Administrative notices and question answers must preserve ongoing work.
+def _dispatch_service(ctx: ServerContext):
+    """Resolve `TurnDispatchService` from this module at call time so tests
+    that monkeypatch `server.TurnDispatchService` intercept scheduler turns."""
+    return TurnDispatchService(ctx)
 
-    Legacy accepted/rejected approval replies retain their existing admission
-    behavior. All question replies and non-answer notices enter the durable
-    queue when the originating agent is busy; dismissing an inbox item must
-    never interrupt an unrelated in-flight turn.
-    """
-    return (pending.get("response_type") == "single_choice"
-            or pending.get("choice") not in {"accepted", "rejected"})
+
+def _dispatch_adapters(ctx: ServerContext) -> DispatchAdapters:
+    return DispatchAdapters(ctx, _dispatch_service)
 
 
 def _deliver_decision_rows(ctx: ServerContext) -> None:
-    from lib import artifacts
-    from lib import html_forms
-    for submission in html_forms.pending():
-        try:
-            TurnDispatchService(ctx).dispatch(
-                text=submission["prompt"], requested_session=submission["session"],
-                forced_session=submission["session"], trace_id=_trace.new_id(),
-                client_msg_id="html-form-" + submission["submission_id"],
-                synthesize_audio=False, origin="user", queue_if_busy=True)
-            html_forms.mark_delivered(submission["submission_id"])
-        except Exception as exc:
-            log_exception("htmlFormDeliveryFail", exc, detail=submission["submission_id"])
-    for pending in artifacts.pending_deliveries():
-        decision_id = pending["decision_id"]
-        text = artifacts.format_delivery_prompt(pending)
-        try:
-            TurnDispatchService(ctx).dispatch(
-                text=text, requested_session=pending["session"],
-                forced_session=pending["session"], trace_id=_trace.new_id(),
-                client_msg_id=f"decision-{decision_id}", synthesize_audio=False,
-                origin="automation", queue_if_busy=_decision_delivery_queues_if_busy(pending))
-            artifacts.mark_delivered(decision_id)
-        except Exception as exc:
-            log_exception("decisionWakeFail", exc, detail=decision_id)
+    _dispatch_adapters(ctx).deliver_decision_rows()
 
 
-def build_server(ctx: ServerContext, port: int,
-                 bind_addr: str | None = None, *,
-                 restart_recovery: bool = False) -> ContextHTTPServer:
-    """Wire a fully-injected HTTP server. Tests use this with a fake ctx."""
-    # Process ownership queries (busy state, stop, steering, compaction fences)
-    # must reach the same runtime that owns dispatch. Reset this explicitly for
-    # injected/local tests so module state cannot leak between server instances.
+def _configure_runtime_client(ctx: ServerContext) -> None:
+    """Process ownership queries (busy state, stop, steering, compaction
+    fences) must reach the same runtime that owns dispatch. Reset this
+    explicitly for injected/local tests so module state cannot leak between
+    server instances."""
     runtime_client = getattr(ctx, "runtime_client", None)
     backends.configure_runtime_client(runtime_client)
     import lib.turn_dispatch as _turn_dispatch_module
     _turn_dispatch_module.configure_runtime_client(runtime_client)
     from lib import compaction as _compaction_module
     _compaction_module.configure_runtime_client(runtime_client)
-    # Persona definitions are a startup-owned invariant.  Historically they
-    # were materialized lazily by the first persona/snapshot read, which made
-    # zero-session definitions depend on endpoint call order.  Initialize them
-    # before request threads start so every read model remains read-only.
+
+
+def _seed_startup_invariants(ctx: ServerContext) -> None:
+    """Persona definitions are a startup-owned invariant. Historically they
+    were materialized lazily by the first persona/snapshot read, which made
+    zero-session definitions depend on endpoint call order. Initialize them
+    before request threads start so every read model remains read-only."""
     from lib import personas
     personas.ensure_builtins()
     from lib.janitor_bootstrap import initialize as initialize_janitors
     initialize_janitors(cwd=str(ctx.root))
 
-    listener_addr = bind_addr or BIND_ADDR
-    if listener_addr not in {"127.0.0.1", "::1", "localhost"} and not ctx.auth_token:
-        raise ValueError("a non-loopback listener requires authentication")
-    if ctx.relay_settings is not None and not ctx.auth_token:
-        raise ValueError("relay networking requires authentication")
+
+def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
+                    adapters: DispatchAdapters, port: int) -> list[Worker]:
+    """The ordered worker catalog. Order is start order and stop order.
+
+    Lives in this module (not `lib.workers`) on purpose: every class is
+    resolved from `server.<Name>` when the record starts, which is what lets
+    tests swap one worker for a fake by monkeypatching this module.
+    """
     herald = getattr(ctx, "herald", None)
-    ctx.stream.start()
-    srv = ContextHTTPServer((listener_addr, port), Handler, ctx)
-    if ctx.relay_settings is not None:
+    _paths = _runtime_paths()
+
+    def start_relay():
         from lib.relay_connector import ManagedRelay
         srv.relay = ManagedRelay(ctx.relay_settings, srv.server_port)
         srv.relay.start()
-        srv.on_close(srv.relay.close)
-    if ctx.tool_explanations is None:
-        from lib.tool_explanations import ToolExplanations
-        ctx.tool_explanations = ToolExplanations()
-    srv.on_close(ctx.tool_explanations.close)
-    srv.on_close(ctx.stream.stop)
-    if getattr(_CFG, "network_advertise_lan", False):
+        return srv.relay
+
+    def start_tool_explanations():
+        if ctx.tool_explanations is None:
+            from lib.tool_explanations import ToolExplanations
+            ctx.tool_explanations = ToolExplanations()
+        return ctx.tool_explanations
+
+    def start_bonjour():
         from lib.bonjour import BonjourAdvertiser
         from lib.server_identity import get_server_info
         server_info = get_server_info()
@@ -5372,191 +5359,106 @@ def build_server(ctx: ServerContext, port: int,
             name=str(server_info["name"]),
             server_id=str(server_info["server_id"]),
             port=port, auth_required=bool(ctx.auth_token))
-        if bonjour.start():
-            srv.on_close(bonjour.stop)
-    # Tail state_log + push every new row as an `agent-state` SSE event.
-    from lib.state_watcher import StateLogWatcher
-    watcher = StateLogWatcher(ctx.stream)
-    watcher.start()
-    srv.on_close(watcher.stop)
-    from lib.background_job_watcher import BackgroundJobWatcher
-    background_job_watcher = BackgroundJobWatcher(ctx.stream)
-    background_job_watcher.start()
-    srv.on_close(background_job_watcher.stop)
-    if getattr(ctx, "runtime_client", None) is not None:
+        return bonjour if bonjour.start() else None
+
+    def start_runtime_events():
         from lib.runtime_events import RuntimeEventWatcher
-        runtime_event_watcher = RuntimeEventWatcher(ctx.stream)
-        runtime_event_watcher.start()
-        srv.on_close(runtime_event_watcher.stop)
-    # TTS worker: drains tts_queue, does the ElevenLabs call from the
-    # server process (not from short-lived hook subprocesses). The hooks
-    # only write queue rows; this is the executor side.
-    from lib.tts_worker import TTSWorker
-    from lib.clip_delivery import build_from_config, DeliveryDeps
-    _paths = _runtime_paths()
-    # The delivery is what decides how clip bytes reach the client
-    # (chunked-file + broker today; hls tomorrow). Config knob:
-    # [audio] delivery = "hls" (or CLAUDE_PWA_DELIVERY=hls).
-    delivery = build_from_config(
-        _CFG, deps=DeliveryDeps(broker=ctx.clip_broker),
-    )
-    tts_worker = TTSWorker(
-        audio_dir=_paths.audio_dir,
-        stream=ctx.stream,
-        herald=herald,
-        broker=ctx.clip_broker,
-        delivery=delivery,
-    )
-    tts_worker.start()
-    srv.on_close(tts_worker.stop)
-    from lib.maintenance import MaintenanceWorker
-    maintenance_worker = MaintenanceWorker(audio_dir=_paths.audio_dir)
-    maintenance_worker.start()
-    srv.on_close(maintenance_worker.stop)
-    usage_refresh = backend_usage.UsageRefreshWorker(stream=ctx.stream)
-    usage_refresh.start()
-    srv.on_close(usage_refresh.stop)
-    from lib.resource_telemetry import ResourceTelemetryWorker
-    resource_telemetry = ResourceTelemetryWorker()
-    resource_telemetry.start()
-    srv.on_close(resource_telemetry.stop)
-    decision_stop = threading.Event()
-    def _decision_loop() -> None:
-        from lib import artifacts
-        while not decision_stop.wait(5):
-            try:
-                artifacts.attention()  # materializes expirations + deliveries
-                _deliver_decision_rows(ctx)
-            except Exception as exc:
-                log_exception("decisionDeliveryWorkerFail", exc)
-    decision_thread = threading.Thread(
-        target=_decision_loop, daemon=True, name="decision-delivery")
-    decision_thread.start()
-    srv.on_close(decision_stop.set)
-    # Transcript streamer: tails ~/.claude/projects/.../<uuid>.jsonl via
-    # inotify for every live agent. As Claude finishes each text block,
-    # the streamer enqueues it in tts_queue — the same queue the Stop
-    # hook uses — so audio starts synthesizing before the turn ends.
-    # Lifecycle is auto-managed: it reconciles with the agents/runtimes
-    # tables every second and binds/unbinds inotify watches accordingly.
-    from lib.transcript_streamer import TranscriptStreamer
-    transcript_streamer = TranscriptStreamer(stream=ctx.stream)
-    transcript_streamer.start()
-    srv.on_close(transcript_streamer.stop)
-    # Autonomous team-leader loop: periodically nudges idle team leaders to
-    # review and unstick stalled teammates. Only fires when there's something to
-    # do (a stalled member or unread team activity) — an idle team costs nothing.
-    from lib.team_leader import TeamLeaderScheduler
+        return started(RuntimeEventWatcher(ctx.stream))
 
-    def _send_leader_tick(session: str, text: str) -> None:
-        TurnDispatchService(ctx).dispatch(
-            text=text, requested_session=session, trace_id=_trace.new_id(),
-            synthesize_audio=False, forced_session=session, origin="leader_tick",
-        )
+    def start_tts_worker():
+        from lib.clip_delivery import build_from_config, DeliveryDeps
+        # The delivery is what decides how clip bytes reach the client
+        # (chunked-file + broker today; hls tomorrow). Config knob:
+        # [audio] delivery = "hls" (or CLAUDE_PWA_DELIVERY=hls).
+        delivery = build_from_config(cfg, deps=DeliveryDeps(broker=ctx.clip_broker))
+        return started(TTSWorker(
+            audio_dir=_paths.audio_dir, stream=ctx.stream, herald=herald,
+            broker=ctx.clip_broker, delivery=delivery))
 
-    leader_scheduler = TeamLeaderScheduler(send_tick=_send_leader_tick)
-    leader_scheduler.start()
-    srv.on_close(leader_scheduler.stop)
-    # Per-agent heartbeat loop: opt-in and idle-only. It sends a hidden
-    # heartbeat prompt; HEARTBEAT_OK replies are suppressed by message_store.
-    from lib.heartbeat import HeartbeatScheduler
+    def start_autonomy_janitors():
+        from lib import apns
+        return started(AutonomyJanitors(
+            adapters.decided_heartbeat, apns.send_user_notification,
+            recover=adapters.recover_janitor_quota))
 
-    def _send_agent_heartbeat(session: str, text: str) -> None:
-        agent = agents_db.get_by_session(session)
-        if not agent or agents_db.is_busy(agent["agent_id"]):
-            return
-        TurnDispatchService(ctx).dispatch(
-            text=text, requested_session=session, trace_id=_trace.new_id(),
-            synthesize_audio=False, forced_session=session, origin="heartbeat",
-        )
+    def start_janitor_runner():
+        from lib.janitor_http import runtime_available
+        return started(JanitorRunner(
+            adapters.janitor_run, admission_ready=lambda: runtime_available(ctx),
+            after_tick=adapters.janitor_after_tick))
 
-    heartbeat_scheduler = HeartbeatScheduler(send_heartbeat=_send_agent_heartbeat)
-    heartbeat_scheduler.start()
-    srv.on_close(heartbeat_scheduler.stop)
-    from lib.janitor_autonomy import AutonomyJanitors
-    from lib import apns
-    def dispatch_decided_heartbeat(session, text, request_id):
-        result = TurnDispatchService(ctx).dispatch(text=text, requested_session=session,
-            forced_session=session, trace_id=request_id, client_msg_id=request_id,
-            synthesize_audio=False, origin="heartbeat", queue_if_busy=False)
-        return result is not None
-    def recover_quota(provider, owner_id, generation, approval_id):
-        runtime = getattr(ctx, "runtime_client", None)
-        if runtime is not None:
-            return runtime.recover_janitor_quota(provider, owner_id, generation, approval_id)
-        from lib.janitor_autonomy import runtime_recover
-        return runtime_recover(provider, owner_id, generation, approval_id)
-    autonomy_janitors = AutonomyJanitors(dispatch_decided_heartbeat, apns.send_user_notification, recover=recover_quota)
-    autonomy_janitors.start()
-    srv.on_close(autonomy_janitors.stop)
-    from lib.dreaming import DreamingScheduler
+    def start_local_https():
+        from lib.local_transport import LocalHTTPS
+        try:
+            srv.local_transport = LocalHTTPS(
+                srv, Handler, ctx.local_tls_directory, ctx.local_tls_port)
+            srv.local_transport.start()
+        except Exception as error:
+            srv.local_transport = None
+            srv.local_transport_error = "Local HTTPS listener could not start"
+            log_exception("localHTTPSStartFailed", error)
+            return None
+        return srv.local_transport
 
-    def _send_agent_dream(session: str, text: str) -> bool:
-        from lib import compaction
-        from lib import dreaming
-        agent = agents_db.get_by_session(session)
-        if (not agent or agents_db.is_busy(agent["agent_id"])
-                or backends.active_handles(agent.get("backend"), agent["agent_id"])
-                or compaction.is_compacting(session)):
-            return False
-        return dreaming.dispatch_isolated_dream(agent, text)
+    def has_runtime_client() -> bool:
+        return getattr(ctx, "runtime_client", None) is not None
 
-    dreaming_scheduler = DreamingScheduler(send_dream=_send_agent_dream)
-    dreaming_scheduler.start()
-    srv.on_close(dreaming_scheduler.stop)
+    return [
+        # SSE hub first: every watcher below broadcasts into it.
+        Worker("stream", lambda: started(ctx.stream)),
+        Worker("relay", start_relay, stop=lambda relay: relay.close(),
+               enabled=lambda: ctx.relay_settings is not None),
+        Worker("tool-explanations", start_tool_explanations,
+               stop=lambda explanations: explanations.close()),
+        Worker("bonjour", start_bonjour,
+               enabled=lambda: bool(getattr(cfg, "network_advertise_lan", False))),
+        # Tail state_log + push every new row as an `agent-state` SSE event.
+        Worker("state-log-watcher", lambda: started(StateLogWatcher(ctx.stream))),
+        Worker("background-job-watcher",
+               lambda: started(BackgroundJobWatcher(ctx.stream))),
+        Worker("runtime-event-watcher", start_runtime_events, enabled=has_runtime_client),
+        # TTS worker: drains tts_queue, does the provider call from the
+        # server process (not from short-lived hook subprocesses). The hooks
+        # only write queue rows; this is the executor side. It starts before
+        # the transcript streamer, which enqueues into the same queue.
+        Worker("tts-worker", start_tts_worker),
+        Worker("maintenance", lambda: started(MaintenanceWorker(audio_dir=_paths.audio_dir))),
+        Worker("usage-refresh",
+               lambda: started(backend_usage.UsageRefreshWorker(stream=ctx.stream))),
+        Worker("resource-telemetry", lambda: started(ResourceTelemetryWorker())),
+        Worker("decision-delivery", lambda: started(
+            DecisionDeliveryWorker(lambda: _deliver_decision_rows(ctx)))),
+        # Transcript streamer: tails ~/.claude/projects/.../<uuid>.jsonl via
+        # inotify for every live agent. As Claude finishes each text block,
+        # the streamer enqueues it in tts_queue (the same queue the Stop hook
+        # uses) so audio starts synthesizing before the turn ends. Lifecycle
+        # is auto-managed: it reconciles with the agents/runtimes tables every
+        # second and binds/unbinds inotify watches accordingly.
+        Worker("transcript-streamer", lambda: started(TranscriptStreamer(stream=ctx.stream))),
+        # Autonomous team-leader loop: periodically nudges idle team leaders to
+        # review and unstick stalled teammates. Only fires when there is
+        # something to do; an idle team costs nothing.
+        Worker("team-leader", lambda: started(TeamLeaderScheduler(send_tick=adapters.leader_tick))),
+        # Per-agent heartbeat loop: opt-in and idle-only. It sends a hidden
+        # heartbeat prompt; HEARTBEAT_OK replies are suppressed by
+        # message_store. Restart recovery (after this stage) reads it back
+        # through `WorkerSet.get("heartbeat")`.
+        Worker("heartbeat", lambda: started(HeartbeatScheduler(send_heartbeat=adapters.heartbeat))),
+        Worker("autonomy-janitors", start_autonomy_janitors),
+        Worker("dreaming", lambda: started(DreamingScheduler(send_dream=adapters.dream))),
+        Worker("agent-scheduler",
+               lambda: started(AgentScheduleRunner(dispatch_turn=adapters.scheduled_job))),
+        Worker("janitor-runner", start_janitor_runner),
+        # Listeners that accept outside requests on their own thread start
+        # only after restart recovery has repaired state.
+        Worker("local-https", start_local_https, stop=lambda transport: transport.close(),
+               enabled=lambda: bool(ctx.local_tls_port), stage=SERVING),
+    ]
 
-    from lib.scheduler import AgentScheduleRunner
 
-    def _send_scheduled_job(session: str, text: str) -> None:
-        agent = agents_db.get_by_session(session)
-        if not agent:
-            return
-        TurnDispatchService(ctx).dispatch(
-            text=text, requested_session=session, trace_id=_trace.new_id(),
-            synthesize_audio=False, forced_session=session, origin="automation",
-        )
-
-    schedule_runner = AgentScheduleRunner(dispatch_turn=_send_scheduled_job)
-    schedule_runner.start()
-    srv.on_close(schedule_runner.stop)
-
-    from lib.janitor_runner import JanitorRunner
-    from lib.janitor_http import runtime_available
-    from lib import janitor_attention
-
-    def _dispatch_janitor_run(run: dict, prompt: str):
-        if not runtime_available(ctx):
-            raise RuntimeError("Janitor runtime support is unavailable")
-        result = TurnDispatchService(ctx).dispatch(
-            text=prompt, requested_session=run["session"],
-            forced_session=run["session"], trace_id=run["trace_id"],
-            client_msg_id=run["trace_id"], origin="janitor",
-            synthesize_audio=False, queue_if_busy=True,
-            janitor_run_id=run["run_id"],
-        )
-        return {"ok": True, "queued": result.queued}
-
-    attention_due = [0.0]
-
-    def _janitor_after_tick():
-        from lib.audio_bookkeeper import drain as drain_audio_bookkeeping
-        drain_audio_bookkeeping()
-        # Failure alerts move on the scale of runs (minutes); scanning
-        # janitor_runs on every 2 s admission tick was measurable idle CPU.
-        now = time.monotonic()
-        if now < attention_due[0]:
-            return
-        attention_due[0] = now + SERVER_TIMING.janitor_attention_interval_sec
-        if janitor_attention.reconcile():
-            ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER,
-                                  "kind": "janitor-attention"})
-
-    janitor_runner = JanitorRunner(
-        _dispatch_janitor_run, admission_ready=lambda: runtime_available(ctx),
-        after_tick=_janitor_after_tick)
-    janitor_runner.start()
-    srv.on_close(janitor_runner.stop)
-
+def _recover_after_start(ctx: ServerContext, workers: WorkerSet, *,
+                         restart_recovery: bool) -> None:
+    """Boot-time repair, after the boot workers and before serving listeners."""
     broadcast_boot_version(ctx)
     runtime_client = getattr(ctx, "runtime_client", None)
     if runtime_client is None:
@@ -5569,7 +5471,7 @@ def build_server(ctx: ServerContext, port: int,
             stream=getattr(ctx, "stream", None))
         if interrupted:
             log("turnRestartRecovery", f"marked={len(interrupted)}")
-        restart_heartbeats = heartbeat_scheduler.run_restart_recovery_once()
+        restart_heartbeats = workers.get("heartbeat").run_restart_recovery_once()
         if restart_heartbeats:
             log("heartbeatRestartRecovery", f"sent={restart_heartbeats}")
     try:
@@ -5582,19 +5484,37 @@ def build_server(ctx: ServerContext, port: int,
         recovered_queues = 0
     if recovered_queues:
         log("queuedRecovery", f"recovered={recovered_queues}")
-    if ctx.local_tls_port:
-        if not ctx.auth_token or ctx.local_tls_directory is None:
-            srv.server_close()
-            raise ValueError("local HTTPS requires authentication and an identity directory")
-        from lib.local_transport import LocalHTTPS
-        try:
-            srv.local_transport = LocalHTTPS(srv, Handler, ctx.local_tls_directory, ctx.local_tls_port)
-            srv.local_transport.start()
-            srv.on_close(srv.local_transport.close)
-        except Exception as error:
-            srv.local_transport = None
-            srv.local_transport_error = "Local HTTPS listener could not start"
-            log_exception("localHTTPSStartFailed", error)
+
+
+def build_server(ctx: ServerContext, port: int,
+                 bind_addr: str | None = None, *,
+                 restart_recovery: bool = False,
+                 herald=None) -> ContextHTTPServer:
+    """Wire a fully-injected HTTP server. Tests use this with a fake ctx.
+
+    `herald` is the HeraldManager production attaches so off-focus agents
+    raise their hand. It is stored on `ctx.herald` before any worker or
+    handler runs (the TTS worker captures it at start), so passing it here is
+    the same as setting `ctx.herald` beforehand, which tests still do.
+    """
+    _configure_runtime_client(ctx)
+    _seed_startup_invariants(ctx)
+    if herald is not None:
+        ctx.herald = herald
+    listener_addr = bind_addr or BIND_ADDR
+    if listener_addr not in {"127.0.0.1", "::1", "localhost"} and not ctx.auth_token:
+        raise ValueError("a non-loopback listener requires authentication")
+    if ctx.relay_settings is not None and not ctx.auth_token:
+        raise ValueError("relay networking requires authentication")
+    srv = ContextHTTPServer((listener_addr, port), Handler, ctx)
+    workers = WorkerSet(_server_workers(ctx, srv, _CFG, _dispatch_adapters(ctx), port))
+    srv.workers = workers
+    workers.start(srv, BOOT)
+    _recover_after_start(ctx, workers, restart_recovery=restart_recovery)
+    if ctx.local_tls_port and (not ctx.auth_token or ctx.local_tls_directory is None):
+        srv.server_close()
+        raise ValueError("local HTTPS requires authentication and an identity directory")
+    workers.start(srv, SERVING)
     return srv
 
 
@@ -5612,8 +5532,9 @@ if __name__ == "__main__":
         repaired = reconcile.reconcile_all()
         if repaired:
             log("bootReconcile", f"repaired {repaired} agent(s)")
-    # Wire the herald manager so off-focus agents raise their hand.
-    prod_ctx.herald = HeraldManager(  # type: ignore[attr-defined]
+    # The herald manager lets off-focus agents raise their hand. build_server
+    # attaches it to the context before any worker or handler can read it.
+    herald = HeraldManager(
         stream=prod_ctx.stream, tts=prod_ctx.tts,
         agents=lambda: load_agents(prod_ctx.agents_path),
         # Single source of truth: the herald reads focus live from the DB, so it
@@ -5624,7 +5545,7 @@ if __name__ == "__main__":
     # Whisper takes ~5 s to load — kick it off before binding the port so
     # the first /transcribe request doesn't time out.
     prod_ctx.stt.start_loading()  # type: ignore[attr-defined]
-    srv = build_server(prod_ctx, PORT, restart_recovery=True)
+    srv = build_server(prod_ctx, PORT, restart_recovery=True, herald=herald)
     log("serverStart", f"port={PORT}")
     print(f"claude-pwa listening on :{PORT}", flush=True)
     try:
