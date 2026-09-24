@@ -80,6 +80,9 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList assignmentContacts READ assignmentContacts NOTIFY assignmentContactsChanged)
     Q_PROPERTY(bool newAgentOnStartup READ newAgentOnStartup WRITE setNewAgentOnStartup NOTIFY newAgentOnStartupChanged)
     Q_PROPERTY(bool minimalUi READ minimalUi WRITE setMinimalUi NOTIFY minimalUiChanged)
+    Q_PROPERTY(QString readingTheme READ readingTheme WRITE setReadingTheme NOTIFY readingThemeChanged)
+    Q_PROPERTY(QVariantMap readingStyle READ readingStyle NOTIFY readingThemeChanged)
+    Q_PROPERTY(QVariantList readingThemes READ readingThemes CONSTANT)
     Q_PROPERTY(bool sharedFilesystem READ sharedFilesystem WRITE setSharedFilesystem
                    NOTIFY sharedFilesystemChanged)
     Q_PROPERTY(QString connectionState READ connectionState NOTIFY connectionStateChanged)
@@ -197,6 +200,10 @@ class AppController : public QObject {
     [[nodiscard]] bool timestampsVisible() const;
     [[nodiscard]] bool minimalUi() const { return m_minimalUi; }
     void setMinimalUi(bool minimal);
+    [[nodiscard]] QString readingTheme() const { return m_readingTheme; }
+    void setReadingTheme(const QString& id);
+    [[nodiscard]] QVariantMap readingStyle() const;
+    [[nodiscard]] static QVariantList readingThemes();
     [[nodiscard]] bool sharedFilesystem() const;
     [[nodiscard]] QString connectionState() const;
     [[nodiscard]] QString errorMessage() const;
@@ -405,6 +412,7 @@ class AppController : public QObject {
     void newAgentOnStartupChanged();
     void launchPoolEmpty();
     void minimalUiChanged();
+    void readingThemeChanged();
     void sharedFilesystemChanged();
     void connectionStateChanged();
     void errorMessageChanged();
@@ -580,6 +588,7 @@ class AppController : public QObject {
     QString m_assignmentSession;
     bool m_newAgentOnStartup = true;
     bool m_minimalUi = false;
+    QString m_readingTheme;
     bool m_sharedFilesystem = false;
     bool m_voicesLoading = false;
     bool m_orchestratorLoading = false;

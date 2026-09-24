@@ -21,6 +21,12 @@ TestCase {
         property bool pauseMobilePush: true
         property bool sharedFilesystem: false
         property bool muted: false
+        property string readingTheme: "terminal"
+        property var readingThemes: [
+            {id: "terminal", label: "Terminal", detail: "Mono", fontFamily: "JetBrains Mono"},
+            {id: "paper", label: "Paper", detail: "Sepia serif", fontFamily: "Literata"},
+            {id: "dusk", label: "Dusk", detail: "Dark serif", fontFamily: "Literata"}
+        ]
         property int focusRequests: 0
         property int avatarRevision: 0
         property QtObject contacts: QtObject { property int count: 0 }
@@ -97,6 +103,24 @@ TestCase {
         compare(stub.toolNarrator.detailLevel, 4);
         picker.open(false); picker.query = "Grandma";
         verify(picker.results[0].label.includes("current"));
+        picker.close();
+    }
+    function test_readingThemeOffersEveryThemeAndMarksCurrent() {
+        stub.readingTheme = "terminal";
+        const picker = createTemporaryObject(factory, testCase);
+        picker.open(true); picker.query = "reading theme";
+        compare(picker.results.length, 3);
+        verify(picker.results[0].label.includes("Terminal"));
+        verify(picker.results[0].label.includes("current"));
+        verify(!picker.results[1].label.includes("current"));
+        picker.choose(1);
+        compare(stub.readingTheme, "paper");
+        picker.open(false); picker.query = "sepia";
+        compare(picker.results.length, 1);
+        verify(picker.results[0].label.includes("Paper"));
+        verify(picker.results[0].label.includes("current"));
+        picker.open(false); picker.query = "font literata";
+        compare(picker.results.length, 2);
         picker.close();
     }
     function test_escapeDoesNotChangeSetting() {

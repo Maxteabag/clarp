@@ -70,6 +70,15 @@ Item {
         root.activityExpanded = false;
         Qt.callLater(root.loadInlineDetails);
     }
+    // Reading theme; test stubs without a controller style keep the terminal look.
+    readonly property var readingStyle: (controller && controller.readingStyle) || ({})
+    function styled(key, fallback) {
+        const value = root.readingStyle[key];
+        return value === undefined || value === null || value === "" ? fallback : value;
+    }
+    readonly property string readingFont: String(styled("fontFamily", "JetBrains Mono"))
+    readonly property int readingSize: Number(styled("fontPixelSize", 15))
+    readonly property int readingMeasure: Number(styled("measure", 840))
     readonly property var narrator: controller.toolNarrator || null
     readonly property bool narrationEnabled: narrator !== null && narrator.enabled
     readonly property bool localFilesAllowed: Boolean(controller.sharedFilesystem)
@@ -100,8 +109,8 @@ Item {
 
     TextMetrics {
         id: bubbleMetrics
-        font.family: "JetBrains Mono"
-        font.pixelSize: 15
+        font.family: root.readingFont
+        font.pixelSize: root.readingSize
         // Long messages already use the available width; do not shape the
         // entire growing stream a second time just to measure the bubble.
         text: root.body.length <= 160 ? root.body : ""
@@ -154,7 +163,7 @@ Item {
                 objectName: "groupReplyMarker"
                 visible: root.replyToName.length > 0 && root.replyMarkerText.length > 0
                 text: root.replyMarkerText
-                color: "#8f96bc"
+                color: root.styled("mutedText", "#8f96bc")
                 font.pixelSize: 11
                 elide: Text.ElideRight
                 Layout.fillWidth: true
@@ -171,7 +180,7 @@ Item {
             visible: root.replyMarkerVisible && !root.groupView
             Layout.leftMargin: 2
             text: root.replyMarkerText
-            color: "#8f96bc"
+            color: root.styled("mutedText", "#8f96bc")
             font.pixelSize: 11
             elide: Text.ElideRight
             Layout.fillWidth: true
@@ -210,7 +219,7 @@ Item {
                         Layout.maximumWidth: activityRow.width * 0.3
                         elide: Text.ElideRight
                         text: root.toolName || root.messageKind || "Working"
-                        color: "#868a9f"
+                        color: root.styled("mutedText", "#868a9f")
                         font.family: "JetBrains Mono"
                         font.pixelSize: 12
                         font.weight: Font.DemiBold
@@ -221,7 +230,8 @@ Item {
                             + (liveExplanation.narrationShown ? liveExplanation.displayText + (root.explanationRepeat > 1 ? " (x" + root.explanationRepeat + ")" : "") : root.body)
                         textFormat: Text.PlainText
                         color: root.activityStatus === "error" ? "#bd7484"
-                            : liveExplanation.narrationShown ? "#82aaff" : "#969bb5"
+                            : liveExplanation.narrationShown ? root.styled("link", "#82aaff")
+                            : root.styled("mutedText", "#969bb5")
                         font.family: "JetBrains Mono"
                         font.pixelSize: 12
                         wrapMode: liveExplanation.narrationShown ? Text.Wrap : Text.NoWrap
@@ -235,12 +245,12 @@ Item {
                 objectName: "userMessageBackground"
                 visible: !root.activity && root.body.length > 0
                 width: Math.min(Math.max(0, parent.width),
-                    parent.width * (root.rightAligned ? 0.78 : 0.95), 840,
-                    root.body.length > 160 ? 840 : Math.max(140, bubbleMetrics.advanceWidth + 28))
+                    parent.width * (root.rightAligned ? 0.78 : 0.95), root.readingMeasure,
+                    root.body.length > 160 ? root.readingMeasure : Math.max(140, bubbleMetrics.advanceWidth + 28))
                 x: root.rightAligned ? parent.width - width : 0
                 implicitHeight: messageBlocks.implicitHeight + 24
                 radius: 0
-                color: root.userAuthored ? "#20212e" : "transparent"
+                color: root.userAuthored ? root.styled("bubble", "#20212e") : "transparent"
                 border.width: root.deliveryFailed ? 1 : 0
                 border.color: "#8d5763"
                 opacity: root.pending ? 0.68 : 1
@@ -273,11 +283,11 @@ Item {
                             textFormat: root.messageKind === "live"
                                 ? Text.PlainText : Text.MarkdownText
                             wrapMode: Text.Wrap
-                            color: "#e7e1dc"
-                            selectedTextColor: "#fff8ff"
-                            selectionColor: "#6f527b"
-                            font.family: "JetBrains Mono"
-                            font.pixelSize: 15
+                            color: root.styled("text", "#e7e1dc")
+                            selectedTextColor: root.styled("selectedText", "#fff8ff")
+                            selectionColor: root.styled("selection", "#6f527b")
+                            font.family: root.readingFont
+                            font.pixelSize: root.readingSize
                             // Routed through the controller so a non-web scheme in
                             // model output cannot reach the desktop handler.
                             onLinkActivated: link => root.controller.openExternalLink(link, root.linkOriginHost)
@@ -358,7 +368,7 @@ Item {
                     ? (root.groupedExpanded ? "Hide · " : "Show · ") + root.groupSummary
                     : (root.activityExpanded ? "Hide · " : "Show · ")
                         + (root.activitySummary || root.presentedActivityCount + " tool calls"))
-                color: "#72778f"
+                color: root.styled("faintText", "#72778f")
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
             }
@@ -428,7 +438,7 @@ Item {
             Layout.leftMargin: 12
             Layout.rightMargin: 12
             text: Qt.formatDateTime(new Date(root.timestamp), "MMM d  HH:mm")
-            color: "#555a70"
+            color: root.styled("faintText", "#555a70")
             font.family: "JetBrains Mono"
             font.pixelSize: 9
         }

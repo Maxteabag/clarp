@@ -37,6 +37,14 @@ Rectangle {
                 label: "Tool activity: " + label + (root.controller.activityDisplayMode === mode ? " (current)" : ""),
                 key: "", group: "settings", keywords: "tool calls collapse expand grouping"});
         });
+        const themes = root.controller.readingThemes || [];
+        for (const theme of themes) {
+            const current = String(root.controller.readingTheme || "terminal") === String(theme.id);
+            rows.push({kind: "command", action: "setting:reading:" + theme.id,
+                label: "Reading theme: " + theme.label + " · " + theme.fontFamily + (current ? " (current)" : ""),
+                key: "", group: "settings",
+                keywords: "font typeface text contrast readable legible eyes appearance colours " + String(theme.detail || "")});
+        }
         const narrator = root.controller.toolNarrator;
         if (narrator) {
             for (let level = 0; level < narrator.detailLevels.length; ++level) {
@@ -52,6 +60,10 @@ Rectangle {
         if (action.startsWith("setting:activity:")) {
             const mode = Number(action.slice("setting:activity:".length));
             if (Number.isInteger(mode) && mode >= 0 && mode <= 2) root.controller.activityDisplayMode = mode;
+        } else if (action.startsWith("setting:reading:")) {
+            const id = action.slice("setting:reading:".length);
+            const themes = root.controller.readingThemes || [];
+            if (themes.some(theme => String(theme.id) === id)) root.controller.readingTheme = id;
         } else if (action.startsWith("setting:detail:")) {
             const level = Number(action.slice("setting:detail:".length));
             const narrator = root.controller.toolNarrator;
