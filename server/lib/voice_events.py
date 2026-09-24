@@ -43,10 +43,10 @@ server side of the turn (transcript, send, playback) together.
 from __future__ import annotations
 
 import json
-import time
 from typing import Any
 
 from . import db
+from .clock import now_ms
 
 SOURCES = ("ios", "pwa", "server", "other")
 MAX_BATCH = 500
@@ -56,9 +56,6 @@ MAX_DETAIL = 8000
 # as unset: we keep the raw client_ts but stamp ts with receipt time.
 MAX_PLAUSIBLE_OFFSET_MS = 6 * 60 * 60 * 1000
 
-
-def now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _num(value: Any) -> float | None:

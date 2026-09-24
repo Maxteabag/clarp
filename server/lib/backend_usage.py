@@ -36,6 +36,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from . import db, server_identity
+from .clock import now_ms as _now_ms
 from .log import log, log_exception
 from .protocol import SSEType
 
@@ -65,9 +66,6 @@ QUOTA_WINDOW_NAMES = {
 CLAUDE_USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
 PROVIDER_COLLECTORS = (CLAUDE, CODEX)
 
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _iso_from_epoch_seconds(value: Any) -> str:

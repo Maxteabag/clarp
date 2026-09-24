@@ -10,6 +10,7 @@ import time
 import uuid
 
 from . import xdg
+from .clock import now_ms
 from .log import log_exception
 
 
@@ -71,7 +72,7 @@ class OracleJournal:
                 self.sequence += 1
                 data = (json.dumps({
                     "session_id": self.session_id, "sequence": self.sequence,
-                    "timestamp_ms": int(time.time() * 1000),
+                    "timestamp_ms": now_ms(),
                     "elapsed_ms": round((time.monotonic() - self.started) * 1000),
                     "event": kind, "fields": fields or {},
                 }, ensure_ascii=False) + "\n").encode()

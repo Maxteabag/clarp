@@ -35,6 +35,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from .http_utils import send_plain_http_error
 from .log import log_exception
 
 
@@ -456,12 +457,4 @@ def _path_for_clip(clip_id: int, audio_dir: pathlib.Path) -> pathlib.Path | None
 
 
 def _send_http_error(handler, code: int, message: str) -> None:
-    try:
-        handler.send_response(code)
-        handler.send_header("Content-Type", "text/plain")
-        handler.send_header("Content-Length", str(len(message)))
-        handler.send_header("Connection", "close")
-        handler.end_headers()
-        handler.wfile.write(message.encode("utf-8"))
-    except OSError as e:
-        log_exception("clipStreamErrorReplyFail", e, detail=str(code))
+    send_plain_http_error(handler, code, message, log_event="clipStreamErrorReplyFail")

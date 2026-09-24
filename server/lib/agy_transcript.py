@@ -24,6 +24,7 @@ import re
 from typing import Any
 
 from .log import log_exception
+from .text_util import truncate
 
 # Map agy's event types onto the tool names the UI already styles.
 _TOOL_TYPES = {
@@ -57,11 +58,6 @@ def _cache_file() -> pathlib.Path:
         pathlib.Path.home() / ".gemini" / "antigravity-cli")
     return pathlib.Path(base) / "cache" / "last_conversations.json"
 
-
-def truncate(s: Any, n: int = 600) -> str:
-    if not isinstance(s, str):
-        return ""
-    return s if len(s) <= n else s[:n] + "…"
 
 
 def _extract_user_text(content: Any) -> str:

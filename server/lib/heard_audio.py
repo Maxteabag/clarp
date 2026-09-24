@@ -18,6 +18,7 @@ import re
 import time
 
 from . import settings_store
+from .clock import now_ms
 from .log import log_exception
 
 RETAIN_KEY = "transcription.retain_audio"
@@ -71,7 +72,7 @@ def retain(cache_dir: pathlib.Path, *, trace_id: str, audio_bytes: bytes,
         (root / f"{trace_id}.json").write_text(json.dumps({
             "trace_id": trace_id, "session": session, "run_id": run_id,
             "model": model, "content_type": content_type,
-            "bytes": len(audio_bytes), "created_at": int(time.time() * 1000),
+            "bytes": len(audio_bytes), "created_at": now_ms(),
         }))
         sweep(root)
         return path

@@ -15,6 +15,7 @@ from typing import Any
 
 from .activity import summarize_tool_activity
 from .log import log_exception
+from .text_util import truncate
 
 
 # Harness-injected user-role envelopes. claude-code records these as `user`
@@ -28,11 +29,6 @@ _INJECTED_USER_NOISE_RE = re.compile(
     re.IGNORECASE,
 )
 
-
-def truncate(s: Any, n: int = 600) -> str:
-    if not isinstance(s, str):
-        return ""
-    return s if len(s) <= n else s[:n] + "…"
 
 
 def _as_int(v: Any) -> int | None:

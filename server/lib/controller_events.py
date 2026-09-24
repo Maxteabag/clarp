@@ -8,8 +8,8 @@ pressed it, so callers must broadcast the returned event with
 from __future__ import annotations
 
 import secrets
-import time
 
+from .clock import now_ms as _now_ms
 from .protocol import ClientAction, SSEType
 
 
@@ -83,7 +83,7 @@ def build_controller_event(data: dict, *, now_ms: int | None = None,
     timestamp = _bounded_integer(
         data,
         "ts",
-        default=now_ms if now_ms is not None else int(time.time() * 1000),
+        default=now_ms if now_ms is not None else _now_ms(),
         maximum=9_999_999_999_999,
     )
     event = {

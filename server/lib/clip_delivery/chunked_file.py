@@ -26,10 +26,10 @@ from __future__ import annotations
 from .. import clip_store
 
 import pathlib
-import time
 
 from .. import agents as agents_db
 from .. import clips as clips_lib
+from ..clock import now_ms
 from ..log import log_exception
 from ..protocol import ClipProducerStatus
 from . import FinalizeResult
@@ -57,7 +57,7 @@ class ChunkedFileDelivery:
               text_len: int,
               trace_id: str | None) -> "ChunkedFileSession":
         audio_dir.mkdir(parents=True, exist_ok=True)
-        target = audio_dir / f"{int(time.time() * 1000)}__{session}.mp3"
+        target = audio_dir / f"{now_ms()}__{session}.mp3"
 
         # 1. Allocate the durable clip identity BEFORE the first byte. The
         #    live URL is keyed by clip_id; the file is just a replay artifact.
