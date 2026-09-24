@@ -168,3 +168,24 @@ def test_unrelated_failed_document_is_untouched(setup):
     attention.reconcile()
     assert artifacts.get(unrelated["artifact_id"])["status"] == "failed"
     assert attention.pending() == []
+
+
+def _statements(callable_):
+    statements: list[str] = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        callable_()
+    finally:
+        db.conn().set_trace_callback(None)
+    return statements
+
+
+def test_stable_reconcile_never_takes_the_write_lock(setup):
+    # The runner calls reconcile on every tick; a settled roster must be read-only.
+    assert not any(s.startswith("BEGIN") for s in _statements(attention.reconcile))
+    fail_twice(setup)
+    assert not any(s.startswith("BEGIN") for s in _statements(attention.reconcile))
+    run(setup)  # a third failure changes the alert, so one write is expected
+    statements = _statements(attention.reconcile)
+    assert sum(s.startswith("BEGIN") for s in statements) == 1
+    assert attention.pending()[0]["failure_count"] == 3

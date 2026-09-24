@@ -716,3 +716,16 @@ def test_future_response_type_is_not_treated_as_a_single_choice_question(tmp_pat
     with pytest.raises(ValueError, match="unsupported response_type"):
         artifacts.resolve(decision_id, expected_revision=1, answer={"text": "Do it"})
     assert artifacts.pending_deliveries() == []
+
+
+def test_attention_poll_without_expiries_is_read_only(tmp_path):
+    _agent(tmp_path)
+    artifacts.create_decision(session="mike", title="Later", question="Ship it?",
+                              expires_at=db.now_ms() + 60_000)
+    statements: list[str] = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        assert len(artifacts.attention()) == 1
+    finally:
+        db.conn().set_trace_callback(None)
+    assert not any(s.startswith("BEGIN") for s in statements)
