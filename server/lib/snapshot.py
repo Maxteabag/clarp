@@ -4,13 +4,13 @@ from __future__ import annotations
 from typing import Any
 
 import json
-import time
 
 from . import (agent_goals, agents as agents_db, avatar_settings, backend_usage, backends,
                compaction, db,
                config, message_store, model_avatars, team_store,
                turn_queue, scheduler, janitors)
 from . import reconcile
+from .clock import now_ms
 from .session_models import agent_model
 from . import personas as persona_store
 from .avatar_urls import (versioned_avatar_url, janitor_avatar_url,
@@ -125,7 +125,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         if active and turn_started_at <= 0:
             # Busy with no recorded turn start (a handle adopted mid-turn):
             # "since now" is honest; 0 read as 1970 in a client's timer.
-            turn_started_at = int(time.time() * 1000)
+            turn_started_at = now_ms()
         message = messages.get(agent_id, {})
         message_head = message.get('head', {'preview': '', 'message_id': ''})
         # Agree with /log's contract: no bound backend session means an empty

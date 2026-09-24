@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from . import backends
+from .clock import now_ms as _now_ms
 from .log import log_exception
 
 _lock = threading.Lock()
@@ -83,7 +84,7 @@ def _task_value(backend: str, state: str, output: str,
     verification_url = next((url.rstrip(".,)") for url in _url.findall(clean)
                              if "auth" in url or "login" in url), "")
     code_match = _device_code.search(clean)
-    now_ms = int(time.time() * 1000)
+    now_ms = _now_ms()
     started = started_at or now_ms
     pending = state == "running" and bool(_code_prompt.search(clean))
     return {
@@ -284,7 +285,7 @@ def status(*, validate: bool = True) -> list[dict[str, Any]]:
             present, expires_at = _credential_metadata(adapter.id)
             state, validation_error = "signed_out", ""
             if reading.logged_in:
-                if expires_at and expires_at <= int(time.time() * 1000):
+                if expires_at and expires_at <= _now_ms():
                     state = "expired"
                 elif validate:
                     state, validation_error = _validation(adapter.id)
@@ -326,7 +327,7 @@ def start_login(backend: str) -> dict[str, Any]:
             return dict(current)
         _code_submitted.pop(backend, None)
         _processes.pop(backend, None)
-        started_at = int(time.time() * 1000)
+        started_at = _now_ms()
         _tasks[backend] = _task_value(
             backend, "running", "", started_at=started_at)
 

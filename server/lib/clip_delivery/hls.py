@@ -43,6 +43,7 @@ import threading
 
 from .. import agents as agents_db
 from .. import clips as clips_lib
+from ..http_utils import send_plain_http_error
 from ..log import log_exception
 from ..protocol import ClipProducerStatus
 from . import FinalizeResult
@@ -423,12 +424,4 @@ def serve_hls_artifact(handler, audio_dir: pathlib.Path,
 
 
 def _send_http_error(handler, code: int, message: str) -> None:
-    try:
-        handler.send_response(code)
-        handler.send_header("Content-Type", "text/plain")
-        handler.send_header("Content-Length", str(len(message)))
-        handler.send_header("Connection", "close")
-        handler.end_headers()
-        handler.wfile.write(message.encode("utf-8"))
-    except OSError as e:
-        log_exception("hlsErrorReplyFail", e, detail=str(code))
+    send_plain_http_error(handler, code, message, log_event="hlsErrorReplyFail")

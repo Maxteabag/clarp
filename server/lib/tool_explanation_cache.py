@@ -3,14 +3,11 @@
 Each row keeps the producer that wrote it (`scripted`, `jev` or `llm`) and its
 bounded provenance, so a cache hit reports the original producer.
 """
-import time
+from .clock import now_ms
 from .db import conn
 
 TTL_MS = 24 * 60 * 60 * 1000
 
-
-def now_ms():
-    return int(time.time() * 1000)
 
 
 def get(key):

@@ -47,6 +47,7 @@ from .timing import (
     SQLITE_LOCK_RETRY_SLEEP_SEC,
 )
 from . import xdg
+from .clock import now_ms  # noqa: F401  (re-exported as db.now_ms)
 
 
 DB_PATH = pathlib.Path(os.environ.get(
@@ -1761,9 +1762,6 @@ def _migrate_to_v80(con: sqlite3.Connection) -> None:
     ):
         con.execute(statement)
 
-
-def now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def reset_for_tests(path: pathlib.Path | None = None) -> None:
