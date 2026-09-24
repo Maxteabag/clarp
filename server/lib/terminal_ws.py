@@ -36,6 +36,7 @@ import json
 from . import agents as agents_db
 from . import backends
 from . import ws
+from .http_utils import send_plain_http_error
 from .log import log, log_exception
 
 # Interactive launch argv when resuming a known session (id appended) and when
@@ -261,12 +262,4 @@ def _kill(pid: int) -> None:
 
 
 def _send_http_error(handler, code: int, message: str) -> None:
-    try:
-        handler.send_response(code)
-        handler.send_header("Content-Type", "text/plain")
-        handler.send_header("Content-Length", str(len(message)))
-        handler.send_header("Connection", "close")
-        handler.end_headers()
-        handler.wfile.write(message.encode("utf-8"))
-    except OSError as e:
-        log_exception("terminalErrorReplyFail", e, detail=str(code))
+    send_plain_http_error(handler, code, message, log_event="terminalErrorReplyFail")

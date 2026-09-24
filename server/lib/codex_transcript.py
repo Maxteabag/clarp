@@ -27,6 +27,7 @@ from typing import Any
 
 from .activity import summarize_tool_activity
 from .log import log_exception
+from .text_util import truncate
 
 
 TOOL_OUTPUT_LINE_LIMIT = 5
@@ -46,11 +47,6 @@ def _codex_home() -> pathlib.Path:
     return pathlib.Path(os.environ.get("CODEX_HOME",
                         str(pathlib.Path.home() / ".codex")))
 
-
-def truncate(s: Any, n: int = 600) -> str:
-    if not isinstance(s, str):
-        return ""
-    return s if len(s) <= n else s[:n] + "…"
 
 
 def _clean_user_text(msg: Any) -> str:

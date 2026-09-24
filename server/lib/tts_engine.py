@@ -17,9 +17,9 @@ import pathlib
 import re
 import shutil
 import tempfile
-import time
 from abc import ABC, abstractmethod
 
+from .clock import now_ms as _now_ms
 from .eleven_http import synthesize_to_file
 
 
@@ -29,7 +29,7 @@ def make_clip_filename(session: str | None = None, *, now_ms: int | None = None)
     Format: '<epoch-ms>__<session>.mp3', or '<epoch-ms>.mp3' when no
     session is given.
     """
-    ts = now_ms if now_ms is not None else int(time.time() * 1000)
+    ts = now_ms if now_ms is not None else _now_ms()
     if session:
         # Same allowed-chars rule as the agent session id sanitiser.
         safe = "".join(c for c in session if c.isalnum() or c in "._-") or "anon"
