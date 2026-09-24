@@ -13,7 +13,7 @@ Rectangle {
     signal closeRequested
     readonly property bool dialogOpen: ttsDialog.visible
     property int focusedIndex: 0
-    readonly property var actions: [timestampsRow, readyRow, reducedMotionRow, toolsRow, narrationRow, startupRow, anonymousRow, minimalUiRow, spokenRow, mobilePushRow,
+    readonly property var actions: [timestampsRow, readyRow, reducedMotionRow, toolsRow, narrationRow, startupRow, anonymousRow, minimalUiRow, readingThemeRow, spokenRow, mobilePushRow,
         connectionRow, orchestratorRow, filesystemRow, routingRow]
     color: "#1a1b26"
     objectName: "settingsPanel"
@@ -33,6 +33,15 @@ Rectangle {
         root.focusRow(Math.max(0, root.availableRows().indexOf(root.actions[root.focusedIndex])));
     }
     function dismissDialog() { ttsDialog.reject(); }
+
+    readonly property var readingThemes: root.controller.readingThemes || []
+    readonly property int readingThemeIndex: Math.max(0, root.readingThemes.findIndex(
+        theme => String(theme.id) === String(root.controller.readingTheme || "terminal")))
+    function stepReadingTheme(delta) {
+        if (root.readingThemes.length === 0) return;
+        const next = (root.readingThemeIndex + delta + root.readingThemes.length) % root.readingThemes.length;
+        root.controller.readingTheme = String(root.readingThemes[next].id);
+    }
 
     function revealRow(row) {
         if (!root.visible || !row.activeFocus) return;
@@ -68,6 +77,8 @@ Rectangle {
         } else if (row === narrationRow && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
             root.controller.toolNarrator.detailLevel = Math.max(0, Math.min(4,
                 root.controller.toolNarrator.detailLevel + (event.key === Qt.Key_Right ? 1 : -1)));
+        } else if (row === readingThemeRow && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
+            root.stepReadingTheme(event.key === Qt.Key_Right ? 1 : -1);
         } else if (row === toolsRow && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
             root.controller.activityDisplayMode = Math.max(0, Math.min(2,
                 (root.controller.activityDisplayMode || 0) + (event.key === Qt.Key_Right ? 1 : -1)));
@@ -284,6 +295,17 @@ Rectangle {
                     detail: "Hide only the sidebar chevron button. Ctrl+B still toggles the sidebar."
                     checked: root.controller.minimalUi
                     onToggled: value => root.controller.minimalUi = value
+                }
+                SettingsAction {
+                    id: readingThemeRow
+                    objectName: "setting-reading-theme"
+                    label: "Reading theme"
+                    detail: {
+                        const theme = root.readingThemes[root.readingThemeIndex];
+                        return theme ? theme.label + " · " + theme.fontFamily + ". " + theme.detail
+                            : "Font and colours for chat text";
+                    }
+                    onActivated: root.stepReadingTheme(1)
                 }
             }
 

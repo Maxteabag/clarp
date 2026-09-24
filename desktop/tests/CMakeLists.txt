@@ -7,6 +7,12 @@ target_link_libraries(clarp-palette-tests PRIVATE Qt6::Gui Qt6::Test)
 clarp_apply_quality_settings(clarp-palette-tests)
 add_test(NAME clarp-desktop-palette COMMAND clarp-palette-tests)
 
+add_executable(clarp-reading-theme-tests tst_reading_theme.cpp)
+target_include_directories(clarp-reading-theme-tests PRIVATE ../src)
+target_link_libraries(clarp-reading-theme-tests PRIVATE Qt6::Gui Qt6::Test)
+clarp_apply_quality_settings(clarp-reading-theme-tests)
+add_test(NAME clarp-desktop-reading-theme COMMAND clarp-reading-theme-tests)
+
 add_executable(clarp-desktop-tests
     ../src/app/PreviewVersions.cpp
     ../src/app/PreviewVersions.h

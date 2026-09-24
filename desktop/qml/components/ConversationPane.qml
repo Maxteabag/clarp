@@ -13,6 +13,12 @@ Rectangle {
     required property var conversationModel
     required property bool active
     readonly property int agentRevision: controller.agentRevision
+    // Reading theme for the transcript surface; stubs without one keep the terminal look.
+    readonly property var readingStyle: (controller && controller.readingStyle) || ({})
+    function styled(key, fallback) {
+        const value = root.readingStyle[key];
+        return value === undefined || value === null || value === "" ? fallback : value;
+    }
     // Agent-to-agent pair rooms are read-only Host projections.
     readonly property bool pairRoom: root.controller.isPairSession(root.session)
     readonly property var pairRoomInfo: {
@@ -178,141 +184,147 @@ Rectangle {
             }
         }
 
-        TranscriptList {
-            id: transcript
-
+        Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            model: presentation
-            clip: true
-            spacing: 2
-            leftMargin: 14
-            rightMargin: 14
-            topMargin: 10
-            bottomMargin: 10
-            reuseItems: true
-            section.property: "dayLabel"
-            section.delegate: Item {
-                required property string section
-                width: transcript.width
-                readonly property bool showHeading: section.length > 0
-                    && !(section === "Today" && presentation.leadingDayLabel === "Today")
-                height: showHeading ? 32 : 0
-                visible: showHeading
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 14
-                    anchors.right: dateLabel.left
-                    anchors.rightMargin: 12
-                    anchors.verticalCenter: parent.verticalCenter
-                    height: 1
-                    color: "#303342"
+            color: root.styled("background", "#1a1b26")
+            Behavior on color { ColorAnimation { duration: 120 } }
+
+            TranscriptList {
+                id: transcript
+
+                anchors.fill: parent
+                model: presentation
+                clip: true
+                spacing: 2
+                leftMargin: 14
+                rightMargin: 14
+                topMargin: 10
+                bottomMargin: 10
+                reuseItems: true
+                section.property: "dayLabel"
+                section.delegate: Item {
+                    required property string section
+                    width: transcript.width
+                    readonly property bool showHeading: section.length > 0
+                        && !(section === "Today" && presentation.leadingDayLabel === "Today")
+                    height: showHeading ? 32 : 0
+                    visible: showHeading
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 14
+                        anchors.right: dateLabel.left
+                        anchors.rightMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        height: 1
+                        color: root.styled("rule", "#303342")
+                    }
+                    TuiText {
+                        id: dateLabel
+                        anchors.centerIn: parent
+                        text: parent.section
+                        color: root.styled("mutedText", "#8d93b0")
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: 11
+                    }
+                    Rectangle {
+                        anchors.left: dateLabel.right
+                        anchors.leftMargin: 12
+                        anchors.right: parent.right
+                        anchors.rightMargin: 14
+                        anchors.verticalCenter: parent.verticalCenter
+                        height: 1
+                        color: root.styled("rule", "#303342")
+                    }
                 }
-                TuiText {
-                    id: dateLabel
+                boundsBehavior: Flickable.StopAtBounds
+
+                header: Item {
+                    width: transcript.width
+                    height: root.conversationModel.hasMore ? 32 : 4
+
+                    TuiButton {
+                        visible: root.conversationModel.hasMore
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: root.conversationModel.loading ? "Loading…" : "Load earlier messages"
+                        enabled: !root.conversationModel.loading
+                        onClicked: {
+                            transcript.pauseFollowing();
+                            root.controller.loadOlderSession(root.session);
+                        }
+                    }
+                }
+
+                delegate: MessageDelegate {
+                    required property var model
+                    senderAgentId: String(model.senderAgentId || "")
+                    senderSession: String(model.senderSession || "")
+                    replyToAgentId: String(model.replyToAgentId || "")
+                    replyToName: String(model.replyToName || "")
+                    replyToSession: String(model.replyToSession || "")
+                    delivery: String(model.delivery || "")
+                    explanationRepeat: Number(model.explanationRepeat || 1)
+                    groupView: root.pairRoom
+                    activitySummary: String(model.activityLabel || "")
+                    required property var groupIds
+                    required property string groupLabel
+                    required property bool groupExpanded
+                    required property bool activityInline
+                    groupSummary: groupLabel
+                    groupedExpanded: groupExpanded
+                    forceActivityInline: activityInline
+                    onToggleActivityGroup: {
+                        if (!groupExpanded) for (const id of groupIds)
+                            root.controller.loadMessageToolDetails(root.session, id);
+                        presentation.toggleGroup(messageId);
+                    }
+                    controller: root.controller
+                    session: root.session
+                    showTools: root.controller.toolsVisible
+                    showTimestamp: root.controller.timestampsVisible
+                }
+
+                footer: Item {
+                    width: transcript.width
+                    // A tail refresh runs on every agent switch and pane focus.
+                    // Reserving spinner space for it moved the whole transcript
+                    // 28px up and back down each time; only an empty chat shows it.
+                    readonly property bool initialLoad: root.conversationModel.loading && transcript.count === 0
+                    height: root.working ? 46 : initialLoad ? 34 : 6
+
+                    TypingIndicator {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: root.working
+                    }
+                    TuiBusyIndicator {
+                        anchors.centerIn: parent
+                        running: parent.initialLoad && !root.working
+                        visible: running
+                        implicitWidth: 22
+                        implicitHeight: 22
+                    }
+                }
+
+                Connections {
+                    target: presentation
+                    function onRowsAppended(fromCurrentUser) {
+                        if (fromCurrentUser || (transcript.followLatest && !transcript.userInteracting)) {
+                            transcript.scrollToLatest();
+                        } else {
+                            transcript.newMessagesBelow = true;
+                        }
+                    }
+                }
+
+                TuiLabel {
                     anchors.centerIn: parent
-                    text: parent.section
-                    color: "#8d93b0"
+                    visible: root.session.length === 0 && transcript.count === 0 && !root.conversationModel.loading
+                    text: "Choose an agent · Ctrl+K"
+                    color: root.styled("faintText", "#5e6176")
                     font.family: "JetBrains Mono"
                     font.pixelSize: 11
                 }
-                Rectangle {
-                    anchors.left: dateLabel.right
-                    anchors.leftMargin: 12
-                    anchors.right: parent.right
-                    anchors.rightMargin: 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    height: 1
-                    color: "#303342"
-                }
-            }
-            boundsBehavior: Flickable.StopAtBounds
-
-            header: Item {
-                width: transcript.width
-                height: root.conversationModel.hasMore ? 32 : 4
-
-                TuiButton {
-                    visible: root.conversationModel.hasMore
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: root.conversationModel.loading ? "Loading…" : "Load earlier messages"
-                    enabled: !root.conversationModel.loading
-                    onClicked: {
-                        transcript.pauseFollowing();
-                        root.controller.loadOlderSession(root.session);
-                    }
-                }
-            }
-
-            delegate: MessageDelegate {
-                required property var model
-                senderAgentId: String(model.senderAgentId || "")
-                senderSession: String(model.senderSession || "")
-                replyToAgentId: String(model.replyToAgentId || "")
-                replyToName: String(model.replyToName || "")
-                replyToSession: String(model.replyToSession || "")
-                delivery: String(model.delivery || "")
-                explanationRepeat: Number(model.explanationRepeat || 1)
-                groupView: root.pairRoom
-                activitySummary: String(model.activityLabel || "")
-                required property var groupIds
-                required property string groupLabel
-                required property bool groupExpanded
-                required property bool activityInline
-                groupSummary: groupLabel
-                groupedExpanded: groupExpanded
-                forceActivityInline: activityInline
-                onToggleActivityGroup: {
-                    if (!groupExpanded) for (const id of groupIds)
-                        root.controller.loadMessageToolDetails(root.session, id);
-                    presentation.toggleGroup(messageId);
-                }
-                controller: root.controller
-                session: root.session
-                showTools: root.controller.toolsVisible
-                showTimestamp: root.controller.timestampsVisible
-            }
-
-            footer: Item {
-                width: transcript.width
-                // A tail refresh runs on every agent switch and pane focus.
-                // Reserving spinner space for it moved the whole transcript
-                // 28px up and back down each time; only an empty chat shows it.
-                readonly property bool initialLoad: root.conversationModel.loading && transcript.count === 0
-                height: root.working ? 46 : initialLoad ? 34 : 6
-
-                TypingIndicator {
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: root.working
-                }
-                TuiBusyIndicator {
-                    anchors.centerIn: parent
-                    running: parent.initialLoad && !root.working
-                    visible: running
-                    implicitWidth: 22
-                    implicitHeight: 22
-                }
-            }
-
-            Connections {
-                target: presentation
-                function onRowsAppended(fromCurrentUser) {
-                    if (fromCurrentUser || (transcript.followLatest && !transcript.userInteracting)) {
-                        transcript.scrollToLatest();
-                    } else {
-                        transcript.newMessagesBelow = true;
-                    }
-                }
-            }
-
-            TuiLabel {
-                anchors.centerIn: parent
-                visible: root.session.length === 0 && transcript.count === 0 && !root.conversationModel.loading
-                text: "Choose an agent · Ctrl+K"
-                color: "#5e6176"
-                font.family: "JetBrains Mono"
-                font.pixelSize: 11
             }
         }
 

@@ -155,6 +155,8 @@ int main(int argc, char* argv[]) {
     if (!screenshotPath.isEmpty() && rootWindow != nullptr && controller != nullptr) startDesktopResearch(application, rootWindow, controller);
     if (!screenshotPath.isEmpty() && controller != nullptr && qEnvironmentVariableIsSet("CLARP_SCREENSHOT_MINIMAL_UI"))
         controller->setMinimalUi(qEnvironmentVariableIntValue("CLARP_SCREENSHOT_MINIMAL_UI") != 0);
+    if (!screenshotPath.isEmpty() && controller != nullptr && qEnvironmentVariableIsSet("CLARP_SCREENSHOT_READING_THEME"))
+        controller->setReadingTheme(qEnvironmentVariable("CLARP_SCREENSHOT_READING_THEME"));
     const QString screenshotLayout = qEnvironmentVariable("CLARP_SCREENSHOT_LAYOUT");
     const QString screenshotView = qEnvironmentVariable("CLARP_SCREENSHOT_VIEW");
     const QString screenshotScenario = qEnvironmentVariable("CLARP_SCREENSHOT_SCENARIO");

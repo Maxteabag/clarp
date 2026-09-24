@@ -2,6 +2,7 @@
 #include "app/LocalReport.h"
 #include "terminal/TerminalLaunch.h"
 #include "app/TimeFormat.h"
+#include "app/ReadingTheme.h"
 #include "media/PortraitImage.h"
 
 #include <QDir>
@@ -20,6 +21,7 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QFontDatabase>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QUrlQuery>
@@ -143,6 +145,8 @@ AppController::AppController(QObject* parent)
     m_anonymousAgents = settings.value(QStringLiteral("launch/anonymousAgents"), true).toBool();
     m_newAgentOnStartup = settings.value(QStringLiteral("launch/newAgentOnStartup"), true).toBool();
     m_minimalUi = settings.value(QStringLiteral("appearance/minimalUi"), false).toBool();
+    m_readingTheme = normalizedReadingThemeId(
+        settings.value(QStringLiteral("appearance/readingTheme"), defaultReadingThemeId()).toString());
     const QString sharedFilesystemHost =
         qEnvironmentVariable("CLARP_SHARED_FILESYSTEM_HOST").trimmed();
     m_sharedFilesystemHostOverride =
@@ -934,6 +938,25 @@ void AppController::setMinimalUi(bool minimal) {
     QSettings().setValue(QStringLiteral("appearance/minimalUi"), minimal);
     emit minimalUiChanged();
 }
+
+void AppController::setReadingTheme(const QString& id) {
+    const QString normalized = normalizedReadingThemeId(id);
+    if (m_readingTheme == normalized) return;
+    m_readingTheme = normalized;
+    QSettings().setValue(QStringLiteral("appearance/readingTheme"), normalized);
+    emit readingThemeChanged();
+}
+
+QVariantMap AppController::readingStyle() const {
+    // Fonts are resolved here rather than in QML so a machine without Literata
+    // or Atkinson Hyperlegible degrades to the next listed family, not to the
+    // platform default.
+    return readingThemeStyle(m_readingTheme, [](const QString& family) {
+        return QGuiApplication::instance() != nullptr && QFontDatabase::hasFamily(family);
+    });
+}
+
+QVariantList AppController::readingThemes() { return readingThemeOptions(); }
 
 void AppController::setSharedFilesystem(bool shared) {
     if (m_sharedFilesystem == shared) {

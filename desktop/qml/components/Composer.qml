@@ -15,6 +15,12 @@ Rectangle {
     signal jumpToLatestRequested()
     property bool dropActive: false
     readonly property int agentRevision: controller.agentRevision
+    // Reading theme for the editor surface only; the status rows stay on the chrome.
+    readonly property var readingStyle: (controller && controller.readingStyle) || ({})
+    function styled(key, fallback) {
+        const value = root.readingStyle[key];
+        return value === undefined || value === null || value === "" ? fallback : value;
+    }
     readonly property int composerRevision: controller.composerRevision
     readonly property int queueCount: {
         agentRevision;
@@ -242,7 +248,7 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: "#1a1b26"
+            color: root.styled("background", "#1a1b26")
             radius: 0
             border.width: 0
 
@@ -262,11 +268,13 @@ Rectangle {
                         && root.controller.startingContact.length === 0
                     opacity: root.active ? 1 : 0.58
                     wrapMode: TextArea.Wrap
-                    color: "#c7c9dc"
+                    color: root.styled("text", "#c7c9dc")
                     Accessible.name: "Message to " + root.controller.agentName(root.session)
-                    placeholderTextColor: "#55586c"
-                    font.family: "JetBrains Mono"
-                    font.pixelSize: 15
+                    placeholderTextColor: root.styled("faintText", "#55586c")
+                    selectionColor: root.styled("selection", "#6f527b")
+                    selectedTextColor: root.styled("selectedText", "#fff8ff")
+                    font.family: String(root.styled("fontFamily", "JetBrains Mono"))
+                    font.pixelSize: Number(root.styled("fontPixelSize", 15))
                     background: null
                     leftPadding: 12
                     rightPadding: 12
