@@ -26,6 +26,7 @@ import sqlite3
 import sys
 import time
 import threading
+from urllib.parse import parse_qs, unquote, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
@@ -106,6 +107,10 @@ PORT = int(os.environ.get("CLAUDE_PWA_PORT", str(_CFG.port)))
 BIND_ADDR = os.environ.get("CLAUDE_PWA_BIND", _CFG.bind_addr)
 
 
+def _runtime_paths() -> RuntimePaths:
+    return RuntimePaths.from_home(pathlib.Path.home())
+
+
 def _truthy_header(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -132,7 +137,6 @@ class ContextHTTPServer(ThreadingHTTPServer):
         superseded transcript poll, the proxy drops an idle keep-alive
         connection). The stdlib default printed a 15-line traceback for each;
         log one line instead and keep the traceback for anything else."""
-        import sys
         exc = sys.exc_info()[1]
         if isinstance(exc, (BrokenPipeError, ConnectionResetError, TimeoutError)):
             try:
@@ -226,7 +230,6 @@ def _raw_query_value(path: str, key: str) -> str:
     Filesystem paths legitimately contain plus signs. Native URLQueryItem may
     leave them literal, whereas parse_qs assumes HTML form encoding.
     """
-    from urllib.parse import unquote, urlparse
     for field in urlparse(path).query.split("&"):
         raw_key, separator, raw_value = field.partition("=")
         if separator and unquote(raw_key) == key:
@@ -634,6 +637,26 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as e:
             log_exception("httpAccessLogFail", e)
 
+    def _query(self) -> dict[str, list[str]]:
+        """Parsed query string of the current request, cached per request.
+
+        Keyed on self.path because one Handler instance serves every request
+        on a keep-alive connection."""
+        cached = getattr(self, "_query_cache", None)
+        if cached is None or cached[0] != self.path:
+            cached = (self.path, parse_qs(urlparse(self.path).query))
+            self._query_cache = cached
+        return cached[1]
+
+    def _json(self, code: int, payload) -> None:
+        self._send(code, json.dumps(payload).encode(), "application/json")
+
+    def _json_ok(self, payload) -> None:
+        self._json(200, payload)
+
+    def _json_error(self, code: int, message: str) -> None:
+        self._json(code, {"error": message})
+
     def _send(self, code, body=b"", content_type="text/plain", extra_headers=None):
         response_started = time.perf_counter()
         request_started = getattr(self, "_request_started_monotonic", response_started)
@@ -835,8 +858,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._request_is_local:
             return False
         # Query string: ?token=<token>
-        from urllib.parse import parse_qs, urlparse
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         for v in qs.get("token", []):
             if self._accept_credential((v or "").strip(), token):
                 return True
@@ -906,7 +928,7 @@ class Handler(BaseHTTPRequestHandler):
         if retry:
             return self._send(429, b'{"error":"too many authentication failures"}',
                               "application/json", extra_headers={"Retry-After": str(retry)})
-        self._send(401, b'{"error":"unauthorized"}', "application/json")
+        self._json_error(401, "unauthorized")
 
     # --- GET dispatch ----------------------------------------------------
 
@@ -915,12 +937,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._reject_unauthorized()
         path = self.path.split("?", 1)[0]
         if self._oracle_auth_missing(path):
-            return self._send(
-                401, b'{"error":"Oracle requires authenticated full-device access"}',
-                "application/json")
+            return self._json_error(401, "Oracle requires authenticated full-device access")
         if self._device_forbidden(path, "GET"):
-            return self._send(403, b'{"error":"full device access required"}',
-                              "application/json")
+            return self._json_error(403, "full device access required")
         from lib import janitor_http
         if janitor_http.handles(path):
             return janitor_http.handle(self, "GET")
@@ -935,7 +954,6 @@ class Handler(BaseHTTPRequestHandler):
             team_id = path[len("/teams/"):-len("/messages")].strip("/")
             return self._handle_team_messages(team_id)
         if path.startswith("/artifacts/"):
-            from urllib.parse import unquote
             return self._handle_artifact_get(unquote(path[len("/artifacts/"):].strip("/")))
         if path.startswith("/static/"):
             rel = path[len("/static/"):]
@@ -979,9 +997,8 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/stt/stream"):
             # Provider-owned turn taking: the phone streams PCM, the relay
             # forwards it to the chosen recogniser and returns its turn events.
-            from urllib.parse import parse_qs, urlparse
             from lib.stt_stream import serve_stt_stream
-            parsed = parse_qs(urlparse(self.path).query)
+            parsed = self._query()
             return serve_stt_stream(
                 self, {k: (v[0] if v else "") for k, v in parsed.items()})
         if path.startswith("/terminal/"):
@@ -1029,12 +1046,11 @@ class Handler(BaseHTTPRequestHandler):
         """GET variant for iOS Shortcuts that use 'Open URL' rather than
         'Get Contents of URL' with an explicit POST. Accepts ?action=...
         and broadcasts the same SSE event."""
-        from urllib.parse import parse_qs, urlparse
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         action = (qs.get("action", [""])[0] or "").strip().lower()
         if (action not in ClientAction.valid()
                 or action == ClientAction.CONTROLLER_EVENT):
-            return self._send(400, b'{"error":"unknown action"}', "application/json")
+            return self._json_error(400, "unknown action")
         self.ctx.stream.broadcast_ephemeral({
             "type": SSEType.REMOTE_ACTION,
             "action": action,
@@ -1046,7 +1062,6 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, body, "text/html")
 
     def _handle_agent_avatar(self, agent_id: str):
-        from lib import agents as agents_db
         row = agents_db.get_by_agent_id(agent_id)
         path = pathlib.Path(str((row or {}).get("avatar_path") or ""))
         if not row or not path.is_file():
@@ -1055,8 +1070,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_notification_avatar(self, agent_id: str):
         """Serve one short-lived APNs avatar capability without app auth."""
-        from urllib.parse import parse_qs, unquote, urlparse
-        from lib import agents as agents_db
         from lib.avatar_urls import (
             avatar_content_version,
             notification_avatar_authorized,
@@ -1067,7 +1080,7 @@ class Handler(BaseHTTPRequestHandler):
         path = pathlib.Path(str((row or {}).get("avatar_path") or ""))
         if not row or not path.is_file():
             return self._send(404, b"not found")
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         try:
             expires_at = int((query.get("exp") or [""])[0])
         except ValueError:
@@ -1089,8 +1102,7 @@ class Handler(BaseHTTPRequestHandler):
     # --- GET handlers ----------------------------------------------------
 
     def _handle_voices(self):
-        from urllib.parse import parse_qs, urlparse
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         include_sid = (qs.get("for", [""])[0] or "").strip()
         agents_map = load_agents(self.ctx.agents_path)
         out = voices_with_availability(agents_map, include_sid)
@@ -1100,39 +1112,32 @@ class Handler(BaseHTTPRequestHandler):
         prefix = "Personality: "
         if bio.startswith(prefix):
             bio = bio[len(prefix):]
-        self._send(200, json.dumps({"voices": out, "bio": bio,
-                                    "persona": persona}).encode(),
-                   "application/json")
+        self._json_ok({"voices": out, "bio": bio,
+                       "persona": persona})
 
     def _handle_cartesia_voices(self):
-        from urllib.parse import parse_qs, urlparse
         from lib.cartesia_voices import catalog
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         force = query.get("force", ["0"])[0] in {"1", "true"}
         try:
             body = catalog(self.ctx.agents_path, force=force)
         except Exception as exc:
             log_exception("cartesiaVoicesFail", exc)
-            return self._send(502, json.dumps({
-                "error": "Cartesia voice library unavailable"
-            }).encode(), "application/json")
-        self._send(200, json.dumps(body).encode(), "application/json")
+            return self._json_error(502, "Cartesia voice library unavailable")
+        self._json_ok(body)
 
     def _handle_voice_catalog(self):
-        from urllib.parse import parse_qs, urlparse
         from lib.voice_catalog import catalog
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         session = (query.get("for", [""])[0] or "").strip()
         agents = load_agents(self.ctx.agents_path)
-        self._send(200, json.dumps(catalog(agents, session)).encode(),
-                   "application/json")
+        self._json_ok(catalog(agents, session))
 
     def _handle_voice_preview(self):
-        from urllib.parse import parse_qs, urlparse
         import hashlib
         from lib import config as app_config
         from lib.voice_catalog import catalog
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         provider = (query.get("provider", [""])[0] or "").strip().lower()
         voice_id = (query.get("id", [""])[0] or "").strip()
         body = catalog(load_agents(self.ctx.agents_path))
@@ -1152,7 +1157,7 @@ class Handler(BaseHTTPRequestHandler):
                 str(custom_manifest.path.stat().st_mtime_ns),
                 str(custom_manifest.executable.stat().st_mtime_ns),
             ))
-        cache = (RuntimePaths.from_home(pathlib.Path.home()).cache_dir
+        cache = (_runtime_paths().cache_dir
                  / "voice-previews")
         cache.mkdir(mode=0o700, parents=True, exist_ok=True)
         prompt = f"Hello, I'm {voice['name']}. This is how I'll sound in Clarp."
@@ -1218,7 +1223,7 @@ class Handler(BaseHTTPRequestHandler):
         voice = controller_narration.voice_id(cfg)
         if not voice or not cfg.cartesia_key():
             return self._send(503, b"narration voice unavailable")
-        cache = (RuntimePaths.from_home(pathlib.Path.home()).cache_dir
+        cache = (_runtime_paths().cache_dir
                  / "controller-narration")
         if cache.is_symlink():
             eventlog.emit("server", "controllerNarrationCacheUnsafe",
@@ -1251,13 +1256,12 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_file(path)
 
     def _handle_cartesia_voice_preview(self):
-        from urllib.parse import parse_qs, urlparse
         import hashlib
         from lib.cartesia_voices import (
             cached_english_voice, english_voices, has_cached_catalog)
         from lib.cartesia_tts import synthesize, CartesiaError
         from lib import config as app_config
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         voice_id = (query.get("id", [""])[0] or "").strip()
         # The picker must load the catalog first, so validate against that same
         # in-memory snapshot. Never turn a preview tap into a slow catalog crawl.
@@ -1269,7 +1273,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, b"not found")
         name = str(row.get("name") or "this voice")[:80]
         cfg = app_config.load()
-        cache = (RuntimePaths.from_home(pathlib.Path.home()).cache_dir
+        cache = (_runtime_paths().cache_dir
                  / "voice-previews")
         if cache.is_symlink():
             eventlog.emit("server", "cartesiaPreviewCacheUnsafe",
@@ -1331,26 +1335,23 @@ class Handler(BaseHTTPRequestHandler):
         from lib import judgments
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             settings = judgments.update_settings(data)
         except ValueError as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        return self._send(200, json.dumps({"ok": True, "settings": settings}).encode(),
-                          "application/json")
+            return self._json_error(400, str(exc))
+        return self._json_ok({"ok": True, "settings": settings})
 
     def _handle_judgments_decisions_get(self):
-        from urllib.parse import parse_qs, urlparse
         from lib import judgments
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         site = (query.get("site") or [""])[0]
         try:
             limit = int((query.get("limit") or ["50"])[0])
         except (TypeError, ValueError):
             limit = 50
         if site and site not in judgments.SITES:
-            return self._send(400, b'{"error":"unknown site"}', "application/json")
+            return self._json_error(400, "unknown site")
         body = json.dumps({"decisions": judgments.recent(limit=limit, site=site)}).encode()
         self._send(200, body, "application/json")
 
@@ -1375,69 +1376,50 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_agent_model_options(self):
         from lib import provider_capabilities
-        self._send(
-            200,
-            json.dumps(provider_capabilities.endpoint_response()).encode(),
-            "application/json",
-        )
+        self._json_ok(provider_capabilities.endpoint_response())
 
     def _handle_automation_settings_get(self):
         from lib.automation_settings import get
-        self._send(200, json.dumps(get()).encode(), "application/json")
+        self._json_ok(get())
 
     def _handle_automation_settings_post(self):
         from lib.automation_settings import update
         data = self._read_json()
         if data is None or not isinstance(data.get("special_treatment"), bool):
-            return self._send(400, b'{"error":"special_treatment required"}',
-                              "application/json")
-        self._send(200, json.dumps(update(data["special_treatment"])).encode(),
-                   "application/json")
+            return self._json_error(400, "special_treatment required")
+        self._json_ok(update(data["special_treatment"]))
 
     def _handle_avatar_settings_get(self):
         from lib.avatar_settings import get
-        self._send(200, json.dumps(get()).encode(), "application/json")
+        self._json_ok(get())
 
     def _handle_avatar_settings_post(self):
         from lib.avatar_settings import update
         data = self._read_json()
         if data is None or not isinstance(data.get("model_avatars"), bool):
-            return self._send(400, b'{"error":"model_avatars required"}',
-                              "application/json")
-        self._send(200, json.dumps(update(data["model_avatars"])).encode(),
-                   "application/json")
+            return self._json_error(400, "model_avatars required")
+        self._json_ok(update(data["model_avatars"]))
 
     def _handle_launch_directories(self):
-        from urllib.parse import parse_qs, urlparse
         from lib.launch_directories import lookup
-        query = parse_qs(urlparse(self.path).query).get("q", [""])[0]
-        return self._send(200, json.dumps(lookup(query)).encode(), "application/json")
+        query = self._query().get("q", [""])[0]
+        return self._json_ok(lookup(query))
 
     def _handle_favorite_paths(self):
-        from urllib.parse import parse_qs, urlparse
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         try:
             limit = int(qs.get("limit", ["5"])[0])
         except ValueError:
             limit = 5
-        self._send(
-            200,
-            json.dumps({"paths": agents_db.favorite_paths(limit)}).encode(),
-            "application/json",
-        )
+        self._json_ok({"paths": agents_db.favorite_paths(limit)})
 
     def _handle_orchestrator_decisions(self):
-        from urllib.parse import parse_qs, urlparse
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         try:
             limit = int(qs.get("limit", ["30"])[0])
         except ValueError:
             limit = 30
-        self._send(
-            200,
-            json.dumps({"decisions": recent_orchestrator_decisions(limit)}).encode(),
-            "application/json",
-        )
+        self._json_ok({"decisions": recent_orchestrator_decisions(limit)})
 
     def _handle_agent_conversations(self):
         """Pair conversations between agents, grouped by stable agent IDs."""
@@ -1447,7 +1429,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_viz_events(self):
         """Normalized fleet activity for the map, over a time window."""
-        from urllib.parse import parse_qs, urlparse
+        # Kept on the raw _send/parse_qs pair: tests drive this handler with a
+        # duck-typed stub that provides only `path` and `_send`.
         qs = parse_qs(urlparse(self.path).query)
 
         def _int(name, default):
@@ -1456,7 +1439,6 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return default
 
-        import time
         window_s = max(60, min(_int("window", 3600), 90 * 86400))
         until = _int("until", 0) or None
         anchor = until if until else int(time.time() * 1000)
@@ -1475,19 +1457,18 @@ class Handler(BaseHTTPRequestHandler):
         from lib import viz_learning
         data = self._read_json()
         if isinstance(data, dict) and data.get("world"):
-            import time
             world = viz_normalize.build_fleet_map(int(time.time()*1000)-3600000)["world"]
             result = viz_learning.offer_scene(world, force=True, reason=str(data.get("reason", "Improve this detail while preserving the established world")) + " Selected entity: " + str(data.get("entity_id", "whole world")))
-            return self._send(202, json.dumps(result).encode(), "application/json")
+            return self._json(202, result)
         if (not isinstance(data, dict) or not isinstance(data.get("entity_id"), str)
                 or not isinstance(data.get("revision"), int)):
-            return self._send(400, b'{"error":"entity_id and revision required"}', "application/json")
+            return self._json_error(400, "entity_id and revision required")
         try:
             result = viz_learning.supersede(data["entity_id"], data["revision"],
                                              str(data.get("reason", "Rethink this representation")))
         except ValueError as error:
-            return self._send(409, json.dumps({"error": str(error)}).encode(), "application/json")
-        self._send(202, json.dumps(result).encode(), "application/json")
+            return self._json_error(409, str(error))
+        self._json(202, result)
 
     def _send_viz_page(self):
         """The fleet map itself; a static page that reads /viz/events."""
@@ -1496,7 +1477,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_relay_status(self):
         relay = self.server.relay
         status = relay.status() if relay else {"enabled": False, "state": "disabled"}
-        self._send(200, json.dumps(status).encode(), "application/json")
+        self._json_ok(status)
 
     def _handle_snapshot(self):
         """Unified per-agent read model for the dashboard."""
@@ -1506,27 +1487,18 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_prompt_history(self):
         """Authenticated history of prospectively evidenced user prompts."""
         if not (getattr(self.ctx, "auth_token", "") or ""):
-            return self._send(
-                503,
-                b'{"error":"prompt history requires configured authentication"}',
-                "application/json",
-            )
-        from urllib.parse import parse_qs, urlparse
+            return self._json_error(503, "prompt history requires configured authentication")
         from lib.prompt_history import build_prompt_history
 
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         session_id = (qs.get("session_id", [""])[0] or "").strip()
         compatibility_session = (qs.get("session", [""])[0] or "").strip()
         if not session_id and not compatibility_session:
-            return self._send(
-                400, b'{"error":"session_id required"}', "application/json",
-            )
+            return self._json_error(400, "session_id required")
         try:
             limit = int(qs.get("limit", ["50"])[0] or 50)
         except ValueError:
-            return self._send(
-                400, b'{"error":"invalid limit"}', "application/json",
-            )
+            return self._json_error(400, "invalid limit")
         before = (qs.get("before", [""])[0] or "").strip()
         try:
             history = build_prompt_history(
@@ -1536,15 +1508,9 @@ class Handler(BaseHTTPRequestHandler):
                 before=before,
             )
         except ValueError as exc:
-            return self._send(
-                400,
-                json.dumps({"error": str(exc)}).encode(),
-                "application/json",
-            )
+            return self._json_error(400, str(exc))
         if history is None:
-            return self._send(
-                404, b'{"error":"session not found"}', "application/json",
-            )
+            return self._json_error(404, "session not found")
         self._send(
             200,
             json.dumps(history, ensure_ascii=False).encode(),
@@ -1552,9 +1518,8 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def _handle_dirs(self):
-        from urllib.parse import parse_qs, urlparse
         from lib.launch_paths import recover_user_path
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         raw = (qs.get("path", [""])[0] or "").strip()
         raw = str(recover_user_path(raw))
         if raw.endswith("/"):
@@ -1581,10 +1546,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, body, "application/json")
 
     def _handle_past_sessions(self):
-        from urllib.parse import parse_qs, urlparse
-        from lib import backends
         from lib.launch_paths import recover_user_path
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         raw = (qs.get("cwd", [""])[0] or "").strip()
         raw = str(recover_user_path(raw))
         backend = backends.normalize(qs.get("backend", [""])[0])
@@ -1625,10 +1588,8 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_status(self):
         """Is the named agent busy? Primary signal: a marker file written by the
         UserPromptSubmit hook and cleared by Stop."""
-        from urllib.parse import parse_qs, urlparse
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         session = (qs.get("session", [self.ctx.default_session])[0] or self.ctx.default_session).strip()
-        from lib import agents as agents_db
         agent = agents_db.get_by_session(session)
         # busy state is purely DB-driven now (hooks + clarp_runner write
         # to state_log). The old terminal-scrape fallback is gone.
@@ -1685,6 +1646,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, body, "application/json")
 
     def _activate_transcription_if_default(self, installed_id: str) -> None:
+        # Deliberately late-bound: tests monkeypatch lib.config.load, so the
+        # module-level load_config alias would bypass the patch.
         from lib.config import load as load_config
         from lib.stt import (DisabledSTT, UnavailableSTT, WhisperSTT,
                              WhisperCppSTT,
@@ -1751,66 +1714,51 @@ class Handler(BaseHTTPRequestHandler):
                 }],
                 "adapters": [],
             }
-        self._send(200, json.dumps(payload).encode(), "application/json")
+        self._json_ok(payload)
 
     def _transcription_guidance_payload(self):
         from lib.vocab import settings_payload
         return settings_payload(self.ctx.active_agent_names())
 
     def _handle_transcription_guidance_get(self):
-        self._send(
-            200,
-            json.dumps(self._transcription_guidance_payload()).encode(),
-            "application/json",
-        )
+        self._json_ok(self._transcription_guidance_payload())
 
     def _handle_transcription_guidance_post(self):
         from lib.vocab import update_guidance
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             update_guidance(data)
         except ValueError as exc:
-            return self._send(
-                400, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(400, str(exc))
         payload = self._transcription_guidance_payload()
         payload["ok"] = True
-        self._send(200, json.dumps(payload).encode(), "application/json")
+        self._json_ok(payload)
 
     def _handle_transcription_providers_get(self):
         from lib import stt_providers
-        self._send(200, json.dumps(stt_providers.status()).encode(),
-                   "application/json")
+        self._json_ok(stt_providers.status())
 
     def _handle_transcription_providers_post(self):
         from lib import stt_providers
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             payload = stt_providers.update_settings(data)
         except ValueError as exc:
-            return self._send(
-                400, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(400, str(exc))
         payload["ok"] = True
-        self._send(200, json.dumps(payload).encode(), "application/json")
+        self._json_ok(payload)
 
     # ---- vocabulary: packs, terms, profiles, assignments, preview, runs ----
     #
     # The transparency contract behind the iOS vocabulary screens: everything
     # the compiler will do is previewable, and everything it did is readable.
 
-    def _query(self) -> dict[str, str]:
-        from urllib.parse import parse_qs, urlparse
-        parsed = parse_qs(urlparse(self.path).query)
-        return {k: (v[0] if v else "") for k, v in parsed.items()}
-
-    def _json_ok(self, payload) -> None:
-        self._send(200, json.dumps(payload).encode(), "application/json")
-
-    def _json_error(self, code: int, message: str) -> None:
-        self._send(code, json.dumps({"error": message}).encode(), "application/json")
+    def _query_first(self) -> dict[str, str]:
+        return {k: (v[0] if v else "") for k, v in self._query().items()}
 
     def _vocab_body(self) -> dict | None:
         data = self._read_json()
@@ -1892,7 +1840,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_vocab_terms_get(self):
         from lib import vocab_store
-        pack_id = self._query().get("pack_id", "")
+        pack_id = self._query_first().get("pack_id", "")
         if not pack_id:
             return self._json_error(400, "pack_id is required")
         self._json_ok({"pack_id": pack_id, "terms": vocab_store.list_terms(pack_id)})
@@ -1958,7 +1906,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_vocab_profile_get(self):
         from lib import vocab_store
-        profile_id = self._query().get("profile_id", "")
+        profile_id = self._query_first().get("profile_id", "")
         detail = vocab_store.profile_detail(profile_id) if profile_id else None
         if detail is None:
             return self._json_error(404, "no such profile")
@@ -2087,7 +2035,7 @@ class Handler(BaseHTTPRequestHandler):
                        "models": stt_providers.cloud_models()})
 
     def _handle_vocab_preview_get(self):
-        query = self._query()
+        query = self._query_first()
         preview = getattr(self.ctx, "vocab_preview", None)
         if not callable(preview):
             return self._json_error(503, "vocabulary preview unavailable")
@@ -2103,7 +2051,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_vocab_runs_get(self):
         from lib import vocab_store
-        query = self._query()
+        query = self._query_first()
         try:
             limit = max(1, min(200, int(query.get("limit") or 20)))
         except ValueError:
@@ -2113,21 +2061,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_vocab_run_get(self):
         from lib import heard_audio, vocab_store
-        trace_id = self._query().get("trace_id", "")
+        trace_id = self._query_first().get("trace_id", "")
         run = vocab_store.run_for_trace(trace_id) if trace_id else None
         if run is None:
             return self._json_error(404, "no run for that trace")
         kept = heard_audio.lookup(
-            RuntimePaths.from_home(pathlib.Path.home()).cache_dir, trace_id)
+            _runtime_paths().cache_dir, trace_id)
         run["audio_url"] = f"/transcription-audio?trace_id={trace_id}" if kept else None
         self._json_ok(run)
 
     def _handle_transcription_audio_get(self):
         """The clip the transcriber was given for one trace, if retained."""
         from lib import heard_audio
-        trace_id = self._query().get("trace_id", "")
+        trace_id = self._query_first().get("trace_id", "")
         kept = heard_audio.lookup(
-            RuntimePaths.from_home(pathlib.Path.home()).cache_dir, trace_id)
+            _runtime_paths().cache_dir, trace_id)
         if kept is None:
             return self._json_error(404, "no retained audio for that trace")
         path, meta = kept
@@ -2138,34 +2086,30 @@ class Handler(BaseHTTPRequestHandler):
         from lib.server_identity import get_server_info
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         model_id = str(data.get("model_id") or "").strip()
         try:
             result = start_install(
                 model_id, computer_id=str(get_server_info()["server_id"]),
                 on_complete=self._activate_transcription_if_default)
         except ValueError as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        self._send(202, json.dumps(result).encode(), "application/json")
+            return self._json_error(400, str(exc))
+        self._json(202, result)
 
     def _handle_transcription_model_remove(self):
         from lib.transcription_models import remove
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         model_id = str(data.get("model_id") or "").strip()
         try:
             remove(model_id)
         except ValueError as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        self._send(200, json.dumps({"ok": True, "model_id": model_id}).encode(),
-                   "application/json")
+            return self._json_error(400, str(exc))
+        self._json_ok({"ok": True, "model_id": model_id})
 
     def _handle_backend_usage(self):
-        from urllib.parse import parse_qs, urlparse
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         force = any(str(v).lower() in {"1", "true", "yes"} for v in qs.get("refresh", []))
         payload = backend_usage.get_backend_usage(force_codex=force)
         for event in payload.get("limit_events") or []:
@@ -2175,55 +2119,49 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_backend_auth(self):
         from lib.backend_auth import status, task
-        from lib import backends
         body = {"backends": status(), "tasks": {
             adapter.id: task(adapter.id) for adapter in backends.auth_adapters()}}
-        self._send(200, json.dumps(body).encode(), "application/json")
+        self._json_ok(body)
 
     def _handle_backend_auth_login(self):
         from lib.backend_auth import start_login
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         backend = str(data.get("backend") or "").strip().lower()
         try:
             result = start_login(backend)
         except ValueError as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        self._send(202, json.dumps(result).encode(), "application/json")
+            return self._json_error(400, str(exc))
+        self._json(202, result)
 
     def _handle_backend_auth_login_code(self):
         from lib.backend_auth import submit_login_code
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         backend = str(data.get("backend") or "").strip().lower()
         try:
             result = submit_login_code(backend, str(data.get("code") or ""))
         except ValueError as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
+            return self._json_error(400, str(exc))
         except RuntimeError as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        self._send(200, json.dumps(result).encode(), "application/json")
+            return self._json_error(409, str(exc))
+        self._json_ok(result)
 
     def _handle_backend_auth_logout(self):
         from lib.backend_auth import logout
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         backend = str(data.get("backend") or "").strip().lower()
         try:
             result = logout(backend)
         except ValueError as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
+            return self._json_error(400, str(exc))
         except RuntimeError as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        self._send(200, json.dumps(result).encode(), "application/json")
+            return self._json_error(409, str(exc))
+        self._json_ok(result)
 
     def _handle_managed_skills(self):
         from lib.managed_skills import status
@@ -2235,32 +2173,26 @@ class Handler(BaseHTTPRequestHandler):
             body = {"skills": skills}
         except (RuntimeError, OSError) as exc:
             log_exception("managedSkillsStatusFail", exc)
-            return self._send(503, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        self._send(200, json.dumps(body).encode(), "application/json")
+            return self._json_error(503, str(exc))
+        self._json_ok(body)
 
     def _handle_managed_skills_update(self):
         from lib.managed_skills import set_enabled
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         skill_id = str(data.get("skill_id") or "").strip()
         enabled = data.get("enabled")
         if not skill_id or not isinstance(enabled, bool):
-            return self._send(
-                400, b'{"error":"skill_id and boolean enabled are required"}',
-                "application/json")
+            return self._json_error(400, "skill_id and boolean enabled are required")
         try:
             skill = set_enabled(skill_id, enabled)
         except ValueError as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
+            return self._json_error(409, str(exc))
         except OSError as exc:
             log_exception("managedSkillsUpdateFail", exc, detail=skill_id)
-            return self._send(500, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        self._send(200, json.dumps({"ok": True, "skill": skill}).encode(),
-                   "application/json")
+            return self._json_error(500, str(exc))
+        self._json_ok({"ok": True, "skill": skill})
 
     def _connection_server_info(self):
         from lib.server_identity import get_server_info
@@ -2278,64 +2210,64 @@ class Handler(BaseHTTPRequestHandler):
         info["client"] = client
         if client["status"] == "client_outdated":
             _note_outdated_client(client)
-        self._send(200, json.dumps(info).encode(), "application/json")
+        self._json_ok(info)
 
     def _handle_desktop_presence(self):
         if not getattr(self, "_request_auth_validated", False):
-            return self._send(401, b'{"error":"authenticated desktop required"}', "application/json")
+            return self._json_error(401, "authenticated desktop required")
         if getattr(self, "_request_device_scope", "") != "full":
-            return self._send(403, b'{"error":"full device access required"}', "application/json")
+            return self._json_error(403, "full device access required")
         from lib import desktop_presence
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"object required"}', "application/json")
+            return self._json_error(400, "object required")
         try:
             result = desktop_presence.update(principal=self._request_principal,
                 instance_id=data.get("instance_id"), sequence=data.get("sequence"), active=data.get("active"),
                 sent_at_ms=data.get("sent_at_ms"))
         except ValueError as error:
-            return self._send(400, json.dumps({"error": str(error)}).encode(), "application/json")
-        self._send(200, json.dumps(result).encode(), "application/json")
+            return self._json_error(400, str(error))
+        self._json_ok(result)
 
     def _handle_application_activity(self):
         if not getattr(self, "_request_auth_validated", False):
-            return self._send(401, b'{"error":"authentication required"}', "application/json")
+            return self._json_error(401, "authentication required")
         if getattr(self, "_request_device_scope", "") != "full":
-            return self._send(403, b'{"error":"full device access required"}', "application/json")
+            return self._json_error(403, "full device access required")
         from lib import application_activity
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"object required"}', "application/json")
+            return self._json_error(400, "object required")
         try:
             result = application_activity.report(self._request_principal,
                 data.get("instance_id"), data.get("sequence"), data.get("foreground"),
                 data.get("input_age_ms"), data.get("sent_at_ms"))
         except ValueError as error:
-            return self._send(400, json.dumps({"error": str(error)}).encode(), "application/json")
-        self._send(200, json.dumps(result).encode(), "application/json")
+            return self._json_error(400, str(error))
+        self._json_ok(result)
 
     def _handle_tool_explanations(self):
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"object required"}', "application/json")
+            return self._json_error(400, "object required")
         session = data.get("session")
         if not isinstance(session, str) or not (agent := agents_db.get_by_session(session)):
-            return self._send(404, b'{"error":"agent not found"}', "application/json")
+            return self._json_error(404, "agent not found")
         try:
             result = self.ctx.tool_explanations.request(
                 data.get("detail_level"), data.get("items"), cwd=agent.get("cwd"),
                 release=data.get("release"), target_agent_id=agent["agent_id"],
                 include_provenance=data.get("include_provenance") is True)
         except ValueError as error:
-            return self._send(400, json.dumps({"error": str(error)}).encode(), "application/json")
-        self._send(200, json.dumps(result).encode(), "application/json")
+            return self._json_error(400, str(error))
+        self._json_ok(result)
 
     def _handle_pairing_exchange(self):
         from lib.device_pairing import PairingError, exchange
         from lib.server_identity import get_server_info
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             device = exchange(
                 str(data.get("code") or ""),
@@ -2346,36 +2278,30 @@ class Handler(BaseHTTPRequestHandler):
             if retry:
                 return self._send(429, b'{"error":"too many pairing failures"}',
                                   "application/json", extra_headers={"Retry-After": str(retry)})
-            return self._send(
-                409, json.dumps({"error": str(exc)}).encode(),
-                "application/json")
+            return self._json_error(409, str(exc))
         payload = {"device": device, "server": self._connection_server_info()}
-        self._send(201, json.dumps(payload).encode(), "application/json")
+        self._json(201, payload)
 
     def _handle_paired_devices(self):
         from lib.device_pairing import list_devices
-        self._send(
-            200, json.dumps({"devices": list_devices()}).encode(),
-            "application/json")
+        self._json_ok({"devices": list_devices()})
 
     def _handle_paired_device_revoke(self):
         from lib.device_pairing import revoke
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         device_id = str(data.get("device_id") or "").strip()
         if not device_id:
-            return self._send(
-                400, b'{"error":"device_id required"}', "application/json")
+            return self._json_error(400, "device_id required")
         if not revoke(device_id):
-            return self._send(404, b'{"error":"device not found"}',
-                              "application/json")
-        self._send(200, b'{"ok":true}', "application/json")
+            return self._json_error(404, "device not found")
+        self._json_ok({"ok": True})
         self.server.disconnect_device(device_id)
 
     def _handle_tts_providers_get(self):
         from lib.tts_providers import status
-        self._send(200, json.dumps(status()).encode(), "application/json")
+        self._json_ok(status())
 
     def _handle_tts_providers_post(self):
         from lib import config as config_module
@@ -2383,7 +2309,7 @@ class Handler(BaseHTTPRequestHandler):
         from lib.tts_providers import status, valid_ids
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         provider = str(data.get("provider") or "").strip().lower()
         fallback = str(data.get("fallback") or "none").strip().lower()
         voice = str(data.get("voice") or "").strip()
@@ -2392,22 +2318,14 @@ class Handler(BaseHTTPRequestHandler):
         if (provider not in allowed or fallback not in allowed
                 or (fallback != "none" and not rows.get(
                     fallback, {}).get("can_fallback", False))):
-            return self._send(
-                400, b'{"error":"unsupported TTS provider or fallback"}',
-                "application/json")
+            return self._json_error(400, "unsupported TTS provider or fallback")
         current = status()
         rows = {row["id"]: row for row in current["providers"]}
         for selected in {provider, fallback} - {"none"}:
             if rows[selected]["kind"] == "local" and not rows[selected]["installed"]:
-                return self._send(
-                    409, json.dumps({
-                        "error": f"local TTS provider is not installed: {selected}",
-                    }).encode(), "application/json")
+                return self._json_error(409, f"local TTS provider is not installed: {selected}")
             if rows[selected].get("custom") and not rows[selected]["available"]:
-                return self._send(
-                    409, json.dumps({
-                        "error": f"custom TTS adapter is unavailable: {selected}",
-                    }).encode(), "application/json")
+                return self._json_error(409, f"custom TTS adapter is unavailable: {selected}")
         config_path = pathlib.Path(os.environ.get(
             "CLAUDE_PWA_CONFIG", str(config_module.CONFIG_PATH)))
         set_toml_value(config_path, "tts", "provider", provider)
@@ -2419,7 +2337,7 @@ class Handler(BaseHTTPRequestHandler):
             set_toml_value(config_path, "audio", "delivery", "chunked-file")
         config_module.reset_cache()
         payload = status() | {"restart_scheduled": restart_required}
-        self._send(200, json.dumps(payload).encode(), "application/json")
+        self._json_ok(payload)
         if restart_required:
             from lib import service_manager
             timer = threading.Timer(
@@ -2432,15 +2350,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_server_update_status(self):
         from lib.server_update import get_update_status
-        from urllib.parse import parse_qs, urlparse
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         force = query.get("force", ["0"])[0] in {"1", "true", "yes"}
-        self._send(200, json.dumps(get_update_status(force=force)).encode(), "application/json")
+        self._json_ok(get_update_status(force=force))
 
     def _handle_server_update(self):
         from lib.server_update import request_update
         status, payload = request_update(self.ctx.default_session)
-        self._send(status, json.dumps(payload).encode(), "application/json")
+        self._json(status, payload)
 
     def _session_cwd(self, session: str) -> pathlib.Path:
         """cwd for an agent is whatever its DB row says — there's no
@@ -2448,105 +2365,89 @@ class Handler(BaseHTTPRequestHandler):
         return session_cwd(session)
 
     def _handle_agent_files(self):
-        from urllib.parse import parse_qs, urlparse
         from lib.agent_files import AgentFileError, list_directory
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         session = (query.get("session", [""])[0] or "").strip()
         relative = _raw_query_value(self.path, "path")
         requested_root = _raw_query_value(self.path, "root")
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"agent not found"}', "application/json")
+            return self._json_error(404, "agent not found")
         cwd = requested_root or str(agent.get("cwd") or "")
         if requested_root.startswith("@"):
             alias, _, suffix = requested_root.partition("/")
             if alias not in {"@workspace", "@home"}:
-                return self._send(400, b'{"error":"unknown directory root"}', "application/json")
+                return self._json_error(400, "unknown directory root")
             base = pathlib.Path(str(agent.get("cwd") or "")) if alias == "@workspace" else pathlib.Path.home()
             candidate = (base / suffix).resolve()
             try: candidate.relative_to(base.resolve())
             except ValueError:
-                return self._send(403, b'{"error":"directory escapes root"}', "application/json")
+                return self._json_error(403, "directory escapes root")
             cwd = str(candidate)
         if not cwd:
-            return self._send(404, b'{"error":"agent workspace unavailable"}',
-                              "application/json")
+            return self._json_error(404, "agent workspace unavailable")
         try:
             root_candidate = pathlib.Path(cwd).expanduser()
             if requested_root and not root_candidate.is_absolute():
-                return self._send(400, b'{"error":"root path must be absolute"}',
-                                  "application/json")
+                return self._json_error(400, "root path must be absolute")
             # Explorer intentionally follows the authenticated operator trust
             # model of the terminal/agent CLI: any path readable by the server
             # user is browseable. It remains read-only and size-bounded.
             root = root_candidate
             if not root.is_dir():
-                return self._send(404, b'{"error":"agent workspace unavailable"}',
-                                  "application/json")
+                return self._json_error(404, "agent workspace unavailable")
             payload = list_directory(root, relative)
         except AgentFileError as exc:
-            return self._send(exc.status, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
+            return self._json_error(exc.status, str(exc))
         except ValueError as exc:
-            return self._send(403, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
+            return self._json_error(403, str(exc))
         except (OSError, RuntimeError) as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        self._send(200, json.dumps(payload).encode(), "application/json")
+            return self._json_error(400, str(exc))
+        self._json_ok(payload)
 
     def _handle_task_plan(self):
-        from urllib.parse import parse_qs, urlparse
         from lib import task_plans
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         session = (query.get("session", [""])[0] or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
-        self._send(200, json.dumps({
+            return self._json_error(400, "session required")
+        self._json_ok({
             "plan": task_plans.active_for_session(session)
-        }).encode(), "application/json")
+        })
 
     def _handle_agent_file(self):
-        from urllib.parse import parse_qs, urlparse
         from lib.agent_files import AgentFileError, read_text_file
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         session = (query.get("session", [""])[0] or "").strip()
         relative = _raw_query_value(self.path, "path")
         requested_root = _raw_query_value(self.path, "root")
         if not session or not relative:
-            return self._send(400, b'{"error":"session and path required"}',
-                              "application/json")
+            return self._json_error(400, "session and path required")
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"agent not found"}', "application/json")
+            return self._json_error(404, "agent not found")
         cwd = requested_root or str(agent.get("cwd") or "")
         if not cwd:
-            return self._send(404, b'{"error":"agent workspace unavailable"}',
-                              "application/json")
+            return self._json_error(404, "agent workspace unavailable")
         try:
             root_candidate = pathlib.Path(cwd).expanduser()
             if requested_root and not root_candidate.is_absolute():
-                return self._send(400, b'{"error":"root path must be absolute"}',
-                                  "application/json")
+                return self._json_error(400, "root path must be absolute")
             # See `_handle_agent_files`: this is an operator capability, not a
             # sandbox boundary. Descendant traversal still uses no-follow FDs.
             root = root_candidate
             if not root.is_dir():
-                return self._send(404, b'{"error":"agent workspace unavailable"}',
-                                  "application/json")
+                return self._json_error(404, "agent workspace unavailable")
             payload = read_text_file(root, relative)
         except AgentFileError as exc:
-            return self._send(exc.status, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
+            return self._json_error(exc.status, str(exc))
         except ValueError as exc:
-            return self._send(403, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
+            return self._json_error(403, str(exc))
         except (OSError, RuntimeError) as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        self._send(200, json.dumps(payload).encode(), "application/json")
+            return self._json_error(400, str(exc))
+        self._json_ok(payload)
 
     def _handle_log(self):
         """Return the conversation turns for an agent's transcript.
@@ -2557,8 +2458,7 @@ class Handler(BaseHTTPRequestHandler):
           after_revision=N  return only messages changed after SQLite revision N.
           before=MESSAGE_ID page older history ending before this message.
         """
-        from urllib.parse import parse_qs, urlparse
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         session = (qs.get("session", [self.ctx.default_session])[0] or self.ctx.default_session).strip()
         try:
             limit = int(qs.get("limit", ["100"])[0] or 100)
@@ -2581,7 +2481,7 @@ class Handler(BaseHTTPRequestHandler):
             body_obj = agent_conversations.load_timeline(
                 session, after_revision=after_revision,
                 before_message_id=before_message_id, limit=limit)
-            return self._send(200, json.dumps(body_obj).encode(), "application/json")
+            return self._json_ok(body_obj)
         try:
             body_obj = load_conversation(
                 session=session,
@@ -2597,8 +2497,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         except OSError as e:
             log_exception("logParseFail", e, detail=session)
-            return self._send(500, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
+            return self._json_error(500, str(e))
         body = json.dumps(body_obj).encode()
         self._send(200, body, "application/json")
 
@@ -2609,26 +2508,22 @@ class Handler(BaseHTTPRequestHandler):
         return value
 
     def _handle_message_tool_details(self):
-        from urllib.parse import parse_qs, urlparse
         from lib import message_store
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         session = (qs.get("session", [""])[0] or "").strip()
         message_id = (qs.get("message_id", [""])[0] or "").strip()
         if not session or not message_id:
-            return self._send(400, b'{"error":"session and message_id required"}',
-                              "application/json")
+            return self._json_error(400, "session and message_id required")
         details = message_store.message_tool_details(
             session=session, message_id=message_id)
         if details is None:
-            return self._send(404, b'{"error":"message not found"}',
-                              "application/json")
-        self._send(200, json.dumps(details).encode(), "application/json")
+            return self._json_error(404, "message not found")
+        self._json_ok(details)
 
     def _sse(self):
         last_event_id = ""
         try:
-            from urllib.parse import parse_qs, urlparse
-            qs = parse_qs(urlparse(self.path).query)
+            qs = self._query()
             last_event_id = (
                 self.headers.get("Last-Event-ID")
                 or qs.get("last_event_id", [""])[0]
@@ -2721,17 +2616,16 @@ class Handler(BaseHTTPRequestHandler):
         """Old clients cannot use chat controls to operate a maintenance agent."""
         if not isinstance(data, dict):
             return False
-        from lib import agents as agents_db
         session = str(data.get("session") or data.get("replace_sid") or "").strip()
         if not session:
             session = str(getattr(self.ctx, "default_session", "") or "")
         agent = agents_db.get_by_session(session) if session else None
         if not agent or not agent.get("is_janitor"):
             return False
-        self._send(403, json.dumps({
-            "error": "Janitors are inspection-only. Use their Pause or Configure controls.",
-            "code": "janitor_inspection_only",
-        }).encode(), "application/json")
+        self._json(403, {
+ "error": "Janitors are inspection-only. Use their Pause or Configure controls.",
+ "code": "janitor_inspection_only",
+        })
         return True
 
     def do_POST(self):
@@ -2739,12 +2633,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._reject_unauthorized()
         path = self.path.split("?", 1)[0]
         if self._oracle_auth_missing(path):
-            return self._send(
-                401, b'{"error":"Oracle requires authenticated full-device access"}',
-                "application/json")
+            return self._json_error(401, "Oracle requires authenticated full-device access")
         if self._device_forbidden(path, "POST"):
-            return self._send(403, b'{"error":"full device access required"}',
-                              "application/json")
+            return self._json_error(403, "full device access required")
         from lib import janitor_http
         if janitor_http.handles(path):
             return janitor_http.handle(self, "POST")
@@ -2761,7 +2652,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._handle_team_add_member(rest[:-len("/members")].strip("/"))
             return self._handle_team_update(rest)
         if path.startswith("/decisions/"):
-            from urllib.parse import unquote
             for action in ("resolve", "dismiss"):
                 suffix = "/" + action
                 if path.endswith(suffix):
@@ -2771,7 +2661,6 @@ class Handler(BaseHTTPRequestHandler):
             from lib import podcast_history_http
             return podcast_history_http.handle(self, "POST")
         if path.startswith("/artifacts/"):
-            from urllib.parse import unquote
             for action in ("archive", "discard", "submit"):
                 suffix = "/" + action
                 if path.endswith(suffix):
@@ -2785,8 +2674,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._reject_unauthorized()
         path = self.path.split("?", 1)[0]
         if self._device_forbidden(path, "PUT"):
-            return self._send(403, b'{"error":"full device access required"}',
-                              "application/json")
+            return self._json_error(403, "full device access required")
         if self._dispatch_exact(self._PUT_ROUTES, path):
             return
         if path.startswith("/turn-queue/"):
@@ -2800,11 +2688,10 @@ class Handler(BaseHTTPRequestHandler):
         if self._reject_janitor_control(data):
             return
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         sid = (data.get("session") or "").strip()
         if not sid:
-            return self._send(400, b'{"error":"session required"}', "application/json")
-        from lib import agents as agents_db
+            return self._json_error(400, "session required")
         agent = agents_db.get_by_session(sid)
         herald = getattr(self.ctx, "herald", None)
         if agent and herald is not None:
@@ -2824,7 +2711,7 @@ class Handler(BaseHTTPRequestHandler):
                 herald.set_focus(sid)
             except Exception as e:
                 log_exception("focusSetFail", e, detail=sid)
-        return self._send(200, b'{"ok":true}', "application/json")
+        return self._json_ok({"ok": True})
 
     def _handle_register_device(self):
         """Register an iOS APNs device token for push notifications. The device
@@ -2834,10 +2721,10 @@ class Handler(BaseHTTPRequestHandler):
          "base_url": "http://private-overlay-address:7682"}."""
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         token = (data.get("token") or "").strip()
         if not token:
-            return self._send(400, b'{"error":"token required"}', "application/json")
+            return self._json_error(400, "token required")
         from lib import apns
         try:
             apns.register_token(
@@ -2849,60 +2736,54 @@ class Handler(BaseHTTPRequestHandler):
             )
         except Exception as e:  # noqa: BLE001
             log_exception("deviceRegisterFail", e)
-            return self._send(500, b'{"error":"register failed"}', "application/json")
-        return self._send(200, b'{"ok":true}', "application/json")
+            return self._json_error(500, "register failed")
+        return self._json_ok({"ok": True})
 
     def _handle_set_location(self):
         """The app POSTs the user's current GPS fix for a session (one-shot
         CoreLocation, When-In-Use). Body: {"session","lat","lng","accuracy"?}."""
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = (data.get("session") or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         try:
             lat = float(data["lat"])
             lng = float(data["lng"])
         except (KeyError, TypeError, ValueError):
-            return self._send(400, b'{"error":"lat/lng required"}', "application/json")
+            return self._json_error(400, "lat/lng required")
         acc = data.get("accuracy")
         from lib import location
         try:
             row = location.set_location(
                 session, lat, lng, float(acc) if acc is not None else None)
         except ValueError as e:
-            return self._send(
-                400,
-                json.dumps({"error": str(e)}).encode(),
-                "application/json",
-            )
+            return self._json_error(400, str(e))
         except Exception as e:  # noqa: BLE001
             log_exception("setLocationFail", e)
-            return self._send(500, b'{"error":"store failed"}', "application/json")
-        return self._send(200, json.dumps({"ok": True, **row}).encode(),
-                          "application/json")
+            return self._json_error(500, "store failed")
+        return self._json_ok({"ok": True, **row})
 
     def _handle_get_location(self):
         """Latest stored fix for ?session=<id>. {} when none shared yet —
         read by the request-location skill."""
-        from urllib.parse import parse_qs, urlparse
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         session = (qs.get("session", [""])[0] or "").strip()
         from lib import location
         loc = location.get_location(session)
-        return self._send(200, json.dumps(loc or {}).encode(), "application/json")
+        return self._json_ok(loc or {})
 
     def _handle_teams_list(self):
         from lib import team_store
         body = {"teams": team_store.list_teams()}
-        return self._send(200, json.dumps(body).encode(), "application/json")
+        return self._json_ok(body)
 
     def _handle_team_create(self):
         from lib import team_store
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             team = team_store.create_team(
                 str(data.get("name") or ""),
@@ -2910,16 +2791,14 @@ class Handler(BaseHTTPRequestHandler):
                 parent_team_id=data.get("parent_team_id"),
             )
         except ValueError as e:
-            return self._send(400, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
-        return self._send(200, json.dumps({"ok": True, "team": team}).encode(),
-                          "application/json")
+            return self._json_error(400, str(e))
+        return self._json_ok({"ok": True, "team": team})
 
     def _handle_team_update(self, team_id: str):
         from lib import team_store
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             team = team_store.update_team(team_id, **{
                 key: data[key] for key in (
@@ -2928,75 +2807,65 @@ class Handler(BaseHTTPRequestHandler):
                 ) if key in data
             })
         except ValueError as e:
-            return self._send(400, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
+            return self._json_error(400, str(e))
         if team is None:
-            return self._send(404, b'{"error":"team not found"}', "application/json")
-        return self._send(200, json.dumps({"ok": True, "team": team}).encode(),
-                          "application/json")
+            return self._json_error(404, "team not found")
+        return self._json_ok({"ok": True, "team": team})
 
     def _handle_team_nudging(self):
         """Enable/disable autonomous leader nudging for a team."""
         from lib import team_store
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         team_id = str(data.get("team_id") or "").strip()
         if not team_id:
-            return self._send(400, b'{"error":"team_id required"}',
-                              "application/json")
+            return self._json_error(400, "team_id required")
         if "nudge_enabled" not in data:
-            return self._send(400, b'{"error":"nudge_enabled required"}',
-                              "application/json")
+            return self._json_error(400, "nudge_enabled required")
         team = team_store.set_nudge_enabled(team_id, data.get("nudge_enabled") is True)
         if team is None:
-            return self._send(404, b'{"error":"team not found"}', "application/json")
-        return self._send(200, json.dumps({"ok": True, "team": team}).encode(),
-                          "application/json")
+            return self._json_error(404, "team not found")
+        return self._json_ok({"ok": True, "team": team})
 
     def _handle_team_add_member(self, team_id: str):
         from lib import team_store
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         agent_id = str(data.get("agent_id") or "").strip()
         if not agent_id:
-            return self._send(400, b'{"error":"agent_id required"}',
-                              "application/json")
+            return self._json_error(400, "agent_id required")
         if not team_store.add_member(team_id, agent_id):
-            return self._send(404, b'{"error":"team or agent not found"}',
-                              "application/json")
-        return self._send(200, json.dumps({
+            return self._json_error(404, "team or agent not found")
+        return self._json_ok({
             "ok": True,
             "team": team_store.get_team(team_id),
-        }).encode(), "application/json")
+        })
 
     def _handle_team_remove_member(self, team_id: str, agent_id: str):
         from lib import team_store
         if not team_id or not agent_id:
-            return self._send(404, b'{"error":"team or agent not found"}',
-                              "application/json")
+            return self._json_error(404, "team or agent not found")
         team_store.remove_member(team_id, agent_id)
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True,
             "team": team_store.get_team(team_id),
-        }).encode(), "application/json")
+        })
 
     def _handle_team_delete(self, team_id: str):
         from lib import team_store
         if not team_id:
-            return self._send(404, b'{"error":"team not found"}', "application/json")
+            return self._json_error(404, "team not found")
         if not team_store.delete_team(team_id):
-            return self._send(404, b'{"error":"team not found"}', "application/json")
-        return self._send(200, json.dumps({"ok": True}).encode(),
-                          "application/json")
+            return self._json_error(404, "team not found")
+        return self._json_ok({"ok": True})
 
     def _handle_team_messages(self, team_id: str):
-        from urllib.parse import parse_qs, urlparse
         from lib import team_store
         if not team_id:
-            return self._send(404, b'{"error":"team not found"}', "application/json")
-        qs = parse_qs(urlparse(self.path).query)
+            return self._json_error(404, "team not found")
+        qs = self._query()
         try:
             limit = int(qs.get("limit", ["100"])[0] or 100)
         except ValueError:
@@ -3005,7 +2874,7 @@ class Handler(BaseHTTPRequestHandler):
             "team_id": team_id,
             "messages": team_store.list_team_messages(team_id, limit=limit),
         }
-        return self._send(200, json.dumps(body).encode(), "application/json")
+        return self._json_ok(body)
 
     def _handle_request_location(self):
         """An agent asks the app for the user's location: broadcast a request the
@@ -3013,13 +2882,13 @@ class Handler(BaseHTTPRequestHandler):
         {"session": "..."}."""
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = (data.get("session") or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         self.ctx.stream.broadcast(
             {"type": SSEType.LOCATION_REQUEST, "session": session})
-        return self._send(200, b'{"ok":true}', "application/json")
+        return self._json_ok({"ok": True})
 
     def _handle_request_calendar(self):
         """An agent asks the app to add an Apple Calendar event. Body:
@@ -3028,22 +2897,14 @@ class Handler(BaseHTTPRequestHandler):
          "url":"...", "all_day":false, "calendar":"Work"}."""
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         request_id = f"cal-{secrets.token_hex(8)}"
         try:
             request = build_calendar_request(data, request_id=request_id)
         except CalendarRequestError as exc:
-            return self._send(
-                400,
-                json.dumps({"error": str(exc)}).encode(),
-                "application/json",
-            )
+            return self._json_error(400, str(exc))
         self.ctx.stream.broadcast(request.as_event(SSEType.CALENDAR_REQUEST))
-        return self._send(
-            200,
-            json.dumps({"ok": True, "request_id": request_id}).encode(),
-            "application/json",
-        )
+        return self._json_ok({"ok": True, "request_id": request_id})
 
     def _handle_crash(self):
         """Receive a MetricKit diagnostic payload from the iOS app.
@@ -3053,9 +2914,8 @@ class Handler(BaseHTTPRequestHandler):
         """
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
-            from lib import db
             from lib.ios_diagnostics import diagnostic_counts
             diagnostic_dir = pathlib.Path(db.DB_PATH).parent / "crashes"
             diagnostic_dir.mkdir(parents=True, exist_ok=True)
@@ -3078,8 +2938,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         except Exception as e:  # noqa: BLE001
             log_exception("crashStoreFail", e)
-            return self._send(500, b'{"error":"store failed"}', "application/json")
-        return self._send(200, b'{"ok":true}', "application/json")
+            return self._json_error(500, "store failed")
+        return self._json_ok({"ok": True})
 
     def _handle_remote_action(self):
         """Receive a fire-and-forget remote action (typically from an iOS
@@ -3087,19 +2947,15 @@ class Handler(BaseHTTPRequestHandler):
         already-running PWA can act without a page reload."""
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         action = (data.get("action") or "").strip().lower()
         if action not in ClientAction.valid():
-            return self._send(400, b'{"error":"unknown action"}', "application/json")
+            return self._json_error(400, "unknown action")
         if action == ClientAction.CONTROLLER_EVENT:
             try:
                 event = build_controller_event(data)
             except ControllerEventError as exc:
-                return self._send(
-                    400,
-                    json.dumps({"error": str(exc)}).encode(),
-                    "application/json",
-                )
+                return self._json_error(400, str(exc))
         else:
             event = {
                 "type": SSEType.REMOTE_ACTION,
@@ -3111,7 +2967,7 @@ class Handler(BaseHTTPRequestHandler):
         body = {"ok": True}
         if action == ClientAction.CONTROLLER_EVENT:
             body["controller_event_id"] = event["controller_event_id"]
-        return self._send(200, json.dumps(body).encode(), "application/json")
+        return self._json_ok(body)
 
     # --- POST handlers ---------------------------------------------------
 
@@ -3120,16 +2976,15 @@ class Handler(BaseHTTPRequestHandler):
         if self._reject_janitor_control(data):
             return
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = (data.get("session") or "").strip()
         voice_id = (data.get("voice_id") or "").strip()
         provider = (data.get("provider") or "").strip().lower()
         if not session or not voice_id:
-            return self._send(400, b'{"error":"session and voice_id required"}',
-                              "application/json")
+            return self._json_error(400, "session and voice_id required")
         agents = load_agents(self.ctx.agents_path)
         if session not in agents:
-            return self._send(404, b'{"error":"no such agent"}', "application/json")
+            return self._json_error(404, "no such agent")
         from lib.voice import merge_voice, resolve_voice
         for sid, info in agents.items():
             if sid == session:
@@ -3137,25 +2992,22 @@ class Handler(BaseHTTPRequestHandler):
             occupied = ((resolve_voice((info or {}).get("voice_id"), provider)
                          if provider else (info or {}).get("voice_id")))
             if occupied == voice_id:
-                return self._send(409,
-                    json.dumps({"error": "voice taken",
-                                "by": (info or {}).get("name") or sid}).encode(),
-                    "application/json")
+                return self._json(409, {"error": "voice taken",
+                                        "by": (info or {}).get("name") or sid})
         agents[session]["voice_id"] = (
             merge_voice(agents[session].get("voice_id"), provider, voice_id)
             if provider else voice_id)
         save_agents(agents, self.ctx.agents_path)
-        return self._send(200, b'{"ok":true}', "application/json")
+        return self._json_ok({"ok": True})
 
     def _handle_agent_fallbacks_get(self):
-        from urllib.parse import parse_qs, urlparse
         from lib import agents, model_fallbacks
-        session = parse_qs(urlparse(self.path).query).get("session", [""])[0]
+        session = self._query().get("session", [""])[0]
         agent = agents.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"agent not found"}', "application/json")
+            return self._json_error(404, "agent not found")
         result = {"session": session, **model_fallbacks.get(agent["agent_id"])}
-        return self._send(200, json.dumps(result).encode(), "application/json")
+        return self._json_ok(result)
 
     def _handle_agent_fallbacks_post(self):
         from lib import agents, model_fallbacks
@@ -3165,98 +3017,89 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("session required")
             agent = agents.get_by_session(data["session"])
             if not agent:
-                return self._send(404, b'{"error":"agent not found"}', "application/json")
+                return self._json_error(404, "agent not found")
             result = model_fallbacks.configure(agent["agent_id"], data.get("models"),
                 expected_revision=data.get("expected_revision"))
-            return self._send(200, json.dumps({"session": agent["session"], **result}).encode(), "application/json")
+            return self._json_ok({"session": agent["session"], **result})
         except ValueError as error:
-            return self._send(409 if isinstance(error, model_fallbacks.Conflict) else 400,
-                json.dumps({"error": str(error)}).encode(), "application/json")
+            return self._json_error(409 if isinstance(error, model_fallbacks.Conflict) else 400, str(error))
 
     def _handle_agent_llm(self):
         """Set a running agent's model and/or reasoning effort. Read fresh on
         the agent's next turn, so this re-tunes a live agent without relaunch.
         Send "" for a field to clear the override (fall back to config default).
         Only fields present in the body are changed."""
-        from lib import agents as agents_db
-        from lib import backends
         from lib import config
         data = self._read_json()
         if self._reject_janitor_control(data):
             return
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = (data.get("session") or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"no such agent"}', "application/json")
+            return self._json_error(404, "no such agent")
         backend = backends.normalize(agent.get("backend"))
         valid = list(backends.valid_efforts(backend))
         update: dict[str, str] = {}
         if "model" in data:
             if data.get("model") is not None and not isinstance(data.get("model"), str):
-                return self._send(400, b'{"error":"model must be string or null"}',
-                                  "application/json")
+                return self._json_error(400, "model must be string or null")
             model = (data.get("model") or "").strip()
             if not backends.is_valid_model(backend, model):
-                return self._send(400, json.dumps({
-                    "error": "invalid model for backend", "backend": backend,
-                }).encode(), "application/json")
+                return self._json(400, {
+         "error": "invalid model for backend", "backend": backend,
+     })
             update["model"] = model
         if "effort" in data:
             if data.get("effort") is not None and not isinstance(data.get("effort"), str):
-                return self._send(400, b'{"error":"effort must be string or null"}',
-                                  "application/json")
+                return self._json_error(400, "effort must be string or null")
             effort = (data.get("effort") or "").strip().lower()
             if effort and effort not in valid:
-                return self._send(400, json.dumps(
-                    {"error": "invalid effort for backend",
-                     "backend": backend, "valid_efforts": valid}).encode(),
-                    "application/json")
+                return self._json(400, {"error": "invalid effort for backend",
+                                        "backend": backend, "valid_efforts": valid})
             update["effort"] = effort
         next_model = update.get("model", str(agent.get("model") or "").strip())
         if backend == backends.AGY and not next_model:
             next_model = config.load().agy_model.strip()
         next_effort = update.get("effort", str(agent.get("effort") or "").strip())
         if backend == backends.AGY and next_model and next_effort:
-            return self._send(400, json.dumps({
-                "error": "AGY model-specific effort compatibility is unknown",
-                "backend": backend,
-            }).encode(), "application/json")
+            return self._json(400, {
+     "error": "AGY model-specific effort compatibility is unknown",
+     "backend": backend,
+ })
         if update:
             agents_db.update_agent(agent["agent_id"], **update)
         fresh = agents_db.get_by_session(session) or {}
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True, "backend": backend,
             "model": fresh.get("model", ""), "effort": fresh.get("effort", ""),
             "valid_efforts": valid,
-        }).encode(), "application/json")
+        })
 
     def _handle_agent_mcp(self):
         """Set which MCP servers an agent loads (user-driven, from the app).
         Body: {"session": "...", "mcp_servers": ["name", ...]}. Names are
         validated against the global ~/.claude.json catalog; unknown names are
         dropped. Read fresh on the agent's next turn — no relaunch."""
-        from lib import agents as agents_db
         from lib import config
         data = self._read_json()
         if self._reject_janitor_control(data):
             return
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = (data.get("session") or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"no such agent"}', "application/json")
+            return self._json_error(404, "no such agent")
         catalog = config.read_global_mcp_servers()
         requested = data.get("mcp_servers")
         if not isinstance(requested, list):
-            return self._send(400, b'{"error":"mcp_servers must be a list"}',
-                              "application/json")
+            return self._json_error(400, "mcp_servers must be a list")
         # Keep only known servers, de-duplicated, in request order.
         chosen: list[str] = []
         for name in requested:
@@ -3265,34 +3108,31 @@ class Handler(BaseHTTPRequestHandler):
                 chosen.append(n)
         from lib.mcp_selection import encode
         agents_db.update_agent(agent["agent_id"], mcp_servers=encode(chosen))
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True,
             "session": session,
             "mcp_servers": chosen,
             "available_mcp_servers": sorted(catalog.keys()),
-        }).encode(), "application/json")
+        })
 
     def _handle_agent_heartbeat(self):
         """Enable/disable autonomous heartbeat for a single live agent."""
-        from lib import agents as agents_db
         from lib import heartbeat
         data = self._read_json()
         if self._reject_janitor_control(data):
             return
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = (data.get("session") or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         if "heartbeat_enabled" not in data:
-            return self._send(400, b'{"error":"heartbeat_enabled required"}',
-                              "application/json")
+            return self._json_error(400, "heartbeat_enabled required")
         if not isinstance(data.get("heartbeat_enabled"), bool):
-            return self._send(400, b'{"error":"heartbeat_enabled must be boolean"}',
-                              "application/json")
+            return self._json_error(400, "heartbeat_enabled must be boolean")
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"no such agent"}', "application/json")
+            return self._json_error(404, "no such agent")
         enabled = bool(data["heartbeat_enabled"])
         agents_db.update_agent(
             agent["agent_id"],
@@ -3300,23 +3140,22 @@ class Handler(BaseHTTPRequestHandler):
         )
         heartbeat.record_heartbeat_activity(agent["agent_id"])
         fresh = agents_db.get_by_session(session) or {}
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True,
             "session": session,
             "heartbeat_enabled": bool(fresh.get("heartbeat_enabled")),
-        }).encode(), "application/json")
+        })
 
     def _handle_agent_schedules_get(self):
-        from urllib.parse import parse_qs, urlparse
         from lib import scheduler
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         session = (query.get("session", [""])[0] or "").strip()
         agent_id = (query.get("agent_id", [""])[0] or "").strip()
         schedules = scheduler.list_schedules(
             session=session if session else None,
             agent_id=agent_id if agent_id else None,
         )
-        return self._send(200, json.dumps({"schedules": schedules}).encode(), "application/json")
+        return self._json_ok({"schedules": schedules})
 
     def _handle_agent_schedules_post(self):
         from lib import scheduler
@@ -3324,50 +3163,50 @@ class Handler(BaseHTTPRequestHandler):
         if self._reject_janitor_control(data):
             return
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = str(data.get("session") or "").strip()
         name = str(data.get("name") or "").strip()
         cron = str(data.get("cron_expression") or data.get("cron") or "").strip()
         prompt = str(data.get("prompt") or "").strip()
         enabled = bool(data.get("enabled", True))
         if not session or not name or not cron or not prompt:
-            return self._send(400, b'{"error":"session, name, cron_expression, and prompt are required"}', "application/json")
+            return self._json_error(400, "session, name, cron_expression, and prompt are required")
         try:
             item = scheduler.create_schedule(session, name, cron, prompt, enabled=enabled)
         except ValueError as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
-        return self._send(201, json.dumps({"ok": True, "schedule": item}).encode(), "application/json")
+            return self._json_error(400, str(exc))
+        return self._json(201, {"ok": True, "schedule": item})
 
     def _handle_agent_schedules_toggle(self):
         from lib import scheduler
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         schedule_id = str(data.get("schedule_id") or "").strip()
         enabled = data.get("enabled")
         if not schedule_id or not isinstance(enabled, bool):
-            return self._send(400, b'{"error":"schedule_id and enabled boolean required"}', "application/json")
+            return self._json_error(400, "schedule_id and enabled boolean required")
         item = scheduler.update_schedule(schedule_id, enabled=enabled)
         if not item:
-            return self._send(404, b'{"error":"schedule not found"}', "application/json")
-        return self._send(200, json.dumps({"ok": True, "schedule": item}).encode(), "application/json")
+            return self._json_error(404, "schedule not found")
+        return self._json_ok({"ok": True, "schedule": item})
 
     def _handle_agent_schedules_delete(self):
         from lib import scheduler
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         schedule_id = str(data.get("schedule_id") or "").strip()
         if not schedule_id:
-            return self._send(400, b'{"error":"schedule_id required"}', "application/json")
+            return self._json_error(400, "schedule_id required")
         ok = scheduler.delete_schedule(schedule_id)
-        return self._send(200, json.dumps({"ok": ok}).encode(), "application/json")
+        return self._json_ok({"ok": ok})
 
     def _handle_schedule_patch(self, schedule_id: str):
         from lib import scheduler
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         enabled = data.get("enabled")
         name = data.get("name")
         cron = data.get("cron_expression") or data.get("cron")
@@ -3381,52 +3220,49 @@ class Handler(BaseHTTPRequestHandler):
                 prompt=str(prompt).strip() if prompt else None,
             )
         except ValueError as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(400, str(exc))
         if not item:
-            return self._send(404, b'{"error":"schedule not found"}', "application/json")
-        return self._send(200, json.dumps({"ok": True, "schedule": item}).encode(), "application/json")
+            return self._json_error(404, "schedule not found")
+        return self._json_ok({"ok": True, "schedule": item})
 
     def _handle_schedule_delete(self, schedule_id: str):
         from lib import scheduler
         ok = scheduler.delete_schedule(schedule_id)
         if not ok:
-            return self._send(404, b'{"error":"schedule not found"}', "application/json")
-        return self._send(200, json.dumps({"ok": True}).encode(), "application/json")
+            return self._json_error(404, "schedule not found")
+        return self._json_ok({"ok": True})
 
     def _handle_agent_archive(self):
-        from lib import agents as agents_db
         data = self._read_json()
         if self._reject_janitor_control(data):
             return
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = str(data.get("session") or "").strip()
         archived = data.get("archived")
         if not session or not isinstance(archived, bool):
-            return self._send(400, b'{"error":"session and archived required"}', "application/json")
+            return self._json_error(400, "session and archived required")
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"no such agent"}', "application/json")
+            return self._json_error(404, "no such agent")
         agents_db.set_archived(agent["agent_id"], archived)
-        return self._send(200, json.dumps({"ok": True, "session": session,
-                                           "archived": archived}).encode(),
-                          "application/json")
+        return self._json_ok({"ok": True, "session": session,
+                              "archived": archived})
 
     def _handle_agent_goal_get(self):
         """The goal an agent is working toward on its own, or null."""
-        from urllib.parse import parse_qs, urlparse
-        from lib import agent_goals, agents as agents_db
-        query = parse_qs(urlparse(self.path).query)
+        from lib import agent_goals
+        query = self._query()
         session = (query.get("session", [""])[0] or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"no such agent"}', "application/json")
-        return self._send(200, json.dumps({
+            return self._json_error(404, "no such agent")
+        return self._json_ok({
             "session": session,
             "goal": agent_goals.public(agent_goals.get(agent["agent_id"])),
-        }).encode(), "application/json")
+        })
 
     def _handle_agent_goal_start(self):
         return self._goal_action("start")
@@ -3449,49 +3285,43 @@ class Handler(BaseHTTPRequestHandler):
         goal as the backend now reports it. Backends without goal control
         answer 501 rather than pretending.
         """
-        from lib import agents as agents_db, backends
         data = self._read_json()
         if self._reject_janitor_control(data):
             return
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = (data.get("session") or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         objective = str(data.get("objective") or "").strip()
         if action == "start" and not objective:
-            return self._send(400, b'{"error":"objective required"}', "application/json")
+            return self._json_error(400, "objective required")
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"no such agent"}', "application/json")
+            return self._json_error(404, "no such agent")
         try:
             goal = backends.goal(
                 str(agent.get("backend") or ""), agent["agent_id"], action,
                 objective=objective, stream=self.ctx.stream)
         except backends.GoalUnsupported as exc:
-            return self._send(501, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
+            return self._json_error(501, str(exc))
         except ValueError as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
+            return self._json_error(400, str(exc))
         except Exception as exc:  # noqa: BLE001 - relay the backend's own refusal
             log_exception("agentGoalFail", exc, detail=f"{session}:{action}")
-            return self._send(502, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        return self._send(200, json.dumps({
+            return self._json_error(502, str(exc))
+        return self._json_ok({
             "ok": True, "session": session, "action": action, "goal": goal,
-        }).encode(), "application/json")
+        })
 
     def _handle_agent_heartbeat_status(self):
         """Return one Agent's scheduler projection and recent heartbeat outcomes."""
-        from urllib.parse import parse_qs, urlparse
-        from lib import agents as agents_db
-        from lib import db, heartbeat
-        query = parse_qs(urlparse(self.path).query)
+        from lib import heartbeat
+        query = self._query()
         session = (query.get("session", [""])[0] or "").strip()
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"no such agent"}', "application/json")
+            return self._json_error(404, "no such agent")
         rows = db.conn().execute(
             """SELECT message_id, text, timestamp, updated_at
                  FROM messages
@@ -3503,81 +3333,77 @@ class Handler(BaseHTTPRequestHandler):
             "id": row["message_id"], "text": row["text"],
             "timestamp": row["timestamp"], "updated_at": row["updated_at"],
         } for row in rows]
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True, "session": session,
             "schedule": heartbeat.agent_schedule(agent), "history": history,
-        }).encode(), "application/json")
+        })
 
     def _handle_heartbeat_settings_get(self):
         """Return the heartbeat policy owned by this Computer."""
         from lib import heartbeat
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True,
             "settings": heartbeat.get_settings().as_dict(),
             "heartbeat_prompt": heartbeat.HEARTBEAT_PROMPT,
-        }).encode(), "application/json")
+        })
 
     def _handle_heartbeat_settings_post(self):
         """Atomically update the heartbeat policy for this Computer."""
         from lib import heartbeat
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             settings = heartbeat.update_settings(data)
         except ValueError as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        return self._send(200, json.dumps({
+            return self._json_error(400, str(exc))
+        return self._json_ok({
             "ok": True,
             "settings": settings.as_dict(),
             "heartbeat_prompt": heartbeat.HEARTBEAT_PROMPT,
-        }).encode(), "application/json")
+        })
 
     def _handle_diagnostics_settings_get(self):
         """Return opt-in developer diagnostics owned by this Computer."""
         from lib import diagnostics_settings
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True, "settings": diagnostics_settings.get().public(),
-        }).encode(), "application/json")
+        })
 
     def _handle_diagnostics_settings_post(self):
         from lib import diagnostics_settings
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             settings = diagnostics_settings.update(data)
         except ValueError as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        return self._send(200, json.dumps({
+            return self._json_error(400, str(exc))
+        return self._json_ok({
             "ok": True, "settings": settings.public(),
-        }).encode(), "application/json")
+        })
 
     def _handle_agent_dreaming(self):
         """Enable/disable nightly creative dreaming for a single live agent."""
-        from lib import agents as agents_db
         from lib import dreaming
         data = self._read_json()
         if self._reject_janitor_control(data):
             return
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = (data.get("session") or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         if "dreaming_enabled" not in data:
-            return self._send(400, b'{"error":"dreaming_enabled required"}',
-                              "application/json")
+            return self._json_error(400, "dreaming_enabled required")
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"no such agent"}', "application/json")
+            return self._json_error(404, "no such agent")
         enabled = data.get("dreaming_enabled") is True
         agents_db.update_agent(agent["agent_id"], dreaming_enabled=enabled)
         fresh = agents_db.get_by_session(session) or {}
         settings = dreaming.get_settings()
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True,
             "session": session,
             "dreaming_enabled": bool(fresh.get("dreaming_enabled")),
@@ -3587,7 +3413,7 @@ class Handler(BaseHTTPRequestHandler):
             "dream_min_directions": settings.min_directions,
             "dream_settings": settings.as_dict(),
             "dream_prompt": dreaming.dreaming_prompt_text(),
-        }).encode(), "application/json")
+        })
 
     def _handle_agent_voice_verbosity(self):
         """Set how much one agent narrates aloud while it is still working.
@@ -3595,38 +3421,35 @@ class Handler(BaseHTTPRequestHandler):
         Read fresh on the next turn dispatch, so moving the slider re-tunes a
         running agent without a relaunch.
         """
-        from lib import agents as agents_db
         from lib import voice_verbosity
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = (data.get("session") or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         if "voice_verbosity" not in data:
-            return self._send(400, b'{"error":"voice_verbosity required"}',
-                              "application/json")
+            return self._json_error(400, "voice_verbosity required")
         raw = data.get("voice_verbosity")
         if isinstance(raw, bool) or not isinstance(raw, int):
-            return self._send(400, b'{"error":"voice_verbosity must be an integer"}',
-                              "application/json")
+            return self._json_error(400, "voice_verbosity must be an integer")
         if not voice_verbosity.MIN_LEVEL <= raw <= voice_verbosity.MAX_LEVEL:
-            return self._send(400, json.dumps({
-                "error": "voice_verbosity out of range",
-                "min": voice_verbosity.MIN_LEVEL,
-                "max": voice_verbosity.MAX_LEVEL,
-            }).encode(), "application/json")
+            return self._json(400, {
+     "error": "voice_verbosity out of range",
+     "min": voice_verbosity.MIN_LEVEL,
+     "max": voice_verbosity.MAX_LEVEL,
+ })
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"no such agent"}', "application/json")
+            return self._json_error(404, "no such agent")
         agents_db.update_agent(agent["agent_id"], voice_verbosity=raw)
         fresh = agents_db.get_by_session(session) or {}
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True,
             "session": session,
             "voice_verbosity": int(fresh.get("voice_verbosity") or 0),
             "options": voice_verbosity.options(),
-        }).encode(), "application/json")
+        })
 
     def _handle_agent_mute(self):
         """Mute/unmute APNs pushes for a single live agent.
@@ -3634,48 +3457,46 @@ class Handler(BaseHTTPRequestHandler):
         Badges/unread remain enabled for user-facing speak turns; this flag
         only removes the interruption.
         """
-        from lib import agents as agents_db
         data = self._read_json()
         if self._reject_janitor_control(data):
             return
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = (data.get("session") or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         if "muted" not in data:
-            return self._send(400, b'{"error":"muted required"}',
-                              "application/json")
+            return self._json_error(400, "muted required")
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"no such agent"}', "application/json")
+            return self._json_error(404, "no such agent")
         muted = data.get("muted") is True
         agents_db.update_agent(agent["agent_id"], muted=muted)
         fresh = agents_db.get_by_session(session) or {}
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True,
             "session": session,
             "muted": bool(fresh.get("muted")),
-        }).encode(), "application/json")
+        })
 
     def _handle_agent_assign(self):
         from lib.contact_assignment import assign_contact
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         if self._reject_janitor_control(data):
             return
         try:
             result = assign_contact(str(data.get("session") or ""),
                                     str(data.get("mode") or "auto"), data.get("name"))
         except AgentLifecycleError as exc:
-            return self._send(exc.status, json.dumps(exc.response()).encode(), "application/json")
+            return self._json(exc.status, exc.response())
         except ValueError as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(409, str(exc))
         if data.get("mode") != "options":
             self.ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER, "kind": "contact-assigned",
                                        "session": result["session"], "name": result["name"]})
-        return self._send(200, json.dumps(result).encode(), "application/json")
+        return self._json_ok(result)
 
     def _handle_agent_rename(self):
         """Change an agent's display name, keeping every stable identifier.
@@ -3683,24 +3504,22 @@ class Handler(BaseHTTPRequestHandler):
         The name is `agents.persona`. `session` and `agent_id` are untouched, so
         addressing, transcripts, pairings and routing all survive the rename.
         """
-        from lib import agents as agents_db
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         if self._reject_janitor_control(data):
             return
         session = (data.get("session") or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         # Collapse internal runs of whitespace: this is a display name, and a
         # name that only differs by spacing is not a different contact.
         name = " ".join(str(data.get("name") or "").split())
         if not name or len(name) > 60:
-            return self._send(400, b'{"error":"name required (maximum 60 characters)"}',
-                              "application/json")
+            return self._json_error(400, "name required (maximum 60 characters)")
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"no such agent"}', "application/json")
+            return self._json_error(404, "no such agent")
         # Agent creation permits one live session per contact name, and the
         # persona-to-session lookup relies on it. A rename has to hold the same
         # line or that lookup becomes ambiguous.
@@ -3709,26 +3528,25 @@ class Handler(BaseHTTPRequestHandler):
                       and str(a["persona"] or "").strip().casefold() == name.casefold()),
                      None)
         if owner is not None:
-            return self._send(409, json.dumps({
-                "error": "contact_occupied",
-                "message": f"{owner['persona']} already has an active session.",
-                "owner": owner["persona"], "session": owner["session"],
-            }).encode(), "application/json")
+            return self._json(409, {
+     "error": "contact_occupied",
+     "message": f"{owner['persona']} already has an active session.",
+     "owner": owner["persona"], "session": owner["session"],
+ })
         if str(agent.get("persona") or "") != name:
             agents_db.update_agent(agent["agent_id"], persona=name)
             self.ctx.stream.broadcast({
                 "type": SSEType.AGENT_ROSTER, "kind": "agent-renamed",
                 "session": session, "name": name,
             })
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True, "session": session, "name": name,
-        }).encode(), "application/json")
+        })
 
     def _handle_dreaming_runs(self):
         """Inspect recent deep dreaming run/thread/round ledger entries."""
-        from urllib.parse import parse_qs, urlparse
         from lib import dreaming
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         session = (qs.get("session", [""])[0] or "").strip()
         try:
             limit = int(qs.get("limit", ["10"])[0] or "10")
@@ -3736,11 +3554,11 @@ class Handler(BaseHTTPRequestHandler):
             limit = 10
         runs = dreaming.list_dream_runs(session=session, limit=limit)
         settings = dreaming.get_settings()
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True,
             "runs": runs,
             "contract": settings.as_dict(),
-        }).encode(), "application/json")
+        })
 
     def _dreaming_backend_options(self):
         """Backends the dreaming picker may offer, with their effort levels.
@@ -3749,7 +3567,7 @@ class Handler(BaseHTTPRequestHandler):
         fetches `/agent-model-options` for the full catalogue and can filter it
         by the chosen backend id.
         """
-        from lib import backends, provider_capabilities
+        from lib import provider_capabilities
         # Model ids come from the same catalogue the agent picker uses, so the
         # dreaming picker can never drift from what the CLIs actually accept.
         # A probe failure degrades to backends-only rather than failing the
@@ -3796,11 +3614,10 @@ class Handler(BaseHTTPRequestHandler):
         from lib import dreaming
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = str(data.get("session") or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}',
-                              "application/json")
+            return self._json_error(400, "session required")
         try:
             run = dreaming.start_manual_run(
                 session,
@@ -3808,56 +3625,55 @@ class Handler(BaseHTTPRequestHandler):
                 context_dose=str(data.get("context_dose") or "").strip(),
             )
         except ValueError as e:
-            return self._send(
-                409, json.dumps({"error": str(e)}).encode(), "application/json")
-        return self._send(200, json.dumps({
+            return self._json_error(409, str(e))
+        return self._json_ok({
             "ok": True,
             "run_id": run.get("run_id"),
             "session": run.get("session"),
             "seed_strategy": run.get("seed_strategy"),
             "context_dose": run.get("context_dose"),
             "seed_material": run.get("seed_material"),
-        }).encode(), "application/json")
+        })
 
     def _handle_dreaming_settings_get(self):
         from lib import dream_seeds, dreaming
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True,
             "settings": dreaming.get_settings().as_dict(),
             "limits": {
-                "dreams_per_night": [
-                    dreaming.DREAMS_PER_NIGHT_MIN,
-                    dreaming.DREAMS_PER_NIGHT_MAX,
-                ],
-                "direction_count": [
-                    dreaming.DREAM_DIRECTION_MIN,
-                    dreaming.DREAM_DIRECTION_MAX,
-                ],
-                "target_token_budget": [
-                    dreaming.DREAM_TOKEN_BUDGET_MIN,
-                    dreaming.DREAM_TOKEN_BUDGET_MAX,
-                ],
+   "dreams_per_night": [
+       dreaming.DREAMS_PER_NIGHT_MIN,
+       dreaming.DREAMS_PER_NIGHT_MAX,
+   ],
+   "direction_count": [
+       dreaming.DREAM_DIRECTION_MIN,
+       dreaming.DREAM_DIRECTION_MAX,
+   ],
+   "target_token_budget": [
+       dreaming.DREAM_TOKEN_BUDGET_MIN,
+       dreaming.DREAM_TOKEN_BUDGET_MAX,
+   ],
             },
             # Everything a client needs to draw the dreaming backend/model/
             # effort pickers without shipping its own catalogue. An empty
             # choice means "inherit the agent's own backend".
             "options": {
-                "backends": self._dreaming_backend_options(),
-                "seed_strategies": list(dream_seeds.STRATEGIES),
-                "context_doses": list(dream_seeds.CONTEXT_DOSES),
+   "backends": self._dreaming_backend_options(),
+   "seed_strategies": list(dream_seeds.STRATEGIES),
+   "context_doses": list(dream_seeds.CONTEXT_DOSES),
             },
-        }).encode(), "application/json")
+        })
 
     def _handle_dreaming_settings_put(self):  # noqa: D401
         from lib import dreaming
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         settings = dreaming.update_settings(data)
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True,
             "settings": settings.as_dict(),
-        }).encode(), "application/json")
+        })
 
     def _handle_compact(self):
         """Compact a conversation on demand (from the app). Drives the backend
@@ -3870,13 +3686,13 @@ class Handler(BaseHTTPRequestHandler):
         if self._reject_janitor_control(data):
             return
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = (data.get("session") or "").strip()
         if not session:
-            return self._send(400, b'{"error":"session required"}', "application/json")
+            return self._json_error(400, "session required")
         result = compaction.compact_session(session)
         status = 200 if result.get("ok") else 409
-        return self._send(status, json.dumps(result).encode(), "application/json")
+        return self._json(status, result)
 
     def _handle_orchestrator_addressing(self):
         """Choose how an unaddressed spoken turn picks its agent.
@@ -3887,77 +3703,59 @@ class Handler(BaseHTTPRequestHandler):
         from lib import addressing
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             chosen = addressing.set_mode(str(data.get("mode") or ""))
         except ValueError:
-            return self._send(400, json.dumps({
-                "error": "unknown addressing mode",
-                "modes": list(addressing.MODES),
-            }).encode(), "application/json")
-        return self._send(200, json.dumps({
+            return self._json(400, {
+     "error": "unknown addressing mode",
+     "modes": list(addressing.MODES),
+ })
+        return self._json_ok({
             "ok": True, "mode": chosen, "modes": list(addressing.MODES),
-        }).encode(), "application/json")
+        })
 
     def _handle_orchestrator_settings_post(self):
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             settings = update_orchestrator_settings(data)
         except ValueError as exc:
-            return self._send(
-                400, json.dumps({"error": str(exc)}).encode(),
-                "application/json")
-        return self._send(
-            200,
-            json.dumps({"ok": True, "settings": settings.__dict__}).encode(),
-            "application/json",
-        )
+            return self._json_error(400, str(exc))
+        return self._json_ok({"ok": True, "settings": settings.__dict__})
 
     def _handle_herald_settings_post(self):
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             settings = update_herald_settings(data)
         except ValueError as exc:
-            return self._send(
-                400,
-                json.dumps({"error": str(exc)}).encode(),
-                "application/json",
-            )
-        return self._send(
-            200,
-            json.dumps({"ok": True, "settings": settings.as_dict()}).encode(),
-            "application/json",
-        )
+            return self._json_error(400, str(exc))
+        return self._json_ok({"ok": True, "settings": settings.as_dict()})
 
     def _handle_personalities_settings_post(self):
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         settings = update_personality_settings(data)
-        return self._send(
-            200,
-            json.dumps({"ok": True, "settings": settings.as_dict()}).encode(),
-            "application/json",
-        )
+        return self._json_ok({"ok": True, "settings": settings.as_dict()})
 
     def _handle_preview(self):
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         voice_id = (data.get("voice_id") or "").strip()
         text = (data.get("text") or "Hi there, this is what I sound like.").strip()
         session = (data.get("session") or self.ctx.default_session).strip() or self.ctx.default_session
         if not voice_id:
-            return self._send(400, b'{"error":"voice_id required"}', "application/json")
+            return self._json_error(400, "voice_id required")
         try:
             path = self.ctx.tts.synthesize(text[:200], voice_id, session=session)
         except Exception as e:
             log_exception("previewSynthFail", e, detail=voice_id)
-            return self._send(500, f'{{"error":"{e}"}}'.encode(), "application/json")
+            return self._json_error(500, str(e))
         # A preview plays on request, so it bypasses herald arbitration and
         # goes straight to every connected client.
         name = pathlib.Path(str(path)).name
@@ -3965,31 +3763,29 @@ class Handler(BaseHTTPRequestHandler):
             "type": SSEType.AUDIO, "url": f"/audio/{name}", "name": name,
             "session": session, "preview": True,
         })
-        return self._send(200, json.dumps({"ok": True, "url": f"/audio/{name}"}).encode(),
-                          "application/json")
+        return self._json_ok({"ok": True, "url": f"/audio/{name}"})
 
     def _handle_oracle_status(self):
         from lib.oracle_realtime import capability
-        return self._send(
-            200, json.dumps(capability()).encode(), "application/json")
+        return self._json_ok(capability())
 
     def _handle_oracle_contact_get(self):
         """The Host-owned Oracle contact, validated against the live roster."""
         from lib import oracle_contact
-        return self._send(200, json.dumps(oracle_contact.get()).encode(), "application/json")
+        return self._json_ok(oracle_contact.get())
 
     def _handle_oracle_contact_post(self):
         """Set or clear the Oracle contact. Body: {"session": "<session|persona|''>"}."""
         from lib import oracle_contact
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             result = oracle_contact.set(str(data.get("session") or ""))
         except ValueError as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(409, str(exc))
         log("oracleContactSet", f"session={result['session'] or '-'}")
-        return self._send(200, json.dumps(result).encode(), "application/json")
+        return self._json_ok(result)
 
     def _handle_oracle_v2(self):
         from lib.oracle_mode import voice_handler
@@ -4000,11 +3796,10 @@ class Handler(BaseHTTPRequestHandler):
         return serve(self)
 
     def _handle_oracle_delegations_get(self):
-        from urllib.parse import parse_qs, urlparse
         from lib import oracle_delegations, turn_dispatch
         oracle_delegations.reconcile_orphans(
             is_live=turn_dispatch.owns_inflight_trace)
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         try:
             limit = int(query.get("limit", ["50"])[0] or "50")
         except ValueError:
@@ -4017,16 +3812,13 @@ class Handler(BaseHTTPRequestHandler):
                     owner_principal=principal, limit=limit) if include_all
                 else oracle_delegations.undelivered(
                     owner_principal=principal, limit=limit))
-        return self._send(
-            200, json.dumps({"delegations": rows}).encode(),
-            "application/json")
+        return self._json_ok({"delegations": rows})
 
     def _handle_oracle_call_status(self):
         from lib import oracle_calls
-        from urllib.parse import parse_qs, urlparse
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         rows = oracle_calls.call_results(str(self._request_principal), query.get("attempt_id", [""])[0])
-        return self._send(200, json.dumps({"delegations": rows}).encode(), "application/json")
+        return self._json_ok({"delegations": rows})
 
     def _handle_oracle_live_call_status(self):
         from lib.oracle_live_calls import handle
@@ -4052,33 +3844,33 @@ class Handler(BaseHTTPRequestHandler):
         from lib import oracle_calls, oracle_contact
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             result = oracle_calls.create_call(ctx=self.ctx,
                 principal=str(self._request_principal),
                 attempt_id=str(data.get("attempt_id") or ""), sdp=data.get("sdp"),
                 fallback=oracle_contact.effective(data.get("oracle_session"), source="v1-webrtc"),
                 stop=lambda session: self._stop_agent_session(session, strict=True, defer_finish=True)[1])
-            return self._send(200, json.dumps(result).encode(), "application/json")
+            return self._json_ok(result)
         except ValueError as exc:
-            return self._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(400, str(exc))
         except Exception as exc:
             log_exception("oracleCallCreateFail", exc)
-            return self._send(502, b'{"error":"Oracle connection unavailable"}', "application/json")
+            return self._json_error(502, "Oracle connection unavailable")
 
     def _handle_oracle_call_close(self):
         from lib import oracle_calls
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         oracle_calls.close_call(str(self._request_principal), str(data.get("attempt_id") or ""))
-        return self._send(200, b'{"closed":true}', "application/json")
+        return self._json_ok({"closed": True})
 
     def _handle_oracle_delegation_create(self):
         from lib import oracle_delegations
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             row = oracle_delegations.dispatch(
                 ctx=self.ctx,
@@ -4092,49 +3884,36 @@ class Handler(BaseHTTPRequestHandler):
                 owner_principal=str(self._request_principal or "administrator"),
             )
         except oracle_delegations.DelegationCollision as exc:
-            return self._send(
-                409, json.dumps({"error": str(exc)}).encode(),
-                "application/json")
+            return self._json_error(409, str(exc))
         except (ValueError, LookupError) as exc:
-            return self._send(
-                400 if isinstance(exc, ValueError) else 404,
-                json.dumps({"error": str(exc)}).encode(),
-                "application/json")
+            return self._json_error(400 if isinstance(exc, ValueError) else 404, str(exc))
         except Exception as exc:  # noqa: BLE001
             status = int(getattr(exc, "status", 500))
             log_exception("oracleDelegationFail", exc)
-            return self._send(
-                status, json.dumps({"error": str(exc)}).encode(),
-                "application/json")
-        return self._send(
-            200, json.dumps({"delegation": row}).encode(),
-            "application/json")
+            return self._json_error(status, str(exc))
+        return self._json_ok({"delegation": row})
 
     def _handle_oracle_delegation_ack(self):
         from lib import oracle_delegations
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             delegation_id = oracle_delegations.normalize_id(
                 str(data.get("delegation_id") or ""))
         except ValueError as exc:
-            return self._send(
-                400, json.dumps({"error": str(exc)}).encode(),
-                "application/json")
+            return self._json_error(400, str(exc))
         if not oracle_delegations.acknowledge(
                 delegation_id,
                 owner_principal=str(self._request_principal or "administrator")):
-            return self._send(
-                404, b'{"error":"terminal delegation not found"}',
-                "application/json")
-        return self._send(200, b'{"ok":true}', "application/json")
+            return self._json_error(404, "terminal delegation not found")
+        return self._json_ok({"ok": True})
 
     def _handle_oracle_delegation_cancel(self):
         from lib import oracle_delegations
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         principal = str(self._request_principal or "administrator")
         session = str(data.get("session") or "").strip()
         if session:
@@ -4145,37 +3924,26 @@ class Handler(BaseHTTPRequestHandler):
                         session, strict=True, defer_finish=True)[1],
                     owner_principal=principal)
             except ValueError as exc:
-                return self._send(
-                    400, json.dumps({"error": str(exc)}).encode(),
-                    "application/json")
+                return self._json_error(400, str(exc))
             except Exception as exc:  # noqa: BLE001
                 log_exception("oracleAgentCancelFail", exc, detail=session)
-                return self._send(
-                    502, b'{"error":"agent cancellation failed"}',
-                    "application/json")
-            return self._send(200, json.dumps({
-                "cancelled_count": len(rows), "delegations": rows,
-            }).encode(), "application/json")
+                return self._json_error(502, "agent cancellation failed")
+            return self._json_ok({
+   "cancelled_count": len(rows), "delegations": rows,
+            })
         try:
             delegation_id = oracle_delegations.normalize_id(
                 str(data.get("delegation_id") or ""))
         except ValueError as exc:
-            return self._send(
-                400, json.dumps({"error": str(exc)}).encode(),
-                "application/json")
+            return self._json_error(400, str(exc))
         try:
             row = oracle_delegations.cancel(
                 delegation_id, owner_principal=principal)
         except oracle_delegations.DelegationNotCancellable as exc:
-            return self._send(
-                409, json.dumps({"error": str(exc)}).encode(),
-                "application/json")
+            return self._json_error(409, str(exc))
         if row is None:
-            return self._send(
-                404, b'{"error":"delegation not found"}', "application/json")
-        return self._send(
-            200, json.dumps({"delegation": row}).encode(),
-            "application/json")
+            return self._json_error(404, "delegation not found")
+        return self._json_ok({"delegation": row})
 
     def _handle_stop(self):
         """Terminate any in-flight clarp turn for the given agent. With
@@ -4187,15 +3955,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         session = (data.get("session") or self.ctx.default_session).strip() or self.ctx.default_session
         n = self._stop_agent_session(session, strict=False)
-        return self._send(200, json.dumps({"ok": True, "terminated": n}).encode(),
-                          "application/json")
+        return self._json_ok({"ok": True, "terminated": n})
 
     def _stop_agent_session(
         self, session: str, *, strict: bool, defer_finish: bool = False
     ):
         """Authoritative local stop shared by /stop and Oracle cancellation."""
-        from lib import agents as agents_db
-        from lib import backends
         from lib import turn_dispatch
         from lib import turn_queue
         agent = agents_db.get_by_session(session)
@@ -4296,8 +4061,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._reject_unauthorized()
         path = self.path.split("?", 1)[0]
         if self._device_forbidden(path, "DELETE"):
-            return self._send(403, b'{"error":"full device access required"}',
-                              "application/json")
+            return self._json_error(403, "full device access required")
         from lib import janitor_http
         if janitor_http.handles(path):
             return janitor_http.handle(self, "DELETE")
@@ -4332,23 +4096,17 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, b"not found")
 
     def _handle_transcription_result_delete(self, job_id: str):
-        from urllib.parse import unquote
         from lib import transcription_results
         try:
             job_id = transcription_results.normalize_job_id(unquote(job_id))
         except ValueError as e:
-            return self._send(400, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
+            return self._json_error(400, str(e))
         transcription_results.delete(job_id)
-        return self._send(200, b'{"ok":true}', "application/json")
+        return self._json_ok({"ok": True})
 
     def _handle_background_jobs(self):
         from lib import background_jobs
-        return self._send(
-            200,
-            json.dumps(background_jobs.snapshot()).encode(),
-            "application/json",
-        )
+        return self._json_ok(background_jobs.snapshot())
 
     def _broadcast_artifact(self, artifact: dict) -> None:
         if getattr(self.ctx, "stream", None) is None:
@@ -4366,16 +4124,15 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _handle_artifacts_list(self):
-        from urllib.parse import parse_qs, urlparse
         from lib import artifacts
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         try:
             limit = int(qs.get("limit", ["100"])[0] or 100)
             offset = int(qs.get("offset", ["0"])[0] or 0)
             created_from = int(qs["created_from"][0]) if qs.get("created_from") else None
             created_to = int(qs["created_to"][0]) if qs.get("created_to") else None
         except (TypeError, ValueError):
-            return self._send(400, b'{"error":"invalid limit"}', "application/json")
+            return self._json_error(400, "invalid limit")
         rows = artifacts.list_artifacts(
             session=(qs.get("session", [""])[0] or "").strip(),
             agent_id=(qs.get("agent_id", [""])[0] or "").strip(),
@@ -4385,32 +4142,32 @@ class Handler(BaseHTTPRequestHandler):
             limit=limit, offset=offset,
             order=(qs.get("order", ["updated"])[0] or "updated").strip(),
         )
-        return self._send(200, json.dumps({"artifacts": rows}).encode(), "application/json")
+        return self._json_ok({"artifacts": rows})
 
     def _handle_artifact_submit(self, artifact_id: str):
         from lib import html_forms
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"JSON object required"}', "application/json")
+            return self._json_error(400, "JSON object required")
         try:
             receipt = html_forms.submit(artifact_id, data)
         except ValueError as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
-        return self._send(200, json.dumps(receipt).encode(), "application/json")
+            return self._json_error(409, str(exc))
+        return self._json_ok(receipt)
 
     def _handle_artifact_get(self, artifact_id: str):
         from lib import artifacts
         row = artifacts.get(artifact_id)
         if not row:
-            return self._send(404, b'{"error":"artifact not found"}', "application/json")
-        return self._send(200, json.dumps({"artifact": row}).encode(), "application/json")
+            return self._json_error(404, "artifact not found")
+        return self._json_ok({"artifact": row})
 
     def _handle_artifact_create(self):
         from lib import artifacts
         data = self._read_json()
-        if not isinstance(data, dict): return self._send(400, b'{"error":"json object required"}', "application/json")
+        if not isinstance(data, dict): return self._json_error(400, "json object required")
         if str(data.get("type") or "").strip().lower() in {"decision", "question", "plan"}:
-            return self._send(409, b'{"error":"reserved artifact type"}', "application/json")
+            return self._json_error(409, "reserved artifact type")
         try:
             row = artifacts.create(
                 session=str(data.get("session") or ""), type=str(data.get("type") or ""),
@@ -4419,24 +4176,24 @@ class Handler(BaseHTTPRequestHandler):
                 reference_id=str(data.get("reference_id") or ""), payload=data.get("payload"),
                 artifact_id=str(data.get("artifact_id") or ""))
         except (ValueError, sqlite3.IntegrityError) as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(409, str(exc))
         self._broadcast_artifact(row)
-        return self._send(201, json.dumps({"artifact": row}).encode(), "application/json")
+        return self._json(201, {"artifact": row})
 
     def _handle_artifact_update(self, artifact_id: str):
         from lib import artifacts
         data = self._read_json()
-        if not isinstance(data, dict): return self._send(400, b'{"error":"json object required"}', "application/json")
+        if not isinstance(data, dict): return self._json_error(400, "json object required")
         try: row = artifacts.update(artifact_id, data)
         except ValueError as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(409, str(exc))
         self._broadcast_artifact(row)
-        return self._send(200, json.dumps({"artifact": row}).encode(), "application/json")
+        return self._json_ok({"artifact": row})
 
     def _handle_decision_create(self):
         from lib import artifacts
         data = self._read_json()
-        if not isinstance(data, dict): return self._send(400, b'{"error":"json object required"}', "application/json")
+        if not isinstance(data, dict): return self._json_error(400, "json object required")
         try:
             row = artifacts.create_decision(
                 session=str(data.get("session") or ""), title=str(data.get("title") or "Decision"),
@@ -4453,9 +4210,9 @@ class Handler(BaseHTTPRequestHandler):
                 response_effort=data.get("response_effort", "review"),
                 deadline_at=data.get("deadline_at"))
         except (ValueError, sqlite3.IntegrityError) as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(409, str(exc))
         self._broadcast_artifact(row)
-        return self._send(201, json.dumps({"artifact": row}).encode(), "application/json")
+        return self._json(201, {"artifact": row})
 
     def _handle_decision_resolve(self, decision_id: str):
         from lib import artifacts
@@ -4464,31 +4221,28 @@ class Handler(BaseHTTPRequestHandler):
         # records the user-facing API action; skills are required to stop and
         # await it rather than self-resolve.
         data = self._read_json()
-        if not isinstance(data, dict): return self._send(400, b'{"error":"json object required"}', "application/json")
+        if not isinstance(data, dict): return self._json_error(400, "json object required")
         choice = data.get("choice")
         answer = data.get("answer")
         if (choice is None) == (answer is None):
-            return self._send(400, b'{"error":"exactly one of choice or answer is required"}',
-                              "application/json")
+            return self._json_error(400, "exactly one of choice or answer is required")
         if choice is not None:
             if not isinstance(choice, str) or choice.strip().lower() not in {"accepted", "rejected"}:
-                return self._send(400, b'{"error":"invalid decision choice"}', "application/json")
+                return self._json_error(400, "invalid decision choice")
             choice = choice.strip().lower()
         raw_revision = data.get("expected_revision")
         if isinstance(raw_revision, bool) or not isinstance(raw_revision, int):
-            return self._send(400, b'{"error":"expected_revision must be an integer"}',
-                              "application/json")
+            return self._json_error(400, "expected_revision must be an integer")
         revision = raw_revision
         try:
             row, changed = artifacts.resolve(
                 decision_id, choice=choice, answer=answer, expected_revision=revision)
         except ValueError as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(409, str(exc))
         self._broadcast_artifact(row)
         self._deliver_pending_decisions()
-        return self._send(200, json.dumps({"artifact": row, "changed": changed,
-                                           "delivery_pending": artifacts.delivery_pending(decision_id)}).encode(),
-                          "application/json")
+        return self._json_ok({"artifact": row, "changed": changed,
+                              "delivery_pending": artifacts.delivery_pending(decision_id)})
 
     def _deliver_pending_decisions(self) -> set[str]:
         from lib import artifacts
@@ -4512,21 +4266,20 @@ class Handler(BaseHTTPRequestHandler):
         from lib import artifacts
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"json object required"}', "application/json")
+            return self._json_error(400, "json object required")
         revision = data.get("expected_revision")
         if isinstance(revision, bool) or not isinstance(revision, int):
-            return self._send(400, b'{"error":"expected_revision must be an integer"}',
-                              "application/json")
+            return self._json_error(400, "expected_revision must be an integer")
         try:
             row, changed = artifacts.dismiss(decision_id, expected_revision=revision)
         except ValueError as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(409, str(exc))
         self._broadcast_artifact(row)
         self._deliver_pending_decisions()
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "artifact": row, "changed": changed,
             "delivery_pending": artifacts.delivery_pending(decision_id),
-        }).encode(), "application/json")
+        })
 
     def _handle_artifact_archive(self, artifact_id: str):
         return self._handle_artifact_inbox_action(artifact_id, discard=False)
@@ -4538,13 +4291,12 @@ class Handler(BaseHTTPRequestHandler):
         from lib import artifacts
         data = self._read_json()
         if not isinstance(data, dict):
-            return self._send(400, b'{"error":"json object required"}', "application/json")
+            return self._json_error(400, "json object required")
         updated_at = data.get("expected_updated_at")
         if isinstance(updated_at, bool) or not isinstance(updated_at, int):
-            return self._send(400, b'{"error":"expected_updated_at must be an integer"}',
-                              "application/json")
+            return self._json_error(400, "expected_updated_at must be an integer")
         if not discard and not isinstance(data.get("archived"), bool):
-            return self._send(400, b'{"error":"archived must be a boolean"}', "application/json")
+            return self._json_error(400, "archived must be a boolean")
         try:
             if discard:
                 row, changed = artifacts.discard(artifact_id, expected_updated_at=updated_at)
@@ -4552,50 +4304,45 @@ class Handler(BaseHTTPRequestHandler):
                 row, changed = artifacts.archive(
                     artifact_id, archived=data["archived"], expected_updated_at=updated_at)
         except ValueError as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(409, str(exc))
         self._broadcast_artifact(row)
-        return self._send(200, json.dumps({"artifact": row, "changed": changed}).encode(),
-                          "application/json")
+        return self._json_ok({"artifact": row, "changed": changed})
 
     def _handle_attention_inbox(self):
-        from urllib.parse import parse_qs, urlparse
         from lib import attention_index
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         try:
             result = attention_index.page(limit=int(query.get("limit", ["100"])[0]),
                                           cursor=query.get("cursor", [""])[0])
         except attention_index.StaleCursor as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return self._json_error(409, str(exc))
         except (ValueError, TypeError):
-            return self._send(400, b'{"error":"invalid attention query"}', "application/json")
-        return self._send(200, json.dumps(result).encode(), "application/json")
+            return self._json_error(400, "invalid attention query")
+        return self._json_ok(result)
 
     def _handle_attention(self):
-        from urllib.parse import parse_qs, urlparse
         from lib import artifacts, janitor_attention
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         items = artifacts.attention(
             include_questions=query.get("decision_format", [""])[0] == "2",
             include_archived=query.get("include_archived", [""])[0] == "1")
         self._deliver_pending_decisions()
         # An explicit format advertisement lets helpers reject older Hosts
         # which otherwise silently interpret question creation as approval.
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "items": items, "count": len(items), "decision_format": 2,
             "janitor_items": janitor_attention.pending(
-                include_archived=query.get("include_archived", [""])[0] == "1"),
-        }).encode(), "application/json")
+   include_archived=query.get("include_archived", [""])[0] == "1"),
+        })
 
     def _handle_turn_queue(self):
-        from urllib.parse import parse_qs, urlparse
-        from lib import agents as agents_db
         from lib import turn_queue
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         session = (query.get("session", [self.ctx.default_session])[0]
                    or self.ctx.default_session).strip()
         agent = agents_db.get_by_session(session)
         if not agent:
-            return self._send(404, b'{"error":"agent not found"}', "application/json")
+            return self._json_error(404, "agent not found")
         state = turn_queue.state(agent["agent_id"])
         items = [{
             "id": row["queue_id"],
@@ -4603,23 +4350,22 @@ class Handler(BaseHTTPRequestHandler):
             "enqueued_at": row["enqueued_at"],
             "synthesize_audio": bool(row["synthesize_audio"]),
         } for row in turn_queue.pending(agent["agent_id"])]
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "items": items,
             "paused": state["paused"],
             "revision": state["revision"],
-        }).encode(), "application/json")
+        })
 
     def _handle_turn_queue_resume(self):
         """Lift a Stop's pause and let the waiting messages run in order."""
-        from lib import agents as agents_db
         from lib import turn_queue
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = str(data.get("session") or "").strip()
         agent = agents_db.get_by_session(session) if session else None
         if not agent:
-            return self._send(404, b'{"error":"agent not found"}', "application/json")
+            return self._json_error(404, "agent not found")
         changed = turn_queue.set_paused(agent["agent_id"], False)
         if changed:
             log("queueResumed", f"session={session}")
@@ -4635,9 +4381,8 @@ class Handler(BaseHTTPRequestHandler):
                 log_exception("queueResumeRecoverFail", e, detail=session)
         self._broadcast_turn_queue(agent["agent_id"], session)
         state = turn_queue.state(agent["agent_id"])
-        return self._send(200, json.dumps({"session": session, "paused": state["paused"],
-                                           "count": state["count"], "revision": state["revision"]}).encode(),
-                          "application/json")
+        return self._json_ok({"session": session, "paused": state["paused"],
+                              "count": state["count"], "revision": state["revision"]})
 
     def _broadcast_turn_queue(self, agent_id: str, session: str) -> None:
         from lib import turn_queue
@@ -4655,7 +4400,6 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _handle_turn_queue_update(self, queue_id: str):
-        from urllib.parse import unquote
         from lib import turn_queue
         queue_id = unquote(queue_id)
         row = turn_queue.get(queue_id)
@@ -4664,53 +4408,45 @@ class Handler(BaseHTTPRequestHandler):
             return
         text = str((data or {}).get("text") or "").strip()
         if data is None or not text:
-            return self._send(400, b'{"error":"text required"}', "application/json")
+            return self._json_error(400, "text required")
         if not row or not turn_queue.update_text(queue_id, text):
-            return self._send(404, b'{"error":"queued message not found"}', "application/json")
+            return self._json_error(404, "queued message not found")
         self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]))
-        return self._send(200, b'{"ok":true}', "application/json")
+        return self._json_ok({"ok": True})
 
     def _handle_turn_queue_delete(self, queue_id: str):
-        from urllib.parse import unquote
         from lib import turn_queue
         queue_id = unquote(queue_id)
         row = turn_queue.get(queue_id)
         if row and self._reject_janitor_control({"session": row["session"]}):
             return
         if not row or not turn_queue.remove(queue_id):
-            return self._send(404, b'{"error":"queued message not found"}', "application/json")
+            return self._json_error(404, "queued message not found")
         self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]))
-        return self._send(200, b'{"ok":true}', "application/json")
+        return self._json_ok({"ok": True})
 
     def _handle_turn_queue_send(self, queue_id: str):
-        from urllib.parse import unquote
         try:
             result = TurnDispatchService(self.ctx).dispatch_queued(unquote(queue_id))
         except DispatchError as exc:
-            return self._send(exc.status, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
-        return self._send(202, json.dumps({
-            "ok": True,
-            "session": result.session,
-            "queued": result.queued,
-            "queue_depth": result.queue_depth,
-            "queue_revision": result.queue_revision,
-        }).encode(), "application/json")
+            return self._json_error(exc.status, str(exc))
+        return self._json(202, {
+ "ok": True,
+ "session": result.session,
+ "queued": result.queued,
+ "queue_depth": result.queue_depth,
+ "queue_revision": result.queue_revision,
+        })
 
     def _handle_background_job_cancel(self, job_id: str):
-        from urllib.parse import unquote
         from lib import background_jobs
         job, cancellation_changed = background_jobs.cancel_with_result(unquote(job_id))
         if not job:
-            return self._send(404, b'{"error":"job not found"}', "application/json")
+            return self._json_error(404, "job not found")
         if job["status"] != "cancelled":
-            return self._send(
-                409,
-                json.dumps({
+            return self._json(409, {
                     "error": f"job already {job['status']}", "job": job,
-                }).encode(),
-                "application/json",
-            )
+                })
         # Cancellation immediately closes the durable gate checked by workers
         # before each delivery/action. The prompt is cleanup: it lets the owner
         # tear down or reconfigure a shared process, but correctness does not
@@ -4743,15 +4479,14 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except Exception as exc:
                 log_exception("backgroundJobCancelPromptFail", exc, detail=job_id)
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True, "changed": cancellation_changed, "job": job,
-        }).encode(),
-                          "application/json")
+        })
 
     def _handle_create_agent(self):
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             result = AgentLifecycleService(self.ctx).create(data)
         except AgentLifecycleError as e:
@@ -4759,9 +4494,7 @@ class Handler(BaseHTTPRequestHandler):
             # greppable as `agentCreateRejected` alongside the POST line.
             log("agentCreateRejected",
                 f"status={e.status} code={e.code} :: {e.message}")
-            return self._send(e.status, json.dumps(e.response()).encode(),
-                              "application/json")
-        from lib import agents as agents_db
+            return self._json(e.status, e.response())
         from lib.mcp_selection import decode as decode_mcp
         from lib.avatar_urls import versioned_avatar_url
         row = agents_db.get_by_session(result.session) or {}
@@ -4774,15 +4507,15 @@ class Handler(BaseHTTPRequestHandler):
         agent.update(alive=True, latest_state=state.get("kind") or "idle", last_activity=row.get("created_at", 0),
                      mcp_servers=decode_mcp(row.get("mcp_servers"))[1],
                      avatar_url=versioned_avatar_url("/avatars", row.get("agent_id", ""), row.get("avatar_path") or ""))
-        return self._send(200, json.dumps({
+        return self._json_ok({
             "ok": True, "session": result.session, "name": result.persona, "agent": agent,
-        }).encode(), "application/json")
+        })
 
     def _handle_create_persona(self):
         from lib import personas
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             row = personas.create(
                 name=str(data.get("name") or ""),
@@ -4792,17 +4525,15 @@ class Handler(BaseHTTPRequestHandler):
                 avatar_base64=str(data.get("avatar_base64") or ""),
             )
         except (ValueError, OSError) as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
+            return self._json_error(409, str(exc))
         self.ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER, "kind": "persona-created"})
-        return self._send(201, json.dumps({"persona": personas.public(row)}).encode(),
-                          "application/json")
+        return self._json(201, {"persona": personas.public(row)})
 
     def _handle_update_persona(self):
         from lib import personas
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         try:
             row = personas.update(
                 original_name=str(data.get("original_name") or ""),
@@ -4813,25 +4544,20 @@ class Handler(BaseHTTPRequestHandler):
                 avatar_base64=str(data.get("avatar_base64") or ""),
             )
         except (ValueError, OSError) as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
+            return self._json_error(409, str(exc))
         self.ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER, "kind": "persona-updated"})
-        return self._send(200, json.dumps({"persona": personas.public(row)}).encode(),
-                          "application/json")
+        return self._json_ok({"persona": personas.public(row)})
 
     def _handle_delete_persona(self, name: str):
-        from urllib.parse import unquote
         from lib import personas
         try:
             removed = personas.delete(unquote(name))
         except ValueError as exc:
-            return self._send(409, json.dumps({"error": str(exc)}).encode(),
-                              "application/json")
+            return self._json_error(409, str(exc))
         if not removed:
-            return self._send(404, b'{"error":"personality not removable"}',
-                              "application/json")
+            return self._json_error(404, "personality not removable")
         self.ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER, "kind": "persona-deleted"})
-        return self._send(200, b'{"ok":true}', "application/json")
+        return self._json_ok({"ok": True})
 
     def _handle_persona_avatar(self, persona_id: str):
         from lib import personas
@@ -4841,7 +4567,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
     def _handle_delete_agent(self, session: str):
-        from urllib.parse import unquote
         from lib import turn_dispatch
         session = unquote(session).strip("/")
         agent = agents_db.get_by_session(session)
@@ -4854,18 +4579,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             AgentLifecycleService(self.ctx).delete(session)
         except AgentLifecycleError as e:
-            return self._send(e.status, json.dumps(e.response()).encode(),
-                              "application/json")
-        return self._send(200, b'{"ok":true}', "application/json")
+            return self._json(e.status, e.response())
+        return self._json_ok({"ok": True})
 
     def _handle_clog(self):
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         from lib import diagnostics_settings
         if not diagnostics_settings.accepts_client_uploads():
-            return self._send(
-                200, b'{"ok":true,"captured":false}', "application/json")
+            return self._json_ok({"ok": True, "captured": False})
         # Accept either a single event {event, detail, ...} or a batch
         # {events: [...]}. Batched form keeps the PWA from spamming one
         # request per state transition.
@@ -4874,7 +4597,7 @@ class Handler(BaseHTTPRequestHandler):
         # Legacy line-based file (humans still read it) — single combined append.
         log_path = pathlib.Path(os.environ.get(
             "CLAUDE_PWA_CLIENT_LOG",
-            str(RuntimePaths.from_home(pathlib.Path.home()).hook_log),
+            str(_runtime_paths().hook_log),
         ))
         try:
             log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -4922,24 +4645,22 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 log_exception("clogEmitFail", e)
-        self._send(200, b'{"ok":true}', "application/json")
+        self._json_ok({"ok": True})
 
     def _handle_select(self):
         data = self._read_json()
         if self._reject_janitor_control(data):
             return
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = (data.get("session") or "").strip()
         if not session or not all(c.isalnum() or c in "._-" for c in session):
-            return self._send(400, b'{"error":"bad session name"}', "application/json")
-        from lib import agents as agents_db
-        if not agents_db.get_by_session(session):
-            return self._send(404, b'{"error":"no such session"}', "application/json")
+            return self._json_error(400, "bad session name")
+        agent = agents_db.get_by_session(session)
+        if not agent:
+            return self._json_error(404, "no such session")
         # Persist focus in the DB and in the small focus-state file read by
         # audio routing.
-        from lib import agents as agents_db
-        agent = agents_db.get_by_session(session)
         herald = getattr(self.ctx, "herald", None)
         if agent and herald is not None:
             try:
@@ -4953,14 +4674,13 @@ class Handler(BaseHTTPRequestHandler):
                 agents_db.set_focus(agent["agent_id"])
             except Exception as e:  # noqa: BLE001
                 log_exception("focusDbWriteFail", e, detail=session)
-        state_path = RuntimePaths.from_home(pathlib.Path.home()).app_session
+        state_path = _runtime_paths().app_session
         try:
             state_path.parent.mkdir(parents=True, exist_ok=True)
             state_path.write_text(session + "\n")
         except OSError as e:
             log_exception("selectStateWriteFail", e, detail=str(state_path))
-            return self._send(500, b'{"error":"could not persist selection"}',
-                              "application/json")
+            return self._json_error(500, "could not persist selection")
         # Tell the herald manager the user's focus changed — if that agent
         # had a pending herald, their held buffer drains now.
         # Push focus change so the client doesn't have to poll for it.
@@ -4969,8 +4689,7 @@ class Handler(BaseHTTPRequestHandler):
             "session": session,
             "agent_id": (agent or {}).get("agent_id"),
         })
-        self._send(200, json.dumps({"ok": True, "session": session}).encode(),
-                   "application/json")
+        self._json_ok({"ok": True, "session": session})
 
     def _handle_orchestrator_route_delegation(self):
         self._orchestrator_fallback_request = True
@@ -5001,8 +4720,7 @@ class Handler(BaseHTTPRequestHandler):
                 transcription_id = transcription_results.normalize_job_id(
                     transcription_id)
             except ValueError as e:
-                return self._send(400, json.dumps({"error": str(e)}).encode(),
-                                  "application/json")
+                return self._json_error(400, str(e))
         synthesize_audio_raw = data.get("synthesize_audio", None)
         hands_free = data.get("hands_free", False) is True
         unheard_audio_sessions_raw = data.get("unheard_audio_sessions") or []
@@ -5083,7 +4801,7 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 if transcription_id:
                     transcription_results.delete(transcription_id)
-                return self._send(200, json.dumps(body).encode(), "application/json")
+                return self._json_ok(body)
             if orchestrated is not None and (
                 orchestrated.action != FINAL_FALLBACK or orchestrator_fallback
             ):
@@ -5110,7 +4828,7 @@ class Handler(BaseHTTPRequestHandler):
                         text=text, detail={"orchestrator": orchestrated.action,
                                            "dispatch": orchestrated.dispatch,
                                            "client_msg_id": client_msg_id})
-                return self._send(status, json.dumps(body).encode(), "application/json")
+                return self._json(status, body)
         try:
             result = TurnDispatchService(self.ctx).dispatch(
                 text=text, requested_session=session, trace_id=trace_id,
@@ -5134,24 +4852,23 @@ class Handler(BaseHTTPRequestHandler):
                 utterance_id=voice_utterance_id, text=text,
                 detail={"dispatch": result.backend, "queued": result.queued,
                         "client_msg_id": client_msg_id, "hands_free": hands_free})
-        self._send(200, json.dumps({"ok": True, "session": result.session,
-                                    "dispatch": result.backend,
-                                    "queued": result.queued,
-                                    "queue_depth": result.queue_depth,
-                                    "queue_revision": result.queue_revision,
-                                    "trace_id": trace_id}).encode(),
-                   "application/json")
+        self._json_ok({"ok": True, "session": result.session,
+                       "dispatch": result.backend,
+                       "queued": result.queued,
+                       "queue_depth": result.queue_depth,
+                       "queue_revision": result.queue_revision,
+                       "trace_id": trace_id})
 
     def _handle_clip_ack(self):
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         status = (data.get("status") or "").strip()
         clip_id = data.get("clip_id")
         try:
             clip_id = int(clip_id) if clip_id not in (None, "") else None
         except (TypeError, ValueError):
-            return self._send(400, b'{"error":"bad clip_id"}', "application/json")
+            return self._json_error(400, "bad clip_id")
         url = (data.get("url") or "").strip()
         error = (data.get("error") or "").strip() or None
         trace_id = (data.get("trace_id") or None)
@@ -5164,7 +4881,7 @@ class Handler(BaseHTTPRequestHandler):
                 error=error,
             )
         except ValueError:
-            return self._send(400, b'{"error":"bad status"}', "application/json")
+            return self._json_error(400, "bad status")
         eventlog.emit("client", "clipAck",
                       trace_id=trace_id,
                       clip_id=clip_id,
@@ -5177,33 +4894,25 @@ class Handler(BaseHTTPRequestHandler):
             self._record_voice(
                 play_event, session=clip_session, trace_id=trace_id or clip_trace,
                 detail={"clip_id": clip_id, "url": url or None, "error": error})
-        self._send(200, json.dumps({"ok": True, "updated": ok}).encode(),
-                   "application/json")
+        self._json_ok({"ok": True, "updated": ok})
 
     def _handle_message_clips(self):
-        from urllib.parse import parse_qs, urlparse
         from lib.message_audio import retained_events
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         session = str(query.get("session", [""])[0]).strip()
         message_id = str(query.get("message_id", [""])[0]).strip()
         if not session or not message_id or len(session) > 256 or len(message_id) > 1024:
-            return self._send(400, b'{"error":"session and message_id required"}', "application/json")
+            return self._json_error(400, "session and message_id required")
         events = retained_events(session=session, message_id=message_id, audio_dir=self.ctx.audio_dir)
         if not events:
-            return self._send(404, b'{"error":"Retained audio is unavailable for this message"}', "application/json")
-        self._send(200, json.dumps({"events": events}).encode(), "application/json")
+            return self._json_error(404, "Retained audio is unavailable for this message")
+        self._json_ok({"events": events})
 
     def _handle_recoverable_clips(self):
-        from urllib.parse import parse_qs, urlparse
-        from lib import clip_store
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         session = str(query.get("session", [""])[0] or "").strip()
         events = clip_store.recoverable_events(session=session)
-        self._send(
-            200,
-            json.dumps({"events": events}).encode(),
-            "application/json",
-        )
+        self._json_ok({"events": events})
 
     def _handle_transcribe(self):
         from lib import transcription_results
@@ -5219,10 +4928,10 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as e:
             log_exception("transcribeReadFail", e)
             self._record_voice_corrupt(utterance_id, client_ts, "bad_content_length")
-            return self._send(400, f'{{"error":"{e}"}}'.encode(), "application/json")
+            return self._json_error(400, str(e))
         if n <= 0 or n > 64 * 1024 * 1024:  # bounded long-recording uploads (64 MiB)
             self._record_voice_corrupt(utterance_id, client_ts, "bad_size", bytes=n)
-            return self._send(400, b'{"error":"bad size"}', "application/json")
+            return self._json_error(400, "bad size")
         # Once the body read starts, a disconnect means there is nothing
         # useful left to drain before responding.  BufferedReader.read(n)
         # returns fewer than n bytes at EOF, so validate the count before
@@ -5236,18 +4945,14 @@ class Handler(BaseHTTPRequestHandler):
             log_exception("transcribeReadFail", e)
             self._record_voice_corrupt(utterance_id, client_ts, "upload_read_error",
                                        expected=n, error=str(e)[:200])
-            return self._send(
-                408, b'{"error":"incomplete audio upload"}',
-                "application/json")
+            return self._json_error(408, "incomplete audio upload")
         if len(audio_bytes) != n:
             log("transcribeReadIncomplete",
                 f"expected={n} received={len(audio_bytes)}")
             self.close_connection = True
             self._record_voice_corrupt(utterance_id, client_ts, "incomplete_upload",
                                        expected=n, received=len(audio_bytes))
-            return self._send(
-                408, b'{"error":"incomplete audio upload"}',
-                "application/json")
+            return self._json_error(408, "incomplete audio upload")
 
         ctype = self.headers.get("Content-Type", "audio/webm")
         hands_free = _truthy_header(self.headers.get("X-Hands-Free"))
@@ -5255,8 +4960,7 @@ class Handler(BaseHTTPRequestHandler):
             transcription_id = transcription_results.normalize_job_id(
                 self.headers.get("X-Transcription-ID"))
         except ValueError as e:
-            return self._send(400, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
+            return self._json_error(400, str(e))
         fingerprint = transcription_results.request_fingerprint(
             audio_bytes, ctype, requested_model, hands_free)
 
@@ -5267,8 +4971,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 cached = transcription_results.load(transcription_id, fingerprint)
             except transcription_results.JobIDCollisionError as e:
-                return self._send(409, json.dumps({"error": str(e)}).encode(),
-                                  "application/json")
+                return self._json_error(409, str(e))
             if cached is not None:
                 cached["cached"] = True
                 self._record_voice("retry", utterance_id=utterance_id,
@@ -5276,8 +4979,7 @@ class Handler(BaseHTTPRequestHandler):
                                    trace_id=cached.get("trace_id"),
                                    text=cached.get("text"),
                                    detail={"bytes": n, "content_type": ctype})
-                return self._send(200, json.dumps(cached).encode(),
-                                  "application/json")
+                return self._json_ok(cached)
             return self._transcribe_uncached(
                 audio_bytes, ctype, hands_free, requested_model,
                 transcription_id, fingerprint,
@@ -5301,7 +5003,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _focused_session(self) -> str:
         try:
-            return RuntimePaths.from_home(pathlib.Path.home()).app_session.read_text().strip()
+            return _runtime_paths().app_session.read_text().strip()
         except OSError:
             return ""
 
@@ -5316,13 +5018,12 @@ class Handler(BaseHTTPRequestHandler):
         """
         data = self._read_json()
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         events = data.get("events")
         if not isinstance(events, list):
-            return self._send(400, b'{"error":"events must be a list"}',
-                              "application/json")
+            return self._json_error(400, "events must be a list")
         if len(events) > voice_events.MAX_BATCH:
-            return self._send(413, b'{"error":"batch too large"}', "application/json")
+            return self._json_error(413, "batch too large")
         source = str(data.get("source") or "other").strip().lower()
         result = voice_events.record_batch(
             source=source, events=events,
@@ -5333,11 +5034,10 @@ class Handler(BaseHTTPRequestHandler):
         body = {"ok": True, "stored": result["stored"],
                 "clock_offset_ms": result["clock_offset_ms"],
                 "server_now": voice_events.now_ms()}
-        self._send(200, json.dumps(body).encode(), "application/json")
+        self._json_ok(body)
 
     def _voice_query_params(self) -> dict:
-        from urllib.parse import parse_qs, urlparse
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         def one(name):
             return (qs.get(name, [""])[0] or "").strip()
         def num(name):
@@ -5358,7 +5058,7 @@ class Handler(BaseHTTPRequestHandler):
         params = self._voice_query_params()
         limit = params.pop("limit") or 500
         rows = voice_events.query(limit=limit, **params)
-        self._send(200, json.dumps({"events": rows}).encode(), "application/json")
+        self._json_ok({"events": rows})
 
     def _handle_voice_utterances_get(self):
         """GET /voice-events/utterances?session=&since=&until=&limit= — one row per utterance."""
@@ -5366,7 +5066,7 @@ class Handler(BaseHTTPRequestHandler):
         rows = voice_events.utterances(
             session=params["session"], since=params["since"],
             until=params["until"], limit=params["limit"] or 100)
-        self._send(200, json.dumps({"utterances": rows}).encode(), "application/json")
+        self._json_ok({"utterances": rows})
 
     def _transcribe_uncached(self, audio_bytes, ctype, hands_free,
                              requested_model, transcription_id, fingerprint,
@@ -5374,8 +5074,7 @@ class Handler(BaseHTTPRequestHandler):
         from lib import transcription_results
 
         if getattr(self.ctx.stt, "available", True) is False:
-            return self._send(503, b'{"error":"server transcription disabled"}',
-                              "application/json")
+            return self._json_error(503, "server transcription disabled")
         if not requested_model:
             # A cloud engine chosen in settings stands in for the server
             # default; an explicit header from the client still wins.
@@ -5403,14 +5102,13 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001 - escalation never blocks STT
             log_exception("sttLongFormRouteFail", e)
         if not requested_model and not self.ctx.stt.ready.is_set():
-            return self._send(503, b'{"error":"whisper model loading"}',
-                              "application/json")
+            return self._json_error(503, "whisper model loading")
         # The trace is minted before compiling so the vocab run, the
         # transcribe event and everything downstream share one id.
         trace_id = _trace.new_id()
         self._trace_id = trace_id
         try:
-            focus = RuntimePaths.from_home(pathlib.Path.home()).app_session.read_text().strip()
+            focus = _runtime_paths().app_session.read_text().strip()
         except OSError:
             focus = ""
         vocab_run_id = 0
@@ -5442,29 +5140,26 @@ class Handler(BaseHTTPRequestHandler):
                     audio_bytes, ctype, prompt, wait=10.0)
             health.mark_success("stt")
         except STTUnknownModelError as e:
-            return self._send(400, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
+            return self._json_error(400, str(e))
         except STTModelLoadingError as e:
-            return self._send(503, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
+            return self._json_error(503, str(e))
         except STTBusyError:
             health.mark_error("stt", "busy")
             self._record_voice("error", utterance_id=utterance_id or None,
                                client_ts=client_ts, detail={"message": "whisper busy"})
-            return self._send(429, b'{"error":"whisper busy"}',
-                              "application/json")
+            return self._json_error(429, "whisper busy")
         except Exception as e:
             health.mark_error("stt", e)
             log_exception("transcribeFail", e)
             self._record_voice("error", utterance_id=utterance_id or None,
                                client_ts=client_ts,
                                detail={"message": str(e)[:300], "stage": "stt"})
-            return self._send(500, f'{{"error":"{e}"}}'.encode(), "application/json")
+            return self._json_error(500, str(e))
         latency_ms = int((time.monotonic() - started) * 1000)
         try:
             from lib import heard_audio
             heard_audio.retain(
-                RuntimePaths.from_home(pathlib.Path.home()).cache_dir,
+                _runtime_paths().cache_dir,
                 trace_id=trace_id, audio_bytes=audio_bytes, content_type=ctype,
                 session=focus, run_id=vocab_run_id, model=requested_model or "")
         except Exception as e:  # noqa: BLE001 - diagnostics never block a turn
@@ -5541,12 +5236,10 @@ class Handler(BaseHTTPRequestHandler):
             transcription_results.store(
                 transcription_id, fingerprint, response)
         except transcription_results.JobIDCollisionError as e:
-            return self._send(409, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
+            return self._json_error(409, str(e))
         except Exception as e:
             log_exception("transcriptionResultStoreFail", e)
-            return self._send(500, b'{"error":"transcription result persistence failed"}',
-                              "application/json")
+            return self._json_error(500, "transcription result persistence failed")
         body = json.dumps(response).encode()
         self._send(200, body, "application/json")
 
@@ -5555,21 +5248,19 @@ class Handler(BaseHTTPRequestHandler):
         phone) and save it under this server's per-session uploads dir. Returns
         the absolute path so the client can drop it into the prompt — agents
         run with --dangerously-skip-permissions, so they read it directly."""
-        from urllib.parse import unquote
         from lib import upload_results
         try:
             n = int(self.headers.get("Content-Length", "0"))
             if n <= 0 or n > 50 * 1024 * 1024:  # cap at 50 MB per upload
-                return self._send(400, b'{"error":"bad size"}', "application/json")
+                return self._json_error(400, "bad size")
             blob = self.rfile.read(n)
             self._body_consumed = True
         except (ValueError, OSError) as e:
             log_exception("uploadReadFail", e)
-            return self._send(400, f'{{"error":"{e}"}}'.encode(), "application/json")
+            return self._json_error(400, str(e))
         if len(blob) != n:
             self.close_connection = True
-            return self._send(
-                408, b'{"error":"incomplete upload"}', "application/json")
+            return self._json_error(408, "incomplete upload")
 
         # Which agent/session this attaches to: explicit header, then the
         # focused session, then the default — same precedence the rest of the
@@ -5577,8 +5268,7 @@ class Handler(BaseHTTPRequestHandler):
         session = (self.headers.get("X-Session") or "").strip()
         if not session:
             try:
-                session = RuntimePaths.from_home(
-                    pathlib.Path.home()).app_session.read_text().strip()
+                session = _runtime_paths().app_session.read_text().strip()
             except OSError:
                 session = ""
         if not session:
@@ -5588,8 +5278,7 @@ class Handler(BaseHTTPRequestHandler):
             unquote((self.headers.get("X-File-Name") or "").strip()),
             self.headers.get("Content-Type", ""),
         )
-        base = self.ctx.uploads_dir or RuntimePaths.from_home(
-            pathlib.Path.home()).uploads_dir
+        base = self.ctx.uploads_dir or _runtime_paths().uploads_dir
         dest_dir = base / _safe_session(session)
         try:
             dest_dir.mkdir(parents=True, exist_ok=True)
@@ -5604,14 +5293,12 @@ class Handler(BaseHTTPRequestHandler):
                 dest = dest_dir / f"{secrets.token_hex(4)}-{name}"
                 dest.write_bytes(blob)
         except upload_results.UploadIDCollisionError as e:
-            return self._send(409, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
+            return self._json_error(409, str(e))
         except ValueError as e:
-            return self._send(400, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
+            return self._json_error(400, str(e))
         except OSError as e:
             log_exception("uploadWriteFail", e)
-            return self._send(500, f'{{"error":"{e}"}}'.encode(), "application/json")
+            return self._json_error(500, str(e))
 
         eventlog.emit("server", "upload", session=session or None,
                       detail={"name": name, "size": len(blob), "path": str(dest)})
@@ -5626,19 +5313,17 @@ class Handler(BaseHTTPRequestHandler):
         two-phase work (blob copy + SQLite row) so agents never have to update
         both a directory and the DB themselves.
         """
-        from urllib.parse import unquote
         try:
             n = int(self.headers.get("Content-Length", "0"))
             if n <= 0 or n > media_store.MAX_MEDIA_BYTES:
-                return self._send(400, b'{"error":"bad size"}', "application/json")
+                return self._json_error(400, "bad size")
             blob = self.rfile.read(n)
             self._body_consumed = True
             if len(blob) != n:
-                return self._send(400, b'{"error":"incomplete body"}', "application/json")
+                return self._json_error(400, "incomplete body")
         except (ValueError, OSError) as e:
             log_exception("mediaReadFail", e)
-            return self._send(400, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
+            return self._json_error(400, str(e))
 
         session = (self.headers.get("X-Session") or "").strip()
         if not session:
@@ -5654,16 +5339,13 @@ class Handler(BaseHTTPRequestHandler):
                 content_type=self.headers.get("Content-Type", ""),
                 caption=caption,
                 created_by=created_by,
-                media_dir=self.ctx.media_dir or RuntimePaths.from_home(
-                    pathlib.Path.home()).media_dir,
+                media_dir=self.ctx.media_dir or _runtime_paths().media_dir,
             )
         except media_store.MediaError as e:
-            return self._send(e.status, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
+            return self._json_error(e.status, str(e))
         except OSError as e:
             log_exception("mediaWriteFail", e)
-            return self._send(500, json.dumps({"error": str(e)}).encode(),
-                              "application/json")
+            return self._json_error(500, str(e))
 
         eventlog.emit("server", "mediaPublish", session=session or None,
                       detail={"asset_id": asset["asset_id"],
@@ -5673,8 +5355,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, body, "application/json")
 
     def _handle_media_list(self):
-        from urllib.parse import parse_qs, urlparse
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self._query()
         session = (qs.get("session", [self.ctx.default_session])[0]
                    or self.ctx.default_session).strip()
         try:
@@ -5682,8 +5363,7 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             limit = 100
         assets = media_store.list_for_session(session, limit=limit)
-        self._send(200, json.dumps({"session": session, "assets": assets}).encode(),
-                   "application/json")
+        self._json_ok({"session": session, "assets": assets})
 
     def _handle_media_content(self, asset_id: str):
         if not asset_id or "/" in asset_id or "." in pathlib.PurePath(asset_id).parts:
@@ -5692,28 +5372,23 @@ class Handler(BaseHTTPRequestHandler):
         if not row:
             return self._send(404, b"not found")
         path = pathlib.Path(row["storage_path"]).resolve()
-        root = (self.ctx.media_dir or RuntimePaths.from_home(
-            pathlib.Path.home()).media_dir).resolve()
+        root = (self.ctx.media_dir or _runtime_paths().media_dir).resolve()
         if not path.is_file() or (path != root and root not in path.parents):
             return self._send(404, b"not found")
         return self._send_file(path, str(row["mime_type"]), secure=True)
 
     def _handle_agent_portraits_list(self):
-        from urllib.parse import parse_qs, urlparse
         from lib import agent_portraits
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         session = (query.get("session", [self.ctx.default_session])[0]
                    or self.ctx.default_session).strip()
-        portrait_dir = self.ctx.media_dir or RuntimePaths.from_home(
-            pathlib.Path.home()).media_dir
+        portrait_dir = self.ctx.media_dir or _runtime_paths().media_dir
         try:
             result = agent_portraits.list_for_session(
                 session, portrait_dir=portrait_dir)
         except agent_portraits.PortraitError as exc:
-            return self._send(
-                exc.status, json.dumps({"error": str(exc)}).encode(),
-                "application/json")
-        self._send(200, json.dumps(result).encode(), "application/json")
+            return self._json_error(exc.status, str(exc))
+        self._json_ok(result)
 
     def _handle_agent_portraits_update(self):
         from lib import agent_portraits
@@ -5721,11 +5396,10 @@ class Handler(BaseHTTPRequestHandler):
         if self._reject_janitor_control(data):
             return
         if data is None:
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         action = str(data.get("action") or "").strip()
         session = str(data.get("session") or self.ctx.default_session).strip()
-        portrait_dir = self.ctx.media_dir or RuntimePaths.from_home(
-            pathlib.Path.home()).media_dir
+        portrait_dir = self.ctx.media_dir or _runtime_paths().media_dir
         try:
             if action == "add_media_asset":
                 result = agent_portraits.add_media_asset(
@@ -5741,28 +5415,24 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 raise agent_portraits.PortraitError("unsupported portrait action")
         except agent_portraits.PortraitError as exc:
-            return self._send(
-                exc.status, json.dumps({"error": str(exc)}).encode(),
-                "application/json")
+            return self._json_error(exc.status, str(exc))
         if changed:
             self.ctx.stream.broadcast({
                 "type": SSEType.AGENT_ROSTER,
                 "kind": "portrait-selected",
                 "session": session,
             })
-        self._send(200, json.dumps(result).encode(), "application/json")
+        self._json_ok(result)
 
     def _handle_agent_portrait_generation_status(self):
-        from urllib.parse import parse_qs, urlparse
         from lib import portrait_generation
-        query = parse_qs(urlparse(self.path).query)
+        query = self._query()
         session = (query.get("session", [self.ctx.default_session])[0]
                    or self.ctx.default_session).strip()
-        portrait_dir = self.ctx.media_dir or RuntimePaths.from_home(
-            pathlib.Path.home()).media_dir
+        portrait_dir = self.ctx.media_dir or _runtime_paths().media_dir
         result = portrait_generation.capability(
             session, media_dir=portrait_dir)
-        self._send(200, json.dumps(result).encode(), "application/json")
+        self._json_ok(result)
 
     def _handle_agent_portrait_generation_start(self):
         from lib import portrait_generation
@@ -5770,19 +5440,16 @@ class Handler(BaseHTTPRequestHandler):
         if self._reject_janitor_control(data):
             return
         if data is None or not isinstance(data, dict):
-            return self._send(400, b'{"error":"bad json"}', "application/json")
+            return self._json_error(400, "bad json")
         session = str(data.get("session") or self.ctx.default_session).strip()
-        portrait_dir = self.ctx.media_dir or RuntimePaths.from_home(
-            pathlib.Path.home()).media_dir
+        portrait_dir = self.ctx.media_dir or _runtime_paths().media_dir
         try:
             result = portrait_generation.start(session, media_dir=portrait_dir)
         except portrait_generation.GenerationError as exc:
-            return self._send(
-                409, json.dumps({"error": str(exc)}).encode(), "application/json")
-        self._send(202, json.dumps(result).encode(), "application/json")
+            return self._json_error(409, str(exc))
+        self._json(202, result)
 
     def _handle_agent_portrait_content(self, portrait_id: str):
-        from urllib.parse import unquote
         from lib import agent_portraits
         if not portrait_id or "/" in portrait_id:
             return self._send(400, b"bad portrait id")
@@ -5917,9 +5584,8 @@ def build_server(ctx: ServerContext, port: int,
     # server process (not from short-lived hook subprocesses). The hooks
     # only write queue rows; this is the executor side.
     from lib.tts_worker import TTSWorker
-    from lib.paths import RuntimePaths as _RP
     from lib.clip_delivery import build_from_config, DeliveryDeps
-    _paths = _RP.from_home(pathlib.Path.home())
+    _paths = _runtime_paths()
     # The delivery is what decides how clip bytes reach the client
     # (chunked-file + broker today; hls tomorrow). Config knob:
     # [audio] delivery = "hls" (or CLAUDE_PWA_DELIVERY=hls).
