@@ -59,7 +59,7 @@ _CONN_LOCK = threading.Lock()
 _MIGRATED = False
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 89
+_SCHEMA_VERSION = 90
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -1411,9 +1411,13 @@ CREATE TABLE tool_explanation_cache (
     cache_key TEXT PRIMARY KEY,
     explanation TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL
+    expires_at INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'llm',
+    provenance_json TEXT NOT NULL DEFAULT '{}',
+    signature TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX tool_explanation_cache_expiry ON tool_explanation_cache(expires_at);
+CREATE INDEX tool_explanation_cache_signature ON tool_explanation_cache(signature);
 CREATE TABLE tool_explanation_jobs (
     cache_key TEXT PRIMARY KEY,
     detail_level INTEGER NOT NULL,
@@ -1439,6 +1443,8 @@ CREATE TABLE tool_explanation_releases (
 );
 """
 _SCHEMA_SQL += _EXPLANATION_CACHE_SCHEMA
+from .tool_explanation_mappings import SCHEMA as _EXPLANATION_MAPPINGS_SCHEMA
+_SCHEMA_SQL += _EXPLANATION_MAPPINGS_SCHEMA
 from .html_forms import SCHEMA as _HTML_FORMS_SCHEMA
 _SCHEMA_SQL += _HTML_FORMS_SCHEMA
 from .model_fallbacks import SCHEMA as _MODEL_FALLBACK_SCHEMA
@@ -1535,6 +1541,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 if statement.strip(): con.execute(statement)
         if version < 89:
             _migrate_to_v89(con)
+        if version < 90:
+            _migrate_to_v90(con)
 
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1813,6 +1821,23 @@ def _migrate_to_v79(con: sqlite3.Connection) -> None:
     that already ran this branch re-applies it without touching stored rows.
     """
     for statement in _MODEL_FALLBACK_SCHEMA.split(";"):
+        if statement.strip():
+            con.execute(statement)
+
+
+def _migrate_to_v90(con: sqlite3.Connection) -> None:
+    """Explanation producer provenance and learned template mappings.
+
+    Rows cached before this version were all written by the language model.
+    """
+    columns = {row[1] for row in con.execute("PRAGMA table_info(tool_explanation_cache)")}
+    for name, definition in (("source", "TEXT NOT NULL DEFAULT 'llm'"),
+                             ("provenance_json", "TEXT NOT NULL DEFAULT '{}'"),
+                             ("signature", "TEXT NOT NULL DEFAULT ''")):
+        if name not in columns:
+            con.execute(f"ALTER TABLE tool_explanation_cache ADD COLUMN {name} {definition}")
+    con.execute("CREATE INDEX IF NOT EXISTS tool_explanation_cache_signature ON tool_explanation_cache(signature)")
+    for statement in _EXPLANATION_MAPPINGS_SCHEMA.split(";"):
         if statement.strip():
             con.execute(statement)
 

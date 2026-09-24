@@ -1,8 +1,14 @@
 """Opt-in, shared presentation cache. Never executes the described activity.
 
-Only bounded tool metadata leaves the Host. SQLite holds queued metadata until
-completion/cancellation, and successful explanations for 24 hours. Raw inputs
-are not logged. Cache identity includes the Janitor configuration and audience.
+Three producers, cheapest first: a scripted template answers known tool calls
+synchronously; Jev may pick a known template for an unfamiliar program, worded
+as what the call most likely does because Jev never saw the program; the
+configured language model explains everything else. Each reply names its
+producer (`scripted`, `jev`, `llm`); a cache hit keeps the original producer
+and adds `cached`. Only bounded tool metadata leaves the Host. SQLite holds
+queued metadata until completion/cancellation, and successful explanations for
+24 hours. Raw inputs are not logged. Cache identity includes the Janitor
+configuration, template library version and audience.
 """
 from __future__ import annotations
 
@@ -22,11 +28,15 @@ import threading
 import time
 from .log import log
 from . import db
-from . import janitor_builtins, model_fallbacks
+from . import janitor_builtins, judgment_sites, judgments, model_fallbacks
+from . import tool_explanation_mappings as mappings
 from . import tool_explanation_queue as durable_queue
+from . import tool_explanation_templates as templates
 
 ROLE = "tool-explainer"
 PROMPT_VERSION = 2
+# `explanation_sources` Janitor option values.
+SOURCES_ALL, SOURCES_SCRIPTED, SOURCES_MODEL = 0, 1, 2
 # Exact refined-low audience instructions selected from the paired lab.
 REFINED_PROMPTS = json.loads(Path(__file__).with_name("tool_explanation_prompts.json").read_text())
 POLICIES = (
@@ -179,7 +189,11 @@ class ToolExplanations:
         target_agent_id = identity.get("target_agent_id")
         return cls._identity(janitor_builtins.resolve(ROLE, target_agent_id=target_agent_id), target_agent_id) == identity
 
-    def request(self, level, items, *, cwd=None, release=None, target_agent_id=None):
+    @staticmethod
+    def _sources(identity):
+        return (identity or {}).get("options", {}).get("explanation_sources", SOURCES_ALL)
+
+    def request(self, level, items, *, cwd=None, release=None, target_agent_id=None, include_provenance=False):
         if type(level) is not int or level not in range(5):
             raise ValueError("detail_level must be an integer from 0 to 4")
         if not isinstance(items, list) or len(items) > 8:
@@ -194,7 +208,10 @@ class ToolExplanations:
         configured = selected or janitor_builtins.get_builtin(ROLE)
         model = configured["model"] if configured else ""
         level = self._detail_level(configured, level)
+        scripted_allowed = bool(level and identity) and self._sources(identity) != SOURCES_MODEL
+        learned = mappings.promoted() if scripted_allowed else {}
         prepared = []
+        scripted = {}
         ids = set()
         for item in items:
             if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not 1 <= len(item["id"]) <= 128 or item["id"] in ids:
@@ -204,20 +221,45 @@ class ToolExplanations:
             if demand is not None and (not isinstance(demand, str) or not 1 <= len(demand) <= 128):
                 raise ValueError("invalid demand ID")
             activity = normalize_activity(item.get("activity"))
+            route = {}
+            if scripted_allowed:
+                text, route = templates.lookup(activity, level, learned)
+                if text:
+                    scripted[item["id"]] = (demand, {"status": "ready", "text": text, "source": "scripted", "cached": False,
+                                                     "provenance": _provenance(route, confidence=1.0)})
+                    continue
             if level and identity and cwd:
                 scripts = script_evidence(activity, cwd)
                 if scripts:
                     activity["scripts"] = scripts
-            key = hashlib.sha256(json.dumps([identity, PROMPT_VERSION, level, activity], sort_keys=True).encode()).hexdigest()
-            prepared.append((item["id"], key, {"activity": activity, "janitor": identity}, demand))
+            key = hashlib.sha256(json.dumps([identity, PROMPT_VERSION, templates.VERSION, level, activity], sort_keys=True).encode()).hexdigest()
+            prepared.append((item["id"], key, {"activity": activity, "janitor": identity, "route": dict(route)}, demand))
         with self._condition:
             if self._closed:
                 return {"model": model, "detail_level": level, "items": [
-                    {"id": item[0], "status": "disabled" if not level else "failed",
-                     **({"reason": "service_stopping"} if level else {})} for item in prepared]}
+                    {"id": item["id"], "status": "disabled" if not level else "failed",
+                     **({"reason": "service_stopping"} if level else {})} for item in items]}
             response = durable_queue.request(level, prepared, release, self._debounce,
-                                             guard=lambda connection: self._matches(identity))
+                                             guard=lambda connection: self._matches(identity)) if prepared or release else []
             self._condition.notify()
+        if scripted:
+            # The exact-match bypass needs no model and no queue, but still
+            # honours a paused Janitor and a viewer that released the row.
+            gone = durable_queue.released([demand for demand, _ in scripted.values()]) | set(release)
+            admitted = self._matches(identity)
+            answers = {entry["id"]: entry for entry in response}
+            for identifier, (demand, value) in scripted.items():
+                answers[identifier] = {"id": identifier, **({"status": "cancelled"} if demand in gone and demand
+                                                            else value if admitted else {"status": "disabled"})}
+            response = [answers[item["id"]] for item in items]
+        if include_provenance:
+            activities = {entry[0]: entry[2]["activity"] for entry in prepared}
+            for entry in response:
+                argument = (entry.get("provenance") or {}).pop("argument", None)
+                if argument and entry["id"] in activities:
+                    entry["provenance"]["parameters"] = _restore(argument, activities[entry["id"]])
+        else:
+            response = [{k: v for k, v in entry.items() if k != "provenance"} for entry in response]
         return {"model": model, "detail_level": level, "items": response}
 
     def _work(self):
@@ -265,9 +307,13 @@ class ToolExplanations:
                     durable_queue.complete(self._owner, [(entry[0], {}) for entry in batch],
                                            self._failure_ttl, guard=lambda connection: False)
                     continue
-                requests = [{"id": str(i + 1), "activity": entry[2]["activity"]} for i, entry in enumerate(batch)]
                 started = time.monotonic()
+                values, reasons, learned = self._select_templates(batch, level, identity)
+                requests = [{"id": str(i + 1), "activity": entry[2]["activity"]} for i, entry in enumerate(batch) if values[i] is None]
+                reason = ""
                 try:
+                    if not requests:
+                        raise _Resolved()
                     if not janitor_builtins.is_current(run["run_id"]):
                         raise RuntimeError("Janitor configuration changed")
                     primary = {key: run["configuration"][key] for key in ("backend", "model", "effort")}
@@ -292,13 +338,20 @@ class ToolExplanations:
                         current=lambda: not self._closed and janitor_builtins.is_current(run["run_id"]))
                     if set(translated) != {r["id"] for r in requests} or any(not isinstance(t, str) or not t.strip() or len(t) > 240 for t in translated.values()):
                         raise ValueError("invalid explanation response")
-                    values = [{"status": "ready", "text": snippet(translated[r["id"]], 240).strip()} for r in requests]
+                    for r in requests:
+                        index = int(r["id"]) - 1
+                        values[index] = {"status": "ready", "text": snippet(translated[r["id"]], 240).strip(), "source": "llm",
+                                         "provenance": _provenance(batch[index][2].get("route") or {}, reason=reasons[index]),
+                                         "signature": (batch[index][2].get("route") or {}).get("signature", "")}
+                    outcome = "ready"
+                except _Resolved:
                     outcome = "ready"
                 except Exception as error:
                     reason = "timeout" if isinstance(error, subprocess.TimeoutExpired) else "codex_unavailable" if isinstance(error, FileNotFoundError) else "invalid_response" if isinstance(error, ValueError) else "translator_failed"
-                    values = [{"status": "failed", "reason": reason} for _ in requests]
+                    values = [value or {"status": "failed", "reason": reason} for value in values]
                     outcome = f"failed:{reason}"
-                log("toolExplanationsBatch", f"model={run['configuration']['model']} level={level} count={len(batch)} outcome={outcome} elapsed_ms={int((time.monotonic() - started) * 1000)} queue_wait_ms={max(0, durable_queue.cache.now_ms() - batch[0][3] - int((time.monotonic() - started) * 1000))}")
+                jev_count = sum(1 for value in values if value.get("source") == "jev")
+                log("toolExplanationsBatch", f"model={run['configuration']['model']} level={level} count={len(batch)} jev={jev_count} llm={len(requests)} outcome={outcome} elapsed_ms={int((time.monotonic() - started) * 1000)} queue_wait_ms={max(0, durable_queue.cache.now_ms() - batch[0][3] - int((time.monotonic() - started) * 1000))}")
                 with self._condition:
                     if self._closed:
                         janitor_builtins.complete_run(run["run_id"], outcome="cancelled", result={"summary": "Explanation service stopped"})
@@ -308,13 +361,68 @@ class ToolExplanations:
                               "status": "ready" if outcome == "ready" else "failed", "item_count": len(batch)}
                     if outcome != "ready":
                         result["reason"] = reason
-                    durable_queue.complete(self._owner, [(entry[0], value) for entry,value in zip(batch,values)],
+                    published = durable_queue.complete(self._owner, list(zip((entry[0] for entry in batch), values)),
                                            self._failure_ttl, guard=lambda connection: janitor_builtins.complete_run(
                                                run["run_id"], outcome="completed" if outcome == "ready" else "failed",
                                                result=result, error="" if outcome == "ready" else reason,
                                                connection=connection))
+                # Only published selections count as evidence. Evidence can at
+                # most propose a mapping; it never changes an explanation.
+                for route, template_id, confidence, activity in learned if published else ():
+                    mappings.record(route, template_id, confidence, activity)
         finally:
             db.close_local()
+
+    def _select_templates(self, batch, level, identity):
+        """Jev's pick among known templates for unfamiliar programs.
+
+        Returns per-entry ready values (None for the model to explain) and the
+        reason each remaining entry falls through, for provenance.
+        """
+        values = [None] * len(batch)
+        reasons = [(entry[2].get("route") or {}).get("reason", "") for entry in batch]
+        learned = []
+        if not level or self._sources(identity) != SOURCES_ALL:
+            return values, [reason or "scripted_disabled" for reason in reasons], learned
+        eligible = {str(i + 1): entry for i, entry in enumerate(batch)
+                    if (entry[2].get("route") or {}).get("reason") in templates.JEV_REASONS}
+        if not eligible:
+            return values, reasons, learned
+        if not judgments.site_enabled("explanations"):
+            return values, [("jev_disabled" if str(i + 1) in eligible else reason) for i, reason in enumerate(reasons)], learned
+        criteria = {template_id: template["description"] for template_id, template in templates.TEMPLATES.items()
+                    if template["action"] in templates.LEARNABLE_ACTIONS}
+        selected = judgment_sites.select_explanation_templates({key: {
+            "activity": {k: v for k, v in entry[2]["activity"].items() if k != "scripts"},
+            "candidates": entry[2]["route"].get("candidates", [])} for key, entry in eligible.items()}, criteria)
+        for key, entry in eligible.items():
+            index = int(key) - 1
+            route = entry[2]["route"]
+            answer = (selected or {}).get(key) or {"reason": "jev_unavailable"}
+            template_id = answer.get("template_id")
+            if not template_id:
+                reasons[index] = answer["reason"]
+                continue
+            primary = next((name for name, kind in templates.TEMPLATES[template_id]["params"].items() if kind in {"directory", "path"}), None)
+            if route.get("candidates") and not answer.get("argument") or answer.get("argument") and primary is None:
+                reasons[index] = "jev_invalid_parameters"
+                continue
+            parameters = templates.validate(template_id, {primary: answer["argument"]} if answer.get("argument") else {}, entry[2]["activity"])
+            rendered = templates.render(template_id, parameters, level) if parameters is not None else None
+            text = templates.hedge(rendered) if rendered else None
+            if text is None:
+                reasons[index] = "jev_invalid_parameters"
+                continue
+            learned.append((route, template_id, answer["confidence"], entry[2]["activity"]))
+            # The cache keeps which candidate was chosen, never its value; a
+            # developer view restores it from the activity the client sends.
+            provenance = _provenance({"template_id": template_id}, confidence=answer["confidence"],
+                                     reason=route.get("reason", ""))
+            if answer.get("argument"):
+                provenance["argument"] = {"name": primary, "index": route["candidates"].index(answer["argument"])}
+            values[index] = {"status": "ready", "text": text, "source": "jev", "signature": route.get("signature", ""),
+                             "provenance": provenance}
+        return values, reasons, learned
 
     @staticmethod
     def _kill(process):
@@ -380,3 +488,30 @@ class ToolExplanations:
                 process.wait(timeout=5)
                 with self._condition:
                     self._process = None
+
+
+class _Resolved(Exception):
+    """Every entry in the batch was answered without the language model."""
+
+
+def _restore(argument, activity):
+    candidates = templates.classify(activity).get("candidates", [])
+    index = argument.get("index")
+    if type(index) is int and 0 <= index < len(candidates) and templates.valid_parameter("path", candidates[index]):
+        return {argument.get("name", "target"): candidates[index]}
+    return {}
+
+
+def _provenance(route, *, confidence=None, reason=""):
+    """Developer-visible metadata. Parameters are already-redacted literals."""
+    value = {"template_version": templates.VERSION}
+    if route.get("template_id"):
+        value["template_id"] = route["template_id"]
+        value["parameters"] = route.get("parameters", {})
+    if confidence is not None:
+        value["confidence"] = round(float(confidence), 3)
+    if route.get("learned"):
+        value["learned"] = True
+    if reason:
+        value["fallback_reason"] = reason
+    return value

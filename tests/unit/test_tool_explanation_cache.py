@@ -15,5 +15,8 @@ def test_fixed_24h_expiry_not_extended_by_reads(monkeypatch):
     assert conn().execute('SELECT count(*) FROM tool_explanation_cache').fetchone()[0]==0
 
 
-def test_only_hash_text_and_timestamps_are_persisted():
-    assert [r[1] for r in conn().execute('PRAGMA table_info(tool_explanation_cache)')]==['cache_key','explanation','created_at','expires_at']
+def test_only_hash_text_timestamps_and_producer_are_persisted():
+    # Producer metadata is bounded: source, template provenance without
+    # parameter values, and a masked program/flag signature for invalidation.
+    assert [r[1] for r in conn().execute('PRAGMA table_info(tool_explanation_cache)')]==[
+        'cache_key','explanation','created_at','expires_at','source','provenance_json','signature']

@@ -91,7 +91,11 @@ def templates() -> list[dict]:
              "options": [{"key": "detail_level", "label": "Tool detail", "type": "choice", "default": 0,
                  "description": "Choose how requested tool activity is explained. Developer keeps the original activity.",
                  "choices": [{"value": value, "label": label} for value, label in enumerate(
-                     ["Developer", "Technical", "Balanced", "Plain English", "Grandma"])]}]}]
+                     ["Developer", "Technical", "Balanced", "Plain English", "Grandma"])]},
+                {"key": "explanation_sources", "label": "Explanation sources", "type": "choice", "default": 0,
+                 "description": "Known tool calls use scripted templates; Jev can pick a known template for unfamiliar ones when its judgment site is on; the configured model explains the rest.",
+                 "choices": [{"value": value, "label": label} for value, label in enumerate(
+                     ["Scripted, Jev, then model", "Scripted, then model", "Model only"])]}]}]
 
 
 def autonomy_templates():

@@ -35,7 +35,7 @@ API_URL = "https://api.typesafe.ai/v1/systemone"
 MODEL = "jev-latest"
 
 # Per-site switches. Each name is a settings key suffix and a log column value.
-SITES = ("errors", "junk", "router", "naming", "watch")
+SITES = ("errors", "junk", "router", "naming", "watch", "explanations")
 
 KEY_ENABLED = "judgments.enabled"
 KEY_TIMEOUT_MS = "judgments.timeout_ms"

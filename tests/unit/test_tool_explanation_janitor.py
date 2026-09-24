@@ -503,7 +503,7 @@ def test_explicit_owner_detail_overrides_every_legacy_client_and_shares_audience
             assert service.request(requested, [ITEM])["items"][0]["status"] == "ready"
     assert calls == [4]
     run = janitors.list_runs(config["session"])[0]
-    assert run["configuration"]["options"] == {"detail_level": 4}
+    assert run["configuration"]["options"] == {"detail_level": 4, "explanation_sources": 0}
     assert run["configuration"]["context"]["detail_level"] == 4
     assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == 1
 
@@ -522,7 +522,7 @@ def test_explicit_developer_detail_cannot_be_overridden_by_legacy_clients(monkey
 
 def test_unconfigured_builtin_alone_preserves_legacy_detail_until_adoption():
     config = seed()
-    assert config["options"] == {"detail_level": 0}
+    assert config["options"] == {"detail_level": 0, "explanation_sources": 0}
     assert "detail_level" not in config["configured_option_keys"]
     calls = []
     def capture(level, items):
@@ -594,7 +594,7 @@ def test_configured_detail_remains_disabled_while_paused_and_releases_demand():
 @pytest.mark.parametrize("phase", ["queued", "running", "cached"])
 def test_adopting_explicit_default_revokes_legacy_detail_without_pausing(phase):
     config = seed()
-    assert config["options"] == {"detail_level": 0}
+    assert config["options"] == {"detail_level": 0, "explanation_sources": 0}
     assert config["configured_option_keys"] == []
     entered, finish = threading.Event(), threading.Event()
     calls = []
