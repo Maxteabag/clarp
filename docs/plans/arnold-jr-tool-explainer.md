@@ -1,0 +1,15 @@
+# Arnold Jr — hybrid tool explainer implementation
+
+Requested owner: Arnold Jr, Claude backend, exact model claude-opus-5-5. Official ID verified https://platform.claude.com/docs/en/models/opus-5-5/overview on2026-09-24. Peter authorized updating the Host catalog and creating this agent.
+
+Peter authorized implementation, then explicitly reassigned it to newly created Arnold Jr. No implementation has started in Arnold parent. Preserve independent agents and dirty shared worktrees.
+
+Implement scripted template lookup -> Jev selection among existing templates -> configured language-model fallback for unmapped actions. Store a durable, versioned explanation-template library with typed parameters. Example: inspect files and subdirectories in {directory}; extract Clarp as project/directory parameter only when supported by actual tool input. Never execute the described command as part of explanation.
+
+Start from existing Host tool_explanations.py, tool_explanation_queue.py, tool_explanation_cache.py (24h cache), judgments.py/judgment_sites.py and Janitor provider configuration. Inspect actual current iOS/PWA explanation presentation. Preserve cancellation, scoping, secret redaction, detail levels and in-flight deduplication. Script parsing must distinguish read/search/edit/delete/network/compound commands and abstain when uncertain. Jev selects a bounded template ID or unknown; validate extracted parameters. Language-model fallback (Spark/Luna or configured supported provider) supplies unseen explanation. Record validated candidate mappings; do not promote one uncertain classification into an unrestricted rule. Version/promote using regression evidence, invalidate mismatched caches.
+
+Developer-only Show explanation source toggle: blue Scripted, purple Jev, amber LLM. Include text badge, not color alone. Preserve original producer in cached explanations; cache hit is separate provenance. Detail can show template ID, parameters, confidence and fallback reason. Ordinary UI unchanged when toggle off; never expose secrets in debug metadata.
+
+Success evidence: representative real tool-call shapes tested with isolated synthetic inputs; exact-match bypass; paraphrase Jev mapping; abstention; malformed/compound/destructive-command distinctions; fallback; parameter correctness; cache provenance and invalidation; invalid-template learning rejection; real production-path tests. Benchmark latency and source hit rates where authorized. No unbounded paid inference or silent model/account switching. Reuse configured keys privately, never put secrets in handoffs. Seek a bounded paid-probe proposal if needed rather than infer an unlimited budget.
+
+Use isolated worktrees, read repository AGENTS.md. For native UI run required Mac static/parse/core/native gates and inspect screenshots incl large text. Report source/test/main/deployment/device proof distinctly. Parent Arnold coordinates cross-project release and review; report milestones to presentation_final_main-2243 with verified IDs and limits. Preserve other tasks.
