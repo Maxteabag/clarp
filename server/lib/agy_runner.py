@@ -9,7 +9,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -19,16 +18,20 @@ from . import agy_transcript
 from . import provider_capabilities
 from . import server_identity
 from . import tts_queue
-from .codex_runner import (
-    _SPEAK_RE,
-    apply_voice_preamble,
-    spoken_chunks_for_tts,
-    spoken_for_tts,
-)
 from .log import log, log_exception
-from .proc_util import attach_stderr_drain, stderr_text
+from .proc_util import stderr_text
 from .process_registry import ProcessRegistry, TurnHandle
-from .protocol import AgentState, SSEType, TurnSource
+from .protocol import AgentState
+from .runner_common import (
+    broadcast_transcript,
+    make_handle,
+    popen_turn,
+    record_state,
+    register_handle,
+    speak,
+    start_drain,
+)
+from .voice_preamble import apply_voice_preamble
 
 
 AGY_BIN = "agy"  # resolved from PATH; tests can monkeypatch.
@@ -61,10 +64,6 @@ def active_handles(agent_id: str) -> list["TurnHandle"]:
 def interrupt(agent_id: str) -> int:
     """SIGTERM every in-flight agy turn for an agent. Idempotent."""
     return _REGISTRY.interrupt(agent_id, event="agyInterruptFail")
-
-
-def _register(agent_id: str, h: "TurnHandle") -> None:
-    _REGISTRY.register(agent_id, h)
 
 
 def _unregister(agent_id: str, h: "TurnHandle") -> None:
@@ -200,11 +199,7 @@ def spawn_turn(
         if runtime_agent_id:
             _record_state(runtime_agent_id, AgentState.THINKING,
                           {"dispatch": "agy", "trace_id": trace_id})
-        process.append(subprocess.Popen(
-            cmd, cwd=str(cwd), stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, start_new_session=(os.name == "posix"),
-            env={**os.environ, "CLAUDE_PWA_SESSION": session},
-        ))
+        process.append(popen_turn(cmd, cwd=cwd, session=session))
     try:
         admitted = owner_gate(admit_spawn)
         if not admitted or not process:
@@ -216,29 +211,20 @@ def spawn_turn(
         except OSError:
             pass
         raise
-    attach_stderr_drain(proc)
-    handle = TurnHandle(
-        proc=proc, drain_thread=None,
-        process_group=proc.pid if os.name == "posix" else None)   # type: ignore[arg-type]
-    if runtime_agent_id:
-        _register(runtime_agent_id, handle)
-    drain = threading.Thread(
-        target=_drain_stream,
-        kwargs=dict(
-            proc=proc, log_path=log_path, agent_id=runtime_agent_id,
-            session=session, trace_id=trace_id, handle=handle,
-            on_session_init=on_session_init, on_result=on_result,
-            on_error=on_error, stream=stream,
-            enqueue=enqueue or tts_queue.enqueue,
-            expected_conversation_id=(
-                backend_session_id if backend_session_id and not is_new_session
-                else ""),
-            run_if_owned=owner_gate,
-        ),
-        daemon=True, name=f"agy-drain-{proc.pid}",
+    handle = make_handle(proc)
+    register_handle(_REGISTRY, runtime_agent_id, handle)
+    start_drain(
+        handle, _drain_stream, backend="agy",
+        proc=proc, log_path=log_path, agent_id=runtime_agent_id,
+        session=session, trace_id=trace_id, handle=handle,
+        on_session_init=on_session_init, on_result=on_result,
+        on_error=on_error, stream=stream,
+        enqueue=enqueue or tts_queue.enqueue,
+        expected_conversation_id=(
+            backend_session_id if backend_session_id and not is_new_session
+            else ""),
+        run_if_owned=owner_gate,
     )
-    handle.drain_thread = drain
-    drain.start()
     return handle
 
 
@@ -849,55 +835,17 @@ def _canonical_tool_input(name: str, value: Any) -> dict[str, Any]:
 
 def _speak(text: str, st: _TurnState, *, agent_id: str, session: str,
            trace_id: str, enqueue: Callable[..., int]) -> None:
-    if not agents_db.latest_turn_synthesize_audio(agent_id):
-        return
-    blocks = [spoken_for_tts(m.group(1).strip()) for m in _SPEAK_RE.finditer(text)]
-    blocks = [b for b in blocks if b]
-    if not blocks:
-        return
-    a = agents_db.get_by_agent_id(agent_id)
-    if a is None:
-        return
-    persona = a.get("persona") or ""
-    voice_id = a.get("voice_id") or ""
-    focused = agents_db.get_focus()
-    trace = trace_id or None
-    for block in blocks:
-        if block in st.seen_speak:
-            continue
-        st.seen_speak.add(block)
-        for index, chunk in enumerate(spoken_chunks_for_tts(block)):
-            payload_text = chunk
-            if (index == 0 and persona and agent_id != focused
-                    and not chunk.lower().startswith(persona.lower())):
-                payload_text = f"{persona} here. {chunk}"
-            try:
-                qid = enqueue(agent_id=agent_id, text=payload_text,
-                              voice_id=voice_id, session=session,
-                              source=TurnSource.PWA,
-                              trace_id=trace, synthesize_audio=True)
-                log("agyEnqueue", f"agent={agent_id} qid={qid} chars={len(chunk)}")
-            except Exception as e:                             # noqa: BLE001
-                log_exception("agyEnqueueFail", e, detail=str(agent_id))
+    # agy speaks under the turn's own trace only, never the agent's stored one.
+    speak(text, st, agent_id=agent_id, session=session, trace_id=trace_id,
+          enqueue=enqueue, backend="agy", agent_trace=False)
 
 
 def _record_state(agent_id: str, kind: str, detail: dict | None = None) -> None:
-    if not agent_id:
-        return
-    try:
-        agents_db.record_state(agent_id, kind, detail)
-    except Exception as e:                                 # noqa: BLE001
-        log_exception("agyRecordStateFail", e, detail=f"{agent_id}:{kind}")
+    record_state(agent_id, kind, detail, backend="agy")
 
 
 def _broadcast_transcript(stream: Any, agent_id: str, session: str) -> None:
-    if stream is None or not agent_id:
-        return
-    try:
-        stream.broadcast({"type": SSEType.TRANSCRIPT_UPDATED,
-                          "agent_id": agent_id, "session": session})
-    except Exception as e:                                 # noqa: BLE001
-        log_exception("agyBroadcastFail", e, detail=agent_id)
+    broadcast_transcript(stream, agent_id, session, backend="agy")
 
 
 # ---- orchestrator routing -------------------------------------------------

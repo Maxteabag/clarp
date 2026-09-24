@@ -1580,7 +1580,7 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
                 continue
 
             if inner == "user_message":
-                from .codex_runner import strip_voice_preamble
+                from .voice_preamble import strip_voice_preamble
                 text = strip_voice_preamble(
                     _clean_user_text(payload.get("message") or ""))
                 _append_visible_message(
