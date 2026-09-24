@@ -111,6 +111,10 @@ def reconcile() -> int:
     write transaction. Holding BEGIN IMMEDIATE across it starved every other
     writer for the whole scan (recorded 2026-09-17/18: 38-193 s holds, with
     decision delivery and the scheduler failing "database is locked").
+
+    The artifact comparison is also read-only first: this runs on every runner
+    tick, and taking the write lock when nothing changed made the idle server
+    the busiest SQLite writer on the host.
     """
     con = db.conn()
     configs = [dict(r) for r in con.execute("""SELECT j.*,a.session,a.persona,a.is_janitor,
@@ -122,54 +126,63 @@ def reconcile() -> int:
                       not config["agent_archived_at"] and not config["agent_deleted_at"])
         reference, latest, count = _episode(config) if active else ("", None, 0)
         planned.append((config, active, reference, latest, count))
+    if not any(_sync(con, *plan, write=False) for plan in planned):
+        return 0
     con.execute("BEGIN IMMEDIATE")
-    changed = 0
     try:
-        for config, active, reference, latest, count in planned:
-            open_rows = list(con.execute("""SELECT artifact_id,reference_id FROM artifacts
-                WHERE agent_id=? AND type='document' AND reference_id LIKE ?
-                  AND status='failed' AND deleted_at IS NULL AND json_valid(payload_json)
-                  AND json_extract(payload_json,'$.attention_kind')=?""",
-                (config["agent_id"], PREFIX + "%", KIND)))
-            for row in open_rows:
-                if active and row["reference_id"] == reference:
-                    continue
-                artifacts.update(row["artifact_id"], {
-                    "status": "completed",
-                    "summary": "Maintenance recovered or its configuration changed." if active
-                               else "Maintenance is paused or removed.",
-                })
-                changed += 1
-            if not active or count < 2 or latest is None:
-                continue
-            artifact_id = "janitor-alert-" + hashlib.sha256(reference.encode()).hexdigest()[:40]
-            # Query raw rows: get() hides discarded records, but their tombstones
-            # must continue suppressing recreation of this same failure episode.
-            existing = con.execute("SELECT * FROM artifacts WHERE artifact_id=?", (artifact_id,)).fetchone()
-            if existing and (existing["archived_at"] is not None or existing["deleted_at"] is not None
-                             or existing["status"] in {"completed", "cancelled", "expired"}):
-                continue
-            desired = _description(config, latest, count)
-            if existing:
-                # Do not repurpose a user artifact in the unlikely event of an ID collision.
-                if existing["agent_id"] != config["agent_id"] or existing["reference_id"] != reference \
-                        or existing["type"] != "document":
-                    continue
-                current = artifacts.get(artifact_id)
-                if current["payload"].get("attention_kind") != KIND:
-                    continue
-                if all(current[key] == value for key, value in desired.items()):
-                    continue
-                artifacts.update(artifact_id, desired)
-            else:
-                artifacts.create(session=config["session"], type="document", reference_id=reference,
-                                 artifact_id=artifact_id, **desired)
-            changed += 1
+        changed = sum(_sync(con, *plan, write=True) for plan in planned)
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")
         raise
     return changed
+
+
+def _sync(con, config: dict, active: bool, reference: str, latest: dict | None, count: int,
+          *, write: bool) -> int:
+    """Bring one config's alert artifact in line; count the changes (made or needed)."""
+    changed = 0
+    open_rows = list(con.execute("""SELECT artifact_id,reference_id FROM artifacts
+        WHERE agent_id=? AND type='document' AND reference_id LIKE ?
+          AND status='failed' AND deleted_at IS NULL AND json_valid(payload_json)
+          AND json_extract(payload_json,'$.attention_kind')=?""",
+        (config["agent_id"], PREFIX + "%", KIND)))
+    for row in open_rows:
+        if active and row["reference_id"] == reference:
+            continue
+        if write:
+            artifacts.update(row["artifact_id"], {
+                "status": "completed",
+                "summary": "Maintenance recovered or its configuration changed." if active
+                           else "Maintenance is paused or removed.",
+            })
+        changed += 1
+    if not active or count < 2 or latest is None:
+        return changed
+    artifact_id = "janitor-alert-" + hashlib.sha256(reference.encode()).hexdigest()[:40]
+    # Query raw rows: get() hides discarded records, but their tombstones
+    # must continue suppressing recreation of this same failure episode.
+    existing = con.execute("SELECT * FROM artifacts WHERE artifact_id=?", (artifact_id,)).fetchone()
+    if existing and (existing["archived_at"] is not None or existing["deleted_at"] is not None
+                     or existing["status"] in {"completed", "cancelled", "expired"}):
+        return changed
+    desired = _description(config, latest, count)
+    if existing:
+        # Do not repurpose a user artifact in the unlikely event of an ID collision.
+        if existing["agent_id"] != config["agent_id"] or existing["reference_id"] != reference \
+                or existing["type"] != "document":
+            return changed
+        current = artifacts.get(artifact_id)
+        if current["payload"].get("attention_kind") != KIND:
+            return changed
+        if all(current[key] == value for key, value in desired.items()):
+            return changed
+        if write:
+            artifacts.update(artifact_id, desired)
+    elif write:
+        artifacts.create(session=config["session"], type="document", reference_id=reference,
+                         artifact_id=artifact_id, **desired)
+    return changed + 1
 
 
 def pending(*, include_archived: bool = False) -> list[dict]:

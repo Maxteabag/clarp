@@ -543,28 +543,38 @@ def is_busy(agent_id: str) -> bool:
 
 
 def dashboard_states() -> dict[str, dict[str, Any]]:
-    """Read state clocks together, preserving state-id ordering for tied times."""
+    """Read state clocks together, preserving state-id ordering for tied times.
+
+    Every clock is an indexed walk from the newest row of one agent, so the
+    cost follows the number of live agents, not the size of state_log. The
+    previous window-function form scanned the whole table per snapshot
+    (1.6 s on 325k rows) and was most of the server's idle CPU.
+    """
     rows = conn().execute("""
-        WITH history AS (
-            SELECT s.*, ROW_NUMBER() OVER (
-                       PARTITION BY s.agent_id ORDER BY ts DESC, state_id DESC) AS rank,
-                   LAG(kind) OVER (
-                       PARTITION BY s.agent_id ORDER BY ts, state_id) AS previous,
-                   MAX(CASE WHEN kind IN ('done', 'idle', 'stopped') THEN ts END)
-                       OVER (PARTITION BY s.agent_id) AS last_end
-              FROM state_log s JOIN agents a USING (agent_id)
-             WHERE a.deleted_at IS NULL
-        )
-        SELECT agent_id,
-               MAX(CASE WHEN rank = 1 THEN kind END) AS kind,
-               MAX(CASE WHEN rank = 1 THEN ts END) AS ts,
-               MAX(CASE WHEN rank = 1 THEN detail END) AS detail,
-               MIN(CASE WHEN kind IN ('thinking', 'tool', 'compacting')
-                         AND ts > COALESCE(last_end, 0) THEN ts END) AS turn_started_at,
-               MAX(CASE WHEN kind = 'done' OR
-                         (kind = 'idle' AND previous IN ('thinking', 'tool'))
-                        THEN ts END) AS last_turn_end
-          FROM history GROUP BY agent_id
+        SELECT a.agent_id, l.kind, l.ts, l.detail,
+               (SELECT MIN(b.ts) FROM state_log b
+                 WHERE b.agent_id = a.agent_id
+                   AND b.kind IN ('thinking', 'tool', 'compacting')
+                   AND b.ts > COALESCE((SELECT MAX(e.ts) FROM state_log e
+                                         WHERE e.agent_id = a.agent_id
+                                           AND e.kind IN ('done', 'idle', 'stopped')), 0)
+               ) AS turn_started_at,
+               (SELECT c.ts FROM state_log c
+                 WHERE c.agent_id = a.agent_id
+                   AND c.kind IN ('done', 'idle', 'stopped')
+                   AND (c.kind = 'done' OR (c.kind = 'idle' AND
+                        (SELECT p.kind FROM state_log p
+                          WHERE p.agent_id = c.agent_id
+                            AND (p.ts < c.ts OR (p.ts = c.ts AND p.state_id < c.state_id))
+                          ORDER BY p.ts DESC, p.state_id DESC LIMIT 1) IN ('thinking', 'tool')))
+                 ORDER BY c.ts DESC, c.state_id DESC LIMIT 1
+               ) AS last_turn_end
+          FROM agents a
+          JOIN state_log l ON l.state_id = (
+                   SELECT x.state_id FROM state_log x
+                    WHERE x.agent_id = a.agent_id
+                    ORDER BY x.ts DESC, x.state_id DESC LIMIT 1)
+         WHERE a.deleted_at IS NULL
     """).fetchall()
     result = {}
     for row in rows:

@@ -117,3 +117,24 @@ def test_delegated_reply_preview_and_overview_clock_stay_together(reply_origin):
     expected_engagement = 1790170140000 if reply_origin == 'user' else 1790158620000
     assert abs(agents.last_activity(aid) - expected_engagement) <= 1
     assert row['last_activity'] == agents.chat_activity(aid)
+
+
+def test_batched_clocks_follow_repeated_idles_and_stops():
+    """Indexed per-agent clocks must agree with the reference queries on odd histories."""
+    histories = {
+        'no-boundary': ('thinking', 'tool', 'tool'),
+        'idle-after-idle': ('thinking', 'idle', 'idle', 'idle'),
+        'stopped-then-busy': ('thinking', 'done', 'stopped', 'thinking', 'compacting'),
+        'tie-ordering': ('idle', 'thinking', 'idle', 'done', 'thinking', 'tool', 'idle'),
+    }
+    for name, kinds in histories.items():
+        aid = agents.create_agent(persona=name, voice_id='', cwd='/tmp', session=name)
+        for j, kind in enumerate(kinds):
+            db.conn().execute('INSERT INTO state_log(agent_id, kind, ts, detail) VALUES(?,?,?,?)',
+                              (aid, kind, (j // 3 + 1) * 1000, json.dumps({'index': j})))
+    states = agents.dashboard_states()
+    for agent in agents.list_agents():
+        aid = agent['agent_id']
+        assert {key: states[aid][key] for key in ('kind', 'ts', 'detail')} == agents.latest_state(aid)
+        assert (states[aid]['turn_started_at'] or 0) == agents.turn_started_at(aid)
+        assert (states[aid]['last_turn_end'] or 0) == agents.last_turn_end(aid)

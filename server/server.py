@@ -316,6 +316,12 @@ class Handler(BaseHTTPRequestHandler):
         # connection, so _send() drains or closes before responding early
         # (e.g. 401 before the handler ever touched rfile).
         self._body_consumed = False
+        # The request clock starts here. handle_one_request() blocks in
+        # readline() for the next request on a keep-alive connection, so a
+        # clock started there counts idle socket time as handler latency
+        # (every path showed a 90 s maximum, the keep-alive timeout).
+        self._request_started_wall = time.time()
+        self._request_started_monotonic = time.perf_counter()
         return super().parse_request()
 
     def _drain_request_body(self):
@@ -608,7 +614,7 @@ class Handler(BaseHTTPRequestHandler):
             # so use getattr to keep the finally-block from raising.
             code = getattr(self, "_status_code", 0) or 0
             if getattr(self, "command", None):
-                self._log_http(code, started)
+                self._log_http(code, getattr(self, "_request_started_wall", started))
 
     def send_response(self, code, message=None):
         self._status_code = code
@@ -6056,9 +6062,17 @@ def build_server(ctx: ServerContext, port: int,
         )
         return {"ok": True, "queued": result.queued}
 
+    attention_due = [0.0]
+
     def _janitor_after_tick():
         from lib.audio_bookkeeper import drain as drain_audio_bookkeeping
         drain_audio_bookkeeping()
+        # Failure alerts move on the scale of runs (minutes); scanning
+        # janitor_runs on every 2 s admission tick was measurable idle CPU.
+        now = time.monotonic()
+        if now < attention_due[0]:
+            return
+        attention_due[0] = now + SERVER_TIMING.janitor_attention_interval_sec
         if janitor_attention.reconcile():
             ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER,
                                   "kind": "janitor-attention"})
