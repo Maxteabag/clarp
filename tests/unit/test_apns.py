@@ -465,6 +465,8 @@ def test_watcher_delegates_done_notification_decision_to_policy(monkeypatch):
     agents_db.record_state(worker_agent, "done", {"backend_session_id": "bs-agent"})
     agents_db.record_state(worker_agent, "done", {"backend_session_id": "bs-hidden"})
     w._poll_once()
+    # Classification runs on the watcher's notification worker, not inline.
+    assert w.wait_for_notifications(5)
 
     assert len(calls) == 1
     assert calls[0]["session"] == "mike"
@@ -798,3 +800,22 @@ def test_desktop_presence_is_rechecked_after_transport_setup(tmp_path, monkeypat
     result = apns.send_user_notification({'session': 'mike', 'preview': 'Reply', 'push': True})
     assert result['sent'] == 0 and result['suppressed']
     assert calls == []
+
+
+def test_send_locks_do_not_accumulate_per_session():
+    """One lock per session ever notified would grow for the process lifetime.
+    Entries must exist only while a sender holds them."""
+    import gc
+    for i in range(500):
+        apns._send_lock(f"session-{i}")
+    gc.collect()
+    assert len(apns._send_locks) == 0
+
+    held = apns._send_lock("busy")
+    with held:
+        assert apns._send_lock("busy") is held, "concurrent senders share the lock"
+        gc.collect()
+        assert len(apns._send_locks) == 1
+    del held
+    gc.collect()
+    assert len(apns._send_locks) == 0
