@@ -4,28 +4,36 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import re
 import shutil
 import subprocess
-import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from . import agents as agents_db
 from . import tts_queue
-from .codex_runner import apply_voice_preamble
 from .log import log, log_exception
-from .proc_util import attach_stderr_drain, stderr_text
+from .proc_util import stderr_text
 from .process_registry import ProcessRegistry, TurnHandle
-from .protocol import AgentState, SSEType, TurnSource
-from .voice_markup import spoken_chunks_for_tts, spoken_for_tts
+from .protocol import AgentState
+from .runner_common import (
+    SPEAK_RE,
+    bind_session,
+    broadcast_transcript,
+    iter_json_dicts,
+    launch,
+    record_state,
+    register_handle,
+    speak,
+    start_drain,
+)
+from .voice_preamble import apply_voice_preamble
 
 
 OPENCODE_BIN = "opencode"
 
 # Only text the model explicitly marked speakable reaches the voice channel;
 # the same contract Claude hooks and the Codex runner use.
-_SPEAK_RE = re.compile(r"<speak>(.*?)</speak>", re.DOTALL | re.IGNORECASE)
+_SPEAK_RE = SPEAK_RE
 _REGISTRY = ProcessRegistry(log_exception=log_exception)
 
 
@@ -96,33 +104,18 @@ def spawn_turn(
     log("opencodeSpawn", f"cwd={cwd} {flag}={backend_session_id or '∅'} "
                          f"text_len={len(text)} trace={trace_id or '∅'} "
                          f"agent={agent_id or '∅'}")
-    env = {**os.environ, "CLAUDE_PWA_SESSION": session}
-    proc = subprocess.Popen(
-        cmd, cwd=str(cwd), stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, start_new_session=(os.name == "posix"),
-        env=env,
-    )
-    attach_stderr_drain(proc)
-    handle = TurnHandle(
-        proc=proc, drain_thread=None,
-        process_group=proc.pid if os.name == "posix" else None)  # type: ignore[arg-type]
+    proc, handle = launch(cmd, cwd=cwd, session=session)
     runtime_agent_id = "" if isolated else agent_id
-    if runtime_agent_id:
-        _REGISTRY.register(runtime_agent_id, handle)
-    drain = threading.Thread(
-        target=_drain_stdout,
-        kwargs=dict(
-            proc=proc, agent_id=runtime_agent_id, session=session,
-            trace_id=trace_id, handle=handle,
-            backend_session_id=backend_session_id,
-            on_session_init=on_session_init, on_result=on_result,
-            on_error=on_error, stream=stream,
-            enqueue=enqueue or tts_queue.enqueue,
-        ),
-        daemon=True, name=f"opencode-drain-{proc.pid}",
+    register_handle(_REGISTRY, runtime_agent_id, handle)
+    start_drain(
+        handle, _drain_stdout, backend="opencode",
+        proc=proc, agent_id=runtime_agent_id, session=session,
+        trace_id=trace_id, handle=handle,
+        backend_session_id=backend_session_id,
+        on_session_init=on_session_init, on_result=on_result,
+        on_error=on_error, stream=stream,
+        enqueue=enqueue or tts_queue.enqueue,
     )
-    handle.drain_thread = drain
-    drain.start()
     return handle
 
 
@@ -248,17 +241,9 @@ def _drain_stdout(
 
 def _bind(st: _TurnState, session_id: str, *, on_session_init, on_error,
           trace_id: str) -> None:
-    if not session_id or st.saw_session:
-        return
-    st.session_id = session_id
-    st.saw_session = True
-    log("opencodeSessionInit", f"sid={session_id} trace={trace_id or '∅'}")
-    if on_session_init is not None:
-        accepted = on_session_init(session_id)
-        if accepted is False:
-            st.failed_error = "backend session binding rejected"
-            if on_error is not None:
-                on_error(st.failed_error)
+    bind_session(st, session_id, backend="opencode",
+                 on_session_init=on_session_init, on_error=on_error,
+                 trace_id=trace_id)
 
 
 def _speak(text: str, st: _TurnState, *, agent_id: str, session: str,
@@ -269,66 +254,18 @@ def _speak(text: str, st: _TurnState, *, agent_id: str, session: str,
     regions are spoken, and a block is spoken once per turn even when the
     same text arrives in more than one event.
     """
-    if not agent_id or not agents_db.latest_turn_synthesize_audio(agent_id):
-        return
-    blocks = [spoken_for_tts(m.group(1).strip()) for m in _SPEAK_RE.finditer(text)]
-    blocks = [b for b in blocks if b]
-    if not blocks:
-        return
-    agent = agents_db.get_by_agent_id(agent_id)
-    if agent is None:
-        return
-    persona = agent.get("persona") or ""
-    voice_id = agent.get("voice_id") or ""
-    focused = agents_db.get_focus()
-    trace = agents_db.get_trace(agent_id) or trace_id or None
-    for block in blocks:
-        key = block.strip()
-        if not key or key in st.seen_speak:
-            continue
-        st.seen_speak.add(key)
-        for index, chunk in enumerate(spoken_chunks_for_tts(block)):
-            payload_text = chunk
-            # Persona prefix only the first chunk of each explicit speak block.
-            if (index == 0 and persona and agent_id != focused
-                    and not chunk.lower().startswith(persona.lower())):
-                payload_text = f"{persona} here. {chunk}"
-            try:
-                qid = enqueue(
-                    agent_id=agent_id,
-                    text=payload_text,
-                    voice_id=voice_id,
-                    session=session,
-                    source=TurnSource.PWA,
-                    trace_id=trace,
-                    synthesize_audio=True,
-                )
-                log("opencodeEnqueue",
-                    f"agent={agent_id} qid={qid} chars={len(chunk)}")
-            except Exception as error:  # noqa: BLE001
-                log_exception("opencodeSpeakFail", error, detail=trace_id)
+    speak(text, st, agent_id=agent_id, session=session, trace_id=trace_id,
+          enqueue=enqueue, backend="opencode", fail_event="opencodeSpeakFail",
+          fail_detail=trace_id)
 
 
 def _record_state(agent_id: str, kind: str, detail: dict[str, Any]) -> None:
-    if not agent_id:
-        return
-    try:
-        agents_db.record_state(agent_id, kind, detail)
-    except Exception as error:  # noqa: BLE001
-        log_exception("opencodeStateFail", error)
+    record_state(agent_id, kind, detail, backend="opencode",
+                 event="opencodeStateFail")
 
 
 def _broadcast(stream: Any, agent_id: str, session: str) -> None:
-    if stream is None or not agent_id:
-        return
-    try:
-        stream.broadcast({
-            "type": SSEType.TRANSCRIPT_UPDATED,
-            "agent_id": agent_id,
-            "session": session,
-        })
-    except Exception as error:  # noqa: BLE001
-        log_exception("opencodeBroadcastFail", error)
+    broadcast_transcript(stream, agent_id, session, backend="opencode")
 
 
 # ---- orchestrator routing -------------------------------------------------
@@ -341,16 +278,7 @@ def routing_cmd(prompt: str, *, model: str = "", effort: str = "") -> list[str]:
 def routing_text(stdout: str) -> str:
     """Concatenated assistant text of an ``opencode run --format json`` run."""
     text = ""
-    for raw in (stdout or "").splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        try:
-            ev = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(ev, dict):
-            continue
+    for ev in iter_json_dicts(stdout):
         etype = str(ev.get("type") or ev.get("event") or "")
         if etype not in {"text", "message", "assistant", "output"}:
             continue

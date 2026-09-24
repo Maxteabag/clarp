@@ -68,7 +68,7 @@ def _extract_user_text(content: Any) -> str:
     m = _USER_REQUEST_RE.search(content)
     text = (m.group(1) if m else content).strip()
     try:
-        from .codex_runner import strip_voice_preamble
+        from .voice_preamble import strip_voice_preamble
         text = strip_voice_preamble(text)
     except Exception:                                      # noqa: BLE001
         pass

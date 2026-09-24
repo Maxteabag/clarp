@@ -30,204 +30,54 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import re
 import shutil
 import subprocess
-import threading
-import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from . import agents as agents_db
-from . import settings_store
 from . import tts_queue
-from .config import persona_personality
-from .personalities import KEY_ENABLED as PERSONALITIES_ENABLED_KEY
 from .voice_markup import (  # noqa: F401 — spoken_for_tts remains re-exported
     spoken_chunks_for_tts,
     spoken_for_tts,
 )
 from .log import log, log_exception
-from .proc_util import attach_stderr_drain, stderr_text
+from .proc_util import stderr_text
 from .process_registry import ProcessRegistry, TurnHandle
-from .protocol import AgentState, SSEType, TurnSource
+from .protocol import AgentState
+from .runner_common import (
+    SPEAK_RE,
+    broadcast_transcript,
+    launch,
+    persist_live_text,
+    record_state,
+    register_handle,
+    speak,
+    start_drain,
+)
+from .voice_preamble import (  # noqa: F401 — re-exported for existing importers
+    _NATURAL_SPEECH,
+    _NO_INTERACTIVE_QUESTIONS,
+    _VOICE_INSTRUCTION,
+    _VOICE_PREAMBLE_HEAD,
+    _VOICE_PREAMBLE_SPLIT,
+    _narration_clause,
+    _preamble,
+    app_turn_instructions,
+    apply_voice_preamble,
+    persona_identity_instruction,
+    strip_voice_preamble,
+)
 
 
 CODEX_BIN = "codex"  # resolved from PATH; tests can monkeypatch.
 LIVE_TEXT_INTERVAL_SEC = 0.25
 
-# Same voice-gating convention as the Claude path: only text the agent
-# wraps in <speak>…</speak> is spoken; everything else is silent.
-_SPEAK_RE = re.compile(r"<speak>(.*?)</speak>", re.DOTALL | re.IGNORECASE)
-
-# Codex (unlike Claude) never receives the PWA's system reminders — Claude
-# gets those from the UserPromptSubmit hook, which Codex has no equivalent of.
-# So for PWA/native turns we prepend the instructions to the prompt ourselves.
-# The head + split sentinels let the history parser strip them back off so the
-# user's message renders cleanly.
-_VOICE_PREAMBLE_HEAD = "[voice-mode]"
-_VOICE_PREAMBLE_SPLIT = "\n\n--- user message ---\n"
-
-# Always-on for app-dispatched turns: CLI question UIs are unavailable,
-# while supporting Hosts can publish durable questions to the native inbox.
-_NO_INTERACTIVE_QUESTIONS = (
-    "You are connected through a phone/voice app. It cannot display CLI "
-    "interactive prompts, question tools, multiple-choice pickers, or approval "
-    "dialogs. Never call AskUserQuestion, request_user_input, or similar CLI "
-    "popup tools; they will not render. For a material clarification, use the "
-    "clarp-decisions skill's documented clarp-agent-artifacts question helper "
-    "when the Host supports native questions. These durable Clarp artifacts "
-    "are answered in Updates or the conversation, not in a CLI popup. For "
-    "explicit authorization, use the skill's decision helper and wait for "
-    "approval. If native questions are unavailable, ask in ordinary text and "
-    "wait for the user's reply. Make routine implementation choices yourself "
-    "and continue independent work while awaiting a necessary answer. Never "
-    "self-resolve a question or approval; a preference or custom answer is "
-    "not blanket authorization."
-)
-
-# Added only for spoken turns: how the <speak> voice gating works.
-_VOICE_INSTRUCTION = (
-    "This reply is read aloud over text-to-speech: treat the spoken "
-    "<speak>...</speak> blocks like a phone call and the surrounding text like "
-    "the screen. Your VERY FIRST output — before any tool call, file read, or "
-    "silent thinking — must be a one-line <speak> acknowledgment (e.g. "
-    "<speak>On it — checking now.</speak>), because the user is hands-free and "
-    "hears only silence until you speak. "
-    "After that opening acknowledgment, STAY SILENT while you work: do NOT "
-    "narrate routine steps, progress, or each tool call. Most intermediate "
-    "steps should carry NO <speak> block at all. Only break the silence "
-    "mid-task when the user genuinely needs to hear it right then — a blocker, "
-    "an error, a decision that needs their input, or a question you must ask "
-    "before continuing. "
-    "When you finish, give ONE spoken final summary: say the outcome and "
-    "whatever they'd actually want in their ear, judged for listening — "
-    "selective, but not a vague headline. Leave out detail that only makes "
-    "sense on screen. "
-    "When that summary runs long, split it across consecutive <speak> blocks "
-    "of about a minute each rather than one long one: each block is "
-    "synthesized as its own clip, so the first starts playing while the rest "
-    "is still being written, and no single clip is long enough to be cut off "
-    "at a provider limit. "
-    "Put code, paths, commands, logs, tables, long lists, and detailed "
-    "evidence OUTSIDE the tags (shown but not spoken). Say it once: don't "
-    "restate your spoken text in the written part."
-)
-
-# Added for spoken turns: make the delivery sound human. Fillers are wrapped in
-# <vox>…</vox> so they're SPOKEN but stripped from the on-screen text; <break>
-# is honoured by the TTS engine and likewise hidden from display.
-_NATURAL_SPEECH = (
-    "Every spoken response should sound conversational, including confident "
-    "and simple answers. Use brief pauses such as <break time=\"350ms\"/> and "
-    "occasional fillers naturally throughout; do not reserve them for "
-    "uncertainty. Wrap EVERY filler in <vox>…</vox> so it is spoken yet never "
-    "shown on screen, e.g. "
-    "<vox>um</vox>, <vox>uh</vox>, <vox>hmm</vox>, <vox>like</vox>, "
-    "<vox>you know</vox>. Keep very short acknowledgments concise, but give "
-    "substantive spoken replies at least one natural conversational cue. Keep it tasteful "
-    "— a couple of pauses or fillers, never a stutter-fest; breaks around "
-    "300–450ms; spell fillers plainly (um/uh/hmm), never stretched out. These "
-    "cues live ONLY inside <speak>; the <vox> wraps and the tags are stripped "
-    "from the visible text automatically."
-)
-
-# Voice-markup normalization (display strip + TTS unwrap) lives in one place:
-# lib.voice_markup. spoken_for_tts is imported above and re-exported so existing
-# callers (agy_runner, transcript_streamer) keep importing it from here.
-
-
-def persona_identity_instruction(persona: str, session: str = "") -> str:
-    """The persona's name plus its personality text; nothing else.
-
-    Session ids reach hooks and skills through CLAUDE_PWA_SESSION, and installed
-    skills advertise themselves through their own descriptions, so neither
-    belongs in the prompt.
-    """
-    persona = (persona or "").strip()
-    session = (session or "").strip()
-    if not persona:
-        return ""
-    identity = f"You are {persona}."
-    custom_personality = ""
-    if session:
-        try:
-            from . import agents as agents_db
-            custom_personality = str(
-                (agents_db.get_by_session(session) or {}).get("personality") or ""
-            ).strip()
-        except Exception:
-            pass
-    personality = (
-        custom_personality or persona_personality(persona)
-        if settings_store.get_bool(PERSONALITIES_ENABLED_KEY, default=True)
-        else ""
-    )
-    if personality:
-        identity = f"{identity} {personality}"
-    return identity
-
-
-def _preamble(*, voice: bool, identity: str = "", session: str = "") -> str:
-    body = app_turn_instructions(voice=voice, session=session)
-    if identity:
-        body = f"{body}\n\n{identity}"
-    return f"{_VOICE_PREAMBLE_HEAD} {body}{_VOICE_PREAMBLE_SPLIT}"
-
-
-def app_turn_instructions(*, voice: bool, session: str = "") -> str:
-    """Application constraints for a turn, without user-message wrappers.
-
-    Persistent transports place this in app-server ``additionalContext`` so it
-    stays model-visible without polluting the user's transcript message.
-
-    `session` selects that agent's own narration level; omitting it keeps the
-    quiet default, so a caller with no session in hand is unchanged.
-    """
-    body = _NO_INTERACTIVE_QUESTIONS
-    if voice:
-        body = f"{body}\n\n{_VOICE_INSTRUCTION}\n\n{_NATURAL_SPEECH}"
-        narration = _narration_clause(session)
-        if narration:
-            body = f"{body}\n\n{narration}"
-    return body
-
-
-def _narration_clause(session: str) -> str:
-    """The agent's own how-much-to-narrate instruction, or "" when quiet."""
-    if not session:
-        return ""
-    try:
-        from . import agents as agents_db, voice_verbosity
-
-        level = (agents_db.get_by_session(session) or {}).get("voice_verbosity")
-        return voice_verbosity.narration_clause(level)
-    except Exception:  # noqa: BLE001 - a prompt tweak must never fail a turn
-        return ""
-
-
-def apply_voice_preamble(text: str, *, voice: bool = True,
-                         persona: str = "", session: str = "") -> str:
-    """Prepend the app-turn instruction block to a prompt.
-
-    The CLI-question restriction is always included (native question artifacts
-    remain available on supporting Hosts); the <speak> voice guidance is added
-    only when `voice` is True (a spoken turn). `voice` defaults True so existing callers keep the
-    full block."""
-    identity = persona_identity_instruction(persona, session)
-    if identity:
-        return _preamble(voice=voice, identity=identity, session=session) + text
-    return _preamble(voice=voice, session=session) + text
-
-
-def strip_voice_preamble(text: str) -> str:
-    """Inverse of apply_voice_preamble — recover the user's original message
-    for the history pane. A no-op if the preamble isn't present."""
-    if isinstance(text, str) and text.startswith(_VOICE_PREAMBLE_HEAD):
-        i = text.find(_VOICE_PREAMBLE_SPLIT)
-        if i != -1:
-            return text[i + len(_VOICE_PREAMBLE_SPLIT):]
-    return text
+# Same voice-gating convention as the Claude path: only text the agent wraps
+# in <speak>…</speak> is spoken. The regex and the app-turn preamble live in
+# shared modules; both stay importable from here (agy_runner,
+# codex_app_server, the transcript parsers and tests reach them this way).
+_SPEAK_RE = SPEAK_RE
 
 # Live registry: agent_id → list of running TurnHandle objects, so /stop
 # can interrupt in-flight turns. Mirrors clarp_runner._ACTIVE.
@@ -241,10 +91,6 @@ def active_handles(agent_id: str) -> list["TurnHandle"]:
 def interrupt(agent_id: str) -> int:
     """SIGTERM every in-flight codex turn for an agent. Idempotent."""
     return _REGISTRY.interrupt(agent_id, event="codexInterruptFail")
-
-
-def _register(agent_id: str, h: "TurnHandle") -> None:
-    _REGISTRY.register(agent_id, h)
 
 
 def _unregister(agent_id: str, h: "TurnHandle") -> None:
@@ -359,38 +205,18 @@ def spawn_turn(
     log("codexSpawn", f"cwd={cwd} {flag}={backend_session_id or '∅'} "
                       f"text_len={len(text)} trace={trace_id or '∅'} "
                       f"agent={agent_id or '∅'}")
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(cwd),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1, start_new_session=(os.name == "posix"),
-        env={**os.environ, "CLAUDE_PWA_SESSION": session},
-    )
-    attach_stderr_drain(proc)
-    handle = TurnHandle(
-        proc=proc, drain_thread=None,
-        process_group=proc.pid if os.name == "posix" else None)   # type: ignore[arg-type]
+    proc, handle = launch(cmd, cwd=cwd, session=session)
     runtime_agent_id = "" if isolated else agent_id
-    if runtime_agent_id:
-        _register(runtime_agent_id, handle)
-    drain = threading.Thread(
-        target=_drain_stdout,
-        kwargs=dict(
-            proc=proc, agent_id=runtime_agent_id, session=session,
-            trace_id=trace_id, handle=handle,
-            backend_session_id=backend_session_id,
-            on_session_init=on_session_init, on_result=on_result,
-            on_error=on_error, stream=stream,
-            enqueue=enqueue or tts_queue.enqueue,
-        ),
-        daemon=True,
-        name=f"codex-drain-{proc.pid}",
+    register_handle(_REGISTRY, runtime_agent_id, handle)
+    start_drain(
+        handle, _drain_stdout, backend="codex",
+        proc=proc, agent_id=runtime_agent_id, session=session,
+        trace_id=trace_id, handle=handle,
+        backend_session_id=backend_session_id,
+        on_session_init=on_session_init, on_result=on_result,
+        on_error=on_error, stream=stream,
+        enqueue=enqueue or tts_queue.enqueue,
     )
-    handle.drain_thread = drain
-    drain.start()
     return handle
 
 
@@ -750,33 +576,11 @@ def _persist_live_text(
     """Write one mutable assistant row at a bounded visual cadence."""
     if text.strip():
         st.pending_live_text = text.strip()
-    if not agent_id or not st.pending_live_text:
-        return
-    if st.pending_live_text == st.persisted_live_text:
-        return
-    now = time.monotonic()
-    if not force and st.last_live_write_at > 0:
-        if now - st.last_live_write_at < LIVE_TEXT_INTERVAL_SEC:
-            return
-    backend_session_id = (
-        st.live_backend_session_id
-        or agents_db.live_backend_session(agent_id)
-    )
-    if not backend_session_id:
-        return
-    try:
-        row = agents_db.upsert_live_assistant_message(
-            agent_id=agent_id,
-            backend_session_id=backend_session_id,
-            trace_id=trace_id,
-            text=st.pending_live_text,
-        )
-        st.last_live_write_at = now
-        st.persisted_live_text = st.pending_live_text
-        if row and row.get("changed"):
-            _broadcast_transcript(stream, agent_id, session)
-    except Exception as e:  # noqa: BLE001
-        log_exception("codexLivePartialFail", e, detail=trace_id or agent_id)
+    persist_live_text(
+        st, text=st.pending_live_text,
+        backend_session_id=st.live_backend_session_id,
+        agent_id=agent_id, session=session, trace_id=trace_id, stream=stream,
+        force=force, interval=LIVE_TEXT_INTERVAL_SEC, backend="codex")
 
 
 def _speak(text: str, st: _TurnState, *, agent_id: str, session: str,
@@ -786,66 +590,17 @@ def _speak(text: str, st: _TurnState, *, agent_id: str, session: str,
     De-duplicates against blocks already spoken this turn (the same region
     can appear in a streamed agent_message and again in task_complete's
     last_agent_message)."""
-    if not agents_db.latest_turn_synthesize_audio(agent_id):
-        return
-    blocks = [spoken_for_tts(m.group(1).strip()) for m in _SPEAK_RE.finditer(text)]
-    blocks = [b for b in blocks if b]
-    if not blocks:
-        return
-    a = agents_db.get_by_agent_id(agent_id)
-    if a is None:
-        return
-    persona = a.get("persona") or ""
-    voice_id = a.get("voice_id") or ""
-    focused = agents_db.get_focus()
-    trace = agents_db.get_trace(agent_id) or trace_id or None
-    for block in blocks:
-        key = block.strip()
-        if key in st.seen_speak:
-            continue
-        st.seen_speak.add(key)
-        for index, chunk in enumerate(spoken_chunks_for_tts(block)):
-            payload_text = chunk
-            # Persona prefix only the first chunk of each explicit speak block.
-            if (index == 0 and persona and agent_id != focused
-                    and not chunk.lower().startswith(persona.lower())):
-                payload_text = f"{persona} here. {chunk}"
-            try:
-                qid = enqueue(
-                    agent_id=agent_id,
-                    text=payload_text,
-                    voice_id=voice_id,
-                    session=session,
-                    source=TurnSource.PWA,
-                    trace_id=trace,
-                    synthesize_audio=True,
-                )
-                st.spoke_any = True
-                log("codexEnqueue", f"agent={agent_id} qid={qid} chars={len(chunk)}")
-            except Exception as e:                 # noqa: BLE001
-                log_exception("codexEnqueueFail", e, detail=str(agent_id))
+    if speak(text, st, agent_id=agent_id, session=session, trace_id=trace_id,
+             enqueue=enqueue, backend="codex"):
+        st.spoke_any = True
 
 
 def _record_state(agent_id: str, kind: str, detail: dict | None = None) -> None:
-    if not agent_id:
-        return
-    try:
-        agents_db.record_state(agent_id, kind, detail)
-    except Exception as e:                     # noqa: BLE001
-        log_exception("codexRecordStateFail", e, detail=f"{agent_id}:{kind}")
+    record_state(agent_id, kind, detail, backend="codex")
 
 
 def _broadcast_transcript(stream: Any, agent_id: str, session: str) -> None:
-    if stream is None or not agent_id:
-        return
-    try:
-        stream.broadcast({
-            "type": SSEType.TRANSCRIPT_UPDATED,
-            "agent_id": agent_id,
-            "session": session,
-        })
-    except Exception as e:                     # noqa: BLE001
-        log_exception("codexBroadcastFail", e, detail=agent_id)
+    broadcast_transcript(stream, agent_id, session, backend="codex")
 
 
 # ---- orchestrator routing -------------------------------------------------
