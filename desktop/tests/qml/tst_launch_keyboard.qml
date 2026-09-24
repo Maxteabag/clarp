@@ -69,7 +69,7 @@ TestCase {
             {tag:"claude-2-keys",keys:[Qt.Key_Left],backend:"claude"},
             {tag:"grok-2-keys",keys:[Qt.Key_Right],backend:"grok"},
             {tag:"agy-3-keys",keys:[Qt.Key_Right,Qt.Key_Right],backend:"agy"},
-            {tag:"opencode-wrap-3-keys",keys:[Qt.Key_Left,Qt.Key_Left],backend:"opencode"},
+            {tag:"deepseek-wrap-3-keys",keys:[Qt.Key_Left,Qt.Key_Left],backend:"deepseek"},
             {tag:"tab-selects-provider",keys:[Qt.Key_Tab],backend:"grok"},
             {tag:"down-selects-provider",keys:[Qt.Key_Down],backend:"grok"}
         ];
