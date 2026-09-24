@@ -64,13 +64,15 @@ from lib import health  # noqa: E402
 from lib import agents as agents_db  # noqa: E402
 from lib import backends  # noqa: E402
 from lib import backend_usage  # noqa: E402
-from lib import origins  # noqa: E402
 from lib import media_store  # noqa: E402
 from lib.calendar_request import CalendarRequestError, build_calendar_request  # noqa: E402
 from lib import trace as _trace  # noqa: E402
 from lib.http_utils import redact_query_secrets  # noqa: E402
 from lib.log import log, log_exception  # noqa: E402
 from lib.paths import RuntimePaths, _safe_session  # noqa: E402
+from lib.focus import current_focus_session  # noqa: E402
+from lib.send_request import SendRequest, SendRequestError  # noqa: E402
+from lib.transcription_pipeline import transcribe as run_transcription  # noqa: E402
 from lib.protocol import AgentState, ClientAction, SSEType  # noqa: E402
 from lib.orchestrator import (  # noqa: E402
     FINAL_FALLBACK,
@@ -92,8 +94,6 @@ from lib.personalities import (  # noqa: E402
 )
 from lib.conversation import load_conversation, session_cwd  # noqa: E402
 from lib.snapshot import build_agent_snapshot  # noqa: E402
-from lib.stt import (STTBusyError, STTModelLoadingError,
-                     STTUnknownModelError)  # noqa: E402
 from lib.timing import SERVER_TIMING  # noqa: E402
 from lib.transcript_log import find_latest_jsonl, parse_turns  # noqa: E402
 from lib.turn_dispatch import DispatchError, TurnDispatchService  # noqa: E402
@@ -113,6 +113,12 @@ def _runtime_paths() -> RuntimePaths:
 
 def _truthy_header(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Serializes read-decide-swap of ctx.stt in _activate_transcription_if_default.
+# Request threads never take it: the transcription pipeline reads ctx.stt once
+# per request, so a swap mid-request cannot hand one utterance two engines.
+_STT_ACTIVATION_LOCK = threading.Lock()
 
 
 class ContextHTTPServer(ThreadingHTTPServer):
@@ -1646,6 +1652,10 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, body, "application/json")
 
     def _activate_transcription_if_default(self, installed_id: str) -> None:
+        with _STT_ACTIVATION_LOCK:
+            self._activate_transcription_if_default_locked(installed_id)
+
+    def _activate_transcription_if_default_locked(self, installed_id: str) -> None:
         # Deliberately late-bound: tests monkeypatch lib.config.load, so the
         # module-level load_config alias would bypass the patch.
         from lib.config import load as load_config
@@ -4659,8 +4669,9 @@ class Handler(BaseHTTPRequestHandler):
         agent = agents_db.get_by_session(session)
         if not agent:
             return self._json_error(404, "no such session")
-        # Persist focus in the DB and in the small focus-state file read by
-        # audio routing.
+        # Persist focus in the DB (what transcribe, upload and the herald read
+        # via lib.focus) and mirror it into the small focus-state file kept for
+        # anything outside this process.
         herald = getattr(self.ctx, "herald", None)
         if agent and herald is not None:
             try:
@@ -4701,163 +4712,135 @@ class Handler(BaseHTTPRequestHandler):
             return
         if data is None:
             return self._send(400, b"bad json")
-        text = (data.get("text") or "").strip()
-        session = (data.get("session") or self.ctx.default_session).strip() or self.ctx.default_session
-        trace_id = (data.get("trace_id") or "").strip() or _trace.new_id()
-        self._trace_id = trace_id
-        # Stable client-authored message id (idempotency key). The client keys
-        # its optimistic bubble by it; we store the durable user row under it so
-        # the two match by identity. A client that sends none gets the trace id.
-        client_msg_id = (data.get("client_msg_id") or "").strip() or trace_id
-        transcription_id = (data.get("transcription_id") or "").strip()
-        # Voice timeline identity for this turn: an explicit utterance id, else
-        # the transcription job id the client already sends.
-        voice_utterance_id = ((data.get("utterance_id") or "").strip()
-                              or transcription_id)[:128]
-        if transcription_id:
-            from lib import transcription_results
-            try:
-                transcription_id = transcription_results.normalize_job_id(
-                    transcription_id)
-            except ValueError as e:
-                return self._json_error(400, str(e))
-        synthesize_audio_raw = data.get("synthesize_audio", None)
-        hands_free = data.get("hands_free", False) is True
-        unheard_audio_sessions_raw = data.get("unheard_audio_sessions") or []
-        unheard_audio_sessions = tuple(dict.fromkeys(
-            str(value).strip()
-            for value in unheard_audio_sessions_raw[:64]
-            if isinstance(value, str) and str(value).strip()
-        )) if isinstance(unheard_audio_sessions_raw, list) else ()
-        orchestrator_fallback = (
-            getattr(self, "_orchestrator_fallback_request", False)
-            or data.get("orchestrator_fallback", False) is True
-        )
-        queue_if_busy = data.get("queue_if_busy", False) is True
-        # Only always-on hands-free dictation gets routed (orchestrator / spoken
-        # name). Tap-to-record and typed text (hands_free=false) always go
-        # straight to the agent the client has open — no routing, no exceptions.
-        force_session = (data.get("force_session", False) is True) or (not hands_free)
-        # Sender identity: when another agent prompts this one, `sender` names
-        # it (session or agent_id). The message is then stamped origin=agent so
-        # the client renders it with the sender's avatar instead of as the user.
-        sender_raw = (data.get("sender") or "").strip()
-        sender_agent_id = ""
-        if sender_raw:
-            sender = (agents_db.get_by_session(sender_raw)
-                      or agents_db.get_by_agent_id(sender_raw))
-            if sender:
-                sender_agent_id = sender["agent_id"]
-        origin = (data.get("origin") or "").strip().lower()
-        if origin not in origins.CLIENT_SETTABLE_ORIGINS:
-            origin = "agent" if sender_agent_id else "user"
-        if synthesize_audio_raw is None:
-            synthesize_audio = origin == "user"
-        else:
-            synthesize_audio = (
-                synthesize_audio_raw is not False
-                if origin == "user"
-                else synthesize_audio_raw is True
+        try:
+            req = SendRequest.from_payload(
+                data,
+                default_session=self.ctx.default_session,
+                trace_id_factory=_trace.new_id,
+                authenticated=bool(
+                    getattr(self, "_request_auth_validated", False)
+                    and (getattr(self.ctx, "auth_token", "") or "")
+                ),
+                orchestrator_fallback=getattr(
+                    self, "_orchestrator_fallback_request", False),
             )
-        from lib import prompt_admissions
-        prompt_admission = prompt_admissions.create(
-            authenticated_at_admission=bool(
-                getattr(self, "_request_auth_validated", False)
-                and (getattr(self.ctx, "auth_token", "") or "")
-            ),
-            origin=origin,
-            sender_agent_id=sender_agent_id,
-            channel="voice" if transcription_id else "chat",
-            observed_at=db.now_ms(),
-            client_admission_id=client_msg_id,
-            trace_id=trace_id,
-            original_text=text,
+        except SendRequestError as e:
+            return self._send_request_error(e)
+        self._trace_id = req.trace_id
+        # The admission row is filed before the empty-text refusal so a
+        # rejected send is still accounted for.
+        prompt_admission = req.admit()
+        try:
+            req.require_text()
+        except SendRequestError as e:
+            return self._send_request_error(e)
+        if not req.force_session:
+            handled = self._send_via_orchestrator(req, prompt_admission)
+            if handled:
+                return
+        self._send_direct(req, prompt_admission)
+
+    def _send_request_error(self, e: SendRequestError) -> None:
+        if e.trace_id:
+            self._trace_id = e.trace_id
+        if e.json_body:
+            return self._json_error(e.status, str(e))
+        return self._send(e.status, str(e).encode())
+
+    def _send_via_orchestrator(self, req: SendRequest, prompt_admission) -> bool:
+        """Hands-free routing. Returns True when a reply was written; False
+        means the orchestrator declined and the caller dispatches directly."""
+        from lib import transcription_results
+        orchestrated = OrchestratorService(self.ctx).handle_send(
+            text=req.text,
+            requested_session=req.session,
+            trace_id=req.trace_id,
+            prompt_admission=prompt_admission,
+            hands_free=req.hands_free,
+            synthesize_audio=req.synthesize_audio,
+            unheard_audio_sessions=req.unheard_audio_sessions,
+            dispatch=TurnDispatchService(self.ctx).dispatch,
+            fallback_request=req.orchestrator_fallback,
         )
-        if not text:
-            return self._send(400, b"empty text")
-        if not force_session:
-            orchestrated = OrchestratorService(self.ctx).handle_send(
-                text=text,
-                requested_session=session,
-                trace_id=trace_id,
-                prompt_admission=prompt_admission,
-                hands_free=hands_free,
-                synthesize_audio=synthesize_audio,
-                unheard_audio_sessions=unheard_audio_sessions,
-                dispatch=TurnDispatchService(self.ctx).dispatch,
-                fallback_request=orchestrator_fallback,
-            )
-            if orchestrated is None and orchestrator_fallback:
-                body = {
-                    "ok": True,
-                    "session": "",
-                    "dispatch": "",
-                    "trace_id": trace_id,
-                    "orchestrator": {
-                        "action": "disabled",
-                        "decision_id": None,
-                        "decision": None,
-                    },
-                }
-                if transcription_id:
-                    transcription_results.delete(transcription_id)
-                return self._json_ok(body)
-            if orchestrated is not None and (
-                orchestrated.action != FINAL_FALLBACK or orchestrator_fallback
-            ):
-                status = orchestrated.status
-                body = {
-                    "ok": orchestrated.ok,
-                    "session": orchestrated.session,
-                    "dispatch": orchestrated.dispatch,
-                    "trace_id": trace_id,
-                    "orchestrator": {
-                        "action": orchestrated.action,
-                        "decision_id": orchestrated.decision_id,
-                        "decision": orchestrated.decision,
-                    },
-                }
-                if orchestrated.error:
-                    body["error"] = orchestrated.error
-                if orchestrated.ok and transcription_id:
-                    transcription_results.delete(transcription_id)
-                if orchestrated.ok and voice_utterance_id:
-                    self._record_voice(
-                        "send", session=orchestrated.session or None,
-                        trace_id=trace_id, utterance_id=voice_utterance_id,
-                        text=text, detail={"orchestrator": orchestrated.action,
-                                           "dispatch": orchestrated.dispatch,
-                                           "client_msg_id": client_msg_id})
-                return self._json(status, body)
+        if orchestrated is None and req.orchestrator_fallback:
+            body = {
+                "ok": True,
+                "session": "",
+                "dispatch": "",
+                "trace_id": req.trace_id,
+                "orchestrator": {
+                    "action": "disabled",
+                    "decision_id": None,
+                    "decision": None,
+                },
+            }
+            if req.transcription_id:
+                transcription_results.delete(req.transcription_id)
+            self._json_ok(body)
+            return True
+        if orchestrated is None or (
+            orchestrated.action == FINAL_FALLBACK and not req.orchestrator_fallback
+        ):
+            return False
+        status = orchestrated.status
+        body = {
+            "ok": orchestrated.ok,
+            "session": orchestrated.session,
+            "dispatch": orchestrated.dispatch,
+            "trace_id": req.trace_id,
+            "orchestrator": {
+                "action": orchestrated.action,
+                "decision_id": orchestrated.decision_id,
+                "decision": orchestrated.decision,
+            },
+        }
+        if orchestrated.error:
+            body["error"] = orchestrated.error
+        if orchestrated.ok and req.transcription_id:
+            transcription_results.delete(req.transcription_id)
+        if orchestrated.ok and req.voice_utterance_id:
+            self._record_voice(
+                "send", session=orchestrated.session or None,
+                trace_id=req.trace_id, utterance_id=req.voice_utterance_id,
+                text=req.text, detail={"orchestrator": orchestrated.action,
+                                       "dispatch": orchestrated.dispatch,
+                                       "client_msg_id": req.client_msg_id})
+        self._json(status, body)
+        return True
+
+    def _send_direct(self, req: SendRequest, prompt_admission) -> None:
+        from lib import transcription_results
         try:
             result = TurnDispatchService(self.ctx).dispatch(
-                text=text, requested_session=session, trace_id=trace_id,
-                synthesize_audio=synthesize_audio,
-                forced_session=session if force_session else "",
-                client_msg_id=client_msg_id,
-                origin=origin, sender_agent_id=sender_agent_id,
+                text=req.text, requested_session=req.session,
+                trace_id=req.trace_id,
+                synthesize_audio=req.synthesize_audio,
+                forced_session=req.session if req.force_session else "",
+                client_msg_id=req.client_msg_id,
+                origin=req.origin, sender_agent_id=req.sender_agent_id,
                 prompt_admission=prompt_admission,
-                queue_if_busy=queue_if_busy,
-                unheard_audio_sessions=unheard_audio_sessions,
+                queue_if_busy=req.queue_if_busy,
+                unheard_audio_sessions=req.unheard_audio_sessions,
             )
         except DispatchError as e:
             return self._send(e.status, str(e).encode(), "text/plain")
-        if transcription_id:
-            transcription_results.delete(transcription_id)
+        if req.transcription_id:
+            transcription_results.delete(req.transcription_id)
         # File the timeline row before answering: a client that reads
         # /voice-events straight after its 200 must already see this turn.
-        if voice_utterance_id:
+        if req.voice_utterance_id:
             self._record_voice(
-                "send", session=result.session, trace_id=trace_id,
-                utterance_id=voice_utterance_id, text=text,
+                "send", session=result.session, trace_id=req.trace_id,
+                utterance_id=req.voice_utterance_id, text=req.text,
                 detail={"dispatch": result.backend, "queued": result.queued,
-                        "client_msg_id": client_msg_id, "hands_free": hands_free})
+                        "client_msg_id": req.client_msg_id,
+                        "hands_free": req.hands_free})
         self._json_ok({"ok": True, "session": result.session,
                        "dispatch": result.backend,
                        "queued": result.queued,
                        "queue_depth": result.queue_depth,
                        "queue_revision": result.queue_revision,
-                       "trace_id": trace_id})
+                       "trace_id": req.trace_id})
 
     def _handle_clip_ack(self):
         data = self._read_json()
@@ -4980,10 +4963,16 @@ class Handler(BaseHTTPRequestHandler):
                                    text=cached.get("text"),
                                    detail={"bytes": n, "content_type": ctype})
                 return self._json_ok(cached)
-            return self._transcribe_uncached(
-                audio_bytes, ctype, hands_free, requested_model,
-                transcription_id, fingerprint,
-                utterance_id=utterance_id, client_ts=client_ts)
+            outcome = run_transcription(
+                self.ctx, audio_bytes=audio_bytes, ctype=ctype,
+                hands_free=hands_free, requested_model=requested_model,
+                transcription_id=transcription_id, fingerprint=fingerprint,
+                utterance_id=utterance_id, client_ts=client_ts,
+                record_voice=self._record_voice,
+                spawn_voice_metrics=_spawn_voice_metrics)
+            if outcome.trace_id:
+                self._trace_id = outcome.trace_id
+            return self._json(outcome.status, outcome.payload)
 
     def _record_voice(self, event: str, **fields) -> None:
         """Best-effort voice-timeline row; never fails the request."""
@@ -5002,10 +4991,7 @@ class Handler(BaseHTTPRequestHandler):
                            detail={"reasons": [reason], **detail})
 
     def _focused_session(self) -> str:
-        try:
-            return _runtime_paths().app_session.read_text().strip()
-        except OSError:
-            return ""
+        return current_focus_session()
 
     def _handle_voice_events_post(self):
         """Client half of the voice timeline (lib/voice_events.py).
@@ -5068,181 +5054,6 @@ class Handler(BaseHTTPRequestHandler):
             until=params["until"], limit=params["limit"] or 100)
         self._json_ok({"utterances": rows})
 
-    def _transcribe_uncached(self, audio_bytes, ctype, hands_free,
-                             requested_model, transcription_id, fingerprint,
-                             utterance_id: str = "", client_ts: int | None = None):
-        from lib import transcription_results
-
-        if getattr(self.ctx.stt, "available", True) is False:
-            return self._json_error(503, "server transcription disabled")
-        if not requested_model:
-            # A cloud engine chosen in settings stands in for the server
-            # default; an explicit header from the client still wins.
-            try:
-                from lib import stt_providers
-                engine = stt_providers.selected_engine()
-                if stt_providers.is_cloud_model(engine):
-                    requested_model = engine
-            except Exception as e:  # noqa: BLE001
-                log_exception("sttEngineSettingFail", e)
-        # Long recordings escalate to the stronger model configured for them.
-        # This deliberately overrides a client-pinned model too: the pin says
-        # which model handles an ordinary clip, and escalation is the whole
-        # point of the setting. An unreadable duration escalates nothing.
-        try:
-            from lib import audio_duration, stt_providers
-            clip_seconds = audio_duration.seconds(audio_bytes)
-            long_model = stt_providers.long_form_model_for(clip_seconds)
-            if long_model and long_model != requested_model:
-                log("sttLongFormRoute",
-                    f"{clip_seconds:.1f}s >= "
-                    f"{stt_providers.long_form_threshold_sec()}s → {long_model}"
-                    f" (was {requested_model or 'server-default'})")
-                requested_model = long_model
-        except Exception as e:  # noqa: BLE001 - escalation never blocks STT
-            log_exception("sttLongFormRouteFail", e)
-        if not requested_model and not self.ctx.stt.ready.is_set():
-            return self._json_error(503, "whisper model loading")
-        # The trace is minted before compiling so the vocab run, the
-        # transcribe event and everything downstream share one id.
-        trace_id = _trace.new_id()
-        self._trace_id = trace_id
-        try:
-            focus = _runtime_paths().app_session.read_text().strip()
-        except OSError:
-            focus = ""
-        vocab_run_id = 0
-        vocab_fn = getattr(self.ctx, "vocab_for_transcription", None)
-        if callable(vocab_fn):
-            try:
-                vocab = vocab_fn(delegated=hands_free, session=focus,
-                                 trace_id=trace_id,
-                                 requested_model=requested_model)
-                prompt, vocab_run_id = vocab.payload, vocab.run_id
-            except Exception as e:  # noqa: BLE001 - biasing never blocks STT
-                log_exception("vocabForTranscribeFail", e)
-                prompt = self.ctx.vocab_prompt(delegated=hands_free)
-        else:
-            prompt = self.ctx.vocab_prompt(delegated=hands_free)
-        started = time.monotonic()
-        try:
-            # Authoritative transcript: wait for the whisper lock rather than
-            # 429 — best-effort live-transcription partials must yield to it.
-            model_transcribe = getattr(self.ctx.stt, "transcribe_model_bytes", None)
-            if requested_model and callable(model_transcribe):
-                text, ends_terminal, _dur = model_transcribe(
-                    requested_model, audio_bytes, ctype, prompt, wait=10.0)
-            elif requested_model and requested_model != "server-default":
-                raise STTUnknownModelError(
-                    f"transcription model not installed: {requested_model}")
-            else:
-                text, ends_terminal, _dur = self.ctx.stt.transcribe_bytes(
-                    audio_bytes, ctype, prompt, wait=10.0)
-            health.mark_success("stt")
-        except STTUnknownModelError as e:
-            return self._json_error(400, str(e))
-        except STTModelLoadingError as e:
-            return self._json_error(503, str(e))
-        except STTBusyError:
-            health.mark_error("stt", "busy")
-            self._record_voice("error", utterance_id=utterance_id or None,
-                               client_ts=client_ts, detail={"message": "whisper busy"})
-            return self._json_error(429, "whisper busy")
-        except Exception as e:
-            health.mark_error("stt", e)
-            log_exception("transcribeFail", e)
-            self._record_voice("error", utterance_id=utterance_id or None,
-                               client_ts=client_ts,
-                               detail={"message": str(e)[:300], "stage": "stt"})
-            return self._json_error(500, str(e))
-        latency_ms = int((time.monotonic() - started) * 1000)
-        try:
-            from lib import heard_audio
-            heard_audio.retain(
-                _runtime_paths().cache_dir,
-                trace_id=trace_id, audio_bytes=audio_bytes, content_type=ctype,
-                session=focus, run_id=vocab_run_id, model=requested_model or "")
-        except Exception as e:  # noqa: BLE001 - diagnostics never block a turn
-            log_exception("heardAudioFail", e)
-        if vocab_run_id:
-            try:
-                from lib import vocab_store
-                vocab_store.update_run_result(
-                    vocab_run_id, transcript=text, latency_ms=latency_ms)
-            except Exception as e:  # noqa: BLE001
-                log_exception("vocabRunUpdateFail", e)
-
-        # Run the user's utterance against any pending heralds. Affirmatives
-        # with a name release that agent's held buffer; mentions / declines
-        # leave the buffer intact.
-        herald = getattr(self.ctx, "herald", None)
-        herald_consumed = False
-        # Deterministic herald grants/declines must run before LLM routing.
-        # If the orchestrator is unavailable, this preserves the old
-        # regex/fuzzy "Yes, Bella" fallback instead of dispatching the grant
-        # phrase as an agent message.
-        skip_herald = False
-        if herald is not None and text:
-            try:
-                decision = herald.on_user_text(text)
-                # A grant/decline ("Yes Domi?") is a COMMAND, not a prompt —
-                # it releases (or holds) the agent's buffer. Mark it consumed so
-                # we don't also dispatch it to the agent (which made Domi reply
-                # to "Yes Domi?" itself).
-                if decision and (decision.granted or decision.declined):
-                    herald_consumed = True
-            except Exception as e:
-                log_exception("heraldIntentFail", e)
-
-        # The client echoes the trace id back in subsequent /send + /clog
-        # calls so the whole turn — STT, send, hook, Claude reply, TTS,
-        # broadcast, play — carries one queryable id.
-        if focus:
-            agents_db.set_trace_for_session(focus, trace_id)
-        eventlog.emit("server", "transcribe", trace_id=trace_id, session=focus or None,
-                      duration_ms=int(_dur * 1000) if _dur else None,
-                      detail={"text": text, "ends_terminal": ends_terminal,
-                              "herald_consumed": herald_consumed,
-                              "hands_free": hands_free,
-                              "orchestrator_skip_herald": skip_herald,
-                              "vocab_run_id": vocab_run_id or None,
-                              "stt_latency_ms": latency_ms})
-        self._record_voice(
-            "transcript", session=focus or self.ctx.default_session or None,
-            trace_id=trace_id,
-            utterance_id=utterance_id or None, client_ts=client_ts,
-            duration_ms=round(_dur * 1000, 1) if _dur else None, text=text,
-            detail={"bytes": len(audio_bytes), "content_type": ctype,
-                    "hands_free": hands_free, "ends_terminal": ends_terminal,
-                    "herald_consumed": herald_consumed,
-                    "model": requested_model or "server-default"})
-        _spawn_voice_metrics(audio_bytes, ctype,
-                             session=focus or self.ctx.default_session or None,
-                             trace_id=trace_id, utterance_id=utterance_id or None,
-                             transcript=text)
-
-        # Blank the text when the utterance was a herald grant/decline so the
-        # client's empty-text guard skips dispatch — it released the buffer,
-        # it isn't a message for the agent.
-        reply_text = "" if herald_consumed else text
-        response = {"text": reply_text, "ends_terminal": ends_terminal,
-                    "trace_id": trace_id,
-                    "herald_consumed": herald_consumed,
-                    "hands_free": hands_free,
-                    "orchestrator_skip_herald": skip_herald,
-                    "vocab_run_id": vocab_run_id or None,
-                    "cached": False}
-        try:
-            transcription_results.store(
-                transcription_id, fingerprint, response)
-        except transcription_results.JobIDCollisionError as e:
-            return self._json_error(409, str(e))
-        except Exception as e:
-            log_exception("transcriptionResultStoreFail", e)
-            return self._json_error(500, "transcription result persistence failed")
-        body = json.dumps(response).encode()
-        self._send(200, body, "application/json")
-
     def _handle_upload(self):
         """Receive a raw file body from a client (e.g. an image picked on the
         phone) and save it under this server's per-session uploads dir. Returns
@@ -5267,10 +5078,7 @@ class Handler(BaseHTTPRequestHandler):
         # API uses.
         session = (self.headers.get("X-Session") or "").strip()
         if not session:
-            try:
-                session = _runtime_paths().app_session.read_text().strip()
-            except OSError:
-                session = ""
+            session = current_focus_session()
         if not session:
             session = self.ctx.default_session
 
