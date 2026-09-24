@@ -138,3 +138,19 @@ def test_batched_clocks_follow_repeated_idles_and_stops():
         assert {key: states[aid][key] for key in ('kind', 'ts', 'detail')} == agents.latest_state(aid)
         assert (states[aid]['turn_started_at'] or 0) == agents.turn_started_at(aid)
         assert (states[aid]['last_turn_end'] or 0) == agents.last_turn_end(aid)
+
+
+def test_dashboard_message_ranking_walks_the_activity_index():
+    """The preview query must keep using the expression index; a drift in
+    _message_activity_sql or the ORDER BY would silently fall back to a scan."""
+    aid = agents.create_agent(persona='Indexed', voice_id='', cwd='/tmp', session='indexed')
+    message_store.record_user_message(agent_id=aid, backend_session_id='c', client_msg_id='m', text='hi')
+    statements = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        message_store.dashboard_messages()
+    finally:
+        db.conn().set_trace_callback(None)
+    ranking = next(s for s in statements if 'WITH candidates AS' in s)
+    plan = ' '.join(row[3] for row in db.conn().execute('EXPLAIN QUERY PLAN ' + ranking))
+    assert 'idx_messages_dashboard_activity' in plan, plan

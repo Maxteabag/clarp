@@ -59,7 +59,7 @@ _CONN_LOCK = threading.Lock()
 _MIGRATED = False
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 90
+_SCHEMA_VERSION = 91
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
 _TRANSACTION_LOCK = threading.Lock()
@@ -527,6 +527,11 @@ CREATE INDEX idx_messages_agent_seq ON messages(agent_id, backend_session_id, se
 CREATE INDEX idx_messages_trace ON messages(trace_id) WHERE trace_id IS NOT NULL;
 CREATE INDEX idx_messages_agent_timestamp ON messages(agent_id, timestamp);
 CREATE INDEX idx_messages_agent_revision ON messages(agent_id, backend_session_id, revision);
+CREATE INDEX idx_messages_dashboard_activity
+    ON messages(agent_id,
+                COALESCE(CAST((julianday(timestamp) - 2440587.5) * 86400000 AS INTEGER), updated_at) DESC,
+                seq DESC, updated_at DESC)
+    WHERE COALESCE(text, '') != '' AND COALESCE(tool_name, '') = '';
 
 CREATE TABLE settings (
     key TEXT PRIMARY KEY,
@@ -1543,6 +1548,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             _migrate_to_v89(con)
         if version < 90:
             _migrate_to_v90(con)
+        if version < 91:
+            _migrate_to_v91(con)
 
         con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1823,6 +1830,24 @@ def _migrate_to_v79(con: sqlite3.Connection) -> None:
     for statement in _MODEL_FALLBACK_SCHEMA.split(";"):
         if statement.strip():
             con.execute(statement)
+
+
+def _migrate_to_v91(con: sqlite3.Connection) -> None:
+    """Expression index behind the dashboard message previews.
+
+    message_store.dashboard_messages ranks every agent's messages by their
+    semantic activity time (_message_activity_sql) on each snapshot. Without
+    this index SQLite evaluated julianday() over the whole table twice per
+    snapshot; with it the window walks the index. The expression here must
+    stay textually identical to _message_activity_sql and the ORDER BY.
+    """
+    con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_messages_dashboard_activity
+            ON messages(agent_id,
+                        COALESCE(CAST((julianday(timestamp) - 2440587.5) * 86400000 AS INTEGER), updated_at) DESC,
+                        seq DESC, updated_at DESC)
+            WHERE COALESCE(text, '') != '' AND COALESCE(tool_name, '') = ''
+    """)
 
 
 def _migrate_to_v90(con: sqlite3.Connection) -> None:
