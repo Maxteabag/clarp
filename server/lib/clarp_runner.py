@@ -25,21 +25,20 @@ the Popen, and callbacks fire from the drainer thread.
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import shutil
 import subprocess
-import threading
 from typing import Callable, Optional
 
 from . import agents as agents_db
 from . import config as _config
 from . import provider_capabilities
-from .codex_runner import persona_identity_instruction
 from .log import log, log_exception
-from .proc_util import attach_stderr_drain, stderr_text
+from .proc_util import stderr_text
 from .process_registry import ProcessRegistry, TurnHandle
 from .protocol import SSEType
+from .runner_common import launch, register_handle, start_drain
+from .voice_preamble import persona_identity_instruction
 
 
 DEFAULT_CLAUDE_BIN = "claude"
@@ -81,10 +80,6 @@ def interrupt(agent_id: str) -> int:
     of processes signalled. Idempotent — already-finished handles are
     silently skipped."""
     return _REGISTRY.interrupt(agent_id, event="clarpInterruptFail")
-
-
-def _register(agent_id: str, h: "TurnHandle") -> None:
-    _REGISTRY.register(agent_id, h)
 
 
 def _unregister(agent_id: str, h: "TurnHandle") -> None:
@@ -254,22 +249,14 @@ def spawn_turn(
         "message": {"role": "user", "content": [{"type": "text", "text": text}]},
     })
     env_session = session if hook_session is None else hook_session
-    env = {**os.environ, "CLAUDE_PWA_SESSION": env_session}
     flag = "new" if is_new_session else ("resume" if backend_session_id else "∅")
     log("clarpSpawn", f"cwd={cwd} {flag}={backend_session_id or '∅'} "
                      f"text_len={len(text)} trace={trace_id or '∅'} "
                      f"session={session or '∅'}")
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(cwd),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1, start_new_session=(os.name == "posix"),
-        env=env,
-    )
-    attach_stderr_drain(proc)
+    # stdin is a pipe here (not DEVNULL like the other runners): the prompt
+    # travels as a stream-json user message, written right below.
+    proc, handle = launch(cmd, cwd=cwd, session=env_session,
+                          stdin=subprocess.PIPE)
     # Hand the CLI the single user message, then close stdin so it sees EOF and
     # runs exactly one turn. Guard the write: if clarp died on spawn the pipe
     # is already broken, and the drainer will surface the non-zero exit.
@@ -280,20 +267,14 @@ def spawn_turn(
             proc.stdin.close()
     except (BrokenPipeError, OSError) as e:
         log_exception("clarpStdinWriteFail", e, detail=trace_id)
-    handle = TurnHandle(
-        proc=proc, drain_thread=None,
-        process_group=proc.pid if os.name == "posix" else None)   # type: ignore[arg-type]
-    if agent_id and not isolated:
-        _register(agent_id, handle)
-    drain = threading.Thread(
-        target=_drain_stdout,
-        args=(proc, on_session_init, on_result, on_error, trace_id,
-              agent_id, handle, session, backend_session_id, stream, isolated),
-        daemon=True,
-        name=f"clarp-drain-{proc.pid}",
+    register_handle(_REGISTRY, "" if isolated else agent_id, handle)
+    start_drain(
+        handle, _drain_stdout, backend="clarp",
+        proc=proc, on_session_init=on_session_init, on_result=on_result,
+        on_error=on_error, trace_id=trace_id, agent_id=agent_id,
+        handle=handle, session=session, backend_session_id=backend_session_id,
+        stream=stream, isolated=isolated,
     )
-    handle.drain_thread = drain
-    drain.start()
     return handle
 
 

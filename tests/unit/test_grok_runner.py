@@ -17,7 +17,7 @@ _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
 from lib import agents as agents_db  # noqa: E402
-from lib import grok_runner  # noqa: E402
+from lib import grok_runner, runner_common  # noqa: E402
 from lib import grok_transcript  # noqa: E402
 from lib.protocol import AgentState, SSEType  # noqa: E402
 
@@ -180,7 +180,7 @@ def test_broadcast_failure_is_logged_not_raised(monkeypatch):
             raise RuntimeError("boom")
 
     logged: list[str] = []
-    monkeypatch.setattr(grok_runner, "log_exception",
+    monkeypatch.setattr(runner_common, "log_exception",
                         lambda name, *a, **k: logged.append(name))
     grok_runner._broadcast(Broken(), "agent-1", "sess-1")
     assert logged == ["grokBroadcastFail"]

@@ -194,7 +194,7 @@ DEFAULT_CARTESIA_VOICES: dict[str, str] = {
 }
 
 # Per-persona personality, keyed by name. Appended to the agent's identity
-# system prompt (see codex_runner.persona_identity_instruction) so every agent
+# system prompt (see voice_preamble.persona_identity_instruction) so every agent
 # responds in character — across both the Claude and codex backends, with no
 # DB column or client change. Flavour/tone only: these never override the app's
 # operating rules (no-interactive-questions, the <speak> voice format, safety).
