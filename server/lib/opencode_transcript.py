@@ -13,7 +13,7 @@ import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
-from .codex_runner import strip_voice_preamble
+from .voice_preamble import strip_voice_preamble
 from .log import log_exception
 from .transcript_log import summarise_tool
 

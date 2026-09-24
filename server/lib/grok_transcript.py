@@ -8,7 +8,7 @@ import re
 import urllib.parse
 from typing import Any
 
-from .codex_runner import strip_voice_preamble
+from .voice_preamble import strip_voice_preamble
 from .transcript_log import summarise_tool, truncate
 
 
