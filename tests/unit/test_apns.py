@@ -819,3 +819,118 @@ def test_send_locks_do_not_accumulate_per_session():
     del held
     gc.collect()
     assert len(apns._send_locks) == 0
+
+
+# --------------------------------------------------------------------------
+# decision requests
+# --------------------------------------------------------------------------
+def test_decision_payload_carries_question_and_deep_link_fields():
+    p = apns.decision_payload(
+        "Nadia", "nadia", "Deploy the CPU fix?", "Should I deploy now?",
+        decision_id="d1", artifact_id="a1", server_instance_id="server-a")
+    assert p["aps"]["alert"] == {
+        "title": "Nadia", "subtitle": "Deploy the CPU fix?", "body": "Should I deploy now?"}
+    assert p["aps"]["thread-id"] == "nadia"
+    assert p["aps"]["interruption-level"] == "active"
+    assert p["kind"] == "user-notification"
+    assert p["reason"] == "decision"
+    assert p["decision_id"] == "d1" and p["artifact_id"] == "a1"
+    assert p["notification_id"] == "decision-d1"
+    assert p["server_instance_id"] == "server-a"
+    # A question that repeats the title is not shown twice.
+    same = apns.decision_payload("Nadia", "nadia", "Deploy?", "Deploy?",
+                                 decision_id="d2", artifact_id="a2")
+    assert "subtitle" not in same["aps"]["alert"]
+
+
+def test_blocking_or_time_sensitive_decisions_interrupt():
+    p = apns.decision_payload("Nadia", "nadia", "Deploy?", "Now?",
+                              decision_id="d1", artifact_id="a1", time_sensitive=True)
+    assert p["aps"]["interruption-level"] == "time-sensitive"
+    assert apns.decision_needs_interruption({"blocks_progress": True})
+    assert apns.decision_needs_interruption({"urgency": "time_sensitive"})
+    assert not apns.decision_needs_interruption({"blocks_progress": False, "urgency": "normal"})
+
+
+def _decision_row(agent_id="a1", session="nadia", persona="Nadia", **decision):
+    base = {"decision_id": "d1", "status": "pending", "question": "Should I deploy now?",
+            "blocks_progress": False, "urgency": "normal"}
+    base.update(decision)
+    return {"artifact_id": "art1", "agent_id": agent_id, "session": session,
+            "agent_name": persona, "title": "Deploy the CPU fix?", "summary": base["question"],
+            "decision": base}
+
+
+def test_send_decision_created_pushes_to_every_live_token(tmp_path, monkeypatch):
+    from lib import db, desktop_presence
+    _apns_config(tmp_path)
+    apns.reset_jwt_cache()
+    db.conn().execute(
+        "INSERT INTO agents (agent_id, persona, voice_id, cwd, session, created_at)"
+        " VALUES (?,?,?,?,?,?)", ("a1", "Nadia", "v", "/tmp", "nadia", db.now_ms()))
+    apns.register_token("goodtoken", session="nadia")
+    apns.register_token("deadtoken", session="nadia", platform="mac")
+    monkeypatch.setattr(desktop_presence, "active", lambda: False)
+    calls: list = []
+    import httpx
+    monkeypatch.setattr(httpx, "Client", lambda *a, **k: _FakeClient(
+        {"goodtoken": _FakeResp(200), "deadtoken": _FakeResp(410, "Unregistered")}, calls))
+
+    summary = apns.send_decision_created(_decision_row(blocks_progress=True))
+    assert summary == {"enabled": True, "sent": 1, "failed": 0, "disabled": 1}
+    assert {c["token"] for c in calls} == {"goodtoken", "deadtoken"}
+    assert {c["headers"]["apns-collapse-id"] for c in calls} == {"decision-d1"}
+    import json as _json
+    body = _json.loads(calls[0]["content"])
+    assert body["aps"]["alert"]["body"] == "Should I deploy now?"
+    assert body["aps"]["interruption-level"] == "time-sensitive"
+    assert body["session"] == "nadia" and body["decision_id"] == "d1"
+    assert {t["token"] for t in apns.active_tokens()} == {"goodtoken"}
+
+
+def test_send_decision_created_respects_agent_mute_and_desktop(tmp_path, monkeypatch):
+    from lib import agents as agents_db, db, desktop_presence
+    _apns_config(tmp_path)
+    apns.reset_jwt_cache()
+    db.conn().execute(
+        "INSERT INTO agents (agent_id, persona, voice_id, cwd, session, created_at, muted)"
+        " VALUES (?,?,?,?,?,?,1)", ("a1", "Nadia", "v", "/tmp", "nadia", db.now_ms()))
+    apns.register_token("goodtoken", session="nadia")
+    monkeypatch.setattr(desktop_presence, "active", lambda: False)
+    calls: list = []
+    import httpx
+    monkeypatch.setattr(httpx, "Client", lambda *a, **k: _FakeClient({"goodtoken": _FakeResp(200)}, calls))
+    assert apns.send_decision_created(_decision_row())["reason"] == "muted"
+    assert calls == []
+    agents_db.update_agent("a1", muted=False) if hasattr(agents_db, "update_agent") else \
+        db.conn().execute("UPDATE agents SET muted=0 WHERE agent_id='a1'")
+    monkeypatch.setattr(desktop_presence, "active", lambda: True)
+    assert apns.send_decision_created(_decision_row())["reason"] == "desktop-active"
+    assert calls == []
+    monkeypatch.setattr(desktop_presence, "active", lambda: False)
+    assert apns.send_decision_created(_decision_row(status="answered"))["sent"] == 0
+    assert apns.send_decision_created(_decision_row())["sent"] == 1
+
+
+def test_create_decision_hands_the_row_to_the_push_hook(tmp_path, monkeypatch):
+    from lib import agents, artifacts
+    agents.create_agent(persona="Nadia", voice_id="V", cwd=str(tmp_path), session="nadia")
+    seen: list = []
+    monkeypatch.setattr(apns, "on_decision_created", lambda row: seen.append(row))
+    created = artifacts.create_decision(
+        session="nadia", title="Deploy the CPU fix?", question="Should I deploy now?",
+        response_type="single_choice", options=[{"id": "now", "label": "Deploy now"}, {"id": "wait", "label": "Wait"}])
+    assert [row["artifact_id"] for row in seen] == [created["artifact_id"]]
+    assert seen[0]["decision"]["status"] == "pending"
+    assert seen[0]["agent_name"] == "Nadia"
+
+
+def test_push_hook_failure_does_not_undo_the_request(tmp_path, monkeypatch):
+    from lib import agents, artifacts
+    agents.create_agent(persona="Nadia", voice_id="V", cwd=str(tmp_path), session="nadia")
+
+    def boom(row):
+        raise RuntimeError("apns exploded")
+    monkeypatch.setattr(apns, "on_decision_created", boom)
+    created = artifacts.create_decision(session="nadia", title="Deploy?", question="Now?")
+    assert artifacts.get(created["artifact_id"])["decision"]["status"] == "pending"

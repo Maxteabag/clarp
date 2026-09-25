@@ -538,9 +538,18 @@ def create_decision(*, session: str, title: str, question: str, context: str = "
              allow_custom_text, recommended_option_id, blocks_progress, priority_reason,
              urgency, response_effort, deadline_at))
         con.execute("COMMIT")
-        return get(artifact["artifact_id"]) or {}
     except BaseException:
         con.execute("ROLLBACK"); raise
+    row = get(artifact["artifact_id"]) or {}
+    # The user learns about a pending request from this push; turn-end pushes
+    # never fire for an agent that asks and keeps working. Delivery failures
+    # must not undo a committed request.
+    try:
+        from . import apns
+        apns.on_decision_created(row)
+    except Exception:  # noqa: BLE001
+        pass
+    return row
 
 
 def _answer(row, *, choice: Any, answer: Any) -> tuple[str, dict]:
