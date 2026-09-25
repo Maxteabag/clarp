@@ -178,3 +178,62 @@ def test_cancelling_a_stream_before_its_task_starts_releases_the_slot():
         await asyncio.sleep(0)
         assert not connector.streams
     asyncio.run(scenario())
+
+
+def test_lost_relay_session_is_logged_with_its_close_code_and_redialed_fast():
+    rows = []
+    states = []
+    async def scenario():
+        connections = [0]
+        second = asyncio.get_running_loop().create_future()
+        async def relay(ws):
+            connections[0] += 1
+            if connections[0] == 1:
+                # Park two phone streams on the session, then drop it like the Worker
+                # does when its Durable Object restarts.
+                await ws.send(jframe(1, 1, {'method': 'GET', 'path': '/events', 'headers': {}}))
+                await ws.send(frame(3, 1))
+                await ws.send(jframe(0x21, 2, {'path': '/terminal', 'headers': {}}))
+                await asyncio.sleep(0.1)
+                await ws.close(1011, 'error')
+            else:
+                second.set_result(asyncio.get_running_loop().time())
+                await ws.wait_closed()
+        # An upstream that accepts and never answers keeps both streams alive
+        # until the relay session drops.
+        holds = []
+        async def hold(reader, writer):
+            holds.append(asyncio.current_task())
+            try:
+                await asyncio.Event().wait()
+            finally:
+                writer.close()
+        silent = await asyncio.start_server(hold, '127.0.0.1', 0)
+        try:
+            async with serve(relay, '127.0.0.1', 0) as public:
+                c = Connector(f'ws://127.0.0.1:{public.sockets[0].getsockname()[1]}', 'host-test', 'test-secret',
+                              f'http://127.0.0.1:{silent.sockets[0].getsockname()[1]}', status=states.append,
+                              telemetry=lambda event, level, detail: rows.append((event, detail)))
+                started = asyncio.get_running_loop().time()
+                task = asyncio.create_task(c.start())
+                try:
+                    reconnected = await asyncio.wait_for(second, 4)
+                    assert reconnected - started < 1.5, 'redial after a lost live session should be near-immediate'
+                    await asyncio.sleep(0.1)
+                finally:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+        finally:
+            silent.close()
+            for held in holds:
+                held.cancel()
+            await asyncio.gather(*holds, return_exceptions=True)
+    asyncio.run(scenario())
+    lost = [detail for event, detail in rows if event == 'relayConnectionLost']
+    assert len(lost) == 1
+    assert (lost[0]['code'], lost[0]['reason']) == (1011, 'error')
+    assert lost[0]['session'] == 1 and lost[0]['session_age_s'] is not None
+    assert lost[0]['streams_torn_down'] == 2 and lost[0]['http_streams'] == 1 and lost[0]['ws_streams'] == 1
+    opened = [detail for event, detail in rows if event == 'relayConnectionOpened']
+    assert [d['session'] for d in opened] == [1, 2]
+    assert states[:4] == ['connecting', 'connected', 'reconnecting', 'connecting']

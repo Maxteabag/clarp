@@ -40,7 +40,8 @@ Provisioning accounts/Host keys at a hosted relay remains the operator's job;
 these commands do not create an anonymous public relay registration service.
 
 Inspect the connection with `clarp-admin network relay status`, or use
-`clarp-admin network status` to see both network modes. Disable the connector
+`clarp-admin network status` to see both network modes. Lost sessions are
+recorded with their close code; see [relay connection diagnostics](../relay-connection-diagnostics.md). Disable the connector
 with `clarp-admin network relay disable`. These operations preserve the primary
 network configuration and Tailscale Serve routes. `network use off` disables the
 managed relay too.
