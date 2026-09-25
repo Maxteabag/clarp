@@ -14,9 +14,11 @@ import logging
 import socket
 import struct
 import threading
+import time
 from urllib.parse import urlencode, urlsplit
 
 from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 REQ, REQ_BODY, REQ_END = 0x01, 0x02, 0x03
 RES_HEAD, RES_BODY, RES_END = 0x11, 0x12, 0x13
@@ -27,7 +29,66 @@ MAX_BODY = 64 * 1024 * 1024
 MAX_STREAMS = 64
 HOP = {'connection', 'keep-alive', 'transfer-encoding', 'te', 'trailer', 'upgrade',
        'proxy-connection', 'proxy-authorization', 'host', 'content-length'}
+# Reconnect schedule. A session that was established and then lost is retried
+# almost immediately (the relay is normally reachable again at once); repeated
+# failures without a successful connection back off exponentially to the cap.
+RECONNECT_FAST = 0.3
+RECONNECT_MIN = 1.0
+RECONNECT_MAX = 30.0
+# The Worker closes the previous host socket with 1012 "replaced" when another
+# connector logs in with the same host id. Racing it would only flap both.
+REPLACED_CLOSE = (1012, 'replaced')
+RECONNECT_REPLACED = 5.0
+STREAM_GONE_CODE = 1012
 log = logging.getLogger(__name__)
+
+
+def close_details(exc: BaseException | None) -> dict:
+    """Peer-visible facts about a lost relay session, safe to log.
+
+    Never includes str(exc): transport exceptions can carry the credential-
+    bearing connect URL. Close codes and reasons come from the peer or from the
+    websockets library and are bounded."""
+    detail: dict = {'error_type': type(exc).__name__ if exc is not None else None}
+    if isinstance(exc, ConnectionClosed):
+        rcvd, sent = exc.rcvd, exc.sent
+        # code is 1006 when the peer sent no close frame (TCP dropped, or our
+        # own keepalive timeout closed the socket first).
+        detail.update(code=rcvd.code if rcvd else 1006, reason=rcvd.reason[:120] if rcvd else '',
+                      rcvd_code=rcvd.code if rcvd else None,
+                      rcvd_reason=rcvd.reason[:120] if rcvd else None,
+                      sent_code=sent.code if sent else None,
+                      sent_reason=sent.reason[:120] if sent else None,
+                      rcvd_then_sent=exc.rcvd_then_sent)
+    elif isinstance(exc, InvalidStatus):
+        detail['http_status'] = exc.response.status_code
+    elif isinstance(exc, OSError) and exc.errno is not None:
+        detail['errno'] = exc.errno
+    return detail
+
+
+def reconnect_delay(previous: float | None, *, was_connected: bool, close: dict | None = None) -> float:
+    """Next sleep before redialing the relay.
+
+    previous is the delay used before this attempt (None on the first dial).
+    A lost live session redials after RECONNECT_FAST unless the Worker said
+    another connector replaced us; failed dials double from RECONNECT_MIN."""
+    if was_connected:
+        if close and (close.get('rcvd_code'), close.get('rcvd_reason')) == REPLACED_CLOSE:
+            return RECONNECT_REPLACED
+        return RECONNECT_FAST
+    if previous is None:
+        return RECONNECT_MIN
+    return min(max(previous * 2, RECONNECT_MIN), RECONNECT_MAX)
+
+
+def _emit_event(event: str, level: str, detail: dict) -> None:
+    """Lazy eventlog import; the connector must work without the server package."""
+    try:
+        from . import eventlog
+        eventlog.emit('relay', event, level=level, detail=detail)
+    except Exception:
+        pass
 
 
 def forward_request_headers(meta_headers: dict, local_netloc: str, body_len: int) -> dict:
@@ -88,7 +149,7 @@ class Stream:
 
 
 class Connector:
-    def __init__(self, relay: str, host_id: str, key: str, local: str, status=None):
+    def __init__(self, relay: str, host_id: str, key: str, local: str, status=None, telemetry=None):
         self.url = relay.rstrip('/') + '/connect?' + urlencode({'host': host_id, 'key': key})
         self.local = urlsplit(local)
         if self.local.scheme != 'http' or self.local.hostname not in {'127.0.0.1', '::1'}:
@@ -98,41 +159,77 @@ class Connector:
         self.generation = 0
         self._buffered_body = 0
         self.status = status or (lambda state: None)
+        self.telemetry = telemetry or _emit_event
+        self.last_loss: dict | None = None
 
     async def start(self):
         self._loop = asyncio.get_running_loop()
-        delay = 1
+        delay = None
+        disconnected_at = time.monotonic()
         try:
             while True:
                 self.status('connecting')
+                connected_at = None
+                torn_down = {'http': 0, 'ws': 0}
+                close: dict | None = None
                 try:
                     async with connect(self.url, max_size=1024 * 1024, ping_interval=25,
                                        ping_timeout=20, open_timeout=20) as ws:
                         self.generation += 1
                         self.out = asyncio.Queue(maxsize=64)
+                        connected_at = time.monotonic()
                         self.status('connected')
-                        delay = 1
+                        downtime = round((connected_at - disconnected_at) * 1000)
+                        log.info('relay connected (session %d, after %d ms)', self.generation, downtime)
+                        self._record('relayConnectionOpened', 'info',
+                                     {'session': self.generation, 'downtime_ms': downtime})
                         sender = asyncio.create_task(self._sender(ws))
                         pinger = asyncio.create_task(self._pinger(ws))
                         try:
                             async for message in ws:
                                 if isinstance(message, bytes):
                                     await self._dispatch(message)
+                            # The peer closed cleanly (1000/1001); recv() does not raise.
+                            close = close_details(ws.protocol.close_exc)
                         finally:
                             sender.cancel(); pinger.cancel()
-                            await self._teardown()
+                            torn_down = await self._teardown()
                             await asyncio.gather(sender, pinger, return_exceptions=True)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    # Exceptions can contain the credential-bearing connect URL.
-                    log.warning('relay connection lost (%s)', type(exc).__name__)
+                    close = close_details(exc)
+                disconnected_at = time.monotonic()
+                self._report_loss(close or {}, connected_at, disconnected_at, torn_down)
+                delay = reconnect_delay(delay, was_connected=connected_at is not None, close=close)
                 self.status('reconnecting')
                 await asyncio.sleep(delay)
-                delay = min(delay * 2, 30)
         finally:
             await self._teardown()
             self.status('stopped')
+
+    def _report_loss(self, close: dict, connected_at, lost_at, torn_down):
+        age = round(lost_at - connected_at, 1) if connected_at is not None else None
+        detail = {**close, 'session': self.generation if connected_at is not None else None,
+                  'session_age_s': age, 'streams_torn_down': torn_down['http'] + torn_down['ws'],
+                  'http_streams': torn_down['http'], 'ws_streams': torn_down['ws']}
+        self.last_loss = detail
+        if connected_at is None:
+            log.warning('relay connect failed (%s%s)', detail['error_type'],
+                        f" http={detail['http_status']}" if 'http_status' in detail else
+                        f" errno={detail['errno']}" if 'errno' in detail else '')
+        else:
+            log.warning('relay connection lost (%s code=%s reason=%r sent=%s age=%ss streams=%d)',
+                        detail['error_type'], detail.get('code'), detail.get('reason', ''),
+                        detail.get('sent_code'), age, detail['streams_torn_down'])
+        self._record('relayConnectionLost', 'warning', detail)
+
+    def _record(self, event, level, detail):
+        # Telemetry writes touch sqlite; keep them off the transport loop.
+        try:
+            self._loop.run_in_executor(None, self.telemetry, event, level, detail)
+        except Exception:
+            pass
 
     async def _sender(self, ws):
         while True:
@@ -145,14 +242,17 @@ class Connector:
             await asyncio.sleep(25)
             await ws.send('ping')
 
-    async def _teardown(self):
+    async def _teardown(self) -> dict:
         streams = list(self.streams.values())
+        counts = {'http': sum(1 for s in streams if s.is_http),
+                  'ws': sum(1 for s in streams if not s.is_http)}
         for stream in streams:
             stream.interrupt_http()
             if stream.task:
                 stream.task.cancel()
         await asyncio.gather(*(s.task for s in streams if s.task), return_exceptions=True)
         self.streams.clear()
+        return counts
 
     async def _send(self, stream, data):
         if not stream.cancelled.is_set() and stream.generation == self.generation:
@@ -216,6 +316,14 @@ class Connector:
             return
         stream = self.streams.get(sid)
         if stream is None:
+            # The relay still holds a phone-side stream this connection never
+            # saw (host restart, relay object reset). Answer so the Worker can
+            # close it with a retryable code instead of leaving it hung.
+            if kind == WS_MSG:
+                await self._send(Stream(sid, self.generation),
+                                 jframe(WS_CLOSE, sid, {'code': STREAM_GONE_CODE, 'reason': 'Host stream gone'}))
+            elif kind == REQ_END:
+                await self._send(Stream(sid, self.generation), frame(ABORT, sid))
             return
         if kind in {REQ_BODY, REQ_END} and not stream.is_http:
             raise ValueError("HTTP frame on a WebSocket stream")
