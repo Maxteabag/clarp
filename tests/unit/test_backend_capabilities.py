@@ -249,8 +249,9 @@ def test_terminal_launch_is_unsupported_for_adapters_without_argv(monkeypatch):
     monkeypatch.setattr(terminal_ws.agents_db, "get_by_session",
                         lambda s: {"agent_id": "a1", "backend": "grok", "cwd": "/"})
     monkeypatch.setattr(terminal_ws.agents_db, "live_backend_session", lambda a: "")
-    with pytest.raises(KeyError):
-        terminal_ws.serve_terminal(_terminal_handler(), "any")
+    handler = _terminal_handler()
+    terminal_ws.serve_terminal(handler, "any")
+    assert handler.sent == [501]
 
 
 def test_resume_target_drives_transcript_checks():

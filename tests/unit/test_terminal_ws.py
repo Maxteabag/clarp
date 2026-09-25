@@ -78,29 +78,25 @@ def agent(monkeypatch, tmp_path):
 # ---- launch tables --------------------------------------------------------
 
 
-def test_launch_tables_cover_the_same_backends():
-    assert set(terminal_ws._LAUNCH_RESUME) == set(terminal_ws._LAUNCH_FRESH)
-    assert set(terminal_ws._LAUNCH_RESUME) == {backends.CLAUDE, backends.CODEX, backends.AGY}
+def test_launch_argv_is_declared_per_adapter():
+    """Every registered backend either declares both terminal argvs or neither."""
+    for adapter in backends._BY_ID.values():
+        assert (adapter.terminal_resume_argv is None) == (adapter.terminal_fresh_argv is None)
+    declared = {a.id for a in backends._BY_ID.values() if a.terminal_resume_argv is not None}
+    assert declared == {backends.CLAUDE, backends.CODEX, backends.AGY}
 
 
 @pytest.mark.parametrize("backend,resume,fresh", [
-    (backends.CLAUDE, ["claude", "--dangerously-skip-permissions", "--resume"],
-     ["claude", "--dangerously-skip-permissions"]),
-    (backends.CODEX, ["codex", "resume"], ["codex"]),
-    (backends.AGY, ["agy", "--dangerously-skip-permissions", "--conversation"],
-     ["agy", "--dangerously-skip-permissions"]),
+    (backends.CLAUDE, ("claude", "--dangerously-skip-permissions", "--resume"),
+     ("claude", "--dangerously-skip-permissions")),
+    (backends.CODEX, ("codex", "resume"), ("codex",)),
+    (backends.AGY, ("agy", "--dangerously-skip-permissions", "--conversation"),
+     ("agy", "--dangerously-skip-permissions")),
 ])
 def test_launch_argv_per_backend(backend, resume, fresh):
-    assert terminal_ws._LAUNCH_RESUME[backend] == resume
-    assert terminal_ws._LAUNCH_FRESH[backend] == fresh
-
-
-def test_registered_backends_missing_from_launch_tables():
-    # BUG: grok, opencode and deepseek are registered backends
-    # (backends.normalize passes them through) but have no interactive launch
-    # argv, so `serve_terminal` raises KeyError instead of a clean HTTP error.
-    missing = set(backends._BY_ID) - set(terminal_ws._LAUNCH_RESUME)
-    assert missing == {"grok", "opencode", "deepseek"}
+    adapter = backends.adapter_for(backend)
+    assert adapter.terminal_resume_argv == resume
+    assert adapter.terminal_fresh_argv == fresh
 
 
 # ---- live-terminal counter -------------------------------------------------
@@ -180,15 +176,13 @@ def test_claude_gets_plugin_dir_appended(agent, monkeypatch, tmp_path):
     assert handler.connection.timeouts == [None]
 
 
-@pytest.mark.xfail(strict=True, raises=KeyError,
-                   reason="BUG: grok/opencode agents crash serve_terminal with KeyError "
-                          "instead of a clean HTTP error")
-@pytest.mark.parametrize("backend", ["grok", "opencode"])
+@pytest.mark.parametrize("backend", ["grok", "opencode", "deepseek"])
 def test_unsupported_backend_gets_clean_error(agent, monkeypatch, backend):
     agent["row"]["backend"] = backend
     handler = FakeHandler(_UPGRADE)
     terminal_ws.serve_terminal(handler, "theo")
-    assert handler.status in (400, 500, 501)
+    assert handler.status == 501
+    assert not terminal_ws.has_live_terminal("agent-1")
 
 
 # ---- the bridge loop -------------------------------------------------------
