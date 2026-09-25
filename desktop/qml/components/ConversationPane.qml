@@ -198,11 +198,11 @@ Rectangle {
                 anchors.fill: parent
                 model: presentation
                 clip: true
-                spacing: 2
+                spacing: 1
                 leftMargin: 14
                 rightMargin: 14
-                topMargin: 10
-                bottomMargin: 10
+                topMargin: 6
+                bottomMargin: 6
                 reuseItems: true
                 section.property: "dayLabel"
                 section.delegate: Item {
@@ -210,7 +210,7 @@ Rectangle {
                     width: transcript.width
                     readonly property bool showHeading: section.length > 0
                         && !(section === "Today" && presentation.leadingDayLabel === "Today")
-                    height: showHeading ? 32 : 0
+                    height: showHeading ? 26 : 0
                     visible: showHeading
                     Rectangle {
                         anchors.left: parent.left
