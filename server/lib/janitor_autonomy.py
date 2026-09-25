@@ -227,7 +227,8 @@ class AutonomyJanitors:
 
 def quota_window_key(provider, account, window):
     identity = window['window_id']
-    if provider == 'claude' and window.get('kind') and window.get('resets_at'):
+    adapter = backends.get(provider)
+    if adapter is not None and adapter.quota_reset_jittered and window.get('kind') and window.get('resets_at'):
         import datetime
         try:
             reset = datetime.datetime.fromisoformat(window['resets_at'].replace('Z', '+00:00'))

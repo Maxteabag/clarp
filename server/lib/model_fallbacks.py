@@ -94,7 +94,7 @@ def validate(models):
             raise ValueError("unavailable fallback model")
         if effort and effort not in backends.valid_efforts(backend):
             raise ValueError("invalid fallback effort")
-        if backend == "agy" and effort:
+        if backends.get(backend).effort_compatibility_unknown and effort:
             # Antigravity encodes Low in the model ID; adding --effort is not
             # a supported model-specific combination in the current adapter.
             raise ValueError("Antigravity effort is included in the model choice")

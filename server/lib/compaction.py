@@ -129,13 +129,15 @@ def _run(session: str, backend: str, bsid: str, cwd: str,
 
 
 def _wait_for_settle(backend: str, bsid: str) -> None:
-    """Wait until compaction finishes. For Claude we watch the transcript jsonl:
-    once it's written past the /compact send AND then goes quiet for _SETTLE_SEC,
-    compaction is done. For codex/agy (no easy transcript handle here) we wait a
-    generous fixed window. Always bounded by _HARD_CAP_SEC."""
+    """Wait until compaction finishes. When the adapter watches its transcript
+    (Claude) we watch the jsonl: once it's written past the /compact send AND
+    then goes quiet for _SETTLE_SEC, compaction is done. Otherwise (no easy
+    transcript handle here) we wait a generous fixed window. Always bounded by
+    _HARD_CAP_SEC."""
     sent = time.time()
     deadline = sent + _HARD_CAP_SEC
-    jsonl = find_latest_jsonl(bsid) if backend == backends.CLAUDE else None
+    watches = backends.adapter_for(backend).compaction_watches_transcript
+    jsonl = find_latest_jsonl(bsid) if watches else None
     if jsonl is None:
         while time.time() < deadline and time.time() - sent < _NO_WATCH_WAIT_SEC:
             time.sleep(2)

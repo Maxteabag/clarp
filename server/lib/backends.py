@@ -132,6 +132,104 @@ EFFORT_UIS = ("picker", "hidden", "folded_into_model")
 # provider ("provider"), or a provider flag whose compatibility with a chosen
 # model is unknown ("provider_flag").
 EFFORT_SCOPES = ("model", "provider", "provider_flag")
+# What the CLI's ``--resume`` style flag points at: a transcript file the
+# Host can check exists on disk before resuming ("transcript_file"), or an
+# opaque session id the CLI resolves itself ("session_id").
+RESUME_TARGETS = ("transcript_file", "session_id")
+
+
+def _mod(name: str):
+    return importlib.import_module(f"lib.{name}")
+
+
+def _lazy(module: str, attr: str) -> Callable[..., Any]:
+    """A callable that resolves ``lib.<module>.<attr>`` at call time.
+
+    Adapters are built at import, before the runner modules are loaded, and
+    tests monkeypatch those module attributes; binding late keeps both
+    working.
+    """
+    def call(*args: Any, **kwargs: Any) -> Any:
+        return getattr(_mod(module), attr)(*args, **kwargs)
+    call.__name__ = call.__qualname__ = f"{module}.{attr}"
+    return call
+
+
+def _claude_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "text", "cwd", "backend_session_id", "is_new_session", "session",
+        "agent_id", "on_session_init", "on_result", "on_error", "trace_id",
+        "model", "effort", "stream", "isolated", "hook_session",
+    }
+    return {k: v for k, v in kwargs.items() if k in allowed}
+
+
+def _stream_kwargs(kwargs: dict[str, Any], *, owner_gate: bool = False) -> dict[str, Any]:
+    return {
+        k: v for k, v in kwargs.items()
+        if k not in ({"synthesize_audio", "hook_session"}
+                     | (set() if owner_gate else {"run_if_owned"}))
+    }
+
+
+def _owner_gated_stream_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Stream kwargs for a runner that admits ``run_if_owned`` (AGY)."""
+    return _stream_kwargs(kwargs, owner_gate=True)
+
+
+def _declared_binary(adapter: "BackendAdapter") -> str:
+    return adapter.required_binary
+
+
+def _configured_claude_binary(adapter: "BackendAdapter") -> str:
+    """Claude's executable is a Host setting (official CLI or clarp wrapper)."""
+    return _mod("clarp_runner").configured_claude_bin()
+
+
+def _claude_resume_transcript(backend: str, session_id: str, cwd: str,
+                              projects_root: pathlib.Path | None):
+    from .resume import find_session_jsonl as find_claude_session_jsonl
+    root = projects_root or (pathlib.Path.home() / ".claude" / "projects")
+    return find_claude_session_jsonl(session_id, cwd, root)
+
+
+def _catalogued_resume_transcript(backend: str, session_id: str, cwd: str,
+                                  projects_root: pathlib.Path | None):
+    return find_session_jsonl(backend, session_id)
+
+
+def _claude_session_catalog(adapter: "BackendAdapter", cwd: str, *,
+                            limit: int, all_projects: bool) -> list[dict]:
+    from . import session_catalog
+    return session_catalog.list_claude_sessions(
+        cwd, all_projects=all_projects, limit=limit)
+
+
+def _transcript_session_catalog(adapter: "BackendAdapter", cwd: str, *,
+                                limit: int, all_projects: bool) -> list[dict]:
+    list_fn = getattr(_mod(adapter.transcript_module), "list_sessions")
+    try:
+        return list_fn(cwd if not all_projects else "", limit=limit,
+                       all_projects=all_projects)
+    except TypeError:
+        return list_fn("" if all_projects else cwd, limit=limit)
+
+
+@dataclass(frozen=True)
+class RecordedModelSource:
+    """Where ``session_models`` reads the model a session actually ran.
+
+    ``transcript`` locates the session's transcript (the model is read from
+    its last turn), ``indexed_model`` consults the CLI's own session index,
+    and ``cli_default_model`` reads the model the CLI would launch with when
+    the Host pins none. ``None`` means the CLI offers no such source.
+    """
+    transcript: Callable[[str], pathlib.Path | None] | None = None
+    indexed_model: Callable[[str], str] | None = None
+    cli_default_model: Callable[[], str] | None = None
+
+
+NO_RECORDED_MODEL = RecordedModelSource()
 
 
 @dataclass(frozen=True)
@@ -170,11 +268,72 @@ class BackendAdapter:
     compact_launch: tuple[str, ...] | None = None
     compact_command: str | None = None
     fallback_models: tuple[tuple[str, str], ...] = ()
-    owner_gate: bool = False
-    uses_claude_kwargs: bool = False
-    uses_codex_app_server: bool = False
-    claude_session_catalog: bool = False
     resumable: bool = True
+    # --- Dispatch strategy -------------------------------------------------
+    # Which of the Host's spawn kwargs the runner's spawn_turn accepts.
+    spawn_kwargs: Callable[[dict[str, Any]], dict[str, Any]] = _stream_kwargs
+    # Module exposing goal(); empty means the CLI has no goal protocol.
+    goal_module: str = ""
+    # Resolves the executable to launch; Claude's is a Host setting.
+    executable_resolver: Callable[["BackendAdapter"], str] = _declared_binary
+    # Validates a pinned model id; None accepts anything non-empty.
+    model_validator: Callable[[str], bool] | None = None
+    # --- Session and transcript access -----------------------------------
+    resume_target: str = "session_id"
+    # The Host allocates the session id before the first spawn (--session-id).
+    preassigns_session_id: bool = False
+    # Locates the transcript to resume from, given (backend, session_id, cwd,
+    # projects_root).
+    resume_transcript_finder: Callable[..., Any] = _catalogued_resume_transcript
+    # Lists past sessions for the adopt picker, given (adapter, cwd, ...).
+    session_catalog_reader: Callable[..., list[dict]] = _transcript_session_catalog
+    # The transcript's directory name encodes the cwd (Claude's project dirs).
+    transcript_dir_encodes_cwd: bool = False
+    # The Host injects Claude's transcript finder/parser into
+    # conversation.load_conversation; other CLIs read through the registry.
+    transcript_reader_injected: bool = False
+    recorded_model_source: RecordedModelSource = NO_RECORDED_MODEL
+    # --- Turn plumbing -----------------------------------------------------
+    # The runner reports source/state through Clarp's hook plugin, armed by a
+    # per-turn marker file.
+    hook_source_marker: bool = False
+    # Runner callbacks arrive on the runner's own threads; serialise them
+    # under the dispatch lock.
+    locks_turn_callbacks: bool = False
+    # Account pool the usage-limit failover coordinator manages; empty means
+    # no account switching for this CLI.
+    account_pool: str = ""
+    # Attempts to recover a usage-limit failure in-process before failing
+    # over accounts; None means the CLI has no such protocol.
+    usage_limit_recovery: Callable[[str], bool] | None = None
+    # A classified usage-limit failure is recorded as a provider limit event.
+    records_classified_usage_limit: bool = False
+    # A sign-in/sign-out rewrites credentials another process holds open, so
+    # the long-lived runner is recycled to re-read them.
+    restarts_runner_on_credential_change: bool = False
+    # Context gauge: the window (tokens) the CLI's transcript fills, or None
+    # when the CLI auto-compacts and shows no gauge.
+    context_window: int | None = None
+    # Compaction waits for the transcript to settle rather than a fixed window.
+    compaction_watches_transcript: bool = False
+    # The CLI reports quota resets with fractional-second jitter, so the
+    # notification identity rounds them.
+    quota_reset_jittered: bool = False
+    # --- Interactive terminal --------------------------------------------
+    # argv prefix for /terminal: resume (session id appended) and fresh. None
+    # means the Host cannot open an interactive terminal for this CLI.
+    terminal_resume_argv: tuple[str, ...] | None = None
+    terminal_fresh_argv: tuple[str, ...] | None = None
+    terminal_loads_plugin: bool = False
+    # --- Routing and Janitors --------------------------------------------
+    # API-key providers whose model catalogue this CLI fronts ("openai").
+    api_providers: tuple[str, ...] = ()
+    # The Janitor tool explainer can run natively through this CLI.
+    native_tool_explainer: bool = False
+    # Model a new Janitor gets when none is chosen; empty means CLI default.
+    janitor_default_model: str = ""
+    # Model family the CLI stands for when the Agent pins no model (avatars).
+    model_family: str = ""
 
     def __post_init__(self) -> None:
         if self.login_kind not in LOGIN_KINDS:
@@ -183,6 +342,8 @@ class BackendAdapter:
             raise ValueError(f"{self.id}: unknown effort_ui {self.effort_ui!r}")
         if self.effort_scope not in EFFORT_SCOPES:
             raise ValueError(f"{self.id}: unknown effort_scope {self.effort_scope!r}")
+        if self.resume_target not in RESUME_TARGETS:
+            raise ValueError(f"{self.id}: unknown resume_target {self.resume_target!r}")
 
     @property
     def supports_compact(self) -> bool:
@@ -195,6 +356,37 @@ class BackendAdapter:
     @property
     def supports_auth(self) -> bool:
         return self.login_kind != "none"
+
+    @property
+    def supports_goal(self) -> bool:
+        return bool(self.goal_module)
+
+    @property
+    def supports_account_failover(self) -> bool:
+        return bool(self.account_pool)
+
+    @property
+    def effort_compatibility_unknown(self) -> bool:
+        """Effort is a provider flag whose fit with a pinned model is unknown."""
+        return self.effort_scope == "provider_flag"
+
+    @property
+    def model_carries_effort(self) -> bool:
+        return self.effort_ui == "folded_into_model"
+
+    @property
+    def resumes_by_transcript_file(self) -> bool:
+        return self.resume_target == "transcript_file"
+
+    def executable(self) -> str:
+        """The binary to launch, after any Host-level override."""
+        return self.executable_resolver(self)
+
+    def is_valid_model(self, model: str | None) -> bool:
+        value = (model or "").strip()
+        if not value or self.model_validator is None:
+            return True
+        return bool(self.model_validator(value))
 
     def catalogue_fields(self, sort_index: int) -> dict[str, Any]:
         """The presentation and capability block of one catalogue row."""
@@ -221,19 +413,11 @@ class BackendAdapter:
         }
 
     def capabilities(self) -> BackendCapabilities:
-        binary = self.required_binary
-        if self.id == CLAUDE:
-            from . import clarp_runner
-            binary = clarp_runner.configured_claude_bin()
         return BackendCapabilities(
             supports_fork=self.supports_fork,
             supports_transcript_streaming=self.supports_transcript_streaming,
-            required_binary=binary,
+            required_binary=self.executable(),
         )
-
-
-def _mod(name: str):
-    return importlib.import_module(f"lib.{name}")
 
 
 _ADAPTERS: tuple[BackendAdapter, ...] = (
@@ -256,8 +440,41 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         config_effort_field="claude_effort",
         compact_launch=("claude", "--dangerously-skip-permissions", "--resume"),
         compact_command="/compact",
-        uses_claude_kwargs=True,
-        claude_session_catalog=True,
+        spawn_kwargs=_claude_kwargs,
+        goal_module="",
+        executable_resolver=_configured_claude_binary,
+        model_validator=None,
+        resume_target="transcript_file",
+        preassigns_session_id=True,
+        resume_transcript_finder=_claude_resume_transcript,
+        session_catalog_reader=_claude_session_catalog,
+        transcript_dir_encodes_cwd=True,
+        transcript_reader_injected=True,
+        recorded_model_source=RecordedModelSource(
+            transcript=_lazy("transcript_log", "find_latest_jsonl"),
+            indexed_model=None,
+            cli_default_model=_lazy("session_models", "claude_cli_default_model"),
+        ),
+        hook_source_marker=True,
+        locks_turn_callbacks=True,
+        account_pool="claude",
+        usage_limit_recovery=None,
+        records_classified_usage_limit=False,
+        restarts_runner_on_credential_change=False,
+        # This deployment runs opus-*[1m] (the 1M context beta, per
+        # ~/.claude.json); the native gauge divides tokens by this.
+        context_window=1_000_000,
+        compaction_watches_transcript=True,
+        quota_reset_jittered=True,
+        terminal_resume_argv=("claude", "--dangerously-skip-permissions", "--resume"),
+        terminal_fresh_argv=("claude", "--dangerously-skip-permissions"),
+        terminal_loads_plugin=True,
+        api_providers=(),
+        native_tool_explainer=False,
+        janitor_default_model="",
+        # Claude fronts several model families, so the backend alone is no
+        # evidence of which model is answering.
+        model_family="",
         fallback_models=(
             ("fable", "Fable"),
             ("opus", "Opus"),
@@ -295,7 +512,39 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         config_effort_field="codex_reasoning_effort",
         compact_launch=("codex", "resume"),
         compact_command="/compact",
-        uses_codex_app_server=True,
+        spawn_kwargs=_stream_kwargs,
+        goal_module="codex_app_server",
+        executable_resolver=_declared_binary,
+        model_validator=None,
+        resume_target="session_id",
+        preassigns_session_id=False,
+        resume_transcript_finder=_catalogued_resume_transcript,
+        session_catalog_reader=_transcript_session_catalog,
+        transcript_dir_encodes_cwd=False,
+        transcript_reader_injected=False,
+        recorded_model_source=RecordedModelSource(
+            transcript=_lazy("session_models", "codex_transcript_path"),
+            indexed_model=_lazy("session_models", "codex_indexed_model"),
+            cli_default_model=_lazy("session_models", "codex_cli_default_model"),
+        ),
+        hook_source_marker=False,
+        locks_turn_callbacks=False,
+        account_pool="codex",
+        usage_limit_recovery=_lazy("codex_app_server", "recover_usage_failure"),
+        records_classified_usage_limit=True,
+        restarts_runner_on_credential_change=True,
+        context_window=None,
+        compaction_watches_transcript=False,
+        quota_reset_jittered=False,
+        terminal_resume_argv=("codex", "resume"),
+        terminal_fresh_argv=("codex",),
+        terminal_loads_plugin=False,
+        # Codex is the catalogue that lists GPT models; the OpenAI API
+        # routing provider executes through it.
+        api_providers=("openai",),
+        native_tool_explainer=True,
+        janitor_default_model="gpt-5.3-codex-spark",
+        model_family="codex",
         fallback_models=(
             ("gpt-5.4", "GPT-5.4"),
             ("gpt-5.4-mini", "GPT-5.4 Mini"),
@@ -324,7 +573,33 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         config_model_field="agy_model",
         compact_launch=("agy", "--dangerously-skip-permissions", "--conversation"),
         compact_command="/compress",
-        owner_gate=True,
+        spawn_kwargs=_owner_gated_stream_kwargs,
+        goal_module="",
+        executable_resolver=_declared_binary,
+        model_validator=_lazy("provider_capabilities", "is_dispatchable_agy_model"),
+        resume_target="session_id",
+        preassigns_session_id=False,
+        resume_transcript_finder=_catalogued_resume_transcript,
+        session_catalog_reader=_transcript_session_catalog,
+        transcript_dir_encodes_cwd=False,
+        transcript_reader_injected=False,
+        recorded_model_source=NO_RECORDED_MODEL,
+        hook_source_marker=False,
+        locks_turn_callbacks=False,
+        account_pool="",
+        usage_limit_recovery=None,
+        records_classified_usage_limit=False,
+        restarts_runner_on_credential_change=False,
+        context_window=None,
+        compaction_watches_transcript=False,
+        quota_reset_jittered=False,
+        terminal_resume_argv=("agy", "--dangerously-skip-permissions", "--conversation"),
+        terminal_fresh_argv=("agy", "--dangerously-skip-permissions"),
+        terminal_loads_plugin=False,
+        api_providers=(),
+        native_tool_explainer=False,
+        janitor_default_model="",
+        model_family="gemini",
         fallback_models=(
             ("gemini-3.7-flash-high", "Gemini 3.7 Flash (High)"),
             ("gemini-3.7-flash-medium", "Gemini 3.7 Flash (Medium)"),
@@ -359,6 +634,34 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         config_effort_field="grok_effort",
         compact_launch=("grok", "--resume"),
         compact_command="/compact",
+        spawn_kwargs=_stream_kwargs,
+        goal_module="",
+        executable_resolver=_declared_binary,
+        model_validator=None,
+        resume_target="session_id",
+        preassigns_session_id=False,
+        resume_transcript_finder=_catalogued_resume_transcript,
+        session_catalog_reader=_transcript_session_catalog,
+        transcript_dir_encodes_cwd=False,
+        transcript_reader_injected=False,
+        recorded_model_source=NO_RECORDED_MODEL,
+        hook_source_marker=False,
+        locks_turn_callbacks=False,
+        account_pool="",
+        usage_limit_recovery=None,
+        records_classified_usage_limit=False,
+        restarts_runner_on_credential_change=False,
+        context_window=None,
+        compaction_watches_transcript=False,
+        quota_reset_jittered=False,
+        # No interactive terminal launch is defined for this CLI yet.
+        terminal_resume_argv=None,
+        terminal_fresh_argv=None,
+        terminal_loads_plugin=False,
+        api_providers=(),
+        native_tool_explainer=False,
+        janitor_default_model="",
+        model_family="grok",
         fallback_models=(
             ("grok-4.6", "Grok 4.6"),
             ("grok-4.5", "Grok 4.5"),
@@ -377,6 +680,35 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         transcript_module="opencode_transcript",
         config_model_field="opencode_model",
         config_effort_field="opencode_effort",
+        spawn_kwargs=_stream_kwargs,
+        goal_module="",
+        executable_resolver=_declared_binary,
+        model_validator=None,
+        resume_target="session_id",
+        preassigns_session_id=False,
+        resume_transcript_finder=_catalogued_resume_transcript,
+        session_catalog_reader=_transcript_session_catalog,
+        transcript_dir_encodes_cwd=False,
+        transcript_reader_injected=False,
+        recorded_model_source=NO_RECORDED_MODEL,
+        hook_source_marker=False,
+        locks_turn_callbacks=False,
+        account_pool="",
+        usage_limit_recovery=None,
+        records_classified_usage_limit=False,
+        restarts_runner_on_credential_change=False,
+        context_window=None,
+        compaction_watches_transcript=False,
+        quota_reset_jittered=False,
+        # No interactive terminal launch is defined for this CLI yet.
+        terminal_resume_argv=None,
+        terminal_fresh_argv=None,
+        terminal_loads_plugin=False,
+        api_providers=(),
+        native_tool_explainer=False,
+        janitor_default_model="",
+        # OpenCode fronts several families; see Claude.
+        model_family="",
         fallback_models=(
             ("opencode/gpt-5.4", "GPT-5.4"),
             ("anthropic/claude-sonnet-4-5", "Claude Sonnet 4.5"),
@@ -400,6 +732,34 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         transcript_module="opencode_transcript",
         config_model_field="deepseek_model",
         config_effort_field="deepseek_effort",
+        spawn_kwargs=_stream_kwargs,
+        goal_module="",
+        executable_resolver=_declared_binary,
+        model_validator=None,
+        resume_target="session_id",
+        preassigns_session_id=False,
+        resume_transcript_finder=_catalogued_resume_transcript,
+        session_catalog_reader=_transcript_session_catalog,
+        transcript_dir_encodes_cwd=False,
+        transcript_reader_injected=False,
+        recorded_model_source=NO_RECORDED_MODEL,
+        hook_source_marker=False,
+        locks_turn_callbacks=False,
+        account_pool="",
+        usage_limit_recovery=None,
+        records_classified_usage_limit=False,
+        restarts_runner_on_credential_change=False,
+        context_window=None,
+        compaction_watches_transcript=False,
+        quota_reset_jittered=False,
+        # No interactive terminal launch is defined for this CLI yet.
+        terminal_resume_argv=None,
+        terminal_fresh_argv=None,
+        terminal_loads_plugin=False,
+        api_providers=(),
+        native_tool_explainer=False,
+        janitor_default_model="",
+        model_family="deepseek",
         fallback_models=(
             ("fireworks-ai/accounts/fireworks/routers/deepseek-pro-latest", "DeepSeek Pro (latest, Fireworks)"),
             ("fireworks-ai/accounts/fireworks/routers/deepseek-flash-latest", "DeepSeek Flash (latest, Fireworks)"),
@@ -467,6 +827,23 @@ def get(backend: str | None) -> BackendAdapter | None:
     return _BY_ID.get(b)
 
 
+def adapter_for(backend: str | None) -> BackendAdapter:
+    """The adapter that runs ``backend``, normalised like ``normalize``."""
+    return get(normalize(backend)) or _BY_ID[DEFAULT]
+
+
+def for_provider(provider: str) -> str:
+    """The backend id that executes a routing provider.
+
+    A registered backend id passes through; an API-key provider maps to the
+    CLI whose adapter fronts it (``openai`` runs through Codex).
+    """
+    for a in _ADAPTERS:
+        if provider in a.api_providers:
+            return a.id
+    return provider
+
+
 def valid_efforts(backend: str) -> tuple[str, ...]:
     adapter = get(normalize(backend))
     return adapter.efforts if adapter else ()
@@ -478,13 +855,7 @@ def clean_effort(backend: str, effort: str | None) -> str:
 
 
 def is_valid_model(backend: str, model: str | None) -> bool:
-    value = (model or "").strip()
-    if not value:
-        return True
-    if normalize(backend) != AGY:
-        return True
-    from . import provider_capabilities
-    return provider_capabilities.is_dispatchable_agy_model(value)
+    return adapter_for(backend).is_valid_model(model)
 
 
 def normalize(backend: str | None) -> str:
@@ -510,44 +881,20 @@ def label(backend: str | None) -> str:
 
 
 def capabilities(backend: str | None) -> BackendCapabilities:
-    adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
+    adapter = adapter_for(backend)
     return adapter.capabilities()
 
 
 def spawn_turn(backend: str, **kwargs: Any):
-    adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
-    if adapter.uses_codex_app_server:
-        from . import codex_app_server
-        return codex_app_server.spawn_turn(**_stream_kwargs(kwargs, owner_gate=False))
-    if adapter.uses_claude_kwargs:
-        from . import clarp_runner
-        return clarp_runner.spawn_turn(**_claude_kwargs(kwargs))
+    adapter = adapter_for(backend)
     runner = _mod(adapter.runner_module)
-    return runner.spawn_turn(
-        **_stream_kwargs(kwargs, owner_gate=adapter.owner_gate))
-
-
-def _claude_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
-    allowed = {
-        "text", "cwd", "backend_session_id", "is_new_session", "session",
-        "agent_id", "on_session_init", "on_result", "on_error", "trace_id",
-        "model", "effort", "stream", "isolated", "hook_session",
-    }
-    return {k: v for k, v in kwargs.items() if k in allowed}
-
-
-def _stream_kwargs(kwargs: dict[str, Any], *, owner_gate: bool = False) -> dict[str, Any]:
-    return {
-        k: v for k, v in kwargs.items()
-        if k not in ({"synthesize_audio", "hook_session"}
-                     | (set() if owner_gate else {"run_if_owned"}))
-    }
+    return runner.spawn_turn(**adapter.spawn_kwargs(kwargs))
 
 
 def interrupt(backend: str, agent_id: str) -> int:
     if _RUNTIME_CLIENT is not None:
         return int(_RUNTIME_CLIENT.interrupt(normalize(backend), agent_id))
-    adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
+    adapter = adapter_for(backend)
     runner = _mod(adapter.runner_module)
     from .turn_model_fallback import REGISTRY
     return int(runner.interrupt(agent_id) or 0) + REGISTRY.interrupt(agent_id, event="fallbackInterruptFail")
@@ -587,7 +934,7 @@ def active_handles(backend: str, agent_id: str) -> list:
         if agent_id in set(status.get("terminals") or ()):
             return [_RemoteHandle("terminal")]
         return []
-    adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
+    adapter = adapter_for(backend)
     runner = _mod(adapter.runner_module)
     from .turn_model_fallback import REGISTRY
     return list(runner.active_handles(agent_id) or []) + REGISTRY.active_handles(agent_id)
@@ -607,12 +954,12 @@ def goal(backend: str, agent_id: str, action: str, *, objective: str = "",
     """
     if _RUNTIME_CLIENT is not None:
         return _RUNTIME_CLIENT.goal(agent_id, action, objective=objective)
-    adapter = get(normalize(backend))
-    if adapter is None or not adapter.uses_codex_app_server:
+    adapter = adapter_for(backend)
+    if not adapter.supports_goal:
         raise GoalUnsupported(
             f"{label(backend)} has no goal control Clarp can drive yet.")
-    from . import codex_app_server
-    return codex_app_server.goal(agent_id, action, objective=objective, stream=stream)
+    return _mod(adapter.goal_module).goal(
+        agent_id, action, objective=objective, stream=stream)
 
 
 def steer_turn(backend: str, agent_id: str, text: str, *,
@@ -623,62 +970,41 @@ def steer_turn(backend: str, agent_id: str, text: str, *,
             client_msg_id=client_msg_id,
             synthesize_audio=synthesize_audio,
         ))
-    adapter = get(normalize(backend))
-    if adapter is None or not adapter.supports_steer:
-        if normalize(backend) != CODEX:
-            return False
-    from . import codex_app_server
-    return codex_app_server.steer(
+    adapter = adapter_for(backend)
+    if not adapter.supports_steer:
+        return False
+    return _mod(adapter.runner_module).steer(
         agent_id, text, client_msg_id=client_msg_id,
         synthesize_audio=synthesize_audio,
     )
 
 
 def find_session_jsonl(backend: str, session_id: str):
-    adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
-    if adapter.claude_session_catalog:
-        from .transcript_log import find_latest_jsonl
-        return find_latest_jsonl(session_id)
+    adapter = adapter_for(backend)
     return _mod(adapter.transcript_module).find_latest_jsonl(session_id)
 
 
 def parse_turns(backend: str, path) -> list[dict]:
-    adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
-    if adapter.claude_session_catalog:
-        from .transcript_log import parse_turns as _claude_parse
-        return _claude_parse(path)
+    adapter = adapter_for(backend)
     return _mod(adapter.transcript_module).parse_turns(path)
 
 
 def find_resume_transcript(backend: str, session_id: str, *, cwd: str,
                            projects_root: pathlib.Path | None = None):
     b = normalize(backend)
-    adapter = get(b) or _BY_ID[DEFAULT]
-    if adapter.claude_session_catalog:
-        from .resume import find_session_jsonl as find_claude_session_jsonl
-        root = projects_root or (pathlib.Path.home() / ".claude" / "projects")
-        return find_claude_session_jsonl(session_id, cwd, root)
-    return find_session_jsonl(b, session_id)
+    adapter = adapter_for(b)
+    return adapter.resume_transcript_finder(b, session_id, cwd, projects_root)
 
 
 def list_sessions(backend: str, cwd: str, *, limit: int = 20,
                   all_projects: bool = False) -> list[dict]:
-    adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
-    if adapter.claude_session_catalog:
-        from . import session_catalog
-        return session_catalog.list_claude_sessions(
-            cwd, all_projects=all_projects, limit=limit)
-    mod = _mod(adapter.transcript_module)
-    list_fn = getattr(mod, "list_sessions")
-    try:
-        return list_fn(cwd if not all_projects else "", limit=limit,
-                       all_projects=all_projects)
-    except TypeError:
-        return list_fn("" if all_projects else cwd, limit=limit)
+    adapter = adapter_for(backend)
+    return adapter.session_catalog_reader(
+        adapter, cwd, limit=limit, all_projects=all_projects)
 
 
 def default_model_effort(backend: str, cfg) -> tuple[str, str]:
-    adapter = get(normalize(backend)) or _BY_ID[DEFAULT]
+    adapter = adapter_for(backend)
     model = ""
     effort = ""
     if adapter.config_model_field:

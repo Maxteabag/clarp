@@ -97,7 +97,8 @@ def load_conversation(*, session: str, after_revision: int = 0,
                 "has_more": False,
                 "includes_automated": include_automated}
 
-    if backend == backends.CLAUDE:
+    reader_injected = backends.adapter_for(backend).transcript_reader_injected
+    if reader_injected:
         latest = claude_finder(backend_session_id)
     else:
         latest = backends.find_session_jsonl(backend, backend_session_id)
@@ -106,7 +107,7 @@ def load_conversation(*, session: str, after_revision: int = 0,
         def import_latest() -> None:
             import_started = time.perf_counter()
             parse_started = import_started
-            imported = (claude_parser(latest) if backend == backends.CLAUDE
+            imported = (claude_parser(latest) if reader_injected
                         else backends.parse_turns(backend, latest))
             parsed_at = time.perf_counter()
             agents_db.store_transcript_turns(

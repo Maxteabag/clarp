@@ -1401,14 +1401,9 @@ def _resolve_dream_llm(agent: dict, backend: str) -> tuple[str, str]:
         effort = ""
     model = model or str(agent.get("model") or "").strip()
     effort = effort or str(agent.get("effort") or "").strip()
-    if backend == backends.CODEX:
-        model = model or cfg.codex_model
-        effort = effort or cfg.codex_reasoning_effort
-    elif backend == backends.AGY:
-        model = model or cfg.agy_model
-    else:
-        model = model or cfg.claude_model
-        effort = effort or cfg.claude_effort
+    default_model, default_effort = backends.default_model_effort(backend, cfg)
+    model = model or default_model
+    effort = effort or default_effort
     return model.strip(), backends.clean_effort(backend, effort)
 
 

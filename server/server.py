@@ -3092,10 +3092,11 @@ class Handler(BaseHTTPRequestHandler):
                                         "backend": backend, "valid_efforts": valid})
             update["effort"] = effort
         next_model = update.get("model", str(agent.get("model") or "").strip())
-        if backend == backends.AGY and not next_model:
-            next_model = config.load().agy_model.strip()
+        effort_compatibility_unknown = backends.adapter_for(backend).effort_compatibility_unknown
+        if effort_compatibility_unknown and not next_model:
+            next_model = backends.default_model_effort(backend, config.load())[0]
         next_effort = update.get("effort", str(agent.get("effort") or "").strip())
-        if backend == backends.AGY and next_model and next_effort:
+        if effort_compatibility_unknown and next_model and next_effort:
             return self._json(400, {
      "error": "AGY model-specific effort compatibility is unknown",
      "backend": backend,
