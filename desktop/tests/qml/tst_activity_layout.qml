@@ -147,7 +147,7 @@ TestCase {
         verify(avatar === null || !avatar.visible);
         compare(findChild(message, "groupAuthorName").text, "C++ Agent");
         verify(findChild(message, "groupAuthorLine").visible);
-        compare(findChild(message, "messageProvenance").visible, false);
+        verify(findChild(message, "messageProvenance") === null); // The provenance label is gone.
     }
 
     function test_attachedToolSummaryShowsElapsedTimeWithoutLoadingCards() {

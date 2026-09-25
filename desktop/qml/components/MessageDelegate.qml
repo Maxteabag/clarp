@@ -106,7 +106,7 @@ Item {
         - ListView.view.rightMargin : 600
     visible: activity || body.length > 0 || displayCells.length > 0
         || presentedActivityCount > 0 || (showTools && tools.length > 0)
-    implicitHeight: visible ? content.implicitHeight + (activity || body.length === 0 ? 2 : 6) : 0
+    implicitHeight: visible ? content.implicitHeight + (activity || body.length === 0 ? 1 : 3) : 0
 
     TextMetrics {
         id: bubbleMetrics
@@ -131,19 +131,6 @@ Item {
         id: content
         width: parent.width
         spacing: 2
-
-        TuiText {
-            objectName: "messageProvenance"
-            visible: !root.activity && !root.teamAuthored
-                && (root.origin === "automation" || root.automated)
-            Layout.leftMargin: 2
-            text: (root.category || "AUTOMATION").toUpperCase()
-            color: root.origin === "agent" ? Theme.secondary : Theme.muted
-            font.family: "JetBrains Mono"
-            font.pixelSize: 9
-            font.weight: Font.DemiBold
-            font.letterSpacing: 0.7
-        }
 
         RowLayout {
             objectName: "groupAuthorLine"
@@ -198,7 +185,7 @@ Item {
                 visible: root.activity
                 x: 0
                 width: parent.width
-                implicitHeight: Math.max(24, activityRow.implicitHeight + 4)
+                implicitHeight: Math.max(20, activityRow.implicitHeight + 2)
                 radius: Theme.radius
                 color: "transparent"
                 border.width: 0
@@ -247,9 +234,9 @@ Item {
                 visible: !root.activity && root.body.length > 0
                 width: Math.min(Math.max(0, parent.width),
                     parent.width * (root.rightAligned ? 0.78 : 0.95), root.readingMeasure,
-                    root.body.length > 160 ? root.readingMeasure : Math.max(140, bubbleMetrics.advanceWidth + 28))
+                    root.body.length > 160 ? root.readingMeasure : Math.max(140, bubbleMetrics.advanceWidth + 24))
                 x: root.rightAligned ? parent.width - width : 0
-                implicitHeight: messageBlocks.implicitHeight + 24
+                implicitHeight: messageBlocks.implicitHeight + 16
                 radius: Theme.radius
                 color: root.userAuthored ? root.styled("bubble", Theme.raised) : "transparent"
                 border.width: root.deliveryFailed ? 1 : 0
@@ -258,10 +245,10 @@ Item {
 
                 Column {
                     id: messageBlocks
-                    x: 12
-                    y: 12
-                    width: parent.width - 24
-                    spacing: 8
+                    x: 10
+                    y: 8
+                    width: parent.width - 20
+                    spacing: 6
 
                     Repeater {
                         objectName: "messageBlockRepeater"
@@ -357,7 +344,7 @@ Item {
                 }
             }
             Layout.fillWidth: true
-            implicitHeight: visible ? 24 : 0
+            implicitHeight: visible ? 20 : 0
             radius: Theme.radius
             color: activityTap.hovered ? Theme.hover : "transparent"
 
