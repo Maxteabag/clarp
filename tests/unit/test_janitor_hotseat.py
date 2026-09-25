@@ -1,7 +1,7 @@
 """Hotseat switcher: proactive default-account switching from Hotseat readings."""
 import json
 import pytest
-from lib import db, janitors, janitor_builtins, settings_store
+from lib import agents, db, janitors, janitor_builtins, settings_store
 from lib import janitor_autonomy as service
 from lib import janitor_hotseat as hotseat
 
@@ -101,9 +101,19 @@ def test_previews_name_the_accounts_and_never_the_command_output():
     assert hotseat.preview("claude", {"action": "noop"}, mode="automatic") == ""
 
 
-def test_template_is_installed_paused_with_configurable_floors():
-    owner = janitor_builtins.ensure_builtins()["account-hotseat"]
-    assert not owner["enabled"]
+def create_switcher(enabled=True):
+    """The switcher is optional: a user creates it from the catalog on a Host with hotseat."""
+    agents.create_agent(persona="Hotseat switcher", voice_id="v", cwd="/tmp", session="hotseat", backend="codex")
+    cfg = janitors.create("hotseat", template_id="account-hotseat")
+    return janitors.set_enabled("hotseat", cfg["revision"], True) if enabled else cfg
+
+
+def test_template_is_optional_paused_and_has_configurable_floors():
+    assert "account-hotseat" not in janitor_builtins.ensure_builtins()
+    catalog = {v["id"]: v for v in janitors.templates()}
+    assert catalog["account-hotseat"]["creatable"] and catalog["account-hotseat"]["default_trigger_id"] == "account-switch-requested"
+    owner = create_switcher(enabled=False)
+    assert not owner["enabled"] and owner["builtin_role"] is None
     assert owner["options"]["claude_min_remaining"] == 25 and owner["options"]["codex_min_remaining"] == 10
     assert owner["options"]["mode"] == "automatic" and owner["options"]["hotseat_command"] == "hotseat"
     changed = janitors.configure(owner["session"], owner["revision"], options={"claude_min_remaining": 40, "codex_min_remaining": 5})
@@ -115,7 +125,8 @@ def test_template_is_installed_paused_with_configurable_floors():
 @pytest.fixture
 def switcher(monkeypatch):
     monkeypatch.setattr(service.backends, "active_handles", lambda *a: [])
-    owner = janitor_builtins.ensure_builtins(initial={"account-hotseat": {"enabled": True}})["account-hotseat"]
+    janitor_builtins.ensure_builtins()
+    owner = create_switcher()
     service.setup()
     readings = {"claude": claude_payload(a=(True, 0.9), b=(False, 0.1)),
                 "codex": {"accounts": [{"alias": "p", "is_active": True, "usage": {"usable": True, "blocked": False, "error": None, "worst_used": 0.5}}]}}
@@ -206,9 +217,13 @@ def test_codex_switch_recycles_idle_connections(switcher):
     assert any(p["preview"].startswith("Codex: switched to q") for p in sent)
 
 
-def test_paused_switcher_does_nothing(monkeypatch):
+def test_paused_or_absent_switcher_does_nothing(monkeypatch):
     monkeypatch.setattr(service.backends, "active_handles", lambda *a: [])
     janitor_builtins.ensure_builtins(); service.setup()
+    worker = service.AutonomyJanitors(lambda *_: True, lambda p: pytest.fail("notified"),
+                                     hotseat_read=lambda *_: pytest.fail("read"), hotseat_switch=lambda *_: pytest.fail("switched"))
+    worker.hotseat_once()
+    create_switcher(enabled=False)
     worker = service.AutonomyJanitors(lambda *_: True, lambda p: pytest.fail("notified"),
                                      hotseat_read=lambda *_: pytest.fail("read"), hotseat_switch=lambda *_: pytest.fail("switched"))
     worker.hotseat_once()

@@ -1,7 +1,8 @@
 # Heartbeat keeper, Quota keeper, Hotseat switcher, and global Janitor models
 
-The Host installs three paused, persisted Janitor identities: `heartbeat-decider`,
-`quota-monitor` and `account-hotseat`. Enable/configure them through the existing Janitors UI or
+The Host installs two paused, persisted Janitor identities: `heartbeat-decider`
+and `quota-monitor`. The Hotseat switcher (`account-hotseat`) is an optional
+template in the same catalog: create it on a Host that has the `hotseat` CLI. Enable/configure them through the existing Janitors UI or
 `clarp-admin janitor`; their enabled state and options belong to the identity.
 The Host lifecycle owns one `AutonomyJanitors` service. No agent-created timer or
 separate credential watcher is required.
@@ -67,9 +68,11 @@ The change does not promise account-policy enforcement inside arbitrary scripts.
 ## Hotseat switcher
 
 The Quota keeper reacts when a turn hits a limit. The Hotseat switcher acts
-before that: it reads every saved account through
-[Hotseat](https://github.com/Maxteabag/hotseat) (`hotseat list --json` for
-Claude, `hotseat codex --json` for Codex) and changes the machine-wide default
+before that. It is not installed by default because it depends on the local
+[Hotseat](https://github.com/Maxteabag/hotseat) CLI; create it from the Janitor
+catalog (`clarp-admin janitor create --agent SESSION --template account-hotseat`
+or the app's New Janitor screen). Enabled, it reads every saved account through
+Hotseat (`hotseat list --json` for Claude, `hotseat codex --json` for Codex) and changes the machine-wide default
 account while the one in use still has a little room. It is deterministic; no
 model is called and no credential is read by the Host.
 

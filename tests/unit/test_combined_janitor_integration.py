@@ -3,7 +3,7 @@ import pytest
 
 def test_all_five_roles_and_deterministic_exemption():
     roles=janitor_builtins.ensure_builtins()
-    assert set(roles)=={'message-delegator','tool-explainer','audio-bookkeeper','heartbeat-decider','quota-monitor','account-hotseat'}
+    assert set(roles)=={'message-delegator','tool-explainer','audio-bookkeeper','heartbeat-decider','quota-monitor'}
     audio=roles['audio-bookkeeper']
     assert audio['execution']=={'executor':'deterministic','provider':'local'}
     assert audio['model']==audio['effort']==''
@@ -11,7 +11,7 @@ def test_all_five_roles_and_deterministic_exemption():
     with pytest.raises(ValueError,match='Deterministic'):
         janitor_design_policy.configure({'model_chain':[{'provider':'codex','model':'gpt-test'}],'inherit_sessions':[audio['session']]},0)
     assert janitor_builtins.begin_run('audio-bookkeeper','never-provider') is None
-    assert not roles['heartbeat-decider']['enabled'] and not roles['quota-monitor']['enabled'] and not roles['account-hotseat']['enabled']
+    assert not roles['heartbeat-decider']['enabled'] and not roles['quota-monitor']['enabled']
 
 def test_v84_to_current_preserves_audio_outbox_and_adds_autonomy():
     c=db.conn();roles=janitor_builtins.ensure_builtins();audio=roles['audio-bookkeeper']
