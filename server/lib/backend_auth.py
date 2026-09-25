@@ -221,11 +221,7 @@ def _executable(backend: str) -> str | None:
     adapter = backends.get(backend)
     if adapter is None:
         return None
-    binary = adapter.required_binary
-    if adapter.id == backends.CLAUDE:
-        from . import clarp_runner
-        binary = clarp_runner.configured_claude_bin()
-    return shutil.which(binary)
+    return shutil.which(adapter.executable())
 
 
 def _credential_metadata(backend: str) -> tuple[bool, int]:
@@ -382,7 +378,7 @@ def start_login(backend: str) -> dict[str, Any]:
                 backend, state, output, started_at=started_at,
                 error="" if state == "complete" else _failure_summary(output))
             _validation_cache.pop(backend, None)
-        if backend == backends.CODEX and state == "complete":
+        if state == "complete" and backends.adapter_for(backend).restarts_runner_on_credential_change:
             _recycle_codex_writers()
 
     threading.Thread(target=worker, daemon=True,
@@ -444,7 +440,7 @@ def logout(backend: str) -> dict[str, Any]:
         _tasks.pop(backend, None)
         _code_submitted.pop(backend, None)
         _validation_cache.pop(backend, None)
-    if backend == backends.CODEX:
+    if backends.adapter_for(backend).restarts_runner_on_credential_change:
         _recycle_codex_writers()
     return next(row for row in status(validate=False) if row["id"] == backend)
 

@@ -37,16 +37,6 @@ FAMILY_TOKENS: tuple[tuple[str, str], ...] = (
     ("deepseek", "deepseek"),
 )
 
-# The family a CLI names when the Agent pins no model of its own. Claude and
-# OpenCode are deliberately absent: both front several families, so neither
-# is evidence of which model is answering.
-BACKEND_FAMILIES: dict[str, str] = {
-    backends.CODEX: "codex",
-    backends.AGY: "gemini",
-    backends.GROK: "grok",
-    backends.DEEPSEEK: "deepseek",
-}
-
 _SLUG = re.compile(r"[^a-z0-9_-]")
 _lock = threading.Lock()
 _versions: dict[str, tuple[int, int, str]] = {}
@@ -74,11 +64,11 @@ def families_for(backend: str, model: str, *, default_model: str = "") -> list[s
     ``default_model`` is what this Computer has configured for the backend;
     it speaks for an Agent that pins no model of its own.
     """
-    resolved = backends.normalize(backend)
     candidates = [
         family_for_model(model),
         family_for_model(default_model),
-        BACKEND_FAMILIES.get(resolved, ""),
+        # The family the CLI names when the Agent pins no model of its own.
+        backends.adapter_for(backend).model_family,
     ]
     ordered: list[str] = []
     for family in candidates:
