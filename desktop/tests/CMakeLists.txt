@@ -7,6 +7,12 @@ target_link_libraries(clarp-palette-tests PRIVATE Qt6::Gui Qt6::Test)
 clarp_apply_quality_settings(clarp-palette-tests)
 add_test(NAME clarp-desktop-palette COMMAND clarp-palette-tests)
 
+add_executable(clarp-markdown-style-tests tst_markdown_style.cpp ../src/app/MarkdownStyle.cpp)
+target_include_directories(clarp-markdown-style-tests PRIVATE ../src)
+target_link_libraries(clarp-markdown-style-tests PRIVATE Qt6::Gui Qt6::Test)
+clarp_apply_quality_settings(clarp-markdown-style-tests)
+add_test(NAME clarp-desktop-markdown-style COMMAND clarp-markdown-style-tests)
+
 add_executable(clarp-reading-theme-tests tst_reading_theme.cpp)
 target_include_directories(clarp-reading-theme-tests PRIVATE ../src)
 target_link_libraries(clarp-reading-theme-tests PRIVATE Qt6::Gui Qt6::Test)
@@ -30,6 +36,7 @@ add_executable(clarp-desktop-tests
     ../src/app/ToolNarrator.cpp
     ../src/app/ToolNarrator.h
     ../src/app/TimeFormat.cpp
+    ../src/app/MarkdownStyle.cpp
     ../src/models/AgentFilterModel.cpp
     ../src/models/AgentFilterModel.h
     ../src/media/PortraitImage.cpp
@@ -73,7 +80,7 @@ target_link_libraries(clarp-desktop-tests PRIVATE
     Qt6::DBus
     Qt6::Multimedia
     Qt6::Concurrent Qt6::Network
-    Qt6::Qml
+    Qt6::Qml Qt6::Quick
     Qt6::Test
 )
 clarp_apply_quality_settings(clarp-desktop-tests)

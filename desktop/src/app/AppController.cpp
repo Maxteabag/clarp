@@ -3,6 +3,8 @@
 #include "terminal/TerminalLaunch.h"
 #include "app/TimeFormat.h"
 #include "app/ReadingTheme.h"
+#include "app/MarkdownStyle.h"
+#include <QtQuick/QQuickTextDocument>
 #include "media/PortraitImage.h"
 
 #include <QDir>
@@ -513,6 +515,12 @@ QUrl AppController::avatarSource(const QString& session) const {
 
 QUrl AppController::contactAvatarSource(const QString& name) const {
     return m_contactAvatarSources.value(name);
+}
+
+void AppController::styleMarkdown(QObject* textDocument, const QVariantMap& options) const {
+    auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
+    if (quickDocument == nullptr || quickDocument->textDocument() == nullptr) return;
+    applyMarkdownStyle(quickDocument->textDocument(), markdownStyleOptions(options));
 }
 
 QVariantMap AppController::memoryCounters() const {
