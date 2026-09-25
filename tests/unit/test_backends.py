@@ -227,6 +227,6 @@ def test_routing_and_auth_adapters_are_derived_from_the_registry():
 def test_adapter_rejects_unknown_enumerations():
     import pytest
     with pytest.raises(ValueError):
-        backends.BackendAdapter(id="x", label="X", required_binary="x", login_kind="magic")
+        type("Bad", (backends.Backend,), {"id": "x", "label": "X", "required_binary": "x", "login_kind": "magic"})()
     with pytest.raises(ValueError):
-        backends.BackendAdapter(id="x", label="X", required_binary="x", effort_ui="dial")
+        type("Bad", (backends.Backend,), {"id": "x", "label": "X", "required_binary": "x", "effort_ui": "dial"})()

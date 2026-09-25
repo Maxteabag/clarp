@@ -17,7 +17,7 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..protocol import AgentState
 from ..voice_preamble import apply_voice_preamble
-from .base import hooked
+from .base import BackendBrand, hooked
 from .stream_json import StreamJsonBackend, iter_json_dicts
 
 
@@ -65,6 +65,25 @@ def _session_id_from(ev: dict) -> str:
 
 class OpenCodeBackend(StreamJsonBackend):
     """Runs ``opencode run --format json`` once per turn; no compaction or terminal yet."""
+    # --- catalogue data (was the BackendAdapter registry row) ------------
+    id = 'opencode'
+    label = 'OpenCode'
+    required_binary = 'opencode'
+    aliases = ('open-code', 'opencode-ai')
+    badge = 'BackendOpenCode'
+    detail = 'Runs on OpenCode.'
+    symbol = 'chevron.left.forwardslash.chevron.right'
+    brand = BackendBrand('#16352b', '#0b1c16', '#5ee4b5', '#1f8a65')
+    efforts = ('low', 'medium', 'high', 'max')
+    runner = 'opencode'
+    config_model_field = 'opencode_model'
+    config_effort_field = 'opencode_effort'
+    fallback_models = (
+        ('opencode/gpt-5.4', 'GPT-5.4'),
+        ('anthropic/claude-sonnet-4-5', 'Claude Sonnet 4.5'),
+        ('openai/gpt-5.4', 'GPT-5.4 (OpenAI)'),
+    )
+
 
     transcript = opencode_transcript
 

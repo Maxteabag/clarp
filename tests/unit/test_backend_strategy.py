@@ -69,12 +69,22 @@ def test_class_shapes():
 @pytest.mark.parametrize("backend", IDS)
 def test_data_attributes_copy_the_adapter_row(backend):
     b = registry.by_id(backend)
-    a = backends.get(backend)
-    assert b.adapter is a
+    # get(), adapter_for() and the facade table all hand out the backend
+    # object itself; there is no separate catalogue row any more.
+    assert backends.get(backend) is b
+    assert backends.adapter_for(backend) is b
+    a = backends._BY_ID[b.id]
+    assert a is b
     for name in ("id", "label", "required_binary", "aliases", "efforts",
                  "context_window", "model_family", "janitor_default_model",
                  "api_providers", "login_kind", "effort_ui", "effort_scope",
-                 "fallback_models", "runner"):
+                 "fallback_models", "runner", "badge", "detail", "symbol",
+                 "brand", "hidden", "effort_help", "resumable", "supports_fork",
+                 "supports_steer", "supports_transcript_streaming",
+                 "supports_mcp", "supports_usage", "native_tool_explainer",
+                 "routing_module", "config_model_field", "config_effort_field",
+                 "supports_routing", "supports_auth",
+                 "effort_compatibility_unknown", "model_carries_effort"):
         assert getattr(b, name) == getattr(a, name), name
 
 
@@ -231,40 +241,49 @@ def _fake_spawn(calls, module):
     return spawn
 
 
-def test_runner_methods_resolve_the_runner_module_late(monkeypatch):
-    # Fakes are keyed by module: DeepSeek runs through OpenCode's runner.
-    calls: dict[str, list] = {}
-    for a in backends.adapters():
-        runner, m = backends._mod(a.runner_module), a.runner_module
-        monkeypatch.setattr(runner, "spawn_turn", _fake_spawn(calls, m))
-        monkeypatch.setattr(runner, "interrupt", lambda aid, _m=m: calls[_m].append(("interrupt", aid)) or 2)
-        monkeypatch.setattr(runner, "active_handles", lambda aid, _m=m: calls[_m].append(("active", aid)) or [f"{_m}:{aid}"])
-    spec = {"text": "hi", "cwd": "/x", "stream": None, "synthesize_audio": True,
-            "hook_session": "h", "run_if_owned": "gate", "voice_preamble": True}
-    stream = {"text": "hi", "cwd": "/x", "stream": None, "voice_preamble": True}
-    expected = {"claude": {"text": "hi", "cwd": "/x", "stream": None, "hook_session": "h"},
-                "agy": {**stream, "run_if_owned": "gate"}}
-    for a in backends.adapters():
-        b, m = registry.by_id(a.id), a.runner_module
-        calls[m] = []
-        assert b.spawn_turn(**spec) == backends.spawn_turn(a.id, **spec) == f"{m}-handle"
-        assert calls[m][0][1] == calls[m][1][1] == expected.get(a.id, stream)
-        assert b.interrupt("a1") == 2
-        assert backends.interrupt(a.id, "a1") == 2
-        assert b.active_handles("a1") == backends.active_handles(a.id, "a1") == [f"{m}:a1"]
-    assert registry.by_id("deepseek").adapter.runner_module == registry.by_id("opencode").adapter.runner_module
-
-
-def test_routing_methods_resolve_the_routing_module_late(monkeypatch):
-    for a in backends.adapters():
-        routing, m = backends._mod(a.routing_module), a.routing_module
-        monkeypatch.setattr(routing, "routing_cmd",
-                            lambda prompt, model="", effort="", _m=m: [_m, prompt, model, effort])
-        monkeypatch.setattr(routing, "routing_text", lambda stdout, _m=m: f"{_m}:{stdout}")
+def test_runner_modules_delegate_to_the_classes(monkeypatch):
+    """The ``<runner>_runner`` modules are thin delegators: patching the
+    class instance is what a test needs, and the module and the facade both
+    land on it. DeepSeek shares OpenCode's runner (and process registry)."""
+    spec = {"text": "hi", "cwd": "/x", "stream": None}
     for a in backends.adapters():
         b = registry.by_id(a.id)
-        assert b.routing_cmd("p", model="m", effort="e") == [a.routing_module, "p", "m", "e"]
-        assert b.routing_text("out") == f"{a.routing_module}:out"
+        calls: list = []
+        monkeypatch.setattr(b, "spawn_turn", lambda **kw: calls.append(("spawn", kw)) or f"{b.id}-handle")
+        # The module delegators call the full-signature ``start_turn``; the
+        # class's ``spawn_turn`` filters the host's kwargs down to it.
+        monkeypatch.setattr(b, "start_turn", lambda **kw: calls.append(("spawn", kw)) or f"{b.id}-handle")
+        monkeypatch.setattr(b, "interrupt", lambda aid: calls.append(("interrupt", aid)) or 2)
+        monkeypatch.setattr(b, "active_handles", lambda aid: calls.append(("active", aid)) or [f"{b.id}:{aid}"])
+        # Codex's module keeps its historical narrower surface: it interrupts
+        # and lists only the exec processes, not the app-server threads the
+        # class's full interrupt also covers.
+        if hasattr(b, "interrupt_exec"):
+            monkeypatch.setattr(b, "interrupt_exec", lambda aid: calls.append(("interrupt", aid)) or 2)
+            monkeypatch.setattr(b, "active_exec_handles", lambda aid: calls.append(("active", aid)) or [f"{b.id}:{aid}"])
+        assert backends.spawn_turn(a.id, **spec) == f"{b.id}-handle"
+        assert backends.interrupt(a.id, "a1") == 2
+        assert backends.active_handles(a.id, "a1") == [f"{b.id}:a1"]
+        if b.id != "deepseek":
+            module = backends._mod(b.runner_module)
+            assert module.spawn_turn(**spec) == f"{b.id}-handle"
+            assert module.interrupt("a1") == 2
+            assert module.active_handles("a1") == [f"{b.id}:a1"]
+        assert [c[0] for c in calls][:3] == ["spawn", "interrupt", "active"]
+    assert registry.by_id("deepseek").runner == registry.by_id("opencode").runner
+    assert isinstance(registry.by_id("deepseek"), type(registry.by_id("opencode")))
+
+
+def test_routing_modules_delegate_to_the_classes(monkeypatch):
+    for a in backends.adapters():
+        if a.id == "deepseek":
+            continue
+        b = registry.by_id(a.id)
+        monkeypatch.setattr(b, "routing_cmd", lambda prompt, model="", effort="": [b.id, prompt, model, effort])
+        monkeypatch.setattr(b, "routing_text", lambda stdout: f"{b.id}:{stdout}")
+        module = backends._mod(b.runner_module)
+        assert module.routing_cmd("p", model="m", effort="e") == [b.id, "p", "m", "e"]
+        assert module.routing_text("out") == f"{b.id}:out"
 
 
 TRANSCRIPT_MODULES = {
@@ -605,8 +624,10 @@ def test_hook_prefers_a_test_double_over_the_modules_own_delegator(monkeypatch):
 
 def test_base_defaults_are_documented_no_ops_or_not_implemented():
     class Bare(Backend):
-        pass
-    bare = Bare(backends.get("grok"))
+        id = "bare"
+        label = "Bare"
+        required_binary = "grok"
+    bare = Bare()
     assert bare.bind_new_session("a", "s") == ""
     assert bare.on_credential_change() is None
     assert bare.recover_usage_limit("m") is False

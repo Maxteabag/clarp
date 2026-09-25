@@ -52,7 +52,7 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..protocol import AgentState
 from ..voice_preamble import apply_voice_preamble
-from .base import CompactionStrategy, hooked, resolve
+from .base import BackendBrand, CompactionStrategy, hooked, resolve
 from .stream_json import StreamJsonBackend
 
 
@@ -130,6 +130,36 @@ _TOOL_ITEM_TYPES = {
 
 class CodexBackend(StreamJsonBackend):
     """Runs through the long-lived Codex app-server (``codex_app_server``)."""
+    # --- catalogue data (was the BackendAdapter registry row) ------------
+    id = 'codex'
+    label = 'Codex'
+    required_binary = 'codex'
+    badge = 'BackendCodex'
+    detail = 'Runs on the Codex CLI.'
+    symbol = 'terminal'
+    brand = BackendBrand('#2b2f3c', '#14161d', '#c0caf5', '#3c4257')
+    supports_steer = True
+    supports_usage = True
+    login_kind = 'device_code'
+    efforts = ('low', 'medium', 'high', 'xhigh', 'max', 'ultra')
+    effort_scope = 'model'
+    runner = 'codex'
+    extra_interrupt_modules = ('codex_runner',)
+    config_model_field = 'codex_model'
+    config_effort_field = 'codex_reasoning_effort'
+    api_providers = ('openai',)
+    native_tool_explainer = True
+    janitor_default_model = 'gpt-5.3-codex-spark'
+    model_family = 'codex'
+    fallback_models = (
+        ('gpt-5.4', 'GPT-5.4'),
+        ('gpt-5.4-mini', 'GPT-5.4 Mini'),
+        ('gpt-5.2-codex', 'GPT-5.2 Codex'),
+        ('gpt-5.1-codex-max', 'GPT-5.1 Codex Max'),
+        ('gpt-5.1-codex', 'GPT-5.1 Codex'),
+        ('gpt-5-codex', 'GPT-5 Codex'),
+    )
+
 
     transcript = codex_transcript
 
