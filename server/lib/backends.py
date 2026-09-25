@@ -1,12 +1,15 @@
-"""AI-CLI backend registry.
+"""AI-CLI backend facade.
 
-Each coding CLI is a ``BackendAdapter``: dispatch, history, catalogue
-metadata, presentation, capability flags, and (optional) compaction,
-routing and sign-in. Clients do not hardcode provider ids — they render
+Each coding CLI is a ``Backend`` strategy object in ``lib.backend``
+(``docs/architecture/backend-strategy.md``); ``by_id()`` / ``for_agent()``
+hand them out. This module stays the import path callers use: the id
+constants, ``normalize()`` (the one alias normaliser) and, while the
+migration runs, the ``BackendAdapter`` rows the strategies still delegate
+to for their catalogue metadata, presentation and capability flags.
+Clients do not hardcode provider ids — they render
 ``/agent-model-options``, including the label, brand colours, symbol and
 ``supports_*`` flags carried here, so a new CLI looks intentional in the
-apps without an app release. Adding a provider is a server adapter plus a
-registry line.
+apps without an app release.
 """
 from __future__ import annotations
 
@@ -850,8 +853,7 @@ def valid_efforts(backend: str) -> tuple[str, ...]:
 
 
 def clean_effort(backend: str, effort: str | None) -> str:
-    e = (effort or "").strip().lower()
-    return e if e in valid_efforts(backend) else ""
+    return by_id(backend).clean_effort(effort)
 
 
 def is_valid_model(backend: str, model: str | None) -> bool:
@@ -886,18 +888,14 @@ def capabilities(backend: str | None) -> BackendCapabilities:
 
 
 def spawn_turn(backend: str, **kwargs: Any):
-    adapter = adapter_for(backend)
-    runner = _mod(adapter.runner_module)
-    return runner.spawn_turn(**adapter.spawn_kwargs(kwargs))
+    return by_id(backend).spawn_turn(**kwargs)
 
 
 def interrupt(backend: str, agent_id: str) -> int:
     if _RUNTIME_CLIENT is not None:
         return int(_RUNTIME_CLIENT.interrupt(normalize(backend), agent_id))
-    adapter = adapter_for(backend)
-    runner = _mod(adapter.runner_module)
     from .turn_model_fallback import REGISTRY
-    return int(runner.interrupt(agent_id) or 0) + REGISTRY.interrupt(agent_id, event="fallbackInterruptFail")
+    return by_id(backend).interrupt(agent_id) + REGISTRY.interrupt(agent_id, event="fallbackInterruptFail")
 
 
 def interrupt_any(agent_id: str) -> int:
@@ -934,10 +932,8 @@ def active_handles(backend: str, agent_id: str) -> list:
         if agent_id in set(status.get("terminals") or ()):
             return [_RemoteHandle("terminal")]
         return []
-    adapter = adapter_for(backend)
-    runner = _mod(adapter.runner_module)
     from .turn_model_fallback import REGISTRY
-    return list(runner.active_handles(agent_id) or []) + REGISTRY.active_handles(agent_id)
+    return by_id(backend).active_handles(agent_id) + REGISTRY.active_handles(agent_id)
 
 
 class GoalUnsupported(RuntimeError):
@@ -980,13 +976,11 @@ def steer_turn(backend: str, agent_id: str, text: str, *,
 
 
 def find_session_jsonl(backend: str, session_id: str):
-    adapter = adapter_for(backend)
-    return _mod(adapter.transcript_module).find_latest_jsonl(session_id)
+    return by_id(backend).find_transcript(session_id)
 
 
 def parse_turns(backend: str, path) -> list[dict]:
-    adapter = adapter_for(backend)
-    return _mod(adapter.transcript_module).parse_turns(path)
+    return by_id(backend).parse_transcript(path)
 
 
 def find_resume_transcript(backend: str, session_id: str, *, cwd: str,
@@ -998,20 +992,18 @@ def find_resume_transcript(backend: str, session_id: str, *, cwd: str,
 
 def list_sessions(backend: str, cwd: str, *, limit: int = 20,
                   all_projects: bool = False) -> list[dict]:
-    adapter = adapter_for(backend)
-    return adapter.session_catalog_reader(
-        adapter, cwd, limit=limit, all_projects=all_projects)
+    return by_id(backend).list_sessions(cwd, limit=limit, all_projects=all_projects)
 
 
 def default_model_effort(backend: str, cfg) -> tuple[str, str]:
-    adapter = adapter_for(backend)
-    model = ""
-    effort = ""
-    if adapter.config_model_field:
-        model = str(getattr(cfg, adapter.config_model_field, "") or "")
-    if adapter.config_effort_field:
-        effort = str(getattr(cfg, adapter.config_effort_field, "") or "")
-    return model.strip(), clean_effort(adapter.id, effort)
+    return by_id(backend).default_model_effort(cfg)
 
 
 ResultCb = Callable[[dict], None]
+
+# The strategy objects. Imported last: the registry builds its singletons
+# from the adapter rows above on first use, so neither import order
+# (facade first or package first) sees a half-initialised module.
+from .backend.base import Backend, CompactionStrategy, Unsupported  # noqa: E402
+from .backend.registry import by_id, for_agent  # noqa: E402
+from .backend.registry import all as all_backends  # noqa: E402
