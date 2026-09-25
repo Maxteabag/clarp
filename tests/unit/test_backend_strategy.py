@@ -164,7 +164,9 @@ def test_executable_matches_the_adapter(monkeypatch):
     from lib import clarp_runner
     monkeypatch.setattr(clarp_runner, "configured_claude_bin", lambda: "clarp")
     for a in backends.adapters():
-        assert registry.by_id(a.id).executable() == a.executable() == backends.capabilities(a.id).required_binary
+        assert registry.by_id(a.id).executable() == backends.capabilities(a.id).required_binary
+        if a.id != "claude":
+            assert registry.by_id(a.id).executable() == a.required_binary
     assert registry.by_id("claude").executable() == "clarp"
     assert registry.by_id("deepseek").executable() == "opencode"
 
@@ -177,7 +179,9 @@ def test_is_valid_model_matches_the_adapter(monkeypatch):
     for a in backends.adapters():
         b = registry.by_id(a.id)
         for model in samples:
-            assert b.is_valid_model(model) is a.is_valid_model(model) is backends.is_valid_model(a.id, model), (a.id, model)
+            assert b.is_valid_model(model) is backends.is_valid_model(a.id, model), (a.id, model)
+            if a.id != "agy":
+                assert b.is_valid_model(model) is True, (a.id, model)
     assert registry.by_id("agy").is_valid_model("gpt-5.4") is False
     assert registry.by_id("codex").is_valid_model("gpt-5.4") is True
 
@@ -196,19 +200,28 @@ def test_default_model_effort_and_clean_effort_match_the_facade():
     assert registry.by_id("codex").clean_effort("Ultra") == backends.clean_effort("codex", "Ultra") == "ultra"
 
 
-def test_compaction_matches_the_compaction_table():
-    from lib import compaction
-    for a in backends.adapters():
-        b = registry.by_id(a.id)
-        if a.id not in compaction._COMPACT:
-            with pytest.raises(Unsupported):
+COMPACTION = {
+    "claude": CompactionStrategy(("claude", "--dangerously-skip-permissions", "--resume"), "/compact", True),
+    "codex": CompactionStrategy(("codex", "resume"), "/compact", False),
+    "agy": CompactionStrategy(("agy", "--dangerously-skip-permissions", "--conversation"), "/compress", False),
+    "grok": CompactionStrategy(("grok", "--resume"), "/compact", False),
+}
+
+
+def test_compaction_strategy_per_backend_or_unsupported():
+    """The table compaction.py used to carry; OpenCode (and DeepSeek on it)
+    has no compaction machinery, so the catalogue flag says so too."""
+    for name in IDS:
+        b = registry.by_id(name)
+        if name not in COMPACTION:
+            with pytest.raises(Unsupported, match=f"compaction unsupported for {name}"):
                 b.compaction("sess")
+            assert backends.supports_compact(name) is False, name
+            assert backends.catalogue_fields(name)["supports_compact"] is False, name
             continue
-        launch, command = compaction._COMPACT[a.id]
-        assert b.compaction("sess") == CompactionStrategy(
-            tuple(launch), command, a.compaction_watches_transcript)
-    assert registry.by_id("claude").compaction("s").watches_transcript is True
-    assert registry.by_id("codex").compaction("s").watches_transcript is False
+        assert b.compaction("sess") == COMPACTION[name]
+        assert backends.supports_compact(name) is True, name
+        assert backends.catalogue_fields(name)["supports_compact"] is True, name
 
 
 def _fake_spawn(calls, module):
@@ -228,11 +241,14 @@ def test_runner_methods_resolve_the_runner_module_late(monkeypatch):
         monkeypatch.setattr(runner, "active_handles", lambda aid, _m=m: calls[_m].append(("active", aid)) or [f"{_m}:{aid}"])
     spec = {"text": "hi", "cwd": "/x", "stream": None, "synthesize_audio": True,
             "hook_session": "h", "run_if_owned": "gate", "voice_preamble": True}
+    stream = {"text": "hi", "cwd": "/x", "stream": None, "voice_preamble": True}
+    expected = {"claude": {"text": "hi", "cwd": "/x", "stream": None, "hook_session": "h"},
+                "agy": {**stream, "run_if_owned": "gate"}}
     for a in backends.adapters():
         b, m = registry.by_id(a.id), a.runner_module
         calls[m] = []
         assert b.spawn_turn(**spec) == backends.spawn_turn(a.id, **spec) == f"{m}-handle"
-        assert calls[m][0][1] == calls[m][1][1] == a.spawn_kwargs(spec)
+        assert calls[m][0][1] == calls[m][1][1] == expected.get(a.id, stream)
         assert b.interrupt("a1") == 2
         assert backends.interrupt(a.id, "a1") == 2
         assert b.active_handles("a1") == backends.active_handles(a.id, "a1") == [f"{m}:a1"]
@@ -251,14 +267,22 @@ def test_routing_methods_resolve_the_routing_module_late(monkeypatch):
         assert b.routing_text("out") == f"{a.routing_module}:out"
 
 
+TRANSCRIPT_MODULES = {
+    # The parser module each backend reads its sessions through.
+    "claude": "transcript_log", "codex": "codex_transcript", "agy": "agy_transcript",
+    "grok": "grok_transcript", "opencode": "opencode_transcript",
+    "deepseek": "opencode_transcript",
+}
+
+
 def test_transcript_access_matches_the_facade(monkeypatch):
-    for a in backends.adapters():
-        module, m = backends._mod(a.transcript_module), a.transcript_module
+    for m in set(TRANSCRIPT_MODULES.values()):
+        module = backends._mod(m)
         monkeypatch.setattr(module, "find_latest_jsonl",
                             lambda sid, projects_root=None, _m=m: pathlib.Path(f"/{_m}/{sid}.jsonl"))
         monkeypatch.setattr(module, "parse_turns", lambda path, _m=m: [{"module": _m, "path": str(path)}])
     for a in backends.adapters():
-        b, m = registry.by_id(a.id), a.transcript_module
+        b, m = registry.by_id(a.id), TRANSCRIPT_MODULES[a.id]
         assert b.find_transcript("s1") == backends.find_session_jsonl(a.id, "s1") == pathlib.Path(f"/{m}/s1.jsonl")
         assert b.parse_transcript("/p") == backends.parse_turns(a.id, "/p") == [{"module": m, "path": "/p"}]
     # Claude threads a home into its projects root; the others own their roots.
@@ -274,17 +298,27 @@ def test_list_sessions_matches_the_facade(monkeypatch):
     from lib import session_catalog
     monkeypatch.setattr(session_catalog, "list_claude_sessions",
                         lambda cwd, *, all_projects, limit: [{"id": f"claude:{cwd}:{limit}:{all_projects}"}])
+    for m in set(TRANSCRIPT_MODULES.values()) - {"transcript_log"}:
+        module = backends._mod(m)
+        if m == "agy_transcript":
+            # agy's catalogue takes no scope flag; "all" is an empty cwd.
+            monkeypatch.setattr(module, "list_sessions",
+                                lambda cwd, limit=20, _m=m: [{"id": f"{_m}:{cwd}:{limit}"}])
+        else:
+            monkeypatch.setattr(module, "list_sessions",
+                                lambda cwd, *, limit, all_projects=False, _m=m: [{"id": f"{_m}:{cwd}:{limit}:{all_projects}"}])
     for a in backends.adapters():
-        if a.id == "claude":
-            continue
-        module = backends._mod(a.transcript_module)
-        monkeypatch.setattr(module, "list_sessions",
-                            lambda cwd, *, limit, all_projects=False, _id=a.id: [{"id": f"{_id}:{cwd}:{limit}:{all_projects}"}])
-    for a in backends.adapters():
-        b = registry.by_id(a.id)
+        b, m = registry.by_id(a.id), TRANSCRIPT_MODULES[a.id]
         for all_projects in (False, True):
-            assert (b.list_sessions("/w", limit=5, all_projects=all_projects)
-                    == backends.list_sessions(a.id, "/w", limit=5, all_projects=all_projects))
+            got = b.list_sessions("/w", limit=5, all_projects=all_projects)
+            assert got == backends.list_sessions(a.id, "/w", limit=5, all_projects=all_projects)
+            cwd = "" if all_projects else "/w"
+            if a.id == "claude":
+                assert got == [{"id": f"claude:/w:5:{all_projects}"}]
+            elif a.id == "agy":
+                assert got == [{"id": f"agy_transcript:{cwd}:5"}]
+            else:
+                assert got == [{"id": f"{m}:{cwd}:5:{all_projects}"}]
 
 
 def test_resume_target_is_the_transcript_for_claude_and_the_id_for_the_rest(monkeypatch):
@@ -295,12 +329,39 @@ def test_resume_target_is_the_transcript_for_claude_and_the_id_for_the_rest(monk
     assert claude.resume_target("real", "/w", home=pathlib.Path("/h")) == pathlib.Path("/h/.claude/projects/real.jsonl")
     assert claude.resume_target("ghost", "/w", home=pathlib.Path("/h")) is None
     assert claude.resume_target("", "/w") is None
-    assert claude.resume_target("real", "/w", home=pathlib.Path("/h")) == backends.find_resume_transcript(
-        "claude", "real", cwd="/w", projects_root=pathlib.Path("/h/.claude/projects"))
+    # The same lookup, cwd hint and all, is find_transcript's when asked with a cwd.
+    assert claude.find_transcript("real", pathlib.Path("/h"), cwd="/w") == pathlib.Path("/h/.claude/projects/real.jsonl")
     for name in IDS[1:]:
         b = registry.by_id(name)
         assert b.resume_target("sid-1", "/w") == "sid-1", name
         assert b.resume_target("", "/w") is None, name
+
+
+def test_find_transcript_with_a_cwd_hint_prefers_the_encoded_project_dir(tmp_path):
+    """Boot-time resume (lib.resume) asks with the saved cwd: Claude prefers
+    the project dir that encodes it, falls back to a scan of the root, and
+    the other CLIs ignore the hint because their layouts carry no cwd."""
+    home = tmp_path
+    projects = home / ".claude" / "projects"
+    for encoded in ("-home-x", "-home-x-GIT-app"):
+        (projects / encoded).mkdir(parents=True)
+        (projects / encoded / "abc.jsonl").write_text("")
+    (projects / "-home-x-GIT-app" / "xyz.jsonl").write_text("")
+    claude = registry.by_id("claude")
+    assert claude.find_transcript("abc", home, cwd="/home/x") == projects / "-home-x" / "abc.jsonl"
+    assert claude.find_transcript("xyz", home, cwd="/home/x") == projects / "-home-x-GIT-app" / "xyz.jsonl"
+    assert claude.find_transcript("nope", home, cwd="/home/x") is None
+    assert claude.find_transcript("", home, cwd="/home/x") is None
+
+
+def test_transcript_cwd_is_decoded_from_claude_project_dirs_only():
+    claude = registry.by_id("claude")
+    assert claude.transcript_cwd(pathlib.Path("/h/.claude/projects/-home-user-GIT-sqlit/s.jsonl")) == "/home/user/GIT/sqlit"
+    assert claude.transcript_cwd(pathlib.Path("/h/.claude/projects/no-prefix/s.jsonl")) == ""
+    for name in IDS[1:]:
+        b = registry.by_id(name)
+        assert b.transcript_cwd(pathlib.Path("/x/-home-user/s.jsonl")) == "", name
+        assert b.transcript_cwd("s-1") == "", name
 
 
 def test_bind_new_session_pre_mints_for_claude_only(monkeypatch):
@@ -334,12 +395,12 @@ def test_wrap_turn_callback_serialises_claude_under_the_dispatch_lock():
 
     def probe(*args):
         return (args, turn_dispatch._TURN_LOCK._is_owned())
-    wrapped = registry.by_id("claude").wrap_turn_callback(probe)
+    wrapped = registry.by_id("claude").wrap_turn_callback(probe, turn_dispatch._TURN_LOCK)
     assert wrapped is not probe
     assert wrapped(1, 2) == ((1, 2), True)
     assert turn_dispatch._TURN_LOCK._is_owned() is False
     for name in IDS[1:]:
-        assert registry.by_id(name).wrap_turn_callback(probe) is probe, name
+        assert registry.by_id(name).wrap_turn_callback(probe, turn_dispatch._TURN_LOCK) is probe, name
 
 
 def test_arm_source_marker_writes_the_hook_marker_for_claude_only(tmp_path, monkeypatch):
@@ -379,6 +440,9 @@ def test_quota_identity_matches_the_janitor_window_key():
     assert claude.quota_identity(windows[0]) == claude.quota_identity(windows[1])
     assert claude.quota_identity(windows[2]) == "w-plain"
     assert registry.by_id("codex").quota_identity(windows[0]) == "w-5h"
+    # An API provider is not a backend: its window id is the identity as is.
+    assert (janitor_autonomy.quota_window_key("openai", "acct", windows[0])
+            == "quota-keeper.window." + janitor_autonomy.digest(["openai", "acct", "w-5h"]))
 
 
 def test_classify_usage_limit_records_a_provider_event_for_codex_only(monkeypatch):
@@ -386,22 +450,86 @@ def test_classify_usage_limit_records_a_provider_event_for_codex_only(monkeypatc
     recorded = []
     monkeypatch.setattr(backend_usage, "record_classified_usage_limit",
                         lambda provider: recorded.append(provider) or {"provider": provider})
-    for a in backends.adapters():
-        b = registry.by_id(a.id)
-        if a.records_classified_usage_limit:
-            assert b.classify_usage_limit("limit") == {"provider": a.id}
-            assert b.classify_usage_limit("limit", quota_confirmed=True) == {"provider": a.id}
+    for name in IDS:
+        b = registry.by_id(name)
+        if name == "codex":
+            assert b.classify_usage_limit("limit") == {"provider": "codex"}
+            assert b.classify_usage_limit("limit", quota_confirmed=True) == {"provider": "codex"}
             assert b.classify_usage_limit("limit", quota_confirmed=False) is None
         else:
-            assert b.classify_usage_limit("limit", quota_confirmed=True) is None, a.id
+            assert b.classify_usage_limit("limit", quota_confirmed=True) is None, name
     assert recorded == ["codex", "codex"]
 
 
-def test_recorded_model_delegates_to_session_models(monkeypatch):
+def test_recorded_model_reads_claude_transcripts_and_the_codex_index(monkeypatch, tmp_path):
+    """session_models' per-backend readers live on the classes: Claude reads
+    the transcript's last turn, Codex prefers its thread index and falls back
+    to the rollout, and the rest record nothing the Host can read."""
     from lib import session_models
-    monkeypatch.setattr(session_models, "recorded_model", lambda backend, session: f"{backend}/{session}")
+    monkeypatch.setattr(session_models, "transcript_model",
+                        lambda backend, session: f"{backend}-transcript/{session}")
+    indexed = {}
+    monkeypatch.setattr(session_models, "indexed_model",
+                        lambda home, session: indexed.get(session, ""))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    assert registry.by_id("claude").recorded_model("s9") == "claude-transcript/s9"
+    assert registry.by_id("codex").recorded_model("s9") == "codex-transcript/s9"
+    indexed["s9"] = "gpt-indexed"
+    assert registry.by_id("codex").recorded_model("s9") == "gpt-indexed"
     for name in IDS:
-        assert registry.by_id(name).recorded_model("s9") == f"{name}/s9"
+        assert registry.by_id(name).recorded_model("") == "", name
+        if name not in ("claude", "codex"):
+            assert registry.by_id(name).recorded_model("s9") == "", name
+    # The facade entry point asks the backend.
+    assert session_models.recorded_model("claude", "s9") == "claude-transcript/s9"
+    assert session_models.recorded_model("grok", "s9") == ""
+
+
+def test_codex_model_transcript_prefers_the_thread_index(monkeypatch, tmp_path):
+    import sqlite3
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    rollout = tmp_path / "rollout.jsonl"
+    rollout.write_text("")
+    with sqlite3.connect(tmp_path / "state_5.sqlite") as db:
+        db.execute("CREATE TABLE threads (id TEXT, rollout_path TEXT)")
+        db.execute("INSERT INTO threads VALUES (?, ?)", ("indexed", str(rollout)))
+        db.execute("INSERT INTO threads VALUES (?, ?)", ("stale", str(tmp_path / "gone.jsonl")))
+    from lib import codex_transcript
+    monkeypatch.setattr(codex_transcript, "find_latest_jsonl",
+                        lambda sid: pathlib.Path(f"/scan/{sid}.jsonl"))
+    codex = registry.by_id("codex")
+    assert codex.model_transcript("indexed") == rollout
+    assert codex.model_transcript("stale") == pathlib.Path("/scan/stale.jsonl")
+    assert codex.model_transcript("unknown") == pathlib.Path("/scan/unknown.jsonl")
+    # Every other backend's model transcript is its session transcript.
+    from lib import transcript_log
+    monkeypatch.setattr(transcript_log, "find_latest_jsonl",
+                        lambda sid, projects_root=None: pathlib.Path(f"/claude/{sid}.jsonl"))
+    assert registry.by_id("claude").model_transcript("s1") == pathlib.Path("/claude/s1.jsonl")
+
+
+def test_cli_default_model_reads_each_clis_own_config(monkeypatch, tmp_path):
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+    claude_home = tmp_path / "claude"
+    claude_home.mkdir()
+    (claude_home / "settings.json").write_text('{"model": "opus"}')
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
+    codex_home = tmp_path / "codex"
+    codex_home.mkdir()
+    (codex_home / "config.toml").write_text('model = "gpt-5.4"\nprofile = "fast"\n[profiles.fast]\nmodel = "gpt-5.4-mini"\n')
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    assert registry.by_id("claude").cli_default_model() == "opus"
+    monkeypatch.setenv("ANTHROPIC_MODEL", "sonnet")
+    assert registry.by_id("claude").cli_default_model() == "sonnet"
+    assert registry.by_id("codex").cli_default_model() == "gpt-5.4-mini"
+    for name in IDS[2:]:
+        assert registry.by_id(name).cli_default_model() == "", name
+    # launch_default: the Host pin wins, else the CLI's own default, else "".
+    from lib import session_models
+    cfg = SimpleNamespace(claude_model="", codex_model="host-pin", grok_model="")
+    assert session_models.launch_default("claude", cfg) == "sonnet"
+    assert session_models.launch_default("codex", cfg) == "host-pin"
+    assert session_models.launch_default("grok", cfg) == ""
 
 
 def test_stream_json_shared_surface_carries_the_runner_prefix(monkeypatch):
@@ -486,10 +614,22 @@ def test_base_defaults_are_documented_no_ops_or_not_implemented():
     assert bare.classify_usage_limit("m") is None
     assert bare.quota_identity({"window_id": "w"}) == "w"
     fn = object()
-    assert bare.wrap_turn_callback(fn) is fn
+    assert bare.wrap_turn_callback(fn, object()) is fn
     assert bare.arm_source_marker("s", "t", True) is None
+    assert bare.recorded_model("s") == "" and bare.cli_default_model() == ""
     with pytest.raises(Unsupported):
         bare.terminal_argv("s")
+    with pytest.raises(Unsupported):
+        bare.goal("a", "start")
+    with pytest.raises(Unsupported):
+        bare.steer("a", "hi")
+    with pytest.raises(Unsupported):
+        bare.compaction("s")
+    assert bare.is_valid_model("anything") is True and bare.executable() == "grok"
+    assert bare.recorded_model("s") == "" and bare.cli_default_model() == ""
+    assert bare.transcript_cwd("/x/-a-b/s.jsonl") == ""
+    with pytest.raises(Unsupported):
+        bare.compaction("s")
     # interrupt/active_handles are implemented on the base over the runner's
     # process registry (slice 3), so a bare subclass gets them for free.
     assert bare.interrupt("nobody") == 0 and bare.active_handles("nobody") == []

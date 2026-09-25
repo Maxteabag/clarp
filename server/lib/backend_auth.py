@@ -218,10 +218,9 @@ def _driver(backend: str) -> _AuthDriver | None:
 
 
 def _executable(backend: str) -> str | None:
-    adapter = backends.get(backend)
-    if adapter is None:
+    if backends.get(backend) is None:
         return None
-    return shutil.which(adapter.executable())
+    return shutil.which(backends.by_id(backend).executable())
 
 
 def _credential_metadata(backend: str) -> tuple[bool, int]:

@@ -20,7 +20,6 @@ from .protocol import AgentState, SSEType
 from .prompt_admissions import PromptAdmission
 from .claude_failover import Attempt as ClaudeAttempt, ClaudeFailover
 from . import prompt_admissions
-from .transcript_log import find_latest_jsonl
 from .send_service import SendTarget, resolve_send_target
 
 # A turn gets this many attempts total before we give up and flip the agent
@@ -578,14 +577,12 @@ class TurnDispatchService:
         # Ghost-session guard: a turn that crashed before its session was
         # created leaves the agent bound to a backend_session_id with no
         # transcript on disk. Resuming it exits instantly (rc=0, no output) and
-        # wedges the agent on every turn forever. If the resume target doesn't
-        # exist, drop the binding and start fresh. (Only for a CLI whose
-        # --resume is transcript-file based; the others resume by session id.)
-        adapter = backends.adapter_for(backend)
-        if (backend_session_id and adapter.resumes_by_transcript_file
-                and find_latest_jsonl(
-                    backend_session_id,
-                    projects_root=self.home / ".claude" / "projects") is None):
+        # wedges the agent on every turn forever. If the backend has no
+        # resume target for the binding, drop it and start fresh. (A CLI that
+        # resumes by session id always has one; only a transcript-file CLI
+        # checks the disk.)
+        if (backend_session_id and backends.by_id(backend).resume_target(
+                backend_session_id, str(cwd), self.home) is None):
             log("ghostSessionReset",
                 f"agent={agent_id} bsid={backend_session_id} — resume target "
                 f"has no transcript on disk; starting a fresh session")
@@ -1323,11 +1320,8 @@ class TurnDispatchService:
                 or self._superseded(spec)):
             return
         bsid = state.get("backend_session_id") or spec.backend_session_id
-        if backends.adapter_for(spec.backend).resumes_by_transcript_file:
-            transcript = (find_latest_jsonl(
-                bsid, projects_root=self.home / ".claude" / "projects") if bsid else None)
-        else:
-            transcript = bool(bsid)
+        transcript = backends.by_id(spec.backend).resume_target(
+            bsid, str(spec.cwd), self.home)
         interrupted = (state.get("spawn_started") or attempt > 1
                        or bool(spec.recovery_text))
         resume_spec = replace(
@@ -1591,14 +1585,16 @@ class TurnDispatchService:
             except Exception as e:
                 log_exception("clarpOnErrorFail", e, detail=trace_id)
 
-        if backends.adapter_for(spec.backend).locks_turn_callbacks or spec.janitor_run_id:
+        if spec.janitor_run_id:
             def guarded(callback):
                 def invoke(*args):
                     with _TURN_LOCK:
                         return callback(*args)
                 return invoke
             return guarded(on_init), guarded(on_result), guarded(on_error)
-        return on_init, on_result, on_error
+        wrap = backends.by_id(spec.backend).wrap_turn_callback
+        return (wrap(on_init, _TURN_LOCK), wrap(on_result, _TURN_LOCK),
+                wrap(on_error, _TURN_LOCK))
 
     def _handle_failure(self, spec: _TurnSpec, attempt: int, state: dict,
                         category: str, message: str | None) -> None:
@@ -1793,12 +1789,10 @@ class TurnDispatchService:
         limit_event = None
         if category == error_classify.USAGE_LIMIT and quota_confirmed is False:
             human = "Codex could not complete this request. Try again"
-        if (category == error_classify.USAGE_LIMIT
-                and backends.adapter_for(spec.backend).records_classified_usage_limit
-                and quota_confirmed is not False):
+        if category == error_classify.USAGE_LIMIT:
             try:
-                limit_event = backend_usage.record_classified_usage_limit(
-                    backends.normalize(spec.backend))
+                limit_event = backends.by_id(spec.backend).classify_usage_limit(
+                    message or "", quota_confirmed=quota_confirmed)
                 if limit_event:
                     for related in limit_event.get("_additional_events") or []:
                         self.ctx.stream.broadcast(related)

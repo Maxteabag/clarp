@@ -155,10 +155,10 @@ class Backend:
     def spawn_turn(self, **spec: Any):
         """Start one turn and return its ``TurnHandle``.
 
-        ``spec`` is the host's full spawn vocabulary; the backend keeps the
+        ``spec`` is the host's full spawn vocabulary; a subclass keeps the
         keywords its runner accepts and drops the rest before ``start_turn``.
         """
-        return self._hook("spawn_turn", self.start_turn)(**self.adapter.spawn_kwargs(spec))
+        return self._hook("spawn_turn", self.start_turn)(**spec)
 
     def start_turn(self, **kwargs: Any):
         """The runner body: spawn the CLI for one turn with explicit keywords."""
@@ -222,9 +222,21 @@ class Backend:
         return ""
 
     def find_transcript(self, session_id: str,
-                        home: pathlib.Path | None = None) -> pathlib.Path | None:
-        """The transcript file of a session, or ``None`` when none exists."""
+                        home: pathlib.Path | None = None, *,
+                        cwd: str = "") -> pathlib.Path | None:
+        """The transcript file of a session, or ``None`` when none exists.
+
+        ``cwd`` is the directory the session was bound with; a CLI whose
+        transcript layout encodes it prefers that directory, the rest ignore
+        the hint.
+        """
         raise NotImplementedError(f"{self.id}: find_transcript")
+
+    def transcript_cwd(self, transcript: Any) -> str:
+        """The working directory a transcript's location encodes, or "" when
+        the CLI's layout says nothing about where the session ran.
+        """
+        return ""
 
     def parse_transcript(self, path) -> list[dict]:
         """The conversation turns recorded in one transcript file."""
@@ -301,35 +313,48 @@ class Backend:
         return e if e in self.efforts else ""
 
     def is_valid_model(self, model: str | None) -> bool:
-        """Whether a pinned model id can be dispatched through this CLI."""
-        return self.adapter.is_valid_model(model)
+        """Whether a pinned model id can be dispatched through this CLI.
+
+        Most CLIs accept any id and fail the turn themselves; a CLI with a
+        catalogue the host can check overrides this. "" is always valid
+        (it means the CLI default).
+        """
+        return True
 
     def recorded_model(self, session_id: str) -> str:
-        """The model the session actually ran, or "" when unrecorded."""
-        return resolve("session_models", "recorded_model")(self.id, session_id)
+        """The model the session actually ran, or "" when the CLI records
+        none anywhere the Host can read.
+        """
+        return ""
+
+    def model_transcript(self, session_id: str) -> pathlib.Path | None:
+        """The transcript ``recorded_model`` reads the model from: the
+        session's transcript unless the CLI keeps a better index of it.
+        """
+        return self.find_transcript(session_id)
+
+    def cli_default_model(self) -> str:
+        """The model the CLI launches with when the Host pins none, read
+        from the CLI's own configuration; "" when it offers no such source.
+        """
+        return ""
 
     # --- compaction -------------------------------------------------------
 
     def compaction(self, session: str) -> CompactionStrategy:
         """How to compact ``session``; raises ``Unsupported`` when the CLI
-        cannot be compacted from outside.
+        cannot be compacted from outside (the default).
         """
-        adapter = self.adapter
-        if not (adapter.compact_launch and adapter.compact_command):
-            raise Unsupported(f"compaction unsupported for {self.id}")
-        return CompactionStrategy(
-            launch=tuple(adapter.compact_launch),
-            command=adapter.compact_command,
-            watches_transcript=bool(adapter.compaction_watches_transcript),
-        )
+        raise Unsupported(f"compaction unsupported for {self.id}")
 
     # --- turn plumbing ----------------------------------------------------
 
-    def wrap_turn_callback(self, fn: Callable[..., Any]) -> Callable[..., Any]:
+    def wrap_turn_callback(self, fn: Callable[..., Any],
+                           lock: Any) -> Callable[..., Any]:
         """Adapt a runner callback for the thread it will fire on.
 
-        Most runners already serialise their callbacks; ``fn`` is returned
-        as is.
+        ``lock`` is the dispatcher's turn lock. Most runners already
+        serialise their callbacks; ``fn`` is returned as is.
         """
         return fn
 
@@ -347,4 +372,22 @@ class Backend:
 
     def executable(self) -> str:
         """The binary to launch, after any Host-level override."""
-        return self.adapter.executable()
+        return self.required_binary
+
+    # --- goal and steer ---------------------------------------------------
+
+    def goal(self, agent_id: str, action: str, *, objective: str = "",
+             stream: Any = None) -> dict | None:
+        """Start, pause, resume, clear or read the agent's goal; the goal as
+        ``agent_goals.public`` shapes it, or ``None`` when there is none.
+        Raises ``Unsupported`` when the CLI has no goal protocol.
+        """
+        raise Unsupported(f"{self.id} has no goal control Clarp can drive yet.")
+
+    def steer(self, agent_id: str, text: str, *, client_msg_id: str = "",
+              synthesize_audio: bool = False) -> bool:
+        """Inject ``text`` into the agent's in-flight turn; True when the
+        runner accepted it. Raises ``Unsupported`` when the CLI cannot be
+        steered mid-turn.
+        """
+        raise Unsupported(f"{self.id} cannot be steered mid-turn")

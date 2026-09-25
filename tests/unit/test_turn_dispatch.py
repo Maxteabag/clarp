@@ -1111,7 +1111,8 @@ def test_account_failover_resumes_all_claude_turns_preserving_history_and_queue(
     coordinator, scheduled = _enable_account_failover(monkeypatch)
     service, backend, agent_id = _make_service(tmp_path)
     service.uuid_factory = lambda: str(uuid.uuid4())
-    monkeypatch.setattr(_td, "find_latest_jsonl", lambda *args, **kwargs: tmp_path / "native.jsonl")
+    monkeypatch.setattr(_td.backends.by_id("claude"), "resume_target",
+                        lambda *args, **kwargs: tmp_path / "native.jsonl")
     for session, provider in (("bella", "claude"), ("codex-agent", "codex")):
         new_id = agents_db.create_agent(persona=session, voice_id="V", cwd=str(tmp_path),
                                         session=session, backend=provider)
@@ -1236,7 +1237,8 @@ def test_account_recovery_invalidates_an_already_scheduled_connection_retry(tmp_
 def test_new_user_turn_parked_on_an_existing_session_keeps_native_user_boundary(tmp_path, monkeypatch):
     coordinator, recovery = _enable_account_failover(monkeypatch)
     service, backend, _ = _make_service(tmp_path)
-    monkeypatch.setattr(_td, "find_latest_jsonl", lambda *args, **kwargs: tmp_path / "native.jsonl")
+    monkeypatch.setattr(_td.backends.by_id("claude"), "resume_target",
+                        lambda *args, **kwargs: tmp_path / "native.jsonl")
     other = agents_db.create_agent(persona="Bella", voice_id="V", cwd=str(tmp_path),
                                    session="bella", backend="claude")
     agents_db.start_runtime(other, "bella")

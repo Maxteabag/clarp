@@ -1,15 +1,26 @@
 """Regression coverage for the app-facing transcript synchronization contract."""
-from lib import agents as agents_db, message_store
+import pytest
+
+from lib import agents as agents_db, backends, message_store
 from lib.conversation import load_conversation
 
 
+@pytest.fixture(autouse=True)
+def _no_transcript_on_disk(monkeypatch):
+    """The read model asks the agent's backend for its transcript; these
+    agents are Claude-backed with no jsonl on disk unless a test says so."""
+    _reader(monkeypatch, lambda _session_id: None, lambda _path: [])
+
+
+def _reader(monkeypatch, finder, parser):
+    claude = backends.by_id("claude")
+    monkeypatch.setattr(claude, "find_transcript",
+                        lambda session_id, home=None, *, cwd="": finder(session_id))
+    monkeypatch.setattr(claude, "parse_transcript", parser)
+
+
 def _load(session: str, **kwargs):
-    return load_conversation(
-        session=session,
-        claude_finder=lambda _session_id: None,
-        claude_parser=lambda _path: [],
-        **kwargs,
-    )
+    return load_conversation(session=session, **kwargs)
 
 
 def _agent(tmp_path):
@@ -196,7 +207,7 @@ def test_compact_turn_keeps_authoritative_activity_count(tmp_path):
     assert len(turn["display_cells"]) == 1
 
 
-def test_unchanged_transcript_file_is_not_reparsed_on_every_log(tmp_path):
+def test_unchanged_transcript_file_is_not_reparsed_on_every_log(tmp_path, monkeypatch):
     _agent(tmp_path)
     transcript = tmp_path / "conversation-1.jsonl"
     transcript.write_text("first version")
@@ -206,12 +217,10 @@ def test_unchanged_transcript_file_is_not_reparsed_on_every_log(tmp_path):
         parser_calls.append(path.read_text())
         return [{"role": "assistant", "text": path.read_text(), "timestamp": "1"}]
 
+    _reader(monkeypatch, lambda _session_id: transcript, parse)
+
     def load():
-        return load_conversation(
-            session="reliable",
-            claude_finder=lambda _session_id: transcript,
-            claude_parser=parse,
-        )
+        return load_conversation(session="reliable")
 
     assert [turn["text"] for turn in load()["turns"]] == ["first version"]
     assert [turn["text"] for turn in load()["turns"]] == ["first version"]
@@ -224,20 +233,16 @@ def test_unchanged_transcript_file_is_not_reparsed_on_every_log(tmp_path):
     assert parser_calls == ["first version", "second version with a different size"]
 
 
-def test_transcript_import_emits_phases_with_interaction_id(tmp_path):
+def test_transcript_import_emits_phases_with_interaction_id(tmp_path, monkeypatch):
     from lib import telemetry
     _agent(tmp_path)
     transcript = tmp_path / "conversation-1.jsonl"
     transcript.write_text("payload")
     interaction = "11111111-2222-3333-4444-555555555555"
 
-    load_conversation(
-        session="reliable",
-        claude_finder=lambda _session_id: transcript,
-        claude_parser=lambda _path: [
-            {"role": "assistant", "text": "done", "timestamp": "1"}],
-        interaction_id=interaction,
-    )
+    _reader(monkeypatch, lambda _session_id: transcript,
+            lambda _path: [{"role": "assistant", "text": "done", "timestamp": "1"}])
+    load_conversation(session="reliable", interaction_id=interaction)
 
     row = telemetry.conn().execute(
         "SELECT detail FROM diagnostic_events "
@@ -388,8 +393,7 @@ def test_chat_read_returns_stored_rows_without_waiting_for_import(tmp_path, monk
     monkeypatch.setattr(backends, 'parse_turns', parse)
     def reading():
         try:
-            answers.append(load_conversation(session='reliable', background_import=True,
-                claude_finder=lambda _: source, claude_parser=parse))
+            answers.append(load_conversation(session='reliable', background_import=True))
         except Exception as exc:
             errors.append(exc)
         finally:
@@ -408,8 +412,7 @@ def test_chat_read_returns_stored_rows_without_waiting_for_import(tmp_path, monk
         if hasattr(transcript_import_cache, 'wait_for_background'):
             assert transcript_import_cache.wait_for_background(4)
 
-    refreshed = load_conversation(session='reliable', background_import=True,
-        claude_finder=lambda _: source, claude_parser=parse)
+    refreshed = load_conversation(session='reliable', background_import=True)
     assert refreshed['turns'][0]['text'] == 'new message'
     assert transcript_import_cache.wait_for_background(3)
 
@@ -424,7 +427,7 @@ def test_only_client_rows_do_not_make_adopted_history_warm(tmp_path, monkeypatch
     def unexpected(*args, **kwargs):
         raise AssertionError('client-only rows must not defer first transcript import')
     monkeypatch.setattr(transcript_import_cache, 'schedule_import', unexpected)
-    result = load_conversation(session='reliable', background_import=True,
-        claude_finder=lambda _: source,
-        claude_parser=lambda _: [{'role':'assistant','text':'prior history','timestamp':'2025-01-01T00:00:00Z'}])
+    _reader(monkeypatch, lambda _: source,
+            lambda _: [{'role':'assistant','text':'prior history','timestamp':'2025-01-01T00:00:00Z'}])
+    result = load_conversation(session='reliable', background_import=True)
     assert any(t['text'] == 'prior history' for t in result['turns'])

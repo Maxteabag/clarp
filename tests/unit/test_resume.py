@@ -41,8 +41,7 @@ def test_codex_agent_resumes_from_codex_sessions(tmp_path, monkeypatch):
     results = resume_missing_sessions(
         {"elli": {"name": "Elli", "voice_id": "v",
                   "cwd": str(pathlib.Path.home()), "backend": "codex"}},
-        pathlib.Path.home(),
-        projects_root=tmp_path / "empty-projects",
+        tmp_path,
         backend_sessions_by_session={"elli": "codex-uuid-7"})
     assert calls["uuid"] == "codex-uuid-7"
     assert results[0]["action"] == "resumed"
@@ -56,8 +55,7 @@ def test_codex_agent_fresh_when_rollout_missing(tmp_path, monkeypatch):
     results = resume_missing_sessions(
         {"elli": {"name": "Elli", "voice_id": "v",
                   "cwd": str(pathlib.Path.home()), "backend": "codex"}},
-        pathlib.Path.home(),
-        projects_root=tmp_path / "empty-projects",
+        tmp_path,
         backend_sessions_by_session={"elli": "gone-uuid"})
     assert results[0]["action"] == "fresh"
     assert results[0]["backend_session_id"] == ""
@@ -72,8 +70,7 @@ def test_agy_agent_resumes_from_antigravity_transcript(tmp_path, monkeypatch):
     results = resume_missing_sessions(
         {"arnold": {"name": "Arnold", "voice_id": "v",
                     "cwd": str(pathlib.Path.home()), "backend": "agy"}},
-        pathlib.Path.home(),
-        projects_root=tmp_path / "empty-projects",
+        tmp_path,
         backend_sessions_by_session={"arnold": "agy-uuid-7"})
     assert results[0]["action"] == "resumed"
     assert results[0]["backend_session_id"] == "agy-uuid-7"
@@ -82,13 +79,12 @@ def test_agy_agent_resumes_from_antigravity_transcript(tmp_path, monkeypatch):
 def test_resumes_with_id_when_mapping_exists(tmp_path):
     """When the DB carries a UUID for an agent and its JSONL exists,
     we resume that exact session."""
-    projects = tmp_path / "projects"
+    projects = tmp_path / ".claude" / "projects"
     _make_jsonl(projects, str(pathlib.Path.home()), "session-abc")
     results = resume_missing_sessions(
         {"mike": {"name": "Mike", "voice_id": "v",
                   "cwd": str(pathlib.Path.home())}},
-        pathlib.Path.home(),
-        projects_root=projects,
+        tmp_path,
         backend_sessions_by_session={"mike": "session-abc"},
     )
     assert results[0]["action"] == "resumed"
@@ -99,15 +95,14 @@ def test_fresh_when_no_uuid_bound(tmp_path):
     """No UUID in the DB and a populated projects dir for the cwd —
     must NOT bind to the newest jsonl there. Stays fresh; next /send
     pre-mints. This is the regression test for the cross-agent bleed."""
-    projects = tmp_path / "projects"
+    projects = tmp_path / ".claude" / "projects"
     # Two pre-existing JSONLs in /home/example — neither belongs to Arnold.
     _make_jsonl(projects, str(pathlib.Path.home()), "elli-uuid", mtime=2000)
     _make_jsonl(projects, str(pathlib.Path.home()), "antoni-uuid", mtime=1000)
     results = resume_missing_sessions(
         {"arnold": {"name": "Arnold", "voice_id": "v",
                     "cwd": str(pathlib.Path.home())}},
-        pathlib.Path.home(),
-        projects_root=projects,
+        tmp_path,
         backend_sessions_by_session={},  # arnold has no UUID
     )
     assert results[0]["action"] == "fresh"
@@ -118,15 +113,14 @@ def test_two_agents_same_cwd_dont_bleed(tmp_path):
     """The exact production scenario: Antoni active in /home/example,
     Arnold relaunched fresh in /home/example. Arnold must NOT pick up
     Antoni's UUID."""
-    projects = tmp_path / "projects"
+    projects = tmp_path / ".claude" / "projects"
     _make_jsonl(projects, str(pathlib.Path.home()), "antoni-uuid")
     results = resume_missing_sessions(
         {"antoni": {"name": "Antoni", "voice_id": "v",
                     "cwd": str(pathlib.Path.home())},
          "arnold": {"name": "Arnold", "voice_id": "v",
                     "cwd": str(pathlib.Path.home())}},
-        pathlib.Path.home(),
-        projects_root=projects,
+        tmp_path,
         backend_sessions_by_session={"antoni": "antoni-uuid"},
     )
     by_sid = {r["sid"]: r for r in results}
@@ -142,8 +136,7 @@ def test_resumed_but_jsonl_missing_falls_to_fresh(tmp_path):
     results = resume_missing_sessions(
         {"mike": {"name": "Mike", "voice_id": "v",
                   "cwd": str(pathlib.Path.home())}},
-        pathlib.Path.home(),
-        projects_root=tmp_path / "empty-projects",
+        tmp_path,
         backend_sessions_by_session={"mike": "gone-uuid"},
     )
     assert results[0]["action"] == "fresh"
@@ -152,15 +145,14 @@ def test_resumed_but_jsonl_missing_falls_to_fresh(tmp_path):
 
 def test_falls_back_to_home_when_saved_cwd_gone(tmp_path, capsys):
     """The cwd-missing guard still works — if an agent's cwd has been
-    deleted from disk, we realign to $HOME and log the realignment."""
+    deleted from disk, we realign to the Host home and log the realignment."""
     results = resume_missing_sessions(
         {"mike": {"name": "Mike", "voice_id": "v",
                   "cwd": "/this/does/not/exist"}},
-        pathlib.Path.home(),
-        projects_root=tmp_path / "projects-empty",
+        tmp_path,
     )
     assert results[0]["ok"] is True
-    assert results[0]["detail"] == str(pathlib.Path.home())
+    assert results[0]["detail"] == str(tmp_path)
     assert "resumeCwdMissing" in capsys.readouterr().err
 
 

@@ -57,18 +57,20 @@ Methods, each with a real body in the subclass or the shared base:
 | `interrupt(agent_id) -> int`, `active_handles(agent_id)` | process registry |
 | `resume_target(session_id, cwd, home)` | transcript path for Claude, the id for the rest, `None` when a bound session has nothing to resume |
 | `bind_new_session(agent_id, session) -> str` | Claude pre-mints a UUID; others return "" |
-| `find_transcript(session_id, home)`, `parse_transcript(path)`, `list_sessions(cwd, limit, all_projects)` | transcript access |
+| `find_transcript(session_id, home, cwd=)`, `parse_transcript(path)`, `list_sessions(cwd, limit, all_projects)` | transcript access; the `cwd` hint lets a CLI whose layout encodes it prefer that directory |
+| `transcript_cwd(transcript)` | the cwd a transcript's location encodes (Claude's project dirs), "" for the rest |
 | `terminal_argv(session_id) -> list[str]` | raises `Unsupported` when the CLI has no interactive mode |
 | `on_credential_change()` | Codex recycles its app-server writers; others no-op |
 | `recover_usage_limit(message) -> bool` | Codex reconnects; others return False |
 | `account_pool() -> str` | "" when the CLI has no account switching |
 | `default_model_effort(cfg) -> tuple[str, str]`, `is_valid_model(model) -> bool` | model policy |
-| `recorded_model(session_id) -> str` | what the session actually ran |
+| `recorded_model(session_id) -> str`, `model_transcript(session_id)`, `cli_default_model() -> str` | what the session actually ran, where that is read from, and what the CLI would launch with unpinned |
 | `compaction(session) -> CompactionStrategy` | how to compact |
-| `wrap_turn_callback(fn)` | Claude serialises under the dispatch lock; others return `fn` |
+| `wrap_turn_callback(fn, lock)` | Claude serialises under the dispatch lock; others return `fn` |
 | `arm_source_marker(session, trace_id, synthesize_audio)` | Claude writes the hook marker; others no-op |
 | `classify_usage_limit(...)`, `quota_identity(window)` | usage events |
 | `executable() -> str` | Claude reads the host setting |
+| `goal(agent_id, action, objective, stream)`, `steer(agent_id, text, ...)` | Codex's app-server protocols; the rest raise `Unsupported` |
 
 Anything the host does that differs per backend and is not in this table is
 a new method, not a new flag.
@@ -108,8 +110,13 @@ clean baseline, behaviour-preserving unless a line here says otherwise.
    intercept the class body; the guard test keeps CLI names out of the
    package, so `configured_claude_bin` stays on `clarp_runner`.
 4. Dispatch-side decisions (resume target, callback wrapping, usage
-   classification, compaction, recorded model, transcript access) move to
-   methods; the remaining behavioural adapter fields are deleted.
+   classification, compaction, recorded model, transcript access, model
+   policy, goal/steer, spawn keywords) move to methods; the behavioural
+   adapter fields are deleted. What stays on `BackendAdapter` is catalogue
+   data (label, brand, `supports_*` flags served to clients, `resumable`,
+   `supports_mcp`, `login_kind`, `effort_*`, `config_*_field`,
+   `routing_module`, `runner_module`, `extra_interrupt_modules`,
+   `native_tool_explainer`) for slice 5 to fold in.
 5. `BackendAdapter` is reduced to the data attributes and merged into
    `Backend`; `adapter_for()` becomes an alias of `by_id()`; the runner
    delegators that no caller uses are removed; the guard test bans
