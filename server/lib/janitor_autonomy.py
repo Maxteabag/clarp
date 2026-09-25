@@ -5,7 +5,7 @@ No model can change accounts, approve decisions, or dispatch outside its snapsho
 """
 from __future__ import annotations
 import hashlib,json,threading,time,importlib,subprocess,shutil,os
-from . import agents,db,janitors,janitor_builtins,settings_store,backends
+from . import agents,db,janitors,janitor_builtins,settings_store,backends,janitor_hotseat
 from .protocol import AgentState
 
 SCHEMA='''CREATE TABLE IF NOT EXISTS janitor_continuity (
@@ -87,8 +87,9 @@ def validate_decision(value):
     return value
 
 class AutonomyJanitors:
-    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None):
+    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=janitor_hotseat.read_accounts,hotseat_switch=janitor_hotseat.switch_account,recycle_runner=None):
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
+        self.hotseat_read=hotseat_read;self.hotseat_switch=hotseat_switch;self.recycle_runner=recycle_runner
     def start(self):
         setup();self.thread=threading.Thread(target=self.loop,name='janitor-autonomy',daemon=True);self.thread.start()
     def stop(self):self.stop_event.set()
@@ -98,7 +99,7 @@ class AutonomyJanitors:
             try:self.run_once()
             except Exception as exc:log_exception('janitorAutonomyFail',exc)
     def run_once(self):
-        setup();self.heartbeat_once();self.quota_once()
+        setup();self.heartbeat_once();self.quota_once();self.hotseat_once()
     def heartbeat_once(self):
         if not any(c['template_id']=='heartbeat-decider' and c['enabled'] for c in janitors.list_janitors(include_runtime=False)):return
         now=db.now_ms()
@@ -189,6 +190,48 @@ class AutonomyJanitors:
                     db.conn().execute('UPDATE janitor_quota_receipts SET payload_json=? WHERE receipt_id=?',(json.dumps(payload),rid));notifications+=1
         self.deliver_notifications(owner)
         janitor_builtins.complete_run(run['run_id'],result={'summary':f'Checked provider quota; {notifications} threshold notifications','reason':'; '.join(recovery_states)[:500],'item_count':notifications})
+
+    def hotseat_once(self):
+        """Hotseat switcher: one bounded run per provider whose check interval elapsed."""
+        owner=janitor_builtins.resolve(janitor_hotseat.ROLE)
+        if not owner or self.stop_event.is_set():return
+        self.deliver_notifications(owner)
+        options=owner['options'];now=db.now_ms()
+        for provider in janitor_hotseat.PROVIDERS:
+            if self.stop_event.is_set():return
+            key=f'hotseat-switcher.{provider}.last-check'
+            if now-settings_store.get_int(key,default=0)<janitor_hotseat.interval_for(options,provider)*1000:continue
+            settings_store.set_int(key,now)
+            run=janitor_builtins.begin_run(janitor_hotseat.ROLE,digest([owner['agent_id'],provider,now]),context={'summary':provider})
+            if not run or not janitor_builtins.claim_run(run['run_id']):continue
+            try:accounts=self.hotseat_read(options['hotseat_command'],provider)
+            except Exception as exc:
+                janitor_builtins.complete_run(run['run_id'],'failed',error=f'{provider}: Hotseat reading unavailable ({type(exc).__name__})');continue
+            decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider))
+            if not janitor_builtins.is_current(run['run_id']):return
+            switched=None;outcome='completed';error=''
+            if decision['action']=='switch' and options['mode']=='automatic':
+                try:switched=bool(self.hotseat_switch(options['hotseat_command'],provider,decision['target']))
+                except Exception as exc:switched=False;error=f'{provider}: Hotseat switch failed ({type(exc).__name__})'
+                if switched:
+                    settings_store.set_text(f'hotseat-switcher.{provider}.last-switch',json.dumps({'from':decision['active'],'to':decision['target'],'at':now}))
+                    # A runner that read credentials once must restart to see the new account.
+                    if self.recycle_runner and backends.adapter_for(provider).restarts_runner_on_credential_change:
+                        try:self.recycle_runner()
+                        except Exception:pass
+                else:outcome='failed';error=error or f'{provider}: Hotseat did not confirm the switch'
+            text=janitor_hotseat.preview(provider,decision,mode=options['mode'],switched=switched)
+            # Advice and exhaustion repeat every interval; notify once per distinct situation.
+            marker=f'hotseat-switcher.{provider}.notified';situation=json.dumps([decision['action'],decision.get('active'),decision.get('target'),switched],sort_keys=True)
+            if text and (decision['action']=='switch' and switched or settings_store.get_text(marker,default='')!=situation):
+                settings_store.set_text(marker,situation)
+                rid=digest([provider,situation,now,owner['generation']])
+                payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':text,'push':True,'reason':'account_switch','owner_generation':owner['generation']}
+                db.conn().execute('INSERT OR IGNORE INTO janitor_quota_receipts VALUES (?,?,?,NULL,?)',(rid,run['run_id'],json.dumps(payload),now))
+            elif decision['action']=='noop':settings_store.set_text(marker,'')
+            summary=text or f"{provider}: {decision.get('active','?')} keeps {decision.get('remaining','?')}% of the {janitor_hotseat.WINDOW_LABEL[provider]} window"
+            janitor_builtins.complete_run(run['run_id'],outcome,result={'summary':summary[:500],'status':decision['action'],'reason':decision.get('reason','')[:500]},error=error)
+        self.deliver_notifications(owner)
 
     def deliver_notifications(self,owner):
         rows=db.conn().execute('SELECT * FROM janitor_quota_receipts WHERE delivery_json IS NULL').fetchall()

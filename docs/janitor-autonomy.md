@@ -1,7 +1,8 @@
-# Heartbeat keeper, Quota keeper, and global Janitor models
+# Heartbeat keeper, Quota keeper, Hotseat switcher, and global Janitor models
 
 The Host installs two paused, persisted Janitor identities: `heartbeat-decider`
-and `quota-monitor`. Enable/configure them through the existing Janitors UI or
+and `quota-monitor`. The Hotseat switcher (`account-hotseat`) is an optional
+template in the same catalog: create it on a Host that has the `hotseat` CLI. Enable/configure them through the existing Janitors UI or
 `clarp-admin janitor`; their enabled state and options belong to the identity.
 The Host lifecycle owns one `AutonomyJanitors` service. No agent-created timer or
 separate credential watcher is required.
@@ -63,6 +64,50 @@ continuation before repetition. A newly spawned process must read the selector's
 credential store; independent terminal sessions are outside this runtime scope.
 Real credential isolation and selector deployment must be verified at rollout.
 The change does not promise account-policy enforcement inside arbitrary scripts.
+
+## Hotseat switcher
+
+The Quota keeper reacts when a turn hits a limit. The Hotseat switcher acts
+before that. It is not installed by default because it depends on the local
+[Hotseat](https://github.com/Maxteabag/hotseat) CLI; create it from the Janitor
+catalog (`clarp-admin janitor create --agent SESSION --template account-hotseat`
+or the app's New Janitor screen). Enabled, it reads every saved account through
+Hotseat (`hotseat list --json` for Claude, `hotseat codex --json` for Codex) and changes the machine-wide default
+account while the one in use still has a little room. It is deterministic; no
+model is called and no credential is read by the Host.
+
+Options on the Janitor:
+
+- `claude_min_remaining` (default 25): floor for the Claude 5-hour window, in
+  percent remaining.
+- `codex_min_remaining` (default 10): floor for the Codex weekly window.
+- `interval_seconds` (300) and `codex_interval_seconds` (900): how often each
+  provider is read. Codex readings probe one app-server per saved profile, so
+  they are slower and rarer.
+- `mode`: `automatic` switches through Hotseat; `notify` only reports what it
+  would do.
+- `hotseat_command`: the executable name or path (default `hotseat`, resolved
+  on the Host service PATH).
+
+The decision is a ladder. The first rung is the floor; below it come 10 % and
+0 %. At each rung the account in use must be under the rung and another saved
+account at or above it (and above the account in use); the account with the
+most room wins, ties going to the larger weekly window. If nobody clears the
+rung, the next rung is tried. A reading Hotseat could not make (`error`,
+missing window) never counts as room, so a broken profile is never chosen. When
+every account is out, one notification says so; it repeats only after the
+situation changes.
+
+Each provider check is a bounded demand run on the Janitor identity, so the
+Janitors screen shows what was read and what happened. A switch, an advice in
+notify mode and an exhausted state are delivered with the same receipts and
+push transport as Quota keeper notifications.
+
+Claude processes read the shared credential file on every request, so a Claude
+switch reaches running turns. A running Codex session reads credentials once at
+startup; after a Codex switch the Host retires idle Codex connections so the
+next turn starts on the new account, and busy ones refresh at their next idle
+admission.
 
 ## Global model chain
 
