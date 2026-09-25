@@ -55,11 +55,19 @@ ALLOWLIST: dict[tuple[str, str], str] = {
 }
 
 
+# The strategy package (docs/architecture/backend-strategy.md): only its
+# registry may list ids; the base and the per-CLI classes are guarded like
+# any other caller.
+PACKAGE = ROOT / "server" / "lib" / "backend"
+PACKAGE_ID_LISTER = "registry.py"
+
+
 def _guarded_files() -> list[pathlib.Path]:
     lib = ROOT / "server" / "lib"
     files = [p for p in lib.glob("*.py")
              if p.name not in EXCLUDED and not p.name.endswith(EXCLUDED_SUFFIXES)]
-    return sorted(files) + [ROOT / "server" / "server.py"]
+    package = [p for p in PACKAGE.glob("*.py") if p.name != PACKAGE_ID_LISTER]
+    return sorted(files) + sorted(package) + [ROOT / "server" / "server.py"]
 
 
 def test_no_backend_identity_branches_outside_the_registry():
@@ -81,6 +89,28 @@ def test_no_backend_identity_branches_outside_the_registry():
         + "\n".join(offenders))
     stale = set(ALLOWLIST) - seen_allowed
     assert not stale, f"allowlist entries no longer match any line: {sorted(stale)}"
+
+
+_ID_LISTING = re.compile(
+    rf"\bAgentBackend\.{_IDS}\b|\bbackends\.{_IDS}\b|{_LIT}")
+
+
+def test_registry_is_the_only_package_file_that_lists_ids():
+    """A backend class learns its id from the row it is built on; naming a
+    sibling by id inside the package would be the identity branch the
+    contract forbids."""
+    offenders = []
+    for path in sorted(PACKAGE.glob("*.py")):
+        if path.name == PACKAGE_ID_LISTER:
+            continue
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            if _ID_LISTING.search(line):
+                offenders.append(f"{path.relative_to(ROOT)}:{number}: {line.strip()}")
+    assert not offenders, (
+        "Backend ids belong in server/lib/backend/registry.py only:\n"
+        + "\n".join(offenders))
+    listed = _ID_LISTING.findall((PACKAGE / PACKAGE_ID_LISTER).read_text())
+    assert len(listed) >= len(IDS)
 
 
 # --- (5) every adapter declares every capability -----------------------------
