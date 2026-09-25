@@ -1702,3 +1702,114 @@ def test_oracle_admission_runs_on_empty_stopped_queue_without_resuming_cancelled
                                      authenticated_at_admission=True)
     assert old['status'] == 'cancelled'
     assert len(backends.spawned) == 1
+
+
+class _OrderedTurnLock:
+    """Stand-in for _TURN_LOCK that records any acquisition made while this
+    thread's SQLite connection has a write transaction open. Lock order is
+    _TURN_LOCK -> SQLite everywhere else (Stop, guarded callbacks, retries),
+    so the reverse inside dispatch stalls those holders for the busy timeout."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.acquired = 0
+        self.violations = []
+
+    def _check(self):
+        from lib import db
+        if db.conn().in_transaction:
+            import traceback
+            self.violations.append("".join(traceback.format_stack(limit=8)))
+
+    def __enter__(self):
+        self._check()
+        self.acquired += 1
+        return self.inner.__enter__()
+
+    def __exit__(self, *exc):
+        return self.inner.__exit__(*exc)
+
+    def acquire(self, *args, **kwargs):
+        self._check()
+        self.acquired += 1
+        return self.inner.acquire(*args, **kwargs)
+
+    def release(self):
+        return self.inner.release()
+
+
+class _TransactionAwareStream(_Stream):
+    def __init__(self):
+        super().__init__()
+        self.in_transaction = []
+
+    def broadcast(self, event):
+        from lib import db
+        if db.conn().in_transaction:
+            self.in_transaction.append(event["type"])
+        super().broadcast(event)
+
+
+def test_dispatch_never_takes_turn_lock_or_broadcasts_inside_its_write_transaction(tmp_path, monkeypatch):
+    import sqlite3
+    guard = _OrderedTurnLock(_td._TURN_LOCK)
+    monkeypatch.setattr(_td, "_TURN_LOCK", guard)
+    service, backends, agent_id = _make_service(tmp_path)
+    stream = _TransactionAwareStream()
+    service.ctx.stream = stream
+
+    # 1. Ordinary admission that launches.
+    service.dispatch(text="hello", requested_session="mike", trace_id="t-1",
+                     client_msg_id="u-1")
+    # 2. Duplicate of a launched, live message (dedup path checks the slot).
+    service.dispatch(text="hello", requested_session="mike", trace_id="t-1b",
+                     client_msg_id="u-1")
+    # 3. A second message while the first is live queues behind it.
+    service.dispatch(text="later", requested_session="mike", trace_id="t-2",
+                     client_msg_id="u-2", queue_if_busy=True)
+    # 4. A launch that dies after admission, then the client's retry of the
+    #    same id, which relaunches through the never-launched check.
+    _td._INFLIGHT.pop(agent_id, None)
+    _td._CLAIMED_AT.pop(agent_id, None)
+    _td._QUEUED.pop(agent_id, None)
+    backends.live = False
+    real = agents_db.set_trace_for_session
+    dies = {"left": 1}
+
+    def die_once(session, trace_id):
+        if dies["left"]:
+            dies["left"] -= 1
+            raise sqlite3.OperationalError("database is locked")
+        real(session, trace_id)
+
+    monkeypatch.setattr(agents_db, "set_trace_for_session", die_once)
+    with pytest.raises(sqlite3.OperationalError):
+        service.dispatch(text="retry me", requested_session="mike",
+                         trace_id="t-3", client_msg_id="u-3")
+    _td._INFLIGHT.pop(agent_id, None)
+    service.dispatch(text="retry me", requested_session="mike",
+                     trace_id="t-3b", client_msg_id="u-3")
+
+    assert guard.acquired > 0, "the guard did not observe the dispatch path"
+    assert guard.violations == [], "\n---\n".join(guard.violations)
+    assert stream.in_transaction == []
+    assert any(e["type"] == "transcript-updated" for e in stream.events), \
+        "the deferred transcript wake-up is still delivered after COMMIT"
+    assert [t for _, kw in backends.spawned for t in [kw["trace_id"]]] == ["t-1", "t-3b"]
+
+
+def test_janitor_spawn_locks_do_not_accumulate():
+    import gc
+    for i in range(500):
+        _td._janitor_spawn_lock(f"janitor-{i}")
+    gc.collect()
+    assert len(_td._JANITOR_SPAWN_LOCKS) == 0
+
+    held = _td._janitor_spawn_lock("busy")
+    with held:
+        assert _td._janitor_spawn_lock("busy") is held
+        gc.collect()
+        assert len(_td._JANITOR_SPAWN_LOCKS) == 1
+    del held
+    gc.collect()
+    assert len(_td._JANITOR_SPAWN_LOCKS) == 0
