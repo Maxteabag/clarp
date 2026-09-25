@@ -103,6 +103,13 @@ the relevant request invokes the selected compatible subscriber. A custom
 Janitor can replace a paused built-in, including a non-overlapping watched scope.
 These workers do not enter ordinary chat or the task-label scheduling loop.
 
+The Hotseat switcher (`account-hotseat`) is installed paused. Enabled, it reads
+every saved Claude and Codex account through the local `hotseat` CLI and moves
+the machine-wide default account when the one in use drops under its floor
+(`claude_min_remaining` on the 5-hour window, `codex_min_remaining` on the
+weekly window; the ladder then drops to 10% and 0%). Set `mode` to `notify` to
+see what it would do without switching. Details in `docs/janitor-autonomy.md`.
+
 For the developer adapter contract, read the Host's
 `docs/janitor-demand-workers.md`. Do not ask task agents for bookkeeping or
 additional context reports. Scope comes from the authenticated request's
