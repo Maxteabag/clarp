@@ -16,6 +16,10 @@ from . import agents, backends, db, janitors
 
 
 ROLES = ("message-delegator", "tool-explainer", "audio-bookkeeper", "heartbeat-decider", "quota-monitor")
+# Optional demand workers are created from the catalog, never installed: the
+# Hotseat switcher needs the local `hotseat` CLI, which not every Host has.
+OPTIONAL_ROLES = ("account-hotseat",)
+DEMAND_ROLES = ROLES + OPTIONAL_ROLES
 SEED_VERSION = 1
 DEMAND_RUN_TTL_MS = 180_000  # Two bounded 60-second routing probes plus overhead.
 _METADATA_KEYS = frozenset({"input_hash", "request_hash", "candidate_count", "item_count",
@@ -23,7 +27,7 @@ _METADATA_KEYS = frozenset({"input_hash", "request_hash", "candidate_count", "it
 
 
 def _role(role: str) -> str:
-    if role not in ROLES:
+    if role not in DEMAND_ROLES:
         raise janitors.JanitorError("Unsupported built-in Janitor role")
     return role
 
@@ -60,7 +64,7 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
     if not isinstance(initial, dict) or set(initial) - set(ROLES):
         raise janitors.JanitorError("Invalid built-in seed configuration")
     with janitors._write() as c:
-        for trigger, name in [("heartbeat-decision-requested", "When continuity needs review"), ("quota-check-requested", "When provider quota needs checking")]:
+        for trigger, name in [("heartbeat-decision-requested", "When continuity needs review"), ("quota-check-requested", "When provider quota needs checking"), ("account-switch-requested", "When the account in use runs low")]:
             c.execute("INSERT OR IGNORE INTO janitor_trigger_definitions(trigger_id,version,name,kind,defaults_json) VALUES (?,1,?,'demand','{}')", (trigger,name))
         for role in ROLES:
             if c.execute("SELECT 1 FROM janitor_builtins WHERE role=?", (role,)).fetchone():
@@ -202,7 +206,7 @@ def is_current(run_id: str, *, connection=None) -> bool:
     try:
         run = janitors._active_run(c, run_id)
         frozen = janitors._decode(run["configuration_json"], {})
-        if frozen.get("executor") != "ephemeral" or frozen.get("template_id") not in ROLES:
+        if frozen.get("executor") != "ephemeral" or frozen.get("template_id") not in DEMAND_ROLES:
             return False
         if db.now_ms() >= frozen.get("expires_at", run["created_at"] + DEMAND_RUN_TTL_MS):
             return False

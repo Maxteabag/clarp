@@ -113,7 +113,16 @@ def autonomy_templates():
           ("quota-monitor", "Quota keeper", "Monitor provider quota, notify and coordinate authorized runtime account recovery.", "quota_monitor", "quota-check-requested", [
             {"key":"interval_seconds","label":"Check interval (seconds)","type":"integer","default":300,"min":60,"max":86400},
             {"key":"remaining_threshold","label":"Notify at remaining percent","type":"integer","default":25,"min":0,"max":100},
-            {"key":"recovery_mode","label":"Account recovery","type":"choice","default":"notify", "choices":[{"value":"notify","label":"Notify only"},{"value":"ask","label":"Ask before recovery"},{"value":"automatic","label":"Use configured runtime account selector"}]}])
+            {"key":"recovery_mode","label":"Account recovery","type":"choice","default":"notify", "choices":[{"value":"notify","label":"Notify only"},{"value":"ask","label":"Ask before recovery"},{"value":"automatic","label":"Use configured runtime account selector"}]}]),
+          ("account-hotseat", "Hotseat switcher", "Switch the default Claude or Codex account through Hotseat before its quota window runs out.", "account_switch", "account-switch-requested", [
+            {"key":"interval_seconds","label":"Claude check interval (seconds)","type":"integer","default":300,"min":60,"max":86400},
+            {"key":"codex_interval_seconds","label":"Codex check interval (seconds)","type":"integer","default":900,"min":300,"max":86400,
+             "description":"Codex quota is probed per saved profile, so check it less often."},
+            {"key":"claude_min_remaining","label":"Claude floor: 5-hour window percent remaining","type":"integer","default":25,"min":0,"max":100,
+             "description":"Switch when the account in use is under this and another account is at or above it. Below the floor the ladder drops to 10%, then 0%."},
+            {"key":"codex_min_remaining","label":"Codex floor: weekly window percent remaining","type":"integer","default":10,"min":0,"max":100},
+            {"key":"mode","label":"Switching","type":"choice","default":"automatic","choices":[{"value":"notify","label":"Notify only"},{"value":"automatic","label":"Switch through Hotseat"}]},
+            {"key":"hotseat_command","label":"Hotseat command","type":"string","default":"hotseat"}])
         ]]
 
 
