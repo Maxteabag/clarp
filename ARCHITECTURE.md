@@ -33,8 +33,9 @@ wire contract the clients follow is in [docs/protocol.md](docs/protocol.md).
 - **SQLite is the source of truth.** `~/.local/share/clarp/state.sqlite` holds
   agents, runtimes, turns, messages, clips, queues, and settings. Hooks
   (separate processes) and the server share it through WAL mode. The schema
-  is `_SCHEMA_SQL` in `server/lib/db.py`; changes bump the version and add
-  one `_migrate_to_vN`.
+  is `_SCHEMA_SQL` in `server/lib/db_schema.py`; changes bump `_SCHEMA_VERSION`
+  there and add one `_migrate_to_vN` in `server/lib/db_migrations.py`. Both
+  stay reachable as `db._SCHEMA_SQL`, `db._migrate_to_vN` and so on.
 - **Hooks are sensors.** `plugin/hooks/` is a Claude Code plugin the server
   passes with `--plugin-dir`. Each hook records what happened (prompt
   submitted, tool started, tool finished, turn stopped, compaction, waiting)
@@ -55,11 +56,11 @@ accept outside requests.
 
 | Area | Modules |
 |---|---|
-| Persistence | `db.py` (schema, connections, migrations), `settings_store.py`, `maintenance.py` (pruning), `instance_backup.py` |
+| Persistence | `db.py` (connections, per-request query metrics, lock reporting; facade over `db_schema.py` (DDL, `_SCHEMA_VERSION`) and `db_migrations.py` (`_migrate`, `_migrate_to_vN`)), `settings_store.py`, `maintenance.py` (pruning), `instance_backup.py` |
 | Agents and turns | `agents.py`, `focus.py` (which agent is open; the DB is the only reader-facing source), `agent_lifecycle.py` (create/relaunch/fork/delete), `send_request.py` (parsing and policy for `/send`), `turn_dispatch.py` (queue, preemption, retries), `turn_queue.py`, `reconcile.py` (repairs drifted state on read), `snapshot.py` (`/agents/snapshot`) |
 | Runtime boundary | `runtime.py`, `runtime_bridge.py` (versioned private RPC), `runtime_events.py` (durable cross-process SSE relay), `runtime_release.py` (idle rolling handoff), `runtime_startup.py` (crash-only recovery) |
 | Backends | `backends.py` (adapter selection), `clarp_runner.py` (Claude), `codex_runner.py` + `codex_app_server.py`, `agy_runner.py`, `provider_capabilities.py` (model catalogue), `backend_auth.py`, `backend_usage.py` |
-| Conversation read model | `message_store.py`, `conversation.py`, `transcript_log.py`, `codex_transcript.py`, `agy_transcript.py`, `transcript_watcher.py` + `transcript_streamer.py` (live text while a turn runs), `activity.py` |
+| Conversation read model | `message_store.py` (facade over `message_writes.py` (client-message idempotency, markers, transcript import), `message_live.py` (live row protocol, agy turn authority), `message_previews.py` (`/log`, previews, dashboard projection), `message_context.py` (display cleaning, injected-context stripping)), `conversation.py`, `transcript_log.py`, `codex_transcript.py`, `agy_transcript.py`, `transcript_watcher.py` + `transcript_streamer.py` (live text while a turn runs), `activity.py` |
 | Events | `audio_stream.py` (SSE hub + clip janitor), `state_watcher.py`, `eventlog.py` + `telemetry.py` (diagnostics into `telemetry.sqlite`) |
 | Startup and workers | `workers.py` (ordered worker registry: start, `on_close` stop, diagnostics), `dispatch_adapters.py` (the silent forced-session turns every scheduler dispatches, with their origins and idle checks), `decision_delivery.py` (polls answered decisions and HTML forms and wakes the agent) |
 | Voice in | `transcription_pipeline.py` (the uncached `/transcribe` path: engine choice, biasing, error mapping, event rows), `stt.py`, `whispercpp.py`, `transcription_models.py`, `vocab.py` + `vocab_budget.py` + `vocab_generators.py` + `vocab_compile.py` + `vocab_store.py` + `workspace_vocab.py` (budget-fitted context packs for the transcription prompt, every compile recorded in `vocab_runs`), `stt_providers.py` + `deepgram_stt.py` + `eleven_stt.py` + `cartesia_stt.py` (cloud engines and the engine / turn-taking switches), `hallucinations.py`, `custom_stt_adapters.py` |
