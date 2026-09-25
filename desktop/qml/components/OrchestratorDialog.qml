@@ -37,7 +37,7 @@ Rectangle {
         width: Math.min(590, parent.width - 48)
         implicitHeight: contentColumn.implicitHeight + 56
         anchors.centerIn: parent
-        radius: 0
+        radius: Theme.radius
         color: Theme.raised
         border.color: Theme.border
 
@@ -157,7 +157,7 @@ Rectangle {
                 visible: root.controller.orchestratorLastDecision.length > 0
                 Layout.fillWidth: true
                 implicitHeight: lastDecision.implicitHeight + 18
-                radius: 0
+                radius: Theme.radius
                 color: Theme.window
                 TuiText {
                     id: lastDecision

@@ -33,7 +33,7 @@ Rectangle {
     readonly property color statusColor: status === "error" ? Theme.danger : status === "running" ? Theme.warning : Theme.success
 
     implicitHeight: toolColumn.implicitHeight + 6
-    radius: 0
+    radius: Theme.radius
     color: hover.hovered ? Theme.control : "transparent"
     border.width: 0
     HoverHandler { id: hover }
@@ -65,7 +65,7 @@ Rectangle {
             Rectangle {
                 Layout.preferredWidth: 7
                 Layout.preferredHeight: 7
-                radius: 0
+                radius: Theme.radius
                 color: root.statusColor
             }
             TuiText {

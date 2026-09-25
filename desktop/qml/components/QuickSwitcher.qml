@@ -27,6 +27,7 @@ Rectangle {
     readonly property var settingCommands: {
         const rows = [
             settingToggle("minimalUi", "Minimal UI", "hide sidebar chevron button minimalistic"),
+            settingToggle("workspaceBarVisible", "Workspace bar", "hide show workspaces tabs top strip"),
             settingToggle("timestampsVisible", "Timestamps", "date time messages"),
             settingToggle("showWhenReady", "Show when ready", "stream streaming answers typing"),
             settingToggle("pauseMobilePush", "Pause phone alerts on desktop", "push notifications mobile iphone"),
@@ -71,7 +72,7 @@ Rectangle {
                 narrator.detailLevel = level;
         } else {
             const property = action.slice("setting:".length);
-            if (["minimalUi", "timestampsVisible", "showWhenReady", "toolsVisible", "pauseMobilePush", "sharedFilesystem"].includes(property))
+            if (["minimalUi", "workspaceBarVisible", "timestampsVisible", "showWhenReady", "toolsVisible", "pauseMobilePush", "sharedFilesystem"].includes(property))
                 root.controller[property] = !root.controller[property];
         }
     }
@@ -202,7 +203,7 @@ Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: Math.min(145, parent.height * 0.15)
-        radius: 0
+        radius: Theme.radius
         color: Theme.window
         border.color: Theme.border
 
@@ -229,7 +230,7 @@ Rectangle {
                 background: Rectangle {
                     color: Theme.window
                     border.color: Theme.control
-                    radius: 0
+                    radius: Theme.radius
                 }
                 onTextChanged: {
                     root.query = text;
@@ -276,7 +277,7 @@ Rectangle {
                     onClicked: root.choose(index)
 
                     background: Rectangle {
-                        radius: 0
+                        radius: Theme.radius
                         color: resultRow.highlighted ? Theme.control : resultRow.hovered ? Theme.hover : "transparent"
 
                         Rectangle {
@@ -356,7 +357,7 @@ Rectangle {
                                 && String(resultRow.modelData.key || "").length > 0
                             Layout.preferredWidth: visible ? shortcutText.implicitWidth + 10 : 0
                             Layout.preferredHeight: 19
-                            radius: 0
+                            radius: Theme.radius
                             color: Theme.hover
                             border.color: Theme.border
                             TuiText {

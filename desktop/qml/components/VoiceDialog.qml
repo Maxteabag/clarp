@@ -22,7 +22,7 @@ Rectangle {
         width: Math.min(560, parent.width - 48)
         height: Math.min(680, parent.height - 48)
         anchors.centerIn: parent
-        radius: 0
+        radius: Theme.radius
         color: Theme.raised
         border.color: Theme.border
 
@@ -78,7 +78,7 @@ Rectangle {
 
                     width: ListView.view.width
                     implicitHeight: 54
-                    radius: 0
+                    radius: Theme.radius
                     color: current ? Theme.control : Theme.raised
                     border.color: current ? Theme.selection : Theme.border
 

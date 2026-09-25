@@ -80,6 +80,7 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList assignmentContacts READ assignmentContacts NOTIFY assignmentContactsChanged)
     Q_PROPERTY(bool newAgentOnStartup READ newAgentOnStartup WRITE setNewAgentOnStartup NOTIFY newAgentOnStartupChanged)
     Q_PROPERTY(bool minimalUi READ minimalUi WRITE setMinimalUi NOTIFY minimalUiChanged)
+    Q_PROPERTY(bool workspaceBarVisible READ workspaceBarVisible WRITE setWorkspaceBarVisible NOTIFY workspaceBarVisibleChanged)
     Q_PROPERTY(QString readingTheme READ readingTheme WRITE setReadingTheme NOTIFY readingThemeChanged)
     Q_PROPERTY(QVariantMap readingStyle READ readingStyle NOTIFY readingThemeChanged)
     Q_PROPERTY(QVariantList readingThemes READ readingThemes CONSTANT)
@@ -203,6 +204,8 @@ class AppController : public QObject {
     [[nodiscard]] bool timestampsVisible() const;
     [[nodiscard]] bool minimalUi() const { return m_minimalUi; }
     void setMinimalUi(bool minimal);
+    [[nodiscard]] bool workspaceBarVisible() const { return m_workspaceBarVisible; }
+    void setWorkspaceBarVisible(bool visible);
     [[nodiscard]] QString readingTheme() const { return m_readingTheme; }
     void setReadingTheme(const QString& id);
     [[nodiscard]] QVariantMap readingStyle() const;
@@ -304,6 +307,7 @@ class AppController : public QObject {
     Q_INVOKABLE void assignContact(const QString& session, const QString& mode, const QString& name);
     [[nodiscard]] QString startingContact() const;
     Q_INVOKABLE [[nodiscard]] QVariantList modelsForBackend(const QString& backend) const;
+    Q_INVOKABLE [[nodiscard]] QString defaultEffortForModel(const QString& backend, const QString& modelId) const;
     Q_INVOKABLE [[nodiscard]] QVariantList effortsForModel(const QString& backend,
                                                            const QString& model) const;
     Q_INVOKABLE [[nodiscard]] bool backendSupportsResume(const QString& backend) const;
@@ -415,6 +419,7 @@ class AppController : public QObject {
     void newAgentOnStartupChanged();
     void launchPoolEmpty();
     void minimalUiChanged();
+    void workspaceBarVisibleChanged();
     void readingThemeChanged();
     void sharedFilesystemChanged();
     void connectionStateChanged();
@@ -472,6 +477,8 @@ class AppController : public QObject {
     void handleJson(const QString& tag, const QJsonObject& object);
     void handleBytes(const QString& tag, const QByteArray& bytes, const QByteArray& contentType);
     void requestContactAvatars();
+    void finishPortrait(const QString& tag, const QByteArray& bytes, const QByteArray& mime);
+    [[nodiscard]] static QString portraitCachePath(const QString& url);
     void handleRequestFailure(const QString& tag, const QString& message, int statusCode);
     void handleSseEvent(const QJsonObject& event);
     void finishUpdateRequest(quint64 generation);
@@ -596,6 +603,7 @@ class AppController : public QObject {
     QString m_assignmentSession;
     bool m_newAgentOnStartup = true;
     bool m_minimalUi = false;
+    bool m_workspaceBarVisible = true;
     QString m_readingTheme;
     bool m_sharedFilesystem = false;
     bool m_voicesLoading = false;

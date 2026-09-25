@@ -16,6 +16,7 @@ TestCase {
         property string selectedSession: "fixture"
         property bool timestampsVisible: false
         property bool minimalUi: false
+        property bool workspaceBarVisible: true
         property bool showWhenReady: false
         property bool toolsVisible: false
         property bool pauseMobilePush: true
@@ -122,6 +123,15 @@ TestCase {
         picker.open(false); picker.query = "font literata";
         compare(picker.results.length, 2);
         picker.close();
+    }
+    function test_workspaceBarIsAToggle() {
+        stub.workspaceBarVisible = true;
+        const picker = createTemporaryObject(factory, testCase);
+        picker.open(false); picker.query = "workspace bar";
+        compare(picker.results.length, 1);
+        verify(picker.results[0].label.includes("On → Off"));
+        picker.choose(0);
+        compare(stub.workspaceBarVisible, false);
     }
     function test_escapeDoesNotChangeSetting() {
         stub.timestampsVisible = false;

@@ -149,7 +149,7 @@ Rectangle {
                         === root.controller.selectedTeamId
                     onClicked: root.controller.selectTeam(String(modelData.team_id || ""))
                     background: Rectangle {
-                        radius: 0
+                        radius: Theme.radius
                         color: teamRow.highlighted ? Theme.border
                             : teamRow.hovered ? Theme.control : "transparent"
                         border.color: teamRow.highlighted ? Theme.muted : "transparent"
@@ -160,7 +160,7 @@ Rectangle {
                         Rectangle {
                             Layout.preferredWidth: 34
                             Layout.preferredHeight: 34
-                            radius: 0
+                            radius: Theme.radius
                             color: {
                                 const value = String(teamRow.modelData.color || "");
                                 return value.startsWith("#") ? value : Theme.faint;
@@ -190,7 +190,7 @@ Rectangle {
                                     visible: Number(teamRow.modelData.unread_count || 0) > 0
                                     Layout.preferredWidth: 18
                                     Layout.preferredHeight: 16
-                                    radius: 0
+                                    radius: Theme.radius
                                     color: Theme.secondary
                                     TuiText {
                                         anchors.centerIn: parent
@@ -349,7 +349,7 @@ Rectangle {
                                         required property string modelData
                                         implicitWidth: memberName.implicitWidth + removeMember.implicitWidth + 18
                                         implicitHeight: 25
-                                        radius: 0
+                                        radius: Theme.radius
                                         color: Theme.border
                                         border.color: Theme.border
                                         Row {
@@ -406,7 +406,7 @@ Rectangle {
                             required property var modelData
                             width: ListView.view.width - 28
                             implicitHeight: messageColumn.implicitHeight + 18
-                            radius: 0
+                            radius: Theme.radius
                             color: Theme.control
                             border.width: 0
                             ColumnLayout {

@@ -92,7 +92,7 @@ Rectangle {
         width: Math.min(620, parent.width - 48)
         height: Math.min(760, parent.height - 48)
         anchors.centerIn: parent
-        radius: 0
+        radius: Theme.radius
         color: Theme.raised
         border.color: Theme.border
 

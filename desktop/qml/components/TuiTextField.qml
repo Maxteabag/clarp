@@ -4,6 +4,7 @@ TextField {
     id: control
     font.family: "JetBrains Mono"
     background: Rectangle {
+        radius: Theme.radius
         implicitWidth: 200
         implicitHeight: 40
         color: control.palette.base

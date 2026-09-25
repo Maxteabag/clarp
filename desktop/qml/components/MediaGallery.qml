@@ -22,7 +22,7 @@ Rectangle {
     implicitHeight: !visible ? 0 : compact && !expanded ? 27 : compact ? 116 : 224
     color: Theme.raised
     border.color: Theme.border
-    radius: 0
+    radius: Theme.radius
 
     ColumnLayout {
         anchors.fill: parent
@@ -68,7 +68,7 @@ Rectangle {
                 required property var modelData
                 width: root.compact ? 142 : 190
                 height: ListView.view.height
-                radius: 0
+                radius: Theme.radius
                 color: Theme.window
                 border.color: Theme.border
                 clip: true
@@ -134,7 +134,7 @@ Rectangle {
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle {
-            radius: 0
+            radius: Theme.radius
             color: Theme.window
             border.color: Theme.faint
         }

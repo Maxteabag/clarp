@@ -107,6 +107,11 @@ a session. Explicit update/adoption restoration keeps its requested session.
 
 New agents default to the Host home directory (`~`), including model-specific
 launches and quick contact creation. Explicit launcher directories are preserved.
+The sidebar search field shows its shortcut in the hint (`/`); the round plus
+button next to it opens the hub, and the panel button beside it hides the
+sidebar (Ctrl+B). Ctrl+K → **Workspace bar** (also Settings → Appearance)
+hides the workspace tab strip above the panes when one workspace is enough.
+
 Use **Ctrl+K → Change directory** or **Ctrl+Alt+D** to choose a directory for a
 new launch. This opens the New Session hub on its directory picker and does not
 restart an existing chat.

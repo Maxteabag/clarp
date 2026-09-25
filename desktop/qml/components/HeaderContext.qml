@@ -91,10 +91,16 @@ Item {
             textFormat: Text.PlainText
             objectName: "headerEffort"
             visible: root.showRuntime
-            text: "effort: " + String(root.metadata.effort || "default")
+            text: String(root.metadata.effort)
+                ? "effort: " + String(root.metadata.effort)
+                : String(root.metadata.default_effort)
+                    ? "effort: " + String(root.metadata.default_effort) + " (default)"
+                    : "effort: default"
             HoverHandler { id: effortHover }
             ToolTip.visible: effortHover.hovered
-            ToolTip.text: "Configured effort: " + String(root.metadata.effort || "Host default")
+            ToolTip.text: String(root.metadata.effort) ? "Configured effort: " + String(root.metadata.effort)
+                : String(root.metadata.default_effort) ? "Not set for this agent; the provider runs at " + String(root.metadata.default_effort)
+                : "Not set for this agent; the provider decides"
             Layout.minimumWidth: 0
             Layout.maximumWidth: root.width * 0.15
             elide: Text.ElideRight

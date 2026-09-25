@@ -23,6 +23,8 @@
 #include <QSettings>
 #include <QFontDatabase>
 #include <QSaveFile>
+#include <QtConcurrent/QtConcurrent>
+#include <QFutureWatcher>
 #include <QStandardPaths>
 #include <QUrlQuery>
 #include <QUuid>
@@ -145,6 +147,7 @@ AppController::AppController(QObject* parent)
     m_anonymousAgents = settings.value(QStringLiteral("launch/anonymousAgents"), true).toBool();
     m_newAgentOnStartup = settings.value(QStringLiteral("launch/newAgentOnStartup"), true).toBool();
     m_minimalUi = settings.value(QStringLiteral("appearance/minimalUi"), false).toBool();
+    m_workspaceBarVisible = settings.value(QStringLiteral("appearance/workspaceBar"), true).toBool();
     m_readingTheme = normalizedReadingThemeId(
         settings.value(QStringLiteral("appearance/readingTheme"), defaultReadingThemeId()).toString());
     const QString sharedFilesystemHost =
@@ -957,6 +960,13 @@ void AppController::setMinimalUi(bool minimal) {
     emit minimalUiChanged();
 }
 
+void AppController::setWorkspaceBarVisible(bool visible) {
+    if (m_workspaceBarVisible == visible) return;
+    m_workspaceBarVisible = visible;
+    QSettings().setValue(QStringLiteral("appearance/workspaceBar"), visible);
+    emit workspaceBarVisibleChanged();
+}
+
 void AppController::setReadingTheme(const QString& id) {
     const QString normalized = normalizedReadingThemeId(id);
     if (m_readingTheme == normalized) return;
@@ -1410,6 +1420,7 @@ QVariantMap AppController::agentDetails(const QString& session) const {
             {QStringLiteral("workspace"), m_workspaceContext.describe(agent->workingDirectory, m_sharedFilesystem)},
             {QStringLiteral("model"), agent->model},
             {QStringLiteral("effort"), agent->effort},
+            {QStringLiteral("default_effort"), defaultEffortForModel(agent->backend, agent->model)},
             {QStringLiteral("state"), m_agents.displayState(session)},
             {QStringLiteral("status_text"), agent->statusText},
             {QStringLiteral("context_tokens"), agent->contextTokens},
@@ -1526,6 +1537,17 @@ QVariantList AppController::modelsForBackend(const QString& backend) const {
         }
     }
     return result;
+}
+
+QString AppController::defaultEffortForModel(const QString& backend, const QString& modelId) const {
+    const QVariantMap providers = m_modelCatalog.value(QStringLiteral("providers")).toMap();
+    const QVariantList models = providers.value(backend).toMap().value(QStringLiteral("models")).toList();
+    for (const QVariant& value : models) {
+        const QVariantMap model = value.toMap();
+        if (model.value(QStringLiteral("id")).toString() == modelId)
+            return model.value(QStringLiteral("default_effort")).toString();
+    }
+    return {};
 }
 
 QVariantList AppController::effortsForModel(const QString& backend, const QString& modelId) const {
@@ -2541,6 +2563,11 @@ void AppController::requestAvatars() {
         }
         m_avatarUrls.insert(session, url);
         m_avatarSources.remove(session);
+        const QString cached = m_cacheEnabled ? portraitCachePath(m_baseUrl + url) : QString{};
+        if (!cached.isEmpty() && QFileInfo::exists(cached)) {
+            m_avatarSources.insert(session, QUrl::fromLocalFile(cached));
+            continue;
+        }
         const QString tag = QStringLiteral("avatar:%1").arg(++m_nextAvatarRequest);
         m_avatarRequests.insert(tag, {session, url});
         m_api.getBytes(tag, url);
@@ -2572,6 +2599,11 @@ void AppController::requestContactAvatars() {
         }
         m_contactAvatarUrls.insert(name, url);
         m_contactAvatarSources.remove(name);
+        const QString cached = m_cacheEnabled ? portraitCachePath(m_baseUrl + url) : QString{};
+        if (!cached.isEmpty() && QFileInfo::exists(cached)) {
+            m_contactAvatarSources.insert(name, QUrl::fromLocalFile(cached));
+            continue;
+        }
         const QString tag = QStringLiteral("contact-avatar:%1").arg(++m_nextAvatarRequest);
         m_contactAvatarRequests.insert(tag, name);
         m_api.getBytes(tag, url);
@@ -3266,49 +3298,75 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
         emit mediaChanged();
         return;
     }
-    if (tag.startsWith(QStringLiteral("contact-avatar:"))) {
-        const QString name = m_contactAvatarRequests.take(tag);
-        const qsizetype separator = contentType.indexOf(';');
-        const QByteArray mime =
-            contentType.left(separator < 0 ? contentType.size() : separator).trimmed().toLower();
-        if (name.isEmpty() || !m_contactAvatarUrls.contains(name)) return;
-        if (bytes.isEmpty() || bytes.size() > MaxPortraitBytes || !mime.startsWith("image/")) {
-            m_contactAvatarFailures.insert(name, m_contactAvatarUrls.value(name));
-            return;
-        }
-        const QByteArray portrait = roundedPortrait(bytes);
-        m_contactAvatarSources.insert(name, QUrl(QStringLiteral("data:%1;base64,%2")
-            .arg(portrait.isEmpty() ? QString::fromLatin1(mime) : QStringLiteral("image/png"),
-                 QString::fromLatin1((portrait.isEmpty() ? bytes : portrait).toBase64()))));
-        m_contactAvatarFailures.remove(name);
-        ++m_avatarRevision;
-        emit avatarRevisionChanged();
+    const bool contactAvatar = tag.startsWith(QStringLiteral("contact-avatar:"));
+    if (!contactAvatar && !tag.startsWith(QStringLiteral("avatar:"))) {
         return;
     }
-    if (!tag.startsWith(QStringLiteral("avatar:"))) {
-        return;
-    }
-    const auto request = m_avatarRequests.take(tag);
-    const QString session = request.first;
-    const QString url = request.second;
     const qsizetype separator = contentType.indexOf(';');
     const QByteArray mime =
         contentType.left(separator < 0 ? contentType.size() : separator).trimmed().toLower();
-    const Agent* agent = m_agents.find(session);
-    if (session.isEmpty() || agent == nullptr || avatarUrlForAgent(*agent) != url) {
-        return;
-    }
     if (bytes.isEmpty() || bytes.size() > MaxPortraitBytes || !mime.startsWith("image/")) {
-        m_avatarFailures.insert(session, url);
+        if (contactAvatar) {
+            const QString name = m_contactAvatarRequests.take(tag);
+            if (!name.isEmpty()) m_contactAvatarFailures.insert(name, m_contactAvatarUrls.value(name));
+        } else {
+            const auto request = m_avatarRequests.take(tag);
+            if (!request.first.isEmpty()) m_avatarFailures.insert(request.first, request.second);
+        }
         return;
     }
-    const QByteArray portrait = roundedPortrait(bytes);
-    const QString dataUrl =
-        QStringLiteral("data:%1;base64,%2")
-            .arg(portrait.isEmpty() ? QString::fromLatin1(mime) : QStringLiteral("image/png"),
-                 QString::fromLatin1((portrait.isEmpty() ? bytes : portrait).toBase64()));
-    m_avatarSources.insert(session, QUrl(dataUrl));
-    m_avatarFailures.remove(session);
+    // Decoding a 1024px PNG and re-encoding the 192px circle costs tens of
+    // milliseconds each; thirty of them at startup used to stall the first
+    // paint. Do it on the pool, then cache the result on disk.
+    auto* watcher = new QFutureWatcher<QByteArray>(this);
+    connect(watcher, &QFutureWatcher<QByteArray>::finished, this, [this, watcher, tag, bytes, mime] {
+        const QByteArray portrait = watcher->result();
+        watcher->deleteLater();
+        finishPortrait(tag, portrait.isEmpty() ? bytes : portrait, portrait.isEmpty() ? mime : QByteArrayLiteral("image/png"));
+    });
+    watcher->setFuture(QtConcurrent::run([bytes] { return roundedPortrait(bytes); }));
+}
+
+QString AppController::portraitCachePath(const QString& url) {
+    if (url.isEmpty()) return {};
+    const QString folder = QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
+                               .filePath(QStringLiteral("portraits"));
+    const QString key = QString::fromLatin1(
+        QCryptographicHash::hash(url.toUtf8(), QCryptographicHash::Sha1).toHex().left(24));
+    return QDir(folder).filePath(key + QStringLiteral(".png"));
+}
+
+void AppController::finishPortrait(const QString& tag, const QByteArray& bytes, const QByteArray& mime) {
+    QString key;
+    QString url;
+    if (tag.startsWith(QStringLiteral("contact-avatar:"))) {
+        key = m_contactAvatarRequests.take(tag);
+        if (key.isEmpty() || !m_contactAvatarUrls.contains(key)) return;
+        url = m_contactAvatarUrls.value(key);
+    } else {
+        const auto request = m_avatarRequests.take(tag);
+        key = request.first;
+        url = request.second;
+        const Agent* agent = m_agents.find(key);
+        if (key.isEmpty() || agent == nullptr || avatarUrlForAgent(*agent) != url) return;
+    }
+    const QUrl source(QStringLiteral("data:%1;base64,%2")
+                          .arg(QString::fromLatin1(mime), QString::fromLatin1(bytes.toBase64())));
+    // The freshly decoded portrait is shown from memory; the rounded PNG is
+    // also written to the cache so the next start skips download and decode.
+    if (mime == "image/png" && m_cacheEnabled) {
+        const QString path = portraitCachePath(m_baseUrl + url);
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QSaveFile file(path);
+        if (file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size()) file.commit();
+    }
+    if (tag.startsWith(QStringLiteral("contact-avatar:"))) {
+        m_contactAvatarSources.insert(key, source);
+        m_contactAvatarFailures.remove(key);
+    } else {
+        m_avatarSources.insert(key, source);
+        m_avatarFailures.remove(key);
+    }
     ++m_avatarRevision;
     emit avatarRevisionChanged();
 }

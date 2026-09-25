@@ -181,7 +181,7 @@ Rectangle {
         anchors.centerIn: parent
         color: Theme.window
         border.color: Theme.border
-        radius: 0
+        radius: Theme.radius
         MouseArea { anchors.fill: parent; onClicked: mouse => mouse.accepted = true }
         Keys.onPressed: event => root.handleKey(event)
 

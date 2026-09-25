@@ -194,7 +194,7 @@ Rectangle {
                         required property var modelData
                         height: 24
                         width: Math.min(220, attachmentLabel.implicitWidth + 36)
-                        radius: 0
+                        radius: Theme.radius
                         color: Theme.control
                         border.color: Theme.border
                         RowLayout {
@@ -250,7 +250,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: root.styled("background", Theme.window)
-            radius: 0
+            radius: Theme.radius
             border.width: 0
 
             ScrollView {
@@ -377,7 +377,7 @@ Rectangle {
                 verticalAlignment: Text.AlignVCenter
             }
             background: Rectangle {
-                radius: 0
+                radius: Theme.radius
                 color: playbackButton.hovered ? Theme.hover : "transparent"
             }
         }
@@ -422,7 +422,7 @@ Rectangle {
         anchors.fill: parent
         visible: root.dropActive
         z: 40
-        radius: 0
+        radius: Theme.radius
         color: Qt.alpha(Theme.control, 0.82)
         border.color: Theme.link
         border.width: 2

@@ -61,7 +61,7 @@ Rectangle {
             visible: root.controller.updatesError.length > 0
             Layout.fillWidth: true
             implicitHeight: visible ? errorText.implicitHeight + 14 : 0
-            radius: 0
+            radius: Theme.radius
             color: Theme.dangerSurface
             border.color: Qt.alpha(Theme.danger, 0.55)
             TuiText {
@@ -107,7 +107,7 @@ Rectangle {
                         }
                         Layout.fillWidth: true
                         implicitHeight: decisionColumn.implicitHeight + 20
-                        radius: 0
+                        radius: Theme.radius
                         color: Theme.control
                         border.width: 0
 
@@ -201,7 +201,7 @@ Rectangle {
                         readonly property real progress: root.controller.backgroundJobProgress(modelData)
                         Layout.fillWidth: true
                         implicitHeight: jobRow.implicitHeight + 16
-                        radius: 0
+                        radius: Theme.radius
                         color: "transparent"
                         border.width: 0
 
@@ -216,7 +216,7 @@ Rectangle {
                             Rectangle {
                                 Layout.preferredWidth: 6
                                 Layout.preferredHeight: 6
-                                radius: 0
+                                radius: Theme.radius
                                 color: root.isActiveJob(job.modelData) ? Theme.secondary
                                     : String(job.modelData.status || "") === "failed"
                                         ? Theme.danger : Theme.muted

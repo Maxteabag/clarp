@@ -49,7 +49,7 @@ Rectangle {
         width: Math.min(820, parent.width - 36)
         height: Math.min(760, parent.height - 42)
         anchors.centerIn: parent
-        radius: 0
+        radius: Theme.radius
         color: Theme.raised
         border.color: Theme.faint
 
@@ -176,7 +176,7 @@ Rectangle {
                                 Rectangle {
                                     Layout.preferredWidth: 7
                                     Layout.preferredHeight: 7
-                                    radius: 0
+                                    radius: Theme.radius
                                     color: String(taskRow.modelData.status || "") === "completed"
                                         ? Theme.secondary
                                         : String(taskRow.modelData.status || "") === "in_progress"
@@ -208,7 +208,7 @@ Rectangle {
                                 required property var modelData
                                 Layout.fillWidth: true
                                 implicitHeight: promptColumn.implicitHeight + 14
-                                radius: 0
+                                radius: Theme.radius
                                 color: Theme.raised
                                 border.color: Theme.border
                                 ColumnLayout {
@@ -355,7 +355,7 @@ Rectangle {
                                 Rectangle {
                                     Layout.preferredWidth: 6
                                     Layout.preferredHeight: 6
-                                    radius: 0
+                                    radius: Theme.radius
                                     color: Theme.secondary
                                 }
                                 TuiText {
@@ -460,7 +460,7 @@ Rectangle {
                                 required property var modelData
                                 Layout.fillWidth: true
                                 implicitHeight: artifactColumn.implicitHeight + 14
-                                radius: 0
+                                radius: Theme.radius
                                 color: Theme.raised
                                 border.color: Theme.border
                                 ColumnLayout {
@@ -602,7 +602,7 @@ Rectangle {
         default property alias content: cardRows.data
         Layout.fillWidth: true
         implicitHeight: cardColumn.implicitHeight + 20
-        radius: 0
+        radius: Theme.radius
         color: "transparent"
         border.width: 0
         ColumnLayout {

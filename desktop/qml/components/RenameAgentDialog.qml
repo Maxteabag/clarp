@@ -48,7 +48,7 @@ Rectangle {
         anchors.centerIn: parent
         width: Math.min(480, parent.width - 32)
         height: form.implicitHeight + 40
-        radius: 0
+        radius: Theme.radius
         color: Theme.raised
         border.color: Theme.border
         ColumnLayout {

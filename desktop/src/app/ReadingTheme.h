@@ -25,6 +25,7 @@ struct ReadingTheme {
     QStringList fontFamilies;  // First installed family wins.
     int fontPixelSize = 15;
     int measure = 840;         // Maximum message width in pixels.
+    int radius = 0;            // Corner radius for controls, cards and bubbles.
     QString background{};
     QString bubble{};            // The current user's own messages.
     QString text{};
@@ -153,6 +154,7 @@ inline const QList<ReadingTheme>& readingThemes() {
             .fontFamilies = {QStringLiteral("Literata"), QStringLiteral("Noto Serif"), QStringLiteral("Liberation Serif"), QStringLiteral("serif")},
             .fontPixelSize = 17,
             .measure = 720,
+            .radius = 8,
             .background = QStringLiteral("#fbf0d9"),
             .bubble = QStringLiteral("#f1e4c6"),
             .text = QStringLiteral("#3d2e20"),
@@ -170,6 +172,7 @@ inline const QList<ReadingTheme>& readingThemes() {
             .fontFamilies = {QStringLiteral("Literata"), QStringLiteral("Noto Serif"), QStringLiteral("Liberation Serif"), QStringLiteral("serif")},
             .fontPixelSize = 17,
             .measure = 720,
+            .radius = 8,
             .background = QStringLiteral("#1a1b26"),
             .bubble = QStringLiteral("#20212e"),
             .text = QStringLiteral("#e2d9cb"),
@@ -187,6 +190,7 @@ inline const QList<ReadingTheme>& readingThemes() {
             .fontFamilies = {QStringLiteral("Atkinson Hyperlegible Next"), QStringLiteral("Atkinson Hyperlegible"), QStringLiteral("Noto Sans"), QStringLiteral("sans-serif")},
             .fontPixelSize = 16,
             .measure = 760,
+            .radius = 8,
             .background = QStringLiteral("#1a1b26"),
             .bubble = QStringLiteral("#20212e"),
             .text = QStringLiteral("#e5e7eb"),
@@ -232,6 +236,7 @@ inline QVariantMap readingThemeStyle(const QString& id,
         {QStringLiteral("fontFamily"), resolveReadingFont(theme, installed)},
         {QStringLiteral("fontPixelSize"), theme.fontPixelSize},
         {QStringLiteral("measure"), theme.measure},
+        {QStringLiteral("radius"), theme.radius},
         {QStringLiteral("background"), theme.background},
         {QStringLiteral("bubble"), theme.bubble},
         {QStringLiteral("text"), theme.text},

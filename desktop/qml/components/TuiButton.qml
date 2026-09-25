@@ -4,6 +4,7 @@ Button {
     id: control
     font.family: "JetBrains Mono"
     background: Rectangle {
+        radius: Theme.radius
         implicitWidth: 100
         implicitHeight: 40
         color: control.down ? Qt.darker(control.palette.button, 1.12) : control.hovered ? Qt.lighter(control.palette.button, 1.12) : control.palette.button

@@ -17,7 +17,7 @@ Rectangle {
     color: active ? Theme.control : Theme.raised
     border.color: active ? Theme.border : Theme.control
     border.width: 1
-    radius: 0
+    radius: Theme.radius
     clip: true
     opacity: active ? 1 : 0.76
 

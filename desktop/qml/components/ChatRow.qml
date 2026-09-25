@@ -81,7 +81,7 @@ ItemDelegate {
                 anchors.top: parent.top
                 width: 12
                 height: 12
-                radius: 0
+                radius: 6
                 color: Theme.accent
                 border.color: Theme.raised
                 border.width: 2
@@ -147,7 +147,7 @@ ItemDelegate {
                     visible: row.unread
                     implicitWidth: Math.max(18, unreadLabel.implicitWidth + 10)
                     implicitHeight: 18
-                    radius: 0
+                    radius: 9
                     color: Theme.accent
 
                     TuiText {

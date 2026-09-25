@@ -71,92 +71,55 @@ Rectangle {
         anchors.fill: parent
         spacing: 0
 
+        // Collapsed rail: only the expand control remains.
         Item {
+            visible: root.collapsed
             Layout.fillWidth: true
-            Layout.preferredHeight: 60
+            Layout.preferredHeight: visible ? 52 : 0
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: root.collapsed ? 0 : 16
-                anchors.rightMargin: root.collapsed ? 0 : 10
-                spacing: 6
-
-                TuiText {
-                    visible: !root.collapsed
-                    Layout.fillWidth: true
-                    text: "Clarp"
-                    color: Theme.text
-                    font.pixelSize: 17
-                    font.weight: Font.DemiBold
-                }
-
-                TuiToolButton {
-                    objectName: "sidebarHideButton"
-                    visible: !root.controller.minimalUi
-                    text: "‹"
-                    implicitWidth: 24
-                    onClicked: root.hideRequested()
-                    ToolTip.visible: hovered
-                    ToolTip.text: "Hide sidebar · Ctrl+B"
-                }
-
-                RoundButton {
-                    id: newAgentButton
-
-                    Layout.preferredWidth: 36
-                    Layout.preferredHeight: 36
-                    Layout.alignment: Qt.AlignHCenter
-                    text: root.collapsed ? "›" : "+"
-                    onClicked: {
-                        if (root.collapsed)
-                            root.collapsed = false;
-                        else
-                            root.startAgent();
-                    }
-                    ToolTip.visible: hovered
-                    ToolTip.text: root.collapsed ? "Expand conversations" : "New agent (Ctrl+N)"
-
-                    background: Rectangle {
-                        radius: 0
-                        color: newAgentButton.pressed ? Theme.accent : newAgentButton.hovered ? Theme.accent : Theme.accent
-                    }
-                    contentItem: TuiText {
-                        text: newAgentButton.text
-                        color: Theme.window
-                        font.pixelSize: 17
-                        font.weight: Font.DemiBold
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
+            RoundButton {
+                id: expandButton
+                anchors.centerIn: parent
+                width: 36; height: 36
+                onClicked: root.collapsed = false
+                ToolTip.visible: hovered
+                ToolTip.text: "Expand conversations"
+                background: Rectangle { radius: 18; color: Theme.accent }
+                contentItem: TuiText {
+                    text: "›"; color: Theme.accentText; font.pixelSize: 17; font.weight: Font.DemiBold
+                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                 }
             }
         }
 
-        Item {
+        // Search, hide and new-session controls share one row.
+        RowLayout {
             visible: !root.collapsed && !root.showingArchive && !root.showingPairs
             Layout.fillWidth: true
-            Layout.preferredHeight: visible ? 46 : 0
+            Layout.leftMargin: 12
+            Layout.rightMargin: 10
+            Layout.topMargin: 12
+            Layout.bottomMargin: 8
+            spacing: 8
 
             Rectangle {
-                anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                anchors.bottomMargin: 8
-                radius: 0
-                color: Theme.dangerSurface
-                border.color: search.activeFocus ? Theme.selection : Theme.control
+                Layout.fillWidth: true
+                Layout.preferredHeight: 36
+                radius: Theme.radius
+                color: Theme.raised
+                border.color: search.activeFocus ? Theme.accent : Theme.border
                 border.width: 1
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 14
-                    anchors.rightMargin: 8
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 6
                     spacing: 8
 
-                    TuiText {
-                        text: "⌕"
-                        color: Theme.muted
-                        font.pixelSize: 15
+                    Image {
+                        source: Qt.resolvedUrl("../../resources/icons/rail-search.svg")
+                        sourceSize: Qt.size(16, 16)
+                        opacity: 0.7
                     }
 
                     TuiTextField {
@@ -164,7 +127,7 @@ Rectangle {
                         objectName: "chatListSearch"
 
                         Layout.fillWidth: true
-                        placeholderText: "Search agents"
+                        placeholderText: "Search agents · /"
                         color: Theme.text
                         font.pixelSize: 12
                         background: null
@@ -183,6 +146,39 @@ Rectangle {
                         implicitHeight: 24
                         onClicked: search.clear()
                     }
+                }
+            }
+
+            TuiToolButton {
+                objectName: "sidebarHideButton"
+                visible: !root.controller.minimalUi
+                display: AbstractButton.IconOnly
+                icon.source: Qt.resolvedUrl("../../resources/icons/rail-sidebar.svg")
+                icon.width: 18; icon.height: 18
+                icon.color: Theme.muted
+                implicitWidth: 32; implicitHeight: 32
+                onClicked: root.hideRequested()
+                ToolTip.visible: hovered
+                ToolTip.text: "Hide sidebar · Ctrl+B"
+            }
+
+            RoundButton {
+                id: newAgentButton
+                Layout.preferredWidth: 36
+                Layout.preferredHeight: 36
+                onClicked: root.startAgent()
+                ToolTip.visible: hovered
+                ToolTip.text: "New session (Ctrl+N)"
+                background: Rectangle {
+                    radius: 18
+                    color: newAgentButton.pressed ? Qt.darker(Theme.accent, 1.15) : Theme.accent
+                }
+                contentItem: Image {
+                    source: Qt.resolvedUrl("../../resources/icons/rail-plus.svg")
+                    sourceSize: Qt.size(18, 18)
+                    fillMode: Image.Pad
+                    horizontalAlignment: Image.AlignHCenter
+                    verticalAlignment: Image.AlignVCenter
                 }
             }
         }
@@ -218,8 +214,8 @@ Rectangle {
                     onClicked: root.scope = String(chip.modelData.key)
 
                     background: Rectangle {
-                        radius: 0
-                        color: chip.selected ? Theme.accent : Theme.dangerSurface
+                        radius: 13
+                        color: chip.selected ? Theme.accent : Theme.raised
                         border.color: chip.selected ? "transparent" : Theme.border
                         border.width: 1
                     }
@@ -284,7 +280,7 @@ Rectangle {
                     visible: !root.showingPairs && root.controller.unreadAgentConversations > 0
                     Layout.preferredWidth: visible ? Math.max(16, unreadLabel.implicitWidth + 8) : 0
                     Layout.preferredHeight: 16
-                    radius: 0
+                    radius: Theme.radius
                     color: Theme.accent
                     TuiText {
                         id: unreadLabel

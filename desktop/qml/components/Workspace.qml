@@ -11,7 +11,9 @@ Rectangle {
     signal queueRequested(string session)
     signal profileRequested(string session)
     readonly property real paneGap: 4
-    readonly property real toolbarHeight: controller.panes.workspaceSaveWarning ? 76 : 36
+    readonly property bool barVisible: controller.workspaceBarVisible === undefined ? true : Boolean(controller.workspaceBarVisible)
+    readonly property real barHeight: barVisible ? 36 : 0
+    readonly property real toolbarHeight: barHeight + (controller.panes.workspaceSaveWarning ? 40 : 0)
     property int createdViews: 0
     function syncViews() {
         const next=controller.panes.viewLayout;
@@ -27,6 +29,7 @@ Rectangle {
     Connections {target:root.controller.panes; function onTreeChanged(){root.syncViews();}}
     Component.onCompleted: syncViews()
     ScrollView {
+        visible: root.barVisible
         width: root.width
         height: 36
         z: 50
@@ -55,7 +58,7 @@ Rectangle {
     }
     }
     Row {
-        y: 36; height: 40; width: root.width; spacing: 8; z: 50
+        y: root.barHeight; height: 40; width: root.width; spacing: 8; z: 50
         visible: !!root.controller.panes.workspaceSaveWarning
         TuiLabel {width:Math.max(100,root.width-saveLayoutButton.width-8);text:root.controller.panes.workspaceSaveWarning;wrapMode:Text.Wrap;color:Theme.warning}
         TuiButton {id:saveLayoutButton;text:"Save this layout instead";onClicked:root.controller.panes.saveWorkspaceLayoutInstead()}

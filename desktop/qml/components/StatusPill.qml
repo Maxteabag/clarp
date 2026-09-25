@@ -31,7 +31,7 @@ Rectangle {
             visible: root.showIndicator
             width: visible ? 5 : 0
             height: 5
-            radius: 0
+            radius: 2.5
             color: root.tone
         }
 

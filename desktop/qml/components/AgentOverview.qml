@@ -26,7 +26,7 @@ Rectangle {
     Rectangle {
         anchors.fill: parent
         anchors.margins: 18
-        radius: 0
+        radius: Theme.radius
         color: Theme.raised
         border.color: Theme.border
 
@@ -104,7 +104,7 @@ Rectangle {
 
                     width: ListView.view.width
                     implicitHeight: cardColumn.implicitHeight + 18
-                    radius: 0
+                    radius: Theme.radius
                     color: root.controller.selectedSession === session ? Theme.control : Theme.raised
                     border.width: 0
 
@@ -203,14 +203,14 @@ Rectangle {
                             value: card.contextTokens
                             background: Rectangle {
                                 color: Theme.border
-                                radius: 0
+                                radius: Theme.radius
                             }
                             contentItem: Item {
                                 implicitHeight: 3
                                 Rectangle {
                                     width: contextProgress.visualPosition * parent.width
                                     height: parent.height
-                                    radius: 0
+                                    radius: Theme.radius
                                     color: Theme.muted
                                 }
                             }
@@ -237,7 +237,7 @@ Rectangle {
                                     required property var modelData
                                     Layout.fillWidth: true
                                     implicitHeight: 48
-                                    radius: 0
+                                    radius: Theme.radius
                                     color: Theme.window
                                     border.color: Theme.control
 
@@ -372,7 +372,7 @@ Rectangle {
                         required property string lastMessage
                         width: 250
                         height: ListView.view.height
-                    radius: 0
+                    radius: Theme.radius
                     color: Theme.raised
                     border.color: Theme.border
 
@@ -439,7 +439,7 @@ Rectangle {
                         required property string avatarSymbol
                         width: 280
                         height: ListView.view.height
-                        radius: 0
+                        radius: Theme.radius
                         color: Theme.raised
                         border.color: Theme.border
 
@@ -451,7 +451,7 @@ Rectangle {
                             Rectangle {
                                 Layout.preferredWidth: 36
                                 Layout.preferredHeight: 36
-                                radius: 0
+                                radius: Theme.radius
                                 color: Theme.border
                                 TuiText {
                                     anchors.centerIn: parent

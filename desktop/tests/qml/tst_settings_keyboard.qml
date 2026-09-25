@@ -17,6 +17,7 @@ TestCase {
         property bool anonymousAgents: true
         property bool newAgentOnStartup: true
         property bool minimalUi: false
+        property bool workspaceBarVisible: true
         property bool pauseMobilePush: true
         property bool showWhenReady: false
         property bool toolsVisible: false

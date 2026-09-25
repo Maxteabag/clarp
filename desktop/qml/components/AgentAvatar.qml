@@ -28,7 +28,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         visible: portrait.status !== Image.Ready
-        radius: 0
+        radius: root.cornerRadius
         antialiasing: true
         color: "transparent"
         border.width: 1

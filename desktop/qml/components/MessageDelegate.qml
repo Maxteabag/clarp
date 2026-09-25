@@ -199,7 +199,7 @@ Item {
                 x: 0
                 width: parent.width
                 implicitHeight: Math.max(24, activityRow.implicitHeight + 4)
-                radius: 0
+                radius: Theme.radius
                 color: "transparent"
                 border.width: 0
 
@@ -250,7 +250,7 @@ Item {
                     root.body.length > 160 ? root.readingMeasure : Math.max(140, bubbleMetrics.advanceWidth + 28))
                 x: root.rightAligned ? parent.width - width : 0
                 implicitHeight: messageBlocks.implicitHeight + 24
-                radius: 0
+                radius: Theme.radius
                 color: root.userAuthored ? root.styled("bubble", Theme.raised) : "transparent"
                 border.width: root.deliveryFailed ? 1 : 0
                 border.color: Theme.danger
@@ -358,7 +358,7 @@ Item {
             }
             Layout.fillWidth: true
             implicitHeight: visible ? 24 : 0
-            radius: 0
+            radius: Theme.radius
             color: activityTap.hovered ? Theme.hover : "transparent"
 
             TuiText {
