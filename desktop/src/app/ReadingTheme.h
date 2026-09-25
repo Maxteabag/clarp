@@ -19,26 +19,117 @@ namespace clarp {
 // paper rather than pure white on light surfaces, and a measure that keeps
 // lines in the 60–90 character range at the theme's body size.
 struct ReadingTheme {
-    QString id;
-    QString label;
-    QString detail;
+    QString id{};
+    QString label{};
+    QString detail{};
     QStringList fontFamilies;  // First installed family wins.
     int fontPixelSize = 15;
     int measure = 840;         // Maximum message width in pixels.
-    QString background;
-    QString bubble;            // The current user's own messages.
-    QString text;
-    QString mutedText;         // Reply markers, tool activity, section headings.
-    QString faintText;         // Timestamps and group toggles.
-    QString rule;              // Section separators.
-    QString selection;
-    QString selectedText;
-    QString link;
+    QString background{};
+    QString bubble{};            // The current user's own messages.
+    QString text{};
+    QString mutedText{};         // Reply markers, tool activity, section headings.
+    QString faintText{};         // Timestamps and group toggles.
+    QString rule{};              // Section separators.
+    QString selection{};
+    QString selectedText{};
+    QString link{};
+    // Application chrome. The transcript roles above stay the reading
+    // surface; these restyle every other pane, dialog and control so the
+    // window reads as one theme.
+    bool light = false;
+    QString sunken{};        // Deepest surface: tab strip, status bar.
+    QString window{};        // Sidebar, panels, dialogs.
+    QString raised{};        // Cards, popups, alternate rows.
+    QString control{};       // Buttons, fields.
+    QString hover{};
+    QString border{};
+    QString shadow{};
+    QString scrim{};         // Modal backdrop (with alpha).
+    QString chromeText{};    // Labels and controls.
+    QString secondary{};     // Less prominent labels.
+    QString accent{};
+    QString accentText{};
+    QString warning{};
+    QString danger{};
+    QString dangerSurface{};
+    QString success{};
 };
+
+// The chrome roles every dark theme shares: the terminal palette.
+struct ChromeRoles {
+    bool light = false;
+    QString sunken, window, raised, control, hover, border, shadow, scrim, chromeText,
+        secondary, accent, accentText, warning, danger, dangerSurface, success;
+};
+
+inline ChromeRoles darkChrome() {
+    return {.light = false,
+            .sunken = QStringLiteral("#12131a"),
+            .window = QStringLiteral("#1a1b26"),
+            .raised = QStringLiteral("#20212e"),
+            .control = QStringLiteral("#292b3a"),
+            .hover = QStringLiteral("#22232f"),
+            .border = QStringLiteral("#41445a"),
+            .shadow = QStringLiteral("#14151d"),
+            .scrim = QStringLiteral("#aa08090f"),
+            .chromeText = QStringLiteral("#c0caf5"),
+            .secondary = QStringLiteral("#9ca1bd"),
+            .accent = QStringLiteral("#bb9af7"),
+            .accentText = QStringLiteral("#1a1b26"),
+            .warning = QStringLiteral("#e0af68"),
+            .danger = QStringLiteral("#c98a98"),
+            .dangerSurface = QStringLiteral("#2b2028"),
+            .success = QStringLiteral("#9ece6a")};
+}
+
+// Warm paper chrome for the light theme. Every text role keeps at least
+// 4.5:1 against its surface; accent and danger are darkened from the
+// CloudEpub values so they also pass as text on paper.
+inline ChromeRoles paperChrome() {
+    return {.light = true,
+            .sunken = QStringLiteral("#ebdfc3"),
+            .window = QStringLiteral("#f3e8cf"),
+            .raised = QStringLiteral("#fbf0d9"),
+            .control = QStringLiteral("#e6d8b8"),
+            .hover = QStringLiteral("#efe3c7"),
+            .border = QStringLiteral("#cdbd9b"),
+            .shadow = QStringLiteral("#d9cba9"),
+            .scrim = QStringLiteral("#8c3a2a16"),
+            .chromeText = QStringLiteral("#3d2e20"),
+            .secondary = QStringLiteral("#5c4b3b"),
+            .accent = QStringLiteral("#9c4f24"),
+            .accentText = QStringLiteral("#fbf0d9"),
+            .warning = QStringLiteral("#7a4b00"),
+            .danger = QStringLiteral("#9a3434"),
+            .dangerSurface = QStringLiteral("#f2d8cc"),
+            .success = QStringLiteral("#3f6b1f")};
+}
+
+inline ReadingTheme withChrome(ReadingTheme theme, const ChromeRoles& chrome) {
+    theme.light = chrome.light;
+    theme.sunken = chrome.sunken;
+    theme.window = chrome.window;
+    theme.raised = chrome.raised;
+    theme.control = chrome.control;
+    theme.hover = chrome.hover;
+    theme.border = chrome.border;
+    theme.shadow = chrome.shadow;
+    theme.scrim = chrome.scrim;
+    theme.chromeText = chrome.chromeText;
+    theme.secondary = chrome.secondary;
+    theme.accent = chrome.accent;
+    theme.accentText = chrome.accentText;
+    theme.warning = chrome.warning;
+    theme.danger = chrome.danger;
+    theme.dangerSurface = chrome.dangerSurface;
+    theme.success = chrome.success;
+    return theme;
+}
 
 inline const QList<ReadingTheme>& readingThemes() {
     static const QList<ReadingTheme> themes = {
-        ReadingTheme{
+        withChrome(ReadingTheme{
             .id = QStringLiteral("terminal"),
             .label = QStringLiteral("Terminal"),
             .detail = QStringLiteral("JetBrains Mono on the dark palette. The default."),
@@ -54,8 +145,8 @@ inline const QList<ReadingTheme>& readingThemes() {
             .selection = QStringLiteral("#6f527b"),
             .selectedText = QStringLiteral("#fff8ff"),
             .link = QStringLiteral("#7aa2f7"),
-        },
-        ReadingTheme{
+        }, darkChrome()),
+        withChrome(ReadingTheme{
             .id = QStringLiteral("paper"),
             .label = QStringLiteral("Paper"),
             .detail = QStringLiteral("Literata on warm sepia paper, as in the CloudEpub reader. Light and low-glare."),
@@ -71,8 +162,8 @@ inline const QList<ReadingTheme>& readingThemes() {
             .selection = QStringLiteral("#e6c48f"),
             .selectedText = QStringLiteral("#1f1a16"),
             .link = QStringLiteral("#1f7a78"),
-        },
-        ReadingTheme{
+        }, paperChrome()),
+        withChrome(ReadingTheme{
             .id = QStringLiteral("dusk"),
             .label = QStringLiteral("Dusk"),
             .detail = QStringLiteral("Literata in warm off-white on the dark palette. A book at night."),
@@ -88,8 +179,8 @@ inline const QList<ReadingTheme>& readingThemes() {
             .selection = QStringLiteral("#6f527b"),
             .selectedText = QStringLiteral("#fff8ff"),
             .link = QStringLiteral("#7aa2f7"),
-        },
-        ReadingTheme{
+        }, darkChrome()),
+        withChrome(ReadingTheme{
             .id = QStringLiteral("hyperlegible"),
             .label = QStringLiteral("Hyperlegible"),
             .detail = QStringLiteral("Atkinson Hyperlegible sans on the dark palette. Built for low vision and tired eyes."),
@@ -105,7 +196,7 @@ inline const QList<ReadingTheme>& readingThemes() {
             .selection = QStringLiteral("#6f527b"),
             .selectedText = QStringLiteral("#fff8ff"),
             .link = QStringLiteral("#7aa2f7"),
-        },
+        }, darkChrome()),
     };
     return themes;
 }
@@ -150,6 +241,23 @@ inline QVariantMap readingThemeStyle(const QString& id,
         {QStringLiteral("selection"), theme.selection},
         {QStringLiteral("selectedText"), theme.selectedText},
         {QStringLiteral("link"), theme.link},
+        {QStringLiteral("light"), theme.light},
+        {QStringLiteral("sunken"), theme.sunken},
+        {QStringLiteral("window"), theme.window},
+        {QStringLiteral("raised"), theme.raised},
+        {QStringLiteral("control"), theme.control},
+        {QStringLiteral("hover"), theme.hover},
+        {QStringLiteral("border"), theme.border},
+        {QStringLiteral("shadow"), theme.shadow},
+        {QStringLiteral("scrim"), theme.scrim},
+        {QStringLiteral("chromeText"), theme.chromeText},
+        {QStringLiteral("secondary"), theme.secondary},
+        {QStringLiteral("accent"), theme.accent},
+        {QStringLiteral("accentText"), theme.accentText},
+        {QStringLiteral("warning"), theme.warning},
+        {QStringLiteral("danger"), theme.danger},
+        {QStringLiteral("dangerSurface"), theme.dangerSurface},
+        {QStringLiteral("success"), theme.success},
     };
 }
 

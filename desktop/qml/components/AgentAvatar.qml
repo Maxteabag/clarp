@@ -7,13 +7,18 @@ Item {
     required property string session
     required property string name
     property bool showPortrait: false
+    // An explicit portrait (a contact's persona avatar) wins over the
+    // session lookup; an empty value keeps the agent-avatar path.
+    property url portraitSource: ""
     property string symbol: ""
     property real avatarSize: 40
     property real cornerRadius: 2
-    property color fallbackColor: "#55596f"
+    property color fallbackColor: Theme.faint
     readonly property url resolvedSource: {
         root.controller.avatarRevision;
-        return root.showPortrait && root.session.length > 0 ? root.controller.avatarSource(root.session) : "";
+        if (!root.showPortrait) return "";
+        if (String(root.portraitSource).length > 0) return root.portraitSource;
+        return root.session.length > 0 ? root.controller.avatarSource(root.session) : "";
     }
 
     implicitWidth: avatarSize
@@ -27,12 +32,12 @@ Item {
         antialiasing: true
         color: "transparent"
         border.width: 1
-        border.color: "#41445a"
+        border.color: Theme.border
 
         TuiText {
             anchors.centerIn: parent
             text: root.symbol.length > 0 ? root.symbol : root.name.slice(0, 1).toUpperCase()
-            color: "#e0e1ec"
+            color: Theme.text
             font.family: "JetBrains Mono"
             font.pixelSize: Math.max(9, root.avatarSize * 0.38)
             font.weight: Font.DemiBold

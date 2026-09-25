@@ -78,11 +78,11 @@ Rectangle {
     readonly property var commands: [
         {kind:"command",label:"Customize key bindings",action:"edit-keymap",key:"Ctrl+Alt+,",group:"view"},
         {kind:"command",label:"Next workspace",action:"next-workspace",key:"Ctrl+Alt+W",group:"view"},
-        { kind: "command", label: "New contact & chat", action: "quick-new-agent", key: "Ctrl+Shift+N", group: "agent" },
+        { kind: "command", label: "New contact & chat", action: "quick-new-agent", key: "Ctrl+Shift+N", group: "agent", keywords: "new session hub create" },
         { kind: "command", label: "Rename contact", action: "rename-agent", key: "F2", group: "agent", keywords: "rename name title relabel persona" },
         { kind: "command", label: "Preview versions · update or roll back", action: "preview-versions", key: "", group: "settings", keywords: "previous installs rollback downgrade" },
-        { kind: "command", label: "New agent", action: "new", key: "Ctrl+N", group: "agent" },
-        { kind: "command", label: "Start an idle contact", action: "new-contact", key: "Ctrl+Alt+N", group: "agent" },
+        { kind: "command", label: "New session", action: "new", key: "Ctrl+N", group: "agent", keywords: "new agent start chat provider contact hub" },
+        { kind: "command", label: "Start an idle contact", action: "new-contact", key: "Ctrl+Alt+N", group: "agent", keywords: "new session hub" },
         { kind: "command", label: "Open agent in terminal", action: "agent-terminal", key: "Ctrl+Alt+T", group: "agent" },
         { kind: "command", label: root.narrationEnabled ? "Disable plain-English tools" : "Enable plain-English tools (Spark · extra usage)", action: "tool-narration", key: "", group: "experiment" },
         { kind: "command", label: "Split right", action: "split-right", key: "Ctrl+Alt+V", group: "layout" },
@@ -144,7 +144,7 @@ Rectangle {
         return needle.length > 0 ? agentRows.concat(contactRows, commandRows)
             : commandRows.concat(agentRows, contactRows);
     }
-    color: "#aa08090f"
+    color: Theme.scrim
 
     function open(returnToComposer) {
         contactsOnly = false;
@@ -203,8 +203,8 @@ Rectangle {
         anchors.top: parent.top
         anchors.topMargin: Math.min(145, parent.height * 0.15)
         radius: 0
-        color: "#1a1b26"
-        border.color: "#3c3f58"
+        color: Theme.window
+        border.color: Theme.border
 
         MouseArea {
             anchors.fill: parent
@@ -227,8 +227,8 @@ Rectangle {
                 leftPadding: 12
                 rightPadding: 12
                 background: Rectangle {
-                    color: "#1a1b26"
-                    border.color: "#303246"
+                    color: Theme.window
+                    border.color: Theme.control
                     radius: 0
                 }
                 onTextChanged: {
@@ -277,7 +277,7 @@ Rectangle {
 
                     background: Rectangle {
                         radius: 0
-                        color: resultRow.highlighted ? "#2a2c3c" : resultRow.hovered ? "#22232f" : "transparent"
+                        color: resultRow.highlighted ? Theme.control : resultRow.hovered ? Theme.hover : "transparent"
 
                         Rectangle {
                             visible: resultRow.highlighted
@@ -285,7 +285,7 @@ Rectangle {
                             anchors.verticalCenter: parent.verticalCenter
                             width: 2
                             height: parent.height - 10
-                            color: "#9da1bd"
+                            color: Theme.secondary
                         }
                     }
                     contentItem: RowLayout {
@@ -302,13 +302,14 @@ Rectangle {
                                 name: String(resultRow.modelData.name || "")
                                 avatarSize: 24
                                 cornerRadius: 6
-                                fallbackColor: "#414458"
+                                showPortrait: true
+                                fallbackColor: Theme.border
                             }
                             TuiText {
                                 visible: String(resultRow.modelData.kind) !== "agent"
                                 anchors.centerIn: parent
                                 text: String(resultRow.modelData.kind) === "contact" ? "+" : "›"
-                                color: "#8589a5"
+                                color: Theme.muted
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 15
                             }
@@ -321,7 +322,7 @@ Rectangle {
                                     ? String(resultRow.modelData.label)
                                     : (String(resultRow.modelData.kind) === "contact" ? "Start " : "")
                                         + String(resultRow.modelData.name)
-                                color: "#c6c8dc"
+                                color: Theme.text
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 12
                                 font.weight: Font.Medium
@@ -333,7 +334,7 @@ Rectangle {
                                     : String(resultRow.modelData.backend) + " · " + String(resultRow.modelData.session)
                                 Layout.fillWidth: true
                                 elide: Text.ElideMiddle
-                                color: "#62657b"
+                                color: Theme.faint
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 11
                             }
@@ -345,7 +346,7 @@ Rectangle {
                         TuiText {
                             visible: String(resultRow.modelData.kind) === "command"
                             text: String(resultRow.modelData.group || "").toUpperCase()
-                            color: "#55586e"
+                            color: Theme.faint
                             font.family: "JetBrains Mono"
                             font.pixelSize: 11
                             font.letterSpacing: 0.6
@@ -356,13 +357,13 @@ Rectangle {
                             Layout.preferredWidth: visible ? shortcutText.implicitWidth + 10 : 0
                             Layout.preferredHeight: 19
                             radius: 0
-                            color: "#20212d"
-                            border.color: "#36384b"
+                            color: Theme.hover
+                            border.color: Theme.border
                             TuiText {
                                 id: shortcutText
                                 anchors.centerIn: parent
                                 text: String(resultRow.modelData.key || "")
-                                color: "#9a9db8"
+                                color: Theme.secondary
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 11
                             }
@@ -375,7 +376,7 @@ Rectangle {
                 visible: root.results.length === 0
                 Layout.alignment: Qt.AlignHCenter
                 text: root.contactsOnly ? "No idle contacts" : "No matching agent or contact"
-                color: "#62657b"
+                color: Theme.faint
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
             }

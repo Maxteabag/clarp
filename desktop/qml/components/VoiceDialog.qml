@@ -11,7 +11,7 @@ Rectangle {
     required property string session
     required property string agentName
     signal closeRequested
-    color: "#e61a1b26"
+    color: Qt.alpha(Theme.window, 0.9)
 
     MouseArea {
         anchors.fill: parent
@@ -23,8 +23,8 @@ Rectangle {
         height: Math.min(680, parent.height - 48)
         anchors.centerIn: parent
         radius: 0
-        color: "#20212e"
-        border.color: "#41445a"
+        color: Theme.raised
+        border.color: Theme.border
 
         ColumnLayout {
             anchors.fill: parent
@@ -36,7 +36,7 @@ Rectangle {
                 TuiText {
                     Layout.fillWidth: true
                     text: (root.agentName || "Agent") + "’s voice"
-                    color: "#c0caf5"
+                    color: Theme.text
                     font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
@@ -50,7 +50,7 @@ Rectangle {
                 visible: text.length > 0
                 Layout.fillWidth: true
                 text: root.controller.voiceBio
-                color: "#8d93b0"
+                color: Theme.muted
                 wrapMode: Text.Wrap
                 font.pixelSize: 12
             }
@@ -79,8 +79,8 @@ Rectangle {
                     width: ListView.view.width
                     implicitHeight: 54
                     radius: 0
-                    color: current ? "#30263a" : "#201d25"
-                    border.color: current ? "#704f82" : "#312c38"
+                    color: current ? Theme.control : Theme.raised
+                    border.color: current ? Theme.selection : Theme.border
 
                     RowLayout {
                         anchors.fill: parent
@@ -93,13 +93,13 @@ Rectangle {
                             spacing: 1
                             TuiText {
                                 text: voiceRow.label
-                                color: "#e8e1e9"
+                                color: Theme.text
                                 font.pixelSize: 13
                                 font.weight: Font.Medium
                             }
                             TuiText {
                                 text: voiceRow.current ? "Current" : voiceRow.takenBy.length > 0 ? "Used by " + voiceRow.takenBy : "Available"
-                                color: voiceRow.takenBy.length > 0 ? "#a77c7d" : "#77717f"
+                                color: voiceRow.takenBy.length > 0 ? Theme.secondary : Theme.faint
                                 font.pixelSize: 10
                             }
                         }

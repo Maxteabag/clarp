@@ -14,8 +14,8 @@ Rectangle {
     function jumpToLatest() { conversation.jumpToLatest(); }
     focus: true
 
-    color: active ? "#292b3a" : "#20212e"
-    border.color: active ? "#414556" : "#282b36"
+    color: active ? Theme.control : Theme.raised
+    border.color: active ? Theme.border : Theme.control
     border.width: 1
     radius: 0
     clip: true

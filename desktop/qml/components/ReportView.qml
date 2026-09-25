@@ -22,7 +22,7 @@ Rectangle {
 
     // A reading surface, not a translucent scrim: report text must stay legible
     // and must not compete with the conversation behind it.
-    color: "#0b0c12"
+    color: Theme.sunken
     visible: false
     focus: visible
 
@@ -67,7 +67,7 @@ Rectangle {
                     objectName: "reportTitle"
                     Layout.fillWidth: true
                     text: String(root.report.title || "Report")
-                    color: "#e7e1dc"
+                    color: Theme.body
                     font.pixelSize: 17
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
@@ -76,7 +76,7 @@ Rectangle {
                     Layout.fillWidth: true
                     visible: text.length > 0
                     text: String(root.report.summary || "")
-                    color: "#868a9f"
+                    color: Theme.muted
                     font.pixelSize: 12
                     elide: Text.ElideRight
                 }
@@ -84,7 +84,7 @@ Rectangle {
             TuiText {
                 objectName: "reportKind"
                 text: (root.report.isHtml ? "HTML" : "MARKDOWN")
-                color: "#72778f"
+                color: Theme.faint
                 font.family: "JetBrains Mono"
                 font.pixelSize: 11
             }
@@ -100,7 +100,7 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             implicitHeight: 1
-            color: "#2a2c3b"
+            color: Theme.border
         }
 
         ScrollView {
@@ -128,9 +128,9 @@ Rectangle {
                 // emptied document. Assign the format first, then the body.
                 textFormat: TextEdit.RichText
                 wrapMode: Text.Wrap
-                color: "#e7e1dc"
-                selectedTextColor: "#fff8ff"
-                selectionColor: "#6f527b"
+                color: Theme.body
+                selectedTextColor: Theme.selectedText
+                selectionColor: Theme.selection
                 font.pixelSize: 15
                 onLinkActivated: link => root.controller.openExternalLink(link, root.linkOriginHost)
 
@@ -147,7 +147,7 @@ Rectangle {
             visible: !root.hasReport
             Layout.fillWidth: true
             text: "This artifact has no readable body."
-            color: "#868a9f"
+            color: Theme.muted
             font.pixelSize: 13
         }
     }

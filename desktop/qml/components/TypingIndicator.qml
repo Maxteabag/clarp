@@ -6,7 +6,7 @@ Rectangle {
     implicitWidth: 132
     implicitHeight: 32
     radius: 0
-    color: "#1b191f"
+    color: Theme.window
     Accessible.role: Accessible.StaticText
     Accessible.name: "Agent is working"
     Row {
@@ -15,7 +15,7 @@ Rectangle {
         spacing: 5
         TuiText {
             text: "Working…"
-            color: "#9ea4c7"
+            color: Theme.text
             font.pixelSize: 12
             anchors.verticalCenter: indicatorRow.verticalCenter
         }
@@ -26,7 +26,7 @@ Rectangle {
                 required property int index
                 width: 6; height: 6; radius: 0
                 anchors.verticalCenter: indicatorRow.verticalCenter
-                color: "#bb9af7"
+                color: Theme.accent
                 opacity: 0.4
                 SequentialAnimation on opacity {
                     running: root.visible

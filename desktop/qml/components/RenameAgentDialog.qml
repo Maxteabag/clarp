@@ -13,7 +13,7 @@ Rectangle {
     property string currentName: ""
     property bool submitting: false
     signal closeRequested
-    color: "#aa08090f"
+    color: Theme.scrim
     function submit() {
         const value = nameField.text.trim();
         if (submitting || value.length === 0 || !controller.connected) return;
@@ -49,13 +49,13 @@ Rectangle {
         width: Math.min(480, parent.width - 32)
         height: form.implicitHeight + 40
         radius: 0
-        color: "#20212e"
-        border.color: "#41445a"
+        color: Theme.raised
+        border.color: Theme.border
         ColumnLayout {
             id: form
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }
             spacing: 14
-            TuiText { text: "Rename contact"; font.pixelSize: 17; color: "#c0caf5" }
+            TuiText { text: "Rename contact"; font.pixelSize: 17; color: Theme.text }
             TuiTextField {
                 id: nameField
                 objectName: "renameAgentName"
@@ -71,7 +71,7 @@ Rectangle {
                 // there is nothing reassuring about that.
                 visible: root.session.length > 0
                 text: "Chat id " + root.session + " stays the same, so history and pairings are kept."
-                color: "#9ca1bd"
+                color: Theme.secondary
                 elide: Text.ElideMiddle
                 font.pixelSize: 12
             }
@@ -79,7 +79,7 @@ Rectangle {
                 Layout.fillWidth: true
                 visible: root.controller.errorMessage.length > 0 || !root.controller.connected
                 text: root.controller.errorMessage || "Connect to the Host to rename a contact"
-                color: "#e0af68"
+                color: Theme.warning
                 wrapMode: Text.Wrap
             }
             RowLayout {

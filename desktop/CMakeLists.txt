@@ -59,6 +59,7 @@ target_sources(clarp-desktop PRIVATE
     src/app/AppController.h
     src/app/AvatarMotionClock.h
     src/app/ReadingTheme.h
+    src/app/MemoryDiagnostics.h
     src/app/WorkspaceContext.cpp
     src/app/WorkspaceContext.h
     src/app/PreviewVersions.cpp
@@ -110,10 +111,12 @@ target_sources(clarp-desktop PRIVATE
     src/protocol/ProtocolTypes.h
 )
 
+set_source_files_properties(qml/components/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(clarp-desktop
     URI Clarp.Desktop
     VERSION 1.0
     QML_FILES
+        qml/components/Theme.qml
         qml/PreviewVersionWindow.qml
         qml/components/PreviewVersionPanel.qml
         qml/Main.qml
@@ -158,9 +161,8 @@ qt_add_qml_module(clarp-desktop
         qml/components/SettingsPanel.qml
         qml/components/StatusPill.qml
         qml/components/AssignAgentDialog.qml
-        qml/components/LaunchAgentPage.qml
+        qml/components/NewSessionHub.qml
         qml/components/LaunchDirectoryPicker.qml
-        qml/components/QuickNewAgentDialog.qml
         qml/components/RenameAgentDialog.qml
         qml/components/StartAgentDialog.qml
         qml/components/ToolCard.qml

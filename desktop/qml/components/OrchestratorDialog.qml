@@ -7,7 +7,7 @@ Rectangle {
 
     required property var controller
     signal closeRequested
-    color: "#e61a1b26"
+    color: Qt.alpha(Theme.window, 0.9)
 
     property bool loaded: false
 
@@ -38,8 +38,8 @@ Rectangle {
         implicitHeight: contentColumn.implicitHeight + 56
         anchors.centerIn: parent
         radius: 0
-        color: "#20212e"
-        border.color: "#41445a"
+        color: Theme.raised
+        border.color: Theme.border
 
         ColumnLayout {
             id: contentColumn
@@ -54,7 +54,7 @@ Rectangle {
                 TuiText {
                     Layout.fillWidth: true
                     text: "Orchestrator"
-                    color: "#c0caf5"
+                    color: Theme.text
                     font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
@@ -73,7 +73,7 @@ Rectangle {
             TuiText {
                 Layout.fillWidth: true
                 text: "Name matching runs first. The routing model resolves delegations that do not clearly select one agent."
-                color: "#8d93b0"
+                color: Theme.muted
                 wrapMode: Text.Wrap
                 font.pixelSize: 12
             }
@@ -89,7 +89,7 @@ Rectangle {
 
             TuiLabel {
                 text: "Automatic routing confidence  " + confidenceSlider.value.toFixed(2)
-                color: "#a9b1d6"
+                color: Theme.secondary
             }
             Slider {
                 id: confidenceSlider
@@ -107,7 +107,7 @@ Rectangle {
                     Layout.fillWidth: true
                     TuiLabel {
                         text: "Provider"
-                        color: "#a9b1d6"
+                        color: Theme.secondary
                     }
                     ThemedComboBox {
                         id: providerBox
@@ -120,7 +120,7 @@ Rectangle {
                     Layout.fillWidth: true
                     TuiLabel {
                         text: "Effort"
-                        color: "#a9b1d6"
+                        color: Theme.secondary
                     }
                     ThemedComboBox {
                         id: effortBox
@@ -132,7 +132,7 @@ Rectangle {
 
             TuiLabel {
                 text: "Model override"
-                color: "#a9b1d6"
+                color: Theme.secondary
             }
             TuiTextField {
                 id: modelField
@@ -142,7 +142,7 @@ Rectangle {
 
             TuiLabel {
                 text: "Timeout (milliseconds)"
-                color: "#a9b1d6"
+                color: Theme.secondary
             }
             SpinBox {
                 id: timeoutField
@@ -158,13 +158,13 @@ Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: lastDecision.implicitHeight + 18
                 radius: 0
-                color: "#1a1b26"
+                color: Theme.window
                 TuiText {
                     id: lastDecision
                     anchors.fill: parent
                     anchors.margins: 9
                     text: "Last decision: " + root.controller.orchestratorLastDecision
-                    color: "#7f7785"
+                    color: Theme.muted
                     wrapMode: Text.Wrap
                     font.pixelSize: 11
                 }

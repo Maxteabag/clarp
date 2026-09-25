@@ -19,13 +19,13 @@ Rectangle {
     readonly property string status: String(cell.status || "recorded")
     readonly property var lines: Array.from(cell.lines || [])
     readonly property int detailCount: Number(cell.detail_count || cell.detailCount || lines.length)
-    readonly property color statusColor: status === "error" ? "#bd7484"
-        : (status === "running" || status === "ok") ? "#89a879" : "#676b80"
+    readonly property color statusColor: status === "error" ? Theme.danger
+        : (status === "running" || status === "ok") ? Theme.secondary : Theme.muted
 
     visible: explanationRepeat !== 0
     implicitHeight: cardColumn.implicitHeight + 6
     radius: 0
-    color: hover.hovered ? "#222638" : "transparent"
+    color: hover.hovered ? Theme.control : "transparent"
     border.width: 0
     HoverHandler { id: hover }
 
@@ -62,7 +62,7 @@ Rectangle {
             TuiText {
                 visible: !explanation.narrationShown
                 text: root.title
-                color: "#9ea4c7"
+                color: Theme.text
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
                 font.weight: Font.DemiBold
@@ -71,7 +71,7 @@ Rectangle {
                 visible: !explanation.narrationShown
                 Layout.fillWidth: true
                 text: root.summary
-                color: "#969bb5"
+                color: Theme.muted
                 font.pixelSize: 12
                 elide: Text.ElideMiddle
             }
@@ -81,14 +81,14 @@ Rectangle {
                 Layout.fillWidth: true
                 text: explanation.displayText + (root.explanationRepeat > 1 ? " (x" + root.explanationRepeat + ")" : "")
                 textFormat: Text.PlainText
-                color: "#82aaff"
+                color: Theme.link
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
             }
             TuiText {
                 visible: explanation.text.length > 0 || (!explanation.narrationShown && (root.lines.length > 0 || root.detailCount > 0))
                 text: root.expanded ? "−" : "+"
-                color: "#858aa7"
+                color: Theme.secondary
                 font.pixelSize: 13
             }
         }
@@ -107,7 +107,7 @@ Rectangle {
                 readOnly: true
                 selectByMouse: true
                 wrapMode: TextEdit.Wrap
-                color: "#aeb2ca"
+                color: Theme.secondary
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
             }
@@ -124,9 +124,9 @@ Rectangle {
                     color: {
                         const kind = String(lineRow.modelData.kind || "");
                         if (kind === "diff_old")
-                            return "#2b2028";
+                            return Theme.dangerSurface;
                         if (kind === "diff_new")
-                            return "#1e2a27";
+                            return Qt.alpha(Theme.success, 0.16);
                         return "transparent";
                     }
 
@@ -143,7 +143,7 @@ Rectangle {
                             return label.length > 0 ? label + "  " + value : value;
                         }
                         color: String(lineRow.modelData.kind || "") === "error"
-                            ? "#c98794" : "#aeb2ca"
+                            ? Theme.danger : Theme.secondary
                         font.family: "JetBrains Mono"
                         font.pixelSize: 12
                     }
@@ -153,7 +153,7 @@ Rectangle {
             TuiText {
                 visible: root.detailCount > root.lines.length
                 text: (root.detailCount - root.lines.length) + " more details available"
-                color: "#62667e"
+                color: Theme.muted
                 font.family: "JetBrains Mono"
                 font.pixelSize: 11
             }

@@ -79,14 +79,14 @@ ColumnLayout {
             text: modelData.label
             leftPadding: 10
             verticalAlignment: Text.AlignVCenter
-            color: "#c0caf5"; elide: Text.ElideMiddle
-            Rectangle { anchors.fill: parent; z: -1; color: parent.index === results.currentIndex ? "#303348" : "transparent" }
+            color: Theme.text; elide: Text.ElideMiddle
+            Rectangle { anchors.fill: parent; z: -1; color: parent.index === results.currentIndex ? Theme.border : "transparent" }
             MouseArea { anchors.fill: parent; onClicked: root.chosen(parent.modelData.path, parent.modelData.label) }
         }
         TuiText {
             anchors.centerIn: parent
             visible: root.controller.connected && !queryTimer.running && !root.controller.launchDirectoriesLoading && results.count === 0
-            text: "No matching directories"; color: "#9ca1bd"
+            text: "No matching directories"; color: Theme.secondary
         }
     }
     Timer { id: queryTimer; interval: 80; onTriggered: root.reload() }

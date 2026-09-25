@@ -156,6 +156,9 @@ class AppController : public QObject {
     [[nodiscard]] bool hasStoredCredential() const;
     Q_INVOKABLE [[nodiscard]] ConversationModel* conversationForSession(const QString& session);
     Q_INVOKABLE [[nodiscard]] QUrl avatarSource(const QString& session) const;
+    Q_INVOKABLE [[nodiscard]] QUrl contactAvatarSource(const QString& name) const;
+    // Counters for the periodic memory log: what the process holds on to.
+    Q_INVOKABLE [[nodiscard]] QVariantMap memoryCounters() const;
     Q_INVOKABLE [[nodiscard]] QString chatStamp(qint64 time) const;
     Q_INVOKABLE [[nodiscard]] QVariantList mediaForSession(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QUrl mediaSource(const QString& assetId) const;
@@ -468,6 +471,7 @@ class AppController : public QObject {
     bool openBrowserUrl(const QUrl& url);
     void handleJson(const QString& tag, const QJsonObject& object);
     void handleBytes(const QString& tag, const QByteArray& bytes, const QByteArray& contentType);
+    void requestContactAvatars();
     void handleRequestFailure(const QString& tag, const QString& message, int statusCode);
     void handleSseEvent(const QJsonObject& event);
     void finishUpdateRequest(quint64 generation);
@@ -544,6 +548,10 @@ class AppController : public QObject {
     QHash<QString, QString> m_avatarUrls;
     QHash<QString, QPair<QString, QString>> m_avatarRequests;
     QHash<QString, QString> m_avatarFailures;
+    QHash<QString, QUrl> m_contactAvatarSources;      // contact name -> data URL
+    QHash<QString, QString> m_contactAvatarUrls;      // contact name -> Host URL
+    QHash<QString, QString> m_contactAvatarRequests;  // request tag -> contact name
+    QHash<QString, QString> m_contactAvatarFailures;  // contact name -> failed Host URL
     QHash<QString, QVariantList> m_mediaAssets;
     QHash<QString, QUrl> m_mediaSources;
     QHash<QString, quint64> m_mediaGenerations;

@@ -16,7 +16,8 @@ Rectangle {
     // Reading theme for the transcript surface; stubs without one keep the terminal look.
     readonly property var readingStyle: (controller && controller.readingStyle) || ({})
     function styled(key, fallback) {
-        const value = root.readingStyle[key];
+        const style = root.readingStyle;
+        const value = style ? style[key] : undefined;
         return value === undefined || value === null || value === "" ? fallback : value;
     }
     // Agent-to-agent pair rooms are read-only Host projections.
@@ -68,7 +69,7 @@ Rectangle {
         }
     }
 
-    color: root.active ? "#1a1b26" : "#1a1b26"
+    color: root.active ? Theme.window : Theme.window
 
     Behavior on color {
         ColorAnimation { duration: 120 }
@@ -81,7 +82,7 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 34
-            color: "#1a1b26"
+            color: Theme.window
 
             HoverHandler { id: headerHover }
 
@@ -102,6 +103,7 @@ Rectangle {
                     controller: root.controller; session: root.session
                     name: root.controller.agentName(root.session)
                     working: headerAvatarActivity.authoritativeWorking
+                    showPortrait: true
                 }
                 HeaderContext {
                     Layout.fillWidth: true
@@ -134,7 +136,7 @@ Rectangle {
                     icon.source: Qt.resolvedUrl("../../resources/icons/more.svg")
                     icon.width: 18
                     icon.height: 18
-                    icon.color: "#a6adc8"
+                    icon.color: Theme.secondary
                     Accessible.name: "Conversation actions"
                     ToolTip.visible: hovered
                     ToolTip.text: "More"
@@ -187,7 +189,7 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: root.styled("background", "#1a1b26")
+            color: root.styled("background", Theme.window)
             Behavior on color { ColorAnimation { duration: 120 } }
 
             TranscriptList {
@@ -217,13 +219,13 @@ Rectangle {
                         anchors.rightMargin: 12
                         anchors.verticalCenter: parent.verticalCenter
                         height: 1
-                        color: root.styled("rule", "#303342")
+                        color: root.styled("rule", Theme.rule)
                     }
                     TuiText {
                         id: dateLabel
                         anchors.centerIn: parent
                         text: parent.section
-                        color: root.styled("mutedText", "#8d93b0")
+                        color: root.styled("mutedText", Theme.muted)
                         font.family: "JetBrains Mono"
                         font.pixelSize: 11
                     }
@@ -234,7 +236,7 @@ Rectangle {
                         anchors.rightMargin: 14
                         anchors.verticalCenter: parent.verticalCenter
                         height: 1
-                        color: root.styled("rule", "#303342")
+                        color: root.styled("rule", Theme.rule)
                     }
                 }
                 boundsBehavior: Flickable.StopAtBounds
@@ -321,7 +323,7 @@ Rectangle {
                     anchors.centerIn: parent
                     visible: root.session.length === 0 && transcript.count === 0 && !root.conversationModel.loading
                     text: "Choose an agent · Ctrl+K"
-                    color: root.styled("faintText", "#5e6176")
+                    color: root.styled("faintText", Theme.faint)
                     font.family: "JetBrains Mono"
                     font.pixelSize: 11
                 }
@@ -345,13 +347,13 @@ Rectangle {
             visible: root.pairRoom
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 44 : 0
-            color: "#171822"
+            color: Theme.sunken
             TuiText {
                 anchors.centerIn: parent
                 width: parent.width - 32
                 horizontalAlignment: Text.AlignHCenter
                 text: "Agents talk here. To reply, open one of them and message it directly."
-                color: "#8d93b0"
+                color: Theme.muted
                 font.pixelSize: 12
                 elide: Text.ElideRight
             }
@@ -390,7 +392,7 @@ Rectangle {
         y: transcript.y
         height: 38
         z: 41
-        color: "#2b2028"
+        color: Theme.dangerSurface
 
         RowLayout {
             anchors.fill: parent
@@ -400,7 +402,7 @@ Rectangle {
             TuiText {
                 Layout.fillWidth: true
                 text: root.controller.errorMessage || root.conversationModel.error
-                color: "#c9959e"
+                color: Theme.danger
                 font.family: "JetBrains Mono"
                 font.pixelSize: 11
                 elide: Text.ElideRight
@@ -430,7 +432,7 @@ Rectangle {
         y: transcript.y + (connectionErrorOverlay.visible ? connectionErrorOverlay.height : 0)
         height: 38
         z: 40
-        color: "#2b2028"
+        color: Theme.dangerSurface
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 16
@@ -438,7 +440,7 @@ Rectangle {
             TuiText {
                 Layout.fillWidth: true
                 text: root.conversationModel.voiceError || ""
-                color: "#c9959e"
+                color: Theme.danger
                 font.pixelSize: 11
                 elide: Text.ElideRight
             }
@@ -466,8 +468,8 @@ Rectangle {
         ToolTip.text: "Jump to latest · Ctrl+End"
         background: Rectangle {
             radius: 0
-            color: "#30354f"
-            border.color: "#777fae"
+            color: Theme.control
+            border.color: Theme.border
         }
     }
 }

@@ -4,10 +4,10 @@
 #include "app/KeyboardSmokeCheck.h"
 #include "../research/DesktopResearch.h"
 #include "app/VoiceViewportSmokeCheck.h"
-#include "app/LaunchKeyboardSmokeCheck.h"
 #include "app/TranscriptScrollSmokeCheck.h"
 #include "app/AppController.h"
 #include "app/DesktopPalette.h"
+#include "app/MemoryDiagnostics.h"
 #include "platform/DesktopIntegration.h"
 
 #include <QApplication>
@@ -85,7 +85,8 @@ int main(int argc, char* argv[]) {
     uiFont.setStyleHint(QFont::Monospace);
     QApplication::setFont(uiFont);
     application.styleHints()->setColorScheme(Qt::ColorScheme::Dark);
-    QApplication::setPalette(clarp::desktopPalette(application.palette()));
+    const QPalette platformPalette = application.palette();
+    QApplication::setPalette(clarp::desktopPalette(platformPalette));
     application.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/Clarp/Desktop/resources/clarp.svg")));
 
     // Each launch owns its window and event loop; no process-wide activation lock.
@@ -123,6 +124,31 @@ int main(int argc, char* argv[]) {
         rootWindow = qobject_cast<QQuickWindow*>(engine.rootObjects().constFirst());
         controller = engine.rootObjects().constFirst()->findChild<clarp::AppController*>();
         if (rootWindow != nullptr && controller != nullptr) {
+            // Qt Basic reads control colours from the application palette, so
+            // the saved reading theme and every later change restyle it too.
+            const auto applyThemePalette = [controller, platformPalette] {
+                QApplication::setPalette(clarp::desktopPalette(
+                    platformPalette, clarp::readingTheme(controller->readingTheme())));
+            };
+            applyThemePalette();
+            QObject::connect(controller, &clarp::AppController::readingThemeChanged, controller, applyThemePalette);
+            // Once a minute, log what the process holds so an out-of-memory kill
+            // leaves a trend in the journal: kernel RSS split, live Qt Quick
+            // items, and the controller's caches. CLARP_MEMORY_LOG_SECONDS=0 disables.
+            const int memoryLogSeconds = qEnvironmentVariableIsSet("CLARP_MEMORY_LOG_SECONDS")
+                ? qEnvironmentVariableIntValue("CLARP_MEMORY_LOG_SECONDS") : 60;
+            if (memoryLogSeconds > 0) {
+                auto* memoryLog = new QTimer(controller);
+                memoryLog->setInterval(memoryLogSeconds * 1000);
+                QObject::connect(memoryLog, &QTimer::timeout, controller, [rootWindow, controller] {
+                    QVariantMap report = clarp::processMemoryKb();
+                    report.insert(clarp::windowItemCounts(rootWindow));
+                    report.insert(controller->memoryCounters());
+                    qInfo().noquote() << "memory"
+                        << QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(report)).toJson(QJsonDocument::Compact));
+                });
+                memoryLog->start();
+            }
             if (restoreDesktop) controller->restoreDesktopSession(restoreSession);
             desktopIntegration =
                 std::make_unique<clarp::DesktopIntegration>(rootWindow, controller, &application);
@@ -151,7 +177,6 @@ int main(int argc, char* argv[]) {
         });
     }
     const QString screenshotPath = qEnvironmentVariable("CLARP_SCREENSHOT_PATH");
-    if (!screenshotPath.isEmpty() && rootWindow != nullptr) startLaunchKeyboardSmokeCheck(rootWindow);
     if (!screenshotPath.isEmpty() && rootWindow != nullptr && controller != nullptr) startDesktopResearch(application, rootWindow, controller);
     if (!screenshotPath.isEmpty() && controller != nullptr && qEnvironmentVariableIsSet("CLARP_SCREENSHOT_MINIMAL_UI"))
         controller->setMinimalUi(qEnvironmentVariableIntValue("CLARP_SCREENSHOT_MINIMAL_UI") != 0);
@@ -314,6 +339,11 @@ int main(int argc, char* argv[]) {
                 }
                 if (screenshotView == QStringLiteral("quickSwitcher"))
                     view->setProperty("query", qEnvironmentVariable("CLARP_SCREENSHOT_QUERY"));
+                // The hub seeds its provider, directory and selection in open().
+                if (screenshotView == QStringLiteral("newSessionHub")) {
+                    QMetaObject::invokeMethod(view, "open", Q_ARG(QVariant, false), Q_ARG(QVariant, false));
+                    return;
+                }
                 view->setProperty("visible", true);
             }
         });

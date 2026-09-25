@@ -10,7 +10,7 @@ Rectangle {
     required property var controller
     property string session: ""
     signal closeRequested
-    color: "#b008090f"
+    color: Qt.alpha(Theme.sunken, 0.69)
 
     MouseArea {
         anchors.fill: parent
@@ -22,8 +22,8 @@ Rectangle {
         height: Math.min(620, parent.height - 60)
         anchors.centerIn: parent
         radius: 0
-        color: "#181a24"
-        border.color: "#42465f"
+        color: Theme.raised
+        border.color: Theme.faint
 
         MouseArea {
             anchors.fill: parent
@@ -42,7 +42,7 @@ Rectangle {
                     spacing: 2
                     TuiText {
                         text: "QUEUED MESSAGES"
-                        color: "#c9cde3"
+                        color: Theme.text
                         font.family: "JetBrains Mono"
                         font.pixelSize: 14
                         font.weight: Font.DemiBold
@@ -51,7 +51,7 @@ Rectangle {
                     TuiText {
                         text: root.controller.agentName(root.session)
                             + (root.controller.turnQueuePaused ? "  ·  paused" : "")
-                        color: root.controller.turnQueuePaused ? "#b18b70" : "#686d84"
+                        color: root.controller.turnQueuePaused ? Theme.warning : Theme.muted
                         font.pixelSize: 9
                     }
                 }
@@ -72,7 +72,7 @@ Rectangle {
                 visible: root.controller.turnQueueError.length > 0
                 Layout.fillWidth: true
                 text: root.controller.turnQueueError
-                color: "#c98a98"
+                color: Theme.danger
                 font.pixelSize: 10
                 wrapMode: Text.Wrap
             }
@@ -93,8 +93,8 @@ Rectangle {
                     width: ListView.view.width
                     implicitHeight: queueColumn.implicitHeight + 18
                     radius: 0
-                    color: "#202330"
-                    border.color: "#34384d"
+                    color: Theme.control
+                    border.color: Theme.border
 
                     ColumnLayout {
                         id: queueColumn
@@ -111,11 +111,11 @@ Rectangle {
                             wrapMode: TextArea.Wrap
                             selectByMouse: true
                             font.pixelSize: 11
-                            color: "#c2c5d7"
+                            color: Theme.text
                             background: Rectangle {
                                 radius: 0
-                                color: "#1b1d28"
-                                border.color: queuedText.activeFocus ? "#737aa3" : "#303448"
+                                color: Theme.raised
+                                border.color: queuedText.activeFocus ? Theme.muted : Theme.border
                             }
                         }
                         RowLayout {
@@ -123,7 +123,7 @@ Rectangle {
                             TuiText {
                                 Layout.fillWidth: true
                                 text: String(queueRow.modelData.enqueued_at || "")
-                                color: "#62677e"
+                                color: Theme.faint
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 8
                                 elide: Text.ElideRight
@@ -158,7 +158,7 @@ Rectangle {
                     anchors.centerIn: parent
                     visible: queueList.count === 0 && !root.controller.turnQueueLoading
                     text: "No queued messages"
-                    color: "#62677e"
+                    color: Theme.faint
                     font.pixelSize: 10
                 }
             }

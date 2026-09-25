@@ -38,7 +38,7 @@ Rectangle {
         id:workspaceBar; height:36; spacing:4; z:50
         Repeater {model:root.controller.panes.workspaces
             TuiButton {id:workspaceTab;required property var modelData; text:modelData.name; checkable:true
-                contentItem:TuiLabel {text:workspaceTab.text;color:"#e7e1dc";horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}
+                contentItem:TuiLabel {text:workspaceTab.text;color:Theme.body;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}
                 checked:root.controller.panes.activeWorkspace===modelData.id
                 onClicked:root.controller.panes.switchWorkspace(modelData.id)
             }
@@ -57,10 +57,10 @@ Rectangle {
     Row {
         y: 36; height: 40; width: root.width; spacing: 8; z: 50
         visible: !!root.controller.panes.workspaceSaveWarning
-        TuiLabel {width:Math.max(100,root.width-saveLayoutButton.width-8);text:root.controller.panes.workspaceSaveWarning;wrapMode:Text.Wrap;color:"#ffcb8c"}
+        TuiLabel {width:Math.max(100,root.width-saveLayoutButton.width-8);text:root.controller.panes.workspaceSaveWarning;wrapMode:Text.Wrap;color:Theme.warning}
         TuiButton {id:saveLayoutButton;text:"Save this layout instead";onClicked:root.controller.panes.saveWorkspaceLayoutInstead()}
     }
-    color: "#10121a"
+    color: Theme.window
 
     function focusNavigation() { navigationFocus.forceActiveFocus(); }
     Item { id: navigationFocus; objectName: "conversationNavigationFocus" }
@@ -115,7 +115,7 @@ Rectangle {
             y: vertical ? splitY : splitY + splitHeight * Number(modelData.ratio) - height / 2
             width: vertical ? root.paneGap : splitWidth
             height: vertical ? splitHeight : root.paneGap
-            color: dragHandler.active ? "#9ca3d1" : hoverHandler.hovered ? "#555b7c" : "#10121a"
+            color: dragHandler.active ? Theme.secondary : hoverHandler.hovered ? Theme.faint : Theme.window
             z: 10
 
             HoverHandler {

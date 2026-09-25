@@ -9,12 +9,12 @@ Rectangle {
     readonly property bool quiet: status === "live" || status === "done" || status === "idle"
     property color tone: {
         if (status === "thinking" || status === "tool" || status === "compacting")
-            return "#91a67f";
+            return Theme.success;
         if (status === "waiting" || status === "interrupted")
-            return "#c47d8d";
+            return Theme.danger;
         if (status === "live" || status === "done" || status === "idle")
-            return "#7e9573";
-        return "#6b6e84";
+            return Theme.success;
+        return Theme.faint;
     }
 
     visible: !quiet

@@ -14,8 +14,8 @@ Rectangle {
     readonly property int total: Math.max(0, Number(kind === "plan" ? plan.total_count || 0 : artifact.total_steps || 0))
     readonly property int completed: Math.max(0, Number(kind === "plan" ? plan.completed_count || 0 : artifact.completed_steps || 0))
     implicitHeight: body.implicitHeight + 24
-    color: "#1a1b26"
-    border.color: failed ? "#aa675f" : "#394154"
+    color: Theme.window
+    border.color: failed ? Theme.danger : Theme.border
     radius: 6
     ColumnLayout {
         id: body
@@ -24,31 +24,31 @@ Rectangle {
         spacing: 6
         RowLayout {
             Layout.fillWidth: true
-            TuiText { text: root.kind.replace(/_/g, " ").toUpperCase(); color: "#929bb3"; font.pixelSize: 11 }
+            TuiText { text: root.kind.replace(/_/g, " ").toUpperCase(); color: Theme.secondary; font.pixelSize: 11 }
             Item { Layout.fillWidth: true }
-            TuiText { objectName: "artifactOutcome"; text: root.outcomeState; color: root.failed ? "#f2a39a" : "#a5c6a8" }
+            TuiText { objectName: "artifactOutcome"; text: root.outcomeState; color: root.failed ? Theme.danger : Theme.text }
         }
         TuiText {
             objectName: "artifactTitle"
             text: String(root.artifact.file_name || root.artifact.title || "Artifact")
-            Layout.fillWidth: true; wrapMode: Text.Wrap; font.pixelSize: 15; color: "#e4e6ef"
+            Layout.fillWidth: true; wrapMode: Text.Wrap; font.pixelSize: 15; color: Theme.text
         }
         TuiText {
             visible: text.length > 0
             text: String(root.artifact.summary || "")
             Layout.fillWidth: true; wrapMode: Text.Wrap; maximumLineCount: 2
-            elide: Text.ElideRight; color: "#abb2c7"
+            elide: Text.ElideRight; color: Theme.text
         }
         TuiText {
             objectName: "artifactProgress"
             visible: ["plan", "workflow_run"].includes(root.kind)
             text: root.total > 0 ? root.completed + " / " + root.total + " completed" : (root.outcomeState === "active" ? "In progress" : "")
-            color: "#b5c7b8"
+            color: Theme.text
         }
         TuiText {
             visible: root.kind === "countdown" && text.length > 0
             text: String(root.artifact.target_at || "") + (root.artifact.time_zone ? " · " + root.artifact.time_zone : "")
-            Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#b5c7b8"
+            Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.text
         }
         RowLayout {
             TuiButton {
@@ -62,7 +62,7 @@ Rectangle {
             }
             TuiText {
                 visible: root.kind === "html_form"
-                text: "Interactive form unavailable"; color: "#e3bb87"
+                text: "Interactive form unavailable"; color: Theme.warning
                 wrapMode: Text.Wrap; Layout.fillWidth: true
             }
         }

@@ -46,8 +46,8 @@ ItemDelegate {
 
     background: Rectangle {
         border.width: row.keyboardCurrent ? 1 : 0
-        border.color: "#bb9af7"
-        color: row.current ? "#292b3a" : row.hovered ? "#211e27" : "transparent"
+        border.color: Theme.accent
+        color: row.current ? Theme.control : row.hovered ? Theme.dangerSurface : "transparent"
 
         Rectangle {
             anchors.left: parent.left
@@ -55,7 +55,7 @@ ItemDelegate {
             anchors.bottom: parent.bottom
             anchors.leftMargin: row.collapsed ? 0 : 74
             height: 1
-            color: "#201d26"
+            color: Theme.raised
             visible: !row.current
         }
     }
@@ -72,6 +72,7 @@ ItemDelegate {
             session: row.session
             cornerRadius: 24
             avatarSize: row.collapsed ? 38 : 48
+            showPortrait: true
             opacity: row.archived ? 0.65 : 1
 
             Rectangle {
@@ -81,8 +82,8 @@ ItemDelegate {
                 width: 12
                 height: 12
                 radius: 0
-                color: "#bb9af7"
-                border.color: "#20212e"
+                color: Theme.accent
+                border.color: Theme.raised
                 border.width: 2
             }
         }
@@ -100,7 +101,7 @@ ItemDelegate {
                 TuiText {
                     Layout.fillWidth: true
                     text: row.name
-                    color: "#eee8e2"
+                    color: Theme.text
                     font.pixelSize: 14
                     font.weight: row.unread ? Font.DemiBold : Font.Medium
                     elide: Text.ElideRight
@@ -108,7 +109,7 @@ ItemDelegate {
 
                 TuiText {
                     text: row.controller.chatStamp(row.lastActivity)
-                    color: row.unread ? "#c69ade" : "#77717f"
+                    color: row.unread ? Theme.accent : Theme.faint
                     font.pixelSize: 10
                 }
             }
@@ -122,7 +123,7 @@ ItemDelegate {
                     textFormat: Text.PlainText
                     objectName: "sidebarMessagePreview"
                     text: row.messagePreview.length > 0 ? row.messagePreview : (row.workingDirectory.length > 0 ? row.workingDirectory : row.backend)
-                    color: row.unread ? "#b3aab9" : "#77717f"
+                    color: row.unread ? Theme.secondary : Theme.faint
                     font.pixelSize: 11
                     elide: Text.ElideRight
                     maximumLineCount: 1
@@ -131,14 +132,14 @@ ItemDelegate {
                 TuiText {
                     visible: row.muted
                     text: "⃠"
-                    color: "#77717f"
+                    color: Theme.faint
                     font.pixelSize: 11
                 }
 
                 TuiText {
                     visible: row.queueCount > 0
                     text: row.queueCount + " queued"
-                    color: "#dba163"
+                    color: Theme.warning
                     font.pixelSize: 10
                 }
 
@@ -147,14 +148,14 @@ ItemDelegate {
                     implicitWidth: Math.max(18, unreadLabel.implicitWidth + 10)
                     implicitHeight: 18
                     radius: 0
-                    color: "#bb9af7"
+                    color: Theme.accent
 
                     TuiText {
                         id: unreadLabel
 
                         anchors.centerIn: parent
                         text: row.unreadCount > 0 ? row.unreadCount : ""
-                        color: "#1a1b26"
+                        color: Theme.window
                         font.pixelSize: 10
                         font.weight: Font.Bold
                     }
@@ -166,7 +167,7 @@ ItemDelegate {
                 Layout.fillWidth: true
                 text: row.activityLine
                 ActivitySweep { anchors.fill: parent; working: activityAvatar.authoritativeWorking; reducedMotion: activityAvatar.reducedMotion; phase: activityAvatar.phase }
-                color: row.busy ? "#dba163" : "#8d93b0"
+                color: row.busy ? Theme.warning : Theme.muted
                 font.pixelSize: 10
                 elide: Text.ElideRight
             }

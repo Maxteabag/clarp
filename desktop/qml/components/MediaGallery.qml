@@ -20,8 +20,8 @@ Rectangle {
 
     visible: assets.length > 0
     implicitHeight: !visible ? 0 : compact && !expanded ? 27 : compact ? 116 : 224
-    color: "#181a24"
-    border.color: "#303448"
+    color: Theme.raised
+    border.color: Theme.border
     radius: 0
 
     ColumnLayout {
@@ -35,7 +35,7 @@ Rectangle {
             TuiText {
                 Layout.fillWidth: true
                 text: "MEDIA  " + root.assets.length
-                color: "#858aa5"
+                color: Theme.muted
                 font.family: "JetBrains Mono"
                 font.pixelSize: 8
                 font.weight: Font.DemiBold
@@ -69,8 +69,8 @@ Rectangle {
                 width: root.compact ? 142 : 190
                 height: ListView.view.height
                 radius: 0
-                color: "#11131b"
-                border.color: "#34394e"
+                color: Theme.window
+                border.color: Theme.border
                 clip: true
 
                 Image {
@@ -87,7 +87,7 @@ Rectangle {
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     height: caption.implicitHeight + 10
-                    color: "#c012141d"
+                    color: Qt.alpha(Theme.window, 0.75)
                     TuiText {
                         id: caption
                         anchors.left: parent.left
@@ -97,7 +97,7 @@ Rectangle {
                         anchors.rightMargin: 6
                         text: String(mediaCard.modelData.caption
                             || mediaCard.modelData.source_name || "Image")
-                        color: "#e0e2ed"
+                        color: Theme.text
                         font.pixelSize: 9
                         elide: Text.ElideRight
                     }
@@ -135,8 +135,8 @@ Rectangle {
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle {
             radius: 0
-            color: "#11131b"
-            border.color: "#555c7d"
+            color: Theme.window
+            border.color: Theme.faint
         }
         contentItem: Item {
             Image {
@@ -153,7 +153,7 @@ Rectangle {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.margins: 10
-                color: "#c4c8da"
+                color: Theme.text
                 font.pixelSize: 10
                 elide: Text.ElideRight
                 horizontalAlignment: Text.AlignHCenter

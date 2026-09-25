@@ -37,7 +37,7 @@ ItemDelegate {
     }
 
     background: Rectangle {
-        color: row.current ? "#292b3a" : row.hovered ? "#211e27" : "transparent"
+        color: row.current ? Theme.control : row.hovered ? Theme.dangerSurface : "transparent"
     }
 
     contentItem: RowLayout {
@@ -58,9 +58,10 @@ ItemDelegate {
                     controller: row.controller
                     session: String(modelData.session || "")
                     name: String(modelData.name || "Agent")
+                    showPortrait: true
                     avatarSize: 32
                     cornerRadius: 16
-                    fallbackColor: index === 0 ? "#555970" : "#3b3e50"
+                    fallbackColor: index === 0 ? Theme.faint : Theme.border
                 }
             }
             Rectangle {
@@ -71,8 +72,8 @@ ItemDelegate {
                 width: 12
                 height: 12
                 radius: 0
-                color: "#bb9af7"
-                border.color: "#20212e"
+                color: Theme.accent
+                border.color: Theme.raised
                 border.width: 2
                 z: 5
             }
@@ -88,14 +89,14 @@ ItemDelegate {
                     objectName: "pairTitle"
                     Layout.fillWidth: true
                     text: String(row.room.title || "Agent conversation")
-                    color: "#eee8e2"
+                    color: Theme.text
                     font.pixelSize: 14
                     font.weight: row.unread ? Font.DemiBold : Font.Medium
                     elide: Text.ElideRight
                 }
                 TuiText {
                     text: row.controller.chatStamp(Number(row.room.latest_activity || 0))
-                    color: row.unread ? "#c69ade" : "#77717f"
+                    color: row.unread ? Theme.accent : Theme.faint
                     font.pixelSize: 10
                 }
             }
@@ -104,7 +105,7 @@ ItemDelegate {
                 Layout.fillWidth: true
                 textFormat: Text.PlainText
                 text: row.preview
-                color: row.unread ? "#c9c3cf" : "#8d8794"
+                color: row.unread ? Theme.text : Theme.secondary
                 font.pixelSize: 12
                 elide: Text.ElideRight
                 maximumLineCount: 1

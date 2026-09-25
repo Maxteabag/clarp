@@ -126,11 +126,11 @@ and Grok run their own interactive interfaces. This requires a local/shared
 filesystem Host and the corresponding CLI installed on the desktop. Chat
 continues independently; reopening the terminal picks up later chat changes.
 
-To start an idle contact, press `Ctrl+Alt+N` for the idle-contact picker, or
-press `Ctrl+K`, type their name, and select **Start
-<name>**. The row shows the saved backend and folder. **Start** in the ready
-contacts view does the same one-step fresh launch; use `Ctrl+N` to change launch
-options. The new chat receives typing focus after creation.
+To start an idle contact, press `Ctrl+N` (or `Ctrl+Alt+N`) for the New Session
+hub, pick a provider mark, optionally edit the model, choose a contact card and
+press Enter. `Ctrl+K`, type a name, **Start <name>** does the same one-step
+launch with the saved backend and folder. The new chat receives typing focus
+after creation.
 
 Your own chat messages use a lighter background instead of a left accent line.
 
@@ -256,16 +256,15 @@ See `REWRITE_PLAN.md` for the behavioral scope and completion gates.
 
 ## Launch an agent from the desktop command
 
-`clarp-desktop --new-agent` first opens directory search at Home, with recent launch directories and zoxide matches. Enter confirms the directory, then opens backend icon cards. The last successful backend
-is selected and focused: Enter launches, arrows or Tab change the selection.
-M opens the optional model picker; arrows select a model and Enter launches.
-Escape returns from models to cards, then closes the chooser. Background chat
-loading cannot take focus while a dialog is open. New agents are
-anonymous by default, named `Codex-5342` or similar, without occupying a saved
-contact. Settings → Agent identity can disable this default.
+`clarp-desktop --new-agent` opens the New Session hub with the last successful
+backend selected and the search field focused. Provider marks, model editor,
+directory row and contact cards sit on one screen; Enter launches. Background
+chat loading cannot take focus while a dialog is open. New agents started from
+the command line are anonymous by default, named `Codex-5342` or similar,
+without occupying a saved contact. Settings → Agent identity can disable that.
 
-- `--backend claude|codex|grok|agy|opencode` implies `--new-agent` and skips backend selection after the directory is confirmed.
-- `--cwd /path` supplies the directory and skips the directory screen.
+- `--backend claude|codex|grok|agy|opencode|deepseek` implies `--new-agent` and starts immediately with that backend.
+- `--cwd /path` supplies the working directory for that launch.
 - `--model MODEL_ID` chooses the provider model; omission uses the provider default.
 - `--effort EFFORT` passes the model's reasoning effort to the Host.
 - `--anonymous` / `--contact` override the anonymous preference for this launch.
