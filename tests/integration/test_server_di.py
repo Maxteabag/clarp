@@ -3563,3 +3563,67 @@ def test_controller_narration_speaks_once_per_text_and_caches(running_server, mo
     with pytest.raises(urllib.error.HTTPError) as exc:
         _get(base + "/controller-narration?text=" + "x" * 300)
     assert exc.value.code == 400
+
+
+def test_build_server_starts_the_worker_registry_in_order(fake_ctx, monkeypatch):
+    """build_server is a composition root: every background thread comes from
+    the ordered catalog, conditional workers are skipped with their reason
+    visible, and a worker class is resolved from the server module at start
+    time so tests can swap it."""
+    started = []
+
+    class FakeTTSWorker:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def start(self):
+            started.append("tts")
+
+        def stop(self, timeout=2.0):
+            started.append("tts-stopped")
+
+    monkeypatch.setattr(server_module, "TTSWorker", FakeTTSWorker)
+    srv = build_server(fake_ctx, _free_port(), bind_addr="127.0.0.1")
+    try:
+        workers = srv.workers
+        assert workers.names() == [
+            "stream", "relay", "tool-explanations", "bonjour",
+            "state-log-watcher", "background-job-watcher", "runtime-event-watcher",
+            "tts-worker", "maintenance", "usage-refresh", "resource-telemetry",
+            "decision-delivery", "transcript-streamer", "team-leader", "heartbeat",
+            "autonomy-janitors", "dreaming", "agent-scheduler", "janitor-runner",
+            "local-https",
+        ]
+        # No relay settings, no LAN advertising, no runtime client, no local TLS.
+        assert workers.skipped == ["relay", "bonjour", "runtime-event-watcher", "local-https"]
+        assert set(workers.running) == set(workers.names()) - set(workers.skipped)
+        assert isinstance(workers.get("tts-worker"), FakeTTSWorker)
+        assert workers.get("tts-worker").kwargs["stream"] is fake_ctx.stream
+        assert started == ["tts"]
+        thread_names = {thread.name for thread in threading.enumerate()}
+        assert {"decision-delivery", "transcript-streamer", "agent-heartbeat-scheduler",
+                "janitor-runner"} <= thread_names
+    finally:
+        srv.server_close()
+    assert started == ["tts", "tts-stopped"]
+
+
+def test_build_server_attaches_the_herald_before_workers_start(fake_ctx):
+    herald = object()
+    captured = {}
+    from lib import tts_worker
+
+    original_init = tts_worker.TTSWorker.__init__
+
+    def capturing_init(self, **kwargs):
+        captured["herald"] = kwargs.get("herald")
+        original_init(self, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(tts_worker.TTSWorker, "__init__", capturing_init)
+        srv = build_server(fake_ctx, _free_port(), bind_addr="127.0.0.1", herald=herald)
+    try:
+        assert fake_ctx.herald is herald
+        assert captured["herald"] is herald
+    finally:
+        srv.server_close()

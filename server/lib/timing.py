@@ -14,6 +14,9 @@ class ServerTiming:
     audio_janitor_interval_sec: float = 60.0
     # Janitor failure alerts are reconciled on this cadence, not every 2 s tick.
     janitor_attention_interval_sec: float = 15.0
+    # Decision answers, expiries and HTML-form submissions are delivered to
+    # their agents on this cadence by lib.decision_delivery.
+    decision_delivery_interval_sec: float = 5.0
     # NOTE: the per-turn watchdog (idle/startup/post-init deadlines) was
     # removed in favour of preempt-kill-and-resume — see clarp_runner
     # 'No turn timer'. Its knobs lived here unreferenced until 2026-08-24.
