@@ -154,3 +154,104 @@ def test_dashboard_message_ranking_walks_the_activity_index():
     ranking = next(s for s in statements if 'WITH candidates AS' in s)
     plan = ' '.join(row[3] for row in db.conn().execute('EXPLAIN QUERY PLAN ' + ranking))
     assert 'idx_messages_dashboard_activity' in plan, plan
+
+
+def test_no_drift_snapshot_makes_no_repair_writes_and_no_per_agent_queries(tmp_path, monkeypatch):
+    """The read-time reconciler must stay a pure in-memory check for a roster
+    whose derived state already agrees with reality."""
+    from lib import reconcile
+    monkeypatch.setenv("HOME", str(tmp_path))
+    projects = tmp_path / ".claude" / "projects" / "-tmp-proj"
+    projects.mkdir(parents=True)
+    ids = []
+    for i in range(30):
+        aid = agents.create_agent(persona=f'Person{i}', voice_id='', cwd='/tmp', session=f'p{i}',
+                                  backend='claude' if i % 3 else 'codex')
+        agents.start_runtime(aid, f'p{i}')
+        agents.record_state(aid, 'background' if i % 7 == 0 else 'done')
+        if i % 2:
+            agents.bind_backend_session(aid, f'sid-{i}')
+            (projects / f'sid-{i}.jsonl').write_text('')
+        ids.append(aid)
+    build_agent_snapshot(None)  # warm caches, persona/config materialisation
+    writes = []
+    monkeypatch.setattr(reconcile.agents_db, "record_state",
+                        lambda *a, **k: writes.append(("record_state", a)))
+    monkeypatch.setattr(reconcile.agents_db, "end_current_runtime",
+                        lambda *a, **k: writes.append(("end_current_runtime", a)))
+    repairs = []
+    original = reconcile.reconcile_agent
+
+    def spy(*a, **k):
+        repaired = original(*a, **k)
+        repairs.append(repaired)
+        return repaired
+
+    monkeypatch.setattr(reconcile, "reconcile_agent", spy)
+    statements = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        snap = build_agent_snapshot(None)
+    finally:
+        db.conn().set_trace_callback(None)
+    assert len(snap['agents']) == 30
+    assert writes == []
+    assert repairs and all(r == {} for r in repairs)
+    assert not [s for s in statements if any(aid in s for aid in ids)], statements
+    from lib import transcript_log
+    transcript_log.reset_transcript_index()
+
+
+def test_snapshot_reads_the_external_runtime_status_once_per_roster(monkeypatch):
+    """With clarp-runtime owning the turns, spawning and compaction used to be
+    one status RPC per agent each; the snapshot now shares one cached status."""
+    from lib import backends, reconcile
+
+    class Runtime:
+        calls = 0
+
+        def status(self):
+            Runtime.calls += 1
+            return {"active": {}, "spawning": [spawning], "terminals": [],
+                    "compactions": ["p2"], "queued": {}}
+
+    ids = {}
+    for i in range(40):
+        ids[f'p{i}'] = agents.create_agent(persona=f'Person{i}', voice_id='', cwd='/tmp', session=f'p{i}')
+        agents.record_state(ids[f'p{i}'], 'thinking' if i == 1 else 'done')
+    spawning = ids['p1']
+    backends.configure_runtime_client(Runtime())
+    try:
+        rows = {r['session']: r for r in build_agent_snapshot(None)['agents']}
+        assert Runtime.calls <= 2, Runtime.calls
+        assert reconcile._slot_is_spawning(ids['p1']) is True
+        assert reconcile._slot_is_spawning(ids['p0']) is False
+        assert Runtime.calls <= 2, Runtime.calls
+    finally:
+        backends.configure_runtime_client(None)
+    assert rows['p2']['compacting'] is True
+    assert rows['p0']['compacting'] is False
+    # A spawning slot is live work: the thinking row is kept, not repaired.
+    assert rows['p1']['busy'] is True and rows['p1']['latest_state'] == 'thinking'
+    assert agents.latest_state(ids['p1'])['kind'] == 'thinking'
+
+
+def test_snapshot_compacting_falls_back_to_persisted_state_when_runtime_is_down(monkeypatch):
+    from lib import backends
+    from lib.runtime_bridge import RuntimeUnavailable
+
+    class Offline:
+        def status(self):
+            raise RuntimeUnavailable("down")
+
+    quiet = agents.create_agent(persona='Quiet', voice_id='', cwd='/tmp', session='quiet')
+    busy = agents.create_agent(persona='Busy', voice_id='', cwd='/tmp', session='busy')
+    agents.record_state(quiet, 'done')
+    agents.record_state(busy, 'compacting')
+    backends.configure_runtime_client(Offline())
+    try:
+        rows = {r['session']: r for r in build_agent_snapshot(None)['agents']}
+    finally:
+        backends.configure_runtime_client(None)
+    assert rows['busy']['compacting'] is True and rows['busy']['busy'] is True
+    assert rows['quiet']['compacting'] is False

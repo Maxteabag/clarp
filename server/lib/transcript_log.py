@@ -8,8 +8,11 @@ and return a list of {role, text, tools, timestamp}.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
+import threading
+import time
 from functools import lru_cache
 from typing import Any
 
@@ -286,6 +289,154 @@ def _context_tokens_cached(path_string: str, device: int, inode: int,
     return latest
 
 
+class _TranscriptIndex:
+    """session id → transcript path for one projects root.
+
+    Every lookup used to glob ``*/<id>.jsonl`` across every project directory
+    (one lstat per directory, ~260 on a busy host). The snapshot does that
+    twice per bound Claude agent every ten seconds and the transcript streamer
+    once per unbound agent every second. The index scans the directories once
+    and then answers from a dict. It stays current through inotify: the root
+    and every project directory are watched for entries appearing, vanishing
+    or moving, and the event queue is drained (without blocking) before each
+    lookup, so a transcript is visible on the very next call after Claude
+    creates it. A positive hit is still verified with one stat so a file that
+    vanished behind the queue's back is never handed out.
+
+    Without inotify (another platform, or the watch budget is exhausted) the
+    index stays off and lookups glob exactly as before.
+    """
+
+    _RETRY_AFTER_FAILURE_SEC = 60.0
+
+    def __init__(self, root: pathlib.Path):
+        self.root = root
+        self._lock = threading.Lock()
+        self._paths: dict[str, pathlib.Path] = {}
+        self._inotify = None
+        self._built = False
+        self._retry_at = 0.0
+
+    def lookup(self, backend_session_id: str) -> pathlib.Path | None:
+        with self._lock:
+            if not self._current():
+                self._rebuild()
+            if self._inotify is None:
+                return _glob_latest_jsonl(self.root, backend_session_id)
+            path = self._paths.get(backend_session_id)
+            if path is not None and not path.is_file():
+                self._rebuild()
+                path = self._paths.get(backend_session_id)
+                if path is not None and not path.is_file():
+                    path = None
+            return path
+
+    def close(self) -> None:
+        with self._lock:
+            self._drop_watches()
+            self._built = False
+
+    # -- internals -------------------------------------------------------
+
+    def _current(self) -> bool:
+        """True when the index reflects the directories as of now."""
+        if self._inotify is None or not self._built:
+            return False
+        try:
+            events = self._inotify.read(timeout=0)
+        except OSError:
+            events = None
+        if events is None:
+            self._drop_watches()
+            return False
+        return not events
+
+    def _rebuild(self) -> None:
+        self._drop_watches()
+        self._paths = {}
+        self._built = True
+        if time.monotonic() < self._retry_at:
+            return
+        try:
+            import inotify_simple
+        except ImportError:
+            self._retry_at = float("inf")
+            return
+        flags = inotify_simple.flags
+        watch = (flags.CREATE | flags.DELETE | flags.MOVED_FROM | flags.MOVED_TO
+                 | flags.DELETE_SELF | flags.MOVE_SELF | flags.ONLYDIR)
+        try:
+            inotify = inotify_simple.INotify(nonblocking=True)
+        except OSError:
+            self._retry_at = time.monotonic() + self._RETRY_AFTER_FAILURE_SEC
+            return
+        try:
+            # Watch before scanning so nothing created in between is missed.
+            inotify.add_watch(str(self.root), watch)
+            with os.scandir(self.root) as entries:
+                for entry in entries:
+                    if not entry.is_dir():
+                        continue
+                    project = pathlib.Path(entry.path)
+                    inotify.add_watch(str(project), watch)
+                    try:
+                        with os.scandir(project) as files:
+                            for f in files:
+                                name = f.name
+                                if name.endswith(".jsonl"):
+                                    self._paths.setdefault(name[:-6], project / name)
+                    except OSError:
+                        continue
+        except OSError:
+            # Root missing, watch budget exhausted, or a directory vanished
+            # mid-scan: glob directly for a while and try the index later.
+            inotify.close()
+            self._paths = {}
+            self._retry_at = time.monotonic() + self._RETRY_AFTER_FAILURE_SEC
+            return
+        self._inotify = inotify
+
+    def _drop_watches(self) -> None:
+        if self._inotify is not None:
+            try:
+                self._inotify.close()
+            except OSError:
+                pass
+            self._inotify = None
+
+
+# One index per projects root. Tests point HOME at fresh directories, so the
+# table is bounded and the oldest root releases its inotify instance.
+_INDEXES: dict[pathlib.Path, _TranscriptIndex] = {}
+_INDEXES_LOCK = threading.Lock()
+_MAX_INDEXES = 4
+
+
+def _index_for(root: pathlib.Path) -> _TranscriptIndex:
+    with _INDEXES_LOCK:
+        index = _INDEXES.get(root)
+        if index is None:
+            while len(_INDEXES) >= _MAX_INDEXES:
+                _INDEXES.pop(next(iter(_INDEXES))).close()
+            index = _INDEXES[root] = _TranscriptIndex(root)
+        return index
+
+
+def reset_transcript_index() -> None:
+    """Forget every cached projects root (tests, or after HOME changes)."""
+    with _INDEXES_LOCK:
+        for index in _INDEXES.values():
+            index.close()
+        _INDEXES.clear()
+
+
+def _glob_latest_jsonl(projects_root: pathlib.Path,
+                       backend_session_id: str) -> pathlib.Path | None:
+    for jsonl in projects_root.glob(f"*/{backend_session_id}.jsonl"):
+        return jsonl
+    return None
+
+
 def find_latest_jsonl(
     backend_session_id: str,
     projects_root: pathlib.Path | None = None,
@@ -300,10 +451,15 @@ def find_latest_jsonl(
     If backend_session_id is empty, return None. Empty UUID → empty
     history pane, which is the honest answer for "this agent hasn't
     talked yet".
+
+    Answered from a per-root index kept current by inotify (see
+    _TranscriptIndex), so callers may ask on every snapshot and every
+    streamer tick without paying for a directory walk.
     """
-    projects_root = projects_root or (pathlib.Path.home() / ".claude" / "projects")
     if not backend_session_id:
         return None
+    projects_root = projects_root or (pathlib.Path.home() / ".claude" / "projects")
+    return _index_for(projects_root).lookup(backend_session_id)
     for jsonl in projects_root.glob(f"*/{backend_session_id}.jsonl"):
         return jsonl
     return None

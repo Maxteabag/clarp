@@ -55,12 +55,25 @@ def has_live_work(agent_id: str, backend: str) -> bool:
     except Exception:  # noqa: BLE001
         pass
     try:
-        from . import turn_dispatch
-        if turn_dispatch._slot_is_spawning(agent_id):
+        if _slot_is_spawning(agent_id):
             return True
     except Exception:  # noqa: BLE001
         pass
     return False
+
+
+def _slot_is_spawning(agent_id: str) -> bool:
+    """Is a turn for this agent claimed but not yet registered as a process?
+
+    With an external runtime the answer is in its ``status`` result, which
+    ``backends`` already caches for a short window; asking the runtime
+    directly cost one socket round trip per agent per snapshot. This process
+    only consults the dispatcher's own slot table when it owns its turns.
+    """
+    if getattr(backends, "_RUNTIME_CLIENT", None) is None:
+        from . import turn_dispatch
+        return turn_dispatch._slot_is_spawning(agent_id)
+    return agent_id in (backends.runtime_status().get("spawning") or ())
 
 
 def reconcile_agent(agent_id: str, backend: str | None = None, *,
