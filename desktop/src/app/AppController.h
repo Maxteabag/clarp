@@ -161,6 +161,8 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] QUrl contactAvatarSource(const QString& name) const;
     // Counters for the periodic memory log: what the process holds on to.
     Q_INVOKABLE [[nodiscard]] QVariantMap memoryCounters() const;
+    // Restyle a TextEdit's imported Markdown (headings, code, quotes, tables).
+    Q_INVOKABLE void styleMarkdown(QObject* textDocument, const QVariantMap& options) const;
     Q_INVOKABLE [[nodiscard]] QString chatStamp(qint64 time) const;
     Q_INVOKABLE [[nodiscard]] QVariantList mediaForSession(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QUrl mediaSource(const QString& assetId) const;

@@ -521,7 +521,12 @@ int main(int argc, char* argv[]) {
                              "A third paragraph makes the rhythm obvious. **Emphasis** and "
                              "`inline code` should still render correctly.\n\n"
                              "1. Lists remain structurally intact\n\n"
-                             "2. Their numbering must not restart")},
+                             "2. Their numbering must not restart\n\n"
+                             "## What changed\n\n"
+                             "### Details\n\n"
+                             "```cpp\nint main() {\n    return 0;\n}\n```\n\n"
+                             "> A quoted remark stays quiet.\n\n"
+                             "| Column | Value |\n|---|---|\n| build | clean |\n| tests | 26/26 |")},
                         {QStringLiteral("revision"), 2}},
                 };
             } else if (screenshotScenario == QStringLiteral("links")) {

@@ -101,3 +101,20 @@ transcript. Normal launches never take the theme from the environment.
   https://baymard.com/blog/line-length-readability
 - a11y-blog, "Is sepia mode the default feature?":
   https://a11y-blog.dev/en/articles/is-sepia-mode-essential/
+
+## Markdown in messages
+
+Qt imports Markdown through md4c and then styles it like a web page: h1 at
+about twice the body size, code and quotes bare, lists indented 40 px. After
+every finalized import `MarkdownStyle.cpp` restyles the `QTextDocument` in
+place for a chat column: headings at 1.3×, 1.18× and 1.08× of the body size
+in demi-bold, code blocks and inline code in the mono family at 0.9× on the
+control colour, quotes indented and muted, links in the link colour, lists on
+a single indent step, tables with cell padding and a hairline border. Live
+(streaming) rows stay plain text and are never restyled; the styler stamps
+the document with the text and options it handled so re-entry is a no-op.
+`tests/tst_markdown_style.cpp` pins those sizes. The library survey that led
+here: Qt already uses md4c, `md4qt` is a parser without a renderer,
+`QMarkdownTextEdit`/`markdown-qt` target QWidgets or HTML converters, and
+`QSourceHighlite` is a small MIT highlighter that could later colour code
+blocks on the same document.

@@ -276,6 +276,21 @@ Item {
                             selectionColor: root.styled("selection", Theme.selection)
                             font.family: root.readingFont
                             font.pixelSize: root.readingSize
+                            // Qt's Markdown import scales headings like a web page
+                            // and leaves code and quotes bare; restyle after every
+                            // finalized import. The styler is a no-op for a document
+                            // it already handled, so this cannot loop.
+                            function restyle() {
+                                if (textFormat !== Text.MarkdownText || !root.controller.styleMarkdown) return;
+                                root.controller.styleMarkdown(textDocument, {
+                                    bodyPixelSize: root.readingSize, monoFamily: "JetBrains Mono",
+                                    codeBackground: String(Theme.control),
+                                    quoteText: String(Theme.muted), link: String(Theme.link), rule: String(Theme.rule)
+                                });
+                            }
+                            onTextChanged: restyle()
+                            onTextFormatChanged: restyle()
+                            Component.onCompleted: restyle()
                             // Routed through the controller so a non-web scheme in
                             // model output cannot reach the desktop handler.
                             onLinkActivated: link => root.controller.openExternalLink(link, root.linkOriginHost)

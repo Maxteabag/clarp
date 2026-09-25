@@ -61,6 +61,8 @@ target_sources(clarp-desktop PRIVATE
     src/app/AvatarMotionClock.h
     src/app/ReadingTheme.h
     src/app/MemoryDiagnostics.h
+    src/app/MarkdownStyle.cpp
+    src/app/MarkdownStyle.h
     src/app/WorkspaceContext.cpp
     src/app/WorkspaceContext.h
     src/app/PreviewVersions.cpp
