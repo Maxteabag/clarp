@@ -698,3 +698,140 @@ def on_user_notification(notification: dict) -> None:
     threading.Thread(
         target=send_user_notification, args=(notification,), daemon=True
     ).start()
+
+
+# --------------------------------------------------------------------------
+# Decision requests
+# --------------------------------------------------------------------------
+# A question or approval request is the one thing an agent cannot finish
+# without the user. Turn-end pushes only fire when the turn ends, and an agent
+# that asks mid-turn keeps working, so without this the request sits unseen
+# until the user happens to open the right chat.
+def decision_payload(persona: str, session: str | None, title: str, question: str,
+                     *, decision_id: str, artifact_id: str,
+                     time_sensitive: bool = False,
+                     avatar_url: str | None = None, avatar_custom: bool = False,
+                     server_instance_id: str = "") -> dict:
+    """APNs payload for a newly created decision. Tapping it deep-links to the
+    agent's conversation, where the request card is pinned."""
+    payload = turn_done_payload(
+        persona, session, (question or title or "").strip()[:500], avatar_url,
+        avatar_custom, decision_notification_id(decision_id), server_instance_id)
+    alert = payload["aps"]["alert"]
+    heading = (title or "").strip()
+    if heading and heading != alert["body"]:
+        alert["subtitle"] = heading[:120]
+    # Blocking or time-sensitive requests are the alerts the user has asked to
+    # be interrupted for; an ordinary question stays at the messaging level.
+    payload["aps"]["interruption-level"] = "time-sensitive" if time_sensitive else "active"
+    payload["reason"] = "decision"
+    payload["decision_id"] = decision_id
+    payload["artifact_id"] = artifact_id
+    return payload
+
+
+def decision_notification_id(decision_id: str) -> str:
+    return f"decision-{decision_id}"[:64]
+
+
+def decision_needs_interruption(decision: dict) -> bool:
+    return bool(decision.get("blocks_progress")) or decision.get("urgency") == "time_sensitive"
+
+
+def send_decision_created(artifact: dict) -> dict:
+    """Synchronously push a new decision request to all live tokens.
+
+    Mirrors the turn-end transport: respects the per-agent push mute, stays
+    quiet while a desktop is active, and prunes dead tokens. Never raises.
+    """
+    from . import agents as agents_db, config, desktop_presence
+    cfg = config.load()
+    if not cfg.apns_enabled():
+        return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
+    tokens = active_tokens()
+    if not tokens:
+        return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
+
+    decision = artifact.get("decision") or {}
+    decision_id = str(decision.get("decision_id") or "")
+    artifact_id = str(artifact.get("artifact_id") or "")
+    session = str(artifact.get("session") or "")
+    persona = str(artifact.get("agent_name") or "Clarp")
+    agent_id = str(artifact.get("agent_id") or "")
+    if not decision_id or decision.get("status", "pending") != "pending":
+        return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
+    agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
+    if agent and agent.get("muted"):
+        log("apnsDecisionSuppressed", f"{persona} session={session} decision={decision_id} reason=muted")
+        return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0,
+                "suppressed": True, "reason": "muted"}
+    if desktop_presence.active():
+        log("apnsDecisionSuppressed", f"{persona} session={session} decision={decision_id} reason=desktop-active")
+        return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0,
+                "suppressed": True, "reason": "desktop-active"}
+
+    title = str(artifact.get("title") or "")
+    question = str(decision.get("question") or artifact.get("summary") or "")
+    time_sensitive = decision_needs_interruption(decision)
+    notification_id = decision_notification_id(decision_id)
+    sent = failed = disabled = 0
+    started = time.monotonic()
+    with _send_lock(session):
+        try:
+            auth = _auth_jwt(cfg)
+            client = _pooled_client()
+            for row in tokens:
+                tok = row["token"]
+                env = row.get("environment") or cfg.apns_environment
+                avatar_url, avatar_custom = _avatar_details(
+                    cfg, persona, agent_id, str(row.get("base_url") or ""))
+                payload = decision_payload(
+                    persona, session, title, question,
+                    decision_id=decision_id, artifact_id=artifact_id,
+                    time_sensitive=time_sensitive,
+                    avatar_url=avatar_url, avatar_custom=avatar_custom,
+                    server_instance_id=_server_instance_id())
+                try:
+                    status, reason, apns_id = _send_one(
+                        client, _host(env), auth, cfg.apns_bundle_id, tok, payload)
+                except Exception as e:  # noqa: BLE001 — one bad token shouldn't abort the batch
+                    log_exception("apnsSendFail", e,
+                                  detail=f"notification={notification_id} token={tok[:12]}…")
+                    _reset_pooled_client()
+                    client = _pooled_client()
+                    failed += 1
+                    continue
+                log("apnsSendResult",
+                    f"notification={notification_id} decision={decision_id} "
+                    f"session={session} status={status} apns_id={apns_id or '-'} "
+                    f"token={tok[:12]}…")
+                if status == 200:
+                    sent += 1
+                    _mark_pushed(tok)
+                elif status == 410 or reason in _DEAD_REASONS:
+                    disable_token(tok, reason or str(status))
+                    disabled += 1
+                else:
+                    failed += 1
+                    log("apnsSendReject", f"{reason or status} token={tok[:12]}…")
+        except Exception as e:  # noqa: BLE001
+            log_exception("apnsBatchFail", e, detail=f"notification={notification_id}")
+    log("apnsDecisionCreated",
+        f"{persona} decision={decision_id} session={session} "
+        f"time_sensitive={int(time_sensitive)} sent={sent} failed={failed} "
+        f"disabled={disabled} duration_ms={int((time.monotonic() - started) * 1000)}")
+    return {"enabled": True, "sent": sent, "failed": failed, "disabled": disabled}
+
+
+def on_decision_created(artifact: dict) -> None:
+    """Fire-and-forget push for a newly created decision. Cheap no-op when
+    APNs isn't configured; never blocks or fails the creating request."""
+    from . import config
+    try:
+        if not config.load().apns_enabled():
+            return
+    except Exception:  # noqa: BLE001
+        return
+    threading.Thread(
+        target=send_decision_created, args=(dict(artifact),), daemon=True
+    ).start()
