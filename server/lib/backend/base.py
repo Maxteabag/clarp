@@ -11,20 +11,31 @@ The values that are genuinely data (``context_window``, ``model_family``,
 not getters.
 
 During the migration each instance still carries ``adapter``, today's
-``BackendAdapter`` row, and the subclasses delegate to its callables and to
-the runner modules. Slice 5 of the contract folds the adapter into this
-class; until then module attributes are resolved at call time so tests
-that monkeypatch runner globals keep working.
+``BackendAdapter`` row, and the subclasses delegate to its callables for
+their catalogue metadata. Slice 5 of the contract folds the adapter into
+this class. The runner bodies live here since slice 3; the
+``lib.<runner>_runner`` modules are delegators kept for the tests that
+monkeypatch their globals, and ``Backend._hook`` is the seam that lets
+those patches still intercept (see ``hooked``).
 """
 from __future__ import annotations
 
+import functools
 import importlib
 import pathlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
+from ..log import log_exception
+from ..process_registry import ProcessRegistry
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..backends import BackendAdapter
+
+# One live-turn registry per runner, shared by every backend that runs
+# through it (DeepSeek on OpenCode), so ``interrupt_any`` and the runner
+# module's ``_REGISTRY`` see the same handles a dispatch registered.
+_REGISTRIES: dict[str, ProcessRegistry] = {}
 
 
 class Unsupported(Exception):
@@ -62,6 +73,26 @@ def resolve(module: str, attr: str) -> Any:
     return getattr(_mod(module), attr)
 
 
+def hooked(method: Callable[..., Any]) -> Callable[..., Any]:
+    """Slice-3 seam: a test's replacement of ``method`` on the runner module wins.
+
+    ``lib.<runner>_runner`` only delegates into the class now, but tests
+    still monkeypatch its globals (``clarp_runner.interrupt``,
+    ``grok_runner.routing_text``) and expect a dispatch through the backend
+    object to hit the double. ``Backend._hook`` tells the module's own
+    delegator from a double; slice 5 moves the tests and removes this.
+    """
+    name = method.__name__
+
+    @functools.wraps(method)
+    def call(self: "Backend", *args: Any, **kwargs: Any) -> Any:
+        patched = self._hook(name)
+        if patched is not None:
+            return patched(*args, **kwargs)
+        return method(self, *args, **kwargs)
+    return call
+
+
 class Backend:
     """One coding CLI the host can run as an agent backend."""
 
@@ -82,9 +113,42 @@ class Backend:
         self.effort_ui: str = adapter.effort_ui
         self.effort_scope: str = adapter.effort_scope
         self.fallback_models: tuple[tuple[str, str], ...] = adapter.fallback_models
+        # The runner's short name: prefix of its log events and drain
+        # threads, the ``dispatch`` tag on its state rows, and the stem of
+        # the ``lib.<runner>_runner`` module. "" for a backend with no runner.
+        self.runner: str = adapter.runner
+        # Live turn processes, agent_id -> handles; one per runner.
+        self._registry: ProcessRegistry | None = None
+        if self.runner:
+            if self.runner not in _REGISTRIES:
+                _REGISTRIES[self.runner] = ProcessRegistry(log_exception=log_exception)
+            self._registry = _REGISTRIES[self.runner]
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__} {self.id}>"
+
+    # --- slice-3 seam: the runner module's globals -------------------------
+
+    @property
+    def runner_module(self) -> str:
+        """The ``lib`` module that delegates to this class ("" when none)."""
+        return f"{self.runner}_runner" if self.runner else ""
+
+    def _hook(self, name: str, own: Any = None) -> Any:
+        """``own`` unless a test replaced ``name`` on the runner module.
+
+        A global whose ``__globals__`` are the module's own is one of its
+        delegators into this class, so ``own`` stands; anything else (a
+        constant, an import, a test double) is returned as is. Slice 5
+        moves the tests and removes this.
+        """
+        if not self.runner:
+            return own
+        module = _mod(self.runner_module)
+        value = getattr(module, name, own)
+        if getattr(value, "__globals__", None) is vars(module):
+            return own
+        return value
 
     # --- the runner -------------------------------------------------------
 
@@ -92,17 +156,40 @@ class Backend:
         """Start one turn and return its ``TurnHandle``.
 
         ``spec`` is the host's full spawn vocabulary; the backend keeps the
-        keywords its runner accepts and drops the rest.
+        keywords its runner accepts and drops the rest before ``start_turn``.
         """
-        raise NotImplementedError(f"{self.id}: spawn_turn")
+        return self._hook("spawn_turn", self.start_turn)(**self.adapter.spawn_kwargs(spec))
 
+    def start_turn(self, **kwargs: Any):
+        """The runner body: spawn the CLI for one turn with explicit keywords."""
+        raise NotImplementedError(f"{self.id}: start_turn")
+
+    @hooked
     def interrupt(self, agent_id: str) -> int:
-        """Stop the agent's in-flight turn; the number of processes signalled."""
-        raise NotImplementedError(f"{self.id}: interrupt")
+        """Stop the agent's in-flight turn; the number of processes signalled.
 
+        SIGTERM every live turn of the agent. Idempotent: finished handles
+        are skipped.
+        """
+        if self._registry is None:
+            raise NotImplementedError(f"{self.id}: interrupt")
+        return self._registry.interrupt(agent_id, event=f"{self.runner}InterruptFail")
+
+    @hooked
     def active_handles(self, agent_id: str) -> list:
         """Handles of the agent's live turn processes (empty when idle)."""
-        raise NotImplementedError(f"{self.id}: active_handles")
+        if self._registry is None:
+            raise NotImplementedError(f"{self.id}: active_handles")
+        return self._registry.active_handles(agent_id)
+
+    def register_handle(self, agent_id: str, handle) -> None:
+        """Register a live turn unless the run is isolated (empty agent id)."""
+        if agent_id and self._registry is not None:
+            self._registry.register(agent_id, handle)
+
+    def unregister_handle(self, agent_id: str, handle) -> None:
+        if self._registry is not None:
+            self._registry.unregister(agent_id, handle)
 
     def routing_cmd(self, prompt: str, *, model: str = "", effort: str = "") -> list[str]:
         """argv for one isolated, tool-less orchestrator request."""
