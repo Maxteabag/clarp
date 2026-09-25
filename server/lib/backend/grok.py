@@ -18,7 +18,7 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..protocol import AgentState
 from ..voice_preamble import apply_voice_preamble
-from .base import CompactionStrategy, hooked
+from .base import BackendBrand, CompactionStrategy, hooked
 from .stream_json import StreamJsonBackend, iter_json_dicts
 
 
@@ -121,6 +121,24 @@ def _usage_from(ev: dict) -> tuple[int, int]:
 
 class GrokBackend(StreamJsonBackend):
     """Runs ``grok -p --output-format streaming-json`` once per turn."""
+    # --- catalogue data (was the BackendAdapter registry row) ------------
+    id = 'grok'
+    label = 'Grok'
+    required_binary = 'grok'
+    badge = 'BackendGrok'
+    detail = 'Runs on Grok Build.'
+    symbol = 'x.circle'
+    brand = BackendBrand('#1a1a1a', '#0a0a0a', '#e8e8e8', '#222222')
+    efforts = ('low', 'medium', 'high')
+    runner = 'grok'
+    config_model_field = 'grok_model'
+    config_effort_field = 'grok_effort'
+    model_family = 'grok'
+    fallback_models = (
+        ('grok-4.6', 'Grok 4.6'),
+        ('grok-4.5', 'Grok 4.5'),
+    )
+
 
     transcript = grok_transcript
 

@@ -4,7 +4,7 @@ Each coding CLI is a ``Backend`` strategy object in ``lib.backend``
 (``docs/architecture/backend-strategy.md``); ``by_id()`` / ``for_agent()``
 hand them out. This module stays the import path callers use: the id
 constants, ``normalize()`` (the one alias normaliser) and, while the
-migration runs, the ``BackendAdapter`` rows the strategies still delegate
+migration ran, the registry rows the strategies delegated
 to for their catalogue metadata, presentation and capability flags.
 Clients do not hardcode provider ids — they render
 ``/agent-model-options``, including the label, brand colours, symbol and
@@ -101,380 +101,21 @@ class BackendCapabilities:
     required_binary: str
 
 
-@dataclass(frozen=True)
-class BackendBrand:
-    """Chooser colours as ``#rrggbb`` strings.
-
-    Served on the catalogue so a client never has to ship a palette per CLI:
-    a new adapter picks its own field and tint and every app renders it.
-    """
-    field_top: str
-    field_bottom: str
-    tint_dark: str
-    tint_light: str
-
-    def as_dict(self) -> dict[str, str]:
-        return {
-            "field_top": self.field_top,
-            "field_bottom": self.field_bottom,
-            "tint_dark": self.tint_dark,
-            "tint_light": self.tint_light,
-        }
-
-
-# Neutral treatment for an adapter that declares no brand of its own.
-DEFAULT_BRAND = BackendBrand("#2a3142", "#151820", "#a8b4c8", "#4a5568")
-DEFAULT_SYMBOL = "cpu"
-
-# How a client obtains credentials for the CLI. "none" hides the sign-in row.
-LOGIN_KINDS = ("none", "device_code", "cli", "api_key")
-# How a client offers the effort control. "folded_into_model" means the model
-# id already encodes the effort (AGY), so the picker is replaced by a note.
-EFFORT_UIS = ("picker", "hidden", "folded_into_model")
-# Where effort evidence lives: per model ("model"), one list for the whole
-# provider ("provider"), or a provider flag whose compatibility with a chosen
-# model is unknown ("provider_flag").
-EFFORT_SCOPES = ("model", "provider", "provider_flag")
+from .backend.base import (  # noqa: E402
+    BackendBrand, DEFAULT_BRAND, DEFAULT_SYMBOL, LOGIN_KINDS, EFFORT_UIS, EFFORT_SCOPES)
 
 
 def _mod(name: str):
     return importlib.import_module(f"lib.{name}")
 
 
-@dataclass(frozen=True)
-class BackendAdapter:
-    """One coding CLI the Host can run as an agent backend."""
-    id: str
-    label: str
-    required_binary: str
-    supports_fork: bool = False
-    supports_steer: bool = False
-    supports_transcript_streaming: bool = False
-    efforts: tuple[str, ...] = ()
-    aliases: tuple[str, ...] = ()
-    badge: str = ""
-    # Presentation the chooser needs; nothing here requires a client build.
-    detail: str = ""
-    symbol: str = DEFAULT_SYMBOL
-    brand: BackendBrand = DEFAULT_BRAND
-    hidden: bool = False
-    # Capability flags advertised on the catalogue. Compact, routing and auth
-    # are derived from the machinery below rather than declared twice.
-    supports_mcp: bool = False
-    supports_usage: bool = False
-    login_kind: str = "none"
-    effort_ui: str = "picker"
-    effort_help: str = ""
-    effort_scope: str = "provider"
-    # Module exposing routing_cmd()/routing_text() for one isolated
-    # orchestrator request. Empty means the CLI cannot route.
-    routing_module: str = ""
-    runner_module: str = ""
-    # The runner's short name: prefix of its log events and drain threads,
-    # the ``dispatch`` tag on its state rows and the stem of the
-    # ``lib.<runner>_runner`` module. DeepSeek runs through OpenCode's.
-    runner: str = ""
-    extra_interrupt_modules: tuple[str, ...] = ()
-    config_model_field: str = ""
-    config_effort_field: str = ""
-    fallback_models: tuple[tuple[str, str], ...] = ()
-    resumable: bool = True
-    # --- Session and transcript access -----------------------------------
-    # Context gauge: the window (tokens) the CLI's transcript fills, or None
-    # when the CLI auto-compacts and shows no gauge.
-    context_window: int | None = None
-    # --- Routing and Janitors --------------------------------------------
-    # API-key providers whose model catalogue this CLI fronts ("openai").
-    api_providers: tuple[str, ...] = ()
-    # The Janitor tool explainer can run natively through this CLI.
-    native_tool_explainer: bool = False
-    # Model a new Janitor gets when none is chosen; empty means CLI default.
-    janitor_default_model: str = ""
-    # Model family the CLI stands for when the Agent pins no model (avatars).
-    model_family: str = ""
-
-    def __post_init__(self) -> None:
-        if self.login_kind not in LOGIN_KINDS:
-            raise ValueError(f"{self.id}: unknown login_kind {self.login_kind!r}")
-        if self.effort_ui not in EFFORT_UIS:
-            raise ValueError(f"{self.id}: unknown effort_ui {self.effort_ui!r}")
-        if self.effort_scope not in EFFORT_SCOPES:
-            raise ValueError(f"{self.id}: unknown effort_scope {self.effort_scope!r}")
-
-    @property
-    def supports_routing(self) -> bool:
-        return bool(self.routing_module)
-
-    @property
-    def supports_auth(self) -> bool:
-        return self.login_kind != "none"
-
-    @property
-    def effort_compatibility_unknown(self) -> bool:
-        """Effort is a provider flag whose fit with a pinned model is unknown."""
-        return self.effort_scope == "provider_flag"
-
-    @property
-    def model_carries_effort(self) -> bool:
-        return self.effort_ui == "folded_into_model"
-
-    def catalogue_fields(self, sort_index: int, *,
-                         supports_compact: bool = False) -> dict[str, Any]:
-        """The presentation and capability block of one catalogue row.
-
-        ``supports_compact`` is whether the backend object has a compaction
-        strategy; the facade's ``catalogue_fields`` asks it.
-        """
-        return {
-            "label": self.label,
-            "detail": self.detail or f"Runs on {self.label}.",
-            "badge": self.badge,
-            "symbol": self.symbol or DEFAULT_SYMBOL,
-            "brand": self.brand.as_dict(),
-            "sort_index": sort_index,
-            "hidden": self.hidden,
-            "supports_fork": bool(self.supports_fork),
-            "resumable": bool(self.resumable),
-            "supports_resume": bool(self.resumable),
-            "supports_steer": bool(self.supports_steer),
-            "supports_compact": supports_compact,
-            "supports_mcp": bool(self.supports_mcp),
-            "supports_routing": self.supports_routing,
-            "supports_auth": self.supports_auth,
-            "supports_usage": bool(self.supports_usage),
-            "login_kind": self.login_kind,
-            "effort_ui": self.effort_ui,
-            "effort_help": self.effort_help,
-        }
-
-
-_ADAPTERS: tuple[BackendAdapter, ...] = (
-    BackendAdapter(
-        id=CLAUDE, label="Claude", required_binary="claude",
-        supports_fork=True, supports_transcript_streaming=True,
-        efforts=("low", "medium", "high", "xhigh", "max"),
-        badge="BackendClaude",
-        detail="Runs on Claude Code.",
-        symbol="sparkles",
-        brand=BackendBrand("#e08b6a", "#c9603d", "#d97757", "#b85433"),
-        supports_mcp=True,
-        supports_usage=True,
-        login_kind="cli",
-        effort_scope="model",
-        routing_module="clarp_runner",
-        runner_module="clarp_runner",
-        runner="clarp",
-        config_model_field="claude_model",
-        config_effort_field="claude_effort",
-        # This deployment runs opus-*[1m] (the 1M context beta, per
-        # ~/.claude.json); the native gauge divides tokens by this.
-        context_window=1_000_000,
-        api_providers=(),
-        native_tool_explainer=False,
-        janitor_default_model="",
-        # Claude fronts several model families, so the backend alone is no
-        # evidence of which model is answering.
-        model_family="",
-        fallback_models=(
-            ("fable", "Fable"),
-            ("opus", "Opus"),
-            ("sonnet", "Sonnet"),
-            ("haiku", "Haiku"),
-            ("claude-fable-5-1", "Claude Fable 5.1"),
-            ("claude-opus-5-5", "Claude Opus 5.5"),
-            ("claude-opus-5", "Claude Opus 5"),
-            ("claude-sonnet-5", "Claude Sonnet 5"),
-            ("claude-haiku-4-5", "Claude Haiku 4.5"),
-            ("claude-opus-4-8", "Claude Opus 4.8"),
-            ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
-        ),
-    ),
-    BackendAdapter(
-        id=CODEX, label="Codex", required_binary="codex",
-        supports_steer=True,
-        # The live catalogue (`codex debug models`) reports xhigh/max on every
-        # currently listed model and ultra on the 5.6 family; the old
-        # three-level tuple silently dropped anything above `high`, so a pinned
-        # xhigh agent ran at the CLI default instead.
-        efforts=("low", "medium", "high", "xhigh", "max", "ultra"),
-        badge="BackendCodex",
-        detail="Runs on the Codex CLI.",
-        symbol="terminal",
-        brand=BackendBrand("#2b2f3c", "#14161d", "#c0caf5", "#3c4257"),
-        supports_usage=True,
-        login_kind="device_code",
-        effort_scope="model",
-        routing_module="codex_runner",
-        runner_module="codex_app_server",
-        runner="codex",
-        extra_interrupt_modules=("codex_runner",),
-        config_model_field="codex_model",
-        config_effort_field="codex_reasoning_effort",
-        context_window=None,
-        # Codex is the catalogue that lists GPT models; the OpenAI API
-        # routing provider executes through it.
-        api_providers=("openai",),
-        native_tool_explainer=True,
-        janitor_default_model="gpt-5.3-codex-spark",
-        model_family="codex",
-        fallback_models=(
-            ("gpt-5.4", "GPT-5.4"),
-            ("gpt-5.4-mini", "GPT-5.4 Mini"),
-            ("gpt-5.2-codex", "GPT-5.2 Codex"),
-            ("gpt-5.1-codex-max", "GPT-5.1 Codex Max"),
-            ("gpt-5.1-codex", "GPT-5.1 Codex"),
-            ("gpt-5-codex", "GPT-5 Codex"),
-        ),
-    ),
-    BackendAdapter(
-        id=AGY, label="Antigravity", required_binary="agy",
-        efforts=("low", "medium", "high"),
-        aliases=("antigravity",),
-        badge="BackendAntigravity",
-        detail="Runs on Antigravity.",
-        symbol="circle.hexagongrid",
-        brand=BackendBrand("#1d2742", "#0e1424", "#4c8ef7", "#2b6ed6"),
-        # AGY model ids carry their own effort suffix ("...-flash-high"), so
-        # the effort picker is folded into the model choice.
-        effort_ui="folded_into_model",
-        effort_help="Included in model choice",
-        effort_scope="provider_flag",
-        routing_module="agy_runner",
-        runner_module="agy_runner",
-        runner="agy",
-        config_model_field="agy_model",
-        context_window=None,
-        api_providers=(),
-        native_tool_explainer=False,
-        janitor_default_model="",
-        model_family="gemini",
-        fallback_models=(
-            ("gemini-3.7-flash-high", "Gemini 3.7 Flash (High)"),
-            ("gemini-3.7-flash-medium", "Gemini 3.7 Flash (Medium)"),
-            ("gemini-3.7-flash-low", "Gemini 3.7 Flash (Low)"),
-            ("gemini-3.6-flash-high", "Gemini 3.6 Flash (High)"),
-            ("gemini-3.6-flash-medium", "Gemini 3.6 Flash (Medium)"),
-            ("gemini-3.6-flash-low", "Gemini 3.6 Flash (Low)"),
-            ("gemini-3.5-flash-medium", "Gemini 3.5 Flash (Medium)"),
-            ("gemini-3.5-flash-high", "Gemini 3.5 Flash (High)"),
-            ("gemini-3.5-flash-low", "Gemini 3.5 Flash (Low)"),
-            ("gemini-3.1-pro-high", "Gemini 3.1 Pro (High)"),
-            ("gemini-3.1-pro-low", "Gemini 3.1 Pro (Low)"),
-            ("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)"),
-            ("claude-opus-4-6-thinking", "Claude Opus 4.6 (Thinking)"),
-            ("gpt-oss-120b-medium", "GPT-OSS 120B (Medium)"),
-        ),
-    ),
-    BackendAdapter(
-        id=GROK, label="Grok", required_binary="grok",
-        efforts=("low", "medium", "high"),
-        badge="BackendGrok",
-        detail="Runs on Grok Build.",
-        # The letterform "x", not `xmark.circle` — that one is the system
-        # dismiss/error glyph, so a Grok contact wearing it reads as a broken
-        # or failed avatar rather than a brand mark.
-        symbol="x.circle",
-        brand=BackendBrand("#1a1a1a", "#0a0a0a", "#e8e8e8", "#222222"),
-        routing_module="grok_runner",
-        runner_module="grok_runner",
-        runner="grok",
-        config_model_field="grok_model",
-        config_effort_field="grok_effort",
-        context_window=None,
-        # No interactive terminal launch is defined for this CLI yet.
-        api_providers=(),
-        native_tool_explainer=False,
-        janitor_default_model="",
-        model_family="grok",
-        fallback_models=(
-            ("grok-4.6", "Grok 4.6"),
-            ("grok-4.5", "Grok 4.5"),
-        ),
-    ),
-    BackendAdapter(
-        id=OPENCODE, label="OpenCode", required_binary="opencode",
-        efforts=("low", "medium", "high", "max"),
-        aliases=("open-code", "opencode-ai"),
-        badge="BackendOpenCode",
-        detail="Runs on OpenCode.",
-        symbol="chevron.left.forwardslash.chevron.right",
-        brand=BackendBrand("#16352b", "#0b1c16", "#5ee4b5", "#1f8a65"),
-        routing_module="opencode_runner",
-        runner_module="opencode_runner",
-        runner="opencode",
-        config_model_field="opencode_model",
-        config_effort_field="opencode_effort",
-        context_window=None,
-        # No interactive terminal launch is defined for this CLI yet.
-        api_providers=(),
-        native_tool_explainer=False,
-        janitor_default_model="",
-        # OpenCode fronts several families; see Claude.
-        model_family="",
-        fallback_models=(
-            ("opencode/gpt-5.4", "GPT-5.4"),
-            ("anthropic/claude-sonnet-4-5", "Claude Sonnet 4.5"),
-            ("openai/gpt-5.4", "GPT-5.4 (OpenAI)"),
-        ),
-    ),
-    # DeepSeek is a model family, not a CLI: the card runs through the
-    # OpenCode binary but its catalogue is only the DeepSeek models OpenCode
-    # exposes (Fireworks, Hugging Face, ...), so the chooser reads
-    # "DeepSeek -> model" instead of "OpenCode -> provider -> model".
-    BackendAdapter(
-        id=DEEPSEEK, label="DeepSeek", required_binary="opencode",
-        efforts=("low", "medium", "high", "max"),
-        aliases=("deep-seek",),
-        badge="BackendDeepSeek",
-        detail="Runs DeepSeek models through OpenCode.",
-        symbol="water.waves",
-        brand=BackendBrand("#4d6bfe", "#2b47d6", "#6f88ff", "#3554e6"),
-        routing_module="opencode_runner",
-        runner_module="opencode_runner",
-        runner="opencode",
-        config_model_field="deepseek_model",
-        config_effort_field="deepseek_effort",
-        context_window=None,
-        # No interactive terminal launch is defined for this CLI yet.
-        api_providers=(),
-        native_tool_explainer=False,
-        janitor_default_model="",
-        model_family="deepseek",
-        fallback_models=(
-            ("fireworks-ai/accounts/fireworks/routers/deepseek-pro-latest", "DeepSeek Pro (latest, Fireworks)"),
-            ("fireworks-ai/accounts/fireworks/routers/deepseek-flash-latest", "DeepSeek Flash (latest, Fireworks)"),
-            ("fireworks-ai/accounts/fireworks/models/deepseek-v4-pro", "DeepSeek V4 Pro (Fireworks)"),
-            ("fireworks-ai/accounts/fireworks/models/deepseek-v4p1-flash", "DeepSeek V4.1 Flash (Fireworks)"),
-            ("huggingface/deepseek-ai/DeepSeek-V4-Pro", "DeepSeek V4 Pro (Hugging Face)"),
-            ("huggingface/deepseek-ai/DeepSeek-V4.1-Flash", "DeepSeek V4.1 Flash (Hugging Face)"),
-        ),
-    ),
-)
-
-_BY_ID: dict[str, BackendAdapter] = {a.id: a for a in _ADAPTERS}
-_ALIASES: dict[str, str] = {
-    alias: a.id for a in _ADAPTERS for alias in a.aliases
-}
-
-VALID: set[str] = set(_BY_ID)
-LABELS: dict[str, str] = {a.id: a.label for a in _ADAPTERS}
-EFFORTS: dict[str, tuple[str, ...]] = {a.id: a.efforts for a in _ADAPTERS}
-CAPABILITIES: dict[str, BackendCapabilities] = {
-    a.id: BackendCapabilities(
-        supports_fork=a.supports_fork,
-        supports_transcript_streaming=a.supports_transcript_streaming,
-        required_binary=a.required_binary,
-    )
-    for a in _ADAPTERS
-}
-
-
-def adapters() -> tuple[BackendAdapter, ...]:
-    return _ADAPTERS
+def adapters() -> tuple["Backend", ...]:
+    """Every backend in catalogue order (the name predates the classes)."""
+    return all_backends()
 
 
 def ids() -> tuple[str, ...]:
-    return tuple(a.id for a in _ADAPTERS)
+    return tuple(b.id for b in all_backends())
 
 
 def catalogue_fields(backend: str | None) -> dict[str, Any]:
@@ -483,13 +124,14 @@ def catalogue_fields(backend: str | None) -> dict[str, Any]:
     An unregistered id gets the neutral defaults so a catalogue row is
     always complete; ``sort_index`` follows registry order.
     """
-    adapter = get(backend)
-    if adapter is None:
-        return BackendAdapter(
-            id=str(backend or ""), label=str(backend or ""), required_binary="",
-        ).catalogue_fields(len(_ADAPTERS))
-    return adapter.catalogue_fields(
-        _ADAPTERS.index(adapter), supports_compact=supports_compact(adapter.id))
+    row = get(backend)
+    if row is None:
+        neutral = type("UnregisteredBackend", (Backend,), {
+            "id": str(backend or ""), "label": str(backend or ""),
+            "required_binary": ""})()
+        return neutral.catalogue_fields(len(all_backends()))
+    return row.catalogue_fields(
+        all_backends().index(row), supports_compact=supports_compact(row.id))
 
 
 def supports_compact(backend: str) -> bool:
@@ -501,25 +143,24 @@ def supports_compact(backend: str) -> bool:
     return True
 
 
-def routing_adapters() -> tuple[BackendAdapter, ...]:
-    """Adapters that can answer one isolated orchestrator request."""
-    return tuple(a for a in _ADAPTERS if a.supports_routing)
+def routing_adapters() -> tuple["Backend", ...]:
+    """Backends that can answer one isolated orchestrator request."""
+    return tuple(b for b in all_backends() if b.supports_routing)
 
 
-def auth_adapters() -> tuple[BackendAdapter, ...]:
-    """Adapters whose CLI has a sign-in the Host can drive."""
-    return tuple(a for a in _ADAPTERS if a.supports_auth)
+def auth_adapters() -> tuple["Backend", ...]:
+    """Backends whose CLI has a sign-in the Host can drive."""
+    return tuple(b for b in all_backends() if b.supports_auth)
 
 
-def get(backend: str | None) -> BackendAdapter | None:
-    b = (backend or "").strip().lower()
-    b = _ALIASES.get(b, b)
-    return _BY_ID.get(b)
+def get(backend: str | None):
+    """The backend object for a known id or alias, else None."""
+    return by_id(backend) if is_valid(backend) else None
 
 
-def adapter_for(backend: str | None) -> BackendAdapter:
-    """The adapter that runs ``backend``, normalised like ``normalize``."""
-    return get(normalize(backend)) or _BY_ID[DEFAULT]
+def adapter_for(backend: str | None):
+    """Alias of ``by_id``: the backend object, normalised like ``normalize``."""
+    return by_id(backend)
 
 
 def for_provider(provider: str) -> str:
@@ -528,15 +169,14 @@ def for_provider(provider: str) -> str:
     A registered backend id passes through; an API-key provider maps to the
     CLI whose adapter fronts it (``openai`` runs through Codex).
     """
-    for a in _ADAPTERS:
-        if provider in a.api_providers:
-            return a.id
+    for b in all_backends():
+        if provider in b.api_providers:
+            return b.id
     return provider
 
 
 def valid_efforts(backend: str) -> tuple[str, ...]:
-    adapter = get(normalize(backend))
-    return adapter.efforts if adapter else ()
+    return by_id(backend).efforts
 
 
 def clean_effort(backend: str, effort: str | None) -> str:
@@ -565,15 +205,14 @@ def is_valid(backend: str | None) -> bool:
 
 
 def label(backend: str | None) -> str:
-    adapter = get(normalize(backend))
-    return adapter.label if adapter else LABELS[DEFAULT]
+    return by_id(backend).label
 
 
 def capabilities(backend: str | None) -> BackendCapabilities:
     runner = by_id(backend)
     return BackendCapabilities(
-        supports_fork=runner.adapter.supports_fork,
-        supports_transcript_streaming=runner.adapter.supports_transcript_streaming,
+        supports_fork=runner.supports_fork,
+        supports_transcript_streaming=runner.supports_transcript_streaming,
         required_binary=runner.executable(),
     )
 
@@ -595,13 +234,14 @@ def interrupt_any(agent_id: str) -> int:
     from .turn_model_fallback import REGISTRY
     total = REGISTRY.interrupt(agent_id, event="fallbackInterruptFail")
     seen: set[str] = set()
-    for adapter in _ADAPTERS:
-        modules = (adapter.runner_module,) + adapter.extra_interrupt_modules
-        for name in modules:
-            if name in seen:
-                continue
-            seen.add(name)
-            total += int(_mod(name).interrupt(agent_id) or 0)
+    for b in all_backends():
+        if b.runner and b.runner not in seen:
+            seen.add(b.runner)
+            total += int(b.interrupt(agent_id) or 0)
+        for name in b.extra_interrupt_modules:
+            if name not in seen:
+                seen.add(name)
+                total += int(_mod(name).interrupt(agent_id) or 0)
     return total
 
 
@@ -689,3 +329,19 @@ ResultCb = Callable[[dict], None]
 from .backend.base import Backend, CompactionStrategy, Unsupported  # noqa: E402
 from .backend.registry import by_id, for_agent  # noqa: E402
 from .backend.registry import all as all_backends  # noqa: E402
+
+# Lookup tables derived from the classes. Built here, after the package
+# import, because the class modules may import this facade lazily.
+_BY_ID: dict[str, Backend] = {b.id: b for b in all_backends()}
+_ALIASES: dict[str, str] = {alias: b.id for b in all_backends() for alias in b.aliases}
+VALID: set[str] = set(_BY_ID)
+LABELS: dict[str, str] = {b.id: b.label for b in all_backends()}
+EFFORTS: dict[str, tuple[str, ...]] = {b.id: b.efforts for b in all_backends()}
+CAPABILITIES: dict[str, BackendCapabilities] = {
+    b.id: BackendCapabilities(
+        supports_fork=b.supports_fork,
+        supports_transcript_streaming=b.supports_transcript_streaming,
+        required_binary=b.required_binary,
+    )
+    for b in all_backends()
+}

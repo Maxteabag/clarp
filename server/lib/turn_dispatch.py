@@ -1706,7 +1706,7 @@ class TurnDispatchService:
                 message_store.finalize_live_assistant_message(agent_id=spec.agent_id,
                     backend_session_id=conversation_id, trace_id=spec.trace_id, text=text)
             if spec.synthesize_audio:
-                from .codex_runner import spoken_for_tts
+                from .voice_markup import spoken_for_tts
                 spoken = spoken_for_tts(text)
                 if spoken:
                     agent = agents_db.get_by_agent_id(spec.agent_id) or {}

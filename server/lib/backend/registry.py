@@ -30,15 +30,12 @@ _INSTANCES: dict[str, Backend] | None = None
 
 
 def _instances() -> dict[str, Backend]:
-    """Build the singletons on first use, after ``lib.backends`` has its
-    adapter rows (the two modules import each other)."""
+    """Build the singletons on first use."""
     global _INSTANCES
     if _INSTANCES is None:
         with _LOCK:
             if _INSTANCES is None:
-                from .. import backends as facade
-                _INSTANCES = {bid: cls(facade._BY_ID[bid])
-                              for bid, cls in _CLASSES.items()}
+                _INSTANCES = {bid: cls() for bid, cls in _CLASSES.items()}
     return _INSTANCES
 
 

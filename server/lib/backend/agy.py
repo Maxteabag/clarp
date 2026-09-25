@@ -23,7 +23,7 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..protocol import AgentState
 from ..voice_preamble import apply_voice_preamble
-from .base import CompactionStrategy, hooked
+from .base import BackendBrand, CompactionStrategy, hooked
 from .stream_json import StreamJsonBackend, make_handle, popen_turn
 
 _CLEAN_STATUSES = {"SUCCESS"}
@@ -388,6 +388,39 @@ def _canonical_tool_input(name: str, value: Any) -> dict[str, Any]:
 
 class AgyBackend(StreamJsonBackend):
     """Runs ``agy --print`` once per turn; validates model ids against its catalogue."""
+    # --- catalogue data (was the BackendAdapter registry row) ------------
+    id = 'agy'
+    label = 'Antigravity'
+    required_binary = 'agy'
+    aliases = ('antigravity',)
+    badge = 'BackendAntigravity'
+    detail = 'Runs on Antigravity.'
+    symbol = 'circle.hexagongrid'
+    brand = BackendBrand('#1d2742', '#0e1424', '#4c8ef7', '#2b6ed6')
+    efforts = ('low', 'medium', 'high')
+    effort_ui = 'folded_into_model'
+    effort_help = 'Included in model choice'
+    effort_scope = 'provider_flag'
+    runner = 'agy'
+    config_model_field = 'agy_model'
+    model_family = 'gemini'
+    fallback_models = (
+        ('gemini-3.7-flash-high', 'Gemini 3.7 Flash (High)'),
+        ('gemini-3.7-flash-medium', 'Gemini 3.7 Flash (Medium)'),
+        ('gemini-3.7-flash-low', 'Gemini 3.7 Flash (Low)'),
+        ('gemini-3.6-flash-high', 'Gemini 3.6 Flash (High)'),
+        ('gemini-3.6-flash-medium', 'Gemini 3.6 Flash (Medium)'),
+        ('gemini-3.6-flash-low', 'Gemini 3.6 Flash (Low)'),
+        ('gemini-3.5-flash-medium', 'Gemini 3.5 Flash (Medium)'),
+        ('gemini-3.5-flash-high', 'Gemini 3.5 Flash (High)'),
+        ('gemini-3.5-flash-low', 'Gemini 3.5 Flash (Low)'),
+        ('gemini-3.1-pro-high', 'Gemini 3.1 Pro (High)'),
+        ('gemini-3.1-pro-low', 'Gemini 3.1 Pro (Low)'),
+        ('claude-sonnet-4-6', 'Claude Sonnet 4.6 (Thinking)'),
+        ('claude-opus-4-6-thinking', 'Claude Opus 4.6 (Thinking)'),
+        ('gpt-oss-120b-medium', 'GPT-OSS 120B (Medium)'),
+    )
+
 
     transcript = agy_transcript
     # agy admits ``run_if_owned`` (the spawn gate) on top of the stream set.

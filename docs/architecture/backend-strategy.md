@@ -1,7 +1,8 @@
 # Backends as strategies
 
-Status: accepted 2026-09-25. Owner: Peter. This document is the contract for
-the `refactor/backend-strategy` change and for every backend added after it.
+Status: accepted 2026-09-25, implemented in five slices on
+`refactor/backend-strategy`. Owner: Peter. This document is the contract for
+every backend added after it.
 
 ## The rule
 
@@ -87,10 +88,12 @@ a new method, not a new flag.
   composition over an existing strategy, not a copy.
 * No `isinstance` checks on backend classes outside the registry and tests.
 
-## Migration slices
+## Migration slices (done)
 
-Each slice is one commit on the branch, gated by the full suite against the
-clean baseline, behaviour-preserving unless a line here says otherwise.
+Each slice was one commit on the branch, gated by the full suite against the
+clean baseline, behaviour-preserving unless a line here says otherwise. The
+`BackendAdapter` dataclass survives only as the declarative catalogue row a
+backend is built from; `adapter_for()` and `get()` return the backend object.
 
 1. Package, `Backend` base, registry, six subclasses whose methods delegate
    to today's runner modules and adapter callables. `backends.py` gains
@@ -117,7 +120,16 @@ clean baseline, behaviour-preserving unless a line here says otherwise.
    `supports_mcp`, `login_kind`, `effort_*`, `config_*_field`,
    `routing_module`, `runner_module`, `extra_interrupt_modules`,
    `native_tool_explainer`) for slice 5 to fold in.
-5. `BackendAdapter` is reduced to the data attributes and merged into
-   `Backend`; `adapter_for()` becomes an alias of `by_id()`; the runner
-   delegators that no caller uses are removed; the guard test bans
-   `backends.X ==` and `in {backends.` outright.
+5. `BackendAdapter` is gone: each class declares its catalogue data as
+   class attributes (DeepSeek overrides only what differs from OpenCode),
+   `Backend.__init__` validates them, and the facade's tables (`_BY_ID`,
+   `LABELS`, `EFFORTS`, `CAPABILITIES`) are derived from the registry.
+   `adapter_for()` is an alias of `by_id()`. The guard test bans identity
+   branching everywhere outside `registry.py`, including `reconcile.py` and
+   `transcript_streamer.py`, whose last Claude branches are gone.
+
+   Deviation, on purpose: the five `<runner>_runner.py` modules stay as thin
+   delegators to the classes. No production code calls them any more, but
+   106 runner tests exercise the runners through those module names and
+   patch their globals. Porting those tests is a follow-up; until then the
+   modules are the test seam and nothing else.

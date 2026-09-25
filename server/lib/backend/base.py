@@ -29,8 +29,6 @@ from typing import TYPE_CHECKING, Any, Callable
 from ..log import log_exception
 from ..process_registry import ProcessRegistry
 
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..backends import BackendAdapter
 
 # One live-turn registry per runner, shared by every backend that runs
 # through it (DeepSeek on OpenCode), so ``interrupt_any`` and the runner
@@ -93,30 +91,97 @@ def hooked(method: Callable[..., Any]) -> Callable[..., Any]:
     return call
 
 
+@dataclass(frozen=True)
+class BackendBrand:
+    """Chooser colours as ``#rrggbb`` strings.
+
+    Served on the catalogue so a client never has to ship a palette per CLI:
+    a new backend picks its own field and tint and every app renders it.
+    """
+    field_top: str
+    field_bottom: str
+    tint_dark: str
+    tint_light: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "field_top": self.field_top,
+            "field_bottom": self.field_bottom,
+            "tint_dark": self.tint_dark,
+            "tint_light": self.tint_light,
+        }
+
+
+# Neutral treatment for a backend that declares no brand of its own.
+DEFAULT_BRAND = BackendBrand("#2a3142", "#151820", "#a8b4c8", "#4a5568")
+DEFAULT_SYMBOL = "cpu"
+
+# How a client obtains credentials for the CLI. "none" hides the sign-in row.
+LOGIN_KINDS = ("none", "device_code", "cli", "api_key")
+# How a client offers the effort control. "folded_into_model" means the model
+# id already encodes the effort (AGY), so the picker is replaced by a note.
+EFFORT_UIS = ("picker", "hidden", "folded_into_model")
+# Where effort evidence lives: per model ("model"), one list for the whole
+# provider ("provider"), or a provider flag whose compatibility with a chosen
+# model is unknown ("provider_flag").
+EFFORT_SCOPES = ("model", "provider", "provider_flag")
+
+
 class Backend:
     """One coding CLI the host can run as an agent backend."""
 
-    def __init__(self, adapter: "BackendAdapter") -> None:
-        # Transitional: today's registry row, deleted in slice 5.
-        self.adapter = adapter
-        # --- data -----------------------------------------------------------
-        self.id: str = adapter.id
-        self.label: str = adapter.label
-        self.required_binary: str = adapter.required_binary
-        self.aliases: tuple[str, ...] = adapter.aliases
-        self.efforts: tuple[str, ...] = adapter.efforts
-        self.context_window: int | None = adapter.context_window
-        self.model_family: str = adapter.model_family
-        self.janitor_default_model: str = adapter.janitor_default_model
-        self.api_providers: tuple[str, ...] = adapter.api_providers
-        self.login_kind: str = adapter.login_kind
-        self.effort_ui: str = adapter.effort_ui
-        self.effort_scope: str = adapter.effort_scope
-        self.fallback_models: tuple[tuple[str, str], ...] = adapter.fallback_models
-        # The runner's short name: prefix of its log events and drain
-        # threads, the ``dispatch`` tag on its state rows, and the stem of
-        # the ``lib.<runner>_runner`` module. "" for a backend with no runner.
-        self.runner: str = adapter.runner
+    # --- catalogue data: every subclass overrides what differs -------------
+    id: str = ""
+    label: str = ""
+    required_binary: str = ""
+    supports_fork: bool = False
+    supports_steer: bool = False
+    supports_transcript_streaming: bool = False
+    supports_routing: bool = True
+    efforts: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
+    badge: str = ""
+    # Presentation the chooser needs; nothing here requires a client build.
+    detail: str = ""
+    symbol: str = DEFAULT_SYMBOL
+    brand: BackendBrand = DEFAULT_BRAND
+    hidden: bool = False
+    # Capability flags advertised on the catalogue. Compact, routing and auth
+    # are derived from behaviour rather than declared twice.
+    supports_mcp: bool = False
+    supports_usage: bool = False
+    login_kind: str = "none"
+    effort_ui: str = "picker"
+    effort_help: str = ""
+    effort_scope: str = "provider"
+    # The runner's short name: prefix of its log events and drain threads,
+    # the ``dispatch`` tag on its state rows and the stem of the
+    # ``lib.<runner>_runner`` module. DeepSeek runs through OpenCode's.
+    runner: str = ""
+    extra_interrupt_modules: tuple[str, ...] = ()
+    config_model_field: str = ""
+    config_effort_field: str = ""
+    fallback_models: tuple[tuple[str, str], ...] = ()
+    resumable: bool = True
+    # Context gauge: the window (tokens) the CLI's transcript fills, or None
+    # when the CLI auto-compacts and shows no gauge.
+    context_window: int | None = None
+    # API-key providers whose model catalogue this CLI fronts ("openai").
+    api_providers: tuple[str, ...] = ()
+    # The Janitor tool explainer can run natively through this CLI.
+    native_tool_explainer: bool = False
+    # Model a new Janitor gets when none is chosen; empty means CLI default.
+    janitor_default_model: str = ""
+    # Model family the CLI stands for when the Agent pins no model (avatars).
+    model_family: str = ""
+
+    def __init__(self) -> None:
+        if self.login_kind not in LOGIN_KINDS:
+            raise ValueError(f"{self.id}: unknown login_kind {self.login_kind!r}")
+        if self.effort_ui not in EFFORT_UIS:
+            raise ValueError(f"{self.id}: unknown effort_ui {self.effort_ui!r}")
+        if self.effort_scope not in EFFORT_SCOPES:
+            raise ValueError(f"{self.id}: unknown effort_scope {self.effort_scope!r}")
         # Live turn processes, agent_id -> handles; one per runner.
         self._registry: ProcessRegistry | None = None
         if self.runner:
@@ -124,8 +189,62 @@ class Backend:
                 _REGISTRIES[self.runner] = ProcessRegistry(log_exception=log_exception)
             self._registry = _REGISTRIES[self.runner]
 
+    @property
+    def supports_auth(self) -> bool:
+        return self.login_kind != "none"
+
+    @property
+    def effort_compatibility_unknown(self) -> bool:
+        """Effort is a provider flag whose fit with a pinned model is unknown."""
+        return self.effort_scope == "provider_flag"
+
+    @property
+    def model_carries_effort(self) -> bool:
+        return self.effort_ui == "folded_into_model"
+
+    def catalogue_fields(self, sort_index: int, *,
+                         supports_compact: bool = False) -> dict[str, Any]:
+        """The presentation and capability block of one catalogue row."""
+        return {
+            "label": self.label,
+            "detail": self.detail or f"Runs on {self.label}.",
+            "badge": self.badge,
+            "symbol": self.symbol or DEFAULT_SYMBOL,
+            "brand": self.brand.as_dict(),
+            "sort_index": sort_index,
+            "hidden": self.hidden,
+            "supports_fork": bool(self.supports_fork),
+            "resumable": bool(self.resumable),
+            "supports_resume": bool(self.resumable),
+            "supports_steer": bool(self.supports_steer),
+            "supports_compact": supports_compact,
+            "supports_mcp": bool(self.supports_mcp),
+            "supports_routing": self.supports_routing,
+            "supports_auth": self.supports_auth,
+            "supports_usage": bool(self.supports_usage),
+            "login_kind": self.login_kind,
+            "effort_ui": self.effort_ui,
+            "effort_help": self.effort_help,
+        }
+
     def __repr__(self) -> str:
         return f"<{type(self).__name__} {self.id}>"
+
+    # --- derived data ------------------------------------------------------
+
+
+    @property
+    def supports_auth(self) -> bool:
+        return self.login_kind != "none"
+
+    @property
+    def effort_compatibility_unknown(self) -> bool:
+        """Effort is a provider flag whose fit with a pinned model is unknown."""
+        return self.effort_scope == "provider_flag"
+
+    @property
+    def model_carries_effort(self) -> bool:
+        return self.effort_ui == "folded_into_model"
 
     # --- slice-3 seam: the runner module's globals -------------------------
 
@@ -133,6 +252,13 @@ class Backend:
     def runner_module(self) -> str:
         """The ``lib`` module that delegates to this class ("" when none)."""
         return f"{self.runner}_runner" if self.runner else ""
+
+    @property
+    def routing_module(self) -> str:
+        """The runner module whose ``routing_cmd``/``routing_text`` tests patch
+        for the orchestrator path; "" when the CLI cannot answer isolated
+        requests."""
+        return self.runner_module if self.supports_routing else ""
 
     def _hook(self, name: str, own: Any = None) -> Any:
         """``own`` unless a test replaced ``name`` on the runner module.
@@ -172,14 +298,14 @@ class Backend:
         are skipped.
         """
         if self._registry is None:
-            raise NotImplementedError(f"{self.id}: interrupt")
+            return 0
         return self._registry.interrupt(agent_id, event=f"{self.runner}InterruptFail")
 
     @hooked
     def active_handles(self, agent_id: str) -> list:
         """Handles of the agent's live turn processes (empty when idle)."""
         if self._registry is None:
-            raise NotImplementedError(f"{self.id}: active_handles")
+            return []
         return self._registry.active_handles(agent_id)
 
     def register_handle(self, agent_id: str, handle) -> None:
@@ -298,13 +424,12 @@ class Backend:
 
     def default_model_effort(self, cfg) -> tuple[str, str]:
         """The Host-configured default model and effort for this CLI."""
-        adapter = self.adapter
         model = ""
         effort = ""
-        if adapter.config_model_field:
-            model = str(getattr(cfg, adapter.config_model_field, "") or "")
-        if adapter.config_effort_field:
-            effort = str(getattr(cfg, adapter.config_effort_field, "") or "")
+        if self.config_model_field:
+            model = str(getattr(cfg, self.config_model_field, "") or "")
+        if self.config_effort_field:
+            effort = str(getattr(cfg, self.config_effort_field, "") or "")
         return model.strip(), self.clean_effort(effort)
 
     def clean_effort(self, effort: str | None) -> str:

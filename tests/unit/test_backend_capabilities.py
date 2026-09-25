@@ -36,8 +36,7 @@ BRANCH = re.compile(
 # The registry itself, the model catalogue and the per-CLI runner/transcript
 # modules are allowed to know which CLI they are. transcript_streamer.py and
 # reconcile.py are being refactored separately.
-EXCLUDED = {"backends.py", "provider_capabilities.py",
-            "transcript_streamer.py", "reconcile.py"}
+EXCLUDED = {"backends.py", "provider_capabilities.py"}
 EXCLUDED_SUFFIXES = ("_runner.py", "_transcript.py")
 
 # Branches that remain, with why. ``cfg.oracle_router_backend`` chooses the
@@ -96,14 +95,22 @@ _ID_LISTING = re.compile(
 
 
 def test_registry_is_the_only_package_file_that_lists_ids():
-    """A backend class learns its id from the row it is built on; naming a
-    sibling by id inside the package would be the identity branch the
-    contract forbids."""
+    """A backend class declares its own id in its catalogue data block;
+    naming a sibling by id anywhere else inside the package would be the
+    identity branch the contract forbids."""
     offenders = []
     for path in sorted(PACKAGE.glob("*.py")):
         if path.name == PACKAGE_ID_LISTER:
             continue
+        in_data_block = False
         for number, line in enumerate(path.read_text().splitlines(), 1):
+            if line.strip().startswith("# --- catalogue data"):
+                in_data_block = True
+                continue
+            if in_data_block and not line.strip():
+                in_data_block = False
+            if in_data_block:
+                continue
             if _ID_LISTING.search(line):
                 offenders.append(f"{path.relative_to(ROOT)}:{number}: {line.strip()}")
     assert not offenders, (
@@ -139,7 +146,9 @@ DELETED_FLAGS = ("preassigns_session_id", "hook_source_marker", "account_pool",
 
 @pytest.mark.parametrize("backend", IDS)
 def test_every_adapter_declares_every_capability(backend):
-    adapter = backends.get(backend)
+    # Behaviour lives on the Backend object as methods; the names that used
+    # to be flags may exist only as callables now, never as data.
+    adapter = backends._BY_ID[backends.normalize(backend)]
     assert adapter is not None
     for name in REQUIRED_STR:
         assert isinstance(getattr(adapter, name), (str, tuple)), name
@@ -150,7 +159,8 @@ def test_every_adapter_declares_every_capability(backend):
     for name in OPTIONAL:
         assert hasattr(adapter, name), name
     for name in DELETED_FLAGS:
-        assert not hasattr(adapter, name), name
+        value = getattr(adapter, name, None)
+        assert value is None or callable(value), f"{name} is data, not behaviour"
 
 
 def test_declared_values_match_the_behaviour_they_replaced():
