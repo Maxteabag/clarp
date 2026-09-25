@@ -16,7 +16,13 @@ def toml_value(value) -> str:
 def set_toml_value(path: Path, section: str, key: str, value) -> None:
     lines = path.read_text().splitlines() if path.exists() else []
     header = f"[{section}]"
-    start = next((i for i, line in enumerate(lines) if line.strip() == header), None)
+
+    def is_header(line: str) -> bool:
+        # `[tts] # voice` is a legal table header; a trailing comment must not
+        # make the writer append a second `[tts]` table.
+        return line.split("#", 1)[0].strip() == header
+
+    start = next((i for i, line in enumerate(lines) if is_header(line)), None)
     rendered = f"{key} = {toml_value(value)}"
     if start is None:
         if lines and lines[-1].strip():

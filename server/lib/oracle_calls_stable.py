@@ -129,8 +129,13 @@ class AgentTools:
             selected = [r for r in rows if r['role'] in ('user', 'assistant')][-10:]
             budget, output = 12000, []
             for r in reversed(selected):
+                if budget <= 0:
+                    break
                 text = str(r['text'])[:min(2000, budget)]
-                if not text: break
+                if not text:
+                    # A tool-only or empty turn at the head must not hide the
+                    # older history from Oracle; only an exhausted budget stops.
+                    continue
                 budget -= len(text)
                 output.append({'id': r['id'], 'role': r['role'], 'timestamp': r['timestamp'], 'text': text})
             newest = max((r['timestamp'] for r in output), default='')
