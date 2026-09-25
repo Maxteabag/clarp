@@ -95,3 +95,43 @@ def test_remote_network_mode_requires_authentication(tmp_path, mode):
     path.write_text(f'[server]\nauth_token = ""\n[network]\nmode = "{mode}"\n')
     with pytest.raises(config.ConfigError, match='authentication'):
         config.load(path)
+
+
+def test_load_reloads_when_asked_for_a_different_path(tmp_path):
+    first = tmp_path / "a.toml"
+    second = tmp_path / "b.toml"
+    first.write_text('[server]\nport = 7001\n')
+    second.write_text('[server]\nport = 7002\n')
+    config.reset_cache()
+    assert config.load(first).port == 7001
+    # Same path: served from the cache without touching the file again.
+    first.write_text('[server]\nport = 7999\n')
+    assert config.load(first).port == 7001
+    # A different path is a different answer, not the stale cache.
+    assert config.load(second).port == 7002
+    config.reset_cache()
+
+
+def test_concurrent_first_loads_share_one_parse(tmp_path, monkeypatch):
+    import threading
+    path = tmp_path / "c.toml"
+    path.write_text('[server]\nport = 7003\n')
+    config.reset_cache()
+    parses = []
+    real = config.tomllib.load
+
+    def counting(fh):
+        parses.append(1)
+        return real(fh)
+
+    monkeypatch.setattr(config.tomllib, "load", counting)
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(config.load(path).port))
+               for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results == [7003] * 8
+    assert len(parses) == 1
+    config.reset_cache()
