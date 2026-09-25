@@ -226,20 +226,10 @@ class AutonomyJanitors:
             if result.get('status') in ['recovering','nothing_to_resume']:settings_store.set_bool(key,True)
 
 def quota_window_key(provider, account, window):
-    identity = window['window_id']
-    adapter = backends.get(provider)
-    if adapter is not None and adapter.quota_reset_jittered and window.get('kind') and window.get('resets_at'):
-        import datetime
-        try:
-            reset = datetime.datetime.fromisoformat(window['resets_at'].replace('Z', '+00:00'))
-            if reset.tzinfo is not None:
-                # Claude reports the same reset with fractional-second jitter.
-                # Only notification identity is rounded; provider data and
-                # displayed reset times remain exact. Windows are hours/days.
-                reset_minute = int((reset.timestamp() + 30) // 60)
-                identity = ['claude-reset-minute-v1', window['kind'], reset_minute]
-        except (ValueError, TypeError, OverflowError):
-            pass
+    # A backend may round its identity (Claude's jittered resets); an API
+    # provider such as openai is not a backend and keeps the window id.
+    identity = (backends.by_id(provider).quota_identity(window)
+                if backends.is_valid(provider) else window['window_id'])
     return 'quota-keeper.window.' + digest([provider, account, identity])
 
 

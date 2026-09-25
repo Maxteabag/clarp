@@ -23,7 +23,7 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..protocol import AgentState
 from ..voice_preamble import apply_voice_preamble
-from .base import hooked
+from .base import CompactionStrategy, hooked
 from .stream_json import StreamJsonBackend, make_handle, popen_turn
 
 _CLEAN_STATUSES = {"SUCCESS"}
@@ -389,6 +389,9 @@ def _canonical_tool_input(name: str, value: Any) -> dict[str, Any]:
 class AgyBackend(StreamJsonBackend):
     """Runs ``agy --print`` once per turn; validates model ids against its catalogue."""
 
+    transcript = agy_transcript
+    # agy admits ``run_if_owned`` (the spawn gate) on top of the stream set.
+    dropped_spawn_kwargs = frozenset({"synthesize_audio", "hook_session"})
     # agy speaks under the turn's own trace only, never the agent's stored one.
     speak_agent_trace = False
     # agy's print mode has its own wall-clock cap (`--print-timeout`, default
@@ -852,3 +855,27 @@ class AgyBackend(StreamJsonBackend):
         if session_id:
             argv += ["--conversation", session_id]
         return argv
+
+    # --- model policy -----------------------------------------------------
+
+    def is_valid_model(self, model: str | None) -> bool:
+        """agy model ids come from its own catalogue (``agy models``)."""
+        value = (model or "").strip()
+        if not value:
+            return True
+        return bool(provider_capabilities.is_dispatchable_agy_model(value))
+
+    # --- sessions and transcripts -----------------------------------------
+
+    def list_sessions(self, cwd: str, *, limit: int = 20,
+                      all_projects: bool = False) -> list[dict]:
+        """The catalogue has no project scope; all-projects is an empty cwd."""
+        return agy_transcript.list_sessions("" if all_projects else cwd, limit=limit)
+
+    # --- compaction -------------------------------------------------------
+
+    def compaction(self, session: str) -> CompactionStrategy:
+        """``/compress`` typed into an interactive ``--conversation`` resume."""
+        return CompactionStrategy(
+            launch=(self.required_binary, "--dangerously-skip-permissions", "--conversation"),
+            command="/compress")

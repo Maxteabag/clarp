@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from .. import agents as agents_db
+from .. import opencode_transcript
 from .. import tts_queue
 from ..log import log, log_exception
 from ..proc_util import stderr_text
@@ -64,6 +65,8 @@ def _session_id_from(ev: dict) -> str:
 
 class OpenCodeBackend(StreamJsonBackend):
     """Runs ``opencode run --format json`` once per turn; no compaction or terminal yet."""
+
+    transcript = opencode_transcript
 
     def build_cmd(self, session_id: str = "", *, is_new_session: bool = False,
                   model: str = "", effort: str = "") -> list[str]:

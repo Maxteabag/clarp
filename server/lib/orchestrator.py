@@ -169,7 +169,7 @@ def provider_options() -> list[dict[str, Any]]:
     """
     rows: list[dict[str, Any]] = []
     for adapter in backends.routing_adapters():
-        binary = adapter.executable()
+        binary = backends.by_id(adapter.id).executable()
         rows.append({
             "id": adapter.id,
             "label": adapter.label,

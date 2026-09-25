@@ -31,6 +31,7 @@ the package guard keeps CLI names out of these classes.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import shutil
 import subprocess
@@ -46,7 +47,7 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..protocol import SSEType
 from ..voice_preamble import persona_identity_instruction
-from .base import Backend, hooked, resolve
+from .base import Backend, CompactionStrategy, hooked, resolve
 from .stream_json import launch, start_drain
 
 
@@ -184,6 +185,15 @@ def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str
         log_exception("clarpLivePartialFail", e, detail=trace_id or agent_id)
 
 
+# The host's spawn keywords ``start_turn`` takes; the rest (``voice_preamble``,
+# ``run_if_owned``, ``synthesize_audio``) belong to the stream runners.
+_SPAWN_KWARGS = frozenset({
+    "text", "cwd", "backend_session_id", "is_new_session", "session",
+    "agent_id", "on_session_init", "on_result", "on_error", "trace_id",
+    "model", "effort", "stream", "isolated", "hook_session",
+})
+
+
 class ClaudeBackend(Backend):
     """Runs the configured Claude CLI once per turn; the only CLI that resumes
     by transcript file, pre-mints its session id and reports through the hook
@@ -195,6 +205,15 @@ class ClaudeBackend(Backend):
         """The configured executable; the body lives on the runner module
         because it spells the CLI names (see the module docstring)."""
         return resolve(self.runner_module, "configured_claude_bin")(cfg)
+
+    def executable(self) -> str:
+        """The Host setting: the official CLI or the clarp wrapper."""
+        return resolve(self.runner_module, "configured_claude_bin")()
+
+    def spawn_turn(self, **spec: Any):
+        """``start_turn`` with the keywords the ``-p`` runner accepts."""
+        kwargs = {k: v for k, v in spec.items() if k in _SPAWN_KWARGS}
+        return self._hook("spawn_turn", self.start_turn)(**kwargs)
 
     def build_cmd(self, backend_session_id: str = "", *,
                   is_new_session: bool = False, model: str = "",
@@ -533,8 +552,7 @@ class ClaudeBackend(Backend):
         """The transcript to resume from, or ``None`` for a ghost session."""
         if not session_id:
             return None
-        return self.adapter.resume_transcript_finder(
-            self.id, session_id, cwd, _projects_root(home))
+        return self.find_transcript(session_id, home, cwd=cwd)
 
     def bind_new_session(self, agent_id: str, session: str, *,
                          uuid_factory: Callable[[], str] | None = None) -> str:
@@ -556,19 +574,36 @@ class ClaudeBackend(Backend):
         return backend_session_id
 
     def find_transcript(self, session_id: str,
-                        home: pathlib.Path | None = None) -> pathlib.Path | None:
-        find = resolve(self.adapter.transcript_module, "find_latest_jsonl")
+                        home: pathlib.Path | None = None, *,
+                        cwd: str = "") -> pathlib.Path | None:
+        """One jsonl per session under ``<home>/.claude/projects/<encoded cwd>/``.
+
+        With a ``cwd`` hint the project dir that encodes it is preferred and
+        the rest of the root is scanned as a fallback (the CLI lets a session
+        cd, so the file lives wherever the first turn ran); without one the
+        inotify-backed index answers.
+        """
         root = _projects_root(home)
+        if cwd:
+            from ..resume import find_session_jsonl
+            return find_session_jsonl(
+                session_id, cwd, root or _projects_root(pathlib.Path.home()))
+        find = resolve("transcript_log", "find_latest_jsonl")
         return find(session_id, projects_root=root) if root is not None else find(session_id)
 
+    def transcript_cwd(self, transcript: Any) -> str:
+        """``~/.claude/projects/-foo-bar`` was written by a session in ``/foo/bar``."""
+        from ..resume import _cwd_from_project_dir
+        return _cwd_from_project_dir(pathlib.Path(transcript).parent)
+
     def parse_transcript(self, path) -> list[dict]:
-        return resolve(self.adapter.transcript_module, "parse_turns")(path)
+        return resolve("transcript_log", "parse_turns")(path)
 
     def list_sessions(self, cwd: str, *, limit: int = 20,
                       all_projects: bool = False) -> list[dict]:
-        adapter = self.adapter
-        return adapter.session_catalog_reader(
-            adapter, cwd, limit=limit, all_projects=all_projects)
+        from .. import session_catalog
+        return session_catalog.list_claude_sessions(
+            cwd, all_projects=all_projects, limit=limit)
 
     # --- interactive terminal ---------------------------------------------
 
@@ -583,6 +618,30 @@ class ClaudeBackend(Backend):
         if plugin is not None:
             argv += ["--plugin-dir", str(plugin)]
         return argv
+
+    # --- model policy -----------------------------------------------------
+
+    def recorded_model(self, session_id: str) -> str:
+        """The model of the transcript's last turn."""
+        if not session_id:
+            return ""
+        return resolve("session_models", "transcript_model")(self.id, session_id)
+
+    def cli_default_model(self) -> str:
+        """``ANTHROPIC_MODEL``, else the ``model`` in the CLI's settings.json."""
+        home = pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
+        data = json.loads((home / "settings.json").read_text())
+        return str(os.environ.get("ANTHROPIC_MODEL") or data.get("model") or "")
+
+    # --- compaction -------------------------------------------------------
+
+    def compaction(self, session: str) -> CompactionStrategy:
+        """``/compact`` typed into an interactive resume; print mode never
+        auto-compacts, and the Host can watch the jsonl settle instead of
+        waiting a fixed window."""
+        return CompactionStrategy(
+            launch=(self.required_binary, "--dangerously-skip-permissions", "--resume"),
+            command="/compact", watches_transcript=True)
 
     # --- credentials and quota --------------------------------------------
 
@@ -610,11 +669,12 @@ class ClaudeBackend(Backend):
 
     # --- turn plumbing ----------------------------------------------------
 
-    def wrap_turn_callback(self, fn: Callable[..., Any]) -> Callable[..., Any]:
+    def wrap_turn_callback(self, fn: Callable[..., Any],
+                           lock: Any) -> Callable[..., Any]:
         """Runner callbacks arrive on the runner's own threads; serialise them
         under the dispatch lock."""
         def invoke(*args: Any):
-            with resolve("turn_dispatch", "_TURN_LOCK"):
+            with lock:
                 return fn(*args)
         return invoke
 

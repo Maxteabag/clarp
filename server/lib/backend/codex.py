@@ -38,18 +38,21 @@ import json
 import os
 import pathlib
 import shutil
+import sqlite3
 import subprocess
+import tomllib
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from .. import agents as agents_db
+from .. import codex_transcript
 from .. import tts_queue
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..protocol import AgentState
 from ..voice_preamble import apply_voice_preamble
-from .base import hooked, resolve
+from .base import CompactionStrategy, hooked, resolve
 from .stream_json import StreamJsonBackend
 
 
@@ -128,19 +131,34 @@ _TOOL_ITEM_TYPES = {
 class CodexBackend(StreamJsonBackend):
     """Runs through the long-lived Codex app-server (``codex_app_server``)."""
 
+    transcript = codex_transcript
+
     # --- the runner: app-server transport ----------------------------------
 
     def spawn_turn(self, **spec: Any):
         """Through the app-server, which keeps ``turn/steer``; it uses
         ``start_turn`` (``codex exec``) itself for isolated jobs."""
-        adapter = self.adapter
-        return resolve(adapter.runner_module, "spawn_turn")(**adapter.spawn_kwargs(spec))
+        kwargs = {k: v for k, v in spec.items() if k not in self.dropped_spawn_kwargs}
+        return resolve("codex_app_server", "spawn_turn")(**kwargs)
 
     def interrupt(self, agent_id: str) -> int:
-        return int(resolve(self.adapter.runner_module, "interrupt")(agent_id) or 0)
+        return int(resolve("codex_app_server", "interrupt")(agent_id) or 0)
 
     def active_handles(self, agent_id: str) -> list:
-        return list(resolve(self.adapter.runner_module, "active_handles")(agent_id) or [])
+        return list(resolve("codex_app_server", "active_handles")(agent_id) or [])
+
+    def goal(self, agent_id: str, action: str, *, objective: str = "",
+             stream: Any = None) -> dict | None:
+        """The app-server's ``thread/goal`` protocol."""
+        return resolve("codex_app_server", "goal")(
+            agent_id, action, objective=objective, stream=stream)
+
+    def steer(self, agent_id: str, text: str, *, client_msg_id: str = "",
+              synthesize_audio: bool = False) -> bool:
+        """``turn/steer`` on the live app-server turn."""
+        return bool(resolve("codex_app_server", "steer")(
+            agent_id, text, client_msg_id=client_msg_id,
+            synthesize_audio=synthesize_audio))
 
     def interrupt_exec(self, agent_id: str) -> int:
         """SIGTERM every in-flight ``codex exec`` turn for an agent. Idempotent."""
@@ -619,6 +637,46 @@ class CodexBackend(StreamJsonBackend):
         if session_id:
             argv += ["resume", session_id]
         return argv
+
+    # --- model policy -----------------------------------------------------
+
+    def _home(self) -> pathlib.Path:
+        return pathlib.Path(os.environ.get("CODEX_HOME") or pathlib.Path.home() / ".codex")
+
+    def model_transcript(self, session_id: str) -> pathlib.Path | None:
+        """The rollout file: the thread index first, else the newest match."""
+        try:
+            with sqlite3.connect(f"file:{self._home() / 'state_5.sqlite'}?mode=ro",
+                                 uri=True, timeout=0.1) as db:
+                row = db.execute("SELECT rollout_path FROM threads WHERE id = ?",
+                                 (session_id,)).fetchone()
+            if row and row[0] and pathlib.Path(row[0]).is_file():
+                return pathlib.Path(row[0])
+        except sqlite3.Error:
+            pass
+        return self.find_transcript(session_id)
+
+    def recorded_model(self, session_id: str) -> str:
+        """The thread index's model, else the rollout's last turn_context."""
+        if not session_id:
+            return ""
+        indexed = resolve("session_models", "indexed_model")(self._home(), session_id)
+        if indexed:
+            return indexed
+        return resolve("session_models", "transcript_model")(self.id, session_id)
+
+    def cli_default_model(self) -> str:
+        """The active profile's ``model`` in config.toml, else the top-level one."""
+        data = tomllib.loads((self._home() / "config.toml").read_text())
+        profile = data.get("profiles", {}).get(data.get("profile", ""), {})
+        return str(profile.get("model") or data.get("model") or "")
+
+    # --- compaction -------------------------------------------------------
+
+    def compaction(self, session: str) -> CompactionStrategy:
+        """``/compact`` typed into ``codex resume <id>``; no transcript handle
+        to watch, so the Host waits a fixed window."""
+        return CompactionStrategy(launch=(self.required_binary, "resume"), command="/compact")
 
     # --- credentials and quota --------------------------------------------
 

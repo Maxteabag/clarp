@@ -11,13 +11,14 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from .. import agents as agents_db
+from .. import grok_transcript
 from .. import tts_queue
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..protocol import AgentState
 from ..voice_preamble import apply_voice_preamble
-from .base import hooked
+from .base import CompactionStrategy, hooked
 from .stream_json import StreamJsonBackend, iter_json_dicts
 
 
@@ -120,6 +121,8 @@ def _usage_from(ev: dict) -> tuple[int, int]:
 
 class GrokBackend(StreamJsonBackend):
     """Runs ``grok -p --output-format streaming-json`` once per turn."""
+
+    transcript = grok_transcript
 
     def build_cmd(self, session_id: str = "", *, is_new_session: bool = False,
                   model: str = "", effort: str = "") -> list[str]:
@@ -394,3 +397,9 @@ class GrokBackend(StreamJsonBackend):
         for ev in iter_json_dicts(stdout):
             text += _assistant_delta(ev)
         return text
+
+    # --- compaction -------------------------------------------------------
+
+    def compaction(self, session: str) -> CompactionStrategy:
+        """``/compact`` typed into ``grok --resume <id>``."""
+        return CompactionStrategy(launch=(self.required_binary, "--resume"), command="/compact")

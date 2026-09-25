@@ -120,6 +120,18 @@ class StreamJsonBackend(Backend):
     live_text_interval: float = 0.25
     #: ``speak`` prefers the agent's stored trace over the turn's own.
     speak_agent_trace: bool = True
+    #: The ``lib.<cli>_transcript`` parser module for this CLI's sessions
+    #: (``find_latest_jsonl``, ``parse_turns``, ``list_sessions``).
+    transcript: Any = None
+    #: Host spawn keywords the stream runners do not take: ``synthesize_audio``
+    #: is read from the DB and ``hook_session`` is Claude's hook plugin.
+    dropped_spawn_kwargs: frozenset[str] = frozenset(
+        {"synthesize_audio", "hook_session", "run_if_owned"})
+
+    def spawn_turn(self, **spec: Any):
+        """``start_turn`` with the keywords this runner accepts."""
+        kwargs = {k: v for k, v in spec.items() if k not in self.dropped_spawn_kwargs}
+        return self._hook("spawn_turn", self.start_turn)(**kwargs)
 
     # --- sessions and transcripts -----------------------------------------
 
@@ -129,19 +141,19 @@ class StreamJsonBackend(Backend):
         return session_id or None
 
     def find_transcript(self, session_id: str,
-                        home: pathlib.Path | None = None) -> pathlib.Path | None:
-        # The transcript modules locate their own roots; ``home`` is only a
-        # Claude concern until slice 4 threads it through.
-        return resolve(self.adapter.transcript_module, "find_latest_jsonl")(session_id)
+                        home: pathlib.Path | None = None, *,
+                        cwd: str = "") -> pathlib.Path | None:
+        # The transcript modules locate their own roots; the CLI's layout
+        # does not encode the cwd, so the hint is ignored.
+        return self.transcript.find_latest_jsonl(session_id)
 
     def parse_transcript(self, path) -> list[dict]:
-        return resolve(self.adapter.transcript_module, "parse_turns")(path)
+        return self.transcript.parse_turns(path)
 
     def list_sessions(self, cwd: str, *, limit: int = 20,
                       all_projects: bool = False) -> list[dict]:
-        adapter = self.adapter
-        return adapter.session_catalog_reader(
-            adapter, cwd, limit=limit, all_projects=all_projects)
+        return self.transcript.list_sessions(
+            cwd if not all_projects else "", limit=limit, all_projects=all_projects)
 
     # --- subprocess contract ----------------------------------------------
 
