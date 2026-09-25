@@ -115,18 +115,21 @@ def test_registry_is_the_only_package_file_that_lists_ids():
 
 # --- (5) every adapter declares every capability -----------------------------
 
-REQUIRED_STR = ("resume_target", "account_pool", "goal_module", "api_providers",
+REQUIRED_STR = ("resume_target", "goal_module", "api_providers",
                 "janitor_default_model", "model_family")
-REQUIRED_BOOL = ("preassigns_session_id", "transcript_dir_encodes_cwd",
-                 "transcript_reader_injected", "hook_source_marker",
+REQUIRED_BOOL = ("transcript_dir_encodes_cwd", "transcript_reader_injected",
                  "locks_turn_callbacks", "records_classified_usage_limit",
-                 "restarts_runner_on_credential_change",
                  "compaction_watches_transcript", "quota_reset_jittered",
-                 "terminal_loads_plugin", "native_tool_explainer")
+                 "native_tool_explainer")
 REQUIRED_CALLABLE = ("spawn_kwargs", "executable_resolver",
                      "resume_transcript_finder", "session_catalog_reader")
-OPTIONAL = ("model_validator", "usage_limit_recovery", "context_window",
-            "terminal_resume_argv", "terminal_fresh_argv")
+OPTIONAL = ("model_validator", "context_window")
+# Decisions that are methods on the Backend classes now (slice 2 of the
+# contract), so no adapter row may declare them as flags any more.
+DELETED_FLAGS = ("preassigns_session_id", "hook_source_marker", "account_pool",
+                 "usage_limit_recovery", "restarts_runner_on_credential_change",
+                 "terminal_resume_argv", "terminal_fresh_argv",
+                 "terminal_loads_plugin", "supports_account_failover")
 
 
 @pytest.mark.parametrize("backend", IDS)
@@ -143,55 +146,52 @@ def test_every_adapter_declares_every_capability(backend):
     assert adapter.resume_target in backends.RESUME_TARGETS
     for name in OPTIONAL:
         assert hasattr(adapter, name), name
+    for name in DELETED_FLAGS:
+        assert not hasattr(adapter, name), name
 
 
 def test_declared_values_match_the_behaviour_they_replaced():
     by = {a.id: a for a in backends.adapters()}
     assert {a.id for a in backends.adapters()} == set(IDS)
 
-    # Claude is the transcript-file CLI: it pre-binds --session-id, its
-    # transcript dir encodes the cwd, the Host injects its reader and it is the
-    # only CLI with a context gauge and a hook source marker.
+    # Claude is the transcript-file CLI: its transcript dir encodes the cwd,
+    # the Host injects its reader and it is the only CLI with a context gauge.
     claude = by["claude"]
-    assert claude.resumes_by_transcript_file and claude.preassigns_session_id
+    assert claude.resumes_by_transcript_file
     assert claude.transcript_dir_encodes_cwd and claude.transcript_reader_injected
-    assert claude.hook_source_marker and claude.locks_turn_callbacks
+    assert claude.locks_turn_callbacks
     assert claude.context_window == 1_000_000 and claude.compaction_watches_transcript
-    assert claude.quota_reset_jittered and claude.terminal_loads_plugin
+    assert claude.quota_reset_jittered
     assert claude.spawn_kwargs is backends._claude_kwargs
     assert claude.executable_resolver is backends._configured_claude_binary
     for other in IDS[1:]:
         a = by[other]
-        assert not a.resumes_by_transcript_file and not a.preassigns_session_id, other
+        assert not a.resumes_by_transcript_file, other
         assert not a.transcript_dir_encodes_cwd and not a.transcript_reader_injected, other
-        assert not a.hook_source_marker and not a.locks_turn_callbacks, other
+        assert not a.locks_turn_callbacks, other
         assert a.context_window is None and not a.compaction_watches_transcript, other
-        assert not a.quota_reset_jittered and not a.terminal_loads_plugin, other
+        assert not a.quota_reset_jittered, other
         assert a.executable_resolver is backends._declared_binary, other
 
-    # Codex owns the goal protocol, in-process usage-limit recovery, the
-    # classified-limit event, app-server recycling after login, the OpenAI
+    # Codex owns the goal protocol, the classified-limit event, the OpenAI
     # routing provider and the native tool explainer.
     codex = by["codex"]
     assert codex.supports_goal and codex.goal_module == "codex_app_server"
-    assert codex.usage_limit_recovery is not None
     assert codex.records_classified_usage_limit
-    assert codex.restarts_runner_on_credential_change
     assert codex.api_providers == ("openai",) and codex.native_tool_explainer
     assert codex.janitor_default_model == "gpt-5.3-codex-spark"
     for other in ("claude", "agy", "grok", "opencode", "deepseek"):
         a = by[other]
-        assert not a.supports_goal and a.usage_limit_recovery is None, other
+        assert not a.supports_goal, other
         assert not a.records_classified_usage_limit, other
-        assert not a.restarts_runner_on_credential_change, other
         assert a.api_providers == () and not a.native_tool_explainer, other
         assert a.janitor_default_model == "", other
 
-    # Account failover pools: Claude and Codex only.
-    assert {a.id: a.account_pool for a in backends.adapters()} == {
+    # Account failover pools: Claude and Codex only (a method now).
+    assert {b.id: b.account_pool() for b in backends.all_backends()} == {
         "claude": "claude", "codex": "codex", "agy": "", "grok": "",
         "opencode": "", "deepseek": ""}
-    assert [a.id for a in backends.adapters() if a.supports_account_failover] == ["claude", "codex"]
+    assert [b.id for b in backends.all_backends() if b.account_pool()] == ["claude", "codex"]
 
     # AGY folds effort into the model id and validates model ids.
     assert by["agy"].effort_compatibility_unknown and by["agy"].model_carries_effort
@@ -222,20 +222,27 @@ def test_adapter_rejects_unknown_resume_target():
 
 # --- (5) replaced decisions -------------------------------------------------
 
-def test_interactive_terminal_argv_per_backend():
-    """The table terminal_ws.py used to carry, now declared per adapter."""
+def test_interactive_terminal_argv_per_backend(monkeypatch):
+    """The table terminal_ws.py used to carry, now each backend's terminal_argv."""
+    from lib.backend.base import Unsupported
+    monkeypatch.setattr("lib.deployment.plugin_dir", lambda: None)
     expected = {
-        "claude": (("claude", "--dangerously-skip-permissions", "--resume"),
-                   ("claude", "--dangerously-skip-permissions")),
-        "codex": (("codex", "resume"), ("codex",)),
-        "agy": (("agy", "--dangerously-skip-permissions", "--conversation"),
-                ("agy", "--dangerously-skip-permissions")),
+        "claude": (["claude", "--dangerously-skip-permissions", "--resume", "s"],
+                   ["claude", "--dangerously-skip-permissions"]),
+        "codex": (["codex", "resume", "s"], ["codex"]),
+        "agy": (["agy", "--dangerously-skip-permissions", "--conversation", "s"],
+                ["agy", "--dangerously-skip-permissions"]),
         # No interactive terminal launch is defined for these yet; today the
         # /terminal route fails for them, and still does.
-        "grok": (None, None), "opencode": (None, None), "deepseek": (None, None),
+        "grok": None, "opencode": None, "deepseek": None,
     }
-    assert {a.id: (a.terminal_resume_argv, a.terminal_fresh_argv)
-            for a in backends.adapters()} == expected
+    for backend in backends.all_backends():
+        if expected[backend.id] is None:
+            for sid in ("s", ""):
+                with pytest.raises(Unsupported):
+                    backend.terminal_argv(sid)
+            continue
+        assert (backend.terminal_argv("s"), backend.terminal_argv("")) == expected[backend.id]
 
 
 def _terminal_handler():

@@ -6,7 +6,7 @@ import time
 import uuid
 from typing import Any, Callable
 
-from .base import Backend, adapter_terminal_argv, resolve
+from .base import Backend, resolve
 
 
 def _projects_root(home: pathlib.Path | None) -> pathlib.Path | None:
@@ -83,9 +83,12 @@ class ClaudeBackend(Backend):
     # --- interactive terminal ---------------------------------------------
 
     def terminal_argv(self, session_id: str) -> list[str]:
-        """The adapter argv plus the same plugin the ``-p`` dispatch loads, so
-        an interactive terminal reports state exactly like a dispatched turn."""
-        argv = adapter_terminal_argv(self, session_id)
+        """``claude --resume <id>`` (or fresh) plus the same plugin the ``-p``
+        dispatch loads, so an interactive terminal reports state exactly like
+        a dispatched turn."""
+        argv = [self.required_binary, "--dangerously-skip-permissions"]
+        if session_id:
+            argv += ["--resume", session_id]
         plugin = resolve("deployment", "plugin_dir")()
         if plugin is not None:
             argv += ["--plugin-dir", str(plugin)]
@@ -94,7 +97,9 @@ class ClaudeBackend(Backend):
     # --- credentials and quota --------------------------------------------
 
     def account_pool(self) -> str:
-        return self.adapter.account_pool
+        """The pool is named after the CLI: its ``claude-switch`` command and
+        failover coordinator are keyed by this name in turn_dispatch."""
+        return self.id
 
     def quota_identity(self, window: dict) -> Any:
         """Claude reports the same reset with fractional-second jitter, so the
