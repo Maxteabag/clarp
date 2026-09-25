@@ -283,8 +283,6 @@ class BackendAdapter:
     model_validator: Callable[[str], bool] | None = None
     # --- Session and transcript access -----------------------------------
     resume_target: str = "session_id"
-    # The Host allocates the session id before the first spawn (--session-id).
-    preassigns_session_id: bool = False
     # Locates the transcript to resume from, given (backend, session_id, cwd,
     # projects_root).
     resume_transcript_finder: Callable[..., Any] = _catalogued_resume_transcript
@@ -297,23 +295,11 @@ class BackendAdapter:
     transcript_reader_injected: bool = False
     recorded_model_source: RecordedModelSource = NO_RECORDED_MODEL
     # --- Turn plumbing -----------------------------------------------------
-    # The runner reports source/state through Clarp's hook plugin, armed by a
-    # per-turn marker file.
-    hook_source_marker: bool = False
     # Runner callbacks arrive on the runner's own threads; serialise them
     # under the dispatch lock.
     locks_turn_callbacks: bool = False
-    # Account pool the usage-limit failover coordinator manages; empty means
-    # no account switching for this CLI.
-    account_pool: str = ""
-    # Attempts to recover a usage-limit failure in-process before failing
-    # over accounts; None means the CLI has no such protocol.
-    usage_limit_recovery: Callable[[str], bool] | None = None
     # A classified usage-limit failure is recorded as a provider limit event.
     records_classified_usage_limit: bool = False
-    # A sign-in/sign-out rewrites credentials another process holds open, so
-    # the long-lived runner is recycled to re-read them.
-    restarts_runner_on_credential_change: bool = False
     # Context gauge: the window (tokens) the CLI's transcript fills, or None
     # when the CLI auto-compacts and shows no gauge.
     context_window: int | None = None
@@ -322,12 +308,6 @@ class BackendAdapter:
     # The CLI reports quota resets with fractional-second jitter, so the
     # notification identity rounds them.
     quota_reset_jittered: bool = False
-    # --- Interactive terminal --------------------------------------------
-    # argv prefix for /terminal: resume (session id appended) and fresh. None
-    # means the Host cannot open an interactive terminal for this CLI.
-    terminal_resume_argv: tuple[str, ...] | None = None
-    terminal_fresh_argv: tuple[str, ...] | None = None
-    terminal_loads_plugin: bool = False
     # --- Routing and Janitors --------------------------------------------
     # API-key providers whose model catalogue this CLI fronts ("openai").
     api_providers: tuple[str, ...] = ()
@@ -363,10 +343,6 @@ class BackendAdapter:
     @property
     def supports_goal(self) -> bool:
         return bool(self.goal_module)
-
-    @property
-    def supports_account_failover(self) -> bool:
-        return bool(self.account_pool)
 
     @property
     def effort_compatibility_unknown(self) -> bool:
@@ -448,7 +424,6 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         executable_resolver=_configured_claude_binary,
         model_validator=None,
         resume_target="transcript_file",
-        preassigns_session_id=True,
         resume_transcript_finder=_claude_resume_transcript,
         session_catalog_reader=_claude_session_catalog,
         transcript_dir_encodes_cwd=True,
@@ -458,20 +433,13 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
             indexed_model=None,
             cli_default_model=_lazy("session_models", "claude_cli_default_model"),
         ),
-        hook_source_marker=True,
         locks_turn_callbacks=True,
-        account_pool="claude",
-        usage_limit_recovery=None,
         records_classified_usage_limit=False,
-        restarts_runner_on_credential_change=False,
         # This deployment runs opus-*[1m] (the 1M context beta, per
         # ~/.claude.json); the native gauge divides tokens by this.
         context_window=1_000_000,
         compaction_watches_transcript=True,
         quota_reset_jittered=True,
-        terminal_resume_argv=("claude", "--dangerously-skip-permissions", "--resume"),
-        terminal_fresh_argv=("claude", "--dangerously-skip-permissions"),
-        terminal_loads_plugin=True,
         api_providers=(),
         native_tool_explainer=False,
         janitor_default_model="",
@@ -520,7 +488,6 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         executable_resolver=_declared_binary,
         model_validator=None,
         resume_target="session_id",
-        preassigns_session_id=False,
         resume_transcript_finder=_catalogued_resume_transcript,
         session_catalog_reader=_transcript_session_catalog,
         transcript_dir_encodes_cwd=False,
@@ -530,18 +497,11 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
             indexed_model=_lazy("session_models", "codex_indexed_model"),
             cli_default_model=_lazy("session_models", "codex_cli_default_model"),
         ),
-        hook_source_marker=False,
         locks_turn_callbacks=False,
-        account_pool="codex",
-        usage_limit_recovery=_lazy("codex_app_server", "recover_usage_failure"),
         records_classified_usage_limit=True,
-        restarts_runner_on_credential_change=True,
         context_window=None,
         compaction_watches_transcript=False,
         quota_reset_jittered=False,
-        terminal_resume_argv=("codex", "resume"),
-        terminal_fresh_argv=("codex",),
-        terminal_loads_plugin=False,
         # Codex is the catalogue that lists GPT models; the OpenAI API
         # routing provider executes through it.
         api_providers=("openai",),
@@ -581,24 +541,16 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         executable_resolver=_declared_binary,
         model_validator=_lazy("provider_capabilities", "is_dispatchable_agy_model"),
         resume_target="session_id",
-        preassigns_session_id=False,
         resume_transcript_finder=_catalogued_resume_transcript,
         session_catalog_reader=_transcript_session_catalog,
         transcript_dir_encodes_cwd=False,
         transcript_reader_injected=False,
         recorded_model_source=NO_RECORDED_MODEL,
-        hook_source_marker=False,
         locks_turn_callbacks=False,
-        account_pool="",
-        usage_limit_recovery=None,
         records_classified_usage_limit=False,
-        restarts_runner_on_credential_change=False,
         context_window=None,
         compaction_watches_transcript=False,
         quota_reset_jittered=False,
-        terminal_resume_argv=("agy", "--dangerously-skip-permissions", "--conversation"),
-        terminal_fresh_argv=("agy", "--dangerously-skip-permissions"),
-        terminal_loads_plugin=False,
         api_providers=(),
         native_tool_explainer=False,
         janitor_default_model="",
@@ -642,25 +594,17 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         executable_resolver=_declared_binary,
         model_validator=None,
         resume_target="session_id",
-        preassigns_session_id=False,
         resume_transcript_finder=_catalogued_resume_transcript,
         session_catalog_reader=_transcript_session_catalog,
         transcript_dir_encodes_cwd=False,
         transcript_reader_injected=False,
         recorded_model_source=NO_RECORDED_MODEL,
-        hook_source_marker=False,
         locks_turn_callbacks=False,
-        account_pool="",
-        usage_limit_recovery=None,
         records_classified_usage_limit=False,
-        restarts_runner_on_credential_change=False,
         context_window=None,
         compaction_watches_transcript=False,
         quota_reset_jittered=False,
         # No interactive terminal launch is defined for this CLI yet.
-        terminal_resume_argv=None,
-        terminal_fresh_argv=None,
-        terminal_loads_plugin=False,
         api_providers=(),
         native_tool_explainer=False,
         janitor_default_model="",
@@ -688,25 +632,17 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         executable_resolver=_declared_binary,
         model_validator=None,
         resume_target="session_id",
-        preassigns_session_id=False,
         resume_transcript_finder=_catalogued_resume_transcript,
         session_catalog_reader=_transcript_session_catalog,
         transcript_dir_encodes_cwd=False,
         transcript_reader_injected=False,
         recorded_model_source=NO_RECORDED_MODEL,
-        hook_source_marker=False,
         locks_turn_callbacks=False,
-        account_pool="",
-        usage_limit_recovery=None,
         records_classified_usage_limit=False,
-        restarts_runner_on_credential_change=False,
         context_window=None,
         compaction_watches_transcript=False,
         quota_reset_jittered=False,
         # No interactive terminal launch is defined for this CLI yet.
-        terminal_resume_argv=None,
-        terminal_fresh_argv=None,
-        terminal_loads_plugin=False,
         api_providers=(),
         native_tool_explainer=False,
         janitor_default_model="",
@@ -740,25 +676,17 @@ _ADAPTERS: tuple[BackendAdapter, ...] = (
         executable_resolver=_declared_binary,
         model_validator=None,
         resume_target="session_id",
-        preassigns_session_id=False,
         resume_transcript_finder=_catalogued_resume_transcript,
         session_catalog_reader=_transcript_session_catalog,
         transcript_dir_encodes_cwd=False,
         transcript_reader_injected=False,
         recorded_model_source=NO_RECORDED_MODEL,
-        hook_source_marker=False,
         locks_turn_callbacks=False,
-        account_pool="",
-        usage_limit_recovery=None,
         records_classified_usage_limit=False,
-        restarts_runner_on_credential_change=False,
         context_window=None,
         compaction_watches_transcript=False,
         quota_reset_jittered=False,
         # No interactive terminal launch is defined for this CLI yet.
-        terminal_resume_argv=None,
-        terminal_fresh_argv=None,
-        terminal_loads_plugin=False,
         api_providers=(),
         native_tool_explainer=False,
         janitor_default_model="",

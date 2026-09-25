@@ -62,19 +62,6 @@ def resolve(module: str, attr: str) -> Any:
     return getattr(_mod(module), attr)
 
 
-def adapter_terminal_argv(backend: "Backend", session_id: str) -> list[str]:
-    """The interactive argv today's adapter row declares (id appended).
-
-    Shared by the CLIs that have an interactive mode until slice 2 moves
-    the argv onto the classes.
-    """
-    adapter = backend.adapter
-    launch = adapter.terminal_resume_argv if session_id else adapter.terminal_fresh_argv
-    if launch is None:
-        raise Unsupported(f"no interactive terminal for the {backend.id} backend")
-    return list(launch) + ([session_id] if session_id else [])
-
-
 class Backend:
     """One coding CLI the host can run as an agent backend."""
 
@@ -137,11 +124,13 @@ class Backend:
         """
         raise NotImplementedError(f"{self.id}: resume_target")
 
-    def bind_new_session(self, agent_id: str, session: str) -> str:
+    def bind_new_session(self, agent_id: str, session: str, *,
+                         uuid_factory: Callable[[], str] | None = None) -> str:
         """Pre-mint and bind the backend session id before the first spawn.
 
-        Only a CLI that accepts ``--session-id`` does this; the rest return
-        "" and let the runner bind the id the CLI reports.
+        Only a CLI that accepts ``--session-id`` does this (minting with
+        ``uuid_factory`` when given); the rest return "" and let the runner
+        bind the id the CLI reports.
         """
         return ""
 

@@ -1,9 +1,9 @@
-"""The ``lib.backend`` strategy package (slice 1 of the contract in
+"""The ``lib.backend`` strategy package (slices 1 and 2 of the contract in
 docs/architecture/backend-strategy.md).
 
 Every backend is a ``Backend``, ids and aliases round-trip through the
-registry, and each method answers exactly what today's adapter path
-answers — or raises ``Unsupported`` where the adapter declared ``None``.
+registry, and each method answers exactly what the host used to decide with
+an adapter flag — or raises ``Unsupported`` where the CLI has no such mode.
 """
 from __future__ import annotations
 
@@ -78,33 +78,86 @@ def test_data_attributes_copy_the_adapter_row(backend):
         assert getattr(b, name) == getattr(a, name), name
 
 
-# --- methods answer what the adapter path answers ---------------------------
+# --- slice 2: decisions that are methods, not flags --------------------------
 
-def test_terminal_argv_matches_the_adapter_or_is_unsupported(monkeypatch):
+TERMINAL_ARGV = {
+    "claude": (["claude", "--dangerously-skip-permissions", "--resume", "s-1"],
+               ["claude", "--dangerously-skip-permissions"]),
+    "codex": (["codex", "resume", "s-1"], ["codex"]),
+    "agy": (["agy", "--dangerously-skip-permissions", "--conversation", "s-1"],
+            ["agy", "--dangerously-skip-permissions"]),
+}
+
+
+@pytest.mark.parametrize("backend", IDS)
+def test_terminal_argv_per_backend_or_unsupported(monkeypatch, backend):
+    from lib import deployment
+    monkeypatch.setattr(deployment, "plugin_dir", lambda: None)
+    b = registry.by_id(backend)
+    if backend not in TERMINAL_ARGV:
+        for sid in ("s-1", ""):
+            with pytest.raises(Unsupported, match=f"no interactive terminal for the {backend} backend"):
+                b.terminal_argv(sid)
+        return
+    resume, fresh = TERMINAL_ARGV[backend]
+    assert b.terminal_argv("s-1") == resume
+    assert b.terminal_argv("") == fresh
+
+
+def test_claude_terminal_argv_appends_the_plugin_dir_itself(monkeypatch):
     from lib import deployment
     monkeypatch.setattr(deployment, "plugin_dir", lambda: pathlib.Path("/plug"))
-    for a in backends.adapters():
-        b = registry.by_id(a.id)
-        for sid in ("s-1", ""):
-            launch = a.terminal_resume_argv if sid else a.terminal_fresh_argv
-            if launch is None:
-                with pytest.raises(Unsupported):
-                    b.terminal_argv(sid)
-                continue
-            expected = list(launch) + ([sid] if sid else [])
-            if a.terminal_loads_plugin:
-                expected += ["--plugin-dir", "/plug"]
-            assert b.terminal_argv(sid) == expected, (a.id, sid)
-    monkeypatch.setattr(deployment, "plugin_dir", lambda: None)
-    assert registry.by_id("claude").terminal_argv("") == list(
-        backends.get("claude").terminal_fresh_argv)
+    claude = registry.by_id("claude")
+    assert claude.terminal_argv("s-1") == TERMINAL_ARGV["claude"][0] + ["--plugin-dir", "/plug"]
+    assert claude.terminal_argv("") == TERMINAL_ARGV["claude"][1] + ["--plugin-dir", "/plug"]
+    for name in ("codex", "agy"):
+        assert "--plugin-dir" not in registry.by_id(name).terminal_argv("s-1"), name
 
 
-def test_account_pool_matches_the_adapter():
+def test_account_pool_per_backend():
     assert {b.id: b.account_pool() for b in registry.all()} == {
-        a.id: a.account_pool for a in backends.adapters()}
-    assert registry.by_id("claude").account_pool() == "claude"
-    assert registry.by_id("grok").account_pool() == ""
+        "claude": "claude", "codex": "codex", "agy": "", "grok": "",
+        "opencode": "", "deepseek": ""}
+
+
+def test_recover_usage_limit_reconnects_codex_only(monkeypatch):
+    from lib import codex_app_server
+    seen = []
+    monkeypatch.setattr(codex_app_server, "recover_usage_failure",
+                        lambda message: seen.append(message) or True)
+    for name in IDS:
+        b = registry.by_id(name)
+        if name == "codex":
+            assert b.recover_usage_limit("limit") is True
+        else:
+            assert b.recover_usage_limit("limit") is False, name
+    assert seen == ["limit"]
+    monkeypatch.setattr(codex_app_server, "recover_usage_failure", lambda message: None)
+    assert registry.by_id("codex").recover_usage_limit("limit") is False
+
+
+def test_on_credential_change_recycles_codex_app_servers_only(monkeypatch):
+    from lib import codex_app_server
+    calls = []
+    monkeypatch.setattr(codex_app_server, "recycle_clients", lambda: calls.append("recycled") or 0)
+    for name in IDS:
+        assert registry.by_id(name).on_credential_change() is None, name
+    assert calls == ["recycled"]
+
+
+def test_on_credential_change_logs_a_failed_recycle(monkeypatch):
+    from lib import codex_app_server
+    from lib.backend import codex as codex_module
+    logged = []
+
+    def boom():
+        raise RuntimeError("no app-server")
+    monkeypatch.setattr(codex_app_server, "recycle_clients", boom)
+    import lib.log
+    monkeypatch.setattr(lib.log, "log_exception",
+                        lambda event, exc, **kw: logged.append((event, str(exc))))
+    assert registry.by_id("codex").on_credential_change() is None
+    assert logged == [("codexAppServerRecycleFail", "no app-server")]
 
 
 def test_executable_matches_the_adapter(monkeypatch):
@@ -141,31 +194,6 @@ def test_default_model_effort_and_clean_effort_match_the_facade():
     assert registry.by_id("claude").default_model_effort(cfg) == ("opus", "high")
     assert registry.by_id("grok").default_model_effort(cfg) == ("", "")  # grok has no "max"
     assert registry.by_id("codex").clean_effort("Ultra") == backends.clean_effort("codex", "Ultra") == "ultra"
-
-
-def test_recover_usage_limit_delegates_for_codex_only(monkeypatch):
-    from lib import codex_app_server
-    seen = []
-    monkeypatch.setattr(codex_app_server, "recover_usage_failure",
-                        lambda message: seen.append(message) or True)
-    for a in backends.adapters():
-        b = registry.by_id(a.id)
-        if a.usage_limit_recovery is None:
-            assert b.recover_usage_limit("limit") is False, a.id
-        else:
-            assert b.recover_usage_limit("limit") is a.usage_limit_recovery("limit") is True
-    assert seen == ["limit", "limit"]
-
-
-def test_on_credential_change_recycles_codex_writers_only(monkeypatch):
-    from lib import backend_auth
-    calls = []
-    monkeypatch.setattr(backend_auth, "_recycle_codex_writers", lambda: calls.append("recycled"))
-    for a in backends.adapters():
-        assert registry.by_id(a.id).on_credential_change() is None
-    assert calls == ["recycled"] * sum(
-        1 for a in backends.adapters() if a.restarts_runner_on_credential_change)
-    assert len(calls) == 1
 
 
 def test_compaction_matches_the_compaction_table():
@@ -314,7 +342,8 @@ def test_wrap_turn_callback_serialises_claude_under_the_dispatch_lock():
         assert registry.by_id(name).wrap_turn_callback(probe) is probe, name
 
 
-def test_arm_source_marker_writes_the_hook_marker_for_claude_only(tmp_path):
+def test_arm_source_marker_writes_the_hook_marker_for_claude_only(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLARP_CACHE_DIR", raising=False)
     from lib import send_service
     home = tmp_path / "home"
     for name in IDS[1:]:
@@ -322,8 +351,13 @@ def test_arm_source_marker_writes_the_hook_marker_for_claude_only(tmp_path):
     assert not home.exists()
     registry.by_id("claude").arm_source_marker("sess", "t-1", False, home=home, now=lambda: 12.5)
     path = send_service.source_marker_path(home, "sess")
+    # Byte-identical to what turn_dispatch wrote before: the hook plugin parses it.
+    assert path == home / ".cache" / "clarp" / "source-markers" / "sess"
+    assert path.read_text() == "pwa-voice sess 12.500 t-1 0\n"
     assert path.read_text() == send_service.source_marker_text(
         session="sess", trace_id="t-1", now=12.5, synthesize_audio=False)
+    registry.by_id("claude").arm_source_marker("sess", "t-2", True, home=home, now=lambda: 13.0)
+    assert path.read_text() == "pwa-voice sess 13.000 t-2 1\n"
 
 
 def test_quota_identity_matches_the_janitor_window_key():
