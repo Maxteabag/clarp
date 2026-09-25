@@ -23,7 +23,7 @@ _FAILED = "(status='failed' OR outcome='error')"
 
 def _valid_demand_receipt(config: dict, run) -> bool:
     """A provider response is not recovery until the demand store accepts it."""
-    if config["template_id"] not in janitor_builtins.ROLES:
+    if config["template_id"] not in janitor_builtins.DEMAND_ROLES:
         return False
     try:
         frozen = json.loads(run["configuration_json"])

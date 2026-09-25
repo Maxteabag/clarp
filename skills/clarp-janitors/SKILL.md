@@ -103,7 +103,8 @@ the relevant request invokes the selected compatible subscriber. A custom
 Janitor can replace a paused built-in, including a non-overlapping watched scope.
 These workers do not enter ordinary chat or the task-label scheduling loop.
 
-The Hotseat switcher (`account-hotseat`) is installed paused. Enabled, it reads
+The Hotseat switcher (`account-hotseat`) is an optional catalog template, not an
+installed built-in: create it only on a Host with the `hotseat` CLI. Enabled, it reads
 every saved Claude and Codex account through the local `hotseat` CLI and moves
 the machine-wide default account when the one in use drops under its floor
 (`claude_min_remaining` on the 5-hour window, `codex_min_remaining` on the
