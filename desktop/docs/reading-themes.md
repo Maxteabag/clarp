@@ -1,12 +1,26 @@
 # Reading themes
 
-Appearance → Reading theme restyles the parts of a chat that are read for
-long stretches: the transcript surface, message text, the user's own message
-bubble and the composer editor. The rest of the window keeps the terminal
-palette so split panes and dialogs still read as one application. The choice
-is saved on the device under `appearance/readingTheme` and is also available
+Appearance → Reading theme restyles the whole window. The transcript roles
+(surface, message text, the user's own bubble, the composer editor) carry the
+reading research below; the chrome roles (sidebar, panels, dialogs, controls,
+status bar) follow so split panes and dialogs read as one theme. Dark themes
+share the terminal chrome; Paper swaps in a warm light chrome. The choice is
+saved on the device under `appearance/readingTheme` and is also available
 from Ctrl+K as `Reading theme: …` rows; the current one is marked. In
 Settings, Enter cycles the themes and Left/Right step through them.
+
+## How colours reach the UI
+
+`qml/components/Theme.qml` is a QML singleton whose roles (`Theme.window`,
+`Theme.text`, `Theme.accent`, …) fall back to the terminal palette and are
+overridden by `controller.readingStyle`, which `Main.qml` binds once. QML
+components use those roles instead of hex literals; `qml/components/qmldir`
+registers the singleton for the source-directory imports the QML tests use.
+The C++ side mirrors the same mapping into the application `QPalette`
+(`DesktopPalette.h`) on every theme change, so Qt Quick Controls Basic picks
+up checked fills, popups and disabled text too. Add a new colour by adding a
+role to `ReadingTheme.h`, `readingThemeStyle()`, and `Theme.qml`; never a new
+literal in a component.
 
 | Theme | Font | Body | Text on surface | Secondary text | Intended for |
 | --- | --- | --- | --- | --- | --- |

@@ -27,37 +27,39 @@ ApplicationWindow {
     minimumWidth: Math.max(760, sidebarVisible ? Math.ceil(624 * uiScale) : 760)
     minimumHeight: 520
     visible: true
-    title: launchAgent.visible ? "New agent — Clarp" : app.selectedName.length > 0 ? app.selectedName + " — Clarp" : "Clarp"
-    color: "#1a1b26"
+    title: newSessionHub.visible ? "New session — Clarp" : app.selectedName.length > 0 ? app.selectedName + " — Clarp" : "Clarp"
+    color: Theme.window
     // Basic supplies control-specific defaults that can override the system
     // palette. Explicit window roles also propagate into popups and menus.
-    palette.window: "#1a1b26"
-    palette.base: "#1a1b26"
-    palette.alternateBase: "#20212e"
-    palette.button: "#292b3a"
-    palette.toolTipBase: "#292b3a"
-    palette.windowText: "#c0caf5"
-    palette.text: "#c0caf5"
-    palette.buttonText: "#c0caf5"
-    palette.toolTipText: "#c0caf5"
-    palette.brightText: "#1a1b26"
-    palette.placeholderText: "#8d93b0"
-    palette.highlight: "#bb9af7"
-    palette.accent: "#bb9af7"
-    palette.highlightedText: "#1a1b26"
-    palette.link: "#7aa2f7"
-    palette.linkVisited: "#bb9af7"
-    palette.light: "#565b76"
-    palette.midlight: "#41445a"
-    palette.mid: "#41445a"
-    palette.dark: "#bb9af7"
-    palette.shadow: "#14151d"
-    palette.disabled.text: "#8d93b0"
-    palette.disabled.windowText: "#8d93b0"
-    palette.disabled.buttonText: "#8d93b0"
+    // Every role follows the reading theme; the C++ side mirrors the same
+    // mapping into the application palette (DesktopPalette.h).
+    palette.window: Theme.window
+    palette.base: Theme.window
+    palette.alternateBase: Theme.raised
+    palette.button: Theme.control
+    palette.toolTipBase: Theme.control
+    palette.windowText: Theme.text
+    palette.text: Theme.text
+    palette.buttonText: Theme.text
+    palette.toolTipText: Theme.text
+    palette.brightText: Theme.accentText
+    palette.placeholderText: Theme.muted
+    palette.highlight: Theme.accent
+    palette.accent: Theme.accent
+    palette.highlightedText: Theme.accentText
+    palette.link: Theme.link
+    palette.linkVisited: Theme.accent
+    palette.light: Theme.light ? "#d8cbaa" : "#565b76"
+    palette.midlight: Theme.border
+    palette.mid: Theme.border
+    palette.dark: Theme.accent
+    palette.shadow: Theme.shadow
+    palette.disabled.text: Theme.muted
+    palette.disabled.windowText: Theme.muted
+    palette.disabled.buttonText: Theme.muted
 
     function openLaunchAgent(backend, model, effort, anonymousMode, directory) {
-        launchAgent.open(backend, model, effort, anonymousMode, directory);
+        newSessionHub.openLaunch(backend, model, effort, anonymousMode, directory);
     }
 
     function composerOwnsFocus() {
@@ -65,7 +67,7 @@ ApplicationWindow {
     }
 
     function overlayVisible() {
-        return keymapEditor.visible || assignAgent.visible || launchAgent.visible || previewVersionPanel.visible || quickNewAgent.visible || renameAgent.visible || quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
+        return keymapEditor.visible || assignAgent.visible || newSessionHub.visible || previewVersionPanel.visible || renameAgent.visible || quickSwitcher.visible || voiceDialog.visible || orchestrator.visible
             || startAgent.visible || overview.visible || connection.visible
             || queueDialog.visible || profilePanel.visible || reportView.visible
             || settingsPanel.dialogOpen;
@@ -146,21 +148,19 @@ ApplicationWindow {
             if (app.selectedSession.length > 0 && !app.isPairSession(app.selectedSession))
                 assignAgent.open(app.selectedSession, action === "auto-assign-agent", root.composerOwnsFocus());
         } else if (action === "change-directory") {
-            if (!launchAgent.visible) launchAgent.open("", "", "", undefined, "~");
-            launchAgent.changeDirectory();
+            newSessionHub.open(root.composerOwnsFocus(), false);
+            newSessionHub.choosingDirectory = true;
         } else if (action === "quick-new-agent") {
-            quickNewAgent.visible = true;
+            newSessionHub.open(root.composerOwnsFocus(), false);
         } else if (action === "rename-agent") {
             if (app.selectedSession.length > 0 && !app.isPairSession(app.selectedSession))
                 renameAgent.open(app.selectedSession, app.agentName(app.selectedSession));
         } else if (action === "new-contact") {
-            quickSwitcher.openContacts(root.composerOwnsFocus());
+            newSessionHub.open(root.composerOwnsFocus(), true);
         } else if (action.startsWith("move-")) {
             root.movePane(action.slice(5));
         } else if (action === "new") {
-            root.relaunchSession = "";
-            root.relaunchName = "";
-            startAgent.visible = true;
+            newSessionHub.open(root.composerOwnsFocus(), false);
         } else if (action === "overview") {
             overview.visible = true;
         } else if (action === "agent-terminal") {
@@ -246,6 +246,7 @@ ApplicationWindow {
     KeymapEditor {id:keymapEditor;objectName:"keymapEditor";anchors.fill:parent;z:300;keymap:keyboard;onClosed:app.requestComposerFocus(app.panes.activePaneId)}
     AppController {
         id: app
+        Component.onCompleted: Theme.style = Qt.binding(() => app.readingStyle)
     }
     PreviewVersions {
         id: previewVersions
@@ -297,12 +298,10 @@ ApplicationWindow {
         if(keymapEditor.visible){keymapEditor.visible=false;keymapEditor.closed();return;}
         if (assignAgent.visible) {
             if (!assignAgent.submitting) assignAgent.closeRequested();
-        } else if (launchAgent.visible) {
-            if (!launchAgent.submitting) launchAgent.back();
+        } else if (newSessionHub.visible) {
+            if (!newSessionHub.submitting) newSessionHub.stepBack();
         } else if (previewVersionPanel.visible)
             previewVersionPanel.close();
-        else if (quickNewAgent.visible)
-            quickNewAgent.closeRequested();
         else if (renameAgent.visible)
             renameAgent.closeRequested();
         else if (quickSwitcher.visible)
@@ -341,7 +340,7 @@ ApplicationWindow {
         id: keyboard
         objectName: "keyboardMap"
         contextName: settingsPanel.dialogOpen ? "blocked"
-            : launchAgent.visible && !quickSwitcher.visible ? "launch" : root.overlayVisible() ? "modal"
+            : newSessionHub.visible && !quickSwitcher.visible ? "launch" : root.overlayVisible() ? "modal"
             : root.selectedSurface !== "chats" ? root.selectedSurface
             : rail.searchOwnsFocus ? "search"
             : root.composerOwnsFocus() ? "composer"
@@ -360,7 +359,7 @@ ApplicationWindow {
         delegate: Shortcut {
             required property var modelData
             sequence: modelData.key
-            enabled: !(launchAgent.visible && modelData.action === "escape")
+            enabled: !(newSessionHub.visible && modelData.action === "escape")
             context: Qt.WindowShortcut
             autoRepeat: modelData.action === "agent-next" || modelData.action === "agent-previous"
             onActivated: root.runCommand(modelData.action)
@@ -377,7 +376,7 @@ ApplicationWindow {
     ColumnLayout {
         id: desktopShell
         objectName: "desktopShell"
-        visible: !launchAgent.visible
+        visible: true
         anchors.fill: parent
         spacing: 0
 
@@ -389,7 +388,7 @@ ApplicationWindow {
             Layout.rightMargin: 14
             TuiLabel {
                 text: previewVersions.error || (root.previewUpdateLabel.length > 0 ? "New update available" : "Preview pinned · automatic updates paused")
-                color: previewVersions.error.length > 0 ? "#e79aa4" : "#aeb6d8"
+                color: previewVersions.error.length > 0 ? Theme.danger : Theme.secondary
                 Layout.fillWidth: true
                 elide: Text.ElideRight
             }
@@ -497,7 +496,7 @@ ApplicationWindow {
 
             handle: Rectangle {
                 implicitWidth: 3
-                color: SplitHandle.pressed ? "#8589a4" : SplitHandle.hovered ? "#555970" : "#292b3a"
+                color: SplitHandle.pressed ? Theme.secondary : SplitHandle.hovered ? Theme.faint : Theme.control
 
                 Behavior on color {
                     ColorAnimation {
@@ -521,7 +520,7 @@ ApplicationWindow {
 
         anchors.fill: parent
         controller: app
-        visible: !launchAgent.visible && app.agents.count === 0 && app.connectionState !== "live"
+        visible: !newSessionHub.visible && app.agents.count === 0 && app.connectionState !== "live"
         z: 100
     }
 
@@ -583,31 +582,17 @@ ApplicationWindow {
         }
     }
 
-    LaunchAgentPage {
-        id: launchAgent
-        objectName: "launchAgent"
-        anchors.fill: parent
-        controller: app
-        visible: root.launchOnStartup
-        z: 100
-        onCloseRequested: {
-            if (!submitting) { root.close(); return; }
-            visible = false;
-            root.selectedSurface = "chats";
-            app.requestComposerFocus(app.panes.activePaneId);
-        }
-    }
-
-    QuickNewAgentDialog {
-        id: quickNewAgent
-        objectName: "quickNewAgent"
+    NewSessionHub {
+        id: newSessionHub
+        objectName: "newSessionHub"
         anchors.fill: parent
         controller: app
         visible: false
-        z: 95
+        z: 100
+        Component.onCompleted: if (root.launchOnStartup) newSessionHub.open(false, false)
+        onConnectionRequested: connection.visible = true
         onCloseRequested: {
-            if (submitting && app.errorMessage.length === 0) root.selectedSurface = "chats";
-            visible = false;
+            root.selectedSurface = "chats";
             root.restoreSurfaceFocus();
         }
     }

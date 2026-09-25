@@ -10,7 +10,7 @@ Rectangle {
     signal openSwitcher
     signal startAgent
     signal selectSurface(string surface)
-    color: "#20212e"
+    color: Theme.raised
     readonly property bool searchOwnsFocus: chatList.searchOwnsFocus
     readonly property string keyboardSession: chatList.keyboardSession
     readonly property int rowCount: chatList.rowCount

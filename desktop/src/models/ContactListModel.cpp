@@ -27,6 +27,8 @@ QVariant ContactListModel::data(const QModelIndex& index, int role) const {
         return contact.builtin;
     case AvatarSymbolRole:
         return contact.avatarSymbol;
+    case AvatarUrlRole:
+        return contact.avatarUrl;
     default:
         return {};
     }
@@ -37,6 +39,7 @@ QHash<int, QByteArray> ContactListModel::roleNames() const {
         {ContactIdRole, "contactId"},       {NameRole, "name"},
         {DescriptionRole, "description"},   {BuiltinRole, "builtin"},
         {AvatarSymbolRole, "avatarSymbol"},
+        {AvatarUrlRole, "avatarUrl"},
     };
 }
 
@@ -62,6 +65,7 @@ void ContactListModel::applySnapshot(const QJsonObject& snapshot,
             contact.description.remove(0, prefix.size());
         }
         contact.avatarSymbol = object.value(QStringLiteral("avatar_symbol")).toString();
+        contact.avatarUrl = object.value(QStringLiteral("avatar_url")).toString();
         contact.builtin = object.value(QStringLiteral("builtin")).toBool();
         contacts.append(std::move(contact));
     }
@@ -72,6 +76,13 @@ void ContactListModel::applySnapshot(const QJsonObject& snapshot,
     m_contacts = std::move(contacts);
     endResetModel();
     emit countChanged();
+}
+
+QHash<QString, QString> ContactListModel::avatarUrlsByName() const {
+    QHash<QString, QString> urls;
+    for (const Contact& contact : m_contacts)
+        if (!contact.avatarUrl.isEmpty()) urls.insert(contact.name, contact.avatarUrl);
+    return urls;
 }
 
 } // namespace clarp

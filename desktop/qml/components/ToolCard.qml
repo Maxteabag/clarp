@@ -30,11 +30,11 @@ Rectangle {
             parts.push(String(tool.result));
         return parts.join("\n\n");
     }
-    readonly property color statusColor: status === "error" ? "#df7777" : status === "running" ? "#e7aa68" : "#6fbd98"
+    readonly property color statusColor: status === "error" ? Theme.danger : status === "running" ? Theme.warning : Theme.success
 
     implicitHeight: toolColumn.implicitHeight + 6
     radius: 0
-    color: hover.hovered ? "#222638" : "transparent"
+    color: hover.hovered ? Theme.control : "transparent"
     border.width: 0
     HoverHandler { id: hover }
 
@@ -71,7 +71,7 @@ Rectangle {
             TuiText {
                 visible: !explanation.narrationShown
                 text: root.toolName
-                color: "#9ea4c7"
+                color: Theme.text
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
                 font.weight: Font.DemiBold
@@ -80,7 +80,7 @@ Rectangle {
                 visible: !explanation.narrationShown
                 Layout.fillWidth: true
                 text: root.summary
-                color: "#969bb5"
+                color: Theme.muted
                 font.pixelSize: 12
                 elide: Text.ElideRight
             }
@@ -90,14 +90,14 @@ Rectangle {
                 Layout.fillWidth: true
                 text: explanation.displayText + (root.explanationRepeat > 1 ? " (x" + root.explanationRepeat + ")" : "")
                 textFormat: Text.PlainText
-                color: "#82aaff"
+                color: Theme.link
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
             }
             TuiText {
                 visible: (!explanation.narrationShown && root.detail.length > 0) || explanation.text.length > 0
                 text: root.expanded ? "Hide" : "Details"
-                color: "#858aa7"
+                color: Theme.secondary
                 font.pixelSize: 13
             }
         }
@@ -128,8 +128,8 @@ Rectangle {
                 readOnly: true
                 selectByMouse: true
                 wrapMode: TextEdit.WrapAnywhere
-                color: "#aeb2ca"
-                selectionColor: "#565d82"
+                color: Theme.secondary
+                selectionColor: Theme.muted
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
                 onLinkActivated: link => root.controller.openExternalLink(link, root.linkOriginHost)

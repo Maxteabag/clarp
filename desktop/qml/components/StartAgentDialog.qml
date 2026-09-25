@@ -15,7 +15,7 @@ Rectangle {
     property var selectedMcpServers: []
     signal closeRequested
 
-    color: "#e61a1b26"
+    color: Qt.alpha(Theme.window, 0.9)
 
     function selectValue(combo, value) {
         const index = combo.indexOfValue(value);
@@ -93,8 +93,8 @@ Rectangle {
         height: Math.min(760, parent.height - 48)
         anchors.centerIn: parent
         radius: 0
-        color: "#20212e"
-        border.color: "#41445a"
+        color: Theme.raised
+        border.color: Theme.border
 
         ColumnLayout {
             anchors.fill: parent
@@ -114,14 +114,14 @@ Rectangle {
 
                 TuiText {
                     text: root.replaceSession.length > 0 ? "Relaunch agent" : "Start an agent"
-                    color: "#c0caf5"
+                    color: Theme.text
                     font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
 
                 TuiLabel {
                     text: "Name"
-                    color: "#8d93b0"
+                    color: Theme.muted
                 }
                 TuiTextField {
                     id: nameField
@@ -132,7 +132,7 @@ Rectangle {
 
                 TuiLabel {
                     text: "Workspace"
-                    color: "#8d93b0"
+                    color: Theme.muted
                 }
                 TuiTextField {
                     id: workspaceField
@@ -188,7 +188,7 @@ Rectangle {
                         Layout.fillWidth: true
                         TuiLabel {
                             text: "Backend"
-                            color: "#8d93b0"
+                            color: Theme.muted
                         }
                         ThemedComboBox {
                             id: backendField
@@ -203,7 +203,7 @@ Rectangle {
                         Layout.fillWidth: true
                         TuiLabel {
                             text: "Effort"
-                            color: "#8d93b0"
+                            color: Theme.muted
                         }
                         ThemedComboBox {
                             id: effortField
@@ -217,7 +217,7 @@ Rectangle {
 
                 TuiLabel {
                     text: "Model"
-                    color: "#8d93b0"
+                    color: Theme.muted
                 }
                 ThemedComboBox {
                     id: modelField
@@ -234,7 +234,7 @@ Rectangle {
                     spacing: 4
                     TuiLabel {
                         text: "MCP servers"
-                        color: "#8d93b0"
+                        color: Theme.muted
                     }
                     Flow {
                         Layout.fillWidth: true
@@ -262,7 +262,7 @@ Rectangle {
 
                 TuiLabel {
                     text: "Conversation"
-                    color: "#8d93b0"
+                    color: Theme.muted
                 }
                 RowLayout {
                     Layout.fillWidth: true
@@ -312,14 +312,14 @@ Rectangle {
                             TuiText {
                                 width: parent.width
                                 text: String(pastRow.modelData.title || pastRow.modelData.preview || pastRow.modelData.id)
-                                color: "#ddd5df"
+                                color: Theme.text
                                 elide: Text.ElideRight
                                 font.pixelSize: 11
                             }
                             TuiText {
                                 width: parent.width
                                 text: String(pastRow.modelData.cwd || "")
-                                color: "#746d7a"
+                                color: Theme.muted
                                 elide: Text.ElideMiddle
                                 font.pixelSize: 9
                             }
@@ -339,7 +339,7 @@ Rectangle {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 1
-                color: "#292b3a"
+                color: Theme.control
             }
 
             RowLayout {

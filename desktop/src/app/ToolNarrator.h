@@ -45,6 +45,7 @@ class ToolNarrator : public QObject {
     void setDetailLevel(int level);
     void reset();
     void setApiClient(ApiClient* api);
+    [[nodiscard]] qsizetype cacheSize() const { return m_cache.size(); }
     Q_INVOKABLE void acquireView(QObject* owner, const QVariantMap& activity);
     Q_INVOKABLE void releaseView(QObject* owner);
     Q_INVOKABLE void request(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false);

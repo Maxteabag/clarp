@@ -7,8 +7,8 @@ Rectangle {
     required property var keymap
     objectName: "contextShortcutBar"
     implicitHeight: Math.max(30, hints.implicitHeight + 12)
-    color: "#171822"
-    Rectangle { width: parent.width; height: 1; color: "#303247" }
+    color: Theme.sunken
+    Rectangle { width: parent.width; height: 1; color: Theme.border }
     RowLayout {
         anchors.fill: parent
         anchors.margins: 6
@@ -18,7 +18,7 @@ Rectangle {
                 : root.keymap.contextName === "sidebar" ? "AGENTS"
                 : root.keymap.contextName === "pane" ? "CONVERSATION"
                 : root.keymap.contextName.toUpperCase()
-            color: "#bb9af7"
+            color: Theme.accent
             font.pixelSize: 10
             font.weight: Font.DemiBold
         }
@@ -34,12 +34,12 @@ Rectangle {
                     spacing: 5
                     TuiText {
                         text: hint.modelData.label + ":"
-                        color: "#9ca1bd"
+                        color: Theme.secondary
                         font.pixelSize: 11
                     }
                     TuiText {
                         text: hint.modelData.keys[0].replace("Return", "Enter").replace("Escape", "Esc")
-                        color: "#c7adf1"
+                        color: Theme.accent
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
                     }

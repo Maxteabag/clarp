@@ -13,13 +13,13 @@ Rectangle {
     property string selectedSurface: "chats"
 
     implicitWidth: 54
-    color: "#101015"
+    color: Theme.sunken
 
     Rectangle {
         anchors.right: parent.right
         width: 1
         height: parent.height
-        color: "#221f29"
+        color: Theme.dangerSurface
     }
 
     component RailButton: TuiToolButton {
@@ -36,13 +36,13 @@ Rectangle {
 
         background: Rectangle {
             radius: 0
-            color: railButton.selected ? "#292b3a" : railButton.hovered ? "#1d1a23" : "transparent"
+            color: railButton.selected ? Theme.control : railButton.hovered ? Theme.raised : "transparent"
         }
         contentItem: Item {
             TuiText {
                 anchors.centerIn: parent
                 text: railButton.text
-                color: railButton.selected ? "#dcc7ea" : "#8d93b0"
+                color: railButton.selected ? Theme.text : Theme.muted
                 font.pixelSize: 17
             }
 
@@ -55,8 +55,8 @@ Rectangle {
                 implicitWidth: Math.max(15, badgeLabel.implicitWidth + 8)
                 implicitHeight: 15
                 radius: 0
-                color: "#bb9af7"
-                border.color: "#101015"
+                color: Theme.accent
+                border.color: Theme.sunken
                 border.width: 1.5
 
                 TuiText {
@@ -64,7 +64,7 @@ Rectangle {
 
                     anchors.centerIn: parent
                     text: railButton.badge
-                    color: "#1a1b26"
+                    color: Theme.window
                     font.pixelSize: 9
                     font.weight: Font.Bold
                 }
@@ -123,14 +123,14 @@ Rectangle {
             implicitWidth: 30
             implicitHeight: 30
             radius: 0
-            color: root.controller.connected ? "#1f3a2e" : "#3a2f1f"
-            border.color: root.controller.connected ? "#6db895" : "#b9996f"
+            color: root.controller.connected ? Qt.alpha(Theme.success, 0.16) : Qt.alpha(Theme.warning, 0.22)
+            border.color: root.controller.connected ? Theme.success : Theme.warning
             border.width: 1
 
             TuiText {
                 anchors.centerIn: parent
                 text: root.controller.serverName.length > 0 ? root.controller.serverName.slice(0, 1).toUpperCase() : "?"
-                color: root.controller.connected ? "#8fd4b3" : "#d3b98c"
+                color: root.controller.connected ? Theme.success : Theme.warning
                 font.pixelSize: 12
                 font.weight: Font.DemiBold
             }

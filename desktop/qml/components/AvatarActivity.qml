@@ -10,7 +10,7 @@ Item {
     property bool reducedMotion: motionClock.reducedMotion
     property real avatarSize: 40
     property real cornerRadius: 2
-    property color fallbackColor: "#55596f"
+    property color fallbackColor: Theme.faint
     property string symbol: ""
     property bool showPortrait: false
     readonly property var motionClock: controller.avatarMotion
@@ -30,7 +30,7 @@ Item {
         avatarSize: root.avatarSize; cornerRadius: root.cornerRadius; fallbackColor: root.fallbackColor
         symbol: root.symbol; showPortrait: root.showPortrait }
     Rectangle { anchors.fill: parent; anchors.margins: -3; color: "transparent"; border.width: 2
-        border.color: "#9ece6a"; radius: root.cornerRadius + 3; visible: root.working && root.authoritativeWorking
+        border.color: Theme.success; radius: root.cornerRadius + 3; visible: root.working && root.authoritativeWorking
         opacity: root.reducedMotion ? 0.6 : 0.35 + 0.65 * (1 + Math.cos(root.phase * Math.PI * 2)) / 2
         scale: root.reducedMotion ? 1 : 1 + 0.035 * (1 + Math.cos(root.phase * Math.PI * 2)) / 2 }
 }

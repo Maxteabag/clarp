@@ -22,7 +22,7 @@ Rectangle {
     signal queueRequested(string session)
     signal voiceRequested(string session, string name)
     signal relaunchRequested(string session, string name)
-    color: "#c008090f"
+    color: Qt.alpha(Theme.sunken, 0.75)
 
     function indexOfValue(rows, value) {
         for (let i = 0; i < rows.length; ++i) {
@@ -50,8 +50,8 @@ Rectangle {
         height: Math.min(760, parent.height - 42)
         anchors.centerIn: parent
         radius: 0
-        color: "#171923"
-        border.color: "#41465f"
+        color: Theme.raised
+        border.color: Theme.faint
 
         MouseArea { anchors.fill: parent; onClicked: mouse => mouse.accepted = true }
 
@@ -74,21 +74,21 @@ Rectangle {
                     name: String(root.details.name || "Agent")
                     avatarSize: 34
                     cornerRadius: 8
-                    fallbackColor: "#4b5068"
+                    fallbackColor: Theme.faint
                 }
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 1
                     TuiText {
                         text: String(root.details.name || "Agent")
-                        color: "#d0d3e4"
+                        color: Theme.text
                         font.pixelSize: 15
                         font.weight: Font.DemiBold
                     }
                     TuiText {
                         Layout.fillWidth: true
                         text: String(root.details.backend || "") + "  ·  " + root.session
-                        color: "#686d84"
+                        color: Theme.muted
                         font.family: "JetBrains Mono"
                         font.pixelSize: 11
                         elide: Text.ElideRight
@@ -98,7 +98,7 @@ Rectangle {
                 TuiToolButton { text: "×"; onClicked: root.closeRequested() }
             }
 
-            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#303347" }
+            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border }
 
             ScrollView {
                 Layout.fillWidth: true
@@ -148,7 +148,7 @@ Rectangle {
                             TuiText {
                                 Layout.fillWidth: true
                                 text: String(root.controller.profileTaskPlan.title || "Loading plan…")
-                                color: "#c2c6d9"
+                                color: Theme.text
                                 font.pixelSize: 13
                                 font.weight: Font.DemiBold
                             }
@@ -156,7 +156,7 @@ Rectangle {
                                 visible: !root.controller.profileLoading
                                 text: String(root.controller.profileTaskPlan.completed_count || 0)
                                     + "/" + String(root.controller.profileTaskPlan.total_count || 0)
-                                color: "#7f859f"
+                                color: Theme.secondary
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 11
                             }
@@ -178,21 +178,21 @@ Rectangle {
                                     Layout.preferredHeight: 7
                                     radius: 0
                                     color: String(taskRow.modelData.status || "") === "completed"
-                                        ? "#8da77f"
+                                        ? Theme.secondary
                                         : String(taskRow.modelData.status || "") === "in_progress"
-                                            ? "#a8aed7" : "#51566b"
+                                            ? Theme.secondary : Theme.faint
                                 }
                                 TuiText {
                                     Layout.fillWidth: true
                                     text: String(taskRow.modelData.title || "Task")
-                                    color: "#adb1c7"
+                                    color: Theme.secondary
                                     font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
                                 TuiText {
                                     visible: (taskRow.modelData.subtasks || []).length > 0
                                     text: String((taskRow.modelData.subtasks || []).length) + " steps"
-                                    color: "#62677e"
+                                    color: Theme.faint
                                     font.pixelSize: 11
                                 }
                             }
@@ -209,8 +209,8 @@ Rectangle {
                                 Layout.fillWidth: true
                                 implicitHeight: promptColumn.implicitHeight + 14
                                 radius: 0
-                                color: "#181b26"
-                                border.color: "#2c3042"
+                                color: Theme.raised
+                                border.color: Theme.border
                                 ColumnLayout {
                                     id: promptColumn
                                     anchors.left: parent.left
@@ -225,7 +225,7 @@ Rectangle {
                                         wrapMode: TextEdit.Wrap
                                         text: String(promptRow.modelData.text
                                             || promptRow.modelData.preview || "")
-                                        color: "#b9bdd1"
+                                        color: Theme.text
                                         font.pixelSize: 12
                                     }
                                     TuiText {
@@ -233,7 +233,7 @@ Rectangle {
                                         text: String(promptRow.modelData.created_at || "")
                                             + "  ·  "
                                             + String((promptRow.modelData.prompt_origin || {}).channel || "chat")
-                                        color: "#61667e"
+                                        color: Theme.muted
                                         font.family: "JetBrains Mono"
                                         font.pixelSize: 11
                                         elide: Text.ElideRight
@@ -248,7 +248,7 @@ Rectangle {
                                     && !root.controller.profilePromptsLoading
                                 Layout.fillWidth: true
                                 text: "No authenticated prompts recorded yet"
-                                color: "#666b82"
+                                color: Theme.muted
                                 font.pixelSize: 11
                             }
                             Item { Layout.fillWidth: true }
@@ -277,7 +277,7 @@ Rectangle {
                                 String(modelBox.currentValue || ""))
                         RowLayout {
                             Layout.fillWidth: true
-                            TuiLabel { text: "Model"; color: "#9297af"; font.pixelSize: 12 }
+                            TuiLabel { text: "Model"; color: Theme.secondary; font.pixelSize: 12 }
                             ThemedComboBox {
                                 id: modelBox
                                 Layout.fillWidth: true
@@ -300,7 +300,7 @@ Rectangle {
                         }
                         RowLayout {
                             Layout.fillWidth: true
-                            TuiLabel { text: "Effort"; color: "#9297af"; font.pixelSize: 12 }
+                            TuiLabel { text: "Effort"; color: Theme.secondary; font.pixelSize: 12 }
                             ThemedComboBox {
                                 id: effortBox
                                 Layout.fillWidth: true
@@ -356,12 +356,12 @@ Rectangle {
                                     Layout.preferredWidth: 6
                                     Layout.preferredHeight: 6
                                     radius: 0
-                                    color: "#899f7d"
+                                    color: Theme.secondary
                                 }
                                 TuiText {
                                     Layout.fillWidth: true
                                     text: String(heartbeatRow.modelData.text || "Heartbeat check")
-                                    color: "#aeb2c8"
+                                    color: Theme.text
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
@@ -371,7 +371,7 @@ Rectangle {
                             visible: heartbeatCard.history.length === 0
                             text: heartbeatCard.schedule.enabled
                                 ? "No heartbeat history yet" : "Heartbeat is off"
-                            color: "#666b82"
+                            color: Theme.muted
                             font.pixelSize: 11
                         }
                     }
@@ -389,12 +389,12 @@ Rectangle {
                                 TuiText {
                                     Layout.fillWidth: true
                                     text: root.controller.teamNameById(teamMembership.modelData)
-                                    color: "#adb1c7"
+                                    color: Theme.secondary
                                     font.pixelSize: 12
                                 }
                                 TuiText {
                                     text: teamMembership.modelData
-                                    color: "#62677e"
+                                    color: Theme.faint
                                     font.family: "JetBrains Mono"
                                     font.pixelSize: 11
                                 }
@@ -461,8 +461,8 @@ Rectangle {
                                 Layout.fillWidth: true
                                 implicitHeight: artifactColumn.implicitHeight + 14
                                 radius: 0
-                                color: "#181b26"
-                                border.color: "#2c3042"
+                                color: Theme.raised
+                                border.color: Theme.border
                                 ColumnLayout {
                                     id: artifactColumn
                                     anchors.left: parent.left
@@ -475,14 +475,14 @@ Rectangle {
                                         TuiText {
                                             Layout.fillWidth: true
                                             text: String(artifactRow.modelData.title || "Artifact")
-                                            color: "#bfc3d7"
+                                            color: Theme.text
                                             font.pixelSize: 12
                                             font.weight: Font.DemiBold
                                             elide: Text.ElideRight
                                         }
                                         TuiText {
                                             text: String(artifactRow.modelData.type || "item").toUpperCase()
-                                            color: "#777d99"
+                                            color: Theme.muted
                                             font.family: "JetBrains Mono"
                                             font.pixelSize: 11
                                         }
@@ -490,7 +490,7 @@ Rectangle {
                                     TuiText {
                                         Layout.fillWidth: true
                                         text: String(artifactRow.modelData.summary || "")
-                                        color: "#686d84"
+                                        color: Theme.muted
                                         font.pixelSize: 11
                                         wrapMode: Text.Wrap
                                         maximumLineCount: 3
@@ -502,7 +502,7 @@ Rectangle {
                         TuiText {
                             visible: root.artifacts.length === 0
                             text: "No artifacts for this agent yet"
-                            color: "#666b82"
+                            color: Theme.muted
                             font.pixelSize: 11
                         }
                     }
@@ -515,7 +515,7 @@ Rectangle {
                                 Layout.fillWidth: true
                                 text: Number(root.details.queue_count || 0) === 0
                                     ? "Nothing waiting" : String(root.details.queue_count) + " waiting"
-                                color: "#858aa2"
+                                color: Theme.secondary
                                 font.pixelSize: 12
                             }
                             TuiButton {
@@ -538,7 +538,7 @@ Rectangle {
                                 TuiText {
                                     Layout.fillWidth: true
                                     text: String(schedule.modelData.name || "Scheduled task")
-                                    color: "#adb1c7"
+                                    color: Theme.secondary
                                     font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
@@ -614,7 +614,7 @@ Rectangle {
             spacing: 8
             TuiText {
                 text: card.title
-                color: "#858aa5"
+                color: Theme.muted
                 font.family: "JetBrains Mono"
                 font.pixelSize: 11
                 font.weight: Font.DemiBold
@@ -629,12 +629,12 @@ Rectangle {
         required property string label
         required property string value
         Layout.fillWidth: true
-        TuiText { text: info.label; color: "#888da5"; font.pixelSize: 11 }
+        TuiText { text: info.label; color: Theme.secondary; font.pixelSize: 11 }
         Item { Layout.fillWidth: true }
         TuiText {
             Layout.maximumWidth: 520
             text: info.value
-            color: "#b2b6cc"
+            color: Theme.text
             font.family: "JetBrains Mono"
             font.pixelSize: 11
             elide: Text.ElideMiddle
@@ -647,7 +647,7 @@ Rectangle {
         property bool checked: false
         signal toggled(bool checked)
         Layout.fillWidth: true
-        TuiText { Layout.fillWidth: true; text: toggle.label; color: "#adb1c7"; font.pixelSize: 12 }
+        TuiText { Layout.fillWidth: true; text: toggle.label; color: Theme.secondary; font.pixelSize: 12 }
         TuiSwitch { checked: toggle.checked; onToggled: toggle.toggled(checked) }
     }
 }

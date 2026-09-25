@@ -20,6 +20,7 @@ class ContactListModel : public QAbstractListModel {
         DescriptionRole,
         BuiltinRole,
         AvatarSymbolRole,
+        AvatarUrlRole,
     };
     Q_ENUM(Role)
 
@@ -30,6 +31,7 @@ class ContactListModel : public QAbstractListModel {
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
     void applySnapshot(const QJsonObject& snapshot, const QSet<QString>& activeNames);
+    [[nodiscard]] QHash<QString, QString> avatarUrlsByName() const;
 
   signals:
     void countChanged();
@@ -40,6 +42,7 @@ class ContactListModel : public QAbstractListModel {
         QString name;
         QString description;
         QString avatarSymbol;
+        QString avatarUrl;
         bool builtin = false;
     };
     QVector<Contact> m_contacts;

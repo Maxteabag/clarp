@@ -10,7 +10,7 @@ Rectangle {
     property bool submitting: false
     property bool returnToComposer: false
     signal closeRequested
-    color: "#e61a1b26"
+    color: Qt.alpha(Theme.window, 0.9)
     function open(target, automatic, restoreComposer) {
         returnToComposer = restoreComposer === true;
         session = target;
@@ -64,12 +64,12 @@ Rectangle {
         anchors.centerIn: parent
         width: Math.min(580, parent.width - 32)
         height: form.implicitHeight + 40
-        color: "#1a1b26"; border.color: "#41445a"
+        color: Theme.window; border.color: Theme.border
         ColumnLayout {
             id: form
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }
             spacing: 14
-            TuiText { text: "Assign contact"; color: "#c0caf5"; font.pixelSize: 18 }
+            TuiText { text: "Assign contact"; color: Theme.text; font.pixelSize: 18 }
             TuiRadioButton {
                 id: automaticOption
                 objectName: "assignAutomatically"
@@ -106,7 +106,7 @@ Rectangle {
             TuiText {
                 visible: root.mode === "choose" && root.controller.assignmentContacts.length === 0
                 text: "No contacts available"
-                color: "#9ca1bd"
+                color: Theme.secondary
                 Layout.fillWidth: true; wrapMode: Text.Wrap
             }
             TuiRadioButton {
@@ -129,7 +129,7 @@ Rectangle {
             TuiText {
                 visible: root.controller.errorMessage.length > 0 || !root.controller.connected
                 text: root.controller.errorMessage || "Connect to the Host to assign a contact."
-                Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#e0af68"
+                Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.warning
             }
             RowLayout {
                 Item { Layout.fillWidth: true }

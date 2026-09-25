@@ -81,13 +81,20 @@ labels, exact detail-level selection, Escape cancellation and focus return.
 For a screenshot, set `CLARP_SCREENSHOT_QUERY=streaming` and use the existing
 screenshot helper with `quickSwitcher` as its view argument.
 
-Ctrl+Shift+N opens the name-only New contact & chat dialog. Enter a new name and
-press Enter to create a fresh agent using the saved workspace and quick-start
-backend. The dialog rejects empty/offline submissions, prevents duplicate
-submission while pending, and retains the name on error. Ctrl+N keeps the full
-configuration form; Ctrl+Alt+N selects an existing idle contact. These are distinct
-operations. `tst_quick_new_agent.qml` covers Enter, cancellation, failure/retry,
-saved defaults and pending submission.
+Ctrl+N, Ctrl+Shift+N and Ctrl+Alt+N all open the one-screen **New Session**
+hub (`NewSessionHub.qml`), which mirrors the iOS New Session sheet: a row of
+provider marks, a model summary with an inline model/effort editor, a compact
+directory row with **Change…**, and contact cards with search, **Show all**
+(adds contacts already in a chat) and **New contact**. The search field has
+focus on open; Up/Down move through the cards, Ctrl+Left/Right change the
+provider (Left/Right on a focused provider mark do the same), Enter confirms,
+and Esc steps out of the inline editors before it closes the hub. Enter on an
+idle contact starts it with the chosen provider, model, effort and directory;
+Enter on an "In chat" card opens that chat; Enter in the New contact name
+field creates a fresh named agent. The Host does not tell the desktop which
+provider a contact was designed for, so every idle contact is listed.
+`tst_new_session_hub.qml` covers defaults, provider reset, search, both confirm
+paths, new-contact creation, Esc, offline state, errors and command-line launch.
 
 Ctrl+Alt+R retries the latest failed message in the selected conversation without
 changing the composer draft. Ctrl+K → Retry latest failed message does the same.
@@ -101,7 +108,8 @@ a session. Explicit update/adoption restoration keeps its requested session.
 New agents default to the Host home directory (`~`), including model-specific
 launches and quick contact creation. Explicit launcher directories are preserved.
 Use **Ctrl+K → Change directory** or **Ctrl+Alt+D** to choose a directory for a
-new launch. This opens the launch picker and does not restart an existing chat.
+new launch. This opens the New Session hub on its directory picker and does not
+restart an existing chat.
 
 ## Custom bindings and workspaces
 

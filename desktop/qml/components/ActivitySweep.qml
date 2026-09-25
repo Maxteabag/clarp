@@ -9,6 +9,6 @@ Item {
  Rectangle {
   width: parent.width * 0.3; height: parent.height
   x: -width + Math.max(0,(root.phase-0.05)/0.95)*(parent.width+width)
-  color: "#9ece6a"; opacity: 0.12
+  color: Theme.success; opacity: 0.12
  }
 }

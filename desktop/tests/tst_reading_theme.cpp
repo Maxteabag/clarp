@@ -38,6 +38,28 @@ class ReadingThemeTest : public QObject {
             QVERIFY2(contrast(theme.link, theme.background) >= 4.5, label);
         }
     }
+    void chromeRolesStayReadableOnEveryTheme() {
+        for (const auto& theme : clarp::readingThemes()) {
+            const auto label = theme.id.toUtf8();
+            for (const auto& surface : {theme.window, theme.raised, theme.control, theme.sunken}) {
+                QVERIFY2(contrast(theme.chromeText, surface) >= 7.0, label);
+                QVERIFY2(contrast(theme.secondary, surface) >= 4.5, label);
+            }
+            QVERIFY2(contrast(theme.mutedText, theme.window) >= 4.5, label);
+            QVERIFY2(contrast(theme.accent, theme.window) >= 3.0, label);
+            QVERIFY2(contrast(theme.accentText, theme.accent) >= 4.5, label);
+            QVERIFY2(contrast(theme.warning, theme.window) >= 4.5, label);
+            QVERIFY2(contrast(theme.danger, theme.window) >= 4.5, label);
+            QVERIFY2(contrast(theme.success, theme.window) >= 3.0, label);
+            QVERIFY2(contrast(theme.border, theme.window) >= 1.3, label);
+            QVERIFY2(theme.light == (QColor(theme.window).lightnessF() > 0.5), label);
+        }
+        QVERIFY(clarp::readingTheme(QStringLiteral("paper")).light);
+        QVERIFY(!clarp::readingTheme(QStringLiteral("terminal")).light);
+        const auto style = clarp::readingThemeStyle(QStringLiteral("paper"), [](const QString&) { return true; });
+        QVERIFY(style.value(QStringLiteral("light")).toBool());
+        QCOMPARE(style.value(QStringLiteral("window")).toString(), clarp::readingTheme(QStringLiteral("paper")).window);
+    }
     void noPurePolarityExtremes() {
         // Pure white on black (or black on white) is harsher to read than a
         // softer pairing; every theme should stop short of both extremes.

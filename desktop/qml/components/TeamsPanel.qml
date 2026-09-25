@@ -30,7 +30,7 @@ Rectangle {
         for (const team of source) append(team, 0);
         return result;
     }
-    color: "#1a1b26"
+    color: Theme.window
     objectName: "teamsPanel"
 
     function selectedTeam() {
@@ -62,7 +62,7 @@ Rectangle {
 
             TuiText {
                 text: "TEAMS"
-                color: "#c9cde3"
+                color: Theme.text
                 font.family: "JetBrains Mono"
                 font.pixelSize: 17
                 font.weight: Font.DemiBold
@@ -70,7 +70,7 @@ Rectangle {
             }
             TuiText {
                 text: root.controller.teams.length + " teams"
-                color: "#656a82"
+                color: Theme.muted
                 font.family: "JetBrains Mono"
                 font.pixelSize: 11
             }
@@ -105,18 +105,18 @@ Rectangle {
             }
         }
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#303347" }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border }
 
         Rectangle {
             visible: root.controller.teamsError.length > 0
             Layout.fillWidth: true
             implicitHeight: visible ? 34 : 0
-            color: "#2b2028"
+            color: Theme.dangerSurface
             TuiText {
                 anchors.fill: parent
                 anchors.margins: 8
                 text: root.controller.teamsError
-                color: "#c98a98"
+                color: Theme.danger
                 font.pixelSize: 12
                 elide: Text.ElideRight
             }
@@ -150,9 +150,9 @@ Rectangle {
                     onClicked: root.controller.selectTeam(String(modelData.team_id || ""))
                     background: Rectangle {
                         radius: 0
-                        color: teamRow.highlighted ? "#272b40"
-                            : teamRow.hovered ? "#202332" : "transparent"
-                        border.color: teamRow.highlighted ? "#596083" : "transparent"
+                        color: teamRow.highlighted ? Theme.border
+                            : teamRow.hovered ? Theme.control : "transparent"
+                        border.color: teamRow.highlighted ? Theme.muted : "transparent"
                     }
                     contentItem: RowLayout {
                         spacing: 9
@@ -163,12 +163,12 @@ Rectangle {
                             radius: 0
                             color: {
                                 const value = String(teamRow.modelData.color || "");
-                                return value.startsWith("#") ? value : "#41465f";
+                                return value.startsWith("#") ? value : Theme.faint;
                             }
                             TuiText {
                                 anchors.centerIn: parent
                                 text: String(teamRow.modelData.name || "?").slice(0, 1).toUpperCase()
-                                color: "#eef0fb"
+                                color: Theme.text
                                 font.pixelSize: 15
                                 font.weight: Font.DemiBold
                             }
@@ -181,7 +181,7 @@ Rectangle {
                                 TuiText {
                                     Layout.fillWidth: true
                                     text: String(teamRow.modelData.name || "Team")
-                                    color: "#c8cadc"
+                                    color: Theme.text
                                     font.pixelSize: 13
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
@@ -191,11 +191,11 @@ Rectangle {
                                     Layout.preferredWidth: 18
                                     Layout.preferredHeight: 16
                                     radius: 0
-                                    color: "#91a884"
+                                    color: Theme.secondary
                                     TuiText {
                                         anchors.centerIn: parent
                                         text: String(teamRow.modelData.unread_count || 0)
-                                        color: "#1a1b26"
+                                        color: Theme.window
                                         font.pixelSize: 11
                                     }
                                 }
@@ -205,7 +205,7 @@ Rectangle {
                                 text: (teamRow.modelData.parent_team_id ? "Subteam · " : "")
                                     + (String(teamRow.modelData.latest_message || "")
                                        || String((teamRow.modelData.member_agent_ids || []).length) + " members")
-                                color: "#6c7188"
+                                color: Theme.muted
                                 font.pixelSize: 11
                                 elide: Text.ElideRight
                             }
@@ -216,7 +216,7 @@ Rectangle {
 
             Rectangle {
                 SplitView.fillWidth: true
-                color: "#191b27"
+                color: Theme.raised
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -225,7 +225,7 @@ Rectangle {
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 54
-                        color: "#1e2130"
+                        color: Theme.control
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 14
@@ -240,7 +240,7 @@ Rectangle {
                                         const team = root.selectedTeam();
                                         return team ? String(team.name || "Team") : "Select a team";
                                     }
-                                    color: "#d0d2e3"
+                                    color: Theme.text
                                     font.pixelSize: 14
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
@@ -257,7 +257,7 @@ Rectangle {
                                             + (leader.length > 0 ? "  ·  leader "
                                                 + root.controller.agentNameById(leader) : "");
                                     }
-                                    color: "#686d85"
+                                    color: Theme.muted
                                     font.family: "JetBrains Mono"
                                     font.pixelSize: 11
                                     elide: Text.ElideMiddle
@@ -322,8 +322,8 @@ Rectangle {
                         visible: root.controller.selectedTeamId.length > 0
                         Layout.fillWidth: true
                         Layout.preferredHeight: visible ? 42 : 0
-                        color: "#1b1e2a"
-                        border.color: "#292d3f"
+                        color: Theme.raised
+                        border.color: Theme.border
 
                         Flickable {
                             anchors.fill: parent
@@ -350,15 +350,15 @@ Rectangle {
                                         implicitWidth: memberName.implicitWidth + removeMember.implicitWidth + 18
                                         implicitHeight: 25
                                         radius: 0
-                                        color: "#272b3c"
-                                        border.color: "#3b4057"
+                                        color: Theme.border
+                                        border.color: Theme.border
                                         Row {
                                             anchors.centerIn: parent
                                             spacing: 4
                                             TuiText {
                                                 id: memberName
                                                 text: root.controller.agentNameById(memberChip.modelData)
-                                                color: "#aeb2cb"
+                                                color: Theme.text
                                                 font.pixelSize: 11
                                             }
                                             TuiToolButton {
@@ -407,7 +407,7 @@ Rectangle {
                             width: ListView.view.width - 28
                             implicitHeight: messageColumn.implicitHeight + 18
                             radius: 0
-                            color: "#202331"
+                            color: Theme.control
                             border.width: 0
                             ColumnLayout {
                                 id: messageColumn
@@ -421,7 +421,7 @@ Rectangle {
                                     TuiText {
                                         Layout.fillWidth: true
                                         text: String(message.modelData.source_name || "Agent")
-                                        color: "#9ca3c7"
+                                        color: Theme.secondary
                                         font.pixelSize: 12
                                         font.weight: Font.DemiBold
                                     }
@@ -439,7 +439,7 @@ Rectangle {
                                     selectByMouse: true
                                     wrapMode: TextEdit.Wrap
                                     text: String(message.modelData.text || "")
-                                    color: "#b8bbcf"
+                                    color: Theme.secondary
                                     font.pixelSize: 13
                                 }
                             }
@@ -450,7 +450,7 @@ Rectangle {
                             visible: messages.count === 0 && !root.controller.teamsLoading
                             text: root.controller.selectedTeamId.length > 0
                                 ? "No team messages yet" : "Choose a team"
-                            color: "#62677f"
+                            color: Theme.muted
                             font.pixelSize: 12
                         }
                     }
@@ -489,7 +489,7 @@ Rectangle {
         onAccepted: root.controller.deleteTeam(root.controller.selectedTeamId)
         TuiLabel {
             text: "This removes the team and its history."
-            color: "#b8bbcf"
+            color: Theme.secondary
         }
     }
 
@@ -512,7 +512,7 @@ Rectangle {
             TuiTextField {
                 id: editColor
                 Layout.fillWidth: true
-                placeholderText: "#596083"
+                placeholderText: Theme.muted
             }
             TuiLabel { text: "Leader" }
             ThemedComboBox {

@@ -196,8 +196,9 @@ inline void startKeyboardSmokeCheck(QGuiApplication& application, QQuickWindow* 
             press(Qt::Key_N, Qt::ControlModifier | Qt::ShiftModifier);
             break;
         case 22:
-            if (!require(state("modal") && window->activeFocusItem() != nullptr
-                         && window->activeFocusItem()->objectName() == QStringLiteral("quickNewAgentName"))) return;
+            // Ctrl+Shift+N opens the New Session hub, which reports the launch context.
+            if (!require(state("launch") && window->activeFocusItem() != nullptr
+                         && window->activeFocusItem()->objectName() == QStringLiteral("contactSearch"))) return;
             press(Qt::Key_Escape);
             break;
         case 23:

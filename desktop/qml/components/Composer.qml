@@ -18,7 +18,8 @@ Rectangle {
     // Reading theme for the editor surface only; the status rows stay on the chrome.
     readonly property var readingStyle: (controller && controller.readingStyle) || ({})
     function styled(key, fallback) {
-        const value = root.readingStyle[key];
+        const style = root.readingStyle;
+        const value = style ? style[key] : undefined;
         return value === undefined || value === null || value === "" ? fallback : value;
     }
     readonly property int composerRevision: controller.composerRevision
@@ -58,15 +59,15 @@ Rectangle {
     implicitHeight: Math.max(54, Math.min(200, editor.contentHeight + editor.topPadding + editor.bottomPadding + 4)) + (transcriptionCount > 0 ? 25 : 0)
         + (queueCount > 0 ? 25 : 0) + (quotaNotice.length > 0 ? 25 : 0) + (attachments.length > 0 ? 31 : 0)
         + (root.active && root.controller.startingContact.length > 0 ? 25 : 0)
-    color: root.active ? "#1a1b26" : "#1a1b26"
-    border.color: root.active ? "#454b6c" : "#272a39"
+    color: root.active ? Theme.window : Theme.window
+    border.color: root.active ? Theme.border : Theme.rule
     border.width: 0
 
     Rectangle {
         z: 1
         width: parent.width
         height: 1
-        color: root.active ? "#454b6c" : "#272a39"
+        color: root.active ? Theme.border : Theme.rule
     }
 
     function restoreFocus() {
@@ -115,7 +116,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 19 : 0
             text: "Starting " + root.controller.startingContact + "…"
-            color: "#b9bfdf"
+            color: Theme.secondary
             font.pixelSize: 12
         }
 
@@ -128,7 +129,7 @@ Rectangle {
                 text: root.transcriptionCount === 1
                     ? "Transcribing voice in background…"
                     : root.transcriptionCount + " voice notes transcribing…"
-                color: "#8997b8"
+                color: Theme.secondary
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
                 elide: Text.ElideRight
@@ -152,7 +153,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 19 : 0
             text: "! " + root.quotaNotice
-            color: "#e0af68"
+            color: Theme.warning
             font.family: "JetBrains Mono"
             font.pixelSize: 12
             elide: Text.ElideRight
@@ -166,7 +167,7 @@ Rectangle {
             Layout.preferredHeight: visible ? 19 : 0
             text: root.queueCount + (root.queueCount === 1 ? " message queued" : " messages queued")
                 + "  ·  Ctrl+Enter queues next"
-            color: "#8f93b3"
+            color: Theme.secondary
             font.family: "JetBrains Mono"
             font.pixelSize: 12
             elide: Text.ElideRight
@@ -194,8 +195,8 @@ Rectangle {
                         height: 24
                         width: Math.min(220, attachmentLabel.implicitWidth + 36)
                         radius: 0
-                        color: "#262938"
-                        border.color: "#42465e"
+                        color: Theme.control
+                        border.color: Theme.border
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 7
@@ -221,7 +222,7 @@ Rectangle {
                                     + (String(attachmentChip.modelData.status || "ready") === "ready"
                                         ? "" : " · " + String(attachmentChip.modelData.status))
                                 color: String(attachmentChip.modelData.status || "ready") === "failed"
-                                    ? "#c98a98" : "#adb1c8"
+                                    ? Theme.danger : Theme.text
                                 font.pixelSize: 12
                                 elide: Text.ElideMiddle
                             }
@@ -248,7 +249,7 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: root.styled("background", "#1a1b26")
+            color: root.styled("background", Theme.window)
             radius: 0
             border.width: 0
 
@@ -268,11 +269,11 @@ Rectangle {
                         && root.controller.startingContact.length === 0
                     opacity: root.active ? 1 : 0.58
                     wrapMode: TextArea.Wrap
-                    color: root.styled("text", "#c7c9dc")
+                    color: root.styled("text", Theme.text)
                     Accessible.name: "Message to " + root.controller.agentName(root.session)
-                    placeholderTextColor: root.styled("faintText", "#55586c")
-                    selectionColor: root.styled("selection", "#6f527b")
-                    selectedTextColor: root.styled("selectedText", "#fff8ff")
+                    placeholderTextColor: root.styled("faintText", Theme.faint)
+                    selectionColor: root.styled("selection", Theme.selection)
+                    selectedTextColor: root.styled("selectedText", Theme.selectedText)
                     font.family: String(root.styled("fontFamily", "JetBrains Mono"))
                     font.pixelSize: Number(root.styled("fontPixelSize", 15))
                     background: null
@@ -282,11 +283,16 @@ Rectangle {
                     bottomPadding: 12
 
                     FontMetrics { id: cursorMetrics; font: editor.font }
+                    // A block the width of "M" suits the monospace terminal theme;
+                    // proportional reading fonts get a slim bar, and both stop at
+                    // the glyph box instead of spanning the whole line height.
+                    readonly property bool blockCursor: editor.font.family === "JetBrains Mono"
                     cursorDelegate: Rectangle {
                         id: terminalCursor
                         objectName: "terminalBlockCursor"
-                        width: Math.max(1, cursorMetrics.advanceWidth("M"))
-                        height: cursorMetrics.height
+                        width: editor.blockCursor ? Math.max(1, cursorMetrics.advanceWidth("n")) : 2
+                        height: Math.ceil(cursorMetrics.ascent + cursorMetrics.descent)
+                        y: Math.max(0, Math.round((cursorMetrics.height - height) / 2))
                         color: editor.color
                         opacity: 0.65
                         visible: editor.activeFocus && editor.selectionStart === editor.selectionEnd
@@ -365,14 +371,14 @@ Rectangle {
             ToolTip.text: "Stop voice playback"
             contentItem: TuiText {
                 text: playbackButton.text
-                color: "#74778e"
+                color: Theme.faint
                 font.pixelSize: 12
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
             }
             background: Rectangle {
                 radius: 0
-                color: playbackButton.hovered ? "#242633" : "transparent"
+                color: playbackButton.hovered ? Theme.hover : "transparent"
             }
         }
 
@@ -417,13 +423,13 @@ Rectangle {
         visible: root.dropActive
         z: 40
         radius: 0
-        color: "#d0262a3d"
-        border.color: "#a7addb"
+        color: Qt.alpha(Theme.control, 0.82)
+        border.color: Theme.link
         border.width: 2
         TuiText {
             anchors.centerIn: parent
             text: "DROP TO ATTACH"
-            color: "#d8dbef"
+            color: Theme.text
             font.family: "JetBrains Mono"
             font.pixelSize: 12
             font.weight: Font.DemiBold

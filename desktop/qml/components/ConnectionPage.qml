@@ -7,7 +7,7 @@ Rectangle {
 
     required property var controller
 
-    color: "#e61a1b26"
+    color: Qt.alpha(Theme.window, 0.9)
 
     MouseArea {
         anchors.fill: parent
@@ -21,8 +21,8 @@ Rectangle {
         height: cardColumn.implicitHeight + 56
         anchors.centerIn: parent
         radius: 0
-        color: "#20212e"
-        border.color: "#41445a"
+        color: Theme.raised
+        border.color: Theme.border
 
         ColumnLayout {
             id: cardColumn
@@ -35,7 +35,7 @@ Rectangle {
 
             TuiText {
                 text: "Connect to Clarp"
-                color: "#c0caf5"
+                color: Theme.text
                 font.pixelSize: 17
                 font.weight: Font.DemiBold
             }
@@ -43,7 +43,7 @@ Rectangle {
             TuiText {
                 Layout.fillWidth: true
                 text: "The native client connects directly to the Clarp server. Credentials remain outside the UI after this session."
-                color: "#8d93b0"
+                color: Theme.muted
                 font.pixelSize: 12
                 wrapMode: Text.Wrap
             }
@@ -70,12 +70,12 @@ Rectangle {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 1
-                color: "#292b3a"
+                color: Theme.control
             }
 
             TuiLabel {
                 text: "Or pair with a one-time code from clarp-admin pair create"
-                color: "#8d93b0"
+                color: Theme.muted
                 font.pixelSize: 11
             }
 
@@ -103,7 +103,7 @@ Rectangle {
                 visible: root.controller.errorMessage.length > 0
                 Layout.fillWidth: true
                 text: root.controller.errorMessage
-                color: "#e58b8c"
+                color: Theme.danger
                 font.pixelSize: 11
                 wrapMode: Text.Wrap
             }

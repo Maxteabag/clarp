@@ -15,7 +15,7 @@ Rectangle {
     property int focusedIndex: 0
     readonly property var actions: [timestampsRow, readyRow, reducedMotionRow, toolsRow, narrationRow, startupRow, anonymousRow, minimalUiRow, readingThemeRow, spokenRow, mobilePushRow,
         connectionRow, orchestratorRow, filesystemRow, routingRow]
-    color: "#1a1b26"
+    color: Theme.window
     objectName: "settingsPanel"
 
     function availableRows() { return root.actions.filter(row => row.visible && row.enabled); }
@@ -115,7 +115,7 @@ Rectangle {
             TuiText {
                 objectName: "settingsHeading"
                 text: "SETTINGS"
-                color: "#c9cde3"
+                color: Theme.text
                 font.family: "JetBrains Mono"
                 font.pixelSize: 17
                 font.weight: Font.DemiBold
@@ -124,7 +124,7 @@ Rectangle {
             TuiText {
                 Layout.fillWidth: true
                 text: "↑↓ / Tab move · Space / Enter change · Esc back to chat"
-                color: "#858aa5"
+                color: Theme.muted
                 font.pixelSize: 12
                 wrapMode: Text.Wrap
             }
@@ -177,11 +177,11 @@ Rectangle {
                         spacing: 8
                         RowLayout {
                             Layout.fillWidth: true
-                            TuiText { text: "Tool detail"; color: "#d2d7eb"; font.pixelSize: 14 }
+                            TuiText { text: "Tool detail"; color: Theme.text; font.pixelSize: 14 }
                             Item { Layout.fillWidth: true }
                             TuiText {
                                 text: root.controller.toolNarrator.detailLevels[root.controller.toolNarrator.detailLevel]
-                                color: "#82aaff"
+                                color: Theme.link
                                 font.pixelSize: 14
                             }
                         }
@@ -205,8 +205,8 @@ Rectangle {
                                 width: detailDial.availableWidth
                                 height: 4
                                 radius: 0
-                                color: "#454c65"
-                                Rectangle { width: parent.width * detailDial.visualPosition; height: parent.height; radius: 0; color: "#82aaff" }
+                                color: Theme.faint
+                                Rectangle { width: parent.width * detailDial.visualPosition; height: parent.height; radius: 0; color: Theme.link }
                                 Repeater {
                                     model: 5
                                     Rectangle {
@@ -215,7 +215,7 @@ Rectangle {
                                         y: -2
                                         width: 3
                                         height: 8
-                                        color: index <= detailDial.value ? "#82aaff" : "#59627f"
+                                        color: index <= detailDial.value ? Theme.link : Theme.muted
                                     }
                                 }
                             }
@@ -225,22 +225,22 @@ Rectangle {
                                 implicitWidth: 16
                                 implicitHeight: 16
                                 radius: 0
-                                color: "#c4cee9"
-                                border.color: "#82aaff"
+                                color: Theme.text
+                                border.color: Theme.link
                             }
                         }
                         RowLayout {
                             Layout.fillWidth: true
-                            TuiText { text: "Developer"; color: "#858da8"; font.pixelSize: 11 }
+                            TuiText { text: "Developer"; color: Theme.secondary; font.pixelSize: 11 }
                             Item { Layout.fillWidth: true }
-                            TuiText { text: "← → to adjust"; color: "#858da8"; font.pixelSize: 11 }
+                            TuiText { text: "← → to adjust"; color: Theme.secondary; font.pixelSize: 11 }
                             Item { Layout.fillWidth: true }
-                            TuiText { text: "Grandma"; color: "#858da8"; font.pixelSize: 11 }
+                            TuiText { text: "Grandma"; color: Theme.secondary; font.pixelSize: 11 }
                         }
                         TuiText {
                             Layout.fillWidth: true
                             text: narrationRow.detail
-                            color: "#a2aac4"
+                            color: Theme.text
                             font.pixelSize: 12
                             wrapMode: Text.Wrap
                         }
@@ -249,14 +249,14 @@ Rectangle {
                 TuiText {
                     Layout.fillWidth: true
                     text: "Your Host uses Spark low to explain tool metadata and bounded script excerpts. Results are shared across clients; this detail choice stays on this device. Secret filtering is best-effort."
-                    color: "#858aa5"
+                    color: Theme.muted
                     font.pixelSize: 12
                     wrapMode: Text.Wrap
                 }
                 TuiText {
                     Layout.fillWidth: true
                     text: root.controller.toolNarrator.status
-                    color: "#82aaff"
+                    color: Theme.link
                     font.pixelSize: 12
                     wrapMode: Text.Wrap
                 }
@@ -453,7 +453,7 @@ Rectangle {
             spacing: 8
             TuiText {
                 text: group.title
-                color: "#858aa5"
+                color: Theme.muted
                 font.family: "JetBrains Mono"
                 font.pixelSize: 11
                 font.weight: Font.DemiBold
@@ -489,9 +489,9 @@ Rectangle {
 
         background: Rectangle {
             radius: 0
-            color: actionRow.activeFocus ? "#292d41" : hover.hovered ? "#212431" : "transparent"
+            color: actionRow.activeFocus ? Theme.control : hover.hovered ? Theme.hover : "transparent"
             border.width: actionRow.activeFocus ? 1 : 0
-            border.color: "#606888"
+            border.color: Theme.border
         }
         contentItem: RowLayout {
             spacing: 14
@@ -501,14 +501,14 @@ Rectangle {
                 TuiText {
                     Layout.fillWidth: true
                     text: actionRow.label
-                    color: actionRow.activeFocus ? "#e0e3f2" : "#c2c5d8"
+                    color: actionRow.activeFocus ? Theme.text : Theme.text
                     font.pixelSize: 14
                     wrapMode: Text.Wrap
                 }
                 TuiText {
                     Layout.fillWidth: true
                     text: actionRow.detail
-                    color: actionRow.activeFocus ? "#a2aac4" : "#777d95"
+                    color: actionRow.activeFocus ? Theme.text : Theme.muted
                     font.pixelSize: 11
                     wrapMode: Text.Wrap
                 }
@@ -517,7 +517,7 @@ Rectangle {
                 Layout.preferredWidth: 34
                 horizontalAlignment: Text.AlignRight
                 text: actionRow.checkable ? (actionRow.checked ? "ON" : "OFF") : "›"
-                color: actionRow.checkable && actionRow.checked ? "#a6bf96" : "#9098b3"
+                color: actionRow.checkable && actionRow.checked ? Theme.secondary : Theme.secondary
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
             }
@@ -558,11 +558,11 @@ Rectangle {
         Layout.leftMargin: 8
         Layout.rightMargin: 8
         Layout.preferredHeight: 28
-        TuiText { text: infoRow.label; color: "#aeb2c8"; font.pixelSize: 12 }
+        TuiText { text: infoRow.label; color: Theme.text; font.pixelSize: 12 }
         Item { Layout.fillWidth: true }
         TuiText {
             text: infoRow.value
-            color: "#6d728a"
+            color: Theme.muted
             font.family: "JetBrains Mono"
             font.pixelSize: 11
         }
@@ -600,7 +600,7 @@ Rectangle {
             TuiText {
                 Layout.fillWidth: true
                 text: "Changing to a local provider may briefly restart the Host."
-                color: "#6d728a"
+                color: Theme.muted
                 font.pixelSize: 11
                 wrapMode: Text.Wrap
             }

@@ -16,7 +16,7 @@ Rectangle {
     signal voiceRequested(string session, string name)
     signal orchestratorRequested
 
-    color: "#d908090f"
+    color: Qt.alpha(Theme.sunken, 0.85)
 
     MouseArea {
         anchors.fill: parent
@@ -27,8 +27,8 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: 18
         radius: 0
-        color: "#20212e"
-        border.color: "#343648"
+        color: Theme.raised
+        border.color: Theme.border
 
         ColumnLayout {
             anchors.fill: parent
@@ -43,7 +43,7 @@ Rectangle {
                     spacing: 2
                     TuiText {
                         text: "AGENTS"
-                        color: "#c8cadc"
+                        color: Theme.text
                         font.family: "JetBrains Mono"
                         font.pixelSize: 17
                         font.weight: Font.DemiBold
@@ -51,7 +51,7 @@ Rectangle {
                     }
                     TuiText {
                         text: root.controller.agents.count + " active conversations"
-                        color: "#62657a"
+                        color: Theme.muted
                         font.family: "JetBrains Mono"
                         font.pixelSize: 11
                     }
@@ -105,7 +105,7 @@ Rectangle {
                     width: ListView.view.width
                     implicitHeight: cardColumn.implicitHeight + 18
                     radius: 0
-                    color: root.controller.selectedSession === session ? "#242634" : "#1c1d28"
+                    color: root.controller.selectedSession === session ? Theme.control : Theme.raised
                     border.width: 0
 
                     ColumnLayout {
@@ -127,11 +127,12 @@ Rectangle {
                                 Layout.preferredHeight: 34
                                 controller: root.controller
                                 session: card.session
+                                showPortrait: true
                                 name: card.name
                                 symbol: card.avatarSymbol
                                 avatarSize: 34
                                 cornerRadius: 8
-                                fallbackColor: card.busy ? "#5c5149" : "#414458"
+                                fallbackColor: card.busy ? Theme.faint : Theme.border
                             }
 
                             ColumnLayout {
@@ -139,7 +140,7 @@ Rectangle {
                                 spacing: 2
                                 TuiText {
                                     text: card.name
-                                    color: "#c8cadc"
+                                    color: Theme.text
                                     font.family: "JetBrains Mono"
                                     font.pixelSize: 13
                                     font.weight: Font.DemiBold
@@ -148,7 +149,7 @@ Rectangle {
                                     Layout.fillWidth: true
                                     text: card.lastMessage || card.statusText || card.agentState
                                     ActivitySweep { anchors.fill: parent; working: overviewAvatarActivity.authoritativeWorking; reducedMotion: overviewAvatarActivity.reducedMotion; phase: overviewAvatarActivity.phase }
-                                    color: "#686b80"
+                                    color: Theme.muted
                                     font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
@@ -165,20 +166,20 @@ Rectangle {
 
                             TuiLabel {
                                 text: card.backend
-                                color: "#8e91aa"
+                                color: Theme.secondary
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 11
                             }
                             TuiLabel {
                                 text: card.modelName || "provider default"
-                                color: "#5f6277"
+                                color: Theme.faint
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 11
                             }
                             TuiLabel {
                                 Layout.fillWidth: true
                                 text: card.workingDirectory
-                                color: "#5f6277"
+                                color: Theme.faint
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 11
                                 elide: Text.ElideMiddle
@@ -186,7 +187,7 @@ Rectangle {
                             TuiLabel {
                                 visible: card.queueCount > 0
                                 text: card.queueCount + " queued"
-                                color: "#9d91a7"
+                                color: Theme.secondary
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 11
                             }
@@ -201,7 +202,7 @@ Rectangle {
                             to: Math.max(1, card.contextWindow)
                             value: card.contextTokens
                             background: Rectangle {
-                                color: "#292b39"
+                                color: Theme.border
                                 radius: 0
                             }
                             contentItem: Item {
@@ -210,7 +211,7 @@ Rectangle {
                                     width: contextProgress.visualPosition * parent.width
                                     height: parent.height
                                     radius: 0
-                                    color: "#666a83"
+                                    color: Theme.muted
                                 }
                             }
                         }
@@ -222,7 +223,7 @@ Rectangle {
 
                             TuiLabel {
                                 text: "SCHEDULED TASKS"
-                                color: "#8d8492"
+                                color: Theme.muted
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
                                 font.letterSpacing: 1
@@ -237,8 +238,8 @@ Rectangle {
                                     Layout.fillWidth: true
                                     implicitHeight: 48
                                     radius: 0
-                                    color: "#18161c"
-                                    border.color: "#2c2831"
+                                    color: Theme.window
+                                    border.color: Theme.control
 
                                     RowLayout {
                                         anchors.fill: parent
@@ -252,7 +253,7 @@ Rectangle {
                                             TuiText {
                                                 Layout.fillWidth: true
                                                 text: String(scheduleRow.modelData.name || "Scheduled task") + "  ·  " + String(scheduleRow.modelData.cron_expression || "")
-                                                color: "#cfc6d2"
+                                                color: Theme.text
                                                 font.pixelSize: 12
                                                 font.weight: Font.Medium
                                                 elide: Text.ElideRight
@@ -260,7 +261,7 @@ Rectangle {
                                             TuiText {
                                                 Layout.fillWidth: true
                                                 text: String(scheduleRow.modelData.prompt || "")
-                                                color: "#716a77"
+                                                color: Theme.muted
                                                 font.pixelSize: 11
                                                 elide: Text.ElideRight
                                             }
@@ -350,7 +351,7 @@ Rectangle {
 
                 TuiText {
                     text: "ARCHIVED"
-                    color: "#8d8492"
+                    color: Theme.muted
                     font.pixelSize: 12
                     font.weight: Font.DemiBold
                     font.letterSpacing: 1.2
@@ -372,8 +373,8 @@ Rectangle {
                         width: 250
                         height: ListView.view.height
                     radius: 0
-                    color: "#1c1d28"
-                    border.color: "#303142"
+                    color: Theme.raised
+                    border.color: Theme.border
 
                         RowLayout {
                             anchors.fill: parent
@@ -384,14 +385,14 @@ Rectangle {
                                 spacing: 1
                                 TuiText {
                                     text: archivedCard.name
-                                    color: "#c9c1cb"
+                                    color: Theme.text
                                     font.pixelSize: 13
                                     font.weight: Font.Medium
                                 }
                                 TuiText {
                                     Layout.fillWidth: true
                                     text: archivedCard.lastMessage || archivedCard.session
-                                    color: "#6f6874"
+                                    color: Theme.muted
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
@@ -417,7 +418,7 @@ Rectangle {
 
                 TuiText {
                     text: "READY CONTACTS"
-                    color: "#8d8492"
+                    color: Theme.muted
                     font.pixelSize: 12
                     font.weight: Font.DemiBold
                     font.letterSpacing: 1.2
@@ -439,8 +440,8 @@ Rectangle {
                         width: 280
                         height: ListView.view.height
                         radius: 0
-                        color: "#1c1d28"
-                        border.color: "#303142"
+                        color: Theme.raised
+                        border.color: Theme.border
 
                         RowLayout {
                             anchors.fill: parent
@@ -451,11 +452,11 @@ Rectangle {
                                 Layout.preferredWidth: 36
                                 Layout.preferredHeight: 36
                                 radius: 0
-                                color: "#414458"
+                                color: Theme.border
                                 TuiText {
                                     anchors.centerIn: parent
                                     text: contactCard.avatarSymbol || contactCard.name.slice(0, 1).toUpperCase()
-                                    color: "#f1e9f4"
+                                    color: Theme.text
                                     font.weight: Font.DemiBold
                                 }
                             }
@@ -464,14 +465,14 @@ Rectangle {
                                 spacing: 1
                                 TuiText {
                                     text: contactCard.name
-                                    color: "#e7dfe9"
+                                    color: Theme.text
                                     font.pixelSize: 14
                                     font.weight: Font.Medium
                                 }
                                 TuiText {
                                     Layout.fillWidth: true
                                     text: root.controller.quickStartBackend() + " · " + root.controller.lastWorkingDirectory
-                                    color: "#746d7a"
+                                    color: Theme.muted
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }

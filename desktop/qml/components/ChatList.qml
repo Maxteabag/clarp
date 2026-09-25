@@ -57,7 +57,7 @@ Rectangle {
     function focusSearch() { search.forceActiveFocus(); }
     function clearSearch() { search.clear(); }
 
-    color: "#20212e"
+    color: Theme.raised
 
     AgentFilterModel {
         id: roster
@@ -85,7 +85,7 @@ Rectangle {
                     visible: !root.collapsed
                     Layout.fillWidth: true
                     text: "Clarp"
-                    color: "#f1ece6"
+                    color: Theme.text
                     font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
@@ -118,11 +118,11 @@ Rectangle {
 
                     background: Rectangle {
                         radius: 0
-                        color: newAgentButton.pressed ? "#a273c3" : newAgentButton.hovered ? "#c193dd" : "#bb9af7"
+                        color: newAgentButton.pressed ? Theme.accent : newAgentButton.hovered ? Theme.accent : Theme.accent
                     }
                     contentItem: TuiText {
                         text: newAgentButton.text
-                        color: "#1a1b26"
+                        color: Theme.window
                         font.pixelSize: 17
                         font.weight: Font.DemiBold
                         horizontalAlignment: Text.AlignHCenter
@@ -143,8 +143,8 @@ Rectangle {
                 anchors.rightMargin: 12
                 anchors.bottomMargin: 8
                 radius: 0
-                color: "#211e27"
-                border.color: search.activeFocus ? "#6f527b" : "#2b2733"
+                color: Theme.dangerSurface
+                border.color: search.activeFocus ? Theme.selection : Theme.control
                 border.width: 1
 
                 RowLayout {
@@ -155,7 +155,7 @@ Rectangle {
 
                     TuiText {
                         text: "⌕"
-                        color: "#8d93b0"
+                        color: Theme.muted
                         font.pixelSize: 15
                     }
 
@@ -165,7 +165,7 @@ Rectangle {
 
                         Layout.fillWidth: true
                         placeholderText: "Search agents"
-                        color: "#c0caf5"
+                        color: Theme.text
                         font.pixelSize: 12
                         background: null
                         leftPadding: 0
@@ -219,15 +219,15 @@ Rectangle {
 
                     background: Rectangle {
                         radius: 0
-                        color: chip.selected ? "#bb9af7" : "#211e27"
-                        border.color: chip.selected ? "transparent" : "#302b37"
+                        color: chip.selected ? Theme.accent : Theme.dangerSurface
+                        border.color: chip.selected ? "transparent" : Theme.border
                         border.width: 1
                     }
                     contentItem: TuiText {
                         id: chipLabel
 
                         text: String(chip.modelData.label)
-                        color: chip.selected ? "#1a1b26" : "#9c95a4"
+                        color: chip.selected ? Theme.window : Theme.secondary
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
                         horizontalAlignment: Text.AlignHCenter
@@ -244,7 +244,7 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 1
-            color: "#221f29"
+            color: Theme.dangerSurface
         }
 
         ItemDelegate {
@@ -262,21 +262,21 @@ Rectangle {
             onClicked: root.showingPairs = !root.showingPairs
 
             background: Rectangle {
-                color: root.showingPairs ? "#232030" : pairEntryRow.hovered ? "#1d1a23" : "transparent"
+                color: root.showingPairs ? Theme.control : pairEntryRow.hovered ? Theme.raised : "transparent"
             }
             contentItem: RowLayout {
                 spacing: 12
 
                 TuiText {
                     text: root.showingPairs ? "‹" : "⇄"
-                    color: "#8d93b0"
+                    color: Theme.muted
                     font.pixelSize: 14
                 }
                 TuiText {
                     objectName: "pairConversationsLabel"
                     Layout.fillWidth: true
                     text: root.showingPairs ? "Back to chats" : "Agent conversations"
-                    color: "#c6bfcc"
+                    color: Theme.text
                     font.pixelSize: 12
                 }
                 Rectangle {
@@ -285,12 +285,12 @@ Rectangle {
                     Layout.preferredWidth: visible ? Math.max(16, unreadLabel.implicitWidth + 8) : 0
                     Layout.preferredHeight: 16
                     radius: 0
-                    color: "#bb9af7"
+                    color: Theme.accent
                     TuiText {
                         id: unreadLabel
                         anchors.centerIn: parent
                         text: root.controller.unreadAgentConversations
-                        color: "#1a1b26"
+                        color: Theme.window
                         font.pixelSize: 9
                         font.weight: Font.Bold
                     }
@@ -298,7 +298,7 @@ Rectangle {
                 TuiText {
                     visible: !root.showingPairs
                     text: root.pairRooms.length
-                    color: "#77717f"
+                    color: Theme.faint
                     font.pixelSize: 11
                 }
             }
@@ -308,7 +308,7 @@ Rectangle {
             visible: pairEntryRow.visible
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 1 : 0
-            color: "#221f29"
+            color: Theme.dangerSurface
         }
 
         ListView {
@@ -339,7 +339,7 @@ Rectangle {
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap
                 text: "No agent-to-agent conversations yet."
-                color: "#6f6976"
+                color: Theme.muted
                 font.pixelSize: 12
             }
         }
@@ -358,26 +358,26 @@ Rectangle {
         }
 
             background: Rectangle {
-                color: archiveRow.hovered ? "#1d1a23" : "transparent"
+                color: archiveRow.hovered ? Theme.raised : "transparent"
             }
             contentItem: RowLayout {
                 spacing: 12
 
                 TuiText {
                     text: root.showingArchive ? "‹" : "▤"
-                    color: "#8d93b0"
+                    color: Theme.muted
                     font.pixelSize: 14
                 }
                 TuiText {
                     Layout.fillWidth: true
                     text: root.showingArchive ? "Back to chats" : "Archived"
-                    color: "#c6bfcc"
+                    color: Theme.text
                     font.pixelSize: 12
                 }
                 TuiText {
                     visible: !root.showingArchive
                     text: root.controller.archivedAgents.count
-                    color: "#77717f"
+                    color: Theme.faint
                     font.pixelSize: 11
                 }
             }
@@ -387,7 +387,7 @@ Rectangle {
             visible: archiveRow.visible
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 1 : 0
-            color: "#221f29"
+            color: Theme.dangerSurface
         }
 
         ListView {
@@ -432,7 +432,7 @@ Rectangle {
                         return "Nothing unread.";
                     return "No agents yet. Use + to start one.";
                 }
-                color: "#6f6976"
+                color: Theme.muted
                 font.pixelSize: 12
             }
         }

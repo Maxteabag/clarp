@@ -21,7 +21,7 @@ Item {
             font.family: "JetBrains Mono"
             font.pixelSize: 13
             font.weight: Font.DemiBold
-            color: "#e7e1dc"
+            color: Theme.body
             elide: Text.ElideRight
             Layout.minimumWidth: 0
             Layout.maximumWidth: root.showRuntime ? root.width * 0.20 : root.width
@@ -46,7 +46,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
                 text: String(root.workspace.label || root.workspace.path || "")
-                color: "#a6adc8"
+                color: Theme.secondary
                 font.family: "JetBrains Mono"
                 font.pixelSize: 11
                 elide: Text.ElideMiddle
@@ -65,7 +65,7 @@ Item {
             Layout.minimumWidth: 0
             Layout.maximumWidth: root.width * 0.28
             elide: Text.ElideRight
-            color: "#b1bd96"
+            color: Theme.secondary
             font.family: "JetBrains Mono"
             font.pixelSize: 11
             HoverHandler { id: statusHover }
@@ -80,7 +80,7 @@ Item {
             Layout.minimumWidth: 0
             Layout.maximumWidth: root.width * 0.19
             elide: Text.ElideMiddle
-            color: "#a6adc8"
+            color: Theme.secondary
             font.family: "JetBrains Mono"
             font.pixelSize: 11
             HoverHandler { id: modelHover }
@@ -98,7 +98,7 @@ Item {
             Layout.minimumWidth: 0
             Layout.maximumWidth: root.width * 0.15
             elide: Text.ElideRight
-            color: "#8d93aa"
+            color: Theme.secondary
             font.family: "JetBrains Mono"
             font.pixelSize: 11
         }

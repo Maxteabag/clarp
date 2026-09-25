@@ -73,7 +73,8 @@ Item {
     // Reading theme; test stubs without a controller style keep the terminal look.
     readonly property var readingStyle: (controller && controller.readingStyle) || ({})
     function styled(key, fallback) {
-        const value = root.readingStyle[key];
+        const style = root.readingStyle;
+        const value = style ? style[key] : undefined;
         return value === undefined || value === null || value === "" ? fallback : value;
     }
     readonly property string readingFont: String(styled("fontFamily", "JetBrains Mono"))
@@ -137,7 +138,7 @@ Item {
                 && (root.origin === "automation" || root.automated)
             Layout.leftMargin: 2
             text: (root.category || "AUTOMATION").toUpperCase()
-            color: root.origin === "agent" ? "#8f96bc" : "#8a806f"
+            color: root.origin === "agent" ? Theme.secondary : Theme.muted
             font.family: "JetBrains Mono"
             font.pixelSize: 9
             font.weight: Font.DemiBold
@@ -153,7 +154,7 @@ Item {
             TuiText {
                 objectName: "groupAuthorName"
                 text: root.senderName || "Agent"
-                color: "#c7adf1"
+                color: Theme.accent
                 font.pixelSize: 12
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
@@ -163,7 +164,7 @@ Item {
                 objectName: "groupReplyMarker"
                 visible: root.replyToName.length > 0 && root.replyMarkerText.length > 0
                 text: root.replyMarkerText
-                color: root.styled("mutedText", "#8f96bc")
+                color: root.styled("mutedText", Theme.secondary)
                 font.pixelSize: 11
                 elide: Text.ElideRight
                 Layout.fillWidth: true
@@ -180,7 +181,7 @@ Item {
             visible: root.replyMarkerVisible && !root.groupView
             Layout.leftMargin: 2
             text: root.replyMarkerText
-            color: root.styled("mutedText", "#8f96bc")
+            color: root.styled("mutedText", Theme.secondary)
             font.pixelSize: 11
             elide: Text.ElideRight
             Layout.fillWidth: true
@@ -219,7 +220,7 @@ Item {
                         Layout.maximumWidth: activityRow.width * 0.3
                         elide: Text.ElideRight
                         text: root.toolName || root.messageKind || "Working"
-                        color: root.styled("mutedText", "#868a9f")
+                        color: root.styled("mutedText", Theme.muted)
                         font.family: "JetBrains Mono"
                         font.pixelSize: 12
                         font.weight: Font.DemiBold
@@ -229,9 +230,9 @@ Item {
                         text: (root.activityStatus === "error" ? "Error · " : "")
                             + (liveExplanation.narrationShown ? liveExplanation.displayText + (root.explanationRepeat > 1 ? " (x" + root.explanationRepeat + ")" : "") : root.body)
                         textFormat: Text.PlainText
-                        color: root.activityStatus === "error" ? "#bd7484"
-                            : liveExplanation.narrationShown ? root.styled("link", "#82aaff")
-                            : root.styled("mutedText", "#969bb5")
+                        color: root.activityStatus === "error" ? Theme.danger
+                            : liveExplanation.narrationShown ? root.styled("link", Theme.link)
+                            : root.styled("mutedText", Theme.muted)
                         font.family: "JetBrains Mono"
                         font.pixelSize: 12
                         wrapMode: liveExplanation.narrationShown ? Text.Wrap : Text.NoWrap
@@ -250,9 +251,9 @@ Item {
                 x: root.rightAligned ? parent.width - width : 0
                 implicitHeight: messageBlocks.implicitHeight + 24
                 radius: 0
-                color: root.userAuthored ? root.styled("bubble", "#20212e") : "transparent"
+                color: root.userAuthored ? root.styled("bubble", Theme.raised) : "transparent"
                 border.width: root.deliveryFailed ? 1 : 0
-                border.color: "#8d5763"
+                border.color: Theme.danger
                 opacity: root.pending ? 0.68 : 1
 
                 Column {
@@ -283,9 +284,9 @@ Item {
                             textFormat: root.messageKind === "live"
                                 ? Text.PlainText : Text.MarkdownText
                             wrapMode: Text.Wrap
-                            color: root.styled("text", "#e7e1dc")
-                            selectedTextColor: root.styled("selectedText", "#fff8ff")
-                            selectionColor: root.styled("selection", "#6f527b")
+                            color: root.styled("text", Theme.body)
+                            selectedTextColor: root.styled("selectedText", Theme.selectedText)
+                            selectionColor: root.styled("selection", Theme.selection)
                             font.family: root.readingFont
                             font.pixelSize: root.readingSize
                             // Routed through the controller so a non-web scheme in
@@ -358,7 +359,7 @@ Item {
             Layout.fillWidth: true
             implicitHeight: visible ? 24 : 0
             radius: 0
-            color: activityTap.hovered ? "#202335" : "transparent"
+            color: activityTap.hovered ? Theme.hover : "transparent"
 
             TuiText {
                 objectName: "activitySummaryText"
@@ -368,7 +369,7 @@ Item {
                     ? (root.groupedExpanded ? "Hide · " : "Show · ") + root.groupSummary
                     : (root.activityExpanded ? "Hide · " : "Show · ")
                         + (root.activitySummary || root.presentedActivityCount + " tool calls"))
-                color: root.styled("faintText", "#72778f")
+                color: root.styled("faintText", Theme.faint)
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
             }
@@ -438,7 +439,7 @@ Item {
             Layout.leftMargin: 12
             Layout.rightMargin: 12
             text: Qt.formatDateTime(new Date(root.timestamp), "MMM d  HH:mm")
-            color: root.styled("faintText", "#555a70")
+            color: root.styled("faintText", Theme.faint)
             font.family: "JetBrains Mono"
             font.pixelSize: 9
         }
@@ -451,7 +452,7 @@ Item {
             spacing: 6
             TuiText {
                 text: root.deliveryFailed ? "Not delivered" : "Delivering…"
-                color: root.deliveryFailed ? "#b56f7c" : "#5f6278"
+                color: root.deliveryFailed ? Theme.danger : Theme.faint
                 font.family: "JetBrains Mono"
                 font.pixelSize: 9
             }

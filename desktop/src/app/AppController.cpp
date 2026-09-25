@@ -380,7 +380,8 @@ QVariantList AppController::matchingContacts(const QString& query) const {
         if (!name.contains(needle, Qt::CaseInsensitive)) continue;
         result.append(QVariantMap{{QStringLiteral("name"), name},
             {QStringLiteral("description"), m_contacts.data(index, ContactListModel::DescriptionRole)},
-            {QStringLiteral("symbol"), m_contacts.data(index, ContactListModel::AvatarSymbolRole)}});
+            {QStringLiteral("symbol"), m_contacts.data(index, ContactListModel::AvatarSymbolRole)},
+            {QStringLiteral("avatarUrl"), m_contacts.data(index, ContactListModel::AvatarUrlRole)}});
     }
     return result;
 }
@@ -505,6 +506,23 @@ ConversationModel* AppController::conversationForSession(const QString& session)
 
 QUrl AppController::avatarSource(const QString& session) const {
     return m_avatarSources.value(session);
+}
+
+QUrl AppController::contactAvatarSource(const QString& name) const {
+    return m_contactAvatarSources.value(name);
+}
+
+QVariantMap AppController::memoryCounters() const {
+    qint64 rows = 0;
+    for (const ConversationModel* model : m_conversations) rows += model->rowCount();
+    return {{QStringLiteral("conversations"), m_conversations.size()},
+            {QStringLiteral("conversationRows"), rows},
+            {QStringLiteral("agents"), m_agents.rowCount()},
+            {QStringLiteral("avatarSources"), m_avatarSources.size()},
+            {QStringLiteral("contactAvatarSources"), m_contactAvatarSources.size()},
+            {QStringLiteral("avatarRequests"), m_avatarRequests.size() + m_contactAvatarRequests.size()},
+            {QStringLiteral("narratorCache"), m_toolNarrator.cacheSize()},
+            {QStringLiteral("logRequestsInFlight"), m_logRequestsInFlight.size()}};
 }
 QString AppController::chatStamp(qint64 time) const { return clarp::chatStamp(time); }
 
@@ -2531,6 +2549,37 @@ void AppController::requestAvatars() {
     emit avatarRevisionChanged();
 }
 
+void AppController::requestContactAvatars() {
+    const QHash<QString, QString> urls = m_contacts.avatarUrlsByName();
+    for (auto it = m_contactAvatarUrls.begin(); it != m_contactAvatarUrls.end();) {
+        if (!urls.contains(it.key())) {
+            m_contactAvatarSources.remove(it.key());
+            m_contactAvatarFailures.remove(it.key());
+            it = m_contactAvatarUrls.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = urls.cbegin(); it != urls.cend(); ++it) {
+        const QString& name = it.key();
+        const QString& url = it.value();
+        const bool requestPending = std::ranges::any_of(
+            m_contactAvatarRequests, [&name](const QString& pending) { return pending == name; });
+        if (m_contactAvatarUrls.value(name) == url &&
+            (m_contactAvatarSources.contains(name) || requestPending ||
+             m_contactAvatarFailures.value(name) == url)) {
+            continue;
+        }
+        m_contactAvatarUrls.insert(name, url);
+        m_contactAvatarSources.remove(name);
+        const QString tag = QStringLiteral("contact-avatar:%1").arg(++m_nextAvatarRequest);
+        m_contactAvatarRequests.insert(tag, name);
+        m_api.getBytes(tag, url);
+    }
+    ++m_avatarRevision;
+    emit avatarRevisionChanged();
+}
+
 void AppController::requestRecoverableClips(const QString& session) {
     if (session.isEmpty()) {
         return;
@@ -2907,6 +2956,7 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
             }
         }
         m_contacts.applySnapshot(object, activeNames);
+        requestContactAvatars();
         m_agentConversationsRefresh.start();
         if (!m_pendingCreatedSession.isEmpty()) {
             if (m_agents.find(m_pendingCreatedSession) == nullptr) {
@@ -3216,6 +3266,25 @@ void AppController::handleBytes(const QString& tag, const QByteArray& bytes,
         emit mediaChanged();
         return;
     }
+    if (tag.startsWith(QStringLiteral("contact-avatar:"))) {
+        const QString name = m_contactAvatarRequests.take(tag);
+        const qsizetype separator = contentType.indexOf(';');
+        const QByteArray mime =
+            contentType.left(separator < 0 ? contentType.size() : separator).trimmed().toLower();
+        if (name.isEmpty() || !m_contactAvatarUrls.contains(name)) return;
+        if (bytes.isEmpty() || bytes.size() > MaxPortraitBytes || !mime.startsWith("image/")) {
+            m_contactAvatarFailures.insert(name, m_contactAvatarUrls.value(name));
+            return;
+        }
+        const QByteArray portrait = roundedPortrait(bytes);
+        m_contactAvatarSources.insert(name, QUrl(QStringLiteral("data:%1;base64,%2")
+            .arg(portrait.isEmpty() ? QString::fromLatin1(mime) : QStringLiteral("image/png"),
+                 QString::fromLatin1((portrait.isEmpty() ? bytes : portrait).toBase64()))));
+        m_contactAvatarFailures.remove(name);
+        ++m_avatarRevision;
+        emit avatarRevisionChanged();
+        return;
+    }
     if (!tag.startsWith(QStringLiteral("avatar:"))) {
         return;
     }
@@ -3373,6 +3442,11 @@ void AppController::handleRequestFailure(const QString& tag, const QString& mess
                              ? QStringLiteral("%1 (HTTP %2)").arg(message).arg(statusCode)
                              : message;
         emit profileChanged();
+        return;
+    }
+    if (tag.startsWith(QStringLiteral("contact-avatar:"))) {
+        const QString name = m_contactAvatarRequests.take(tag);
+        if (!name.isEmpty()) m_contactAvatarFailures.insert(name, m_contactAvatarUrls.value(name));
         return;
     }
     if (tag.startsWith(QStringLiteral("avatar:"))) {

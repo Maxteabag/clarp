@@ -1,2 +1,2 @@
 import QtQuick
-Text { font.family: "JetBrains Mono"; color: "#c7c9dc" }
+Text { font.family: "JetBrains Mono"; color: Theme.text }
