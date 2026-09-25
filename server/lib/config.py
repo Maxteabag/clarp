@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import threading
 import tomllib
 from . import xdg
 from dataclasses import dataclass, field
@@ -504,6 +505,8 @@ class Config:
 
 
 _CACHED: Config | None = None
+_CACHED_PATH: pathlib.Path | None = None
+_LOAD_LOCK = threading.RLock()  # re-entrant: a load failure logs, and logging may consult config
 
 
 class ConfigError(RuntimeError):
@@ -526,13 +529,27 @@ def _resolve_config_path() -> pathlib.Path:
 
 
 def load(path: pathlib.Path | None = None) -> Config:
-    """Read TOML config; return a Config with defaults filled in. Cached."""
-    global _CACHED
-    if _CACHED is not None:
-        return _CACHED
+    """Read TOML config; return a Config with defaults filled in. Cached.
+
+    The cache is keyed by the resolved path: asking for a different file
+    reloads instead of silently returning whatever was cached first. Filling
+    the cache is serialized so concurrent first callers share one parse.
+    """
+    with _LOAD_LOCK:
+        return _load_locked(path)
+
+
+def _load_locked(path: pathlib.Path | None) -> Config:
+    global _CACHED, _CACHED_PATH
     if path is None:
+        # Bare load(): whatever is cached is the process-wide answer, even
+        # when it was primed from an explicit path (tests and tools do that).
+        if _CACHED is not None:
+            return _CACHED
         path = _resolve_config_path()
     path = path.expanduser().resolve(strict=False)
+    if _CACHED is not None and _CACHED_PATH == path:
+        return _CACHED
     data: dict[str, Any] = {}
     try:
         with path.open("rb") as f:
@@ -671,6 +688,7 @@ def load(path: pathlib.Path | None = None) -> Config:
         apns_bundle_id  = str(apns.get("bundle_id", "com.maxteabag.clarp")),
         apns_environment = str(apns.get("environment", "production")).strip().lower(),
     )
+    _CACHED_PATH = path
     return _CACHED
 
 
