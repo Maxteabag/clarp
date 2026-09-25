@@ -21,7 +21,7 @@ Rectangle {
         width: Math.min(660, parent.width - 40)
         height: Math.min(620, parent.height - 60)
         anchors.centerIn: parent
-        radius: 0
+        radius: Theme.radius
         color: Theme.raised
         border.color: Theme.faint
 
@@ -92,7 +92,7 @@ Rectangle {
                     required property var modelData
                     width: ListView.view.width
                     implicitHeight: queueColumn.implicitHeight + 18
-                    radius: 0
+                    radius: Theme.radius
                     color: Theme.control
                     border.color: Theme.border
 
@@ -113,7 +113,7 @@ Rectangle {
                             font.pixelSize: 11
                             color: Theme.text
                             background: Rectangle {
-                                radius: 0
+                                radius: Theme.radius
                                 color: Theme.raised
                                 border.color: queuedText.activeFocus ? Theme.muted : Theme.border
                             }

@@ -72,7 +72,7 @@ target_link_libraries(clarp-desktop-tests PRIVATE
     Qt6::Gui
     Qt6::DBus
     Qt6::Multimedia
-    Qt6::Network
+    Qt6::Concurrent Qt6::Network
     Qt6::Qml
     Qt6::Test
 )

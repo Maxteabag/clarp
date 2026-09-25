@@ -182,6 +182,23 @@ def _report_database_locked(waiting_sql: object) -> None:
         )
 
 
+# Bumped on every write statement executed in this process (the Host runs
+# SQLite in autocommit mode, so commit() is not a reliable signal). Readers that
+# aggregate large tables cache their result keyed by this value, so a quiet
+# Host answers from memory and any write invalidates the cache immediately.
+_WRITE_GENERATION = 0
+_WRITE_VERBS = frozenset({"INSERT", "UPDATE", "DELETE", "REPLACE"})
+
+
+def _bump_write_generation() -> None:
+    global _WRITE_GENERATION
+    _WRITE_GENERATION += 1
+
+
+def write_generation() -> int:
+    return _WRITE_GENERATION
+
+
 class _TrackedConnection(sqlite3.Connection):
     """Connection that records explicit transaction ownership for diagnostics."""
 
@@ -198,6 +215,8 @@ class _TrackedConnection(sqlite3.Connection):
         finally:
             _record_query_metric(template, started)
         verb = template.partition(" ")[0].upper()
+        if verb in _WRITE_VERBS:
+            _bump_write_generation()
         if verb == "BEGIN" and self.in_transaction:
             _record_transaction_begin(self, template)
         elif verb in {"COMMIT", "ROLLBACK", "END"}:
@@ -209,6 +228,8 @@ class _TrackedConnection(sqlite3.Connection):
 
     def executemany(self, sql, seq_of_parameters, /):  # type: ignore[override]
         template = _sql_template(sql)
+        if template.partition(" ")[0].upper() in _WRITE_VERBS:
+            _bump_write_generation()
         measured = getattr(_LOCAL, "request_metrics", None) is not None
         started = time.perf_counter() if measured else None
         try:
@@ -266,6 +287,8 @@ def _open_connection() -> sqlite3.Connection:
     con.execute("PRAGMA foreign_keys = ON")
     con.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
     return con
+
+
 
 
 def conn() -> sqlite3.Connection:

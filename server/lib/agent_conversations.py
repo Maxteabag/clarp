@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from .avatar_urls import janitor_avatar_url, versioned_avatar_url
-from .db import conn
+from .db import conn, write_generation
 from .voice_markup import clean_for_display, strip_hidden_blocks
 
 PREFIX = "pair:"
@@ -126,14 +126,30 @@ def _participants_for(agent_ids: set[str]) -> dict[str, dict[str, Any]]:
     return {row["agent_id"]: _participant(row) for row in rows}
 
 
+_LIST_CACHE: dict[int, tuple[int, list[dict[str, Any]]]] = {}
+
+
 def list_conversations(limit: int = 200) -> list[dict[str, Any]]:
     """Every agent pair with at least one delivered agent-origin message.
 
     Aggregates, the newest row per pair and all participants resolve in three
     statements. A per-room query loop cost ~1.8 s on a real transcript store,
     which the sidebar waited on before it could show the section at all.
+    The scan still costs ~0.4 s over ~100k pair rows, so the result is kept per
+    limit until the next committed write; every client poll between writes
+    answers from memory.
     """
     limit = max(1, min(int(limit), 1000))
+    generation = write_generation()
+    cached = _LIST_CACHE.get(limit)
+    if cached is not None and cached[0] == generation:
+        return [dict(row) for row in cached[1]]
+    result = _list_conversations_uncached(limit)
+    _LIST_CACHE[limit] = (generation, result)
+    return [dict(row) for row in result]
+
+
+def _list_conversations_uncached(limit: int) -> list[dict[str, Any]]:
     rows = conn().execute(f"""
         WITH pair_rows AS (
             SELECT m.message_id, m.agent_id, m.role, m.timestamp, m.text, m.revision,

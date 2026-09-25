@@ -4,6 +4,7 @@ ToolButton {
     id: control
     font.family: "JetBrains Mono"
     background: Rectangle {
+        radius: Theme.radius
         implicitWidth: 40
         implicitHeight: 40
         color: control.down ? control.palette.midlight : control.hovered || control.checked ? control.palette.alternateBase : "transparent"

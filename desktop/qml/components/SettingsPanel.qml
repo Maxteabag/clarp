@@ -13,7 +13,7 @@ Rectangle {
     signal closeRequested
     readonly property bool dialogOpen: ttsDialog.visible
     property int focusedIndex: 0
-    readonly property var actions: [timestampsRow, readyRow, reducedMotionRow, toolsRow, narrationRow, startupRow, anonymousRow, minimalUiRow, readingThemeRow, spokenRow, mobilePushRow,
+    readonly property var actions: [timestampsRow, readyRow, reducedMotionRow, toolsRow, narrationRow, startupRow, anonymousRow, minimalUiRow, workspaceBarRow, readingThemeRow, spokenRow, mobilePushRow,
         connectionRow, orchestratorRow, filesystemRow, routingRow]
     color: Theme.window
     objectName: "settingsPanel"
@@ -204,7 +204,7 @@ Rectangle {
                                 y: detailDial.topPadding + (detailDial.availableHeight - height) / 2
                                 width: detailDial.availableWidth
                                 height: 4
-                                radius: 0
+                                radius: Theme.radius
                                 color: Theme.faint
                                 Rectangle { width: parent.width * detailDial.visualPosition; height: parent.height; radius: 0; color: Theme.link }
                                 Repeater {
@@ -224,7 +224,7 @@ Rectangle {
                                 y: detailDial.topPadding + (detailDial.availableHeight - height) / 2
                                 implicitWidth: 16
                                 implicitHeight: 16
-                                radius: 0
+                                radius: Theme.radius
                                 color: Theme.text
                                 border.color: Theme.link
                             }
@@ -295,6 +295,14 @@ Rectangle {
                     detail: "Hide only the sidebar chevron button. Ctrl+B still toggles the sidebar."
                     checked: root.controller.minimalUi
                     onToggled: value => root.controller.minimalUi = value
+                }
+                SettingsToggle {
+                    id: workspaceBarRow
+                    objectName: "setting-workspace-bar"
+                    label: "Workspace bar"
+                    detail: "Show the workspace tabs above the panes. Ctrl+K → Workspace bar toggles it too."
+                    checked: root.controller.workspaceBarVisible
+                    onToggled: value => root.controller.workspaceBarVisible = value
                 }
                 SettingsAction {
                     id: readingThemeRow
@@ -441,7 +449,7 @@ Rectangle {
         default property alias content: rows.data
         Layout.fillWidth: true
         implicitHeight: column.implicitHeight + 20
-        radius: 0
+        radius: Theme.radius
         color: "transparent"
         border.width: 0
         ColumnLayout {
@@ -488,7 +496,7 @@ Rectangle {
         Accessible.onToggleAction: { if (checkable) activated(); }
 
         background: Rectangle {
-            radius: 0
+            radius: Theme.radius
             color: actionRow.activeFocus ? Theme.control : hover.hovered ? Theme.hover : "transparent"
             border.width: actionRow.activeFocus ? 1 : 0
             border.color: Theme.border

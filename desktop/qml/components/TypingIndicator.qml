@@ -5,7 +5,7 @@ Rectangle {
     objectName: "replyTypingIndicator"
     implicitWidth: 132
     implicitHeight: 32
-    radius: 0
+    radius: Theme.radius
     color: Theme.window
     Accessible.role: Accessible.StaticText
     Accessible.name: "Agent is working"
@@ -24,7 +24,7 @@ Rectangle {
             Rectangle {
                 id: dot
                 required property int index
-                width: 6; height: 6; radius: 0
+                width: 6; height: 6; radius: Theme.radius
                 anchors.verticalCenter: indicatorRow.verticalCenter
                 color: Theme.accent
                 opacity: 0.4

@@ -467,7 +467,7 @@ Rectangle {
         ToolTip.visible: hovered
         ToolTip.text: "Jump to latest · Ctrl+End"
         background: Rectangle {
-            radius: 0
+            radius: Theme.radius
             color: Theme.control
             border.color: Theme.border
         }

@@ -22,6 +22,12 @@ up checked fills, popups and disabled text too. Add a new colour by adding a
 role to `ReadingTheme.h`, `readingThemeStyle()`, and `Theme.qml`; never a new
 literal in a component.
 
+`Theme.radius` is the one non-colour role: 0 on Terminal, so the TUI keeps
+its square identity, and 8 on the reading themes. Controls, cards and bubbles
+use it. Badges, avatars, the rail buttons, the sidebar plus button and the
+scope chips are round in every theme; a count pill or a portrait has no
+reason to be square.
+
 | Theme | Font | Body | Text on surface | Secondary text | Intended for |
 | --- | --- | --- | --- | --- | --- |
 | Terminal | JetBrains Mono | 15 px | 13.2:1 | ≥ 4.7:1 | The default; unchanged look, timestamps lifted from 2.5:1 |

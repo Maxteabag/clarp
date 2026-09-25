@@ -20,7 +20,7 @@ FocusScope {
         height: Math.min(520, parent.height - 32)
         color: Theme.control
         border.color: Theme.faint
-        radius: 0
+        radius: Theme.radius
         MouseArea { anchors.fill: parent }
         ColumnLayout {
             anchors.fill: parent
@@ -72,7 +72,7 @@ FocusScope {
                     background: Rectangle {
                         color: versionRow.hovered || versionRow.activeFocus
                             || (versionRow.ListView.isCurrentItem && versions.activeFocus) ? Theme.border : Theme.border
-                        radius: 0
+                        radius: Theme.radius
                     }
                     onClicked: root.switcher.selectVersion(String(modelData.hash))
                     Keys.onReturnPressed: root.switcher.selectVersion(String(modelData.hash))

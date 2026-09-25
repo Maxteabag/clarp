@@ -20,7 +20,7 @@ Rectangle {
         width: Math.min(520, parent.width - 48)
         height: cardColumn.implicitHeight + 56
         anchors.centerIn: parent
-        radius: 0
+        radius: Theme.radius
         color: Theme.raised
         border.color: Theme.border
 

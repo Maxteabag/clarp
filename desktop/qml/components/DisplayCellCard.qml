@@ -24,7 +24,7 @@ Rectangle {
 
     visible: explanationRepeat !== 0
     implicitHeight: cardColumn.implicitHeight + 6
-    radius: 0
+    radius: Theme.radius
     color: hover.hovered ? Theme.control : "transparent"
     border.width: 0
     HoverHandler { id: hover }
@@ -56,7 +56,7 @@ Rectangle {
             Rectangle {
                 Layout.preferredWidth: 6
                 Layout.preferredHeight: 6
-                radius: 0
+                radius: Theme.radius
                 color: root.statusColor
             }
             TuiText {
@@ -120,7 +120,7 @@ Rectangle {
                     required property var modelData
                     Layout.fillWidth: true
                     implicitHeight: lineText.implicitHeight + 4
-                    radius: 0
+                    radius: Theme.radius
                     color: {
                         const kind = String(lineRow.modelData.kind || "");
                         if (kind === "diff_old")

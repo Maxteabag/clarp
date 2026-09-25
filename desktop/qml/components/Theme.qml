@@ -15,6 +15,8 @@ QtObject {
     readonly property string fontFamily: String(pick("fontFamily", "JetBrains Mono"))
     readonly property int fontPixelSize: Number(pick("fontPixelSize", 15))
     readonly property int measure: Number(pick("measure", 840))
+    // 0 keeps the terminal identity; reading themes soften corners.
+    readonly property int radius: Number(pick("radius", 0))
     // Surfaces, from deepest to most raised.
     readonly property color sunken: pick("sunken", "#12131a")
     readonly property color window: pick("window", "#1a1b26")

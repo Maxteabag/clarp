@@ -71,7 +71,7 @@ ItemDelegate {
                 anchors.top: parent.top
                 width: 12
                 height: 12
-                radius: 0
+                radius: Theme.radius
                 color: Theme.accent
                 border.color: Theme.raised
                 border.width: 2

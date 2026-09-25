@@ -2655,9 +2655,11 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
     QTRY_VERIFY_WITH_TIMEOUT(controller.connected(), 3'000);
     QCOMPARE(controller.selectedSession(), QStringLiteral("rachel"));
     QTRY_VERIFY_WITH_TIMEOUT(!controller.avatarSource(QStringLiteral("rachel")).isEmpty(), 3'000);
-    QVERIFY(controller.avatarSource(QStringLiteral("rachel"))
-                .toString()
-                .startsWith(QStringLiteral("data:image/png;base64,")));
+    // Fresh fetches show the rounded portrait from memory; a repeat run on the
+    // same machine may serve the cached PNG from disk instead.
+    const QString rachelPortrait = controller.avatarSource(QStringLiteral("rachel")).toString();
+    QVERIFY(rachelPortrait.startsWith(QStringLiteral("data:image/png;base64,"))
+            || rachelPortrait.startsWith(QStringLiteral("file://")));
 
     server.holdLogRequests(true);
     controller.refreshConversation();

@@ -30,6 +30,7 @@ option(CLARP_ENABLE_CLANG_TIDY "Run clang-tidy as part of compilation" OFF)
 option(CLARP_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 
 find_package(Qt6 6.11 REQUIRED COMPONENTS
+    Concurrent
     Core
     DBus
     Gui
@@ -178,6 +179,17 @@ qt_add_qml_module(clarp-desktop
         resources/icons/repo.svg
         resources/icons/worktree.svg
         resources/icons/more.svg
+        resources/icons/rail-chats.svg
+        resources/icons/rail-overview.svg
+        resources/icons/rail-search.svg
+        resources/icons/rail-updates.svg
+        resources/icons/rail-teams.svg
+        resources/icons/rail-sound.svg
+        resources/icons/rail-muted.svg
+        resources/icons/rail-settings.svg
+        resources/icons/rail-plus.svg
+        resources/icons/rail-sidebar.svg
+        resources/icons/rail-close.svg
         resources/backends/claude.png
         resources/backends/codex.png
         resources/backends/grok.png
@@ -192,6 +204,7 @@ target_compile_definitions(clarp-desktop PRIVATE
 )
 
 target_link_libraries(clarp-desktop PRIVATE
+    Qt6::Concurrent
     Qt6::Core
     Qt6::DBus
     Qt6::Gui
