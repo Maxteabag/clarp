@@ -90,7 +90,8 @@ def serve_terminal(handler, session: str) -> None:
     # without one cannot open a terminal here.
     launch = adapter.terminal_resume_argv if bsid else adapter.terminal_fresh_argv
     if launch is None:
-        raise KeyError(adapter.id)
+        return _send_http_error(
+            handler, 501, f"no interactive terminal for the {adapter.id} backend")
     argv = list(launch) + ([bsid] if bsid else [])
     if adapter.terminal_loads_plugin:
         # Same plugin the -p dispatch path loads, so an interactive terminal
@@ -128,7 +129,7 @@ def serve_terminal(handler, session: str) -> None:
         except OSError:
             os._exit(127)
 
-    log("terminalStart", f"session={session} backend={backend} bsid={bsid} pid={pid}")
+    log("terminalStart", f"session={session} backend={adapter.id} bsid={bsid} pid={pid}")
     _mark(agent_id, +1)
     _set_winsize(fd, 80, 24)
 
