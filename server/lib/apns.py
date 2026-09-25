@@ -20,6 +20,7 @@ import hashlib
 import ipaddress
 import collections
 import threading
+import weakref
 import time
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
@@ -41,14 +42,22 @@ _jwt_cache: tuple[str, int] | None = None  # (token, minted_at_epoch)
 # APNs requests are synchronous but notification classification is dispatched
 # from independent daemon threads.  Serialize each conversation so an older,
 # slower request can never arrive after (and collapse over) its successor.
+# Weak values: an entry exists only while some sender holds its lock (the
+# `with` block keeps a strong reference), so the map does not grow by one lock
+# per session ever notified. Concurrent senders still share one object.
 _send_locks_guard = threading.Lock()
-_send_locks: dict[str, threading.Lock] = {}
+_send_locks: "weakref.WeakValueDictionary[str, threading.Lock]" = (
+    weakref.WeakValueDictionary())
 
 
 def _send_lock(session: str) -> threading.Lock:
     key = (session or "").strip() or "__global__"
     with _send_locks_guard:
-        return _send_locks.setdefault(key, threading.Lock())
+        lock = _send_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _send_locks[key] = lock
+        return lock
 
 
 def _preview_fingerprint(text: str) -> str:

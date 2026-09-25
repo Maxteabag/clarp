@@ -15,8 +15,18 @@ CREATE TABLE IF NOT EXISTS janitor_quota_receipts (
  receipt_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, payload_json TEXT NOT NULL,
  delivery_json TEXT, created_at INTEGER NOT NULL);'''
 
+_SCHEMA_LOCK=threading.Lock()
+_SCHEMA_READY_FOR=None  # db.DB_PATH the schema was last applied to
+
 def setup():
-    db.conn().executescript(SCHEMA)
+    """Create the tables once per database instead of on every 15 s tick."""
+    global _SCHEMA_READY_FOR
+    path=db.DB_PATH
+    if _SCHEMA_READY_FOR==path:return
+    with _SCHEMA_LOCK:
+        if _SCHEMA_READY_FOR==path:return
+        db.conn().executescript(SCHEMA)
+        _SCHEMA_READY_FOR=path
 
 def snapshot(agent):
     from . import heartbeat
