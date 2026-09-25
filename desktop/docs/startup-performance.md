@@ -33,3 +33,18 @@ Changes made:
 Not changed: the snapshot's 50-candidates-per-agent window query (47 ms warm)
 and its Python formatting, and the per-token `/log` delta polls described in
 `memory-diagnostics.md`.
+
+## Second pass: the snapshot storm
+
+After the first deploy, request telemetry showed `/agents/snapshot` served up
+to 80 times a minute at 370–550 ms each, 60 % of it in two window-function
+queries that ranked every message of every live agent. Two changes:
+
+- `message_previews.dashboard_messages` now reads each agent's message
+  revisions first (one indexed GROUP BY) and keeps a per-agent cache keyed by
+  them. An unchanged agent costs nothing; a changed one runs three index walks
+  through `idx_messages_dashboard_activity` that stop after at most 50 rows
+  (65 ms for all 102 agents cold, versus 200–450 ms before).
+- The desktop coalesces snapshot requests closer together than 700 ms into one
+  trailing request, so a burst of roster events during streaming produces one
+  fetch instead of a fetch per event.
