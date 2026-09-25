@@ -58,9 +58,29 @@ def _backend_quota(backend: str, exhausted: dict[str, dict[str, Any]],
     }
 
 
+def _compacting_check() -> Any:
+    """One ``(session, observed_kind) -> bool`` for the whole snapshot.
+
+    ``compaction.is_compacting`` asks the external runtime for its status on
+    every call, which made the snapshot one socket round trip per agent. The
+    runtime's status is already fetched (and briefly cached) for the liveness
+    check, so read the compacting set from it once. When the runtime cannot
+    answer, fall back to the persisted state exactly as ``is_compacting``
+    does; when this process owns its turns, ask ``compaction`` directly.
+    """
+    if getattr(backends, "_RUNTIME_CLIENT", None) is None:
+        return lambda session, kind: compaction.is_compacting(session)
+    try:
+        compacting = set(backends.runtime_status().get("compactions") or ())
+    except Exception:  # noqa: BLE001 - logged once per window by backends
+        return lambda session, kind: kind == AgentState.COMPACTING
+    return lambda session, kind: session in compacting
+
+
 def build_agent_snapshot(ctx) -> dict[str, Any]:
     """Reconcile liveness and project the dashboard from batched database reads."""
     rows = []
+    is_compacting = _compacting_check()
     focus = agents_db.get_focus()
     team_memberships = team_store.memberships_by_agent()
     queue_states = turn_queue.states()
@@ -221,7 +241,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "context_window": (1_000_000
                                if backends.normalize(backend) == backends.CLAUDE
                                else None),
-            "compacting":     compaction.is_compacting(a["session"]),
+            "compacting":     is_compacting(a["session"], state.get("kind")),
             "queued_turn_count": queue_states.get(agent_id, {}).get("count", 0),
             "queued_turn_revision": queue_states.get(agent_id, {}).get("revision", 0),
             "queue_paused": bool(queue_states.get(agent_id, {}).get("paused", False)),
