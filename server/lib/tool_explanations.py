@@ -27,7 +27,7 @@ import tempfile
 import threading
 import time
 from .log import log
-from . import db
+from . import backends, db
 from . import janitor_builtins, judgment_sites, judgments, model_fallbacks
 from . import tool_explanation_mappings as mappings
 from . import tool_explanation_queue as durable_queue
@@ -324,8 +324,8 @@ class ToolExplanations:
                     def translate(model):
                         if self._translate is not None:
                             value = self._translate(level, requests)
-                        elif model["backend"] == "codex":
-                            selected = {**run, "configuration": {**run["configuration"], **model, "provider": "codex"}}
+                        elif backends.adapter_for(model["backend"]).native_tool_explainer:
+                            selected = {**run, "configuration": {**run["configuration"], **model, "provider": model["backend"]}}
                             value = self._run_codex(level, requests, run=selected)
                         else:
                             value = self._run_fallback(level, requests, model, run)

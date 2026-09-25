@@ -39,19 +39,6 @@ from . import ws
 from .http_utils import send_plain_http_error
 from .log import log, log_exception
 
-# Interactive launch argv when resuming a known session (id appended) and when
-# starting fresh (agent has never bound a session id yet).
-_LAUNCH_RESUME: dict[str, list[str]] = {
-    backends.CLAUDE: ["claude", "--dangerously-skip-permissions", "--resume"],
-    backends.CODEX:  ["codex", "resume"],
-    backends.AGY:    ["agy", "--dangerously-skip-permissions", "--conversation"],
-}
-_LAUNCH_FRESH: dict[str, list[str]] = {
-    backends.CLAUDE: ["claude", "--dangerously-skip-permissions"],
-    backends.CODEX:  ["codex"],
-    backends.AGY:    ["agy", "--dangerously-skip-permissions"],
-}
-
 _READ_CHUNK = 65536
 
 # agent_id -> number of live terminals (0/1 in practice). turn_dispatch reads
@@ -95,14 +82,17 @@ def serve_terminal(handler, session: str) -> None:
     agent = agents_db.get_by_session(session)
     if not agent:
         return _send_http_error(handler, 404, "no such agent")
-    backend = backends.normalize(agent.get("backend"))
+    adapter = backends.adapter_for(agent.get("backend"))
     agent_id = agent["agent_id"]
     bsid = agents_db.live_backend_session(agent_id)
-    if bsid:
-        argv = list(_LAUNCH_RESUME[backend]) + [bsid]
-    else:
-        argv = list(_LAUNCH_FRESH[backend])
-    if backend == backends.CLAUDE:
+    # Interactive launch argv when resuming a known session (id appended) and
+    # when starting fresh (agent has never bound a session id yet). An adapter
+    # without one cannot open a terminal here.
+    launch = adapter.terminal_resume_argv if bsid else adapter.terminal_fresh_argv
+    if launch is None:
+        raise KeyError(adapter.id)
+    argv = list(launch) + ([bsid] if bsid else [])
+    if adapter.terminal_loads_plugin:
         # Same plugin the -p dispatch path loads, so an interactive terminal
         # reports state exactly like a dispatched turn.
         from .deployment import plugin_dir

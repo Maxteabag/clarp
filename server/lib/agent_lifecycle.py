@@ -247,7 +247,7 @@ class AgentLifecycleService:
                 raise AgentLifecycleError(400, "mcp_servers must be a list of names")
             requested_mcp_servers = list(dict.fromkeys(
                 item.strip() for item in raw_mcp if item.strip()))
-            if requested_mcp_servers and backend != backends.CLAUDE:
+            if requested_mcp_servers and not backends.adapter_for(backend).supports_mcp:
                 raise AgentLifecycleError(
                     400, "mcp servers unsupported for backend",
                     message=f"MCP server selection is unavailable for {backends.label(backend)}.")
@@ -260,10 +260,12 @@ class AgentLifecycleService:
                     400, "unknown mcp server",
                     message=f"Unknown MCP server: {', '.join(unknown_mcp)}")
         effective_validation_model = effective_requested_model
-        if backend == backends.AGY:
+        effort_compatibility_unknown = backends.adapter_for(backend).effort_compatibility_unknown
+        if effort_compatibility_unknown:
             effective_validation_model = (
-                effective_validation_model or cfg.agy_model.strip())
-        if (backend == backends.AGY and effective_validation_model
+                effective_validation_model
+                or backends.default_model_effort(backend, cfg)[0])
+        if (effort_compatibility_unknown and effective_validation_model
                 and effective_requested_effort):
             raise AgentLifecycleError(
                 400, "AGY model-specific effort compatibility is unknown")

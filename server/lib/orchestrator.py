@@ -169,10 +169,7 @@ def provider_options() -> list[dict[str, Any]]:
     """
     rows: list[dict[str, Any]] = []
     for adapter in backends.routing_adapters():
-        binary = adapter.required_binary
-        if adapter.id == backends.CLAUDE:
-            from . import clarp_runner
-            binary = clarp_runner.configured_claude_bin()
+        binary = adapter.executable()
         rows.append({
             "id": adapter.id,
             "label": adapter.label,
@@ -226,10 +223,12 @@ def get_legacy_settings() -> OrchestratorSettings:
     provider = settings_store.get_text(KEY_PROVIDER, default=provider_default).strip()
     provider = provider or provider_default
     canonical = normalize_provider(provider)
-    if canonical == backends.AGY:
-        model_default = cfg.agy_model.strip()
-    elif canonical == OPENAI_PROVIDER:
+    adapter = backends.get(canonical)
+    if canonical == OPENAI_PROVIDER:
         model_default = DEFAULT_MODEL
+    elif adapter is not None and adapter.model_carries_effort:
+        # The effort lives in the model id, so the default must name a model.
+        model_default = backends.default_model_effort(canonical, cfg)[0]
     else:
         model_default = ""
     effort_default = DEFAULT_EFFORT if canonical == OPENAI_PROVIDER else ""

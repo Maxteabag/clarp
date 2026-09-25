@@ -97,9 +97,11 @@ def resume_missing_sessions(
             if jsonl is not None:
                 claude_id = mapped
                 action = "resumed"
-                # cwd realignment only applies to Claude's project-dir naming;
-                # Codex rollout filenames encode the date, not the cwd.
-                if backend == AgentBackend.CLAUDE:
+                # cwd realignment only applies where the transcript's
+                # directory encodes the cwd (Claude's project dirs); Codex
+                # rollout filenames encode the date, not the cwd.
+                adapter = backends.get(backend)
+                if adapter is not None and adapter.transcript_dir_encodes_cwd:
                     derived = _cwd_from_project_dir(jsonl.parent)
                     if derived and derived != cwd:
                         log("resumeCwdRealign", f"{sid} {cwd} → {derived}")
