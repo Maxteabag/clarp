@@ -154,12 +154,14 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         # conversation, so the client saw a head it could never reach and
         # reloaded the full transcript on every poll (audit bug D1).
         head_revision = message.get('revisions', {}).get(bsid, 0) if bsid else 0
-        # Context-window occupancy from the transcript (Claude only — Codex/agy
-        # auto-compact in their own loops, so an empty gauge there correctly
-        # signals "managed automatically"). Computed from the last assistant
-        # message's usage, not the cumulative result event.
+        # Context-window occupancy from the transcript, only for an adapter
+        # that declares a context window (Claude). Codex/agy auto-compact in
+        # their own loops, so an empty gauge there correctly signals "managed
+        # automatically". Computed from the last assistant message's usage,
+        # not the cumulative result event.
         context_tokens = None
-        if backends.normalize(backend) == backends.CLAUDE and bsid:
+        context_window = backends.adapter_for(backend).context_window
+        if context_window is not None and bsid:
             j = find_latest_jsonl(bsid)
             if j is not None:
                 context_tokens = context_tokens_from_jsonl(j)
@@ -234,13 +236,10 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "team_ids":       team_memberships.get(agent_id, []),
             "latest_state_ts": state.get("ts"),
             "context_tokens": context_tokens,
-            # Window the tokens fill. This deployment runs opus-*[1m] (the 1M
-            # context beta, per ~/.claude.json), so Claude agents get 1M; the
-            # native gauge divides tokens by this. None for codex/agy (they
+            # Window the tokens fill, as the adapter declares it; the native
+            # gauge divides tokens by this. None for codex/agy (they
             # auto-compact, so no gauge).
-            "context_window": (1_000_000
-                               if backends.normalize(backend) == backends.CLAUDE
-                               else None),
+            "context_window": context_window,
             "compacting":     is_compacting(a["session"], state.get("kind")),
             "queued_turn_count": queue_states.get(agent_id, {}).get("count", 0),
             "queued_turn_revision": queue_states.get(agent_id, {}).get("revision", 0),

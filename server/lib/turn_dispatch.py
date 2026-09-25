@@ -46,12 +46,25 @@ BACKOFF_BASE_SEC = 1.0
 _TURN_LOCK = threading.RLock()
 _CLAUDE_FAILOVER = ClaudeFailover(_TURN_LOCK)
 _CODEX_FAILOVER = ClaudeFailover(_TURN_LOCK)
+# Account pool (adapter.account_pool) -> (coordinator, config field naming the
+# account switch command). Coordinators are read through thunks so a
+# monkeypatched module global is honoured. Backends without a pool of their
+# own book-keep in Claude's coordinator, as they always have.
+_ACCOUNT_POOLS = {
+    "claude": (lambda: _CLAUDE_FAILOVER, "claude_account_switch_command"),
+    "codex": (lambda: _CODEX_FAILOVER, "codex_account_switch_command"),
+}
+_DEFAULT_ACCOUNT_POOL = "claude"
+
+def _account_pool(backend):
+    pool = backends.adapter_for(backend).account_pool or _DEFAULT_ACCOUNT_POOL
+    return _ACCOUNT_POOLS[pool]
 
 def account_failover(backend):
-    return _CODEX_FAILOVER if backend == backends.CODEX else _CLAUDE_FAILOVER
+    return _account_pool(backend)[0]()
 
 def account_selector(backend):
-    return config.load().codex_account_switch_command if backend == backends.CODEX else config.load().claude_account_switch_command
+    return getattr(config.load(), _account_pool(backend)[1])
 
 _INFLIGHT: dict[str, str] = {}
 _QUEUED: dict[str, list] = {}
@@ -571,9 +584,10 @@ class TurnDispatchService:
         # created leaves the agent bound to a backend_session_id with no
         # transcript on disk. Resuming it exits instantly (rc=0, no output) and
         # wedges the agent on every turn forever. If the resume target doesn't
-        # exist, drop the binding and start fresh. (Claude only — its --resume is
-        # transcript-file based; codex/agy resume differently.)
-        if (backend_session_id and backend == self.backends.CLAUDE
+        # exist, drop the binding and start fresh. (Only for a CLI whose
+        # --resume is transcript-file based; the others resume by session id.)
+        adapter = backends.adapter_for(backend)
+        if (backend_session_id and adapter.resumes_by_transcript_file
                 and find_latest_jsonl(
                     backend_session_id,
                     projects_root=self.home / ".claude" / "projects") is None):
@@ -586,7 +600,7 @@ class TurnDispatchService:
             backend_session_id = ""
         is_new_session = not backend_session_id
 
-        if is_new_session and backend == self.backends.CLAUDE:
+        if is_new_session and adapter.preassigns_session_id:
             backend_session_id = self._bind_new_claude_session(agent_id, session)
 
         context = eventlog.EventContext(
@@ -1328,8 +1342,11 @@ class TurnDispatchService:
                 or self._superseded(spec)):
             return
         bsid = state.get("backend_session_id") or spec.backend_session_id
-        transcript = (bool(bsid) if spec.backend == backends.CODEX else find_latest_jsonl(
-            bsid, projects_root=self.home / ".claude" / "projects") if bsid else None)
+        if backends.adapter_for(spec.backend).resumes_by_transcript_file:
+            transcript = (find_latest_jsonl(
+                bsid, projects_root=self.home / ".claude" / "projects") if bsid else None)
+        else:
+            transcript = bool(bsid)
         interrupted = (state.get("spawn_started") or attempt > 1
                        or bool(spec.recovery_text))
         resume_spec = replace(
@@ -1374,7 +1391,8 @@ class TurnDispatchService:
         # consumes it), so without re-writing here a retry — or a redispatch
         # after preempting an in-flight turn — would fire its hook with no
         # marker, tag the turn `local`, and the Stop hook would skip TTS.
-        if spec.backend == self.backends.CLAUDE:
+        adapter = backends.adapter_for(spec.backend)
+        if adapter.hook_source_marker:
             self._write_source_marker(
                 session=spec.session, trace_id=spec.trace_id,
                 synthesize_audio=spec.synthesize_audio)
@@ -1382,7 +1400,7 @@ class TurnDispatchService:
         # A retry of a never-initialised new session must keep --session-id.
         state = {"saw_init": False, "backend_session_id": spec.backend_session_id, "spawn_ready": threading.Event()}
         account_attempt = None
-        if (spec.backend in {backends.CLAUDE, backends.CODEX}
+        if (adapter.supports_account_failover
                 and (account_selector(spec.backend) or account_failover(spec.backend).recovering)):
             def pause():
                 _CLAIMED_AT[spec.agent_id] = time.monotonic()
@@ -1594,7 +1612,7 @@ class TurnDispatchService:
             except Exception as e:
                 log_exception("clarpOnErrorFail", e, detail=trace_id)
 
-        if spec.backend == self.backends.CLAUDE or spec.janitor_run_id:
+        if backends.adapter_for(spec.backend).locks_turn_callbacks or spec.janitor_run_id:
             def guarded(callback):
                 def invoke(*args):
                     with _TURN_LOCK:
@@ -1619,12 +1637,12 @@ class TurnDispatchService:
                 f"superseded by a newer turn; ignoring its outcome")
             return
         msg = (message or "")[:300]
+        adapter = backends.adapter_for(spec.backend)
         if (category == error_classify.USAGE_LIMIT
-                and spec.backend == backends.CODEX
+                and adapter.usage_limit_recovery is not None
                 and not spec.codex_recovery_attempted):
-            from . import codex_app_server
             try:
-                recovered = codex_app_server.recover_usage_failure(message)
+                recovered = adapter.usage_limit_recovery(message)
             except Exception as exc:
                 log_exception("codexConnectionRecoveryFail", exc, detail=spec.trace_id)
                 recovered = False
@@ -1638,7 +1656,7 @@ class TurnDispatchService:
         if self._start_model_fallback(spec, state, category, msg):
             return
         if (category in (error_classify.USAGE_LIMIT, error_classify.AUTH)
-                and spec.backend in {backends.CLAUDE,backends.CODEX}
+                and adapter.supports_account_failover
                 and account_failover(spec.backend).request(
                     spec.agent_id, spec.trace_id, account_selector(spec.backend))):
             eventlog.emit("server", "claudeAccountRecovery", context=spec.context,
@@ -1798,11 +1816,12 @@ class TurnDispatchService:
         limit_event = None
         if category == error_classify.USAGE_LIMIT and quota_confirmed is False:
             human = "Codex could not complete this request. Try again"
-        if (category == error_classify.USAGE_LIMIT and spec.backend == backends.CODEX
+        if (category == error_classify.USAGE_LIMIT
+                and backends.adapter_for(spec.backend).records_classified_usage_limit
                 and quota_confirmed is not False):
             try:
                 limit_event = backend_usage.record_classified_usage_limit(
-                    backends.CODEX)
+                    backends.normalize(spec.backend))
                 if limit_event:
                     for related in limit_event.get("_additional_events") or []:
                         self.ctx.stream.broadcast(related)
