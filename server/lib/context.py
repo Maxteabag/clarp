@@ -131,6 +131,10 @@ class ServerContext:
     # injected/local dispatch implementation.
     runtime_client: Any | None = None
     tool_explanations: Any | None = None
+    # HeraldManager (lib.herald) deciding which off-focus agent's clip plays.
+    # Production passes it to build_server, which stores it here before any
+    # worker or handler runs; tests set it directly. None = no arbitration.
+    herald: Any | None = None
 
     def __post_init__(self):
         if self.clip_broker is None:
