@@ -100,7 +100,13 @@ clean baseline, behaviour-preserving unless a line here says otherwise.
    become `backend.on_credential_change()`.
 3. `runner_common.py` becomes `stream_json.py`; the five runner modules
    become the subclass bodies; the modules keep thin delegators for the
-   tests that patch them.
+   tests that patch them. Each backend carries `runner`, the short name
+   that prefixes its log events, drain threads and `dispatch` tags and
+   names its `lib.<runner>_runner` module (DeepSeek's is OpenCode's, so it
+   shares OpenCode's process registry). Until slice 5, `Backend._hook`
+   and the `@hooked` methods let a monkeypatched runner-module global
+   intercept the class body; the guard test keeps CLI names out of the
+   package, so `configured_claude_bin` stays on `clarp_runner`.
 4. Dispatch-side decisions (resume target, callback wrapping, usage
    classification, compaction, recorded model, transcript access) move to
    methods; the remaining behavioural adapter fields are deleted.

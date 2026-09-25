@@ -1,4 +1,4 @@
-"""The ``lib.backend`` strategy package (slices 1 and 2 of the contract in
+"""The ``lib.backend`` strategy package (slices 1 to 3 of the contract in
 docs/architecture/backend-strategy.md).
 
 Every backend is a ``Backend``, ids and aliases round-trip through the
@@ -74,7 +74,7 @@ def test_data_attributes_copy_the_adapter_row(backend):
     for name in ("id", "label", "required_binary", "aliases", "efforts",
                  "context_window", "model_family", "janitor_default_model",
                  "api_providers", "login_kind", "effort_ui", "effort_scope",
-                 "fallback_models"):
+                 "fallback_models", "runner"):
         assert getattr(b, name) == getattr(a, name), name
 
 
@@ -404,26 +404,75 @@ def test_recorded_model_delegates_to_session_models(monkeypatch):
         assert registry.by_id(name).recorded_model("s9") == f"{name}/s9"
 
 
-def test_stream_json_shared_surface_delegates_to_runner_common(monkeypatch):
-    from lib import runner_common
-    seen = []
-    monkeypatch.setattr(runner_common, "record_state",
-                        lambda aid, kind, detail, *, backend, event="": seen.append(("state", aid, kind, backend, event)))
-    monkeypatch.setattr(runner_common, "broadcast_transcript",
-                        lambda stream, aid, session, *, backend: seen.append(("broadcast", aid, session, backend)))
-    monkeypatch.setattr(runner_common, "speak",
-                        lambda text, st, *, backend, **kw: seen.append(("speak", text, backend)) or 1)
-    monkeypatch.setattr(runner_common, "bind_session",
-                        lambda st, sid, *, backend, **kw: seen.append(("bind", sid, backend)))
+def test_stream_json_shared_surface_carries_the_runner_prefix(monkeypatch):
+    """Slice 3: the runner_common bodies live on StreamJsonBackend and key
+    their log events by the runner name, so DeepSeek logs as OpenCode."""
+    from lib import agents as agents_db
+    from lib.backend import stream_json
+    logged = []
+    monkeypatch.setattr(stream_json, "log_exception",
+                        lambda name, error, detail=None: logged.append((name, detail)))
+    monkeypatch.setattr(stream_json, "log", lambda name, msg: logged.append((name, msg)))
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("down")
+
+    class Broken:
+        def broadcast(self, event):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(agents_db, "record_state", boom)
+    monkeypatch.setattr(agents_db, "latest_turn_synthesize_audio", lambda agent_id: False)
+    for name, prefix in (("grok", "grok"), ("opencode", "opencode"), ("deepseek", "opencode")):
+        b = registry.by_id(name)
+        logged.clear()
+        b.record_state("a1", "thinking", None)
+        b.record_state("a1", "thinking", None, event="custom")
+        b.broadcast_transcript(Broken(), "a1", "sess")
+        st = SimpleNamespace(session_id="", saw_session=False, failed_error="")
+        b.bind_session(st, "sid", on_session_init=None, on_error=None, trace_id="t")
+        assert b.speak("<speak>hi</speak>", st, agent_id="a1", session="s", trace_id="t", enqueue=None) == 0
+        assert logged == [(f"{prefix}RecordStateFail", "a1:thinking"),
+                          ("custom", "a1:thinking"),
+                          (f"{prefix}BroadcastFail", "a1"),
+                          (f"{prefix}SessionInit", "sid=sid trace=t")], name
+        assert (st.session_id, st.saw_session) == ("sid", True)
+    # Isolated runs (no agent) record and broadcast nothing.
+    logged.clear()
+    registry.by_id("grok").record_state("", "thinking", None)
+    registry.by_id("grok").broadcast_transcript(Broken(), "", "sess")
+    assert logged == []
+
+
+def test_runner_registries_are_shared_per_runner():
+    """DeepSeek turns live in OpenCode's registry, as they did when the
+    registry was ``opencode_runner._REGISTRY``; every other CLI has its own."""
+    from lib import clarp_runner, codex_runner, grok_runner, opencode_runner, agy_runner
+    assert registry.by_id("deepseek")._registry is registry.by_id("opencode")._registry
+    assert opencode_runner._REGISTRY is registry.by_id("opencode")._registry
+    assert grok_runner._REGISTRY is registry.by_id("grok")._registry
+    assert agy_runner._REGISTRY is registry.by_id("agy")._registry
+    assert clarp_runner._REGISTRY is registry.by_id("claude")._registry
+    assert codex_runner._REGISTRY is registry.by_id("codex")._registry
+    distinct = {id(registry.by_id(n)._registry) for n in ("claude", "codex", "agy", "grok", "opencode")}
+    assert len(distinct) == 5
+
+
+def test_hook_prefers_a_test_double_over_the_modules_own_delegator(monkeypatch):
+    """The slice-3 seam: a monkeypatched runner-module global intercepts
+    the class body; the module's own delegator does not recurse into it."""
+    from lib import grok_runner
     grok = registry.by_id("grok")
-    grok.record_state("a1", "thinking", None, event="x")
-    grok.broadcast_transcript(None, "a1", "sess")
-    assert grok.speak("<speak>hi</speak>", None, agent_id="a1", session="s", trace_id="t", enqueue=None) == 1
-    grok.bind_session(None, "sid", on_session_init=None, on_error=None, trace_id="t")
-    assert seen == [("state", "a1", "thinking", "grok", "x"),
-                    ("broadcast", "a1", "sess", "grok"),
-                    ("speak", "<speak>hi</speak>", "grok"),
-                    ("bind", "sid", "grok")]
+    assert grok._hook("build_cmd") is None
+    assert grok._hook("build_cmd", "own") == "own"
+    assert grok._hook("GROK_BIN", "x") == "grok"
+    monkeypatch.setattr(grok_runner, "GROK_BIN", "fake-grok")
+    assert grok.build_cmd("")[0] == "fake-grok"
+    monkeypatch.setattr(grok_runner, "build_cmd", lambda *a, **kw: ["patched"])
+    assert grok.routing_cmd("p") == ["patched", "-p", "p"]
+    monkeypatch.setattr(grok_runner, "routing_text", lambda stdout: f"double:{stdout}")
+    assert grok.routing_text("o") == "double:o"
+    assert grok_runner.routing_text("o") == "double:o"
 
 
 def test_base_defaults_are_documented_no_ops_or_not_implemented():
@@ -441,7 +490,10 @@ def test_base_defaults_are_documented_no_ops_or_not_implemented():
     assert bare.arm_source_marker("s", "t", True) is None
     with pytest.raises(Unsupported):
         bare.terminal_argv("s")
-    for method, args in (("spawn_turn", ()), ("interrupt", ("a",)), ("active_handles", ("a",)),
+    # interrupt/active_handles are implemented on the base over the runner's
+    # process registry (slice 3), so a bare subclass gets them for free.
+    assert bare.interrupt("nobody") == 0 and bare.active_handles("nobody") == []
+    for method, args in (("spawn_turn", ()),
                          ("resume_target", ("s", "/w")), ("find_transcript", ("s",)),
                          ("parse_transcript", ("/p",)), ("list_sessions", ("/w",)),
                          ("routing_cmd", ("p",)), ("routing_text", ("o",))):
