@@ -230,56 +230,60 @@ def last_message_preview(*, agent_id: str, max_len: int = 80) -> str:
     return str(last_message_head(agent_id=agent_id, max_len=max_len)["preview"])
 
 
-def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
-    """Batch the dashboard projection; at most 50 candidates per agent per preview mode leave SQLite."""
-    routine = tuple(sorted(origins.ROUTINE_AUTOMATION_ORIGINS))
+# Per-agent preview entries keyed by the agent's message revisions. A snapshot
+# during quiet minutes reuses every entry; while agents stream, only the
+# agents whose rows changed run their three indexed queries again.
+_PREVIEW_CACHE: dict[str, tuple[tuple[tuple[str, int], ...], dict[str, Any]]] = {}
+
+
+def _agent_preview(agent_id: str, max_len: int, routine: tuple[str, ...]) -> dict[str, Any]:
+    """head, completed_head and activity for one agent via idx_messages_dashboard_activity."""
     marks = ','.join('?' for _ in routine)
-    result: dict[str, dict[str, Any]] = {}
-    # Separate bounded projections keep the last final message available even
-    # when many newer provisional rows exist, without one query per agent.
+    entry: dict[str, Any] = {}
     for field, completed_filter in (
         ('head', ''),
-        ('completed_head', "AND NOT (role = 'assistant' AND COALESCE(source_file, '') LIKE 'live:%')"),
+        ('completed_head', "AND NOT (m.role = 'assistant' AND COALESCE(m.source_file, '') LIKE 'live:%')"),
     ):
         rows = conn().execute(f"""
-        WITH candidates AS (
-            SELECT m.agent_id, m.message_id, ROW_NUMBER() OVER (
-                PARTITION BY m.agent_id
-                ORDER BY {_message_activity_sql()} DESC, seq DESC, updated_at DESC
-            ) AS rank FROM messages m
-            WHERE m.agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
-              AND COALESCE(text, '') != '' AND COALESCE(tool_name, '') = ''
-              {completed_filter}
-              AND COALESCE(origin, 'user') NOT IN ({marks})
-        )
-        SELECT m.agent_id, m.message_id, m.backend_session_id, m.revision, m.role, m.text, m.origin,
-               {_message_activity_sql()} AS message_activity
-          FROM candidates c JOIN messages m ON m.message_id = c.message_id
-         WHERE c.rank <= 50 ORDER BY c.agent_id, c.rank
-    """, routine)
+            SELECT m.agent_id, m.message_id, m.backend_session_id, m.revision, m.role, m.text, m.origin,
+                   {_message_activity_sql()} AS message_activity
+              FROM messages m
+             WHERE m.agent_id = ?
+               AND COALESCE(m.text, '') != '' AND COALESCE(m.tool_name, '') = ''
+               {completed_filter}
+               AND COALESCE(m.origin, 'user') NOT IN ({marks})
+             ORDER BY {_message_activity_sql()} DESC, m.seq DESC, m.updated_at DESC
+             LIMIT 50
+        """, (agent_id, *routine))
         for row in rows:
-            entry = result.setdefault(row['agent_id'], {})
-            if field not in entry and not _automation_kind(
-                    role=row['role'], origin=row['origin'], text=row['text']):
+            if not _automation_kind(role=row['role'], origin=row['origin'], text=row['text']):
                 entry[field] = _format_preview(row, max_len)
-    # The newest user-origin row per agent walks idx_messages_dashboard_activity
-    # from the top and stops at the first match, instead of grouping every
-    # message of every live agent (35 ms -> 11 ms on a 140k-row store).
-    for row in conn().execute(f"""
-        SELECT a.agent_id,
-               (SELECT {_message_activity_sql()} FROM messages m
-                 WHERE m.agent_id = a.agent_id
-                   AND COALESCE(m.origin, 'user') = 'user'
-                   AND COALESCE(m.text, '') != '' AND COALESCE(m.tool_name, '') = ''
-                 ORDER BY {_message_activity_sql()} DESC, m.seq DESC, m.updated_at DESC
-                 LIMIT 1) AS activity
-          FROM agents a WHERE a.deleted_at IS NULL
-    """):
-        entry = result.setdefault(row['agent_id'], {})
-        entry['activity'] = int(row['activity'] or 0)
-        # Date/order must describe the same visible message as the preview.
-        # Prompt origin still controls scheduler engagement above.
-        entry['chat_activity'] = int(entry.get('head', {}).get('activity', 0))
+                break
+    row = conn().execute(f"""
+        SELECT {_message_activity_sql()} AS activity FROM messages m
+         WHERE m.agent_id = ?
+           AND COALESCE(m.origin, 'user') = 'user'
+           AND COALESCE(m.text, '') != '' AND COALESCE(m.tool_name, '') = ''
+         ORDER BY {_message_activity_sql()} DESC, m.seq DESC, m.updated_at DESC
+         LIMIT 1
+    """, (agent_id,)).fetchone()
+    entry['activity'] = int((row['activity'] if row else 0) or 0)
+    # Date/order must describe the same visible message as the preview.
+    # Prompt origin still controls scheduler engagement above.
+    entry['chat_activity'] = int(entry.get('head', {}).get('activity', 0))
+    return entry
+
+
+def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
+    """The dashboard projection for every live agent.
+
+    Revisions come first (one indexed GROUP BY); they key a per-agent cache so
+    an unchanged agent costs nothing and a changed one costs three index walks
+    that stop after at most 50 rows. The previous window-function query ranked
+    every message of every live agent on each call (100–230 ms each, twice).
+    """
+    routine = tuple(sorted(origins.ROUTINE_AUTOMATION_ORIGINS))
+    revisions: dict[str, dict[str, int]] = {}
     for row in conn().execute("""
         SELECT agent_id, backend_session_id, MAX(revision) AS revision FROM (
             SELECT agent_id, backend_session_id, revision FROM messages
@@ -288,8 +292,23 @@ def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
         ) WHERE agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
         GROUP BY agent_id, backend_session_id
     """):
-        result.setdefault(row['agent_id'], {}).setdefault('revisions', {})[
-            row['backend_session_id']] = int(row['revision'] or 0)
+        revisions.setdefault(row['agent_id'], {})[row['backend_session_id']] = int(row['revision'] or 0)
+    live = [row['agent_id'] for row in conn().execute("SELECT agent_id FROM agents WHERE deleted_at IS NULL")]
+    result: dict[str, dict[str, Any]] = {}
+    for agent_id in live:
+        key = tuple(sorted((str(session or ''), rev) for session, rev in revisions.get(agent_id, {}).items()))
+        cached = _PREVIEW_CACHE.get(agent_id)
+        if cached is not None and cached[0] == key and max_len == 80:
+            entry = dict(cached[1])
+        else:
+            entry = _agent_preview(agent_id, max_len, routine)
+            if max_len == 80:
+                _PREVIEW_CACHE[agent_id] = (key, dict(entry))
+        if agent_id in revisions:
+            entry['revisions'] = dict(revisions[agent_id])
+        result[agent_id] = entry
+    for stale in [agent_id for agent_id in _PREVIEW_CACHE if agent_id not in result]:
+        _PREVIEW_CACHE.pop(stale, None)
     return result
 
 

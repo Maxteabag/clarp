@@ -2509,10 +2509,26 @@ bool AppController::retryCreatedAgent() {
     return true;
 }
 
+// Roster and notification events arrive many times a second while agents
+// stream; each snapshot costs the Host a few hundred milliseconds, so calls
+// closer together than this are coalesced into one trailing request.
+constexpr qint64 SnapshotMinIntervalMs = 700;
+
 void AppController::requestSnapshot() {
     if (m_launchMode) return;
     if (m_snapshotInFlight) { m_snapshotDirty = true; return; }
+    if (m_snapshotClock.isValid() && m_snapshotClock.elapsed() < SnapshotMinIntervalMs) {
+        if (!m_snapshotScheduled) {
+            m_snapshotScheduled = true;
+            QTimer::singleShot(static_cast<int>(SnapshotMinIntervalMs - m_snapshotClock.elapsed()), this, [this] {
+                m_snapshotScheduled = false;
+                requestSnapshot();
+            });
+        }
+        return;
+    }
     m_snapshotInFlight = true;
+    m_snapshotClock.start();
     m_api.get(QStringLiteral("snapshot:%1").arg(++m_snapshotGeneration), QStringLiteral("/agents/snapshot"));
 }
 

@@ -16,6 +16,7 @@
 
 #include <QHash>
 #include <QObject>
+#include <QElapsedTimer>
 #include <QSet>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -604,6 +605,8 @@ class AppController : public QObject {
     bool m_newAgentOnStartup = true;
     bool m_minimalUi = false;
     bool m_workspaceBarVisible = true;
+    QElapsedTimer m_snapshotClock;
+    bool m_snapshotScheduled = false;
     QString m_readingTheme;
     bool m_sharedFilesystem = false;
     bool m_voicesLoading = false;
