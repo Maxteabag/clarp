@@ -324,7 +324,7 @@ class ToolExplanations:
                     def translate(model):
                         if self._translate is not None:
                             value = self._translate(level, requests)
-                        elif backends.adapter_for(model["backend"]).native_tool_explainer:
+                        elif backends.by_id(model["backend"]).native_tool_explainer:
                             selected = {**run, "configuration": {**run["configuration"], **model, "provider": model["backend"]}}
                             value = self._run_codex(level, requests, run=selected)
                         else:

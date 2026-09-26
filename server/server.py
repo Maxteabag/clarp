@@ -3101,7 +3101,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "backend": backend, "valid_efforts": valid})
             update["effort"] = effort
         next_model = update.get("model", str(agent.get("model") or "").strip())
-        effort_compatibility_unknown = backends.adapter_for(backend).effort_compatibility_unknown
+        effort_compatibility_unknown = backends.by_id(backend).effort_compatibility_unknown
         if effort_compatibility_unknown and not next_model:
             next_model = backends.default_model_effort(backend, config.load())[0]
         next_effort = update.get("effort", str(agent.get("effort") or "").strip())

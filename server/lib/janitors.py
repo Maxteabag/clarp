@@ -306,7 +306,7 @@ def _execution(template_id: str, value, backend: str) -> dict:
     if backend != backends.for_provider(provider):
         raise JanitorError("Execution provider must match the Janitor backend")
     if template_id == "tool-explainer" and (
-            provider != backend or not backends.adapter_for(backend).native_tool_explainer):
+            provider != backend or not backends.by_id(backend).native_tool_explainer):
         raise JanitorError("Tool explanation requires the codex provider")
     return {"executor": "ephemeral", "provider": provider}
 
@@ -1074,7 +1074,7 @@ def begin_creation(request_id: str, payload: dict) -> dict:
         if any(values.get(key) is not None and not isinstance(values[key], str) for key in ("model", "effort")):
             raise JanitorError("Model and effort must be text")
         model = (values.get("model") or "") if "model" in values else (
-            backends.adapter_for(backend).janitor_default_model)
+            backends.by_id(backend).janitor_default_model)
         effort = (values.get("effort") or "") if "effort" in values else (
             "low" if model == "gpt-5.3-codex-spark" else "")
         if not isinstance(model, str) or not isinstance(effort, str):
@@ -1082,7 +1082,7 @@ def begin_creation(request_id: str, payload: dict) -> dict:
         model, effort = model.strip(), effort.strip().lower()
         execution = _execution(values.get("template_id", "task-labels"), values.get("execution"), backend)
         _model({"backend": backend}, model, effort, provider=execution.get("provider"))
-        if backends.adapter_for(backend).effort_compatibility_unknown and effort:
+        if backends.by_id(backend).effort_compatibility_unknown and effort:
             raise JanitorError("AGY model-specific effort compatibility is unknown")
         validate_configuration(**{k: values[k] for k in ("template_id", "scope", "attachments", "options") if k in values})
         from .agent_lifecycle import _existing_cwd
