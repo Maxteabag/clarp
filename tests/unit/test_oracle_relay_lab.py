@@ -96,18 +96,29 @@ class FakeUpstream:
 
 
 class Lab:
-    def __init__(self, monkeypatch, *, rows=(), transcript=(), strategy="direct_contact"):
+    """``rows`` are results of work delegated in this call; ``prior_rows`` are
+    the thread's work from earlier calls, known when the call opens, and
+    ``completions`` the unread agent completions the attention projection
+    reports."""
+
+    def __init__(self, monkeypatch, *, rows=(), prior_rows=(), completions=(), transcript=(),
+                 strategy="direct_contact"):
+        self.completions = list(completions)
         monkeypatch.setattr(mod.oracle_attention, "pending_decisions", lambda: [])
-        monkeypatch.setattr(mod.oracle_attention, "pending_completion_notifications", lambda: [])
+        monkeypatch.setattr(mod.oracle_attention, "pending_completion_notifications",
+                            lambda: list(self.completions))
         self.now = [100.0]
         self.down = []
         self.upstreams = [FakeUpstream()]
         self.sent = self.upstreams[0].sent
         self.open_error = None
-        self.tools = FakeTools(rows, transcript)
+        self.tools = FakeTools(prior_rows, transcript)
         self.conv = mod.Conversation(self.upstreams[0], self.down.append,
                                      self.tools, "key", clock=lambda: self.now[0],
                                      delegation_strategy=strategy)
+        for row in rows:
+            self.tools.rows.append(row)
+            self.tools.delegations.add(row["delegation_id"])
         self.conv.open_upstream = self.open_upstream
         self.ms = 0
         self.delegation = 0
@@ -871,3 +882,187 @@ def test_earcons_off_by_config_sends_nothing(lab):
 def test_the_earcons_preference_must_be_a_boolean(value, accepted):
     event = mod.client_event(json.dumps({"type": "oracle_v2.preferences", "earcons": value}))
     assert (event == {"type": "oracle_v2.preferences", "earcons": value}) is accepted
+
+
+# ---- a new call opens quietly (calls bfd47723 and cae1c237) -----------------
+#
+# bfd47723 opened 6.7 minutes after call 6bd3aeea, whose "... Ups" had been
+# handed to Theo; Theo answered after that call ended. At 0.3 s, before the
+# user said anything, the Host cued a result and relayed the old reply, and
+# Oracle read it over the user.
+
+NEW_CALL = json.loads((FIXTURES / "bfd47723_new_call_after_unfinished_delegation.json").read_text())
+STALE_CALL = json.loads((FIXTURES / "cae1c237_hours_old_completion_at_open.json").read_text())
+PRIOR_REPLY = NEW_CALL["prior_operation"]["result_text"]
+
+
+def _completion(fixture, stale):
+    notice = dict(fixture["unread_completion"])
+    notice["reference_ts"] = 1_790_435_949_105 - notice.pop("age_ms_at_open")
+    notice["stale"] = stale
+    return notice
+
+
+def _new_call(lab, **kwargs):
+    return lab(prior_rows=[dict(NEW_CALL["prior_operation"])],
+               completions=[_completion(NEW_CALL, stale=False)], **kwargs)
+
+
+def _answer_the_first_turn(lab):
+    lab.replay(NEW_CALL["events"])
+    lab.ms = 10_000
+    _oracle_says(lab, " Ja, jeg hører deg.", seconds=2)
+    lab.wait(8)
+
+
+def test_bfd47723_nothing_from_the_last_call_before_the_user_speaks(lab):
+    lab = _new_call(lab)
+    lab.wait(10)
+    assert lab.appends() == [], "the call opens quietly"
+    assert _cues(lab) == []
+    lab.replay(NEW_CALL["events"])
+    lab.wait(1)
+    assert lab.appends() == [] and _cues(lab) == [], "nor while the user's first turn is unanswered"
+
+
+def test_bfd47723_the_last_calls_result_is_background_never_relayed(lab):
+    lab = _new_call(lab)
+    _answer_the_first_turn(lab)
+    lab.wait(60)
+    assert lab.parts() == [] and _cues(lab) == []
+    assert not any(e["type"] == "session.commentary.append" for e in lab.appends())
+    notes = [e["content"] for e in lab.appends()]
+    assert len(notes) == 1 and "Background from before this call" in notes[0]
+    assert "Do not bring it up" in notes[0]
+    assert lab.tools.dispatched == []
+
+
+@pytest.mark.parametrize("words", ["What did Theo say?", "Any updates?", "Hva sa Theo?"])
+def test_bfd47723_asking_about_it_serves_the_stored_reply(lab, words):
+    lab = _new_call(lab)
+    _answer_the_first_turn(lab)
+    lab.user(words)
+    [part] = lab.parts()
+    assert _body(part) == PRIOR_REPLY
+    assert NEW_CALL["prior_operation"]["delegation_id"] in _header(part)
+    assert lab.tools.dispatched == []
+    assert not any(name == "read_agent_transcript" for name, _ in lab.tools.calls)
+
+
+def test_bfd47723_asking_before_anything_was_said_still_serves_it(lab):
+    lab = _new_call(lab)
+    lab.wait(2)
+    lab.user("What did Theo say")
+    assert _body(lab.parts()[0]) == PRIOR_REPLY
+
+
+def test_bfd47723_results_of_this_calls_work_still_relay_with_the_cue(lab):
+    lab = _new_call(lab)
+    _answer_the_first_turn(lab)
+    lab.user("Check the deploy")
+    assert _cues(lab) == ["handed_off"]
+    lab.tools.rows.append({"delegation_id": "new-1", "session": "theo-97e5", "status": "completed",
+                           "request_text": "Check the deploy", "result_text": "The deploy is green."})
+    lab.wait(6)
+    assert _cues(lab) == ["handed_off", "result"]
+    [part] = lab.parts()
+    assert "The deploy is green." in part and PRIOR_REPLY not in part
+
+
+def test_bfd47723_a_prior_call_result_finishing_during_this_call_is_not_relayed(lab):
+    row = dict(NEW_CALL["prior_operation"], status="running")
+    lab = lab(prior_rows=[row])
+    _answer_the_first_turn(lab)
+    row["status"] = "completed"
+    lab.wait(30)
+    assert lab.parts() == [] and _cues(lab) == []
+
+
+def test_cae1c237_an_hours_old_completion_is_never_volunteered(lab):
+    lab = lab(completions=[_completion(STALE_CALL, stale=True)])
+    lab.wait(5)
+    lab.replay(STALE_CALL["events"])
+    lab.wait(30)
+    assert lab.appends() == []
+
+
+def test_pending_decisions_wait_for_the_first_turn_too(lab, monkeypatch):
+    lab = lab()
+    monkeypatch.setattr(mod.oracle_attention, "pending_decisions", lambda: [{
+        "decision_id": "d-1", "updated_at": 1, "title": "Pick one"}])
+    monkeypatch.setattr(mod.oracle_attention, "context_text", lambda decision: "Pending decision d-1")
+    lab.wait(10)
+    assert lab.appends() == []
+    lab.user("hello")
+    lab.oracle_speaks(1)
+    lab.wait(8)
+    assert [e["content"] for e in lab.appends()][-1] == "Pending decision d-1"
+
+
+class FakeMemory:
+    """The durable thread: a checkpoint and the thread's linked work."""
+
+    def __init__(self):
+        self.state, self.rows = {}, []
+
+    def reconcile(self):
+        pass
+
+    def load(self):
+        return {"revision": 0, **self.state}
+
+    def save(self, state):
+        self.state = json.loads(json.dumps(state))
+
+    def work(self):
+        return list(self.rows)
+
+    def observe(self, event, source_key):
+        return True
+
+
+def _reconnect(monkeypatch, memory, tools, after_ms):
+    monkeypatch.setattr(mod, "wall_ms", lambda: 1_000_000 + after_ms)
+    up = FakeUpstream()
+    conv = mod.Conversation(up, lambda event: None, tools, "key", clock=lambda: 500.0,
+                            delegation_strategy="direct_contact", memory=memory)
+    return conv, up
+
+
+@pytest.mark.parametrize("after_ms,relayed", [(5_000, True), (mod.CALL_RESUME_GRACE_SECONDS * 1000 + 1, False)])
+def test_a_reconnect_within_the_grace_continues_the_calls_relay(monkeypatch, after_ms, relayed):
+    monkeypatch.setattr(mod.oracle_attention, "pending_decisions", lambda: [])
+    monkeypatch.setattr(mod.oracle_attention, "pending_completion_notifications", lambda: [])
+    memory = FakeMemory()
+    old = FakeTools([dict(NEW_CALL["prior_operation"])])
+    monkeypatch.setattr(mod, "wall_ms", lambda: 1_000_000)
+    first = mod.Conversation(FakeUpstream(), lambda event: None, old, "key", clock=lambda: 100.0,
+                             delegation_strategy="direct_contact", memory=memory)
+    old.delegations.add("new-1")          # delegated in this call
+    first.checkpoint()
+    first.stop.set(); first.pool.shutdown(wait=True)
+    assert memory.state["call_work"] == ["new-1"]
+    memory.rows = [dict(NEW_CALL["prior_operation"]),
+                   {"delegation_id": "new-1", "session": "theo-97e5", "status": "completed",
+                    "request_text": "Check the deploy", "result_text": "The deploy is green."}]
+    tools = FakeTools()
+    tools.rows = list(memory.rows)
+    conv, up = _reconnect(monkeypatch, memory, tools, after_ms)
+    try:
+        conv.tick()
+        bodies = [json.loads(raw)["content"] for raw in up.sent]
+        assert any("The deploy is green." in body for body in bodies) is relayed
+        assert not any(PRIOR_REPLY in body for body in bodies)
+    finally:
+        conv.stop.set(); conv.pool.shutdown(wait=True)
+
+
+@pytest.mark.parametrize("words,expected", [
+    ("Any updates?", True), ("Okay, anything new?", True), ("What's new", True),
+    ("Has anyone gotten back to me?", True), ("Noe nytt?", True),
+    ("Any updates on the deploy? Ask Theo to check it", False),
+    ("Tell Theo there is news", False), ("Update the config", False),
+    ("any new ideas for the roadmap", False),
+])
+def test_update_questions(words, expected):
+    assert oracle_relay.asks_for_updates(words) is expected

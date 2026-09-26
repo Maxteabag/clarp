@@ -138,6 +138,40 @@ def test_unread_completion_bridge_quotes_exact_source_and_filters_provenance():
     assert "The requested change is complete." in payload
 
 
+def test_completions_older_than_the_stale_threshold_are_marked_stale():
+    """cae1c237: a completion 3.6 hours old reached a new call as stale:false."""
+    now = db.now_ms()
+    _insert_completion(done_ts=now - 6 * 60 * 1000)
+    [fresh] = oracle_attention.pending_completion_notifications(now_ms_value=now)
+    assert fresh["stale"] is False
+    [old] = oracle_attention.pending_completion_notifications(
+        now_ms_value=now + oracle_attention.ORACLE_COMPLETION_STALE_MS)
+    assert old["stale"] is True
+    payload = oracle_attention.completion_context_text(old)
+    assert '"stale":true' in payload and "Background from before this call" in payload
+
+
+def test_stable_oracle_never_volunteers_a_stale_completion(monkeypatch):
+    sent = []
+    monkeypatch.setattr(oracle_live_stable.oracle_attention, "pending_decisions", lambda: [])
+    monkeypatch.setattr(oracle_live_stable.oracle_attention, "pending_completion_notifications",
+                        lambda: [{"notification_id": "n", "source_message_id": "old-answer",
+                                  "cause_message_id": "c", "agent": "OPUS", "session": "opus",
+                                  "origin": "user", "reference_ts": 1, "stale": True,
+                                  "source_text": "It is merged."}])
+    tools = SimpleNamespace(lock=threading.Lock(), delegations=set(), results=lambda: [])
+    conversation = oracle_live_stable.Conversation(
+        SimpleNamespace(send=sent.append), lambda _event: None, tools, "unused", clock=lambda: 100.0)
+    conversation.opening_answered = True
+    try:
+        conversation.tick()
+        assert sent == []
+        assert conversation.context_notifications_sent == {"completion:old-answer"}
+    finally:
+        conversation.stop.set()
+        conversation.pool.shutdown()
+
+
 def test_unread_completion_bridge_suppresses_newer_reply_and_stale_rows():
     now = db.now_ms()
     _insert_completion(done_ts=now - 1000)
@@ -166,6 +200,7 @@ def test_stable_oracle_notifies_unrelated_agent_decision_once(monkeypatch):
     conversation = oracle_live_stable.Conversation(
         SimpleNamespace(send=sent.append), downstream.append, tools, "unused",
         clock=lambda: 100.0)
+    conversation.opening_answered = True  # the user's first turn was answered
     try:
         conversation.tick()
         conversation.tick()
@@ -190,6 +225,7 @@ def test_stable_oracle_presents_one_decision_per_quiet_opportunity(monkeypatch):
     conversation = oracle_live_stable.Conversation(
         SimpleNamespace(send=sent.append), lambda _event: None, tools, "unused",
         clock=lambda: now[0])
+    conversation.opening_answered = True  # the user's first turn was answered
     try:
         conversation.tick()
         now[0] = 101.0
@@ -227,6 +263,7 @@ def test_stable_oracle_bridges_unread_completion_without_decision_semantics(monk
     conversation = oracle_live_stable.Conversation(
         SimpleNamespace(send=sent.append), lambda _event: None, tools, "unused",
         clock=lambda: 100.0)
+    conversation.opening_answered = True  # the user's first turn was answered
     try:
         conversation.tick()
         payload = json.loads(sent[0])["content"]
@@ -247,6 +284,7 @@ def test_stable_oracle_does_not_replay_when_decision_resolves(monkeypatch):
     conversation = oracle_live_stable.Conversation(
         SimpleNamespace(send=sent.append), downstream.append, tools, "unused",
         clock=lambda: 100.0)
+    conversation.opening_answered = True  # the user's first turn was answered
     try:
         conversation.tick()
         current.clear()
