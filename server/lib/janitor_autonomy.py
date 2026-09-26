@@ -87,9 +87,9 @@ def validate_decision(value):
     return value
 
 class AutonomyJanitors:
-    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=janitor_hotseat.read_accounts,hotseat_switch=janitor_hotseat.switch_account,recycle_runner=None):
+    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=janitor_hotseat.read_accounts,hotseat_switch=janitor_hotseat.switch_account):
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
-        self.hotseat_read=hotseat_read;self.hotseat_switch=hotseat_switch;self.recycle_runner=recycle_runner
+        self.hotseat_read=hotseat_read;self.hotseat_switch=hotseat_switch
     def start(self):
         setup();self.thread=threading.Thread(target=self.loop,name='janitor-autonomy',daemon=True);self.thread.start()
     def stop(self):self.stop_event.set()
@@ -216,9 +216,8 @@ class AutonomyJanitors:
                 if switched:
                     settings_store.set_text(f'hotseat-switcher.{provider}.last-switch',json.dumps({'from':decision['active'],'to':decision['target'],'at':now}))
                     # A runner that read credentials once must restart to see the new account.
-                    if self.recycle_runner and backends.adapter_for(provider).restarts_runner_on_credential_change:
-                        try:self.recycle_runner()
-                        except Exception:pass
+                    try:backends.by_id(provider).on_credential_change()
+                    except Exception:pass
                 else:outcome='failed';error=error or f'{provider}: Hotseat did not confirm the switch'
             text=janitor_hotseat.preview(provider,decision,mode=options['mode'],switched=switched)
             # Advice and exhaustion repeat every interval; notify once per distinct situation.

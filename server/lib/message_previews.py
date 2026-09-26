@@ -284,19 +284,25 @@ def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
     """
     routine = tuple(sorted(origins.ROUTINE_AUTOMATION_ORIGINS))
     revisions: dict[str, dict[str, int]] = {}
+    # updated_at rides along: a transcript import that rewrites a row in place
+    # (same revision, new text) must refresh the cached preview as well.
+    stamps: dict[str, dict[str, int]] = {}
     for row in conn().execute("""
-        SELECT agent_id, backend_session_id, MAX(revision) AS revision FROM (
-            SELECT agent_id, backend_session_id, revision FROM messages
+        SELECT agent_id, backend_session_id, MAX(revision) AS revision,
+               MAX(updated_at) AS updated_at FROM (
+            SELECT agent_id, backend_session_id, revision, updated_at FROM messages
             UNION ALL
-            SELECT agent_id, backend_session_id, revision FROM conversation_heads
+            SELECT agent_id, backend_session_id, revision, NULL AS updated_at FROM conversation_heads
         ) WHERE agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
         GROUP BY agent_id, backend_session_id
     """):
         revisions.setdefault(row['agent_id'], {})[row['backend_session_id']] = int(row['revision'] or 0)
+        stamps.setdefault(row['agent_id'], {})[row['backend_session_id']] = int(row['updated_at'] or 0)
     live = [row['agent_id'] for row in conn().execute("SELECT agent_id FROM agents WHERE deleted_at IS NULL")]
     result: dict[str, dict[str, Any]] = {}
     for agent_id in live:
-        key = tuple(sorted((str(session or ''), rev) for session, rev in revisions.get(agent_id, {}).items()))
+        key = tuple(sorted((str(session or ''), rev, stamps.get(agent_id, {}).get(session, 0))
+                           for session, rev in revisions.get(agent_id, {}).items()))
         cached = _PREVIEW_CACHE.get(agent_id)
         if cached is not None and cached[0] == key and max_len == 80:
             entry = dict(cached[1])

@@ -78,9 +78,10 @@ def test_completed_preview_survives_live_updates_for_unopened_chats():
     row = next(row for row in build_agent_snapshot(None)['agents'] if row['agent_id'] == aid)
     assert row['last_message'] == 'Unfinished reply'
     assert row['last_completed_message'] == 'Completed reply'
-    db.conn().execute("UPDATE messages SET text='Growing unfinished reply' WHERE message_id='preview-2'")
+    # Real writers bump updated_at (and usually revision); the preview cache keys on both.
+    db.conn().execute("UPDATE messages SET text='Growing unfinished reply', updated_at=3 WHERE message_id='preview-2'")
     assert message_store.dashboard_messages()[aid]['completed_head']['preview'] == 'Completed reply'
-    db.conn().execute("UPDATE messages SET source_file='transcript:two', text='New finished reply' WHERE message_id='preview-2'")
+    db.conn().execute("UPDATE messages SET source_file='transcript:two', text='New finished reply', updated_at=4 WHERE message_id='preview-2'")
     assert message_store.dashboard_messages()[aid]['completed_head']['preview'] == 'New finished reply'
 
 
@@ -151,7 +152,7 @@ def test_dashboard_message_ranking_walks_the_activity_index():
         message_store.dashboard_messages()
     finally:
         db.conn().set_trace_callback(None)
-    ranking = next(s for s in statements if 'WITH candidates AS' in s)
+    ranking = next(s for s in statements if 'FROM messages m' in s and 'LIMIT 50' in s)
     plan = ' '.join(row[3] for row in db.conn().execute('EXPLAIN QUERY PLAN ' + ranking))
     assert 'idx_messages_dashboard_activity' in plan, plan
 

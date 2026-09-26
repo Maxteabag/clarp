@@ -5376,13 +5376,12 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
 
     def start_autonomy_janitors():
         from lib import apns
-        from lib import codex_app_server
+        # A Codex switch through Hotseat rewrites auth.json; the Codex backend
+        # restarts its idle app-servers from on_credential_change(), exactly
+        # as after `codex login`.
         return started(AutonomyJanitors(
             adapters.decided_heartbeat, apns.send_user_notification,
-            recover=adapters.recover_janitor_quota,
-            # A Codex switch through Hotseat rewrites auth.json; idle app-servers
-            # must restart to read it, exactly as after `codex login`.
-            recycle_runner=codex_app_server.recycle_clients))
+            recover=adapters.recover_janitor_quota))
 
     def start_janitor_runner():
         from lib.janitor_http import runtime_available
