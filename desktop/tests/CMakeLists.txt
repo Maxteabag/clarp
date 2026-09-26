@@ -38,6 +38,9 @@ add_executable(clarp-desktop-tests
     ../src/app/TimeFormat.cpp
     ../src/app/MarkdownStyle.cpp
     ../src/models/AgentFilterModel.cpp
+    ../src/models/BackgroundJobTracker.cpp
+    ../src/models/BackgroundJobTracker.h
+    ../src/models/TreeOrder.h
     ../src/models/AgentFilterModel.h
     ../src/media/PortraitImage.cpp
     ../src/media/AudioController.cpp

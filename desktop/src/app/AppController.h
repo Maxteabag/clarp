@@ -48,6 +48,9 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList backendOptions READ backendOptions NOTIFY modelCatalogChanged)
     Q_PROPERTY(QVariantList availableMcpServers READ availableMcpServers NOTIFY agentRevisionChanged)
     Q_PROPERTY(quint64 agentRevision READ agentRevision NOTIFY agentRevisionChanged)
+    // Bumped whenever an agent's active background jobs change, including a
+    // heartbeat or title update that leaves the counts alone.
+    Q_PROPERTY(quint64 processRevision READ processRevision NOTIFY processRevisionChanged)
     Q_PROPERTY(QObject* avatarMotion READ avatarMotion CONSTANT)
     Q_PROPERTY(quint64 avatarRevision READ avatarRevision NOTIFY avatarRevisionChanged)
     Q_PROPERTY(quint64 mediaRevision READ mediaRevision NOTIFY mediaChanged)
@@ -147,6 +150,7 @@ class AppController : public QObject {
     [[nodiscard]] QVariantList backendOptions() const;
     [[nodiscard]] QVariantList availableMcpServers() const;
     [[nodiscard]] quint64 agentRevision() const;
+    [[nodiscard]] quint64 processRevision() const { return m_processRevision; }
     [[nodiscard]] quint64 avatarRevision() const;
     [[nodiscard]] quint64 mediaRevision() const;
     [[nodiscard]] QVariantList pastSessions() const;
@@ -284,6 +288,9 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] int agentQueueCount(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentQuotaNotice(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QVariantMap agentDetails(const QString& session) const;
+    // Running background jobs and child helpers for the process popover and
+    // the header indicator; see describeAgentProcesses().
+    Q_INVOKABLE [[nodiscard]] QVariantMap agentProcesses(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentBackend(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentWorkingDirectory(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QString agentModel(const QString& session) const;
@@ -435,6 +442,7 @@ class AppController : public QObject {
     void orchestratorChanged();
     void modelCatalogChanged();
     void agentRevisionChanged();
+    void processRevisionChanged();
     void nextAttentionChanged();
     void avatarRevisionChanged();
     void mediaChanged();
@@ -505,6 +513,7 @@ class AppController : public QObject {
     AvatarMotionClock m_avatarMotion;
     AgentListModel m_agents;
     AgentListModel m_archivedAgents;
+    BackgroundJobTracker m_jobTracker;
     ContactListModel m_contacts;
     PaneTreeModel m_panes;
     VoiceListModel m_voices;
@@ -617,6 +626,7 @@ class AppController : public QObject {
     bool m_pastSessionsLoading = false;
     bool m_hasStoredCredential = false;
     quint64 m_agentRevision = 0;
+    quint64 m_processRevision = 0;
     quint64 m_avatarRevision = 0;
     quint64 m_mediaRevision = 0;
     quint64 m_composerRevision = 0;

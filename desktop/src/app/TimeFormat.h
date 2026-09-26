@@ -26,4 +26,8 @@ namespace clarp {
 [[nodiscard]] QString daySeparator(const QString& timestamp, const QString& previousTimestamp,
                                    const QDateTime& now = QDateTime::currentDateTime());
 
+/// Compact running time for a duration in milliseconds: "12s", "4m",
+/// "1h 05m", "3d". Negative durations (clock skew) read as "0s".
+[[nodiscard]] QString compactDuration(qint64 milliseconds);
+
 } // namespace clarp

@@ -77,6 +77,9 @@ target_sources(clarp-desktop PRIVATE
     src/app/TimeFormat.cpp
     src/app/TimeFormat.h
     src/models/AgentFilterModel.cpp
+    src/models/BackgroundJobTracker.cpp
+    src/models/BackgroundJobTracker.h
+    src/models/TreeOrder.h
     src/models/AgentFilterModel.h
     src/media/PortraitImage.cpp
     src/media/PortraitImage.h

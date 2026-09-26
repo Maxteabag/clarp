@@ -24,6 +24,11 @@ struct Agent {
     QString lastCompletedMessage;
     QString conversationId;
     QString voiceId;
+    // Helper hierarchy; an older Host sends none of these, which leaves every
+    // agent a top-level peer exactly as before.
+    QString parentAgentId;
+    QString role = QStringLiteral("agent");
+    QString helperState;
     QJsonArray schedules;
     QJsonArray mcpServers;
     QJsonArray teamIds;
@@ -36,6 +41,12 @@ struct Agent {
     qint64 contextWindow = 0;
     qint64 queueRevision = 0;
     int queuedTurnCount = 0;
+    // `background_jobs` from the snapshot: active jobs, and how many of them
+    // are Clarp sub-agents. Zero when the Host predates the field.
+    int backgroundJobCount = 0;
+    int backgroundSubAgentCount = 0;
+    int childCount = 0;
+    int runningChildren = 0;
     bool alive = false;
     bool busy = false;
     bool focused = false;
@@ -46,6 +57,10 @@ struct Agent {
     bool unread = false;
 
     [[nodiscard]] static Agent fromJson(const QJsonObject& object);
+    [[nodiscard]] bool isHelper() const;
+    // A finished helper collapses into its parent's "N helpers done" line.
+    [[nodiscard]] bool helperFinished() const;
+    [[nodiscard]] bool helperRunning() const;
     // The warning shown above the composer before a send; empty when the
     // provider is usable or the Host is too old to say. Advisory only.
     [[nodiscard]] QString quotaNotice(const QDateTime& now) const;
@@ -101,6 +116,12 @@ struct AudioClip {
 };
 
 [[nodiscard]] bool isBusyState(const QString& state);
+
+// A Harness sub-agent display cell (`kind: "subagents"`) reduced to what the
+// transcript shows: `phase` is spawned, waiting, finished, failed or activity;
+// `running` is true while the call is in flight; `name` is the sub-agent's
+// label and `task` its prompt or input. Empty for any other kind of cell.
+[[nodiscard]] QJsonObject describeSubagentCell(const QJsonObject& cell);
 [[nodiscard]] QString displayName(const Agent& agent);
 [[nodiscard]] QString voiceDeliverySession(const QString& captureSession,
                                            const QString& currentSession);
