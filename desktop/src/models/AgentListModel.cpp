@@ -404,7 +404,7 @@ void AgentListModel::clearLiveJobCounts() {
 
 BackgroundJobCounts AgentListModel::jobCounts(const Agent& agent) const {
     if (m_liveJobsKnown) return m_liveJobCounts.value(agent.agentId);
-    return {agent.backgroundJobCount, agent.backgroundSubAgentCount};
+    return {.total = agent.backgroundJobCount, .subAgents = agent.backgroundSubAgentCount};
 }
 
 int AgentListModel::runningChildren(const Agent& agent) const {

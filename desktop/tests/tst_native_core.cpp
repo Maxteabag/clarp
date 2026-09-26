@@ -1201,7 +1201,7 @@ void NativeCoreTest::rosterPrefersLiveJobCountsAndCountsHelpers() {
     QCOMPARE(quiet.data(AgentListModel::ProcessCountRole).toInt(), 0);
 
     QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
-    QHash<QString, BackgroundJobCounts> live{{QStringLiteral("p"), {3, 1}}};
+    QHash<QString, BackgroundJobCounts> live{{QStringLiteral("p"), {.total = 3, .subAgents = 1}}};
     model.applyLiveJobCounts(live);
     QCOMPARE(changed.size(), 1); // Only the parent row actually changed.
     QCOMPARE(parent.data(AgentListModel::BackgroundJobCountRole).toInt(), 3);
@@ -1234,12 +1234,12 @@ void NativeCoreTest::rosterPrefersLiveJobCountsAndCountsHelpers() {
 void NativeCoreTest::treeOrderMatchesTheTeamWalk() {
     // Same fixture shape as the Teams hierarchy: roots keep input order,
     // children follow their parent, and a cycle still appears exactly once.
-    const QVector<TreeNode> nodes{{QStringLiteral("child"), QStringLiteral("root")},
-                                  {QStringLiteral("root"), {}},
-                                  {QStringLiteral("orphan"), QStringLiteral("gone")},
-                                  {QStringLiteral("grand"), QStringLiteral("child")},
-                                  {QStringLiteral("x"), QStringLiteral("y")},
-                                  {QStringLiteral("y"), QStringLiteral("x")}};
+    const QVector<TreeNode> nodes{{.id = QStringLiteral("child"), .parentId = QStringLiteral("root")},
+                                  {.id = QStringLiteral("root"), .parentId = {}},
+                                  {.id = QStringLiteral("orphan"), .parentId = QStringLiteral("gone")},
+                                  {.id = QStringLiteral("grand"), .parentId = QStringLiteral("child")},
+                                  {.id = QStringLiteral("x"), .parentId = QStringLiteral("y")},
+                                  {.id = QStringLiteral("y"), .parentId = QStringLiteral("x")}};
     const QVector<TreePlacement> order = treeOrder(nodes);
     QStringList ids;
     QList<int> depths;
@@ -1250,9 +1250,9 @@ void NativeCoreTest::treeOrderMatchesTheTeamWalk() {
     QCOMPARE(ids, (QStringList{QStringLiteral("root"), QStringLiteral("child"), QStringLiteral("grand"),
                                QStringLiteral("orphan"), QStringLiteral("x"), QStringLiteral("y")}));
     QCOMPARE(depths, (QList<int>{0, 1, 2, 0, 0, 1}));
-    const QVector<TreeNode> ranked{{QStringLiteral("p"), {}},
-                                   {QStringLiteral("done"), QStringLiteral("p"), 1},
-                                   {QStringLiteral("live"), QStringLiteral("p"), 0}};
+    const QVector<TreeNode> ranked{{.id = QStringLiteral("p"), .parentId = {}},
+                                   {.id = QStringLiteral("done"), .parentId = QStringLiteral("p"), .rank = 1},
+                                   {.id = QStringLiteral("live"), .parentId = QStringLiteral("p"), .rank = 0}};
     const QVector<TreePlacement> rankedOrder = treeOrder(ranked);
     QCOMPARE(ranked.at(rankedOrder.at(1).index).id, QStringLiteral("live"));
 }

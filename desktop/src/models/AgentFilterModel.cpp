@@ -114,8 +114,9 @@ void AgentFilterModel::rebuildTree() {
             helper ? index.data(AgentListModel::ParentAgentIdRole).toString() : QString{};
         const bool done = helper && !parent.isEmpty() &&
                           finishedHelperState(index.data(AgentListModel::HelperStateRole).toString());
-        nodes.append({treeActive() ? agentId : QString{}, treeActive() ? parent : QString{},
-                      done ? 1 : 0});
+        nodes.append({.id = treeActive() ? agentId : QString{},
+                      .parentId = treeActive() ? parent : QString{},
+                      .rank = done ? 1 : 0});
         sessions.append(index.data(AgentListModel::SessionRole).toString());
         agentIds.append(agentId);
         finished.append(done);
@@ -175,7 +176,7 @@ void AgentFilterModel::rebuildTree() {
         int anchor = positions.first() - 1;
         while (anchor >= 0 && !hiddenBy.at(anchor).isEmpty()) --anchor;
         if (anchor < 0) continue;
-        const QString anchorSession = sessions.at(order.at(anchor).index);
+        const QString& anchorSession = sessions.at(order.at(anchor).index);
         if (tree.hidden.contains(sessions.at(byAgentId.value(parent)))) continue;
         tree.footers[anchorSession].append(QVariantMap{
             {QStringLiteral("parentAgentId"), parent},
