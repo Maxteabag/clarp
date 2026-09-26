@@ -185,7 +185,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         # automatically". Computed from the last assistant message's usage,
         # not the cumulative result event.
         context_tokens = None
-        context_window = backends.adapter_for(backend).context_window
+        context_window = backends.by_id(backend).context_window
         if context_window is not None and bsid:
             j = find_latest_jsonl(bsid)
             if j is not None:

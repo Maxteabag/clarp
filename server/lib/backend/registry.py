@@ -45,11 +45,6 @@ def by_id(backend_id: str | None) -> Backend:
     return _instances()[facade.normalize(backend_id)]
 
 
-def for_agent(agent_row: dict | None) -> Backend:
-    """The backend of one agent row (``backend`` column, normalised)."""
-    return by_id((agent_row or {}).get("backend"))
-
-
 def all() -> tuple[Backend, ...]:  # noqa: A001 - the contract names it all()
     """Every backend, in registry (catalogue) order."""
     return tuple(_instances().values())

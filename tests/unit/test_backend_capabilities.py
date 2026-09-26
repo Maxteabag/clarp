@@ -18,6 +18,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "server"))
 from lib import backends  # noqa: E402
+from lib.backend import registry  # noqa: E402
 
 IDS = ("claude", "codex", "agy", "grok", "opencode", "deepseek")
 
@@ -164,8 +165,8 @@ def test_every_adapter_declares_every_capability(backend):
 
 
 def test_declared_values_match_the_behaviour_they_replaced():
-    by = {a.id: a for a in backends.adapters()}
-    assert {a.id for a in backends.adapters()} == set(IDS)
+    by = {a.id: a for a in registry.all()}
+    assert {a.id for a in registry.all()} == set(IDS)
 
     # Claude is the only CLI with a context gauge.
     claude = by["claude"]
@@ -184,10 +185,10 @@ def test_declared_values_match_the_behaviour_they_replaced():
         assert a.janitor_default_model == "", other
 
     # Account failover pools: Claude and Codex only (a method now).
-    assert {b.id: b.account_pool() for b in backends.all_backends()} == {
+    assert {b.id: b.account_pool() for b in registry.all()} == {
         "claude": "claude", "codex": "codex", "agy": "", "grok": "",
         "opencode": "", "deepseek": ""}
-    assert [b.id for b in backends.all_backends() if b.account_pool()] == ["claude", "codex"]
+    assert [b.id for b in registry.all() if b.account_pool()] == ["claude", "codex"]
 
     # AGY folds effort into the model id and validates model ids.
     assert by["agy"].effort_compatibility_unknown and by["agy"].model_carries_effort
@@ -195,7 +196,7 @@ def test_declared_values_match_the_behaviour_they_replaced():
         assert not by[other].effort_compatibility_unknown, other
 
     # Model families for avatars: Claude and OpenCode front several families.
-    assert {a.id: a.model_family for a in backends.adapters()} == {
+    assert {a.id: a.model_family for a in registry.all()} == {
         "claude": "", "codex": "codex", "agy": "gemini", "grok": "grok",
         "opencode": "", "deepseek": "deepseek"}
 
@@ -217,7 +218,7 @@ def test_interactive_terminal_argv_per_backend(monkeypatch):
         # /terminal route fails for them, and still does.
         "grok": None, "opencode": None, "deepseek": None,
     }
-    for backend in backends.all_backends():
+    for backend in registry.all():
         if expected[backend.id] is None:
             for sid in ("s", ""):
                 with pytest.raises(Unsupported):
@@ -308,12 +309,13 @@ def test_account_pool_lookup_matches_the_coordinators(monkeypatch):
 
 def test_spawn_kwargs_per_backend(monkeypatch):
     """Each backend's spawn_turn keeps the keywords its own runner takes."""
+    from lib import codex_app_server
     seen: dict[str, dict] = {}
-    for name, module in (("claude", "clarp_runner"), ("codex", "codex_app_server"),
-                         ("agy", "agy_runner"), ("grok", "grok_runner"),
-                         ("opencode", "opencode_runner")):
-        monkeypatch.setattr(backends._mod(module), "spawn_turn",
-                            lambda _n=name, **kw: seen.__setitem__(_n, kw))
+    for backend in registry.all():
+        monkeypatch.setattr(backend, "start_turn",
+                            lambda _n=backend.id, **kw: seen.__setitem__(_n, kw))
+    monkeypatch.setattr(codex_app_server, "spawn_turn",
+                        lambda **kw: seen.__setitem__("codex", kw))
     kwargs = {"text": "hi", "cwd": "/x", "stream": None, "synthesize_audio": True,
               "hook_session": "h", "run_if_owned": "gate", "voice_preamble": True}
     backends.by_id("claude").spawn_turn(**kwargs)
@@ -323,15 +325,14 @@ def test_spawn_kwargs_per_backend(monkeypatch):
     assert seen["codex"] == codex
     backends.by_id("agy").spawn_turn(**kwargs)
     assert seen["agy"] == {**codex, "run_if_owned": "gate"}
-    for backend, runner in (("grok", "grok"), ("opencode", "opencode"), ("deepseek", "opencode")):
-        seen.pop(runner, None)
+    for backend in ("grok", "opencode", "deepseek"):
         backends.by_id(backend).spawn_turn(**kwargs)
-        assert seen[runner] == codex, backend
+        assert seen[backend] == codex, backend
 
 
 def test_executable_honours_the_claude_override(monkeypatch):
-    from lib import clarp_runner
-    monkeypatch.setattr(clarp_runner, "configured_claude_bin", lambda: "clarp")
+    from lib import config
+    monkeypatch.setattr(config, "load", lambda: SimpleNamespace(claude_cli="clarp"))
     assert backends.by_id("claude").executable() == "clarp"
     assert backends.by_id("codex").executable() == "codex"
     assert backends.by_id("deepseek").executable() == "opencode"
