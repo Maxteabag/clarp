@@ -162,3 +162,15 @@ def test_contact_instructions_speak_as_the_agent_not_oracle():
     assert "You are the voice of Theo" in text
     assert "never claim to be Oracle" in text
     assert "word for word" in text
+
+
+def test_earcons_config_defaults_on_and_can_be_turned_off(tmp_path):
+    from lib import config
+    path = tmp_path / "config.toml"
+    path.write_text("[oracle]\nearcons = false\n")
+    config.reset_cache()
+    try:
+        assert config.load(path).oracle_earcons is False
+        assert config.load(tmp_path / "missing.toml").oracle_earcons is True
+    finally:
+        config.reset_cache()
