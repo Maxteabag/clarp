@@ -24,7 +24,7 @@ explanations. This document applies it to the rest.
 | `heartbeat.py:25` | idle heartbeat | read HEARTBEAT.md, review the durable plan, "audit durable background jobs and update stale ones", reply HEARTBEAT_OK |
 | `server.py:4314` job-cancelled prompt | user cancels a job | run `clarp-agent-bg job-cancelled` and verify worker identity before stopping anything |
 | 33 managed skills symlinked into `~/.claude/skills` and `~/.codex/skills` (`managed_skills.py`) | always; the core pack cannot be disabled | see section 2 |
-| Repo `AGENTS.md` "Uncommitted work needs a decision artifact" | every turn in this repo | raise a native question via `clarp-agent-artifacts question` before ending with uncommitted changes |
+| Repo `AGENTS.md` "Push to main" | every turn in this repo | once the relevant gates pass, commit and push to main directly; never leave the turn's work uncommitted |
 
 The Host already observes a lot without asking: hook sensors write thinking/tool/
 done/waiting/compacting states and tool summaries (`plugin/hooks/*.py`),
