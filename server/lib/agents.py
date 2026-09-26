@@ -788,13 +788,7 @@ def latest_turn_synthesize_audio(agent_id: str) -> bool:
 
 def enable_latest_turn_audio(agent_id: str) -> None:
     """Upgrade the active turn to speech; never downgrade a voice turn."""
-    conn().execute("""
-        UPDATE turns SET synthesize_audio = 1
-         WHERE turn_id = (
-            SELECT turn_id FROM turns WHERE agent_id = ?
-             ORDER BY started_at DESC, turn_id DESC LIMIT 1
-         )
-    """, (agent_id,))
+    turn_lifecycle.enable_latest_turn_audio(agent_id)
 
 
 # ---- canonical wire events --------------------------------------------

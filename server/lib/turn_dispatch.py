@@ -916,7 +916,7 @@ class TurnDispatchService:
                     queue_revision=queue_state["revision"])
         turn_id = 0
         try:
-            turn_id = agents_db.open_turn(
+            turn_id = turn_lifecycle.open_turn(
                 agent_id=agent_id, source="pwa", trace_id=trace_id,
                 synthesize_audio=synthesize_audio)
             # This turn owns the agent's live trace.
@@ -960,9 +960,9 @@ class TurnDispatchService:
         eventlog.emit("server", "spawnAbandonedUnlaunched", context=spec.context,
                       detail={"error": str(error)[:200]})
         try:
-            agents_db.record_unlaunched_trace(spec.agent_id, spec.trace_id)
+            turn_lifecycle.record_unlaunched(spec.agent_id, spec.trace_id)
             if turn_id:
-                agents_db.close_turn(turn_id)
+                turn_lifecycle.close_turn(turn_id)
         except Exception as close_error:  # noqa: BLE001
             log_exception("spawnAbandonedCloseFail", close_error, detail=spec.session)
 
@@ -1299,7 +1299,7 @@ class TurnDispatchService:
                 # Queue admission is intentionally invisible. Materialize the
                 # ordinary user turn only at the moment execution begins.
                 self._record_user_message(next_spec)
-            agents_db.open_turn(
+            turn_lifecycle.open_turn(
                 agent_id=next_spec.agent_id, source="pwa",
                 trace_id=next_spec.trace_id,
                 synthesize_audio=next_spec.synthesize_audio)
