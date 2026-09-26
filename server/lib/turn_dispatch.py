@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import pathlib
 import json
 import re
@@ -373,6 +374,76 @@ _REQUEST_LOCKS = weakref.WeakValueDictionary()
 _REQUEST_LOCKS_GUARD = threading.Lock()
 
 
+@dataclass(frozen=True)
+class DispatchCommand:
+    """One send, built once where it enters (``TurnDispatchService.dispatch``,
+    the HTTP send handler, a scheduler adapter) and serialized once across the
+    runtime RPC. Admission — the Janitor-demand authority check, the
+    leader-tick gate, the durable write — runs on the side that owns turns,
+    exactly once per command."""
+    text: str
+    requested_session: str = ""
+    trace_id: str = ""
+    synthesize_audio: bool = True
+    forced_session: str = ""
+    routed_by_orchestrator: bool = False
+    client_msg_id: str = ""
+    origin: str = "user"
+    sender_agent_id: str = ""
+    prompt_admission: PromptAdmission | None = None
+    prompt_admission_id: str = ""
+    queue_if_busy: bool = False
+    skip_admission: bool = False
+    durable_queue_id: str = ""
+    unheard_audio_sessions: tuple[str, ...] = ()
+    allow_paused_queue: bool = False
+    janitor_run_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.unheard_audio_sessions, tuple):
+            object.__setattr__(self, "unheard_audio_sessions",
+                               tuple(str(item) for item in self.unheard_audio_sessions))
+
+    def as_kwargs(self) -> dict[str, Any]:
+        """The historical ``dispatch(**kwargs)`` shape. ``janitor_run_id`` is
+        present only when set, so an older runtime keeps accepting ordinary
+        work from a newer HTTP server."""
+        values = {field.name: getattr(self, field.name)
+                  for field in dataclasses.fields(self)}
+        if not self.janitor_run_id:
+            values.pop("janitor_run_id")
+        return values
+
+    def to_wire(self) -> dict[str, Any]:
+        values = self.as_kwargs()
+        if self.prompt_admission is not None:
+            values["prompt_admission"] = dataclasses.asdict(self.prompt_admission)
+        values["unheard_audio_sessions"] = list(self.unheard_audio_sessions)
+        return values
+
+    @classmethod
+    def from_wire(cls, params: dict[str, Any]) -> "DispatchCommand":
+        """Parse an RPC payload; ValueError for anything this side cannot run."""
+        names = {field.name for field in dataclasses.fields(cls)}
+        unknown = sorted(set(params) - names)
+        if unknown:
+            raise ValueError(f"unknown dispatch fields: {', '.join(unknown)}")
+        values = dict(params)
+        admission = values.get("prompt_admission")
+        if isinstance(admission, (dict, str)):
+            raw = admission if isinstance(admission, str) else json.dumps(admission)
+            values["prompt_admission"] = PromptAdmission.from_json(raw)
+            if values["prompt_admission"] is None:
+                raise ValueError("invalid prompt admission")
+        elif admission is not None and not isinstance(admission, PromptAdmission):
+            raise ValueError("invalid prompt admission")
+        if "text" not in values:
+            raise ValueError("dispatch text is required")
+        values["unheard_audio_sessions"] = tuple(
+            str(item) for item in values.get("unheard_audio_sessions") or ())
+        return cls(**values)
+
+
 def _serialize_client_retry(method):
     """Keep one client's concurrent retries together through admission/launch.
 
@@ -380,22 +451,21 @@ def _serialize_client_retry(method):
     request must not reclaim that first request in the intervening gap.
     Weak entries disappear when the last waiting request finishes.
     """
+    # Applied to the owning half only; the forwarding half never holds this
+    # lock across the RPC (an embedded runtime can execute the same request
+    # on another thread).
     @functools.wraps(method)
-    def dispatch(self, **kwargs):
-        # The runtime owns admission. Never hold this lock across the RPC:
-        # an embedded runtime can execute the same request on another thread.
-        if getattr(self.ctx, "runtime_client", None) is not None:
-            return method(self, **kwargs)
-        key = kwargs.get("client_msg_id") or kwargs.get("trace_id")
+    def dispatch(self, command):
+        key = command.client_msg_id or command.trace_id
         if not key:
-            return method(self, **kwargs)
+            return method(self, command)
         with _REQUEST_LOCKS_GUARD:
             lock = _REQUEST_LOCKS.get(key)
             if lock is None:
                 lock = threading.RLock()
                 _REQUEST_LOCKS[key] = lock
         with lock:
-            return method(self, **kwargs)
+            return method(self, command)
     return dispatch
 
 
@@ -498,7 +568,6 @@ class TurnDispatchService:
             self.retry_scheduler(1.0, self.recover_queued)
         return recovered
 
-    @_serialize_client_retry
     def dispatch(self, *, text: str, requested_session: str,
                  trace_id: str, synthesize_audio: bool = True,
                  forced_session: str = "",
@@ -514,43 +583,68 @@ class TurnDispatchService:
                  unheard_audio_sessions: tuple[str, ...] = (),
                  allow_paused_queue: bool = False,
                  janitor_run_id: str = "") -> DispatchResult:
+        # TODO(integration): the send handler and dispatch_adapters build the
+        # DispatchCommand themselves and call submit().
+        return self.submit(DispatchCommand(
+            text=text, requested_session=requested_session,
+            trace_id=trace_id, synthesize_audio=synthesize_audio,
+            forced_session=forced_session,
+            routed_by_orchestrator=routed_by_orchestrator,
+            client_msg_id=client_msg_id, origin=origin,
+            sender_agent_id=sender_agent_id,
+            prompt_admission=prompt_admission,
+            prompt_admission_id=prompt_admission_id,
+            queue_if_busy=queue_if_busy, skip_admission=skip_admission,
+            durable_queue_id=durable_queue_id,
+            unheard_audio_sessions=tuple(unheard_audio_sessions),
+            allow_paused_queue=allow_paused_queue,
+            janitor_run_id=janitor_run_id))
+
+    def submit(self, command: DispatchCommand) -> DispatchResult:
+        """Run ``command`` where turns are owned: forward it unchanged over the
+        runtime RPC, or admit and launch it here."""
+        runtime = getattr(self.ctx, "runtime_client", None)
+        if runtime is None:
+            return self._dispatch_owned(command)
+        try:
+            send = getattr(runtime, "dispatch_command", None)
+            result = (send(command) if send is not None
+                      else runtime.dispatch(**command.as_kwargs()))
+        except Exception as exc:
+            from .runtime_bridge import RuntimeUnavailable
+            if isinstance(exc, RuntimeUnavailable):
+                raise DispatchError(503, str(exc)) from exc
+            raise
+        # The runtime's active map just changed; do not let a shared
+        # status window older than this dispatch answer for it.
+        invalidate = getattr(self.backends, "invalidate_runtime_status", None)
+        if invalidate is not None:
+            invalidate()
+        return result
+
+    @_serialize_client_retry
+    def _dispatch_owned(self, command: DispatchCommand) -> DispatchResult:
+        text = command.text
+        requested_session = command.requested_session
+        trace_id = command.trace_id
+        synthesize_audio = command.synthesize_audio
+        forced_session = command.forced_session
+        routed_by_orchestrator = command.routed_by_orchestrator
+        client_msg_id = command.client_msg_id
+        origin = command.origin
+        sender_agent_id = command.sender_agent_id
+        prompt_admission = command.prompt_admission
+        prompt_admission_id = command.prompt_admission_id
+        queue_if_busy = command.queue_if_busy
+        skip_admission = command.skip_admission
+        durable_queue_id = command.durable_queue_id
+        unheard_audio_sessions = command.unheard_audio_sessions
+        allow_paused_queue = command.allow_paused_queue
+        janitor_run_id = command.janitor_run_id
         if origin == "heartbeat" and client_msg_id.startswith("janitor-demand-"):
             from .janitor_autonomy import validate_dispatch
             if not validate_dispatch(requested_session, client_msg_id):
                 raise DispatchError(409, "Heartbeat decision authority changed")
-        runtime = getattr(self.ctx, "runtime_client", None)
-        if runtime is not None:
-            try:
-                result = runtime.dispatch(
-                    text=text,
-                    requested_session=requested_session,
-                    trace_id=trace_id,
-                    synthesize_audio=synthesize_audio,
-                    forced_session=forced_session,
-                    routed_by_orchestrator=routed_by_orchestrator,
-                    client_msg_id=client_msg_id,
-                    origin=origin,
-                    sender_agent_id=sender_agent_id,
-                    prompt_admission=prompt_admission,
-                    prompt_admission_id=prompt_admission_id,
-                    queue_if_busy=queue_if_busy,
-                    skip_admission=skip_admission,
-                    durable_queue_id=durable_queue_id,
-                    unheard_audio_sessions=unheard_audio_sessions,
-                    allow_paused_queue=allow_paused_queue,
-                    **({"janitor_run_id": janitor_run_id} if janitor_run_id else {}),
-                )
-            except Exception as exc:
-                from .runtime_bridge import RuntimeUnavailable
-                if isinstance(exc, RuntimeUnavailable):
-                    raise DispatchError(503, str(exc)) from exc
-                raise
-            # The runtime's active map just changed; do not let a shared
-            # status window older than this dispatch answer for it.
-            invalidate = getattr(self.backends, "invalidate_runtime_status", None)
-            if invalidate is not None:
-                invalidate()
-            return result
         # NB: the live session->trace mapping is set only when a turn actually
         # spawns (see below / _finish_turn), NOT here — a message that merely
         # queues behind a busy agent must not move the trace, or the running
