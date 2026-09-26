@@ -17,7 +17,7 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
-from .base import BackendBrand, hooked
+from .base import BackendBrand
 from .stream_json import StreamJsonBackend, iter_json_dicts
 
 
@@ -65,7 +65,7 @@ def _session_id_from(ev: dict) -> str:
 
 class OpenCodeBackend(StreamJsonBackend):
     """Runs ``opencode run --format json`` once per turn; no compaction or terminal yet."""
-    # --- catalogue data (was the BackendAdapter registry row) ------------
+    # --- catalogue data ---------------------------------------------------
     id = 'opencode'
     label = 'OpenCode'
     required_binary = 'opencode'
@@ -89,7 +89,7 @@ class OpenCodeBackend(StreamJsonBackend):
 
     def build_cmd(self, session_id: str = "", *, is_new_session: bool = False,
                   model: str = "", effort: str = "") -> list[str]:
-        cmd = [self._hook("OPENCODE_BIN", self.required_binary),
+        cmd = [self.required_binary,
                "run", "--format", "json", "--auto"]
         if model:
             cmd += ["--model", model]
@@ -120,7 +120,7 @@ class OpenCodeBackend(StreamJsonBackend):
         isolated: bool = False,
         **_kwargs: Any,
     ) -> TurnHandle:
-        opencode_bin = self._hook("OPENCODE_BIN", self.required_binary)
+        opencode_bin = self.required_binary
         if shutil.which(opencode_bin) is None:
             raise FileNotFoundError(
                 f"`{opencode_bin}` not on PATH — install OpenCode "
@@ -130,7 +130,7 @@ class OpenCodeBackend(StreamJsonBackend):
         persona = (agent or {}).get("persona") or ""
         prompt = apply_voice_preamble(
             text, voice=voice_preamble, persona=persona, session=session)
-        cmd = self._hook("build_cmd", self.build_cmd)(
+        cmd = self.build_cmd(
             backend_session_id, is_new_session=is_new_session,
             model=model, effort=effort)
         cmd.append(prompt)
@@ -157,14 +157,12 @@ class OpenCodeBackend(StreamJsonBackend):
         handle: TurnHandle, backend_session_id: str,
         on_session_init, on_result, on_error, stream, enqueue,
     ) -> None:
-        # Slice-3 seam: tests monkeypatch ``opencode_runner._transition``.
-        _transition = self._hook("_transition", self._transition)
         st = _TurnState(session_id=backend_session_id)
         if backend_session_id:
             self._bind(st, backend_session_id, on_session_init=on_session_init,
                        on_error=on_error, trace_id=trace_id)
-            _transition(agent_id, TurnEvent.SPAWN_STARTED,
-                        {"dispatch": self.runner, "trace_id": trace_id})
+            self._transition(agent_id, TurnEvent.SPAWN_STARTED,
+                             {"dispatch": self.runner, "trace_id": trace_id})
         try:
             if proc.stdout is not None:
                 for raw in proc.stdout:
@@ -183,7 +181,7 @@ class OpenCodeBackend(StreamJsonBackend):
                                    on_error=on_error, trace_id=trace_id)
                     etype = str(ev.get("type") or ev.get("event") or "")
                     if etype == "step_start":
-                        _transition(agent_id, TurnEvent.TEXT_STREAMED, {
+                        self._transition(agent_id, TurnEvent.TEXT_STREAMED, {
                             "dispatch": self.runner, "trace_id": trace_id,
                         })
                         self._broadcast(stream, agent_id, session)
@@ -193,7 +191,7 @@ class OpenCodeBackend(StreamJsonBackend):
                         part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
                         name = str(part.get("tool") or ev.get("tool")
                                    or ev.get("name") or "tool")
-                        _transition(agent_id, TurnEvent.TOOL_STARTED, {
+                        self._transition(agent_id, TurnEvent.TOOL_STARTED, {
                             "dispatch": self.runner, "trace_id": trace_id, "tool": name,
                         })
                         self._broadcast(stream, agent_id, session)
@@ -267,12 +265,10 @@ class OpenCodeBackend(StreamJsonBackend):
 
     # ---- orchestrator routing ----------------------------------------------
 
-    @hooked
     def routing_cmd(self, prompt: str, *, model: str = "", effort: str = "") -> list[str]:
         """argv for one ``opencode run`` request with no session (orchestrator)."""
-        return self._hook("build_cmd", self.build_cmd)(model=model, effort=effort) + [prompt]
+        return self.build_cmd(model=model, effort=effort) + [prompt]
 
-    @hooked
     def routing_text(self, stdout: str) -> str:
         """Concatenated assistant text of an ``opencode run --format json`` run."""
         text = ""

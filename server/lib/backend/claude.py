@@ -25,8 +25,8 @@ stream-json backend in the sense of ``StreamJsonBackend`` (the prompt goes
 over a stdin pipe and the PWA side-effects come from the hook plugin), but
 it shares the subprocess contract (``launch``, ``start_drain``).
 
-Which executable runs (``configured_claude_bin``) stays in ``lib.clarp_runner``:
-the package guard keeps CLI names out of these classes.
+Which executable runs is the Host ``claude_cli`` setting, read by
+``executable()`` against the ``executable_choices`` catalogue data.
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..voice_preamble import persona_identity_instruction
-from .base import BackendBrand, Backend, CompactionStrategy, hooked, resolve
+from .base import BackendBrand, Backend, CompactionStrategy, resolve
 from .stream_json import launch, start_drain
 
 
@@ -195,7 +195,7 @@ class ClaudeBackend(Backend):
     """Runs the configured Claude CLI once per turn; the only CLI that resumes
     by transcript file, pre-mints its session id and reports through the hook
     plugin."""
-    # --- catalogue data (was the BackendAdapter registry row) ------------
+    # --- catalogue data ---------------------------------------------------
     id = 'claude'
     label = 'Claude'
     required_binary = 'claude'
@@ -214,6 +214,12 @@ class ClaudeBackend(Backend):
     config_model_field = 'claude_model'
     config_effort_field = 'claude_effort'
     context_window = 1000000
+    # Host ``claude_cli`` values -> the executable each selects; the first
+    # entry is the default an unknown value falls back to.
+    executable_choices = (
+        ('claude', ('claude', 'claude-code', 'claude_code', 'official')),
+        ('clarp', ('clarp', 'clarp-cli', 'clarp_cli')),
+    )
     fallback_models = (
         ('fable', 'Fable'),
         ('opus', 'Opus'),
@@ -231,19 +237,25 @@ class ClaudeBackend(Backend):
 
     # --- the runner -------------------------------------------------------
 
-    def _configured_bin(self, cfg: _config.Config | None = None) -> str:
-        """The configured executable; the body lives on the runner module
-        because it spells the CLI names (see the module docstring)."""
-        return resolve(self.runner_module, "configured_claude_bin")(cfg)
+    def executable(self, cfg: _config.Config | None = None) -> str:
+        """The Host ``claude_cli`` setting: the official CLI or the clarp wrapper.
 
-    def executable(self) -> str:
-        """The Host setting: the official CLI or the clarp wrapper."""
-        return resolve(self.runner_module, "configured_claude_bin")()
+        Invalid values fail open to the official CLI and are logged so a typo
+        does not strand voice turns on a non-existent runner.
+        """
+        cfg = cfg or _config.load()
+        default = self.executable_choices[0][0]
+        raw = (getattr(cfg, "claude_cli", "") or default).strip().lower()
+        for binary, spellings in self.executable_choices:
+            if raw in spellings:
+                return binary
+        log("claudeCliProviderInvalid", f"value={raw!r} fallback={default}")
+        return default
 
     def spawn_turn(self, **spec: Any):
         """``start_turn`` with the keywords the ``-p`` runner accepts."""
         kwargs = {k: v for k, v in spec.items() if k in _SPAWN_KWARGS}
-        return self._hook("spawn_turn", self.start_turn)(**kwargs)
+        return self.start_turn(**kwargs)
 
     def build_cmd(self, backend_session_id: str = "", *,
                   is_new_session: bool = False, model: str = "",
@@ -271,7 +283,7 @@ class ClaudeBackend(Backend):
         """
         cfg = _config.load()
         cmd = [
-            self._configured_bin(cfg), "-p",
+            self.executable(cfg), "-p",
             "--dangerously-skip-permissions",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
@@ -349,7 +361,7 @@ class ClaudeBackend(Backend):
         """
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""
-        cmd = self._hook("build_cmd", self.build_cmd)(
+        cmd = self.build_cmd(
             backend_session_id,
             is_new_session=is_new_session,
             model=model,
@@ -552,14 +564,13 @@ class ClaudeBackend(Backend):
 
     # ---- orchestrator routing ----------------------------------------------
 
-    @hooked
     def routing_cmd(self, prompt: str, *, model: str = "", effort: str = "") -> list[str]:
         """argv for one isolated, non-persisted Claude request (orchestrator).
 
         Plain text output: the router's JSON is the whole reply.
         """
         cmd = [
-            self._configured_bin(), "-p",
+            self.executable(), "-p",
             "--dangerously-skip-permissions",
             "--no-session-persistence",
         ]
@@ -570,7 +581,6 @@ class ClaudeBackend(Backend):
         cmd.append(prompt)
         return cmd
 
-    @hooked
     def routing_text(self, stdout: str) -> str:
         """The reply text of a ``routing_cmd`` run."""
         return stdout or ""

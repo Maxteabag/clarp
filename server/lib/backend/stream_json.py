@@ -133,7 +133,7 @@ class StreamJsonBackend(Backend):
     def spawn_turn(self, **spec: Any):
         """``start_turn`` with the keywords this runner accepts."""
         kwargs = {k: v for k, v in spec.items() if k not in self.dropped_spawn_kwargs}
-        return self._hook("spawn_turn", self.start_turn)(**kwargs)
+        return self.start_turn(**kwargs)
 
     # --- sessions and transcripts -----------------------------------------
 

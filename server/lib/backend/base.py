@@ -10,17 +10,12 @@ The values that are genuinely data (``context_window``, ``model_family``,
 ``effort_scope``, ``fallback_models``, ``required_binary``) are attributes,
 not getters.
 
-During the migration each instance still carries ``adapter``, today's
-``BackendAdapter`` row, and the subclasses delegate to its callables for
-their catalogue metadata. Slice 5 of the contract folds the adapter into
-this class. The runner bodies live here since slice 3; the
-``lib.<runner>_runner`` modules are delegators kept for the tests that
-monkeypatch their globals, and ``Backend._hook`` is the seam that lets
-those patches still intercept (see ``hooked``).
+Each subclass declares its catalogue data as class attributes and holds
+its runner body; there is no module-level runner API to patch. Tests
+replace attributes on the backend instance (``by_id(...)``) instead.
 """
 from __future__ import annotations
 
-import functools
 import importlib
 import pathlib
 from dataclasses import dataclass
@@ -69,26 +64,6 @@ def resolve(module: str, attr: str) -> Any:
     their globals, so a backend binds late on every call.
     """
     return getattr(_mod(module), attr)
-
-
-def hooked(method: Callable[..., Any]) -> Callable[..., Any]:
-    """Slice-3 seam: a test's replacement of ``method`` on the runner module wins.
-
-    ``lib.<runner>_runner`` only delegates into the class now, but tests
-    still monkeypatch its globals (``clarp_runner.interrupt``,
-    ``grok_runner.routing_text``) and expect a dispatch through the backend
-    object to hit the double. ``Backend._hook`` tells the module's own
-    delegator from a double; slice 5 moves the tests and removes this.
-    """
-    name = method.__name__
-
-    @functools.wraps(method)
-    def call(self: "Backend", *args: Any, **kwargs: Any) -> Any:
-        patched = self._hook(name)
-        if patched is not None:
-            return patched(*args, **kwargs)
-        return method(self, *args, **kwargs)
-    return call
 
 
 @dataclass(frozen=True)
@@ -155,10 +130,9 @@ class Backend:
     effort_help: str = ""
     effort_scope: str = "provider"
     # The runner's short name: prefix of its log events and drain threads,
-    # the ``dispatch`` tag on its state rows and the stem of the
-    # ``lib.<runner>_runner`` module. DeepSeek runs through OpenCode's.
+    # the ``dispatch`` tag on its state rows and the key of its process
+    # registry. DeepSeek runs through OpenCode's.
     runner: str = ""
-    extra_interrupt_modules: tuple[str, ...] = ()
     config_model_field: str = ""
     config_effort_field: str = ""
     fallback_models: tuple[tuple[str, str], ...] = ()
@@ -202,8 +176,16 @@ class Backend:
     def model_carries_effort(self) -> bool:
         return self.effort_ui == "folded_into_model"
 
-    def catalogue_fields(self, sort_index: int, *,
-                         supports_compact: bool = False) -> dict[str, Any]:
+    @property
+    def supports_compact(self) -> bool:
+        """Whether the host can drive a compaction (``compaction`` has one)."""
+        try:
+            self.compaction("")
+        except Unsupported:
+            return False
+        return True
+
+    def catalogue_fields(self, sort_index: int) -> dict[str, Any]:
         """The presentation and capability block of one catalogue row."""
         return {
             "label": self.label,
@@ -217,7 +199,7 @@ class Backend:
             "resumable": bool(self.resumable),
             "supports_resume": bool(self.resumable),
             "supports_steer": bool(self.supports_steer),
-            "supports_compact": supports_compact,
+            "supports_compact": self.supports_compact,
             "supports_mcp": bool(self.supports_mcp),
             "supports_routing": self.supports_routing,
             "supports_auth": self.supports_auth,
@@ -230,52 +212,6 @@ class Backend:
     def __repr__(self) -> str:
         return f"<{type(self).__name__} {self.id}>"
 
-    # --- derived data ------------------------------------------------------
-
-
-    @property
-    def supports_auth(self) -> bool:
-        return self.login_kind != "none"
-
-    @property
-    def effort_compatibility_unknown(self) -> bool:
-        """Effort is a provider flag whose fit with a pinned model is unknown."""
-        return self.effort_scope == "provider_flag"
-
-    @property
-    def model_carries_effort(self) -> bool:
-        return self.effort_ui == "folded_into_model"
-
-    # --- slice-3 seam: the runner module's globals -------------------------
-
-    @property
-    def runner_module(self) -> str:
-        """The ``lib`` module that delegates to this class ("" when none)."""
-        return f"{self.runner}_runner" if self.runner else ""
-
-    @property
-    def routing_module(self) -> str:
-        """The runner module whose ``routing_cmd``/``routing_text`` tests patch
-        for the orchestrator path; "" when the CLI cannot answer isolated
-        requests."""
-        return self.runner_module if self.supports_routing else ""
-
-    def _hook(self, name: str, own: Any = None) -> Any:
-        """``own`` unless a test replaced ``name`` on the runner module.
-
-        A global whose ``__globals__`` are the module's own is one of its
-        delegators into this class, so ``own`` stands; anything else (a
-        constant, an import, a test double) is returned as is. Slice 5
-        moves the tests and removes this.
-        """
-        if not self.runner:
-            return own
-        module = _mod(self.runner_module)
-        value = getattr(module, name, own)
-        if getattr(value, "__globals__", None) is vars(module):
-            return own
-        return value
-
     # --- the runner -------------------------------------------------------
 
     def spawn_turn(self, **spec: Any):
@@ -284,13 +220,12 @@ class Backend:
         ``spec`` is the host's full spawn vocabulary; a subclass keeps the
         keywords its runner accepts and drops the rest before ``start_turn``.
         """
-        return self._hook("spawn_turn", self.start_turn)(**spec)
+        return self.start_turn(**spec)
 
     def start_turn(self, **kwargs: Any):
         """The runner body: spawn the CLI for one turn with explicit keywords."""
         raise NotImplementedError(f"{self.id}: start_turn")
 
-    @hooked
     def interrupt(self, agent_id: str) -> int:
         """Stop the agent's in-flight turn; the number of processes signalled.
 
@@ -301,7 +236,15 @@ class Backend:
             return 0
         return self._registry.interrupt(agent_id, event=f"{self.runner}InterruptFail")
 
-    @hooked
+    def interrupt_all(self, agent_id: str) -> int:
+        """``interrupt`` plus any other process path the runner owns.
+
+        Used when the host stops an agent without knowing which backend ran
+        it; a runner with a second process path (Codex's isolated ``exec``
+        turns beside the app-server) stops both.
+        """
+        return self.interrupt(agent_id)
+
     def active_handles(self, agent_id: str) -> list:
         """Handles of the agent's live turn processes (empty when idle)."""
         if self._registry is None:

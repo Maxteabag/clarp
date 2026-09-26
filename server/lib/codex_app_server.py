@@ -19,26 +19,29 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from . import agent_goals, agents as agents_db, backend_usage, eventlog, tts_queue
-from . import codex_runner
-from .codex_runner import (
-    _TurnState, _broadcast_transcript, _handle_item, _transition,
-    _persist_live_text, _speak, app_turn_instructions, persona_identity_instruction,
-)
+from .backend.codex import CodexBackend, TurnState
+from .backend.registry import by_id
 from .log import log, log_exception
 from .protocol import TurnSource
 from . import turn_lifecycle
 from . import events
 from .turn_lifecycle import TurnEvent
+from .voice_preamble import app_turn_instructions, persona_identity_instruction
+
+
+def _backend() -> CodexBackend:
+    """The Codex strategy whose event mapping and ``exec`` path this pool uses."""
+    return by_id("codex")
 
 
 def _codex_argv() -> list[str]:
     """Resolve ``codex app-server --stdio`` from the live runner binary.
 
-    Read ``codex_runner.CODEX_BIN`` at spawn time so the QA host (and tests)
-    can point at ``fake_codex.py`` without also patching this module. A
-    ``.py`` path is launched with the current interpreter.
+    Read the backend's ``required_binary`` at spawn time so the QA host (and
+    tests) can point at ``fake_codex.py`` without also patching this module.
+    A ``.py`` path is launched with the current interpreter.
     """
-    binary = str(codex_runner.CODEX_BIN)
+    binary = str(_backend().required_binary)
     if os.path.isfile(binary) and binary.endswith(".py"):
         return [sys.executable, binary, "app-server", "--stdio"]
     found = shutil.which(binary)
@@ -56,7 +59,7 @@ class _ActiveTurn:
     agent_id: str
     session: str
     trace_id: str
-    state: _TurnState
+    state: TurnState
     handle: "AppTurnHandle"
     on_result: Callable[[dict], None] | None
     on_error: Callable[[str], None] | None
@@ -288,8 +291,8 @@ class _Client:
             notified_turn = params.get("turn") or {}
             active.turn_id = str(notified_turn.get("id") or active.turn_id)
             active.steer_ready.set()
-            _transition(active.agent_id, TurnEvent.SPAWN_STARTED,
-                        {"dispatch": "codex", "trace_id": active.trace_id})
+            _backend().transition(active.agent_id, TurnEvent.SPAWN_STARTED,
+                                  {"dispatch": "codex", "trace_id": active.trace_id})
             return
         if method == "thread/tokenUsage/updated":
             usage = (params.get("tokenUsage") or {}).get("last") or {}
@@ -302,10 +305,10 @@ class _Client:
                 active.produced_output = True
                 normalized = _normalize_item(item)
                 phase = method.replace("/", ".")
-                _handle_item(phase, normalized, active.state,
-                             agent_id=active.agent_id, session=active.session,
-                             trace_id=active.trace_id, stream=active.stream,
-                             enqueue=active.enqueue)
+                _backend().handle_item(phase, normalized, active.state,
+                                       agent_id=active.agent_id, session=active.session,
+                                       trace_id=active.trace_id, stream=active.stream,
+                                       enqueue=active.enqueue)
             return
         if method == "item/agentMessage/delta":
             delta = params.get("delta") or params.get("text") or ""
@@ -318,7 +321,7 @@ class _Client:
                 # servers that send a progressively complete snapshot.
                 merged = delta if delta.startswith(current) else current + delta
                 active.state.last_agent_message = merged
-                _persist_live_text(
+                _backend().update_live_text(
                     active.state, text=merged, agent_id=active.agent_id,
                     session=active.session, trace_id=active.trace_id,
                     stream=active.stream)
@@ -327,7 +330,7 @@ class _Client:
             turn = params.get("turn") or {}
             status = str(turn.get("status") or "completed")
             error = turn.get("error") or {}
-            _persist_live_text(
+            _backend().update_live_text(
                 active.state, agent_id=active.agent_id,
                 session=active.session, trace_id=active.trace_id,
                 stream=active.stream, force=True)
@@ -350,7 +353,7 @@ class _Client:
                               "output_tokens": active.state.tokens_out},
                     "last_agent_message": active.state.last_agent_message,
                 })
-            _broadcast_transcript(active.stream, active.agent_id, active.session)
+            _backend().broadcast_transcript(active.stream, active.agent_id, active.session)
 
     def _mirror_goal(self, thread_id: str, goal: dict | None) -> None:
         """Keep Clarp's goal table and clients in step with the app-server."""
@@ -398,8 +401,8 @@ class _Client:
                     agents_db.close_turn(db_turn)
                 except Exception as exc:  # noqa: BLE001
                     log_exception("codexGoalTurnCloseFail", exc, detail=agent_id)
-            _transition(agent_id, turn_event, {**detail, "dispatch": "codex-goal",
-                                               "trace_id": trace_id})
+            _backend().transition(agent_id, turn_event, {**detail, "dispatch": "codex-goal",
+                                                         "trace_id": trace_id})
             eventlog.emit("server", "codexGoalTurnDone", session=session,
                           agent_id=agent_id, backend_session_id=thread_id,
                           detail={"trace_id": trace_id, "state": turn_lifecycle.target(turn_event), **detail})
@@ -415,7 +418,7 @@ class _Client:
         handle = AppTurnHandle(self, agent_id=agent_id)
         active = _ActiveTurn(
             turn_id, thread_id, agent_id, session, trace_id,
-            _TurnState(live_backend_session_id=thread_id),
+            TurnState(live_backend_session_id=thread_id),
             handle, on_result, on_error, getattr(self, "stream", None),
             tts_queue.enqueue, False,
         )
@@ -488,7 +491,7 @@ class _Client:
         # declaring the dispatch stale and starting an overlapping turn.
         active = _ActiveTurn(
             "", backend_session_id, owner, session, trace_id,
-            _TurnState(live_backend_session_id=backend_session_id),
+            TurnState(live_backend_session_id=backend_session_id),
             handle, on_result, on_error, stream, enqueue, voice,
         )
         self.stream = stream
@@ -764,8 +767,7 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
                isolated: bool = False) -> AppTurnHandle:
     if isolated:
         # Isolated jobs do not need steering and retain the hardened exec path.
-        from . import codex_runner
-        return codex_runner.spawn_turn(
+        return _backend().start_turn(
             text=text, cwd=cwd, backend_session_id=backend_session_id,
             is_new_session=is_new_session, session=session, agent_id=agent_id,
             on_session_init=on_session_init, on_result=on_result,

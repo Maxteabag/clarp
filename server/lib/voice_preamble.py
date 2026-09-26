@@ -86,7 +86,7 @@ _NATURAL_SPEECH = (
 
 # Voice-markup normalization (display strip + TTS unwrap) lives in one place:
 # lib.voice_markup. spoken_for_tts is imported above and re-exported so existing
-# callers (agy_runner, transcript_streamer) keep importing it from here.
+# callers (the AGY backend, transcript_streamer) keep importing it from here.
 
 
 def persona_identity_instruction(persona: str, session: str = "") -> str:
