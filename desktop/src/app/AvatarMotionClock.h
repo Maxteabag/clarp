@@ -11,7 +11,12 @@ namespace clarp {
 class AvatarMotionClock final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool ticking READ ticking NOTIFY changed)
-    Q_PROPERTY(quint64 revision READ revision NOTIFY changed)
+    // `revision` advances on every animation frame; bind only the pulse phase
+    // to it. `workingRevision` advances when the working set, reduced motion
+    // or foreground state changes, so "is this agent working" and settings
+    // bindings are not re-evaluated on every frame.
+    Q_PROPERTY(quint64 revision READ revision NOTIFY tick)
+    Q_PROPERTY(quint64 workingRevision READ workingRevision NOTIFY changed)
     Q_PROPERTY(bool reducedMotion READ reducedMotion WRITE setReducedMotion NOTIFY changed)
   public:
     explicit AvatarMotionClock(QObject* parent = nullptr) : QObject(parent) {
@@ -24,13 +29,16 @@ class AvatarMotionClock final : public QObject {
                         m_foreground = state == Qt::ApplicationActive;
                         schedule();
                         ++m_revision;
+                        ++m_workingRevision;
                         emit changed();
+                        emit tick();
                     });
         }
-        m_timer.setInterval(33);
+        // 20 fps is plenty for a 2.4 s breathing pulse and halves the redraws.
+        m_timer.setInterval(50);
         connect(&m_timer, &QTimer::timeout, this, [this] {
             ++m_revision;
-            emit changed();
+            emit tick();
         });
     }
     [[nodiscard]] bool ticking() const { return m_timer.isActive(); }
@@ -55,6 +63,7 @@ class AvatarMotionClock final : public QObject {
         schedule();
     }
     [[nodiscard]] quint64 revision() const { return m_revision; }
+    [[nodiscard]] quint64 workingRevision() const { return m_workingRevision; }
     [[nodiscard]] bool reducedMotion() const { return m_reduced; }
     void setReducedMotion(bool value) {
         if (value == m_reduced)
@@ -63,7 +72,9 @@ class AvatarMotionClock final : public QObject {
         QSettings().setValue(QStringLiteral("appearance/reducedMotion"), value);
         schedule();
         ++m_revision;
+        ++m_workingRevision;
         emit changed();
+        emit tick();
     }
     void reconcile(const QSet<QString>& active) {
         for (auto it = m_epochs.begin(); it != m_epochs.end();) {
@@ -77,7 +88,9 @@ class AvatarMotionClock final : public QObject {
                 m_epochs.insert(session, m_elapsed.elapsed());
         schedule();
         ++m_revision;
+        ++m_workingRevision;
         emit changed();
+        emit tick();
     }
     Q_INVOKABLE [[nodiscard]] bool working(const QString& session) const { return m_epochs.contains(session); }
     Q_INVOKABLE [[nodiscard]] double phase(const QString& session) const {
@@ -101,7 +114,9 @@ class AvatarMotionClock final : public QObject {
     QHash<QString, qint64> m_epochs;
     bool m_reduced = false;
     quint64 m_revision = 0;
+    quint64 m_workingRevision = 0;
   signals:
     void changed();
+    void tick();
 };
 } // namespace clarp
