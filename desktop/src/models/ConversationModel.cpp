@@ -12,6 +12,23 @@ namespace {
 
 QVariantList jsonArrayToVariantList(const QJsonArray& array) { return array.toVariantList(); }
 
+// Sub-agent cells carry a derived `_subagent` summary for the transcript card.
+// It is added on the way out only, so caches and deltas keep the Host's shape.
+QVariantList displayCellsToVariantList(const QJsonArray& cells) {
+    QVariantList result;
+    result.reserve(cells.size());
+    for (const QJsonValue& value : cells) {
+        QJsonObject cell = value.toObject();
+        if (const QJsonObject summary = describeSubagentCell(cell); !summary.isEmpty()) {
+            cell.insert(QStringLiteral("_subagent"), summary);
+            result.append(cell.toVariantMap());
+        } else {
+            result.append(value.toVariant());
+        }
+    }
+    return result;
+}
+
 QJsonObject messageToJson(const Message& message) {
     return {{QStringLiteral("id"), message.id},
             {QStringLiteral("role"), message.role},
@@ -96,7 +113,7 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const {
     case ToolsRole:
         return jsonArrayToVariantList(message.tools);
     case DisplayCellsRole:
-        return jsonArrayToVariantList(message.displayCells);
+        return displayCellsToVariantList(message.displayCells);
     case ActivityStatusRole:
         return message.activityStatus;
     case AutomatedRole:
