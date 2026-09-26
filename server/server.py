@@ -477,6 +477,7 @@ class Handler(BaseHTTPRequestHandler):
         "/diagnostics/settings": "_handle_diagnostics_settings_get",
         "/agent-heartbeat/status": "_handle_agent_heartbeat_status",
         "/agent-goal": "_handle_agent_goal_get",
+        "/agent-helper-state": "_handle_agent_helper_state_get",
         "/oracle/status": "_handle_oracle_status",
         "/oracle/contact": "_handle_oracle_contact_get",
         "/oracle/delegations": "_handle_oracle_delegations_get",
@@ -3287,6 +3288,20 @@ class Handler(BaseHTTPRequestHandler):
         agents_db.set_archived(agent["agent_id"], archived)
         return self._json_ok({"ok": True, "session": session,
                               "archived": archived})
+
+    def _handle_agent_helper_state_get(self):
+        """One agent's lineage and helper state, without a full snapshot."""
+        query = self._query()
+        session = (query.get("session", [""])[0] or "").strip()
+        if not session:
+            return self._json_error(400, "session required")
+        row = identity.lookup(session)
+        row = agents_db.get_by_agent_id(row["agent_id"]) if row else None
+        if not row:
+            return self._json_error(404, "agent_not_found")
+        return self._json_ok({key: row.get(key) for key in (
+            "agent_id", "session", "role", "parent_agent_id", "helper_state",
+            "helper_completed_at", "archived_at")})
 
     def _handle_agent_helper_state(self):
         """Mark a helper agent done, failed or running again.
