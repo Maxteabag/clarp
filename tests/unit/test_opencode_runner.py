@@ -11,20 +11,24 @@ import sys
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
-from lib import opencode_runner  # noqa: E402
+from lib import agents as agents_db  # noqa: E402
+from lib.backend import opencode  # noqa: E402
+from lib.backend.registry import by_id  # noqa: E402
 from lib import opencode_transcript  # noqa: E402
 from lib import turn_lifecycle  # noqa: E402
 
+OPENCODE = by_id("opencode")
+
 
 def test_build_cmd_fresh_and_resume():
-    fresh = opencode_runner.build_cmd("", is_new_session=True,
+    fresh = OPENCODE.build_cmd("", is_new_session=True,
                                       model="anthropic/claude-sonnet-4-5",
                                       effort="high")
     assert fresh[:4] == ["opencode", "run", "--format", "json"]
     assert "--auto" in fresh
     assert fresh[fresh.index("--model") + 1] == "anthropic/claude-sonnet-4-5"
     assert fresh[fresh.index("--variant") + 1] == "high"
-    resume = opencode_runner.build_cmd("ses_1")
+    resume = OPENCODE.build_cmd("ses_1")
     assert resume[resume.index("--session") + 1] == "ses_1"
 
 
@@ -56,7 +60,7 @@ def test_spawn_turn_reads_json_events(tmp_path, monkeypatch):
         bin_dir, "".join(json.dumps(row) + "\n" for row in events))
     results: list[dict] = []
     sessions: list[str] = []
-    handle = opencode_runner.spawn_turn(
+    handle = OPENCODE.start_turn(
         text="hello", cwd=tmp_path,
         on_session_init=lambda sid: sessions.append(sid) or True,
         on_result=results.append, enqueue=lambda **_k: 1,
@@ -70,7 +74,7 @@ def test_spawn_turn_reads_json_events(tmp_path, monkeypatch):
 def test_missing_opencode_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     try:
-        opencode_runner.spawn_turn(text="hi", cwd=tmp_path)
+        OPENCODE.start_turn(text="hi", cwd=tmp_path)
         raise AssertionError("expected FileNotFoundError")
     except FileNotFoundError as error:
         assert "opencode" in str(error)
@@ -253,23 +257,23 @@ class _Recorder:
 
 
 def _voice_agent(monkeypatch, *, focused="someone-else"):
-    monkeypatch.setattr(opencode_runner.agents_db,
+    monkeypatch.setattr(agents_db,
                         "latest_turn_synthesize_audio", lambda _agent_id: True)
-    monkeypatch.setattr(opencode_runner.agents_db, "get_by_agent_id",
+    monkeypatch.setattr(agents_db, "get_by_agent_id",
                         lambda _agent_id: {"persona": "Mike", "voice_id": "voice-1"})
-    monkeypatch.setattr(opencode_runner.agents_db, "get_focus", lambda: focused)
-    monkeypatch.setattr(opencode_runner.agents_db, "get_trace", lambda _agent_id: "trace-db")
+    monkeypatch.setattr(agents_db, "get_focus", lambda: focused)
+    monkeypatch.setattr(agents_db, "get_trace", lambda _agent_id: "trace-db")
 
 
 def test_speak_enqueues_with_voice_identity(monkeypatch):
     _voice_agent(monkeypatch)
     enqueue = _Recorder()
-    st = opencode_runner._TurnState()
+    st = opencode._TurnState()
     text = "<speak>Pong.</speak>\n\npong"
-    opencode_runner._speak(text, st, agent_id="a1", session="mike-1",
+    OPENCODE._speak(text, st, agent_id="a1", session="mike-1",
                            trace_id="trace-arg", enqueue=enqueue)
     # Same block again in a later event: spoken once.
-    opencode_runner._speak(text, st, agent_id="a1", session="mike-1",
+    OPENCODE._speak(text, st, agent_id="a1", session="mike-1",
                            trace_id="trace-arg", enqueue=enqueue)
     assert len(enqueue.calls) == 1
     call = enqueue.calls[0]
@@ -285,20 +289,20 @@ def test_speak_enqueues_with_voice_identity(monkeypatch):
 def test_speak_skips_unmarked_text_and_focused_prefix(monkeypatch):
     _voice_agent(monkeypatch, focused="a1")
     enqueue = _Recorder()
-    st = opencode_runner._TurnState()
-    opencode_runner._speak("plain prose only", st, agent_id="a1",
+    st = opencode._TurnState()
+    OPENCODE._speak("plain prose only", st, agent_id="a1",
                            session="s", trace_id="", enqueue=enqueue)
     assert enqueue.calls == []
-    opencode_runner._speak("<speak>Hi.</speak>", st, agent_id="a1",
+    OPENCODE._speak("<speak>Hi.</speak>", st, agent_id="a1",
                            session="s", trace_id="", enqueue=enqueue)
     assert [c["text"] for c in enqueue.calls] == ["Hi."]
 
 
 def test_speak_is_silent_without_voice_turn(monkeypatch):
-    monkeypatch.setattr(opencode_runner.agents_db,
+    monkeypatch.setattr(agents_db,
                         "latest_turn_synthesize_audio", lambda _agent_id: False)
     enqueue = _Recorder()
-    opencode_runner._speak("<speak>Hi.</speak>", opencode_runner._TurnState(),
+    OPENCODE._speak("<speak>Hi.</speak>", opencode._TurnState(),
                            agent_id="a1", session="s", trace_id="", enqueue=enqueue)
     assert enqueue.calls == []
 
@@ -312,7 +316,7 @@ def test_broadcast_sends_one_event_dict():
             self.events.append(event_dict)
 
     stream = Stream()
-    opencode_runner._broadcast(stream, "a1", "mike-1")
+    OPENCODE._broadcast(stream, "a1", "mike-1")
     assert stream.events == [{
         "type": "transcript-updated", "agent_id": "a1", "session": "mike-1",
     }]
@@ -330,13 +334,13 @@ def test_step_start_is_thinking_not_a_tool(tmp_path, monkeypatch):
     _install_fake_opencode(
         bin_dir, "".join(json.dumps(row) + "\n" for row in events))
     states: list[str] = []
-    monkeypatch.setattr(opencode_runner, "_transition",
+    monkeypatch.setattr(OPENCODE, "_transition",
                         lambda _agent_id, event, _detail: states.append(
                             turn_lifecycle.target(event)))
-    monkeypatch.setattr(opencode_runner.agents_db, "get_by_agent_id", lambda _id: None)
-    monkeypatch.setattr(opencode_runner.agents_db,
+    monkeypatch.setattr(agents_db, "get_by_agent_id", lambda _id: None)
+    monkeypatch.setattr(agents_db,
                         "latest_turn_synthesize_audio", lambda _id: False)
-    handle = opencode_runner.spawn_turn(
+    handle = OPENCODE.start_turn(
         text="hello", cwd=tmp_path, agent_id="a1", session="s",
         on_session_init=lambda _sid: True, enqueue=lambda **_k: 1,
     )
