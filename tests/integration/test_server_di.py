@@ -2109,8 +2109,9 @@ def test_oracle_cancel_survives_post_interrupt_bookkeeping_failure(
         client_msg_id="oracle-bookkeeping-failure",
         agent_id=agent["agent_id"], session="rachel",
         request_text="Cancel despite UI bookkeeping")
+    from lib import turn_lifecycle
     monkeypatch.setattr(
-        agents, "record_state",
+        turn_lifecycle, "try_transition",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             RuntimeError("state write failed")))
 

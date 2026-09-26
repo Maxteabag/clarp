@@ -92,6 +92,10 @@ class TurnEvent:
     RESTART_INTERRUPTED = "restart_interrupted"  # boot recovery
     UNLAUNCHED = "unlaunched"                    # back-dated launch receipt
     RECONCILE_REPAIR = "reconcile_repair"        # busy with nothing running
+    # An administrative note (a janitor ownership handoff) that repeats the
+    # current state with new detail. Not an inferred change of state: the
+    # target is whatever the agent is in now, and it needs a started agent.
+    AUDIT_NOTED = "audit_noted"
     # Compatibility shim for writers that have not adopted an event yet
     # (`agents.record_state`). The kind is given explicitly and the edge is
     # legal from every state, so behaviour is unchanged for those callers.
@@ -99,7 +103,7 @@ class TurnEvent:
 
     @classmethod
     def all(cls) -> frozenset[str]:
-        return frozenset(TRANSITIONS) | {cls.RECORDED}
+        return frozenset(TRANSITIONS) | {cls.RECORDED, cls.AUDIT_NOTED}
 
 
 # event -> (target kind, states the event is legal from)
@@ -195,6 +199,8 @@ class TurnStateMachine:
     def is_legal(self, from_state: str, event: str) -> bool:
         if event == TurnEvent.RECORDED:
             return True
+        if event == TurnEvent.AUDIT_NOTED:
+            return from_state in STARTED
         entry = self.table.get(event)
         return entry is not None and from_state in entry[1]
 
@@ -216,16 +222,18 @@ class TurnStateMachine:
         event whose target the caller names. ``force`` skips the legality
         check (repairs); ``ts`` back-dates the row (historical receipts).
         """
+        from_state = self.current_kind(agent_id)
         if event == TurnEvent.RECORDED:
             if kind is None or not AgentState.is_valid(kind):
                 raise ValueError(f"invalid agent state: {kind}")
             target = kind
+        elif event == TurnEvent.AUDIT_NOTED:
+            target = from_state
         else:
             try:
                 target = self.table[event][0]
             except KeyError:
                 raise ValueError(f"unknown turn event: {event}") from None
-        from_state = self.current_kind(agent_id)
         if not force and not self.is_legal(from_state, event):
             self._refuse(agent_id, event, from_state, target)
             raise IllegalTransition(agent_id, event, from_state, target)
@@ -433,6 +441,11 @@ def record(agent_id: str, kind: str,
 
 def current_kind(agent_id: str) -> str:
     return MACHINE.current_kind(agent_id)
+
+
+def target(event: str) -> str:
+    """The state ``event`` moves an agent to."""
+    return MACHINE.target(event)
 
 
 def open_turn(*, agent_id: str, source: str, trace_id: str,

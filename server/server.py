@@ -77,6 +77,8 @@ from lib.focus import current_focus_session  # noqa: E402
 from lib.send_request import SendRequest, SendRequestError  # noqa: E402
 from lib.transcription_pipeline import transcribe as run_transcription  # noqa: E402
 from lib.protocol import AgentState, ClientAction  # noqa: E402
+from lib import turn_lifecycle  # noqa: E402
+from lib.turn_lifecycle import TurnEvent  # noqa: E402
 from lib.orchestrator import (  # noqa: E402
     FINAL_FALLBACK,
     OrchestratorService,
@@ -4033,8 +4035,9 @@ class Handler(BaseHTTPRequestHandler):
             # Durable user-requested queue entries remain visible and paused;
             # stopping work must never silently delete acknowledged messages.
             try:
-                agents_db.record_state(agent_id, AgentState.INTERRUPTED,
-                                       {"source": "user_stop", "message": "Turn stopped"})
+                turn_lifecycle.try_transition(
+                    agent_id, TurnEvent.STOP_REQUESTED,
+                    {"source": "user_stop", "message": "Turn stopped"})
                 if getattr(self.ctx, "stream", None) is not None:
                     events.broadcast(self.ctx.stream, events.agent_state(
                         session=session, agent_id=agent_id,

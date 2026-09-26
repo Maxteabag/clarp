@@ -21,11 +21,13 @@ from typing import Any, Callable
 from . import agent_goals, agents as agents_db, backend_usage, eventlog, tts_queue
 from . import codex_runner
 from .codex_runner import (
-    _TurnState, _broadcast_transcript, _handle_item, _record_state,
+    _TurnState, _broadcast_transcript, _handle_item, _transition,
     _persist_live_text, _speak, app_turn_instructions, persona_identity_instruction,
 )
 from .log import log, log_exception
-from .protocol import AgentState, TurnSource
+from .protocol import TurnSource
+from . import turn_lifecycle
+from .turn_lifecycle import TurnEvent
 
 
 def _codex_argv() -> list[str]:
@@ -285,8 +287,8 @@ class _Client:
             notified_turn = params.get("turn") or {}
             active.turn_id = str(notified_turn.get("id") or active.turn_id)
             active.steer_ready.set()
-            _record_state(active.agent_id, AgentState.THINKING,
-                          {"dispatch": "codex", "trace_id": active.trace_id})
+            _transition(active.agent_id, TurnEvent.SPAWN_STARTED,
+                        {"dispatch": "codex", "trace_id": active.trace_id})
             return
         if method == "thread/tokenUsage/updated":
             usage = (params.get("tokenUsage") or {}).get("last") or {}
@@ -389,25 +391,25 @@ class _Client:
             log_exception("codexGoalTurnOpenFail", exc, detail=agent_id)
             db_turn = None
 
-        def finish(kind: str, detail: dict) -> None:
+        def finish(turn_event: str, detail: dict) -> None:
             if db_turn is not None:
                 try:
                     agents_db.close_turn(db_turn)
                 except Exception as exc:  # noqa: BLE001
                     log_exception("codexGoalTurnCloseFail", exc, detail=agent_id)
-            _record_state(agent_id, kind, {**detail, "dispatch": "codex-goal",
-                                           "trace_id": trace_id})
+            _transition(agent_id, turn_event, {**detail, "dispatch": "codex-goal",
+                                               "trace_id": trace_id})
             eventlog.emit("server", "codexGoalTurnDone", session=session,
                           agent_id=agent_id, backend_session_id=thread_id,
-                          detail={"trace_id": trace_id, "state": kind, **detail})
+                          detail={"trace_id": trace_id, "state": turn_lifecycle.target(turn_event), **detail})
 
         def on_result(event: dict) -> None:
             usage = event.get("usage") or {}
-            finish(AgentState.DONE, {"tokens_in": usage.get("input_tokens"),
+            finish(TurnEvent.PROCESS_EXITED_OK, {"tokens_in": usage.get("input_tokens"),
                                      "tokens_out": usage.get("output_tokens")})
 
         def on_error(message: str) -> None:
-            finish(AgentState.INTERRUPTED, {"error": str(message)[:300]})
+            finish(TurnEvent.PROCESS_EXITED_FAILED, {"error": str(message)[:300]})
 
         handle = AppTurnHandle(self, agent_id=agent_id)
         active = _ActiveTurn(

@@ -5,7 +5,7 @@ reproduce the same PWA side-effects off its stdout stream: agent-state
 rows, transcript-updated SSEs, ``<speak>`` extraction into the TTS queue, a
 bounded-cadence live assistant row and a session binding callback. The
 bodies live here once; each subclass keeps its thin private wrappers
-(``_record_state``, ``_speak``, ...) that pin the per-CLI event names.
+(``_transition``, ``_speak``, ...) that pin the per-CLI event names.
 
 The subprocess contract itself (``popen_turn``, ``make_handle``, ``launch``,
 ``start_drain``) is module-level so the Claude runner, which is not a
@@ -25,6 +25,7 @@ import time
 from typing import Any, Callable, Iterator, Optional
 
 from .. import agents as agents_db
+from .. import turn_lifecycle
 from ..log import log, log_exception
 from ..proc_util import attach_stderr_drain
 from ..process_registry import TurnHandle
@@ -183,16 +184,18 @@ class StreamJsonBackend(Backend):
 
     # --- side-effects -----------------------------------------------------
 
-    def record_state(self, agent_id: str, kind: str, detail: dict | None, *,
-                     event: str = "") -> None:
-        """Record an agent-state row; failures are logged, never raised."""
+    def transition(self, agent_id: str, turn_event: str, detail: dict | None, *,
+                   log_event: str = "") -> None:
+        """Report a turn event to the state machine; failures (including a
+        refused transition, which the machine already logs and counts) are
+        logged, never raised."""
         if not agent_id:
             return
         try:
-            agents_db.record_state(agent_id, kind, detail)
+            turn_lifecycle.transition(agent_id, turn_event, detail)
         except Exception as error:  # noqa: BLE001
-            log_exception(event or f"{self.runner}RecordStateFail", error,
-                          detail=f"{agent_id}:{kind}")
+            log_exception(log_event or f"{self.runner}RecordStateFail", error,
+                          detail=f"{agent_id}:{turn_event}")
 
     def broadcast_transcript(self, stream: Any, agent_id: str, session: str) -> None:
         """Tell the PWA the history pane changed; failures are logged, never raised."""

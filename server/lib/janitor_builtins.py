@@ -14,6 +14,8 @@ import uuid
 
 from . import agents, backends, db, janitors
 from . import janitor_store as store
+from . import turn_lifecycle
+from .turn_lifecycle import TurnEvent
 
 
 ROLES = ("message-delegator", "tool-explainer", "audio-bookkeeper", "heartbeat-decider", "quota-monitor")
@@ -97,7 +99,8 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
             # TODO(integration: move to agents.py) - the built-in identity row.
             store.insert_builtin_agent(c, agent_id=agent_id, persona=defaults["name"], cwd=cwd or os.getcwd(),
                                        session=session, backend=backend, model=model or "", effort=effort or "", now=now)
-            agents.record_state(agent_id, "spawned", {"origin": "janitor", "builtin_role": role})
+            turn_lifecycle.transition(agent_id, TurnEvent.AGENT_CREATED,
+                                      {"origin": "janitor", "builtin_role": role})
             store.insert_config(c, agent_id, role, scope={}, execution=execution, options=options,
                                 now=now, enabled=enabled)
             store.save_attachments(c, agent_id, [{"attachment_id": f"builtin-{role}-v1",

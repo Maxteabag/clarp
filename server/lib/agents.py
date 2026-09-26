@@ -454,11 +454,11 @@ def live_backend_session(agent_id: str) -> str:
 
 def record_state(agent_id: str, kind: str,
                  detail: dict | None = None) -> None:
-    """Compatibility writer: the kind is explicit and the edge is legal from
-    every state. Writers inside the turn lifecycle call
-    ``turn_lifecycle.transition`` with an event instead; this wrapper stays
-    for callers outside it. TODO(integration): migrate the backend package,
-    ``interrupted_turns``, ``server.py`` and the janitor modules to events."""
+    """Fixture writer: the kind is explicit and the edge is legal from every
+    state. Production code reports events through
+    ``turn_lifecycle.transition``; tests use this to put an agent in a state
+    without replaying the events that lead there. ``test_turn_lifecycle``
+    fails if a server module calls it."""
     turn_lifecycle.record(agent_id, kind, detail)
 
 
