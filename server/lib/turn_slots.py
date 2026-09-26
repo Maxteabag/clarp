@@ -73,8 +73,14 @@ class OwnershipLock:
             pending = self._pending()
             self._local.pending = []
         self._lock.release()
+        error: BaseException | None = None
         for fn in pending:
-            fn()
+            try:
+                fn()
+            except BaseException as exc:  # run the rest, then surface it
+                error = error or exc
+        if error is not None:
+            raise error
 
     def __enter__(self) -> "OwnershipLock":
         self.acquire()
