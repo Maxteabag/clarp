@@ -35,10 +35,9 @@ import uuid
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import db, server_identity
+from . import db, events, server_identity
 from .clock import now_ms as _now_ms
 from .log import log, log_exception
-from .protocol import SSEType
 
 
 CLAUDE = "claude"
@@ -413,24 +412,23 @@ def _window_id(
     })
 
 
-def _event_payload(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "type": "provider-limit",
-        "provider_limit_event_id": row["provider_limit_event_id"],
-        "episode_id": row["episode_id"],
-        "provider_instance_id": row["provider_instance_id"],
-        "provider_id": row["provider_id"],
-        "window_id": row["window_id"],
-        "kind": row["kind"],
-        "threshold_id": row.get("threshold_id"),
-        "used_percentage": row.get("used_percentage"),
-        "resets_at": row.get("resets_at"),
-        "observed_at": _normalize_time(int(row["observed_at"]) / 1000),
-        "freshness": row["freshness"],
-        "source": {"kind": row["source_kind"]},
-        "dedupe_key": row.get("dedupe_key"),
-    }
+def _event_payload(row: dict[str, Any]) -> events.Event:
+    return events.provider_limit(
+        schema_version=SCHEMA_VERSION,
+        provider_limit_event_id=row["provider_limit_event_id"],
+        episode_id=row["episode_id"],
+        provider_instance_id=row["provider_instance_id"],
+        provider_id=row["provider_id"],
+        window_id=row["window_id"],
+        kind=row["kind"],
+        threshold_id=row.get("threshold_id"),
+        used_percentage=row.get("used_percentage"),
+        resets_at=row.get("resets_at"),
+        observed_at=_normalize_time(int(row["observed_at"]) / 1000),
+        freshness=row["freshness"],
+        source={"kind": row["source_kind"]},
+        dedupe_key=row.get("dedupe_key"),
+    )
 
 
 def _insert_limit_event(
@@ -1132,7 +1130,7 @@ class UsageRefreshWorker:
         try:
             payload = get_backend_usage()
             for event in payload.get("limit_events") or []:
-                self._stream.broadcast(event)
+                events.broadcast(self._stream, events.as_event(event))
             current = {
                 provider: (row["window"], row["resets_at"])
                 for provider, row in exhausted_backends().items()
@@ -1140,8 +1138,7 @@ class UsageRefreshWorker:
             if self._last is not None and current != self._last:
                 # Snapshot rows carry the projection; this makes clients
                 # refetch them instead of learning on the next failed send.
-                self._stream.broadcast({
-                    "type": SSEType.AGENT_ROSTER, "kind": "backend-quota"})
+                events.broadcast(self._stream, events.agent_roster("backend-quota"))
             self._last = current
         except Exception as exc:  # noqa: BLE001
             log_exception("usageRefreshWorkerFail", exc)
