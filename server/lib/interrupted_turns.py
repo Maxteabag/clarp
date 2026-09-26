@@ -22,7 +22,8 @@ from . import db, message_store, origins
 from .db import conn
 from .log import log, log_exception
 from . import turn_lifecycle
-from .protocol import AgentState, SSEType
+from . import events
+from .protocol import AgentState
 from .turn_lifecycle import TurnEvent
 
 MARKER_ORIGIN = origins.MARKER_ORIGIN
@@ -142,19 +143,17 @@ def _mark(turn: dict[str, Any], stream) -> None:
     if stream is None:
         return
     try:
-        stream.broadcast({
-            "type": SSEType.AGENT_STATE,
-            "session": turn["session"],
-            "agent_id": agent_id,
-            "kind": AgentState.INTERRUPTED,
-            "trace_id": turn["trace_id"],
-        })
+        events.broadcast(stream, events.agent_state(
+            session=turn["session"],
+            agent_id=agent_id,
+            kind=AgentState.INTERRUPTED,
+            trace_id=turn["trace_id"],
+        ))
         if marker is not None:
-            stream.broadcast({
-                "type": SSEType.TRANSCRIPT_UPDATED,
-                "agent_id": agent_id,
-                "session": turn["session"],
-                "backend_session_id": turn["backend_session_id"],
-            })
+            events.broadcast(stream, events.transcript_updated(
+                agent_id=agent_id,
+                session=turn["session"],
+                backend_session_id=turn["backend_session_id"],
+            ))
     except Exception as e:  # noqa: BLE001
         log_exception("restartInterruptBroadcastFail", e, detail=agent_id)

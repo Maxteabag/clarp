@@ -3,10 +3,9 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import agents, db, janitors
+from . import agents, db, events, janitors
 from .agent_lifecycle import AgentLifecycleError, AgentLifecycleService
 from .http_utils import responder_of
-from .protocol import SSEType
 
 
 def handles(path: str) -> bool:
@@ -38,7 +37,7 @@ def _changed(handler) -> None:
     janitor_attention.reconcile()
     stream = getattr(handler.ctx, "stream", None)
     if stream is not None:
-        stream.broadcast({"type": SSEType.AGENT_ROSTER, "kind": "janitor-changed"})
+        events.broadcast(stream, events.agent_roster("janitor-changed"))
 
 
 def _required(row, label="Janitor"):

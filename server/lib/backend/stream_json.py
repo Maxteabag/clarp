@@ -26,10 +26,11 @@ from typing import Any, Callable, Iterator, Optional
 
 from .. import agents as agents_db
 from .. import turn_lifecycle
+from .. import events
 from ..log import log, log_exception
 from ..proc_util import attach_stderr_drain
 from ..process_registry import TurnHandle
-from ..protocol import SSEType, TurnSource
+from ..protocol import TurnSource
 from ..voice_markup import spoken_chunks_for_tts, spoken_for_tts
 from .base import Backend, resolve
 
@@ -202,11 +203,8 @@ class StreamJsonBackend(Backend):
         if stream is None or not agent_id:
             return
         try:
-            stream.broadcast({
-                "type": SSEType.TRANSCRIPT_UPDATED,
-                "agent_id": agent_id,
-                "session": session,
-            })
+            events.broadcast(stream, events.transcript_updated(
+                agent_id=agent_id, session=session))
         except Exception as error:  # noqa: BLE001
             log_exception(f"{self.runner}BroadcastFail", error, detail=agent_id)
 

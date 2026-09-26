@@ -18,6 +18,7 @@ from . import agents as agents_db
 from . import backend_usage, backends, config, db, error_classify, eventlog
 from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
 from . import turn_lifecycle, turn_slots
+from . import events
 from .turn_lifecycle import TurnEvent
 from .turn_slots import OwnershipLock, defer_on
 from .policies import admission as admission_policy
@@ -891,7 +892,7 @@ class TurnDispatchService:
             # SSE fan-out takes the stream hub locks and writes sse_events;
             # do it only once the admission is durable and the lock released.
             for event in deferred_events:
-                self.ctx.stream.broadcast(event)
+                events.broadcast(self.ctx.stream, events.as_event(event))
         if admission is False:
             eventlog.emit("server", "sendDeduplicated", context=spec.context)
             log("sendDeduplicated",
@@ -1397,16 +1398,15 @@ class TurnDispatchService:
                 },
             )
             if getattr(self.ctx, "stream", None) is not None:
-                self.ctx.stream.broadcast({
-                    "type": SSEType.AGENT_STATE,
-                    "session": spec.session,
-                    "agent_id": spec.agent_id,
-                    "kind": AgentState.THINKING,
-                    "trace_id": spec.trace_id,
-                    "client_msg_id": spec.client_msg_id,
-                    "queue_started": bool(spec.queue_id),
-                    "queue_remaining": turn_queue.pending_count(spec.agent_id),
-                })
+                events.broadcast(self.ctx.stream, events.agent_state(
+                    session=spec.session,
+                    agent_id=spec.agent_id,
+                    kind=AgentState.THINKING,
+                    trace_id=spec.trace_id,
+                    client_msg_id=spec.client_msg_id,
+                    queue_started=bool(spec.queue_id),
+                    queue_remaining=turn_queue.pending_count(spec.agent_id),
+                ))
         except Exception as e:
             log_exception("spawnStateFail", e, detail=spec.session)
 
@@ -1414,16 +1414,15 @@ class TurnDispatchService:
         if getattr(self.ctx, "stream", None) is None:
             return
         queue_state = turn_queue.state(spec.agent_id)
-        self.ctx.stream.broadcast({
-            "type": SSEType.QUEUE_UPDATED,
-            "session": spec.session,
-            "agent_id": spec.agent_id,
-            "client_msg_id": spec.client_msg_id,
-            "queue_depth": queue_state["count"],
-            "queue_paused": queue_state["paused"],
-            "queue_started": started,
-            "queue_revision": queue_state["revision"],
-        })
+        events.broadcast(self.ctx.stream, events.queue_updated(
+            session=spec.session,
+            agent_id=spec.agent_id,
+            client_msg_id=spec.client_msg_id,
+            queue_depth=queue_state["count"],
+            queue_paused=queue_state["paused"],
+            queue_started=started,
+            queue_revision=queue_state["revision"],
+        ))
 
     def _record_user_message(self, spec: _TurnSpec, *,
                              deferred: list[dict] | None = None) -> bool | None:
@@ -1451,7 +1450,7 @@ class TurnDispatchService:
                 if deferred is not None:
                     deferred.append(event)
                 else:
-                    self.ctx.stream.broadcast(event)
+                    events.broadcast(self.ctx.stream, events.as_event(event))
             if appended is None:
                 # A brand-new Codex session does not have its backend UUID yet;
                 # on_init persists this row once that identity is available.
@@ -1993,12 +1992,12 @@ class TurnDispatchService:
                     message or "", quota_confirmed=quota_confirmed)
                 if limit_event:
                     for related in limit_event.get("_additional_events") or []:
-                        self.ctx.stream.broadcast(related)
+                        events.broadcast(self.ctx.stream, events.as_event(related))
                     if limit_event.get("_new"):
-                        self.ctx.stream.broadcast({
+                        events.broadcast(self.ctx.stream, events.as_event({
                             key: value for key, value in limit_event.items()
                             if not key.startswith("_")
-                        })
+                        }))
             except Exception as exc:  # noqa: BLE001
                 log_exception("providerLimitRecordFail", exc, detail=spec.trace_id)
         state_detail = {
@@ -2212,8 +2211,9 @@ def _record_janitor_cancelled(ctx, agent_id: str, session: str, trace_id: str) -
         "message": "Maintenance run cancelled"})
     turn_lifecycle.close_turns_for_trace(agent_id, trace_id)
     if getattr(ctx, "stream", None) is not None:
-        ctx.stream.broadcast({"type": SSEType.AGENT_STATE, "session": session,
-            "agent_id": agent_id, "kind": AgentState.INTERRUPTED, "origin": "janitor"})
+        events.broadcast(ctx.stream, events.agent_state(
+            session=session, agent_id=agent_id, kind=AgentState.INTERRUPTED,
+            origin="janitor"))
 
 
 def cancel_janitor_run(ctx, run_id: str, *, backend_registry=backends) -> dict:
