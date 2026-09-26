@@ -4,7 +4,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from lib import vocab_store
-from lib.context import ServerContext
 
 
 def _agent_id(session: str) -> str:
@@ -60,16 +59,10 @@ def test_updates_edit_in_place_and_clamp_rarity():
 
 
 def _ctx(agent_id="agent-1", cwd=None):
-    from lib import agents as agents_db
-    stub = SimpleNamespace(
-        stt=SimpleNamespace(provider="faster-whisper", model_name="small.en"),
-        active_agent_names=lambda: ["Rachel", "Mike"],
-    )
-    stub.vocab_preview = ServerContext.__dict__["vocab_preview"].__get__(stub)
-    stub._transcription_provider_model = (
-        ServerContext.__dict__["_transcription_provider_model"].__get__(stub))
-    stub._vocab_static_packs = ServerContext.__dict__["_vocab_static_packs"].__get__(stub)
-    return stub
+    from lib.vocab_service import VocabService
+    service = VocabService(stt=lambda: SimpleNamespace(provider="faster-whisper", model_name="small.en"))
+    service.active_agent_names = lambda: ["Rachel", "Mike"]
+    return service
 
 
 def test_preview_reflects_the_assigned_profile_without_recording_a_run(seed_agents):
@@ -81,7 +74,7 @@ def test_preview_reflects_the_assigned_profile_without_recording_a_run(seed_agen
     vocab_store.add_pack_to_profile(profile, people)
     vocab_store.assign_profile(profile, agent_id=_agent_id("rachel"))
 
-    preview = _ctx().vocab_preview(session="rachel")
+    preview = _ctx().preview(session="rachel")
     assert preview["provider"] == "faster-whisper"
     assert preview["profile_id"] == profile
     included = {t["text"] for t in preview["included"]}
@@ -93,7 +86,7 @@ def test_preview_reflects_the_assigned_profile_without_recording_a_run(seed_agen
 
 
 def test_preview_for_an_unknown_session_still_answers():
-    preview = _ctx().vocab_preview(session="nobody", requested_model="deepgram:nova-3")
+    preview = _ctx().preview(session="nobody", requested_model="deepgram:nova-3")
     assert preview["provider"] == "deepgram"
     assert preview["capacity"] == 50
     assert preview["profile_id"] is None
