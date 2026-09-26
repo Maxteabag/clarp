@@ -136,3 +136,10 @@ def test_max_append_bytes_is_below_documented_token_limit():
     # The module promises to stay under the provider's 500-token append cap
     # even for byte-level tokenization.
     assert 0 < oracle_context.MAX_APPEND_BYTES < 500
+
+
+def test_context_chunks_respects_a_smaller_budget_losslessly():
+    text = "Ordet æ og ✓ " * 300
+    chunks = list(context_chunks(text, max_bytes=100))
+    assert "".join(chunks) == text
+    assert all(len(chunk.encode()) <= 100 for chunk in chunks)

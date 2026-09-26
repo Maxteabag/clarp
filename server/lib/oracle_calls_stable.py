@@ -85,6 +85,53 @@ def _agent_status(agent: dict) -> dict:
     }
 
 
+TRANSCRIPT_DEFAULT, TRANSCRIPT_MAX = 10, 30
+TRANSCRIPT_MESSAGE_CHARS, TRANSCRIPT_BUDGET = 6000, 16000
+
+
+def _recent_messages(agent: dict, *, limit: int, message_chars: int, budget: int, mark_cuts: bool):
+    """The newest non-empty user and assistant messages, oldest first.
+
+    Shared by read_agent_messages (a short spoken summary on the v1 tool
+    contract, which never carried cut markers) and read_agent_transcript
+    (sized for a verbatim read, every cut marked). Neither prompts the agent.
+    Returns (messages, older_or_cut) where older_or_cut says the window or
+    the budget left messages out.
+    """
+    rows = message_store.list_messages(agent_id=agent['agent_id'], limit=limit * 2, include_automated=False)
+    # A tool-only or empty turn at the head must not hide the older history
+    # from Oracle; only an exhausted budget stops the walk.
+    chat = [r for r in rows if r['role'] in ('user', 'assistant') and str(r['text'])]
+    selected = chat[-limit:]
+    cut = len(chat) > len(selected)
+    output = []
+    for r in reversed(selected):
+        if budget <= 0:
+            cut = True
+            break
+        full = str(r['text'])
+        text = full[:min(message_chars, budget)]
+        budget -= len(text)
+        message = {'id': r['id'], 'role': r['role'], 'timestamp': r['timestamp'], 'text': text}
+        if mark_cuts and len(text) < len(full):
+            message['truncated'] = True
+        output.append(message)
+    return list(reversed(output)), cut
+
+
+def _agent_transcript(agent: dict, limit=None) -> dict:
+    """read_agent_messages sized for a verbatim read; the caller relays it losslessly in parts."""
+    if type(limit) is not int or limit < 1:
+        limit = TRANSCRIPT_DEFAULT
+    messages, cut = _recent_messages(agent, limit=min(limit, TRANSCRIPT_MAX),
+                                     message_chars=TRANSCRIPT_MESSAGE_CHARS, budget=TRANSCRIPT_BUDGET,
+                                     mark_cuts=True)
+    newest = max((r['timestamp'] for r in messages), default='')
+    return {'agent': agent['persona'], 'session': agent['session'], 'messages': messages,
+            'newest_message_age': _age_text(newest), 'truncated': cut,
+            'note': 'Read without prompting the agent. Read it word for word when the user asks for their words.'}
+
+
 def datetime_from_ms(value) -> str:
     from datetime import datetime, timezone
     try:
@@ -125,23 +172,13 @@ class AgentTools:
         if name == 'get_agent_status':
             return _agent_status(agent)
         if name == 'read_agent_messages':
-            rows = message_store.list_messages(agent_id=agent['agent_id'], limit=20, include_automated=False)
-            selected = [r for r in rows if r['role'] in ('user', 'assistant')][-10:]
-            budget, output = 12000, []
-            for r in reversed(selected):
-                if budget <= 0:
-                    break
-                text = str(r['text'])[:min(2000, budget)]
-                if not text:
-                    # A tool-only or empty turn at the head must not hide the
-                    # older history from Oracle; only an exhausted budget stops.
-                    continue
-                budget -= len(text)
-                output.append({'id': r['id'], 'role': r['role'], 'timestamp': r['timestamp'], 'text': text})
-            newest = max((r['timestamp'] for r in output), default='')
-            return {'agent': agent['persona'], 'messages': list(reversed(output)),
+            messages, _ = _recent_messages(agent, limit=10, message_chars=2000, budget=12000, mark_cuts=False)
+            newest = max((r['timestamp'] for r in messages), default='')
+            return {'agent': agent['persona'], 'messages': messages,
                     'newest_message_age': _age_text(newest),
                     'note': 'Summarize in one natural sentence and say how old the newest message is.'}
+        if name == 'read_agent_transcript':
+            return _agent_transcript(agent, arguments.get('limit'))
         if name == 'cancel_agent':
             follow = str(arguments.get('request') or '').strip()
             if len(follow) > 16000:
@@ -210,6 +247,11 @@ class Sideband:
                 raw = self.socket.recv()
                 if not raw: break
                 if self.journal: self.journal.event('server', raw)
+                from .oracle_realtime import incomplete_response_detail
+                detail = incomplete_response_detail(raw)
+                if detail:
+                    from .log import log
+                    log('oracleResponseIncomplete', detail)
                 self.incoming.put(('event', json.loads(raw)))
         except Exception as exc:
             if self.journal: self.journal.record('sideband.failed', {'error_type': type(exc).__name__})

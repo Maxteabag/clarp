@@ -461,3 +461,11 @@ def test_history_recording_annotates_events(podcast, monkeypatch):
     assert podcast.last_question_event_id == 55
     assert podcast._down[-1]["history_event_id"] == 55
     assert podcast._down[-1]["conversation_id"] == "hist-1"
+
+
+def test_podcast_receives_from_the_shared_upstream_pump(podcast):
+    """serve() feeds every conversation through pump_upstream, which names the socket."""
+    frames = [json.dumps({"type": "session.output_transcript.delta", "delta": "Hello"})]
+    podcast.upstream = SimpleNamespace(recv=lambda: frames.pop(0) if frames else "")
+    oracle_live_stable.pump_upstream(podcast, TimeoutError)
+    assert any(event.get("delta") == "Hello" for event in podcast._down)
