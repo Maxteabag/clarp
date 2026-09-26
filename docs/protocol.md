@@ -226,6 +226,55 @@ agent in `reply_to_*`. Render that as a compact "Replying to …" marker, never 
 the other agent's message: the current agent wrote it, and nothing forwarded it
 onward unless the agent itself sent a message.
 
+Display cells. `display_cells` are backend-neutral activity rows that the
+parser has already rendered:
+
+```json
+{"id": "…", "kind": "command | patch | exploration | web_search | subagents | …",
+ "title": "…", "summary": "…", "status": "running | ok | error | recorded",
+ "lines": [{"label": "Task", "text": "…", "kind": "detail | muted | status | output | …"}]}
+```
+
+When a turn has cells, `/log` keeps only its edit-shaped `tools` (`Edit`,
+`MultiEdit`, `Write`), because the cells already carry the rest. With
+`include_tool_details=0` each cell is cut down to `id`, `kind`, `title`,
+`summary`, `status`, `ephemeral` and `detail_count`.
+
+Sub-agent cells (`kind: "subagents"`) come from two backends:
+
+- **Codex** (`codex_transcript.py`): one cell per `spawn_agent`,
+  `send_input`, `wait_agent`, `resume_agent` and `close_agent` call or
+  collab event. The title says what happened ("Spawned agent", "Finished
+  waiting"), the summary names the agent (`nickname [role]`), and the lines
+  carry the task, thread ids and each agent's status.
+- **Claude** (`transcript_log.py`): one cell per built-in `Agent` (formerly
+  `Task`) tool call, in place of a tool card. `id` is the tool_use id and
+  `summary` is the call's description. `status` is `running` until the call
+  settles: a foreground call settles on its tool result, and a background one
+  on the `<task-notification>` Claude writes when the sub-agent stops. Then
+  `status` becomes `ok` (completed) or `error` (failed, killed or stopped).
+  The title follows the status: "Running agent", "Agent finished",
+  "Agent failed" or "Agent stopped". The lines are `Task` (the prompt,
+  shortened), `Type`, `Mode` (`Foreground` or `Background`), `Result` or
+  `Status`, `Usage` (tool calls and duration, foreground only) and
+  `Transcript`. The cell also carries these fields:
+
+  ```json
+  {"ephemeral": true, "description": "Map the auth flow",
+   "subagent_type": "Explore", "background": true, "agent_id": "a1dac2d0…",
+   "transcript_path": "/home/…/.claude/projects/<project>/<parent-id>/subagents/agent-a1dac2d0….jsonl"}
+  ```
+
+  `ephemeral: true` means the sub-agent runs inside the parent's Claude
+  process and dies with it, for example when Clarp restarts the session
+  after a usage limit. Label these so they are not mistaken for detached
+  Clarp helpers, which survive restarts. A cell whose parent died stays
+  `running`, because no notification ever arrives. `transcript_path` is the
+  sub-agent's own transcript, found through the `toolUseId` in its
+  `.meta.json` or through its agent id, and is empty when the file does not
+  exist. The Host does not import sub-agent transcripts as conversations.
+  They appear only as these cells.
+
 #### Pair conversations: `GET /agent-conversations`
 
 Agent-to-agent exchanges are also readable as one conversation per pair,
