@@ -1098,7 +1098,7 @@ def _enable_account_failover(monkeypatch, *, available=True):
     monkeypatch.setattr(_td.config, "load", lambda *args, **kwargs: cfg)
     scheduled = []
     coordinator = ClaudeFailover(
-        _td._TURN_LOCK, switch=Mock(return_value=available),
+        _td.OwnershipLock(), switch=Mock(return_value=available),
         schedule=lambda delay, callback: scheduled.append((delay, callback)),
         now=lambda: 100)
     monkeypatch.setattr(_td, "_CLAUDE_FAILOVER", coordinator)
