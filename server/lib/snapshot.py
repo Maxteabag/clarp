@@ -5,7 +5,7 @@ from typing import Any
 
 import json
 
-from . import (agent_goals, agents as agents_db, avatar_settings, backend_usage, backends,
+from . import (background_jobs, agent_goals, agents as agents_db, avatar_settings, backend_usage, backends,
                compaction, db,
                config, message_store, model_avatars, team_store,
                turn_queue, scheduler, janitors)
@@ -85,6 +85,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     team_memberships = team_store.memberships_by_agent()
     queue_states = turn_queue.states()
     goals = agent_goals.by_agent()
+    active_jobs = background_jobs.active_by_agent()
     states = agents_db.dashboard_states()
     runtimes = agents_db.dashboard_runtimes()
     messages = message_store.dashboard_messages()
@@ -139,6 +140,20 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         status_text = str(visible_labels.get(agent_id, a.get("custom_status")) or "").strip() or None
         if status_text is None and agent_id not in visible_labels and state.get("kind") == "background":
             status_text = str(_sdetail.get("label") or "").strip() or None
+        # A durable background job (or a Clarp sub-agent, which is one) means
+        # the agent is waiting on work even though its turn ended: show it as
+        # background so the apps draw the running indicator, not idle.
+        jobs = active_jobs.get(agent_id, [])
+        sub_agents = sum(1 for job in jobs if job["kind"] == "sub-agent")
+        if jobs and latest_state not in {"thinking", "tool", "compacting", "background"}:
+            latest_state = "background"
+        if jobs and status_text is None:
+            if len(jobs) == 1:
+                status_text = jobs[0]["title"] or ("Sub-agent running" if sub_agents else "Background job running")
+            elif sub_agents == len(jobs):
+                status_text = f"{len(jobs)} sub-agents running"
+            else:
+                status_text = f"{len(jobs)} background jobs running"
         turn_started_at = int(state.get('turn_started_at') or 0)
         if active and not turn_started_at:
             turn_started_at = int(rt.get('open_turn_started_at') or 0)
@@ -233,6 +248,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "turn_started_at": turn_started_at,
             "latest_state":   latest_state,
             "status_text":    status_text,
+            "background_jobs": {"count": len(jobs), "sub_agents": sub_agents},
             "team_ids":       team_memberships.get(agent_id, []),
             "latest_state_ts": state.get("ts"),
             "context_tokens": context_tokens,

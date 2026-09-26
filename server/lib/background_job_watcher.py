@@ -13,6 +13,7 @@ class BackgroundJobWatcher:
     INTERVAL_SEC = SERVER_TIMING.state_watcher_poll_sec
 
     def __init__(self, stream):
+        self._statuses: dict[str, str] = {}
         self.stream = stream
         self._last_id = 0
         self._stop = threading.Event()
@@ -57,3 +58,12 @@ class BackgroundJobWatcher:
                 "status": job["status"],
                 "job": job,
             })
+            # The agent row derives its background state from active jobs, so
+            # a start or finish must reach the list without waiting for a poll.
+            # Heartbeats also produce events; only a status change nudges.
+            # Computer-owned jobs (updates, model installs) belong to no agent row.
+            if job.get("agent_id") and self._statuses.get(job["job_id"]) != job["status"]:
+                self._statuses[job["job_id"]] = job["status"]
+                if job["status"] not in background_jobs.ACTIVE_STATUSES:
+                    self._statuses.pop(job["job_id"], None)
+                self.stream.broadcast({"type": SSEType.AGENT_ROSTER, "kind": "background-job"})

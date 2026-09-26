@@ -231,10 +231,12 @@ def test_update_worker_transitions_are_visible_on_typed_sse(monkeypatch):
 
     watcher._poll_once()
 
-    assert len(stream.events) == 2
-    assert all(event["type"] == "background-job-updated" for event in stream.events)
-    assert stream.events[-1]["status"] == "succeeded"
-    assert stream.events[-1]["job"]["kind"] == "server-update"
+    jobs = [e for e in stream.events if e["type"] == "background-job-updated"]
+    # Each status change also nudges the roster (the row shows the job running).
+    assert {e["type"] for e in stream.events} == {"background-job-updated", "agent-roster"}
+    assert len(jobs) == 2
+    assert jobs[-1]["status"] == "succeeded"
+    assert jobs[-1]["job"]["kind"] == "server-update"
 
 
 def test_update_worker_failure_is_terminal(monkeypatch):
