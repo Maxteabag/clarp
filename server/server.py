@@ -95,7 +95,6 @@ from lib.personalities import (  # noqa: E402
 from lib.conversation import load_conversation, session_cwd  # noqa: E402
 from lib.snapshot import build_agent_snapshot  # noqa: E402
 from lib.timing import SERVER_TIMING  # noqa: E402
-from lib.transcript_log import find_latest_jsonl, parse_turns  # noqa: E402
 from lib.turn_dispatch import DispatchError, TurnDispatchService  # noqa: E402
 from lib.voices import voices_with_availability  # noqa: E402
 
@@ -2522,8 +2521,6 @@ class Handler(BaseHTTPRequestHandler):
                 include_tool_details=include_tool_details,
                 interaction_id=self._interaction_id(),
                 background_import=True,
-                claude_finder=find_latest_jsonl,
-                claude_parser=parse_turns,
             )
         except OSError as e:
             log_exception("logParseFail", e, detail=session)

@@ -162,20 +162,23 @@ def test_resume_transcript_dispatch_picks_agy_parser(monkeypatch):
     monkeypatch.setattr(agy_transcript, "find_latest_jsonl",
                         lambda sid: pathlib.Path(f"/agy/{sid}/transcript.jsonl"))
 
-    assert str(backends.find_resume_transcript(
-        "agy", "conversation-7", cwd="/tmp",
+    # The boot-time resume check asks the backend, cwd hint and all.
+    assert str(backends.by_id("agy").find_transcript(
+        "conversation-7", pathlib.Path("/h"), cwd="/tmp",
     )) == "/agy/conversation-7/transcript.jsonl"
 
 
-def test_stream_kwargs_strips_synthesize_audio():
+def test_stream_kwargs_strips_synthesize_audio(monkeypatch):
     """Regression: agy/codex turns crashed with `spawn_turn() got an
     unexpected keyword argument 'synthesize_audio'`. turn_dispatch passes
     synthesize_audio (for the Claude path); the stream runners read it from
     the DB instead, so backends must strip it before delegating to them."""
-    out = backends._stream_kwargs({
-        "text": "hi", "cwd": "/tmp", "stream": None,
-        "voice_preamble": True, "synthesize_audio": True,
-    })
+    from lib import grok_runner
+    seen = {}
+    monkeypatch.setattr(grok_runner, "spawn_turn", lambda **kw: seen.update(kw))
+    backends.by_id("grok").spawn_turn(
+        text="hi", cwd="/tmp", stream=None, voice_preamble=True, synthesize_audio=True)
+    out = seen
     assert "synthesize_audio" not in out, "synthesize_audio must be stripped"
     # The args the stream runners DO accept survive.
     assert out["text"] == "hi"
@@ -224,6 +227,6 @@ def test_routing_and_auth_adapters_are_derived_from_the_registry():
 def test_adapter_rejects_unknown_enumerations():
     import pytest
     with pytest.raises(ValueError):
-        backends.BackendAdapter(id="x", label="X", required_binary="x", login_kind="magic")
+        type("Bad", (backends.Backend,), {"id": "x", "label": "X", "required_binary": "x", "login_kind": "magic"})()
     with pytest.raises(ValueError):
-        backends.BackendAdapter(id="x", label="X", required_binary="x", effort_ui="dial")
+        type("Bad", (backends.Backend,), {"id": "x", "label": "X", "required_binary": "x", "effort_ui": "dial"})()

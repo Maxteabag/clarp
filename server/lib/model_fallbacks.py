@@ -347,7 +347,6 @@ def json_call(model, prompt, schema, *, current=lambda: True, timeout=45):
     run gets its own throwaway workspace, its own process group, and a hard
     deadline; nothing it does can touch the caller's conversation.
     """
-    import importlib
     import os
     import shutil
     import signal
@@ -356,10 +355,9 @@ def json_call(model, prompt, schema, *, current=lambda: True, timeout=45):
     import time
     from . import backends
 
-    adapter = backends.get(model["backend"])
-    if adapter is None or not adapter.supports_routing:
+    runner = backends.get(model["backend"])
+    if runner is None or not runner.supports_routing:
         raise ValueError("fallback provider cannot answer an isolated request")
-    runner = importlib.import_module(f"lib.{adapter.routing_module}")
     prompt += (
         "\nReturn only the assistant answer as one JSON object matching this exact schema: "
         + json.dumps(schema)

@@ -9,15 +9,10 @@ which is exactly the stale-history bug this guards against.
 """
 from lib import agents as agents_db
 from lib.conversation import load_conversation
-from lib.transcript_log import find_latest_jsonl, parse_turns
 
 
 def _load(session):
-    return load_conversation(
-        session=session,
-        claude_finder=find_latest_jsonl,
-        claude_parser=parse_turns,
-    )
+    return load_conversation(session=session)
 
 
 def test_relaunch_before_first_response_shows_empty_not_previous(tmp_path):

@@ -106,7 +106,8 @@ def test_logout_uses_cli_owned_commands_and_clears_task(monkeypatch):
 def test_codex_logout_recycles_app_servers(monkeypatch):
     recycled = []
     monkeypatch.setattr(backend_auth.shutil, "which", lambda name: f"/bin/{name}")
-    monkeypatch.setattr(backend_auth, "_recycle_codex_writers", lambda: recycled.append("codex"))
+    from lib import codex_app_server
+    monkeypatch.setattr(codex_app_server, "recycle_clients", lambda: recycled.append("codex") or 0)
     monkeypatch.setattr(
         backend_auth, "_credential_metadata", lambda _backend: (False, 0))
 
@@ -126,7 +127,8 @@ def test_codex_logout_recycles_app_servers(monkeypatch):
 def test_claude_logout_does_not_recycle_codex_writers(monkeypatch):
     recycled = []
     monkeypatch.setattr(backend_auth.shutil, "which", lambda name: f"/bin/{name}")
-    monkeypatch.setattr(backend_auth, "_recycle_codex_writers", lambda: recycled.append("codex"))
+    from lib import codex_app_server
+    monkeypatch.setattr(codex_app_server, "recycle_clients", lambda: recycled.append("codex") or 0)
     monkeypatch.setattr(
         backend_auth, "_credential_metadata", lambda _backend: (False, 0))
 
