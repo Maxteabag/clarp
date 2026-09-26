@@ -72,6 +72,7 @@ from .message_live import (  # noqa: F401
     apply_final_assistant_side_effects,
 )
 from .message_previews import (  # noqa: F401
+    _agent_preview,
     _client_tools,
     list_messages,
     provenance_fields,
