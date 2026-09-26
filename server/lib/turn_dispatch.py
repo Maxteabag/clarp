@@ -15,8 +15,9 @@ from typing import Any, Callable
 from . import agents as agents_db
 from . import backend_usage, backends, config, db, error_classify, eventlog, origins
 from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
-from . import turn_lifecycle
+from . import turn_lifecycle, turn_slots
 from .turn_lifecycle import TurnEvent
+from .turn_slots import OwnershipLock, defer_on
 from .log import log, log_exception
 from .protocol import AgentState, SSEType
 from .prompt_admissions import PromptAdmission
@@ -37,11 +38,21 @@ BACKOFF_BASE_SEC = 1.0
 # started, and abandoned the agent's work). Turns for one agent run strictly in
 # arrival order. Only an explicit stop / barge-in (backends.interrupt, a
 # separate path) preempts a running turn.
+# The slots live in lib.turn_slots.TurnSlots behind one OwnershipLock; the
+# module names below are views of that one object:
 #   _INFLIGHT: agent_id -> trace_id of the turn currently running
 #   _QUEUED:   agent_id -> list of _TurnSpec waiting to run, in order
-_TURN_LOCK = threading.RLock()
-_CLAUDE_FAILOVER = ClaudeFailover(_TURN_LOCK)
-_CODEX_FAILOVER = ClaudeFailover(_TURN_LOCK)
+# Under _TURN_LOCK only ownership is decided. SQLite writes, eventlog rows and
+# backend spawns that follow from a decision are deferred with
+# ``_TURN_LOCK.defer`` and run after the outermost release.
+_TURN_LOCK = OwnershipLock()
+_SLOTS = turn_slots.TurnSlots(lock=_TURN_LOCK)
+# Each account-failover coordinator has its own lock. Lock order is always
+# _TURN_LOCK -> coordinator: the coordinator never takes _TURN_LOCK while it
+# holds its own; the callbacks it runs (owned, pause, resume) read slots
+# without the lock or defer their work past the coordinator's release.
+_CLAUDE_FAILOVER = ClaudeFailover(OwnershipLock())
+_CODEX_FAILOVER = ClaudeFailover(OwnershipLock())
 # Account pool (backend.account_pool()) -> (coordinator, config field naming
 # the account switch command). Coordinators are read through thunks so a
 # monkeypatched module global is honoured. Backends without a pool of their
@@ -62,9 +73,9 @@ def account_failover(backend):
 def account_selector(backend):
     return getattr(config.load(), _account_pool(backend)[1])
 
-_INFLIGHT: dict[str, str] = {}
-_QUEUED: dict[str, list] = {}
-_CLAIMED_AT: dict[str, float] = {}
+_INFLIGHT: dict[str, str] = _SLOTS.inflight
+_QUEUED: dict[str, list] = _SLOTS.queued
+_CLAIMED_AT: dict[str, float] = _SLOTS.claimed_at
 _RECOVERY_LOCK = threading.Lock()
 _RUNTIME_CLIENT: Any | None = None
 # Weak values: a lock lives only while a caller holds it (`with` keeps a strong
@@ -76,8 +87,11 @@ _JANITOR_SPAWN_LOCKS: "weakref.WeakValueDictionary[str, Any]" = weakref.WeakValu
 # attached to an agent. A normal turn routed to that agent queues behind it
 # (two processes resuming one session would corrupt the transcript); the queue
 # drains via drain_after_terminal() when the terminal closes.
-_TERMINAL_SENTINEL = "terminal"
-_STOPPING_SENTINEL = "stopping"
+_TERMINAL_SENTINEL = turn_slots.TERMINAL_SENTINEL
+_STOPPING_SENTINEL = turn_slots.STOPPING_SENTINEL
+# Durable Stop-parked rows are reinstated once per process, at the first
+# queue recovery after boot (see TurnDispatchService.recover_queued).
+_REHYDRATED = False
 
 
 def configure_runtime_client(client: Any | None) -> None:
@@ -88,57 +102,42 @@ def configure_runtime_client(client: Any | None) -> None:
 def runtime_status() -> dict[str, Any]:
     """Serializable ownership snapshot served to replaceable HTTP processes."""
     from . import compaction
-    with _TURN_LOCK:
-        return {
-            "active": {
-                agent_id: trace_id
-                for agent_id, trace_id in _INFLIGHT.items()
-                if trace_id not in {_TERMINAL_SENTINEL, _STOPPING_SENTINEL}
-            },
-            "terminals": sorted(
-                agent_id for agent_id, trace_id in _INFLIGHT.items()
-                if trace_id == _TERMINAL_SENTINEL
-            ),
-            "spawning": sorted(_CLAIMED_AT),
-            "queued": {
-                agent_id: len(items) for agent_id, items in _QUEUED.items()
-                if items
-            },
-            "compactions": compaction.active_sessions(),
-            "claude_account_recovery": _CLAUDE_FAILOVER.status(),
-            "codex_account_recovery": _CODEX_FAILOVER.status(),
-        }
+    status = _SLOTS.snapshot()
+    status.update({
+        "compactions": compaction.active_sessions(),
+        "claude_account_recovery": _CLAUDE_FAILOVER.status(),
+        "codex_account_recovery": _CODEX_FAILOVER.status(),
+    })
+    return status
+
+
+def live_work(agent_id: str, *, session: str = "") -> turn_slots.LiveWork:
+    """Every busy fact for one agent: slot, queue, terminal, compaction."""
+    return _SLOTS.live_work(agent_id, session=session)
+
+
+def reset_for_tests() -> None:
+    global _REHYDRATED
+    _SLOTS.reset_for_tests()
+    _REHYDRATED = False
 
 
 def _terminal_live(agent_id: str) -> bool:
-    try:
-        from . import terminal_ws
-        return terminal_ws.has_live_terminal(agent_id)
-    except Exception:  # noqa: BLE001
-        return False
+    return turn_slots._terminal_live(agent_id)
 
 
 def _slot_is_spawning(agent_id: str) -> bool:
     if _RUNTIME_CLIENT is not None:
         return agent_id in set(
             _RUNTIME_CLIENT.status().get("spawning") or ())
-    return agent_id in _CLAIMED_AT
+    return _SLOTS.is_spawning(agent_id)
 
 
 def free_stale_slot(agent_id: str) -> str | None:
     """INV3 (lib.reconcile): free an in-flight slot that has no live turn and
     nothing queued behind it. Returns the dead trace id, or None if nothing
     was freed. Spawning slots and terminal sentinels are left alone."""
-    with _TURN_LOCK:
-        if agent_id in _CLAIMED_AT or agent_id not in _INFLIGHT:
-            return None
-        if _QUEUED.get(agent_id):
-            return None  # the next send / finish drains these; don't orphan them
-        trace = _INFLIGHT.get(agent_id)
-        if trace == _TERMINAL_SENTINEL:
-            return None
-        _INFLIGHT.pop(agent_id, None)
-        return trace or ""
+    return _SLOTS.free_stale(agent_id)
 
 
 def _reset_hint(message: str) -> str:
