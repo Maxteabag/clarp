@@ -9,4 +9,5 @@ table over its inputs.
 * ``notifications``  whether a completed turn pages the user (``user_notifications``)
 * ``failover``       what to do with parked Claude work (``claude_failover``)
 * ``agent_spec``     how an agent create/relaunch request is parsed (``agent_lifecycle``)
+* ``helper_state``   a helper agent's lifecycle, parent checks and archive picks (``agents``, ``helper_agents``)
 """

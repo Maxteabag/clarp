@@ -240,3 +240,34 @@ def test_v78_adds_dreaming_columns_and_voice_verbosity(tmp_path):
     assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     # Idempotent: a second pass over an already-repaired database is a no-op.
     db._migrate(upgraded)
+
+
+def test_v93_adds_helper_lineage_and_backfills_janitor_role(tmp_path):
+    path = tmp_path / "v92.sqlite"
+    con = _fresh(path)
+    con.executescript("""
+        DROP INDEX idx_agents_parent;
+        ALTER TABLE agents DROP COLUMN parent_agent_id;
+        ALTER TABLE agents DROP COLUMN role;
+        ALTER TABLE agents DROP COLUMN helper_state;
+        ALTER TABLE agents DROP COLUMN helper_completed_at;
+        INSERT INTO agents (agent_id, persona, voice_id, cwd, session, created_at, is_janitor)
+            VALUES ('a1', 'Ada', 'v', '/tmp', 'ada', 1, 0),
+                   ('j1', 'Hugo', '', '/tmp', 'hugo', 2, 1);
+        PRAGMA user_version = 92;
+    """)
+    con.close()
+
+    upgraded = _connect(path)
+    db._migrate(upgraded)
+
+    assert {"parent_agent_id", "role", "helper_state",
+            "helper_completed_at"} <= _columns(upgraded, "agents")
+    assert "idx_agents_parent" in _names(upgraded, "index")
+    rows = {r["agent_id"]: dict(r) for r in upgraded.execute(
+        "SELECT agent_id, role, parent_agent_id, helper_state, helper_completed_at FROM agents")}
+    assert rows["a1"] == {"agent_id": "a1", "role": "agent", "parent_agent_id": None,
+                          "helper_state": None, "helper_completed_at": None}
+    assert rows["j1"]["role"] == "janitor"
+    assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+    db._migrate(upgraded)

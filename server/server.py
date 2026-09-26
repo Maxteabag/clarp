@@ -477,6 +477,7 @@ class Handler(BaseHTTPRequestHandler):
         "/diagnostics/settings": "_handle_diagnostics_settings_get",
         "/agent-heartbeat/status": "_handle_agent_heartbeat_status",
         "/agent-goal": "_handle_agent_goal_get",
+        "/agent-helper-state": "_handle_agent_helper_state_get",
         "/oracle/status": "_handle_oracle_status",
         "/oracle/contact": "_handle_oracle_contact_get",
         "/oracle/delegations": "_handle_oracle_delegations_get",
@@ -542,6 +543,7 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-goal/resume": "_handle_agent_goal_resume",
         "/agent-goal/clear": "_handle_agent_goal_clear",
         "/agent-archive": "_handle_agent_archive",
+        "/agent-helper-state": "_handle_agent_helper_state",
         "/heartbeat/settings": "_handle_heartbeat_settings_post",
         "/diagnostics/settings": "_handle_diagnostics_settings_post",
         "/agent-dreaming": "_handle_agent_dreaming",
@@ -3287,6 +3289,40 @@ class Handler(BaseHTTPRequestHandler):
         return self._json_ok({"ok": True, "session": session,
                               "archived": archived})
 
+    def _handle_agent_helper_state_get(self):
+        """One agent's lineage and helper state, without a full snapshot."""
+        query = self._query()
+        session = (query.get("session", [""])[0] or "").strip()
+        if not session:
+            return self._json_error(400, "session required")
+        row = identity.lookup(session)
+        row = agents_db.get_by_agent_id(row["agent_id"]) if row else None
+        if not row:
+            return self._json_error(404, "agent_not_found")
+        return self._json_ok({key: row.get(key) for key in (
+            "agent_id", "session", "role", "parent_agent_id", "helper_state",
+            "helper_completed_at", "archived_at")})
+
+    def _handle_agent_helper_state(self):
+        """Mark a helper agent done, failed or running again.
+
+        ``by`` names the marking agent when an agent does it (only the
+        helper's parent may); without it the mark is the user's."""
+        from lib import helper_agents
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        session = str(data.get("session") or "").strip()
+        state = str(data.get("state") or "").strip()
+        if not session or not state:
+            return self._json_error(400, "session and state required")
+        try:
+            new = helper_agents.mark(self.ctx.stream, session, state,
+                                     by=str(data.get("by") or "").strip())
+        except helper_agents.HelperStateError as e:
+            return self._json(e.status, {"error": e.code, "message": str(e)})
+        return self._json_ok({"ok": True, "session": session, "helper_state": new})
+
     def _handle_agent_goal_get(self):
         """The goal an agent is working toward on its own, or null."""
         from lib import agent_goals
@@ -4505,7 +4541,8 @@ class Handler(BaseHTTPRequestHandler):
         row = identity.lookup(result.session) or {}
         agent = {key: row.get(key) for key in (
             "agent_id", "session", "persona", "backend", "cwd", "model", "effort",
-            "voice_id", "avatar_symbol", "muted", "heartbeat_enabled", "dreaming_enabled")}
+            "voice_id", "avatar_symbol", "muted", "heartbeat_enabled", "dreaming_enabled",
+            "parent_agent_id", "role", "helper_state")}
         from lib.session_models import agent_model
         agent["model"] = agent_model(row, identity.backend_session(row))
         state = agents_db.latest_state(row["agent_id"]) or {}
@@ -4816,6 +4853,8 @@ class Handler(BaseHTTPRequestHandler):
             ))
         except DispatchError as e:
             return self._send(e.status, str(e).encode(), "text/plain")
+        if req.origin == "agent" and req.sender_agent_id:
+            self._note_helper_message(req.sender_agent_id, result.session)
         if req.transcription_id:
             transcription_results.delete(req.transcription_id)
         # File the timeline row before answering: a client that reads
@@ -4833,6 +4872,18 @@ class Handler(BaseHTTPRequestHandler):
                        "queue_depth": result.queue_depth,
                        "queue_revision": result.queue_revision,
                        "trace_id": req.trace_id})
+
+    def _note_helper_message(self, sender_agent_id: str, target_session: str) -> None:
+        """A helper reporting to its parent, or a parent re-tasking it."""
+        from lib import helper_agents
+        try:
+            target = identity.resolve(target_session)
+            if target is not None:
+                helper_agents.note_agent_message(
+                    self.ctx.stream, sender_agent_id=sender_agent_id,
+                    target_agent_id=target.agent_id)
+        except Exception as e:  # noqa: BLE001 - never fail an admitted send
+            log_exception("helperMessageNoteFail", e, detail=sender_agent_id)
 
     def _handle_clip_ack(self):
         data = self._read_json()
@@ -5409,7 +5460,8 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         # only write queue rows; this is the executor side. It starts before
         # the transcript streamer, which enqueues into the same queue.
         Worker("tts-worker", start_tts_worker),
-        Worker("maintenance", lambda: started(MaintenanceWorker(audio_dir=_paths.audio_dir))),
+        Worker("maintenance", lambda: started(MaintenanceWorker(
+            audio_dir=_paths.audio_dir, stream=ctx.stream))),
         Worker("usage-refresh",
                lambda: started(backend_usage.UsageRefreshWorker(stream=ctx.stream))),
         Worker("resource-telemetry", lambda: started(ResourceTelemetryWorker())),
