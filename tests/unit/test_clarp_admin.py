@@ -1223,3 +1223,17 @@ def test_setup_summary_names_the_pwa_link(tmp_path, monkeypatch):
     text = admin.setup_complete_message()
     assert "http://127.0.0.1:7682/?token=tok" in text
     assert "clarp-admin url" in text
+
+
+def test_schedule_list_prints_the_next_run_time(monkeypatch, capsys):
+    # Issue 120: the listing formats next_run_at with datetime, which the
+    # module never imported, so any armed schedule crashed the command.
+    from types import SimpleNamespace
+    monkeypatch.setattr(admin, "api_request", lambda method, path: {"schedules": [{
+        "schedule_id": "sched_1", "name": "hourly", "session": "theo",
+        "cron_expression": "@hourly", "prompt": "hi", "enabled": True,
+        "next_run_at": 1_789_232_400_000}]})
+    assert admin.cmd_schedule(SimpleNamespace(schedule_command="list", session=None)) == 0
+    out = capsys.readouterr().out
+    assert "[ENABLED] hourly (ID: sched_1)" in out
+    assert "Next:    2026-09-12 17:00:00 UTC" in out

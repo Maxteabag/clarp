@@ -12,7 +12,10 @@ import io
 import math
 import wave
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:  # macOS installs get no faster-whisper, hence no numpy (#83)
+    np = None  # type: ignore[assignment]
 
 SILENCE_FLOOR_DB = -50.0
 CLIP_LEVEL = 0.985
@@ -31,7 +34,7 @@ def _db(x: float) -> float:
     return 20.0 * math.log10(x) if x > 1e-6 else -120.0
 
 
-def _decode_wav(audio: bytes) -> tuple[np.ndarray, int]:
+def _decode_wav(audio: bytes) -> tuple["np.ndarray", int]:
     with wave.open(io.BytesIO(audio), "rb") as w:
         channels, width, rate = w.getnchannels(), w.getsampwidth(), w.getframerate()
         frames = w.readframes(w.getnframes())
@@ -49,11 +52,11 @@ def _decode_wav(audio: bytes) -> tuple[np.ndarray, int]:
     return samples, rate
 
 
-def _decode_av(audio: bytes) -> tuple[np.ndarray, int]:
+def _decode_av(audio: bytes) -> tuple["np.ndarray", int]:
     import av  # type: ignore
     from av.audio.resampler import AudioResampler  # type: ignore
 
-    chunks: list[np.ndarray] = []
+    chunks: list["np.ndarray"] = []
     with av.open(io.BytesIO(audio), mode="r") as container:
         stream = next((s for s in container.streams if s.type == "audio"), None)
         if stream is None:
@@ -71,7 +74,7 @@ def _decode_av(audio: bytes) -> tuple[np.ndarray, int]:
     return np.concatenate(chunks).astype(np.float32) / 32768.0, 16_000
 
 
-def decode(audio: bytes, content_type: str = "") -> tuple[np.ndarray, int]:
+def decode(audio: bytes, content_type: str = "") -> tuple["np.ndarray", int]:
     """Mono float32 samples in [-1, 1] plus sample rate."""
     if audio[:4] == b"RIFF" and audio[8:12] == b"WAVE":
         return _decode_wav(audio)
@@ -79,8 +82,16 @@ def decode(audio: bytes, content_type: str = "") -> tuple[np.ndarray, int]:
 
 
 def analyze(audio: bytes, content_type: str = "") -> dict:
-    """Metrics for one capture. Never raises; decode failures are a result."""
+    """Metrics for one capture. Never raises; decode failures are a result.
+
+    Without numpy the capture is reported as unmeasured rather than broken:
+    the metrics exist to flag corrupt uploads, and an absent analyser must
+    not turn every recording into a corruption verdict.
+    """
     out: dict = {"bytes": len(audio), "content_type": content_type or ""}
+    if np is None:
+        out["unavailable"] = "numpy"
+        return out
     try:
         samples, rate = decode(audio, content_type)
     except Exception as exc:  # noqa: BLE001 - the failure is the finding
@@ -122,6 +133,8 @@ def analyze(audio: bytes, content_type: str = "") -> dict:
 def corruption_reasons(metrics: dict, *, transcript: str | None = None) -> list[str]:
     """Why a capture looks broken. Empty when it looks fine."""
     reasons: list[str] = []
+    if metrics.get("unavailable"):
+        return []
     if metrics.get("decode_error"):
         return ["decode_error"]
     duration = float(metrics.get("duration_ms") or 0.0)
