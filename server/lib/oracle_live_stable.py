@@ -1282,7 +1282,7 @@ def serve(handler):
     podcast_source = None
     history_id = None
     if "podcast_artifact" in query:
-        from . import artifacts, podcast_live_stable as podcast_live, podcast_history
+        from . import artifacts, podcast_live, podcast_history
         try:
             artifact = artifacts.get(query["podcast_artifact"][0])
             if not artifact or artifact["type"] != "audio":
@@ -1330,7 +1330,7 @@ def serve(handler):
             import pathlib
             from .paths import RuntimePaths
             media_dir = getattr(handler.ctx, "media_dir", None) or RuntimePaths.from_home(pathlib.Path.home()).media_dir
-            conversation = podcast_live.PodcastConversation(upstream, downstream, key,
+            conversation = podcast_live.StablePodcastConversation(upstream, downstream, key,
                 podcast_context, images=query.get("images", ["0"])[0] == "1",
                 history_id=history_id, media_dir=media_dir)
             downstream({"type": "podcast.history", "conversation_id": history_id,
@@ -1392,7 +1392,7 @@ def serve(handler):
             downstream({"type": "oracle_v2.routing_mode", "strategy": strategy,
                 "primary_contact": selected_contact, "operator_model_called": False})
         conversation.send({"type": "session.start", "session":
-            podcast_live.session_config(podcast_context) if podcast_context is not None
+            podcast_live.session_config(podcast_context, stable=True) if podcast_context is not None
             else live_config(roster=tools.execute("list_agents", {}, "startup"), delegation_strategy=strategy, voice_context=voice_context,
                 history=memory.startup_history(roster=tools.execute("list_agents", {}, "history")) if memory else ())})
         while not conversation.stop.is_set():
