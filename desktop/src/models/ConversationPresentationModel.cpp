@@ -188,6 +188,16 @@ void ConversationPresentationModel::refreshGroups() {
     endFilterChange(QSortFilterProxyModel::Direction::Rows);
     if (rowCount() > 0) emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
 }
+void ConversationPresentationModel::requestRefresh(bool rowsMoved) {
+    if (m_batchDepth > 0) {
+        // Annotations are keyed by source row; once rows shift, plain row data
+        // is correct until the refresh at the end of the batch.
+        if (rowsMoved) m_explanationRows.clear();
+        m_refreshPending = true;
+        return;
+    }
+    refreshGroups();
+}
 void ConversationPresentationModel::setExplanationLookup(std::function<QString(const QVariantMap&)> lookup) {
     m_explanationLookup = std::move(lookup);
     refreshGroups();
@@ -286,7 +296,7 @@ void ConversationPresentationModel::setSourceModel(QAbstractItemModel* model) {
     QSortFilterProxyModel::setSourceModel(model);
     if (model != nullptr) {
         connect(model, &QAbstractItemModel::dataChanged, this, [this](const QModelIndex& first, const QModelIndex& last) {
-            if (m_explanationLookup) { refreshGroups(); return; }
+            if (m_explanationLookup) { requestRefresh(); return; }
             if (m_activityMode == 1) return;
             for (int row = first.row(); row <= last.row(); ++row)
                 if (groupedRow(row) || groupedRow(row - 1)) { refreshGroups(); return; }
@@ -298,9 +308,29 @@ void ConversationPresentationModel::setSourceModel(QAbstractItemModel* model) {
             }
         });
         connect(model, &QAbstractItemModel::modelReset, this, [this] { refreshGroups(); });
-        connect(model, &QAbstractItemModel::rowsInserted, this, [this] { if (m_activityMode != 1 || m_explanationLookup) refreshGroups(); });
-        connect(model, &QAbstractItemModel::rowsRemoved, this, [this] { if (m_activityMode != 1 || m_explanationLookup) refreshGroups(); });
+        connect(model, &QAbstractItemModel::rowsInserted, this, [this] {
+            if (m_explanationLookup) requestRefresh(true); else if (m_activityMode != 1) refreshGroups();
+        });
+        connect(model, &QAbstractItemModel::rowsRemoved, this, [this] {
+            if (m_explanationLookup) requestRefresh(true); else if (m_activityMode != 1) refreshGroups();
+        });
+        // A log response merges row by row. With tool narration on, every
+        // merged row rebuilt every explanation run (a hash per tool) and
+        // re-announced the whole transcript: a 50-row tail cost 2,500 lookups
+        // and seconds of GUI time. Within one response, refresh once at the end.
+        if (const auto* conversation = qobject_cast<ConversationModel*>(model)) {
+            connect(conversation, &ConversationModel::batchStarted, this, [this] { ++m_batchDepth; });
+            connect(conversation, &ConversationModel::batchFinished, this, [this] {
+                if (m_batchDepth == 0) return;
+                --m_batchDepth;
+                if (m_batchDepth > 0 || !m_refreshPending) return;
+                m_refreshPending = false;
+                refreshGroups();
+            });
+        }
     }
+    m_batchDepth = 0;
+    m_refreshPending = false;
     beginVisit();
 }
 void ConversationPresentationModel::toggleGroup(const QString& id) {

@@ -656,6 +656,7 @@ class NativeCoreTest final : public QObject {
     void oldActivityGroupsAreLazyAndVisitScoped();
     void consecutiveExplanationsCollapseWithoutChangingTranscript();
     void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
+    void logMergeRefreshesExplanationsOncePerBatch();
     void readyModePreservesActivityAndHidesOnlyProvisionalBody();
     void idleContactStartsFreshWithSavedDefaults();
     void newAgentWaitsForOwnRosterAndRejectsLateSnapshots();
@@ -716,6 +717,50 @@ class NativeCoreTest final : public QObject {
     void reportForArtifactExposesSanitizedBody();
     void portedUrlsBecomeLinksWithoutChangingVisibleText();
 };
+
+void NativeCoreTest::logMergeRefreshesExplanationsOncePerBatch() {
+    // A tail reload merges every turn it returns. With tool narration on, each
+    // merged row used to rebuild every explanation run and re-announce the
+    // whole transcript, so a 100-turn merge ran 100 full refreshes in one call:
+    // the GUI froze for minutes while destroyed delegates piled up unfreed.
+    ConversationModel source;
+    source.openSession(QStringLiteral("storm"));
+    const auto turns = [](int count, const QString& command) {
+        QJsonArray rows;
+        for (int turn = 0; turn < count; ++turn) {
+            rows.append(QJsonObject{{QStringLiteral("id"), QStringLiteral("tool-%1").arg(turn)},
+                {QStringLiteral("role"), QStringLiteral("assistant")}, {QStringLiteral("text"), QString{}},
+                {QStringLiteral("revision"), turn + 1},
+                {QStringLiteral("tools"), QJsonArray{QJsonObject{{QStringLiteral("name"), QStringLiteral("Bash")},
+                    {QStringLiteral("input"), QJsonObject{{QStringLiteral("command"), command.arg(turn)}}}}}}});
+            rows.append(QJsonObject{{QStringLiteral("id"), QStringLiteral("reply-%1").arg(turn)},
+                {QStringLiteral("role"), QStringLiteral("assistant")},
+                {QStringLiteral("text"), QStringLiteral("Step %1 done.").arg(turn)}, {QStringLiteral("revision"), turn + 1}});
+        }
+        return rows;
+    };
+    source.applyLog({{QStringLiteral("conversation_id"), QStringLiteral("c")}, {QStringLiteral("turns"), turns(40, QStringLiteral("ls %1"))}},
+                    ConversationModel::LoadKind::Replace);
+    ConversationPresentationModel view;
+    view.setSourceModel(&source);
+    view.setActivityMode(1);
+    int lookups = 0;
+    view.setExplanationLookup([&lookups](const QVariantMap&) { ++lookups; return QStringLiteral("Lists files."); });
+    QSignalSpy refreshed(&view, &QAbstractItemModel::dataChanged);
+    lookups = 0;
+    // Every existing tool row changes and ten more turns arrive in one tail.
+    source.applyLog({{QStringLiteral("conversation_id"), QStringLiteral("c")}, {QStringLiteral("turns"), turns(50, QStringLiteral("ls -la %1"))}},
+                    ConversationModel::LoadKind::Tail);
+    QCOMPARE(source.rowCount(), 100);
+    QVERIFY2(lookups <= 50, qPrintable(QStringLiteral("%1 explanation lookups for one merge").arg(lookups)));
+    int wholeTranscript = 0;
+    for (const auto& signal : refreshed)
+        if (signal.at(0).value<QModelIndex>().row() == 0 && signal.at(1).value<QModelIndex>().row() == view.rowCount() - 1)
+            ++wholeTranscript;
+    QCOMPARE(wholeTranscript, 1);
+    // The single refresh at the end of the batch still reflects the new rows.
+    QCOMPARE(view.index(view.rowCount() - 1, 0).data(ConversationModel::BodyRole).toString(), QStringLiteral("Step 49 done."));
+}
 
 void NativeCoreTest::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender() {
     ConversationModel source;

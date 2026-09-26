@@ -99,6 +99,11 @@ class ConversationModel : public QAbstractListModel {
     void rowsPrepended();
     void replacementRequired();
     void deliveryConfirmed(const QString& clientMessageId);
+    // Bracket one applied log response. Each merged row still emits its own
+    // row signals; listeners that rebuild whole-transcript state can defer
+    // that work to batchFinished instead of repeating it per row.
+    void batchStarted();
+    void batchFinished();
 
   private:
     void rebuildIndex();

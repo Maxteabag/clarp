@@ -48,10 +48,13 @@ class ConversationPresentationModel : public QSortFilterProxyModel {
     QList<QModelIndex> groupRows(int row) const;
     QString activityLabel(const QList<QModelIndex>& rows) const;
     void refreshGroups();
+    void requestRefresh(bool rowsMoved = false);
     QVariant presentationData(const QModelIndex& source, int role) const;
     void rebuildExplanationRuns();
     std::function<QString(const QVariantMap&)> m_explanationLookup;
     QHash<int, QHash<int, QVariant>> m_explanationRows;
     QSet<int> m_repeatedRows;
+    int m_batchDepth = 0;
+    bool m_refreshPending = false;
 };
 }
