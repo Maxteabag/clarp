@@ -1705,6 +1705,55 @@ def cmd_prompt(args) -> int:
     return 0
 
 
+def cmd_model(args) -> int:
+    """Show or set an agent's model/effort override. Defaults to the calling
+    agent's own session, so an agent can switch itself; the change is read on
+    its next turn, not the one running now."""
+    from lib import agents, backends
+
+    session = (args.session or os.environ.get("CLAUDE_PWA_SESSION", "")).strip()
+    if not session:
+        raise SystemExit("no session: pass --session (CLAUDE_PWA_SESSION is unset)")
+    agent = agents.get_by_session(session)
+    if not agent:
+        raise SystemExit(f"no such agent session: {session}")
+    backend = backends.normalize(agent.get("backend"))
+    body = {"session": session}
+    if args.model is not None:
+        body["model"] = "" if args.model == "default" else args.model
+    if args.effort is not None:
+        body["effort"] = "" if args.effort == "default" else args.effort
+
+    def available() -> list[str]:
+        catalog = api_request("GET", "/agent-model-options")
+        provider = (catalog.get("providers") or {}).get(backend) or {}
+        return [m["id"] for m in provider.get("models") or [] if m.get("id")]
+
+    if len(body) == 1:
+        print(json.dumps({
+            "session": session, "backend": backend,
+            "model": agent.get("model") or "", "effort": agent.get("effort") or "",
+            "available": available(),
+        }, indent=2))
+        return 0
+    # The server only pattern-checks some backends (any Claude ID passes), and
+    # an agent that switches itself to a typo breaks its own next turn.
+    if body.get("model"):
+        models = available()
+        if body["model"] not in models:
+            raise SystemExit(f"{body['model']} is not an advertised {backend} model; "
+                             "available: " + ", ".join(models))
+    try:
+        result = api_request("POST", "/agent-llm", body)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace").strip()
+        raise SystemExit(f"model change refused (HTTP {exc.code}): {detail}")
+    result["session"] = session
+    result["applies"] = "next turn"
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def cmd_peers(args) -> int:
     server_root = SHARE
     if not (server_root / "lib").is_dir(): server_root = REPO / "server"
@@ -2319,6 +2368,14 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     prompt_cmd.add_argument("--origin", choices=("automation", "watcher"))
     prompt_cmd.add_argument("--server", help="explicit configured peer name")
     prompt_cmd.set_defaults(func=cmd_prompt)
+    model_cmd = sub.add_parser(
+        "model", help="show or set an agent's model and effort (default: own session)")
+    model_cmd.add_argument(
+        "model", nargs="?", help="exact model ID, or 'default' to clear the override")
+    model_cmd.add_argument(
+        "--effort", help="reasoning effort, or 'default' to clear the override")
+    model_cmd.add_argument("--session", help="target session (default: $CLAUDE_PWA_SESSION)")
+    model_cmd.set_defaults(func=cmd_model)
     peers = sub.add_parser("peers").add_subparsers(
         dest="peers_command", required=True)
     peers.add_parser("list").set_defaults(func=cmd_peers)
