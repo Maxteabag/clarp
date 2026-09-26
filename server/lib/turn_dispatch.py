@@ -576,7 +576,7 @@ class TurnDispatchService:
             if already_memory_queued:
                 continue
             try:
-                self.dispatch(
+                self.submit(DispatchCommand(
                     text=row["text"], requested_session=row["session"],
                     trace_id=row["trace_id"],
                     synthesize_audio=bool(row["synthesize_audio"]),
@@ -587,7 +587,7 @@ class TurnDispatchService:
                     queue_if_busy=True, skip_admission=True,
                     durable_queue_id=row["queue_id"],
                     janitor_run_id=_recovered_janitor_run(row),
-                )
+                ))
                 recovered += 1
             except JanitorDispatchError as exc:
                 _remove_queued_run(str(row["queue_id"]))
@@ -613,8 +613,8 @@ class TurnDispatchService:
                  unheard_audio_sessions: tuple[str, ...] = (),
                  allow_paused_queue: bool = False,
                  janitor_run_id: str = "") -> DispatchResult:
-        # TODO(integration): the send handler and dispatch_adapters build the
-        # DispatchCommand themselves and call submit().
+        """Keyword form of :meth:`submit`, for tests and ad-hoc callers.
+        Production entry points build the :class:`DispatchCommand` themselves."""
         return self.submit(DispatchCommand(
             text=text, requested_session=requested_session,
             trace_id=trace_id, synthesize_audio=synthesize_audio,
@@ -1055,7 +1055,7 @@ class TurnDispatchService:
             turn_queue.release_claim(queue_id)
             raise DispatchError(409, "agent is still working")
         try:
-            return self.dispatch(
+            return self.submit(DispatchCommand(
                 text=str(row["text"]), requested_session=str(row["session"]),
                 trace_id=str(row["trace_id"]),
                 synthesize_audio=bool(row["synthesize_audio"]),
@@ -1066,7 +1066,7 @@ class TurnDispatchService:
                 prompt_admission_id=str(row["prompt_admission_id"]),
                 queue_if_busy=True, skip_admission=True,
                 durable_queue_id=queue_id, allow_paused_queue=True,
-            )
+            ))
         except BaseException:
             turn_queue.release_claim(queue_id)
             raise

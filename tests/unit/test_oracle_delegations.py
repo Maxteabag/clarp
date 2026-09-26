@@ -81,6 +81,9 @@ def test_dispatch_is_silent_forced_and_durable(tmp_path, monkeypatch):
         def __init__(self, _ctx):
             pass
 
+        def submit(self, command):
+            return self.dispatch(**command.as_kwargs())
+
         def dispatch(self, **kwargs):
             calls.append(kwargs)
             return SimpleNamespace(session="theo", queued=False)
@@ -110,6 +113,9 @@ def test_dispatch_preserves_unauthenticated_request_authority(tmp_path, monkeypa
         def __init__(self, _ctx):
             pass
 
+        def submit(self, command):
+            return self.dispatch(**command.as_kwargs())
+
         def dispatch(self, **kwargs):
             calls.append(kwargs)
             return SimpleNamespace(session="theo", queued=False)
@@ -134,6 +140,9 @@ def test_dispatch_retry_does_not_reopen_terminal_failure(tmp_path, monkeypatch):
     class FailingDispatch:
         def __init__(self, _ctx):
             pass
+
+        def submit(self, command):
+            return self.dispatch(**command.as_kwargs())
 
         def dispatch(self, **kwargs):
             calls.append(kwargs)

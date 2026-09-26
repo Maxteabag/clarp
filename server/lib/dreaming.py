@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 from . import agents as agents_db
 from . import backends, compaction, config, db, dream_seeds, location, origins
 from . import settings_store
+from . import trace as _trace
 from .log import log, log_exception
 from .protocol import AgentState
 
@@ -1175,7 +1176,7 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
     backend = backends.normalize(
         get_settings().backend or agent.get("backend"))
     backend_session_id = str(uuid.uuid4())
-    trace_id = f"dream-{uuid.uuid4().hex[:16]}"
+    trace_id = _trace.new_trace_id()
     model, effort = _resolve_dream_llm(agent, backend)
     run_id = _run_id_from_prompt(prompt)
     run = get_run(run_id) if run_id else None

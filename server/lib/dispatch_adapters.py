@@ -46,7 +46,7 @@ def decision_queues_if_busy(pending: dict) -> bool:
 
 class DispatchAdapters:
     def __init__(self, ctx, service_factory: Callable[[Any], Any], *,
-                 new_trace_id: Callable[[], str] = _trace.new_id,
+                 new_trace_id: Callable[[], str] = _trace.new_trace_id,
                  monotonic: Callable[[], float] = time.monotonic):
         self.ctx = ctx
         self._service = service_factory
@@ -60,11 +60,12 @@ class DispatchAdapters:
                   trace_id: str = "", client_msg_id: str = "",
                   queue_if_busy: bool = False, **extra):
         """A silent turn forced onto `session`. Schedulers never route."""
-        return self._service(self.ctx).dispatch(
+        from .turn_dispatch import DispatchCommand
+        return self._service(self.ctx).submit(DispatchCommand(
             text=text, requested_session=session, forced_session=session,
             trace_id=trace_id or self._new_trace_id(),
             client_msg_id=client_msg_id, synthesize_audio=False,
-            origin=origin, queue_if_busy=queue_if_busy, **extra)
+            origin=origin, queue_if_busy=queue_if_busy, **extra))
 
     @staticmethod
     def _idle_agent(session: str) -> dict | None:

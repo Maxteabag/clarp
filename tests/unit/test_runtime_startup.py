@@ -21,7 +21,10 @@ def test_ephemeral_janitors_do_not_start_unused_chat_runtimes(tmp_path, monkeypa
 def test_runtime_recovery_marks_dead_work_before_reconcile_and_continuity():
     order = []
     dispatch = SimpleNamespace(
-        dispatch=lambda **kwargs: order.append(("dispatch", kwargs)),
+        submit=lambda command: order.append(("dispatch", {
+            key: getattr(command, key) for key in (
+                "text", "requested_session", "forced_session", "trace_id",
+                "synthesize_audio", "origin")})),
         recover_queued=lambda: order.append("queues") or 3,
     )
 
@@ -59,14 +62,14 @@ def test_runtime_recovery_marks_dead_work_before_reconcile_and_continuity():
 def test_runtime_recovery_isolates_one_failed_continuity_prompt():
     sent = []
 
-    def dispatch(**kwargs):
-        sent.append(kwargs["requested_session"])
-        if kwargs["requested_session"] == "broken":
+    def submit(command):
+        sent.append(command.requested_session)
+        if command.requested_session == "broken":
             raise RuntimeError("provider unavailable")
 
     result = recover_runtime(
         SimpleNamespace(stream=None),
-        SimpleNamespace(dispatch=dispatch, recover_queued=lambda: 0),
+        SimpleNamespace(submit=submit, recover_queued=lambda: 0),
         restore_agents=lambda _ctx: None,
         mark_interrupted=lambda stream=None: [],
         reconcile=lambda: 0,

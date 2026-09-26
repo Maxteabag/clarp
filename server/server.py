@@ -100,7 +100,7 @@ from lib.personalities import (  # noqa: E402
 from lib.conversation import load_conversation, session_cwd  # noqa: E402
 from lib.snapshot import build_agent_snapshot  # noqa: E402
 from lib.timing import SERVER_TIMING  # noqa: E402
-from lib.turn_dispatch import DispatchError, TurnDispatchService  # noqa: E402
+from lib.turn_dispatch import DispatchCommand, DispatchError, TurnDispatchService  # noqa: E402
 from lib.voices import voices_with_availability  # noqa: E402
 
 # Background workers, imported here so tests can monkeypatch them as
@@ -4457,7 +4457,7 @@ class Handler(BaseHTTPRequestHandler):
                     f"pid={job.get('worker_pid') or 'unknown'} "
                     f"start_token={job.get('worker_start_token') or 'unknown'}"
                 )
-                TurnDispatchService(self.ctx).dispatch(
+                TurnDispatchService(self.ctx).submit(DispatchCommand(
                     text=(f"the user cancelled background job {job['job_id']}: "
                           f"{job['title']} (handle {cancelled_handle}; "
                           f"{worker_identity}). Before stopping anything, run "
@@ -4469,7 +4469,7 @@ class Handler(BaseHTTPRequestHandler):
                     trace_id=_trace.new_trace_id(),
                     synthesize_audio=False,
                     origin="automation",
-                )
+                ))
             except Exception as exc:
                 log_exception("backgroundJobCancelPromptFail", exc, detail=job_id)
         return self._json_ok({
@@ -4791,7 +4791,7 @@ class Handler(BaseHTTPRequestHandler):
     def _send_direct(self, req: SendRequest, prompt_admission) -> None:
         from lib import transcription_results
         try:
-            result = TurnDispatchService(self.ctx).dispatch(
+            result = TurnDispatchService(self.ctx).submit(DispatchCommand(
                 text=req.text, requested_session=req.session,
                 trace_id=req.trace_id,
                 synthesize_audio=req.synthesize_audio,
@@ -4800,8 +4800,8 @@ class Handler(BaseHTTPRequestHandler):
                 origin=req.origin, sender_agent_id=req.sender_agent_id,
                 prompt_admission=prompt_admission,
                 queue_if_busy=req.queue_if_busy,
-                unheard_audio_sessions=req.unheard_audio_sessions,
-            )
+                unheard_audio_sessions=tuple(req.unheard_audio_sessions),
+            ))
         except DispatchError as e:
             return self._send(e.status, str(e).encode(), "text/plain")
         if req.transcription_id:

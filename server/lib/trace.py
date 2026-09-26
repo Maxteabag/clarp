@@ -8,13 +8,12 @@ recognises the ones already on disk.
 
 Canonical format: 16 lowercase hex characters (64 bits). Two older shapes
 still exist in stored rows and are accepted by ``parse_trace_id`` so history
-stays readable, but nothing new should mint them:
+stays readable; nothing mints them any more:
 
-* a bare uuid4 (``runtime_startup.py`` restart prompts)
-* ``dream-<16 hex>`` (``dreaming.py`` dream runs)
+* a bare uuid4 (restart prompts before the architecture program)
+* ``dream-<16 hex>`` (dream runs before the architecture program)
 
-TODO(integration): switch runtime_startup.py:91 and dreaming.py:1178 to
-``new_trace_id()`` so ``LEGACY_TRACE_ID_RE`` can be retired.
+``LEGACY_TRACE_ID_RE`` can go once no stored row carries either shape.
 """
 from __future__ import annotations
 
@@ -52,7 +51,3 @@ def parse_trace_id(value: object) -> str | None:
 def is_canonical(value: object) -> bool:
     return isinstance(value, str) and bool(TRACE_ID_RE.match(value))
 
-
-# Kept for callers outside this stream (dispatch_adapters, stt_stream,
-# transcription_pipeline). TODO(integration): move them to new_trace_id().
-new_id = new_trace_id
