@@ -340,18 +340,12 @@ class ServerContext:
 
 
 def _frozen_setattr(self: ServerContext, name: str, value: Any) -> None:
-    """Refuse assignment except the replaceable services.
-
-    TODO(integration): server.py still assigns `ctx.stt = replacement`
-    (STT switch), `ctx.tool_explanations = ToolExplanations()` and
-    `ctx.herald = herald` (build_server). Those three lines become
-    `ctx.replace_stt(replacement)`, `ctx.install_tool_explanations(...)` and
-    `ctx.install_herald(herald)`; this shim then only raises.
-    """
-    if name in REPLACEABLE_SERVICES:
-        self.replace_service(name, value)
-        return
-    raise dataclasses.FrozenInstanceError(f"cannot assign to field {name!r}; use with_()")
+    """Refuse every assignment. A replaceable service changes through
+    `replace_service` (or `replace_stt`/`install_*`), which swaps it under the
+    service lock and returns the predecessor; anything else goes through
+    `with_()`."""
+    hint = f"replace_service({name!r}, ...)" if name in REPLACEABLE_SERVICES else "with_()"
+    raise dataclasses.FrozenInstanceError(f"cannot assign to field {name!r}; use {hint}")
 
 
 ServerContext.__setattr__ = _frozen_setattr  # type: ignore[method-assign]

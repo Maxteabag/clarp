@@ -37,6 +37,15 @@ server_module.BIND_ADDR = "127.0.0.1"
 build_server = server_module.build_server
 
 
+
+class _SttCtx(SimpleNamespace):
+    """A handler context stub with the one ServerContext method the STT
+    switch calls."""
+
+    def replace_stt(self, stt):
+        previous, self.stt = self.stt, stt
+        return previous
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -181,10 +190,10 @@ def test_server_restart_does_not_interrupt_healthy_external_runtime(
     from lib import heartbeat, interrupted_turns
 
     calls: list[str] = []
-    fake_ctx.runtime_client = SimpleNamespace(
+    fake_ctx.replace_service("runtime_client", SimpleNamespace(
         ping=lambda: True,
         recover_queued=lambda: 0,
-    )
+    ))
     monkeypatch.setattr(
         server_module, "resume_persisted_agents",
         lambda _ctx: calls.append("resume"))
@@ -205,7 +214,7 @@ def test_server_restart_does_not_interrupt_healthy_external_runtime(
 
 
 def test_status_reports_external_runtime_health(fake_ctx):
-    fake_ctx.runtime_client = SimpleNamespace(
+    fake_ctx.replace_service("runtime_client", SimpleNamespace(
         ping=lambda: True,
         recover_queued=lambda: 0,
         status=lambda: {
@@ -214,7 +223,7 @@ def test_status_reports_external_runtime_health(fake_ctx):
             "draining": False,
             "active": {"agent-1": "trace-1"},
         },
-    )
+    ))
     port = _free_port()
     srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -270,7 +279,7 @@ def test_http_server_can_be_replaced_while_runtime_keeps_active_turn(
     )
     runtime_thread = threading.Thread(target=runtime.serve_forever, daemon=True)
     runtime_thread.start()
-    fake_ctx.runtime_client = RuntimeClient(runtime_socket)
+    fake_ctx.replace_service("runtime_client", RuntimeClient(runtime_socket))
 
     def start_http_server():
         port = _free_port()
@@ -356,7 +365,7 @@ def test_runtime_owned_turn_completes_after_http_server_is_gone(
         runtime_socket, dispatch_service=runtime_dispatch)
     runtime_thread = threading.Thread(target=runtime.serve_forever, daemon=True)
     runtime_thread.start()
-    fake_ctx.runtime_client = RuntimeClient(runtime_socket)
+    fake_ctx.replace_service("runtime_client", RuntimeClient(runtime_socket))
 
     port = _free_port()
     first = build_server(fake_ctx, port, bind_addr="127.0.0.1")
@@ -1675,7 +1684,7 @@ def test_discard_waits_for_inflight_transcription_then_deletes(running_server):
             assert release.wait(timeout=2)
             return super().transcribe_bytes(*args, **kwargs)
 
-    ctx.stt = SlowSTT(text="discard me")
+    ctx.replace_service("stt", SlowSTT(text="discard me"))
     transcription_result = []
     discard_result = []
 
@@ -2369,7 +2378,7 @@ def test_concurrent_transcription_retry_coalesces_inflight_work(running_server):
             assert release.wait(timeout=2)
             return super().transcribe_bytes(*args, **kwargs)
 
-    ctx.stt = SlowSTT(text="computed once", ends_terminal=True)
+    ctx.replace_service("stt", SlowSTT(text="computed once", ends_terminal=True))
     headers = {
         "Content-Type": "audio/webm",
         "X-Transcription-ID": "durable-recording-inflight",
@@ -2449,7 +2458,7 @@ def test_disabled_transcription_keeps_server_health_ready(running_server, monkey
     from lib import stt as stt_module, transcription_models
     monkeypatch.setattr(transcription_models, "catalog_status", lambda: [])
     monkeypatch.setattr(stt_module, "installed_transcription_models", lambda: [])
-    ctx.stt = DisabledSTT()
+    ctx.replace_service("stt", DisabledSTT())
     with urllib.request.urlopen(base + "/diagnostics/health", timeout=2) as response:
         health_body = json.loads(response.read())
     with urllib.request.urlopen(base + "/transcription-capabilities", timeout=2) as response:
@@ -2473,7 +2482,7 @@ def test_post_transcribe_passes_selected_installed_model(running_server):
             return self.transcribe_bytes(
                 audio_bytes, content_type, vocab_prompt, wait=wait)
 
-    ctx.stt = SelectableSTT()
+    ctx.replace_service("stt", SelectableSTT())
     status, body = _post_raw(
         base + "/transcribe", b"\x00" * 100,
         {"Content-Type": "audio/webm", "X-Transcription-Model": "whisper:medium"},
@@ -2515,7 +2524,7 @@ else:
     manifest = custom_stt_adapters.get("custom.integration-stt")
     assert manifest is not None
     base, ctx, _srv = running_server
-    ctx.stt = CustomAdapterSTT(manifest, "general")
+    ctx.replace_service("stt", CustomAdapterSTT(manifest, "general"))
 
     status, body = _get(base + "/transcription-capabilities")
     assert status == 200
@@ -2620,7 +2629,7 @@ def test_transcription_activation_recovery_reuses_loading_default(monkeypatch):
 
     current = WhisperSTT("small.en", "int8")
     handler = object.__new__(server_module.Handler)
-    handler.server = SimpleNamespace(ctx=SimpleNamespace(stt=current))
+    handler.server = SimpleNamespace(ctx=_SttCtx(stt=current))
     monkeypatch.setattr(config, "load", lambda: SimpleNamespace(
         whisper_enabled=True, whisper_model="small.en",
         whisper_compute="int8", whisper_isolate=False,
@@ -2676,7 +2685,7 @@ def test_transcription_activation_timeout_reuses_same_loader(monkeypatch):
         whisper_compute="int8", whisper_isolate=False,
     ))
     handler = object.__new__(server_module.Handler)
-    handler.server = SimpleNamespace(ctx=SimpleNamespace(
+    handler.server = SimpleNamespace(ctx=_SttCtx(
         stt=FakeUnavailable("small.en", "int8")))
 
     with pytest.raises(RuntimeError, match="did not load"):
@@ -2732,7 +2741,7 @@ def test_transcription_activation_propagates_loader_error_before_retry(
     current = FakeWhisper("small.en", "int8")
     current.load_error = RuntimeError("first loader failed")
     handler = object.__new__(server_module.Handler)
-    handler.server = SimpleNamespace(ctx=SimpleNamespace(stt=current))
+    handler.server = SimpleNamespace(ctx=_SttCtx(stt=current))
 
     with pytest.raises(RuntimeError, match="first loader failed"):
         handler._activate_transcription_if_default("faster-whisper:small.en")
@@ -2778,7 +2787,7 @@ def test_transcription_activation_holds_the_swap_lock(monkeypatch):
         whisper_compute="int8", whisper_isolate=False,
     ))
     handler = object.__new__(server_module.Handler)
-    handler.server = SimpleNamespace(ctx=SimpleNamespace(
+    handler.server = SimpleNamespace(ctx=_SttCtx(
         stt=FakeUnavailable("small.en", "int8")))
     assert not server_module._STT_ACTIVATION_LOCK.locked()
     handler._activate_transcription_if_default("faster-whisper:small.en")
@@ -3121,7 +3130,7 @@ def test_stop_barrier_is_executed_by_external_runtime(fake_ctx):
         def finish_stop(self, lease_id, cancelled_trace_ids=None):
             calls.append(("finish", lease_id, cancelled_trace_ids))
 
-    fake_ctx.runtime_client = RuntimeOwner()
+    fake_ctx.replace_service("runtime_client", RuntimeOwner())
     agent = agents_db.get_by_session("claude")
     turn_queue.enqueue(
         queue_id="queue-runtime-stop", agent_id=agent["agent_id"],

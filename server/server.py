@@ -1721,7 +1721,7 @@ class Handler(BaseHTTPRequestHandler):
                 model_source=record["_local_path"])
         # Publish loader ownership before starting it. A timed-out recovery
         # retry must wait on this exact loader rather than create a duplicate.
-        self.ctx.stt = replacement
+        self.ctx.replace_stt(replacement)
         replacement.start_loading()
         if not replacement.load_done.wait(timeout=330.0):
             raise RuntimeError(f"installed model did not load: {installed_id}")
@@ -5320,7 +5320,7 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
     def start_tool_explanations():
         if ctx.tool_explanations is None:
             from lib.tool_explanations import ToolExplanations
-            ctx.tool_explanations = ToolExplanations()
+            ctx.install_tool_explanations(ToolExplanations())
         return ctx.tool_explanations
 
     def start_bonjour():
@@ -5479,7 +5479,7 @@ def build_server(ctx: ServerContext, port: int,
     _configure_runtime_client(ctx)
     _seed_startup_invariants(ctx)
     if herald is not None:
-        ctx.herald = herald
+        ctx.install_herald(herald)
     listener_addr = bind_addr or BIND_ADDR
     if listener_addr not in {"127.0.0.1", "::1", "localhost"} and not ctx.auth_token:
         raise ValueError("a non-loopback listener requires authentication")
