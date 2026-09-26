@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 93
+_SCHEMA_VERSION = 94
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -1126,6 +1126,7 @@ CREATE TABLE tool_explanation_releases (
     demand_id TEXT PRIMARY KEY,
     expires_at INTEGER NOT NULL
 );
+CREATE INDEX tool_explanation_releases_expiry ON tool_explanation_releases(expires_at);
 """
 _SCHEMA_SQL += _EXPLANATION_CACHE_SCHEMA
 from .tool_explanation_mappings import SCHEMA as _EXPLANATION_MAPPINGS_SCHEMA
