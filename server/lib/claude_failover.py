@@ -2,6 +2,8 @@
 
 The dispatcher supplies its ownership lock and callbacks. Account credentials
 stay in an explicitly configured local command, outside the Host database.
+What to do with the parked work is ``policies.failover.FailoverPlan``; this
+module gathers the process state, asks, and terminates, kills, waits, resumes.
 """
 from __future__ import annotations
 
@@ -15,6 +17,9 @@ import time
 from typing import Callable
 
 from .log import log
+from .policies.failover import (
+    FAILED, NOT_CHECKED, PARK_EXPIRED, FailoverPlan, FailoverSettings, Kill,
+    Park, PendingWork, Release, Resume)
 
 RECHECK_SECONDS = 60.0
 # Owned work is never left parked silently for ever. A turn released into a real
@@ -122,6 +127,7 @@ class ClaudeFailover:
         self.command: tuple[str, ...] = ()
         self.next_check = 0.0
         self.parked_since = 0.0
+        self.checked_models: tuple[str, ...] = ()
 
     @staticmethod
     def _schedule(delay, callback):
@@ -179,91 +185,99 @@ class ClaudeFailover:
                          if value.owned()}
         return list(self.attempts.values())
 
+    def _plan(self) -> FailoverPlan:
+        return FailoverPlan(parked_since=self.parked_since, next_check=self.next_check,
+                            checked_models=self.checked_models)
+
+    def _decide(self, pending, verdict, settings):
+        snapshot = [PendingWork(model=item.model, stopped=item.stopped) for item in pending]
+        return self._plan().decide(snapshot, verdict, self.now(), settings)
+
+    @staticmethod
+    def _stop_owned(attempt: Attempt) -> None:
+        """Terminate one owned process and make sure nothing of it can work."""
+        if attempt.stopped:
+            return
+        # A quota callback can arrive before spawn_turn has returned.
+        # Wait for its exact handle, then finish draining before resume.
+        if not attempt.spawned.wait(timeout=10):
+            raise RuntimeError("Claude spawn has not settled")
+        handle = attempt.handle
+        if handle is not None:
+            handle.terminate()
+            try:
+                handle.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                handle.kill()
+                handle.wait(timeout=10)
+            drain = getattr(handle, "drain_thread", None)
+            if drain is not None and drain.is_alive():
+                # wait() bounds the drainer join but does not raise
+                # when a descendant keeps stdout open after parent exit.
+                handle.kill()
+                handle.wait(timeout=10)
+                if drain.is_alive():
+                    raise RuntimeError("Claude transcript is still draining")
+            finish_owned_group(handle)
+        attempt.stopped = True
+
     def recover(self):
+        settings = FailoverSettings(recheck_seconds=RECHECK_SECONDS,
+                                    max_park_seconds=MAX_PARK_SECONDS)
         try:
             with self.lock:
                 pending = self._pending()
-            for attempt in pending:
-                if attempt.stopped:
-                    continue
-                # A quota callback can arrive before spawn_turn has returned.
-                # Wait for its exact handle, then finish draining before resume.
-                if not attempt.spawned.wait(timeout=10):
-                    raise RuntimeError("Claude spawn has not settled")
-                handle = attempt.handle
-                if handle is not None:
-                    handle.terminate()
-                    try:
-                        handle.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        handle.kill()
-                        handle.wait(timeout=10)
-                    drain = getattr(handle, "drain_thread", None)
-                    if drain is not None and drain.is_alive():
-                        # wait() bounds the drainer join but does not raise
-                        # when a descendant keeps stdout open after parent exit.
-                        handle.kill()
-                        handle.wait(timeout=10)
-                        if drain.is_alive():
-                            raise RuntimeError("Claude transcript is still draining")
-                    finish_owned_group(handle)
-                attempt.stopped = True
+            if isinstance(self._decide(pending, NOT_CHECKED, settings), Kill):
+                for attempt in pending:
+                    self._stop_owned(attempt)
             with self.lock:
                 pending = self._pending()
-                if not pending:
+                decision = self._decide(pending, NOT_CHECKED, settings)
+                if isinstance(decision, Release):
                     self.recovering = False
                     return
-                delay = self.next_check - self.now()
-                if delay > 0:
-                    self.schedule(delay, self.recover)
+                if isinstance(decision, Park):
+                    self.schedule(decision.delay, self.recover)
                     return
-                models = sorted({attempt.model for attempt in pending})
-                self.next_check = self.now() + RECHECK_SECONDS
-            verdict = self.switch(self.command, models)
-            resumed = verdict is True
-            if resumed:
-                with self.lock:
-                    pending = self._pending()
-                    # New arrivals can introduce a model that was not checked.
-                    # Keep them parked for another complete account check.
-                    if any(item.model not in models for item in pending):
-                        resumed = False
-                    else:
-                        self.attempts.clear()
-                        self.recovering = False
-                        for attempt in pending:
-                            if attempt.owned():
-                                attempt.resume()
-                if resumed:
-                    log("claudeAccountRecovered", f"turns={len(pending)}")
-                    return
-            elif verdict is None:
-                log("claudeAccountCheckInconclusive",
-                    "selector returned no verdict; quota is unknown")
-            if verdict is not None:
-                log("claudeAccountWaiting", "No verified account; turns remain paused")
+                self.next_check = self.now() + settings.recheck_seconds
+                self.checked_models = decision.models
+            verdict = self.switch(self.command, list(decision.models))
         except Exception as exc:  # Keep the owned work parked for a later check.
             log("claudeAccountRecoveryFail", type(exc).__name__)
+            verdict = FAILED
         # Every exit from a failed check lands here, including a raised one, so
         # this is the one place that can guarantee work is not parked for ever.
         with self.lock:
             pending = self._pending()
-            if not pending:
-                self.recovering = False
-                return
-            expired = self.now() - self.parked_since >= MAX_PARK_SECONDS
-            if expired:
+            decision = self._decide(pending, verdict, settings)
+            if isinstance(decision, Resume):
                 self.attempts.clear()
                 self.recovering = False
-        if expired:
-            log("claudeAccountParkExpired",
-                f"released={len(pending)} after {MAX_PARK_SECONDS:.0f}s without a "
-                "usable account; the turns run and fail visibly instead")
-            for attempt in pending:
-                if attempt.owned():
-                    attempt.resume()
+                for attempt in pending:
+                    if attempt.owned():
+                        attempt.resume()
+            elif isinstance(decision, Release):
+                self.recovering = False
+                if decision.reason == PARK_EXPIRED:
+                    self.attempts.clear()
+        if isinstance(decision, Resume):
+            log("claudeAccountRecovered", f"turns={len(pending)}")
             return
-        self.schedule(RECHECK_SECONDS, self.recover)
+        if verdict is None:
+            log("claudeAccountCheckInconclusive",
+                "selector returned no verdict; quota is unknown")
+        elif verdict is not FAILED:
+            log("claudeAccountWaiting", "No verified account; turns remain paused")
+        if isinstance(decision, Release):
+            if decision.reason == PARK_EXPIRED:
+                log("claudeAccountParkExpired",
+                    f"released={len(pending)} after {MAX_PARK_SECONDS:.0f}s without a "
+                    "usable account; the turns run and fail visibly instead")
+                for attempt in pending:
+                    if attempt.owned():
+                        attempt.resume()
+            return
+        self.schedule(decision.delay, self.recover)
 
     def status(self):
         with self.lock:
