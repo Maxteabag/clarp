@@ -3649,3 +3649,42 @@ def test_build_server_attaches_the_herald_before_workers_start(fake_ctx):
         assert captured["herald"] is herald
     finally:
         srv.server_close()
+
+
+def test_helper_agent_create_report_and_mark_over_http(running_server, monkeypatch, tmp_path):
+    base, _ctx, _srv = running_server
+    _unlink_claude_source_marker()
+    from lib import clarp_runner
+    monkeypatch.setattr(clarp_runner, "spawn_turn", lambda **kw: type("_H", (), {"pid": 99})())
+
+    status, body = _post(base + "/agents", {
+        "name": "stream-a", "parent": "claude", "role": "helper", "voice_id": "{}",
+        "cwd": str(tmp_path), "synthesize_audio": False, "backend": "claude"})
+    created = json.loads(body)
+    helper = created["session"]
+    assert status == 200
+    assert created["agent"]["role"] == "helper"
+    assert created["agent"]["helper_state"] == "running"
+
+    status, _ = _post(base + "/send", {
+        "text": "Report: parser refactored.", "session": "claude", "sender": helper,
+        "force_session": True, "synthesize_audio": False})
+    assert status == 200
+    _, raw = _get(base + f"/agent-helper-state?session={helper}")
+    state = json.loads(raw)
+    assert state["helper_state"] == "reported"
+    assert state["parent_agent_id"] == json.loads(_get(
+        base + "/agent-helper-state?session=claude")[1])["agent_id"]
+
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + "/agent-helper-state", {"session": helper, "state": "done", "by": "rachel"})
+    assert error.value.code == 403
+    status, raw = _post(base + "/agent-helper-state",
+                        {"session": helper, "state": "done", "by": "claude"})
+    assert json.loads(raw)["helper_state"] == "done"
+
+    rows = {r["session"]: r for r in json.loads(_get(base + "/agents/snapshot")[1])["agents"]}
+    assert rows["claude"]["child_count"] == 1
+    assert rows["claude"]["running_children"] == 0
+    assert rows[helper]["helper_state"] == "done"
+    assert rows[helper]["parent_agent_id"] == rows["claude"]["agent_id"]
