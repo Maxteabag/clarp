@@ -140,8 +140,12 @@ def set_config_generation(c, agent_id: str, generation: int, now: int) -> None:
     c.execute("UPDATE janitor_configs SET generation=?,revision=revision+1,updated_at=? WHERE agent_id=?", (generation, now, agent_id))
 
 
-def record_config_run(c, agent_id: str, now: int, error: str = "") -> None:
-    c.execute("UPDATE janitor_configs SET last_run_at=?,last_error=?,updated_at=? WHERE agent_id=?", (now, error, now, agent_id))
+def record_config_run(c, agent_id: str, now: int, error: str = "", *, touch_updated: bool = True) -> None:
+    """Last run time and error; deterministic bookkeeping leaves updated_at alone."""
+    if touch_updated:
+        c.execute("UPDATE janitor_configs SET last_run_at=?,last_error=?,updated_at=? WHERE agent_id=?", (now, error, now, agent_id))
+    else:
+        c.execute("UPDATE janitor_configs SET last_run_at=?,last_error=? WHERE agent_id=?", (now, error, agent_id))
 
 
 def record_config_change(c, agent_id: str, now: int) -> None:
@@ -348,8 +352,9 @@ def demand_result_json(run_id: str, c=None) -> str | None:
     return row[0] if row else None
 
 
-def insert_demand_result(c, run_id: str, result, now: int) -> None:
-    c.execute("INSERT INTO janitor_demand_results(run_id,result_json,created_at) VALUES (?,?,?)", (run_id, encode(result), now))
+def insert_demand_result(c, run_id: str, result, now: int, *, ignore_existing: bool = False) -> None:
+    c.execute(f"INSERT {'OR IGNORE ' if ignore_existing else ''}INTO janitor_demand_results(run_id,result_json,created_at) VALUES (?,?,?)",
+              (run_id, encode(result), now))
 
 
 # ---- effects -----------------------------------------------------------------
@@ -456,6 +461,51 @@ def link_creation_agent(c, request_id: str, agent_id: str) -> None:
 
 def complete_creation_request(c, request_id: str, response, now: int) -> None:
     c.execute("UPDATE janitor_creation_requests SET response_json=?,completed_at=? WHERE request_id=?", (encode(response), now, request_id))
+
+
+# ---- autonomy continuity and quota receipts ---------------------------------
+#
+# janitor_autonomy.py creates these two tables (its SCHEMA); the statements
+# against them live here like every other janitor_* table.
+
+def continuity_row(target_id: str, c=None):
+    return _c(c).execute("SELECT * FROM janitor_continuity WHERE target_id=?", (target_id,)).fetchone()
+
+
+def continuity_row_for_run(run_id: str, c=None):
+    return _c(c).execute("SELECT * FROM janitor_continuity WHERE run_id=?", (run_id,)).fetchone()
+
+
+def pending_continuity_rows(c=None) -> list:
+    return _c(c).execute("SELECT * FROM janitor_continuity WHERE status='pending'").fetchall()
+
+
+def save_continuity(target_id: str, snapshot: str, run_id: str, decision_json: str, due_at: int,
+                    status: str, c=None) -> None:
+    _c(c).execute("INSERT OR REPLACE INTO janitor_continuity VALUES (?,?,?,?,?,?)",
+                  (target_id, snapshot, run_id, decision_json, due_at, status))
+
+
+def set_continuity_status(target_id: str, status: str, c=None) -> None:
+    _c(c).execute("UPDATE janitor_continuity SET status=? WHERE target_id=?", (status, target_id))
+
+
+def insert_quota_receipt(receipt_id: str, run_id: str, payload_json: str, now: int, c=None) -> bool:
+    """True when this receipt is new; a repeat of the same identity is ignored."""
+    return bool(_c(c).execute("INSERT OR IGNORE INTO janitor_quota_receipts VALUES (?,?,?,NULL,?)",
+                              (receipt_id, run_id, payload_json, now)).rowcount)
+
+
+def set_quota_receipt_payload(receipt_id: str, payload_json: str, c=None) -> None:
+    _c(c).execute("UPDATE janitor_quota_receipts SET payload_json=? WHERE receipt_id=?", (payload_json, receipt_id))
+
+
+def undelivered_quota_receipts(c=None) -> list:
+    return _c(c).execute("SELECT * FROM janitor_quota_receipts WHERE delivery_json IS NULL").fetchall()
+
+
+def set_quota_receipt_delivery(receipt_id: str, delivery_json: str, c=None) -> None:
+    _c(c).execute("UPDATE janitor_quota_receipts SET delivery_json=? WHERE receipt_id=?", (delivery_json, receipt_id))
 
 
 # ---- neighbouring tables the janitor transaction needs ----------------------
