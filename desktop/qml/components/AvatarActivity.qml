@@ -14,8 +14,9 @@ Item {
     property string symbol: ""
     property bool showPortrait: false
     readonly property var motionClock: controller.avatarMotion
-    readonly property bool authoritativeWorking: { motionClock.revision; return motionClock.working(session); }
-    property real phase: { motionClock.revision; return motionClock.phase(session); }
+    readonly property bool authoritativeWorking: { motionClock.workingRevision; return motionClock.working(session); }
+    // Only working avatars follow the frame clock; idle ones stay at rest.
+    property real phase: { if (!authoritativeWorking) return 0; motionClock.revision; return motionClock.phase(session); }
     readonly property bool windowVisible: root.Window.window !== null && root.Window.window.visibility !== Window.Hidden && root.Window.window.visibility !== Window.Minimized
     onWindowVisibleChanged: updateObservation()
     function updateObservation() { motionClock.observe(root, root.visible && root.windowVisible && root.working && root.authoritativeWorking); }

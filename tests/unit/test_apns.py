@@ -253,9 +253,30 @@ def test_turn_done_payload():
 
 def test_turn_done_alerts_are_ordinary_messages_not_time_sensitive():
     """A finished turn is a chat message, so it must not break through Focus
-    or Do Not Disturb the way a time-sensitive alert does."""
+    or Do Not Disturb the way a time-sensitive alert does. It also arrives
+    without a sound or vibration by default, reserving those for a reply that
+    actually leaves something for the user to answer."""
     p = apns.turn_done_payload("Mike", "mike")
     assert p["aps"]["interruption-level"] == "active"
+    assert "sound" not in p["aps"]
+    assert p["needs_response"] is False
+
+
+def test_turn_done_needing_a_response_is_time_sensitive_with_sound():
+    p = apns.turn_done_payload("Mike", "mike", needs_response=True)
+    assert p["aps"]["interruption-level"] == "time-sensitive"
+    assert p["aps"]["sound"] == "default"
+    assert p["needs_response"] is True
+
+
+def test_decision_payload_always_carries_the_sound_even_when_not_interrupting():
+    """A decision is, by definition, something to answer, so it always plays
+    the alert sound; only interruption-level follows blocks_progress/urgency."""
+    p = apns.decision_payload("Nadia", "nadia", "Deploy?", "Now?",
+                              decision_id="d1", artifact_id="a1")
+    assert p["aps"]["sound"] == "default"
+    assert p["aps"]["interruption-level"] == "active"
+    assert p["needs_response"] is True
 
 
 # --------------------------------------------------------------------------
@@ -761,6 +782,36 @@ def test_avatar_url_none_when_loopback(tmp_path):
     cfg = config.load(cfgfile)
     # Loopback isn't device-reachable → skip the avatar rather than send a bad URL.
     assert apns._avatar_url(cfg, "Mike") is None
+
+
+def test_send_user_notification_carries_needs_response_into_the_wire_payload(tmp_path, monkeypatch):
+    """The classifier's needs_response flag must reach the actual APNs body,
+    not just the payload builder in isolation."""
+    import json as jsonlib
+    import httpx
+    _apns_config(tmp_path)
+    apns.register_token('needs-response-phone')
+    calls = []
+    monkeypatch.setattr(
+        httpx, 'Client', lambda *a, **k: _FakeClient({'needs-response-phone': _FakeResp(200)}, calls))
+    apns.send_user_notification({
+        'session': 'mike', 'persona': 'Mike', 'preview': 'Pick one before I continue',
+        'push': True, 'needs_response': True,
+    })
+    sent = jsonlib.loads(calls[0]['content'])
+    assert sent['needs_response'] is True
+    assert sent['aps']['interruption-level'] == 'time-sensitive'
+    assert sent['aps']['sound'] == 'default'
+
+    calls.clear()
+    apns.send_user_notification({
+        'session': 'mike', 'persona': 'Mike', 'preview': 'All done',
+        'push': True, 'needs_response': False,
+    })
+    sent = jsonlib.loads(calls[0]['content'])
+    assert sent['needs_response'] is False
+    assert sent['aps']['interruption-level'] == 'active'
+    assert 'sound' not in sent['aps']
 
 
 def test_active_desktop_suppresses_alert_without_marking_notification_read(tmp_path, monkeypatch):

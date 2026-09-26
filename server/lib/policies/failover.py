@@ -1,6 +1,6 @@
-"""What to do with Claude work parked behind an account limit.
+"""What to do with work parked behind an account limit.
 
-``claude_failover.ClaudeFailover.recover`` owns the lock, the ownership checks
+``account_failover.AccountFailover.recover`` owns the lock, the ownership checks
 and every subprocess action. It snapshots the pending attempts, asks this plan
 what to do, and acts. The plan never reads a clock: ``now`` comes in.
 

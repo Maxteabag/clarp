@@ -60,7 +60,9 @@ def import_if_changed(path: pathlib.Path, importer: Callable[[], None],
         with _guard:
             if _imported.get(key) == before:
                 return False
-        importer()
+        # A busy writer must not cost the whole import; imports are idempotent.
+        from . import db
+        db.retry_locked(importer)
         with _guard:
             # Mark the version we actually chose to import. If the backend
             # appended more bytes while parsing, the next call observes a new

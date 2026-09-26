@@ -4,7 +4,7 @@ from __future__ import annotations
 import itertools
 
 from lib import agents as agents_db
-from lib import db, message_store, user_notifications
+from lib import artifacts, db, message_store, user_notifications
 from lib import team_store
 
 
@@ -79,6 +79,40 @@ def test_user_origin_speak_notifies(monkeypatch):
     assert notification["unread"] is True
     assert notification["preview"] == "User should see this."
     assert notification["reason"] == "speak"
+    assert notification["needs_response"] is False
+
+
+def test_a_reply_leaving_a_pending_decision_needs_a_response(monkeypatch):
+    """The push tier is decided by whether the agent left something
+    unanswered, not by the reply's own wording."""
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    aid = _agent(persona="Nova", session="nova")
+    artifacts.create_decision(
+        session="nova", title="Choose a layout", question="Which layout?",
+        response_type="single_choice",
+        options=[{"id": "a", "label": "A"}, {"id": "b", "label": "B"}])
+    done_ts = _turn(aid, origin="user",
+                    assistant="<speak>I need your preference before I continue.</speak>")
+
+    notification = _classify(aid, done_ts)
+
+    assert notification["notify"] is True
+    assert notification["needs_response"] is True
+
+
+def test_answering_the_decision_drops_needs_response_on_the_next_turn(monkeypatch):
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    aid = _agent(persona="Rex", session="rex")
+    created = artifacts.create_decision(
+        session="rex", title="Deploy?", question="May I deploy?")
+    artifacts.resolve(
+        created["decision"]["decision_id"], choice="accepted", expected_revision=1)
+    done_ts = _turn(aid, origin="user", assistant="<speak>Deployed.</speak>")
+
+    notification = user_notifications.classify_completed_turn(
+        agent_id=aid, session="rex", persona="Rex", done_ts=done_ts)
+
+    assert notification["needs_response"] is False
 
 
 def test_worker_origin_speak_is_suppressed(monkeypatch):

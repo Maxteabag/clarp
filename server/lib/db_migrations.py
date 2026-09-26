@@ -112,6 +112,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             _migrate_to_v93(con)
         if version < 94:
             _migrate_to_v94(con)
+        if version < 95:
+            _migrate_to_v95(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -394,6 +396,12 @@ def _migrate_to_v91(con: sqlite3.Connection) -> None:
 
 
 def _migrate_to_v94(con: sqlite3.Connection) -> None:
+    """Index release expiry: pruning and the 4096-row cap scanned the table."""
+    con.execute("CREATE INDEX IF NOT EXISTS tool_explanation_releases_expiry "
+                "ON tool_explanation_releases(expires_at)")
+
+
+def _migrate_to_v95(con: sqlite3.Connection) -> None:
     """Inspectable background processes.
 
     A job carries the worker's last progress line, the log file it writes

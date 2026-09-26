@@ -54,13 +54,23 @@ def get_text(key: str, *, default: str = "") -> str:
 
 def set_text(key: str, value: str, *, updated_at: int | None = None) -> None:
     """Upsert `key`. `updated_at` defaults to now; lease writers pass the
-    clock they validated the report against so pruning and reads agree."""
+    clock they validated the report against so pruning and reads agree.
+
+    An unchanged value is not rewritten: the upsert would take the database
+    write lock only to store what is already there. A caller that passes
+    `updated_at` is refreshing a lease, so only an identical stamp is skipped.
+    """
+    value = str(value)
+    row = conn().execute("SELECT value, updated_at FROM settings WHERE key = ?", (key,)).fetchone()
+    if row is not None and str(row["value"]) == value and (
+            updated_at is None or int(row["updated_at"]) == int(updated_at)):
+        return
     conn().execute(
         """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
            ON CONFLICT(key) DO UPDATE SET
                value = excluded.value,
                updated_at = excluded.updated_at""",
-        (key, str(value), now_ms() if updated_at is None else int(updated_at)),
+        (key, value, now_ms() if updated_at is None else int(updated_at)),
     )
 
 
@@ -81,7 +91,14 @@ def delete(key: str) -> None:
 
 
 def prune_prefix(prefix: str, *, updated_before: int) -> int:
-    """Delete every key under `prefix` last written before `updated_before`."""
+    """Delete every key under `prefix` last written before `updated_before`.
+
+    Lease reporters call this on every report. Look before deleting so a
+    report with nothing stale issues no DELETE.
+    """
+    if conn().execute("SELECT 1 FROM settings WHERE key LIKE ? AND updated_at < ? LIMIT 1",
+                      (prefix + "%", int(updated_before))).fetchone() is None:
+        return 0
     return conn().execute(
         "DELETE FROM settings WHERE key LIKE ? AND updated_at < ?",
         (prefix + "%", int(updated_before))).rowcount

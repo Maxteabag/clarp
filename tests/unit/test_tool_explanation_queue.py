@@ -120,3 +120,30 @@ def test_v71_migration_preserves_existing_rows():
     assert connection.execute("SELECT value FROM settings WHERE key='cache-migration-sentinel'").fetchone()[0]=='preserved'
     assert connection.execute('SELECT count(*) FROM tool_explanation_cache').fetchone()[0]==0
     connection.close()
+
+
+def test_polls_that_change_nothing_take_no_write_lock():
+    queue.request(3,prepared(),[],0)
+    queue.claim('worker')
+    queue.complete('worker',[('digest',{'status':'ready','text':'Ready.'})],60)
+    statements=[]
+    conn().set_trace_callback(statements.append)
+    try:
+        assert queue.request(3,prepared(),[],0)[0]['status']=='ready'
+        assert queue.request(0,prepared('view'),[],0)[0]['status']=='disabled'
+    finally:
+        conn().set_trace_callback(None)
+    assert statements and not [s for s in statements if s.startswith('BEGIN')]
+
+
+def test_pending_requests_share_one_queue_count_and_batch_their_writes():
+    statements=[]
+    conn().set_trace_callback(statements.append)
+    items=[(f'row{i}',f'digest{i}',{'command':f'ls {i}'},f'view{i}') for i in range(3)]
+    try:
+        assert [r['status'] for r in queue.request(3,items,[],0)]==['pending']*3
+    finally:
+        conn().set_trace_callback(None)
+    assert len([s for s in statements if "status='queued'" in s and 'count(*)' in s])==1
+    assert not [s for s in statements if s.startswith('DELETE FROM tool_explanation_cache')]
+    assert conn().execute('SELECT count(*) FROM tool_explanation_demands').fetchone()[0]==3

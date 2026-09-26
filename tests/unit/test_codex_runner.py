@@ -1,4 +1,4 @@
-"""Tests for `lib.codex_runner` — the `codex exec --json` dispatcher.
+"""Tests for `CodexBackend`'s `codex exec --json` path.
 
 No real `codex` runs. We:
   * pin build_cmd's argv for fresh vs resume turns
@@ -23,15 +23,18 @@ import pytest
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
-from lib import codex_runner          # noqa: E402
+from lib import voice_preamble        # noqa: E402
+from lib.backend.registry import by_id  # noqa: E402
 from lib import agents as agents_db    # noqa: E402
 from lib.protocol import AgentState    # noqa: E402
+
+CODEX = by_id("codex")
 
 
 # ---- build_cmd ---------------------------------------------------------
 
 def test_build_cmd_fresh_has_json_and_bypass_no_resume():
-    cmd = codex_runner.build_cmd("", is_new_session=True)
+    cmd = CODEX.build_cmd("", is_new_session=True)
     assert cmd[:2] == ["codex", "exec"]
     assert "--json" in cmd
     assert "--dangerously-bypass-approvals-and-sandbox" in cmd
@@ -39,7 +42,7 @@ def test_build_cmd_fresh_has_json_and_bypass_no_resume():
 
 
 def test_build_cmd_isolated_uses_ephemeral_workspace_sandbox():
-    cmd = codex_runner.build_cmd("", is_new_session=True, isolated=True)
+    cmd = CODEX.build_cmd("", is_new_session=True, isolated=True)
     assert "--dangerously-bypass-approvals-and-sandbox" not in cmd
     assert cmd[cmd.index("--sandbox") + 1] == "workspace-write"
     assert "--ephemeral" in cmd
@@ -47,7 +50,7 @@ def test_build_cmd_isolated_uses_ephemeral_workspace_sandbox():
 
 
 def test_build_cmd_resume_appends_resume_and_id():
-    cmd = codex_runner.build_cmd("sess-uuid-9")
+    cmd = CODEX.build_cmd("sess-uuid-9")
     assert "resume" in cmd
     i = cmd.index("resume")
     assert cmd[i + 1] == "sess-uuid-9"
@@ -58,10 +61,10 @@ def test_build_cmd_resume_appends_resume_and_id():
 def test_build_cmd_model_and_reasoning_effort_opt_in():
     """Empty → no overrides (Codex defaults). Set → --model and the
     -c model_reasoning_effort override are passed, before any resume."""
-    assert "--model" not in codex_runner.build_cmd("")
-    assert "-c" not in codex_runner.build_cmd("")
+    assert "--model" not in CODEX.build_cmd("")
+    assert "-c" not in CODEX.build_cmd("")
 
-    cmd = codex_runner.build_cmd("sess-1", model="gpt-5-codex",
+    cmd = CODEX.build_cmd("sess-1", model="gpt-5-codex",
                                  reasoning_effort="low")
     assert cmd[cmd.index("--model") + 1] == "gpt-5-codex"
     assert cmd[cmd.index("-c") + 1] == "model_reasoning_effort=low"
@@ -134,7 +137,7 @@ def test_spawn_turn_binds_session_records_state_and_speaks(fake_codex, tmp_path)
 
     sids: list[str] = []
     results: list[dict] = []
-    handle = codex_runner.spawn_turn(
+    handle = CODEX.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="rachel",
         on_session_init=sids.append, on_result=results.append,
     )
@@ -167,7 +170,7 @@ def test_rejected_session_bind_ignores_buffered_assistant_output(fake_codex, tmp
         {"type": "turn.completed", "usage": {"output_tokens": 4}},
     ])
     results, errors = [], []
-    handle = codex_runner.spawn_turn(
+    handle = CODEX.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="reject",
         on_session_init=lambda _sid: False,
         on_result=results.append, on_error=errors.append)
@@ -203,7 +206,7 @@ def test_agent_message_updates_stream_through_one_throttled_live_row(
     monkeypatch.setattr(agents_db, "upsert_live_assistant_message", record_live)
     agents_db.open_turn(
         agent_id=agent_id, source="pwa", trace_id="trace-live-1")
-    handle = codex_runner.spawn_turn(
+    handle = CODEX.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="caleb",
         trace_id="trace-live-1",
     )
@@ -234,7 +237,7 @@ def test_turn_failed_calls_on_error_not_result(fake_codex, tmp_path):
 
     errors: list[str] = []
     results: list[dict] = []
-    handle = codex_runner.spawn_turn(
+    handle = CODEX.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="bella-fail",
         on_error=errors.append, on_result=results.append,
     )
@@ -254,7 +257,7 @@ def test_spawn_turn_flat_event_shape_also_binds(fake_codex, tmp_path):
         {"type": "agent_message", "message": "<speak>Flat works.</speak>"},
     ])
     sids: list[str] = []
-    handle = codex_runner.spawn_turn(
+    handle = CODEX.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="domi",
         on_session_init=sids.append,
     )
@@ -274,7 +277,7 @@ def test_speak_dedupes_across_agent_message_and_task_complete(fake_codex, tmp_pa
             "type": "task_complete",
             "last_agent_message": "<speak>Only once.</speak>"}},
     ])
-    handle = codex_runner.spawn_turn(
+    handle = CODEX.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="bella",
     )
     handle.wait(timeout=5.0)
@@ -295,7 +298,7 @@ def test_command_execution_item_flips_to_tool_state(fake_codex, tmp_path):
             "id": "i1", "type": "command_execution", "command": "ls -1"}},
         {"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}},
     ])
-    handle = codex_runner.spawn_turn(
+    handle = CODEX.start_turn(
         text="run ls", cwd=tmp_path, agent_id=agent_id, session="domi2",
     )
     handle.wait(timeout=5.0)
@@ -316,7 +319,7 @@ def test_spawn_turn_expands_tilde_cwd(fake_codex):
     ])
     sids: list[str] = []
     # pathlib.Path("~") is exactly what _handle_send used to pass through.
-    handle = codex_runner.spawn_turn(
+    handle = CODEX.start_turn(
         text="hi", cwd=pathlib.Path("~"), agent_id=agent_id,
         session="elli", on_session_init=sids.append,
     )
@@ -328,23 +331,23 @@ def test_spawn_turn_expands_tilde_cwd(fake_codex):
 def test_spawn_turn_missing_codex_raises_filenotfound(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", "")
     with pytest.raises(FileNotFoundError):
-        codex_runner.spawn_turn(text="hi", cwd=tmp_path, agent_id="x")
+        CODEX.start_turn(text="hi", cwd=tmp_path, agent_id="x")
 
 
 def test_interrupt_is_safe_when_nothing_running():
-    assert codex_runner.interrupt("no-such-agent") == 0
+    assert CODEX.interrupt_exec("no-such-agent") == 0
 
 
 def test_voice_preamble_roundtrip():
     """apply_voice_preamble adds the <speak> instruction; strip_voice_preamble
     recovers the original message exactly (for the history pane)."""
     msg = "count the files in this repo"
-    wrapped = codex_runner.apply_voice_preamble(msg)
+    wrapped = voice_preamble.apply_voice_preamble(msg)
     assert "<speak>" in wrapped and msg in wrapped
     assert wrapped != msg
-    assert codex_runner.strip_voice_preamble(wrapped) == msg
+    assert voice_preamble.strip_voice_preamble(wrapped) == msg
     # No-op when the preamble isn't present.
-    assert codex_runner.strip_voice_preamble("plain message") == "plain message"
+    assert voice_preamble.strip_voice_preamble("plain message") == "plain message"
 
 
 def test_preamble_always_forbids_interactive_questions():
@@ -354,20 +357,20 @@ def test_preamble_always_forbids_interactive_questions():
     msg = "should I refactor this?"
 
     # Non-voice turn: no <speak> guidance, but the no-question rule is present.
-    silent = codex_runner.apply_voice_preamble(msg, voice=False)
+    silent = voice_preamble.apply_voice_preamble(msg, voice=False)
     assert "interactive prompts" in silent
     assert "<speak>" not in silent
-    assert codex_runner.strip_voice_preamble(silent) == msg
+    assert voice_preamble.strip_voice_preamble(silent) == msg
 
     # Voice turn: both the no-question rule AND the <speak> guidance.
-    spoken = codex_runner.apply_voice_preamble(msg, voice=True)
+    spoken = voice_preamble.apply_voice_preamble(msg, voice=True)
     assert "interactive prompts" in spoken
     assert "<speak>" in spoken
-    assert codex_runner.strip_voice_preamble(spoken) == msg
+    assert voice_preamble.strip_voice_preamble(spoken) == msg
 
 
 def test_voice_preamble_requests_conversational_delivery_for_all_speech():
-    spoken = codex_runner.apply_voice_preamble("Explain the result.", voice=True)
+    spoken = voice_preamble.apply_voice_preamble("Explain the result.", voice=True)
 
     assert "Every spoken response should sound conversational" in spoken
     assert "do not reserve them for uncertainty" in spoken
@@ -377,11 +380,11 @@ def test_voice_preamble_requests_conversational_delivery_for_all_speech():
 
 def test_voice_preamble_can_hide_persona_identity():
     msg = "hello"
-    wrapped = codex_runner.apply_voice_preamble(
+    wrapped = voice_preamble.apply_voice_preamble(
         msg,
         voice=True,
         persona="Bella",
         session="bella",
     )
     assert "You are Bella." in wrapped
-    assert codex_runner.strip_voice_preamble(wrapped) == msg
+    assert voice_preamble.strip_voice_preamble(wrapped) == msg

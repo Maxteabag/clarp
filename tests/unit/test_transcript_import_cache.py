@@ -125,3 +125,21 @@ def test_background_queue_is_bounded_and_deferred_owner_can_retry(tmp_path, monk
     assert cache.schedule_import(path, lambda: calls.append('deferred'), owner='deferred')
     assert cache.wait_for_background(4)
     assert calls == ['pending', 'deferred']
+
+
+def test_a_locked_database_retries_instead_of_dropping_the_import(tmp_path, monkeypatch):
+    import sqlite3
+    from lib import db as database
+    transcript_import_cache.reset_for_tests()
+    monkeypatch.setattr(database, "SQLITE_LOCK_RETRY_SLEEP_SEC", 0)
+    path = tmp_path / "t.jsonl"
+    path.write_text("{}\n")
+    attempts: list[int] = []
+
+    def importer():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise sqlite3.OperationalError("database is locked")
+
+    assert transcript_import_cache.import_if_changed(path, importer)
+    assert attempts == [1, 1]

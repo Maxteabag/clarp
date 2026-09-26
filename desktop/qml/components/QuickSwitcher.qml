@@ -116,6 +116,9 @@ Rectangle {
         { kind: "command", label: "Talk", action: "talk", key: "Ctrl+Shift+Space", group: "audio" }
     ].filter(command => command.action !== "preview-versions" || root.previewVersionsAvailable)
     readonly property var results: {
+        // Hidden, the switcher computes nothing: every agent update used to
+        // rebuild the full result list and recreate its rows off screen.
+        if (!root.visible) return [];
         controller.agentRevision;
         controller.contacts.count;
         controller.lastBackend;

@@ -159,7 +159,7 @@ Rules:
   process by its latest progress line or title ("CI: build 3/10", the most
   recently active job when there are several). Helpers and a process are
   joined with " · ". Only a process with neither title nor progress falls
-  back to a bare "1 background process". Before Host contract 15 `count`
+  back to a bare "1 background process". Before Host contract 16 `count`
   included the mirror jobs and `sub_agents` counted jobs of kind
   `sub-agent`.
 - There is no `/sessions` in this layer. The list of chats is
@@ -268,7 +268,7 @@ Sub-agent cells (`kind: "subagents"`) come from two backends:
   collab event. The title says what happened ("Spawned agent", "Finished
   waiting"), the summary names the agent (`nickname [role]`), and the lines
   carry the task, thread ids and each agent's status.
-- **Claude** (`transcript_log.py`): one cell per built-in `Agent` (formerly
+- **Claude** (`claude_transcript.py`): one cell per built-in `Agent` (formerly
   `Task`) tool call, in place of a tool card. `id` is the tool_use id and
   `summary` is the call's description. `status` is `running` until the call
   settles: a foreground call settles on its tool result, and a background one

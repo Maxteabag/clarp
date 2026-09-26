@@ -107,7 +107,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/transcript_import_cache.py", "_path_locks"): LOCKS,
     ("lib/transcript_import_cache.py", "_pending"): JOBS,
     ("lib/transcript_import_cache.py", "_worker"): JOBS,
-    ("lib/transcript_log.py", "_INDEXES"): CACHE,
+    ("lib/claude_transcript.py", "_INDEXES"): CACHE,
     ("lib/transcription_models.py", "_activation_attempts"): JOBS,
     ("lib/transcription_models.py", "_activation_completed"): JOBS,
     ("lib/transcription_models.py", "_activation_exhausted"): JOBS,

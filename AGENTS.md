@@ -61,38 +61,24 @@ foreground. Two commits were pushed and deployed from a false green this way.
 load-sensitive under `pytest-xdist`: confirm a failure by running that test
 alone before treating it as a regression, and say which it was.
 
-## Uncommitted work needs a decision artifact
+## Push to main
 
-Never end a turn by silently leaving the work you produced uncommitted. If your
-changes are still only in the working tree when you are ready to report, raise a
-native question with the `clarp-decisions` skill's question helper and let the
-user choose what happens to them:
+Never end a turn by silently leaving the work you produced uncommitted. Once
+the relevant gates above have passed, push it to main yourself. Always. Do
+not open a pull request and wait, and do not raise a question asking whether
+to commit — commit and push is the default action, not something that needs
+asking.
 
-```bash
-clarp-agent-artifacts question "$CLAUDE_PWA_SESSION" \
-  "Uncommitted: <short description>" \
-  "<files changed> are still uncommitted on <branch>. What should I do with them?" \
-  '[{"id":"commit","label":"Commit on this branch"},{"id":"branch_pr","label":"New branch and open a PR"},{"id":"leave","label":"Leave them uncommitted"}]' \
-  --recommend commit --effort quick \
-  --context "<what the change does and how it was verified>"
-```
+Work in an isolated worktree so a shared working tree's other dirty files
+never ride along; stage and commit only the files this turn's task actually
+touched. Rebase onto the current `origin/main` before pushing, and fast-forward
+(`git merge --ff-only` or an explicit `git push origin SHA:main`) rather than
+opening a merge commit. If `origin/main` moved and no longer fast-forwards
+cleanly, rebase again rather than forcing.
 
-The helper accepts two or three options only, so offer the ones that actually
-fit the situation; anything else (reverting, stashing, splitting the diff) is
-reachable through the card's **Write my own answer**.
-
-Scope it to the work of this turn. A shared working tree often carries unrelated
-dirty files; name only what you touched, and say so in the context rather than
-proposing to commit somebody else's work-in-progress. Report the change in your
-answer as usual — the question rides alongside it and does not replace telling
-the user what you did.
-
-Do not block on the answer, do not resolve it yourself, and do not treat
-silence, an expiry, or a discard as permission to commit or to revert. One
-question per batch of related changes; check `clarp-agent-artifacts attention`
-before adding another so you do not stack duplicates. Committing and pushing
-still follow the usual rule that they happen when the user asks — the answer to
-this question is that ask.
+Report the change in your answer as usual: what you pushed, the commit, and
+the evidence that it passed. A passing test run is not itself permission to
+skip verifying the change does what was asked; say plainly what you checked.
 
 ## Fleet-map vision and decisions
 

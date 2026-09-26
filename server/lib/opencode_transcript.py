@@ -15,7 +15,7 @@ from typing import Any
 
 from .voice_preamble import strip_voice_preamble
 from .log import log_exception
-from .transcript_log import summarise_tool
+from .claude_transcript import summarise_tool
 
 # OpenCode's lowercase tool names and camelCase arguments, mapped to the shared
 # vocabulary the chat already knows how to render as file, edit and shell cells.

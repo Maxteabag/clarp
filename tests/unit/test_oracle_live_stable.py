@@ -480,7 +480,7 @@ def test_narration_off_preference_instructs_oracle_and_quiets_admissions(conv):
     [event] = _events(conv)
     assert event["type"] == "session.instructions.append" and event["content"] == mod.NARRATION_OFF
     assert conv._down[-1] == {"type": "oracle_v2.preferences", "progress_interval_seconds": 0,
-                              "narration": "off"}
+                              "narration": "off", "earcons": True}
     conv.input({"type": "oracle_v2.preferences", "narration": "off"})
     assert len(_events(conv)) == 1           # unchanged preference: no repeat instruction
     quiet = mod.oracle_strategy.admission_context("theo", "op", "x", "accepted", narration="off")

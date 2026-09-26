@@ -10,7 +10,7 @@ import uuid
 import pytest
 
 from lib import agents, backends, config, turn_dispatch
-from lib.claude_failover import ClaudeFailover
+from lib.account_failover import AccountFailover
 from lib.protocol import AgentState
 
 
@@ -60,8 +60,8 @@ else:
                 raise AssertionError("Old Claude process was not reaped")
         switched.append(models)
         return True
-    coordinator = ClaudeFailover(turn_dispatch.OwnershipLock(), switch=switch)
-    monkeypatch.setattr(turn_dispatch, "_CLAUDE_FAILOVER", coordinator)
+    coordinator = AccountFailover(turn_dispatch.OwnershipLock(), switch=switch)
+    monkeypatch.setitem(turn_dispatch._FAILOVERS, "claude", coordinator)
     ctx = SimpleNamespace(default_session="one", agents_path=tmp_path / "unused.json",
                           stream=SimpleNamespace(broadcast=lambda event: None))
     service = turn_dispatch.TurnDispatchService(ctx, home=tmp_path)
@@ -91,7 +91,7 @@ else:
             assert [row["flag"] for row in attempts] == ["--session-id", "--resume"]
             assert attempts[0]["sid"] == attempts[1]["sid"]
             assert attempts[0]["pid"] != attempts[1]["pid"]
-            from lib.transcript_log import parse_turns
+            from lib.claude_transcript import parse_turns
             transcript = tmp_path / ".claude/projects/test" / f'{attempts[0]["sid"]}.jsonl'
             user_texts = [turn["text"] for turn in parse_turns(transcript)
                           if turn["role"] == "user"]

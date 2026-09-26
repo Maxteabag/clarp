@@ -66,7 +66,7 @@ owning the files below and nothing else. Integration merges them here.
 | A turn | turn_lifecycle.py (new), turn_slots.py (new), turn_dispatch.py, turn_queue.py, reconcile.py, state_watcher.py, agents.py (state/turn functions only), plugin/hooks/*, runtime_bridge.py dispatch RPC | 1, 4, plus DispatchCommand serialized once across the RPC |
 | B identity+events | identity.py (new), events.py (new), trace.py, protocol.py, herald.py, orchestrator.py, backend_usage.py, message_audio.py, server.py (broadcast and identity sites only) | 3, 7 |
 | C state+stores | revisioned_cache.py (new), db.py (data_version), agent_conversations.py, message_previews.py, settings_store.py, janitor_store.py (new), janitors.py, janitor_builtins.py, agent_portraits.py, application_activity.py, desktop_presence.py, oracle_contact.py, http_utils.py (Principal/Responder), the 7 oracle/podcast/janitor_http modules that read handler privates, context.py, config.py, tests/conftest.py resets, the module-state guard test | 1, 2, 5, 8 |
-| D policies | policies/ (new), user_notifications.py, claude_failover.py, agent_lifecycle.py, origins.py | 6 |
+| D policies | policies/ (new), user_notifications.py, account_failover.py, agent_lifecycle.py, origins.py | 6 |
 
 Cross-stream adoption (dispatch calling the admission policy, turn_dispatch
 using event constructors, stores using AgentRef) is done at integration, not

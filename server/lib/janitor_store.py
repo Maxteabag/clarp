@@ -153,6 +153,24 @@ def record_config_change(c, agent_id: str, now: int) -> None:
     c.execute("UPDATE janitor_configs SET last_change_at=? WHERE agent_id=?", (now, agent_id))
 
 
+def role_revision(template_id: str, target_agent_id: str | None = None, c=None) -> tuple:
+    """A cheap fingerprint of the rows ``janitor_builtins.resolve`` reads.
+
+    Every configuration change bumps ``revision``; the agent columns cover a
+    model, archive or conversion change. Read it before resolving outside a
+    transaction, then compare inside one instead of resolving again.
+    """
+    c = _c(c)
+    configs = c.execute("""SELECT j.agent_id,j.revision,j.enabled,a.is_janitor,a.deleted_at,a.archived_at,
+        a.backend,a.model,a.effort,a.session FROM janitor_configs j JOIN agents a ON a.agent_id=j.agent_id
+        WHERE j.template_id=? ORDER BY j.agent_id""", (template_id,)).fetchall()
+    target = None
+    if target_agent_id:
+        target = c.execute("SELECT is_janitor,deleted_at,archived_at FROM agents WHERE agent_id=?",
+                           (target_agent_id,)).fetchone()
+    return tuple(tuple(r) for r in configs), tuple(target) if target else None
+
+
 def other_enabled_configs(agent_id: str, c=None) -> list:
     return list(_c(c).execute("SELECT j.* FROM janitor_configs j JOIN agents a ON a.agent_id=j.agent_id WHERE j.enabled=1 AND j.agent_id!=? AND a.deleted_at IS NULL AND a.archived_at IS NULL", (agent_id,)))
 

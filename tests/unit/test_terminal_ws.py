@@ -20,6 +20,7 @@ from types import SimpleNamespace
 import pytest
 
 from lib import backends, terminal_ws, ws
+from lib.backend import registry
 
 _KEY = "dGhlIHNhbXBsZSBub25jZQ=="
 _UPGRADE = {"Upgrade": "websocket", "Connection": "keep-alive, Upgrade",
@@ -84,7 +85,7 @@ def test_launch_argv_is_declared_per_backend(monkeypatch):
     from lib.backend.base import Unsupported
     monkeypatch.setattr("lib.deployment.plugin_dir", lambda: None)
     declared = set()
-    for backend in backends.all_backends():
+    for backend in registry.all():
         answers = []
         for sid in ("s-1", ""):
             try:

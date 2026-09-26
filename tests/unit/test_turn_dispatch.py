@@ -10,7 +10,6 @@ from lib.turn_dispatch import (
     MAX_ATTEMPTS,
     DispatchError,
     TurnDispatchService,
-    _spoken_failure_text,
     clear_for_agent,
 )
 import lib.turn_dispatch as _td
@@ -986,17 +985,6 @@ def test_interruption_is_recorded_but_not_spoken(tmp_path):
     assert tts_queue.recent(5) == []
 
 
-def test_spoken_usage_limit_includes_reset_time():
-    text = _spoken_failure_text(
-        persona="Mike",
-        category="usage_limit",
-        human="Usage limit reached",
-        message="You've hit your usage limit. Try again at 3:29 PM.",
-    )
-
-    assert text == "Mike is out of usage. Try again at 3:29 PM."
-
-
 def test_nonzero_runner_exit_notifies_without_retry(tmp_path):
     service, backends, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
     service.dispatch(text="hi", requested_session="mike", trace_id="t",
@@ -1092,16 +1080,16 @@ def test_unknown_error_keeps_legacy_idle_flip(tmp_path):
 
 def _enable_account_failover(monkeypatch, *, available=True):
     from dataclasses import replace
-    from lib.claude_failover import ClaudeFailover
+    from lib.account_failover import AccountFailover
     from unittest.mock import Mock
     cfg = replace(_td.config.load(), claude_account_switch_command=("selector",))
     monkeypatch.setattr(_td.config, "load", lambda *args, **kwargs: cfg)
     scheduled = []
-    coordinator = ClaudeFailover(
+    coordinator = AccountFailover(
         _td.OwnershipLock(), switch=Mock(return_value=available),
         schedule=lambda delay, callback: scheduled.append((delay, callback)),
         now=lambda: 100)
-    monkeypatch.setattr(_td, "_CLAUDE_FAILOVER", coordinator)
+    monkeypatch.setitem(_td._FAILOVERS, "claude", coordinator)
     return coordinator, scheduled
 
 
@@ -1410,12 +1398,12 @@ def test_stop_cancels_codex_connection_retry(tmp_path, monkeypatch, stop_during_
 
 def test_codex_account_recovery_preserves_native_identity_and_user_stop(tmp_path,monkeypatch):
     from dataclasses import replace
-    from lib.claude_failover import ClaudeFailover
+    from lib.account_failover import AccountFailover
     from unittest.mock import Mock
     cfg=replace(_td.config.load(),codex_account_switch_command=('codex-selector',))
     monkeypatch.setattr(_td.config,'load',lambda *args,**kwargs:cfg)
-    scheduled=[];coordinator=ClaudeFailover(_td._TURN_LOCK,switch=Mock(return_value=True),schedule=lambda d,f:scheduled.append((d,f)),now=lambda:100)
-    monkeypatch.setattr(_td,'_CODEX_FAILOVER',coordinator)
+    scheduled=[];coordinator=AccountFailover(_td._TURN_LOCK,switch=Mock(return_value=True),schedule=lambda d,f:scheduled.append((d,f)),now=lambda:100)
+    monkeypatch.setitem(_td._FAILOVERS, "codex", coordinator)
     service,backend,aid=_make_service(tmp_path)
     agents_db.update_agent(aid,backend='codex')
     service.dispatch(text='Continue current task',requested_session='mike',trace_id='codex-owned',synthesize_audio=False)

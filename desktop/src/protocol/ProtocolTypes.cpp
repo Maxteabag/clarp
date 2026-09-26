@@ -93,7 +93,7 @@ Agent Agent::fromJson(const QJsonObject& object) {
     const QJsonObject jobs = object.value(QStringLiteral("background_jobs")).toObject();
     agent.backgroundJobCount = static_cast<int>(std::max<qint64>(0, integerValue(jobs, "count")));
     agent.backgroundSubAgentCount = static_cast<int>(
-        std::clamp<qint64>(integerValue(jobs, "sub_agents"), 0, agent.backgroundJobCount));
+        std::max<qint64>(0, integerValue(jobs, "sub_agents")));
     agent.childCount = static_cast<int>(std::max<qint64>(0, integerValue(object, "child_count")));
     agent.runningChildren =
         static_cast<int>(std::max<qint64>(0, integerValue(object, "running_children")));

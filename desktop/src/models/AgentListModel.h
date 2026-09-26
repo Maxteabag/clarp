@@ -89,6 +89,8 @@ class AgentListModel : public QAbstractListModel {
     // Helpers whose parent is `agentId`, in list order.
     [[nodiscard]] QList<const Agent*> helpersOf(const QString& agentId) const;
     [[nodiscard]] BackgroundJobCounts jobCounts(const Agent& agent) const;
+    // Background processes plus running helpers, each helper counted once.
+    [[nodiscard]] int runningWork(const Agent& agent) const;
     // Running helpers: the Host's `running_children`, or the helpers visible
     // in this list when that is larger (or the Host predates the field).
     [[nodiscard]] int runningChildren(const Agent& agent) const;

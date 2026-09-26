@@ -85,7 +85,7 @@ caller, and cleanup when done.
 ## Vocabulary
 
 Two words, used the same way in the snapshot, the apps and the skills
-(Host contract 15):
+(Host contract 16):
 
 - A **sub-agent** is a Clarp helper agent: `role = helper` with a
   `parent_agent_id`. It is counted from the parent's running children
