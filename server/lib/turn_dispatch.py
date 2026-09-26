@@ -2026,14 +2026,13 @@ def clear_for_agent(
         # Stop needs pause + in-memory detachment to be atomic with
         # _finish_turn(), otherwise the interrupted callback can drain the
         # next item in between those two operations.
+        # TODO(integration): the pause flag is the one SQLite write left
+        # under _TURN_LOCK; moving it out needs _finish_turn to read it.
         if pause_queue:
             turn_queue.set_paused(agent_id, True)
-        if pause_queue:
-            _INFLIGHT[agent_id] = _STOPPING_SENTINEL
-        else:
-            _INFLIGHT.pop(agent_id, None)
-        _CLAIMED_AT.pop(agent_id, None)
-        dropped = len(_QUEUED.pop(agent_id, []) or [])
+        dropped = _SLOTS.clear(agent_id, stopping=pause_queue)
+    if preserve_queue:
+        turn_queue.discard_parked(agent_id)
     durable_dropped = 0 if preserve_queue else turn_queue.remove_for_agent(agent_id)
     return max(dropped, durable_dropped)
 
@@ -2047,8 +2046,7 @@ def owns_inflight_trace(agent_id: str, trace_id: str) -> bool:
         except Exception:
             return bool(trace_id) and agents_db.is_busy(agent_id) and \
                 agents_db.get_trace(agent_id) == trace_id
-    with _TURN_LOCK:
-        return bool(trace_id) and _INFLIGHT.get(agent_id) == trace_id
+    return _SLOTS.owns(agent_id, trace_id)
 
 
 def _record_janitor_cancelled(ctx, agent_id: str, session: str, trace_id: str) -> None:
@@ -2094,15 +2092,13 @@ def _cancel_fenced_janitor_run(ctx, run: dict, agent: dict, backend_registry) ->
     # A queued run may sit behind unrelated work. Remove its own queue copy
     # without installing a stop barrier or touching that other backend turn.
     with _TURN_LOCK:
-        matching = _INFLIGHT.get(agent_id) == run_id
+        matching = _SLOTS.owns(agent_id, run_id)
         if not matching:
-            _QUEUED[agent_id] = [spec for spec in _QUEUED.get(agent_id, [])
-                                 if spec.trace_id != run_id]
-            if not _QUEUED[agent_id]:
-                _QUEUED.pop(agent_id, None)
-            _remove_queued_run(run_id)
-            return {"cancelled": True, "interrupted": False, "run_id": run_id}
-        snapshot, _dropped, queue_was_paused = begin_stop(agent_id)
+            _SLOTS.drop_queued(agent_id, lambda spec: spec.trace_id == run_id)
+    if not matching:
+        _remove_queued_run(run_id)
+        return {"cancelled": True, "interrupted": False, "run_id": run_id}
+    snapshot, _dropped, queue_was_paused = begin_stop(agent_id)
     try:
         backend = backend_registry.normalize(agent.get("backend"))
         terminated = int(backend_registry.interrupt(backend, agent_id) or 0)
@@ -2116,67 +2112,45 @@ def _cancel_fenced_janitor_run(ctx, run: dict, agent: dict, backend_registry) ->
     try:
         _remove_queued_run(run_id)
         turn_queue.set_paused(agent_id, queue_was_paused)
-        with _TURN_LOCK:
-            _CLAUDE_FAILOVER.discard(agent_id, run_id)
-            _CODEX_FAILOVER.discard(agent_id, run_id)
-            _record_janitor_cancelled(ctx, agent_id, run["session"], run_id)
+        _CLAUDE_FAILOVER.discard(agent_id, run_id)
+        _CODEX_FAILOVER.discard(agent_id, run_id)
+        _record_janitor_cancelled(ctx, agent_id, run["session"], run_id)
     finally:
         complete_stop(ctx, agent_id, snapshot, {run_id}, backend_registry=backend_registry)
     return {"cancelled": True, "interrupted": bool(terminated), "run_id": run_id}
 
 
+def _recovery_parked(agent_id: str, trace_id: str | None) -> bool:
+    return bool(_CLAUDE_FAILOVER.parked(agent_id, trace_id)
+                or _CODEX_FAILOVER.parked(agent_id, trace_id))
+
+
 def snapshot_stop_state(agent_id: str) -> dict:
     with _TURN_LOCK:
-        value = _INFLIGHT.get(agent_id)
-        return {
-            "trace_id": value if value not in {None, _STOPPING_SENTINEL} else "",
-            "claimed_at": _CLAIMED_AT.get(agent_id),
-            "queued": list(_QUEUED.get(agent_id) or []),
-            "account_recovery_parked": (_CLAUDE_FAILOVER.parked(agent_id, value) or _CODEX_FAILOVER.parked(agent_id, value)),
-        }
+        snapshot = _SLOTS.stop_snapshot(agent_id).as_dict()
+        snapshot["account_recovery_parked"] = _recovery_parked(
+            agent_id, _SLOTS.get(agent_id) or None)
+        return snapshot
 
 
 def begin_stop(agent_id: str) -> tuple[dict, int, bool]:
     """Atomically install the Stop barrier in the process that owns turns."""
     with _TURN_LOCK:
-        value = _INFLIGHT.get(agent_id)
-        snapshot = {
-            "trace_id": value if value not in {None, _STOPPING_SENTINEL} else "",
-            "claimed_at": _CLAIMED_AT.get(agent_id),
-            "queued": list(_QUEUED.get(agent_id) or []),
-            "account_recovery_parked": (_CLAUDE_FAILOVER.parked(agent_id, value) or _CODEX_FAILOVER.parked(agent_id, value)),
-        }
+        value = _SLOTS.get(agent_id) or None
+        recovery_parked = _recovery_parked(agent_id, value)
         queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
+        # TODO(integration): like clear_for_agent, the pause flag is written
+        # under the lock so that Stop is atomic with _finish_turn().
         turn_queue.set_paused(agent_id, True)
-        _INFLIGHT[agent_id] = _STOPPING_SENTINEL
-        _CLAIMED_AT.pop(agent_id, None)
-        dropped = len(_QUEUED.pop(agent_id, []) or [])
+        stop, dropped = _SLOTS.begin_stop(agent_id)
+    snapshot = stop.as_dict()
+    snapshot["account_recovery_parked"] = recovery_parked
     return snapshot, dropped, queue_was_paused
 
 
 def restore_stop_state(agent_id: str, snapshot: dict) -> None:
     """Roll back every process-local Stop mutation after interrupt failure."""
-    with _TURN_LOCK:
-        if _INFLIGHT.get(agent_id) != _STOPPING_SENTINEL:
-            return
-        trace_id = str(snapshot.get("trace_id") or "")
-        if trace_id:
-            _INFLIGHT[agent_id] = trace_id
-        else:
-            _INFLIGHT.pop(agent_id, None)
-        claimed_at = snapshot.get("claimed_at")
-        if claimed_at is None:
-            _CLAIMED_AT.pop(agent_id, None)
-        else:
-            _CLAIMED_AT[agent_id] = float(claimed_at)
-        # Sends admitted while the Stop barrier was active were appended after
-        # the snapshot. Preserve them behind the restored pre-Stop queue.
-        queued = list(snapshot.get("queued") or []) + list(
-            _QUEUED.get(agent_id) or [])
-        if queued:
-            _QUEUED[agent_id] = queued
-        else:
-            _QUEUED.pop(agent_id, None)
+    _SLOTS.restore_stop(agent_id, snapshot)
 
 
 def prepare_queued_for_finish(
@@ -2184,16 +2158,14 @@ def prepare_queued_for_finish(
 ) -> None:
     """Restore preserved/new specs except cancelled ones under the barrier."""
     with _TURN_LOCK:
-        queue = list(snapshot.get("queued") or []) + list(
-            _QUEUED.get(agent_id) or [])
-        remaining = [
-            spec for spec in queue
-            if spec.trace_id not in cancelled_trace_ids
-        ]
-        if remaining:
-            _QUEUED[agent_id] = remaining
-        else:
-            _QUEUED.pop(agent_id, None)
+        cancelled = [
+            spec for spec in list(snapshot.get("queued") or [])
+            + list(_QUEUED.get(agent_id) or [])
+            if spec.trace_id in cancelled_trace_ids]
+        _SLOTS.restore_queue(agent_id, snapshot, cancelled_trace_ids)
+    for spec in cancelled:
+        if getattr(spec, "park_id", ""):
+            turn_queue.unpark(spec.park_id)
 
 
 def complete_stop(
@@ -2206,17 +2178,9 @@ def complete_stop(
 
 def finish_stop(ctx, agent_id: str, *, backend_registry=backends) -> None:
     """Release the barrier and run a normal send admitted during Stop."""
-    with _TURN_LOCK:
-        if _INFLIGHT.get(agent_id) != _STOPPING_SENTINEL:
-            return
-        queue = _QUEUED.get(agent_id)
-        next_spec = queue.pop(0) if queue else None
-        if next_spec is None:
-            _INFLIGHT.pop(agent_id, None)
-            _QUEUED.pop(agent_id, None)
-            return
-        _INFLIGHT[agent_id] = next_spec.trace_id
-        _CLAIMED_AT[agent_id] = time.monotonic()
+    next_spec = _SLOTS.pop_next(agent_id, expected=_STOPPING_SENTINEL)
+    if next_spec is None:
+        return
     TurnDispatchService(ctx, backend_registry=backend_registry)._resume_and_spawn(
         agent_id, next_spec)
 
@@ -2228,14 +2192,13 @@ def drain_after_terminal(ctx, agent_id: str) -> None:
     with _TURN_LOCK:
         if _terminal_live(agent_id):
             return  # another terminal still attached — keep holding
-        queue = _QUEUED.get(agent_id)
-        next_spec = queue.pop(0) if queue else None
-        if next_spec is None:
-            if _INFLIGHT.get(agent_id) == _TERMINAL_SENTINEL:
+        if not _QUEUED.get(agent_id):
+            if _SLOTS.get(agent_id) == _TERMINAL_SENTINEL:
                 _INFLIGHT.pop(agent_id, None)
             _CLAIMED_AT.pop(agent_id, None)
             _QUEUED.pop(agent_id, None)
             return
-        _INFLIGHT[agent_id] = next_spec.trace_id
-        _CLAIMED_AT[agent_id] = time.monotonic()
+        next_spec = _SLOTS.pop_next(agent_id)
+    if next_spec is None:
+        return
     TurnDispatchService(ctx)._resume_and_spawn(agent_id, next_spec)

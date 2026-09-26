@@ -323,14 +323,19 @@ class TurnSlots:
 
     # --- Stop barrier ------------------------------------------------------
 
-    def begin_stop(self, agent_id: str) -> tuple[StopSnapshot, int]:
-        """Install the Stop barrier atomically; returns what it replaced."""
+    def stop_snapshot(self, agent_id: str) -> StopSnapshot:
+        """What a Stop would replace, without installing the barrier."""
         with self.lock:
             value = self.inflight.get(agent_id)
-            snapshot = StopSnapshot(
+            return StopSnapshot(
                 trace_id=value if value not in {None, STOPPING_SENTINEL} else "",
                 claimed_at=self.claimed_at.get(agent_id),
                 queued=tuple(self.queued.get(agent_id) or ()))
+
+    def begin_stop(self, agent_id: str) -> tuple[StopSnapshot, int]:
+        """Install the Stop barrier atomically; returns what it replaced."""
+        with self.lock:
+            snapshot = self.stop_snapshot(agent_id)
             self.inflight[agent_id] = STOPPING_SENTINEL
             self.claimed_at.pop(agent_id, None)
             dropped = len(self.queued.pop(agent_id, []) or [])
