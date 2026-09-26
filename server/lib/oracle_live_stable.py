@@ -1043,8 +1043,12 @@ class Conversation:
             self.provider_session = provider_session or uuid.uuid4().hex
             self.contact = contact
             self.pending_swap = None
-            self.last_output_active = False
+            was_speaking, self.last_output_active = self.last_output_active, False
         self.retire_upstream(old)
+        if was_speaking:
+            # The swap waits less than the quiet timer; end the old voice's turn on the phone.
+            self.journal_event("host", {"type": "oracle_v2.quiet"})
+            self.downstream({"type": "oracle_v2.quiet"})
         log("oracleV2Swap", f"to={who} voice={voice}")
         if self.journal:
             self.journal.record("contact.swapped", {"to": who, "voice": voice,

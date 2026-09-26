@@ -226,7 +226,9 @@ class PodcastConversation(Conversation):
         self.media_dir = media_dir
         self.last_question_event_id = 0
 
-    def receive(self, event):
+    def receive(self, event, source=None):
+        if source is not None and source is not self.upstream:
+            return  # podcast calls never switch voices; nothing retired to hear from
         with self.lock:
             self._receive_saved(event)
 

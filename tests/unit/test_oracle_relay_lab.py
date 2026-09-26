@@ -431,6 +431,9 @@ def test_put_me_through_opens_theo_in_his_own_voice_on_the_same_phone_line(lab):
     contact = [e for e in lab.down if e["type"] == "oracle_v2.contact"]
     assert contact == [{"type": "oracle_v2.contact", "agent": "Theo", "session": "theo-97e5",
                         "voice": "meridian"}]
+    types = lab.down_types()
+    last_audio = max(i for i, kind in enumerate(types) if kind == "session.output_audio.delta")
+    assert "oracle_v2.quiet" in types[last_audio:], "the phone must not be left in a speaking state"
 
     # The retired session's close never reaches the phone or ends the call.
     before = len(lab.down)
