@@ -4505,7 +4505,8 @@ class Handler(BaseHTTPRequestHandler):
         row = identity.lookup(result.session) or {}
         agent = {key: row.get(key) for key in (
             "agent_id", "session", "persona", "backend", "cwd", "model", "effort",
-            "voice_id", "avatar_symbol", "muted", "heartbeat_enabled", "dreaming_enabled")}
+            "voice_id", "avatar_symbol", "muted", "heartbeat_enabled", "dreaming_enabled",
+            "parent_agent_id", "role", "helper_state")}
         from lib.session_models import agent_model
         agent["model"] = agent_model(row, identity.backend_session(row))
         state = agents_db.latest_state(row["agent_id"]) or {}
