@@ -37,6 +37,73 @@ STOPPING_SENTINEL = "stopping"
 SENTINELS = frozenset({TERMINAL_SENTINEL, STOPPING_SENTINEL})
 
 
+class OwnershipLock:
+    """A reentrant lock that runs deferred side effects after its outermost
+    release, on the releasing thread.
+
+    Ownership decisions (who holds the slot, whether a retry still owns its
+    turn) must be atomic, but the work they lead to (a SQLite write, a
+    subprocess spawn, an eventlog row) must not run while other threads wait
+    for the decision. ``defer(fn)`` inside the ``with`` block queues ``fn``;
+    it runs once the thread no longer holds the lock at any depth. Outside
+    the lock ``defer`` runs ``fn`` immediately.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._local = threading.local()
+
+    def _pending(self) -> list:
+        pending = getattr(self._local, "pending", None)
+        if pending is None:
+            pending = self._local.pending = []
+        return pending
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        acquired = self._lock.acquire(blocking, timeout)
+        if acquired:
+            self._local.depth = getattr(self._local, "depth", 0) + 1
+        return acquired
+
+    def release(self) -> None:
+        depth = getattr(self._local, "depth", 0) - 1
+        self._local.depth = depth
+        pending: list = []
+        if depth == 0:
+            pending = self._pending()
+            self._local.pending = []
+        self._lock.release()
+        for fn in pending:
+            fn()
+
+    def __enter__(self) -> "OwnershipLock":
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.release()
+
+    def _is_owned(self) -> bool:
+        return getattr(self._local, "depth", 0) > 0
+
+    held = _is_owned
+
+    def defer(self, fn: Callable[[], Any]) -> None:
+        if self._is_owned():
+            self._pending().append(fn)
+        else:
+            fn()
+
+
+def defer_on(lock: Any, fn: Callable[[], Any]) -> None:
+    """``lock.defer(fn)`` for an :class:`OwnershipLock`; otherwise run now."""
+    defer = getattr(lock, "defer", None)
+    if defer is None:
+        fn()
+    else:
+        defer(fn)
+
+
 class SlotsExhausted(RuntimeError):
     """The bounded slot table refused to grow."""
 
@@ -80,7 +147,7 @@ class TurnSlots:
 
     def __init__(self, *, lock: Any | None = None,
                  clock: Callable[[], float] = time.monotonic):
-        self.lock = lock if lock is not None else threading.RLock()
+        self.lock = lock if lock is not None else OwnershipLock()
         self._clock = clock
         # The dicts are exposed under the dispatcher's historical names so
         # existing tests and the few remaining inline sites see one truth.
