@@ -89,6 +89,9 @@ event arrives.
       "compacting": false, "context_tokens": 12345, "context_window": 1000000,
       "queued_turn_count": 0, "queued_turn_revision": 0, "queue_paused": false,
       "backend_quota": null,
+      "background_jobs": {"count": 0, "sub_agents": 0},
+      "parent_agent_id": null, "role": "agent", "helper_state": null,
+      "child_count": 0, "running_children": 0,
       "team_ids": []
     }
   ],
@@ -128,6 +131,16 @@ Rules:
   refuse the send: a fallback or an account switch may still serve the turn.
   The Host refreshes usage every five minutes and sends `agent-roster` with
   `kind: "backend-quota"` when the picture changes.
+- `parent_agent_id` is the agent that created this one (a helper's parent,
+  or a fork's source), else `null`. `role` is `agent`, `helper` or `janitor`.
+  `helper_state` is `null` unless `role` is `helper`; then it is `running`,
+  `reported` (its report reached the parent), `done` (the parent or the user
+  accepted it), `failed` or `abandoned` (the parent was deleted or archived;
+  helpers are flagged, never deleted with it). `child_count` counts live
+  agents whose parent is this one and `running_children` those still
+  `running`. Nest helpers under their parent; a done helper is archived
+  after the grace period (`[agents] helper_archive_grace_hours`, 24 by
+  default). `agent-roster` with `kind: "helper-state"` asks for a refetch.
 - There is no `/sessions` in this layer. The list of chats is
   `agents[].session` filtered by `archived_at == null`.
 
@@ -386,8 +399,20 @@ apply the broadcast, not re-post `/select`, or two clients loop.
 - `GET /agents` — session-keyed map of live agents (a subset of the snapshot).
 - `POST /agents` — create, relaunch, or fork: `{"name", "voice_id",
   "backend", "cwd", "model", "effort", "session" (to relaunch),
-  "resume_session_id", "fork_session_id", "avatar_symbol", "personality"}`.
+  "resume_session_id", "fork_session_id", "avatar_symbol", "personality",
+  "parent", "role"}`. `parent` is the creating session or agent id and
+  `role` is `agent` (default) or `helper`; a helper needs a parent, and a
+  fork without `parent` records its source agent. Self-parenting and cycles
+  answer 409 (`self_parent`, `parent_cycle`); an unknown parent 404.
   Answers `{"session", "persona", …}` and broadcasts `agent-roster`.
+- `POST /agent-helper-state` — `{"session", "state": "done"|"failed"|"running",
+  "by"?}` marks a helper. `by` is the marking agent and must be the helper's
+  parent; without it the mark is the user's. An agent-origin `/send` from a
+  helper to its parent moves it to `reported` on its own, and one from the
+  parent back to a reported helper returns it to `running`.
+- `GET /agent-helper-state?session=` — `{"agent_id", "session", "role",
+  "parent_agent_id", "helper_state", "helper_completed_at", "archived_at"}`
+  for one agent, so a watcher can poll without the snapshot.
 - `DELETE /agents/<session>` — release the agent (soft delete).
 - `POST /agent-mute`, `/agent-archive`, `/agent-heartbeat`, `/agent-dreaming`,
   `/agent-voice` — per-agent toggles: `{"session", "<flag>": bool}`.

@@ -14,7 +14,7 @@ import threading
 from dataclasses import dataclass, replace
 
 from . import agents as agents_db
-from . import backends, events
+from . import backends, events, identity
 from .agent_store import AGENT_ROSTER, load_agents, save_agents
 from .fork import fork_session
 from .log import log, log_exception
@@ -118,6 +118,8 @@ class AgentLifecycleService:
             global_mcp_servers=app_config.read_global_mcp_servers(),
             cartesia_voice_for=cfg.cartesia_voice_for,
             default_roster_voice=next(iter(AGENT_ROSTER.values())),
+            resolve_agent=lambda raw: getattr(identity.resolve(raw), "agent_id", ""),
+            ancestors=agents_db.ancestors,
         )
 
     @staticmethod
@@ -180,6 +182,15 @@ class AgentLifecycleService:
                 agents_db.update_agent(agent["agent_id"], avatar_path=str(path))
             except OSError as exc:
                 raise AgentLifecycleError(400, "invalid avatar", message=str(exc)) from exc
+        if spec.write_lineage:
+            try:
+                agents_db.set_lineage(agent["agent_id"],
+                                      parent_agent_id=spec.parent_agent_id or None,
+                                      role=spec.role)
+            except agents_db.ParentRefused as exc:
+                raise AgentLifecycleError(409, exc.code) from exc
+            if spec.fork_id and spec.parent_agent_id:
+                log("forkParent", f"{session} <- {spec.parent_agent_id}")
         agents_db.start_runtime(agent["agent_id"], session)
         if resume_session_id:
             try:

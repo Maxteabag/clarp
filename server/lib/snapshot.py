@@ -105,7 +105,17 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
                          db.conn().execute("SELECT agent_id,template_id FROM janitor_configs")}
     exhausted = _exhausted_backends()
     fallback_chains = _fallback_chains() if exhausted else {}
-    for a in agents_db.list_agents():
+    agent_rows = agents_db.list_agents()
+    # Helper tree counts come from the rows already read: no extra query.
+    child_count: dict[str, int] = {}
+    running_children: dict[str, int] = {}
+    for a in agent_rows:
+        parent_id = a.get("parent_agent_id")
+        if parent_id:
+            child_count[parent_id] = child_count.get(parent_id, 0) + 1
+            if a.get("helper_state") == "running":
+                running_children[parent_id] = running_children.get(parent_id, 0) + 1
+    for a in agent_rows:
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
         # Re-derive truth from reality before reading derived state (INV1-3):
@@ -213,6 +223,11 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "mcp_servers":    mcp_servers,
             "schedules":      schedules.get(agent_id, []),
             "is_janitor": bool(a.get("is_janitor")),
+            "parent_agent_id": a.get("parent_agent_id") or None,
+            "role": a.get("role") or "agent",
+            "helper_state": a.get("helper_state") or None,
+            "child_count": child_count.get(agent_id, 0),
+            "running_children": running_children.get(agent_id, 0),
             "interaction_capabilities": agents_db.interaction_capabilities(a),
             "heartbeat_enabled": bool(a.get("heartbeat_enabled")),
             "dreaming_enabled": bool(a.get("dreaming_enabled")),

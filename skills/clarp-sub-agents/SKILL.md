@@ -12,9 +12,19 @@ kills them mid-task. Their transcript then says "didn't finish before the
 previous session ended". `setsid` and `nohup` do not help, because the child
 stays in your session's systemd cgroup and dies with it.
 
-A Clarp sub-agent runs as its own systemd user unit on a model you choose.
-The helper also registers it as a background job of kind `sub-agent` on your
-session, so the phone and desktop show that you are waiting on it.
+A Clarp sub-agent survives that. It comes in two modes:
+
+- **`--clarp-agent` (preferred when the owner should see and steer it).** The
+  sub-agent is a real Clarp helper agent: role `helper`, parent = your
+  session, cwd = its worktree. It nests under you in the chat list, the owner
+  can open its chat, watch its tool calls and message it, and it reports back
+  to you as an agent-origin message. Its state (`running`, `reported`,
+  `done`, `failed`, `abandoned`) is in the snapshot.
+- **Default (systemd).** A raw `claude -p` / `codex exec` process in its own
+  systemd user unit. Use it for fire-and-forget workers nobody needs to open.
+
+Both register a background job of kind `sub-agent` on your session, so the
+phone and desktop show that you are waiting on it.
 
 ## When to use which
 
@@ -24,6 +34,8 @@ session, so the phone and desktop show that you are waiting on it.
 | Anything longer than about five minutes | `clarp-sub-agent` |
 | Anything that edits code or runs a test gate | `clarp-sub-agent` |
 | Several parallel workstreams | `clarp-sub-agent`, one per stream |
+| The owner may want to open, watch or steer it | `clarp-sub-agent start --clarp-agent` |
+| Fire-and-forget batch work | `clarp-sub-agent start` (systemd mode) |
 
 ## How
 
@@ -48,14 +60,44 @@ session, so the phone and desktop show that you are waiting on it.
    Output goes to `/var/tmp/clarp-sub-agents/NAME.log`. `NAME.exit` holds the
    exit code when the sub-agent finishes. The background job is finished or
    failed to match.
+
+   As a Clarp helper agent:
+
+   ```bash
+   clarp-sub-agent start stream-a /path/to/worktree /var/tmp/prompts/stream-a.md \
+     --clarp-agent --backend codex --model gpt-5.5 --title "Refactor stream A"
+   ```
+
+   This runs `clarp-admin agent create stream-a --parent "$CLARP_SESSION"
+   --role helper --cwd WORKTREE`, sends the prompt from your session with
+   instructions to report back via `clarp-admin prompt --to <you> --from
+   <helper>`, and starts a small watcher unit that holds the background job
+   until the helper reports (job finished) or fails or is abandoned (job
+   failed). Any Clarp backend works (`claude`, `codex`, `grok`, `agy`,
+   `opencode`, `deepseek`). `NAME.session` holds the helper's session.
+   Its report arrives in your chat as a message from the helper.
 4. **Model with quota.** Sub-agents share your account's quota. If your
    model is at its limit, a sub-agent on the same model dies on its first
    call ("You've hit your session limit"). Pass `--model` explicitly when
    yours is close to the limit.
 5. **Resume.** To resume a killed sub-agent, start it again with the same
-   name and prompt. It reads its own WIP commits and continues.
+   name and prompt. It reads its own WIP commits and continues. A Clarp
+   helper survives restarts on its own; starting it again with the same name
+   reuses the same helper agent and re-sends the prompt.
 6. **Collect.** Read the report file and `git log` in the worktree, merge
-   into your branch, then close out the worktree.
+   into your branch, then close out the worktree. For a Clarp helper, mark
+   it done when you have taken its result, and it archives itself after the
+   grace period (24 h by default):
+
+   ```bash
+   clarp-admin agent helper-state stream-a-3f9c done --from "$CLARP_SESSION"
+   clarp-admin agent helper-state stream-a-3f9c        # show its state
+   ```
+
+   To give a reported helper more work, just message it
+   (`clarp-admin prompt --to <helper> --from "$CLARP_SESSION"`); it goes back
+   to `running`. `clarp-sub-agent stop NAME` stops only the watcher in this
+   mode; the helper agent stays until you mark it done or delete it.
 
 ## Notes
 
@@ -68,7 +110,9 @@ session, so the phone and desktop show that you are waiting on it.
   leaked test children, match on the executable (`pgrep -x bash` plus
   `/proc/PID/cmdline` starting with the script path) and skip your own
   process tree.
-- Linux only (systemd). On macOS `start` exits with status 3; use
+- Systemd mode is Linux only. On macOS `start` exits with status 3; use
   `launchctl submit` with the same command until a launchd path exists.
+  `--clarp-agent` works on macOS too, but without systemd no background job
+  is registered.
 - Progress is visible through `git log` in the worktree. With
   `--output-format text`, the log file is written only at the end.
