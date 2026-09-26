@@ -27,12 +27,11 @@ import pathlib
 from typing import Any
 
 from . import agents as agents_db
-from . import backends, db
+from . import backends, db, turn_lifecycle
 from .log import log, log_exception
-from .protocol import AgentState
 
 # Kinds that assert a live process. Intentionally excludes "background".
-_PROCESS_BUSY_KINDS = frozenset({"thinking", "tool", "compacting"})
+_PROCESS_BUSY_KINDS = turn_lifecycle.BUSY
 
 
 def _projects_root(home: pathlib.Path | None) -> pathlib.Path:
@@ -97,8 +96,10 @@ def reconcile_agent(agent_id: str, backend: str | None = None, *,
             kind = str(state.get('kind') or '')
             live = has_live_work(agent_id, backend)
         if kind in _PROCESS_BUSY_KINDS and not live:
-            agents_db.record_state(agent_id, AgentState.IDLE,
-                                   {"reason": "reconcile", "was": kind})
+            # A repair is the one write the table would refuse on its own.
+            turn_lifecycle.transition(
+                agent_id, turn_lifecycle.TurnEvent.RECONCILE_REPAIR,
+                {"reason": "reconcile", "was": kind}, force=True)
             log("reconcileStuckBusy", f"agent={agent_id} was={kind} → idle")
             repaired["state"] = kind
 
