@@ -43,3 +43,99 @@ def send_plain_http_error(handler, code: int, message: str, *, log_event: str) -
         handler.wfile.write(message.encode("utf-8"))
     except OSError as e:
         log_exception(log_event, e, detail=str(code))
+
+
+# ---- The handler/library boundary ------------------------------------------
+#
+# Library modules never read `handler._request_*` or call `handler._send`
+# themselves. The handler builds one `Principal` per request and hands the
+# library a `Responder`; the library decides and answers through those.
+#
+# TODO(integration): server.py's Handler must expose the handler-side
+# constructors. The three lines it needs (Stream B owns server.py):
+#
+#     from lib.http_utils import HandlerResponder, Principal
+#     def principal(self) -> Principal:
+#         return Principal(bool(self._request_auth_validated), str(self._request_device_scope), str(self._request_principal))
+#     def responder(self) -> HandlerResponder:
+#         return HandlerResponder(self)
+#
+# Until then `principal_of()`/`responder_of()` below fall back to reading the
+# private attributes - the one place in server/lib allowed to know their names.
+
+import json
+from dataclasses import dataclass
+from typing import Any, Protocol
+
+
+@dataclass(frozen=True)
+class Principal:
+    """Who is asking, as the auth gate decided it once per request."""
+    authenticated: bool = False
+    device_scope: str = ""
+    principal: str = ""
+
+    @property
+    def full_scope(self) -> bool:
+        return self.authenticated and self.device_scope == "full" and bool(self.principal)
+
+
+ANONYMOUS = Principal()
+
+
+def principal_of(handler) -> Principal:
+    build = getattr(handler, "principal", None)
+    if callable(build):
+        return build()
+    return Principal(
+        authenticated=bool(getattr(handler, "_request_auth_validated", False)),
+        device_scope=str(getattr(handler, "_request_device_scope", "") or ""),
+        principal=str(getattr(handler, "_request_principal", "") or ""),
+    )
+
+
+def require_full_scope(principal: Principal, *,
+                       message: str = "This route requires full-device authentication") -> str | None:
+    """The error to answer with, or None when `principal` may proceed."""
+    return None if principal.full_scope else message
+
+
+class Responder(Protocol):
+    """What a library route needs from the HTTP layer to answer a request."""
+
+    def send_json(self, status: int, value: Any) -> Any: ...
+
+    def send_bytes(self, status: int, body: bytes, content_type: str) -> Any: ...
+
+    def send_error(self, status: int, message: str, *, content_type: str = "application/json") -> Any: ...
+
+    def read_json(self) -> dict | None: ...
+
+
+class HandlerResponder:
+    """Responder over a server.Handler. Returns what the handler's send returns
+    so unit tests that stub `_send` can inspect the reply."""
+
+    def __init__(self, handler) -> None:
+        self._handler = handler
+
+    def send_json(self, status: int, value: Any) -> Any:
+        return self._handler._send(status, json.dumps(value).encode(), "application/json")
+
+    def send_bytes(self, status: int, body: bytes, content_type: str) -> Any:
+        return self._handler._send(status, body, content_type)
+
+    def send_error(self, status: int, message: str, *, content_type: str = "application/json") -> Any:
+        if content_type == "application/json":
+            return self.send_json(status, {"error": message})
+        return self._handler._send(status, message.encode("utf-8"), content_type)
+
+    def read_json(self) -> dict | None:
+        return self._handler._read_json()
+
+
+def responder_of(handler) -> Responder:
+    build = getattr(handler, "responder", None)
+    if callable(build):
+        return build()
+    return HandlerResponder(handler)
