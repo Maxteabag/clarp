@@ -3,7 +3,7 @@
 Codex persists each session to
 ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl. Each line is an
 envelope `{timestamp, type, payload}`. We map it onto the exact shape
-lib/transcript_log.parse_turns produces for Claude, while also emitting
+lib/claude_transcript.parse_turns produces for Claude, while also emitting
 native Codex display cells for compact terminal-style rendering:
 
     {"role": "assistant", "text": str, "tools": [...],

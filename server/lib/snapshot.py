@@ -17,7 +17,7 @@ from .avatar_urls import (versioned_avatar_url, janitor_avatar_url,
                           static_persona_avatar_url)
 from .log import log_exception
 from .activity import state_activity_event
-from .transcript_log import context_tokens_from_jsonl, find_latest_jsonl
+from .claude_transcript import context_tokens_from_jsonl, find_latest_jsonl
 from .protocol import AgentBackend, AgentState
 
 

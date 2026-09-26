@@ -1,11 +1,11 @@
-"""Tests for transcript_log — turn parsing and tool summarisation."""
+"""Tests for claude_transcript — turn parsing and tool summarisation."""
 import json
 import pytest
 import sys
 import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
-from lib.transcript_log import (  # noqa: E402
+from lib.claude_transcript import (  # noqa: E402
     truncate,
     summarise_tool,
     parse_turns,
@@ -207,25 +207,25 @@ def test_find_latest_jsonl_returns_none_when_uuid_missing(tmp_path):
 
 
 def _count_rebuilds(monkeypatch):
-    from lib import transcript_log
+    from lib import claude_transcript
     rebuilds = []
-    original = transcript_log._TranscriptIndex._rebuild
+    original = claude_transcript._TranscriptIndex._rebuild
 
     def counting(self):
         rebuilds.append(self.root)
         return original(self)
 
-    monkeypatch.setattr(transcript_log._TranscriptIndex, "_rebuild", counting)
-    monkeypatch.setattr(transcript_log, "_glob_latest_jsonl",
+    monkeypatch.setattr(claude_transcript._TranscriptIndex, "_rebuild", counting)
+    monkeypatch.setattr(claude_transcript, "_glob_latest_jsonl",
                         lambda *a: pytest.fail("index must answer without a glob"))
-    transcript_log.reset_transcript_index()
+    claude_transcript.reset_transcript_index()
     return rebuilds
 
 
 def test_find_latest_jsonl_caches_misses_until_the_transcript_appears(tmp_path, monkeypatch):
     """Every miss used to glob ~260 project directories; the streamer asks
     once a second per unbound agent and the snapshot twice per bound one."""
-    from lib import transcript_log
+    from lib import claude_transcript
     rebuilds = _count_rebuilds(monkeypatch)
     root = tmp_path / "projects"
     for i in range(3):
@@ -249,29 +249,29 @@ def test_find_latest_jsonl_caches_misses_until_the_transcript_appears(tmp_path, 
     (root / "proj-new" / "sid-2.jsonl").write_text("")
     assert find_latest_jsonl("sid-2", projects_root=root) == root / "proj-new" / "sid-2.jsonl"
     assert find_latest_jsonl("", projects_root=root) is None
-    transcript_log.reset_transcript_index()
+    claude_transcript.reset_transcript_index()
 
 
 def test_find_latest_jsonl_globs_when_inotify_is_unavailable(tmp_path, monkeypatch):
     import sys as _sys
-    from lib import transcript_log
+    from lib import claude_transcript
     monkeypatch.setitem(_sys.modules, "inotify_simple", None)  # import raises
-    transcript_log.reset_transcript_index()
+    claude_transcript.reset_transcript_index()
     root = tmp_path / "projects"
     (root / "p").mkdir(parents=True)
     assert find_latest_jsonl("x", projects_root=root) is None
     (root / "p" / "x.jsonl").write_text("")
     assert find_latest_jsonl("x", projects_root=root) == root / "p" / "x.jsonl"
-    transcript_log.reset_transcript_index()
+    claude_transcript.reset_transcript_index()
 
 
 def test_find_latest_jsonl_index_survives_a_missing_root(tmp_path, monkeypatch):
-    from lib import transcript_log
-    transcript_log.reset_transcript_index()
+    from lib import claude_transcript
+    claude_transcript.reset_transcript_index()
     root = tmp_path / "not-yet"
     assert find_latest_jsonl("x", projects_root=root) is None
     (root / "p").mkdir(parents=True)
     (root / "p" / "x.jsonl").write_text("")
     # Falls back to the glob while the root could not be watched.
     assert find_latest_jsonl("x", projects_root=root) == root / "p" / "x.jsonl"
-    transcript_log.reset_transcript_index()
+    claude_transcript.reset_transcript_index()
