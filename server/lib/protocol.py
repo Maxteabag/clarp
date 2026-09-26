@@ -36,6 +36,19 @@ class SSEType:
     # started, paused, resumed, blocked, limited, completed or cleared. Carries
     # the new goal (or null) so clients need no snapshot round trip.
     GOAL_UPDATED = "goal-updated"
+    # The orchestrator routed (or declined to route) a hands-free utterance.
+    # Carries the decision so a client can show why an agent was picked.
+    ORCHESTRATOR_DECISION = "orchestrator-decision"
+
+    @classmethod
+    def valid(cls) -> set[str]:
+        return set(cls.members().values())
+
+    @classmethod
+    def members(cls) -> dict[str, str]:
+        """``{MEMBER_NAME: wire_type}`` for every event type on the wire."""
+        return {name: value for name, value in vars(cls).items()
+                if name.isupper() and isinstance(value, str)}
 
 
 class AgentBackend:
