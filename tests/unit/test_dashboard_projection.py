@@ -272,13 +272,16 @@ def test_active_background_jobs_show_the_agent_as_background():
     job = background_jobs.upsert(session='waiter', job_id='build', kind='implementation', title='Build')
     row = next(r for r in build_agent_snapshot(None)['agents'] if r['agent_id'] == aid)
     assert row['latest_state'] == 'background'
-    assert row['status_text'] == '1 background process'
+    assert row['status_text'] == 'Build'
 
-    background_jobs.upsert(session='waiter', job_id='worker-a', kind='worker', title='Stream A')
+    worker = background_jobs.upsert(session='waiter', job_id='worker-a', kind='worker', title='Stream A')
+    background_jobs.set_progress('worker-a', session='waiter', generation=worker['generation'],
+                                 text='tests 3/10')
     row = next(r for r in build_agent_snapshot(None)['agents'] if r['agent_id'] == aid)
+    # The badge carries the count; the line says what is happening.
     assert row['background_jobs'] == {'count': 2, 'sub_agents': 0}
-    assert row['status_text'] == '2 background processes'
+    assert row['status_text'] == 'Stream A: tests 3/10'
 
-    background_jobs.finish('build', generation=job['generation'])
+    background_jobs.finish('worker-a', generation=worker['generation'])
     row = next(r for r in build_agent_snapshot(None)['agents'] if r['agent_id'] == aid)
-    assert row['status_text'] == '1 background process'
+    assert row['status_text'] == 'Build'

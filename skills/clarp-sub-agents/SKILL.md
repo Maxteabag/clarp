@@ -28,8 +28,9 @@ helper agent (`--clarp-agent`), counted from your running helpers. A
 **background process** is a durable job, such as a systemd worker. A
 `--clarp-agent` helper also gets a small watcher job (kind `sub-agent`) that
 only mirrors it and is not counted again; a systemd worker registers kind
-`worker` and counts as one background process. Your row then reads
-"3 sub-agents", "1 background process" or "3 sub-agents · 1 process".
+`worker` and counts as one background process. The apps show those counts
+as a badge; your status line says what the work is doing ("stream-a:
+running tests", "3 working, 1 waiting", a worker's latest progress line).
 
 ## When to use which
 

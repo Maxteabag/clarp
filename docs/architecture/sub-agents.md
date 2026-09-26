@@ -98,7 +98,10 @@ Two words, used the same way in the snapshot, the apps and the skills
 `clarp-sub-agent start --clarp-agent` still registers a watcher job of kind
 `sub-agent` whose detail is the helper's session. That job only mirrors the
 helper, so it is not counted as a process; counting both made three helpers
-read as "6 sub-agents running". A job whose worker PID has exited fails at
+read as "6 sub-agents running". The counts are the badge; the parent's
+`status_text` describes activity instead of repeating them ("slice5-helper:
+running tests", "3 working, 1 waiting", a process's progress line or title).
+A job whose worker PID has exited fails at
 once (`worker_vanished`), and the owning session can close its own job with
 `clarp-agent-bg SESSION job-cancel HANDLE` even when the worker is gone.
 
