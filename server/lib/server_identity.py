@@ -40,7 +40,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 10
+HOST_CONTRACT = 11
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (

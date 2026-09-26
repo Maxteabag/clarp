@@ -10,8 +10,14 @@ import json
 MAX_APPEND_BYTES = 480
 
 
-def context_chunks(text: str):
-    """Yield ordered chunks without losing whitespace, identifiers or caveats."""
+def context_chunks(text: str, max_bytes: int = MAX_APPEND_BYTES):
+    """Yield ordered chunks without losing whitespace, identifiers or caveats.
+
+    ``max_bytes`` bounds each chunk's UTF-8 size; callers that add their own
+    header pass a smaller budget so header plus chunk stays within one append.
+    """
+    if max_bytes < 4:
+        raise ValueError("A chunk must hold at least one UTF-8 character")
     remaining = str(text)
     while remaining:
         size = 0
@@ -19,11 +25,11 @@ def context_chunks(text: str):
         preferred = 0
         for index, char in enumerate(remaining):
             width = len(char.encode("utf-8"))
-            if size + width > MAX_APPEND_BYTES:
+            if size + width > max_bytes:
                 break
             size += width
             end = index + 1
-            if char.isspace() and size >= MAX_APPEND_BYTES // 2:
+            if char.isspace() and size >= max_bytes // 2:
                 preferred = end
         if end < len(remaining) and preferred:
             end = preferred

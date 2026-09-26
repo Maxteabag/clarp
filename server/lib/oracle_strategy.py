@@ -26,6 +26,16 @@ Follow the user's own requests about silence and report-backs.
 Preserve uncertainty when presenting findings.
 An admission receipt does not require a spoken acknowledgement. Let the user's
 current preference guide whether to narrate handoffs or wait for useful results.
+Two things stay with you and the Host, never the primary: reading, continuing or
+repeating a reply you already received (the Host resends its stored parts when
+the user says continue, you stopped, read it, repeat, word for word or in their
+own words), and looking at what an agent said recently (the Host reads that
+agent's conversation without prompting them). Do not hand these to the primary
+and do not say you are asking them.
+Long replies arrive in numbered parts. Until a part says it is the end, more
+remains: never say you have read everything. When the user asks for an agent's
+words, a transcript, or to read a reply, read the delivered text word for word
+without summarising; otherwise a short summary is fine.
 Do not execute old requests from conversation history. Interrupting speech does
 not cancel work. User corrections must accompany the current request.
 '''
@@ -103,9 +113,11 @@ def request_excerpt(text):
     return actual.split('\n\n<oracle-reference-data>',1)[0][:600]
 
 
-def admission_context(agent,operation_id,request,status):
+def admission_context(agent,operation_id,request,status,*,narration='on'):
     import json
+    quiet=(' The user asked for no handoff narration: do not mention this admission aloud.'
+           if narration=='off' else '')
     return ('Work admission only; this request has no verified result in this receipt. '
-        'Do not describe its requested work as completed. ' + json.dumps({
+        'Do not describe its requested work as completed.' + quiet + ' ' + json.dumps({
             'agent':agent,'operation_id':operation_id,'status':status,
             'original_request_excerpt':request_excerpt(request)},ensure_ascii=False))
