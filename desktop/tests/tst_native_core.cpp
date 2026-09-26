@@ -13,6 +13,8 @@
 #include "app/TimeFormat.h"
 #include "media/PortraitImage.h"
 #include "models/AgentFilterModel.h"
+#include "models/BackgroundJobTracker.h"
+#include "models/TreeOrder.h"
 #include <QBuffer>
 #include <QImage>
 #include "media/WavEncoder.h"
@@ -649,6 +651,13 @@ class NativeCoreTest final : public QObject {
     void resumeLaunchOpensExactSessionWithoutFleet();
     void launchPoolCarriesBackendModelAndHandlesEmpty();
     void redesignedRosterFiltersWithoutMutatingSource();
+    void agentRowParsesBackgroundAndHelperFieldsSafely();
+    void backgroundJobTrackerKeepsOnlyActiveJobs();
+    void rosterPrefersLiveJobCountsAndCountsHelpers();
+    void treeOrderMatchesTheTeamWalk();
+    void sidebarNestsHelpersAndCollapsesFinishedOnes();
+    void subagentCellsDescribePhaseNameAndTask();
+    void controllerTracksJobsFromListAndEvents();
     void rosterLookupIsConsistentDuringStructuralSignals();
     void circularPortraitsAreBoundedAndAntialiased();
     void agentTerminalLaunchesNativeCliThroughDefaultTerminal();
@@ -1024,6 +1033,405 @@ void NativeCoreTest::redesignedRosterFiltersWithoutMutatingSource() {
     source.clearUnread(QStringLiteral("alpha"));
     QCOMPARE(filtered.rowCount(), 0);
     QVERIFY(!clarp::chatStamp(1'788'000'000'000).isEmpty());
+}
+
+namespace {
+QJsonObject rosterRow(const QString& session, const QString& agentId, qint64 activity,
+                      const QJsonObject& extra = {}) {
+    QJsonObject row{{QStringLiteral("session"), session},
+                    {QStringLiteral("agent_id"), agentId},
+                    {QStringLiteral("persona"), session.toUpper()},
+                    {QStringLiteral("last_activity"), static_cast<double>(activity)}};
+    for (auto it = extra.begin(); it != extra.end(); ++it) row.insert(it.key(), it.value());
+    return row;
+}
+
+QJsonObject helperRow(const QString& session, const QString& parent, const QString& state,
+                      qint64 activity) {
+    return rosterRow(session, session + QStringLiteral("-id"), activity,
+                     {{QStringLiteral("role"), QStringLiteral("helper")},
+                      {QStringLiteral("parent_agent_id"), parent},
+                      {QStringLiteral("helper_state"), state}});
+}
+
+QJsonObject jobJson(const QString& id, const QString& agentId, const QString& status,
+                    qint64 updated, const QString& kind = QStringLiteral("watch")) {
+    return {{QStringLiteral("job_id"), id}, {QStringLiteral("agent_id"), agentId},
+            {QStringLiteral("session"), agentId + QStringLiteral("-session")},
+            {QStringLiteral("kind"), kind}, {QStringLiteral("title"), id + QStringLiteral(" title")},
+            {QStringLiteral("status"), status},
+            {QStringLiteral("started_at"), static_cast<double>(updated - 1000)},
+            {QStringLiteral("heartbeat_at"), static_cast<double>(updated)},
+            {QStringLiteral("updated_at"), static_cast<double>(updated)}};
+}
+
+QStringList proxySessions(const QAbstractItemModel& model) {
+    QStringList result;
+    for (int row = 0; row < model.rowCount(); ++row)
+        result.append(model.index(row, 0).data(AgentListModel::SessionRole).toString());
+    return result;
+}
+} // namespace
+
+void NativeCoreTest::agentRowParsesBackgroundAndHelperFieldsSafely() {
+    const Agent old = Agent::fromJson({{QStringLiteral("session"), QStringLiteral("a")}});
+    QCOMPARE(old.backgroundJobCount, 0);
+    QCOMPARE(old.backgroundSubAgentCount, 0);
+    QCOMPARE(old.role, QStringLiteral("agent"));
+    QVERIFY(old.parentAgentId.isEmpty());
+    QVERIFY(old.helperState.isEmpty());
+    QCOMPARE(old.childCount, 0);
+    QCOMPARE(old.runningChildren, 0);
+    QVERIFY(!old.isHelper());
+
+    const Agent current = Agent::fromJson({
+        {QStringLiteral("session"), QStringLiteral("h")},
+        {QStringLiteral("background_jobs"), QJsonObject{{QStringLiteral("count"), 3},
+                                                        {QStringLiteral("sub_agents"), 2}}},
+        {QStringLiteral("parent_agent_id"), QStringLiteral("p")},
+        {QStringLiteral("role"), QStringLiteral("helper")},
+        {QStringLiteral("helper_state"), QStringLiteral("reported")},
+        {QStringLiteral("child_count"), 4},
+        {QStringLiteral("running_children"), 1}});
+    QCOMPARE(current.backgroundJobCount, 3);
+    QCOMPARE(current.backgroundSubAgentCount, 2);
+    QCOMPARE(current.parentAgentId, QStringLiteral("p"));
+    QVERIFY(current.isHelper());
+    QVERIFY(current.helperFinished());
+    QVERIFY(!current.helperRunning());
+    QCOMPARE(current.childCount, 4);
+    QCOMPARE(current.runningChildren, 1);
+
+    // Wrong types, nulls and impossible numbers fall back instead of leaking.
+    const Agent hostile = Agent::fromJson({
+        {QStringLiteral("session"), QStringLiteral("x")},
+        {QStringLiteral("background_jobs"), QJsonObject{{QStringLiteral("count"), -2},
+                                                        {QStringLiteral("sub_agents"), 9}}},
+        {QStringLiteral("parent_agent_id"), QJsonValue::Null},
+        {QStringLiteral("role"), 7},
+        {QStringLiteral("helper_state"), QJsonValue::Null},
+        {QStringLiteral("child_count"), QStringLiteral("many")},
+        {QStringLiteral("running_children"), -1}});
+    QCOMPARE(hostile.backgroundJobCount, 0);
+    QCOMPARE(hostile.backgroundSubAgentCount, 0);
+    QCOMPARE(hostile.role, QStringLiteral("agent"));
+    QCOMPARE(hostile.childCount, 0);
+    QCOMPARE(hostile.runningChildren, 0);
+    const Agent notObject = Agent::fromJson({{QStringLiteral("session"), QStringLiteral("y")},
+                                             {QStringLiteral("background_jobs"), 5}});
+    QCOMPARE(notObject.backgroundJobCount, 0);
+    // A helper without a parent is not nested anywhere.
+    QVERIFY(!Agent::fromJson({{QStringLiteral("role"), QStringLiteral("helper")}}).isHelper());
+    QCOMPARE(clarp::compactDuration(-5), QStringLiteral("0s"));
+    QCOMPARE(clarp::compactDuration(59'000), QStringLiteral("59s"));
+    QCOMPARE(clarp::compactDuration(125'000), QStringLiteral("2m"));
+    QCOMPARE(clarp::compactDuration(3'900'000), QStringLiteral("1h 05m"));
+    QCOMPARE(clarp::compactDuration(3LL * 86'400'000), QStringLiteral("3d"));
+}
+
+void NativeCoreTest::backgroundJobTrackerKeepsOnlyActiveJobs() {
+    BackgroundJobTracker tracker;
+    QSignalSpy changed(&tracker, &BackgroundJobTracker::changed);
+    QVERIFY(!tracker.loaded());
+    tracker.applyList({{QStringLiteral("jobs"), QJsonArray{
+        jobJson(QStringLiteral("j1"), QStringLiteral("a"), QStringLiteral("running"), 5000),
+        jobJson(QStringLiteral("j2"), QStringLiteral("a"), QStringLiteral("queued"), 3000,
+                QStringLiteral("sub-agent")),
+        jobJson(QStringLiteral("j3"), QStringLiteral("a"), QStringLiteral("succeeded"), 4000),
+        jobJson(QStringLiteral("j4"), QStringLiteral("b"), QStringLiteral("running"), 4000),
+        QJsonObject{{QStringLiteral("status"), QStringLiteral("running")}}, 7}}});
+    QVERIFY(tracker.loaded());
+    QCOMPARE(changed.size(), 1);
+    auto counts = tracker.countsByAgent();
+    QCOMPARE(counts.value(QStringLiteral("a")).total, 2);
+    QCOMPARE(counts.value(QStringLiteral("a")).subAgents, 1);
+    QCOMPARE(counts.value(QStringLiteral("b")).total, 1);
+    // Oldest first, so the popover reads in the order work started.
+    const auto jobs = tracker.activeJobs(QStringLiteral("a"));
+    QCOMPARE(jobs.size(), 2);
+    QCOMPARE(jobs.at(0).value(QStringLiteral("job_id")).toString(), QStringLiteral("j2"));
+
+    // The SSE event wraps the job; a finish removes it at once.
+    QJsonObject finished = jobJson(QStringLiteral("j1"), QStringLiteral("a"),
+                                   QStringLiteral("succeeded"), 6000);
+    QVERIFY(tracker.applyEvent({{QStringLiteral("type"), QStringLiteral("background-job-updated")},
+                                {QStringLiteral("job_id"), QStringLiteral("j1")},
+                                {QStringLiteral("job"), finished}}));
+    QCOMPARE(tracker.countsByAgent().value(QStringLiteral("a")).total, 1);
+    // A replayed older event cannot bring a job back or rewind it.
+    QVERIFY(!tracker.applyEvent({{QStringLiteral("job"), jobJson(QStringLiteral("j4"), QStringLiteral("b"),
+                                                                QStringLiteral("succeeded"), 1000)}}));
+    QCOMPARE(tracker.countsByAgent().value(QStringLiteral("b")).total, 1);
+    // A new job starts; a heartbeat with the same content is not a change.
+    const QJsonObject started = jobJson(QStringLiteral("j5"), QStringLiteral("b"),
+                                        QStringLiteral("running"), 7000);
+    QVERIFY(tracker.applyEvent({{QStringLiteral("job"), started}}));
+    QVERIFY(!tracker.applyEvent({{QStringLiteral("job"), started}}));
+    QCOMPARE(tracker.countsByAgent().value(QStringLiteral("b")).total, 2);
+    QVERIFY(!tracker.applyEvent({{QStringLiteral("type"), QStringLiteral("background-job-updated")}}));
+    // Jobs with no agent owner match by session only.
+    tracker.applyEvent({{QStringLiteral("job"), QJsonObject{
+        {QStringLiteral("job_id"), QStringLiteral("orphan")},
+        {QStringLiteral("session"), QStringLiteral("s1")},
+        {QStringLiteral("status"), QStringLiteral("running")}}}});
+    QCOMPARE(tracker.activeJobs({}, QStringLiteral("s1")).size(), 1);
+    QVERIFY(!tracker.countsByAgent().contains(QString{}));
+    tracker.clear();
+    QVERIFY(!tracker.loaded());
+    QVERIFY(tracker.countsByAgent().isEmpty());
+}
+
+void NativeCoreTest::rosterPrefersLiveJobCountsAndCountsHelpers() {
+    AgentListModel model;
+    model.applySnapshot({{QStringLiteral("agents"), QJsonArray{
+        rosterRow(QStringLiteral("parent"), QStringLiteral("p"), 300,
+                  {{QStringLiteral("background_jobs"),
+                    QJsonObject{{QStringLiteral("count"), 1}, {QStringLiteral("sub_agents"), 1}}},
+                   {QStringLiteral("latest_state"), QStringLiteral("background")}}),
+        helperRow(QStringLiteral("worker"), QStringLiteral("p"), QStringLiteral("running"), 200),
+        helperRow(QStringLiteral("old"), QStringLiteral("p"), QStringLiteral("done"), 100),
+        rosterRow(QStringLiteral("quiet"), QStringLiteral("q"), 50)}}});
+    const QModelIndex parent = model.index(model.indexOfSession(QStringLiteral("parent")), 0);
+    QCOMPARE(parent.data(AgentListModel::BackgroundJobCountRole).toInt(), 1);
+    QCOMPARE(parent.data(AgentListModel::SubAgentCountRole).toInt(), 1);
+    // Old Host: no running_children, so the visible running helper counts.
+    QCOMPARE(parent.data(AgentListModel::RunningChildrenRole).toInt(), 1);
+    QCOMPARE(parent.data(AgentListModel::ProcessCountRole).toInt(), 2);
+    const QModelIndex quiet = model.index(model.indexOfSession(QStringLiteral("quiet")), 0);
+    QCOMPARE(quiet.data(AgentListModel::ProcessCountRole).toInt(), 0);
+
+    QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+    QHash<QString, BackgroundJobCounts> live{{QStringLiteral("p"), {3, 1}}};
+    model.applyLiveJobCounts(live);
+    QCOMPARE(changed.size(), 1); // Only the parent row actually changed.
+    QCOMPARE(parent.data(AgentListModel::BackgroundJobCountRole).toInt(), 3);
+    QCOMPARE(parent.data(AgentListModel::ProcessCountRole).toInt(), 4);
+
+    BackgroundJobTracker tracker;
+    tracker.applyList({{QStringLiteral("jobs"), QJsonArray{
+        jobJson(QStringLiteral("watch"), QStringLiteral("p"), QStringLiteral("running"), 10'000),
+        jobJson(QStringLiteral("helper"), QStringLiteral("p"), QStringLiteral("running"), 12'000,
+                QStringLiteral("sub-agent"))}}});
+    const QVariantMap processes =
+        describeAgentProcesses(model, tracker, QStringLiteral("parent"), 70'000);
+    const QVariantList jobs = processes.value(QStringLiteral("jobs")).toList();
+    QCOMPARE(jobs.size(), 2);
+    QCOMPARE(jobs.at(0).toMap().value(QStringLiteral("elapsed")).toString(), QStringLiteral("1m"));
+    QCOMPARE(jobs.at(0).toMap().value(QStringLiteral("heartbeat")).toString(), QStringLiteral("1m ago"));
+    QVERIFY(jobs.at(1).toMap().value(QStringLiteral("subAgent")).toBool());
+    const QVariantList helpers = processes.value(QStringLiteral("helpers")).toList();
+    QCOMPARE(helpers.size(), 1);
+    QCOMPARE(helpers.at(0).toMap().value(QStringLiteral("session")).toString(), QStringLiteral("worker"));
+    QCOMPARE(processes.value(QStringLiteral("total")).toInt(), 4);
+    QVERIFY(describeAgentProcesses(model, tracker, QStringLiteral("missing"), 0).isEmpty());
+
+    model.clearLiveJobCounts();
+    QCOMPARE(parent.data(AgentListModel::BackgroundJobCountRole).toInt(), 1);
+    model.markTransportUnavailable();
+    QCOMPARE(parent.data(AgentListModel::ProcessCountRole).toInt(), 0);
+}
+
+void NativeCoreTest::treeOrderMatchesTheTeamWalk() {
+    // Same fixture shape as the Teams hierarchy: roots keep input order,
+    // children follow their parent, and a cycle still appears exactly once.
+    const QVector<TreeNode> nodes{{QStringLiteral("child"), QStringLiteral("root")},
+                                  {QStringLiteral("root"), {}},
+                                  {QStringLiteral("orphan"), QStringLiteral("gone")},
+                                  {QStringLiteral("grand"), QStringLiteral("child")},
+                                  {QStringLiteral("x"), QStringLiteral("y")},
+                                  {QStringLiteral("y"), QStringLiteral("x")}};
+    const QVector<TreePlacement> order = treeOrder(nodes);
+    QStringList ids;
+    QList<int> depths;
+    for (const TreePlacement& placement : order) {
+        ids.append(nodes.at(placement.index).id);
+        depths.append(placement.depth);
+    }
+    QCOMPARE(ids, (QStringList{QStringLiteral("root"), QStringLiteral("child"), QStringLiteral("grand"),
+                               QStringLiteral("orphan"), QStringLiteral("x"), QStringLiteral("y")}));
+    QCOMPARE(depths, (QList<int>{0, 1, 2, 0, 0, 1}));
+    const QVector<TreeNode> ranked{{QStringLiteral("p"), {}},
+                                   {QStringLiteral("done"), QStringLiteral("p"), 1},
+                                   {QStringLiteral("live"), QStringLiteral("p"), 0}};
+    const QVector<TreePlacement> rankedOrder = treeOrder(ranked);
+    QCOMPARE(ranked.at(rankedOrder.at(1).index).id, QStringLiteral("live"));
+}
+
+void NativeCoreTest::sidebarNestsHelpersAndCollapsesFinishedOnes() {
+    AgentListModel source;
+    AgentFilterModel filtered;
+    filtered.setSourceModel(&source);
+    // An old Host sends no hierarchy: the recency order is untouched.
+    source.applySnapshot({{QStringLiteral("agents"), QJsonArray{
+        rosterRow(QStringLiteral("b"), QStringLiteral("b"), 300),
+        rosterRow(QStringLiteral("a"), QStringLiteral("a"), 200),
+        rosterRow(QStringLiteral("c"), QStringLiteral("c"), 100)}}});
+    QCOMPARE(proxySessions(filtered), (QStringList{QStringLiteral("b"), QStringLiteral("a"), QStringLiteral("c")}));
+    QCOMPARE(filtered.index(0, 0).data(AgentFilterModel::TreeDepthRole).toInt(), 0);
+    QVERIFY(filtered.index(0, 0).data(AgentFilterModel::DoneHelpersRole).toList().isEmpty());
+
+    // Helpers are more recent than their parent yet never reach the top level.
+    source.applySnapshot({{QStringLiteral("agents"), QJsonArray{
+        helperRow(QStringLiteral("done1"), QStringLiteral("p"), QStringLiteral("done"), 900),
+        helperRow(QStringLiteral("live"), QStringLiteral("p"), QStringLiteral("running"), 800),
+        rosterRow(QStringLiteral("other"), QStringLiteral("o"), 700),
+        helperRow(QStringLiteral("done2"), QStringLiteral("p"), QStringLiteral("reported"), 600),
+        helperRow(QStringLiteral("failed"), QStringLiteral("p"), QStringLiteral("failed"), 550),
+        rosterRow(QStringLiteral("parent"), QStringLiteral("p"), 500),
+        helperRow(QStringLiteral("stray"), QStringLiteral("deleted"), QStringLiteral("running"), 400)}}});
+    QCOMPARE(proxySessions(filtered),
+             (QStringList{QStringLiteral("other"), QStringLiteral("parent"), QStringLiteral("live"),
+                          QStringLiteral("failed"), QStringLiteral("stray")}));
+    const int failedRow = filtered.indexOfSession(QStringLiteral("failed"));
+    QCOMPARE(filtered.index(failedRow, 0).data(AgentFilterModel::TreeDepthRole).toInt(), 1);
+    // The orphan stays discoverable at the top level, like a team cycle.
+    QCOMPARE(filtered.index(filtered.indexOfSession(QStringLiteral("stray")), 0)
+                 .data(AgentFilterModel::TreeDepthRole).toInt(), 0);
+    // The "2 helpers done" line rides on the last visible row above them.
+    QVariantList footers = filtered.index(failedRow, 0).data(AgentFilterModel::DoneHelpersRole).toList();
+    QCOMPARE(footers.size(), 1);
+    QCOMPARE(footers.at(0).toMap().value(QStringLiteral("count")).toInt(), 2);
+    QCOMPARE(footers.at(0).toMap().value(QStringLiteral("parentAgentId")).toString(), QStringLiteral("p"));
+    QVERIFY(!footers.at(0).toMap().value(QStringLiteral("expanded")).toBool());
+
+    filtered.toggleDoneHelpers(QStringLiteral("p"));
+    QCOMPARE(proxySessions(filtered),
+             (QStringList{QStringLiteral("other"), QStringLiteral("parent"), QStringLiteral("live"),
+                          QStringLiteral("failed"), QStringLiteral("done1"), QStringLiteral("done2"),
+                          QStringLiteral("stray")}));
+    footers = filtered.index(filtered.indexOfSession(QStringLiteral("failed")), 0)
+                  .data(AgentFilterModel::DoneHelpersRole).toList();
+    QVERIFY(footers.at(0).toMap().value(QStringLiteral("expanded")).toBool());
+    filtered.toggleDoneHelpers(QStringLiteral("p"));
+    QCOMPARE(filtered.indexOfSession(QStringLiteral("done1")), -1);
+    filtered.revealSession(QStringLiteral("done1"));
+    QVERIFY(filtered.indexOfSession(QStringLiteral("done1")) > 0);
+    filtered.toggleDoneHelpers(QStringLiteral("p"));
+
+    // A search is flat and finds finished helpers too.
+    filtered.setQuery(QStringLiteral("DONE"));
+    QCOMPARE(proxySessions(filtered), (QStringList{QStringLiteral("done1"), QStringLiteral("done2")}));
+    QCOMPARE(filtered.index(0, 0).data(AgentFilterModel::TreeDepthRole).toInt(), 0);
+    filtered.setQuery({});
+    QCOMPARE(filtered.indexOfSession(QStringLiteral("done1")), -1);
+
+    // A state change arriving through the roster re-nests without a reset.
+    source.applySnapshot({{QStringLiteral("agents"), QJsonArray{
+        helperRow(QStringLiteral("live"), QStringLiteral("p"), QStringLiteral("done"), 800),
+        rosterRow(QStringLiteral("parent"), QStringLiteral("p"), 500)}}});
+    QCOMPARE(proxySessions(filtered), (QStringList{QStringLiteral("parent")}));
+    footers = filtered.index(0, 0).data(AgentFilterModel::DoneHelpersRole).toList();
+    QCOMPARE(footers.at(0).toMap().value(QStringLiteral("count")).toInt(), 1);
+}
+
+void NativeCoreTest::subagentCellsDescribePhaseNameAndTask() {
+    auto cell = [](const QString& title, const QString& status, const QString& summary,
+                   const QJsonArray& lines = {}) {
+        return QJsonObject{{QStringLiteral("kind"), QStringLiteral("subagents")},
+                           {QStringLiteral("title"), title},
+                           {QStringLiteral("status"), status},
+                           {QStringLiteral("summary"), summary},
+                           {QStringLiteral("lines"), lines}};
+    };
+    const QJsonArray taskLine{QJsonObject{{QStringLiteral("label"), QStringLiteral("Task")},
+                                          {QStringLiteral("text"), QStringLiteral("Audit the parser")}}};
+    QJsonObject info = describeSubagentCell(cell(QStringLiteral("Spawning agent"), QStringLiteral("running"),
+                                                 QStringLiteral("Kepler (explorer)"), taskLine));
+    QCOMPARE(info.value(QStringLiteral("phase")).toString(), QStringLiteral("spawned"));
+    QVERIFY(info.value(QStringLiteral("running")).toBool());
+    QCOMPARE(info.value(QStringLiteral("name")).toString(), QStringLiteral("Kepler (explorer)"));
+    QCOMPARE(info.value(QStringLiteral("task")).toString(), QStringLiteral("Audit the parser"));
+    info = describeSubagentCell(cell(QStringLiteral("Waiting for agents"), QStringLiteral("running"),
+                                     QStringLiteral("2 agents")));
+    QCOMPARE(info.value(QStringLiteral("phase")).toString(), QStringLiteral("waiting"));
+    info = describeSubagentCell(cell(QStringLiteral("Finished waiting"), QStringLiteral("ok"),
+        QStringLiteral("agents"), QJsonArray{QJsonObject{{QStringLiteral("label"), QStringLiteral("Kepler")},
+                                                         {QStringLiteral("text"), QStringLiteral("Completed")},
+                                                         {QStringLiteral("kind"), QStringLiteral("status")}}}));
+    QCOMPARE(info.value(QStringLiteral("phase")).toString(), QStringLiteral("finished"));
+    QCOMPARE(info.value(QStringLiteral("task")).toString(), QStringLiteral("Kepler: Completed"));
+    info = describeSubagentCell(cell(QStringLiteral("Closed agent"), QStringLiteral("recorded"), QStringLiteral("agent"),
+        QJsonArray{QJsonObject{{QStringLiteral("label"), QStringLiteral("Agent")},
+                               {QStringLiteral("text"), QStringLiteral("019a-thread")}}}));
+    QCOMPARE(info.value(QStringLiteral("phase")).toString(), QStringLiteral("finished"));
+    QCOMPARE(info.value(QStringLiteral("name")).toString(), QStringLiteral("019a-thread"));
+    info = describeSubagentCell(cell(QStringLiteral("Interrupted subagent"), QStringLiteral("error"), {}));
+    QCOMPARE(info.value(QStringLiteral("phase")).toString(), QStringLiteral("failed"));
+    QCOMPARE(info.value(QStringLiteral("name")).toString(), QStringLiteral("sub-agent"));
+    QVERIFY(describeSubagentCell({{QStringLiteral("kind"), QStringLiteral("command")}}).isEmpty());
+
+    // The transcript role annotates the cell but the cached shape is untouched.
+    ConversationModel model;
+    model.openSession(QStringLiteral("s"));
+    model.applyLog({{QStringLiteral("conversation_id"), QStringLiteral("c")},
+                    {QStringLiteral("latest_revision"), 1},
+                    {QStringLiteral("turns"), QJsonArray{QJsonObject{
+                        {QStringLiteral("id"), QStringLiteral("m1")},
+                        {QStringLiteral("role"), QStringLiteral("assistant")},
+                        {QStringLiteral("text"), QStringLiteral("")},
+                        {QStringLiteral("revision"), 1},
+                        {QStringLiteral("display_cells"), QJsonArray{
+                            cell(QStringLiteral("Spawned agent"), QStringLiteral("recorded"),
+                                 QStringLiteral("Kepler"), taskLine)}}}}}},
+                   ConversationModel::LoadKind::Tail);
+    bool found = false;
+    for (int row = 0; row < model.rowCount(); ++row) {
+        const QVariantList cells = model.index(row, 0).data(ConversationModel::DisplayCellsRole).toList();
+        if (cells.isEmpty()) continue;
+        const QVariantMap summary = cells.at(0).toMap().value(QStringLiteral("_subagent")).toMap();
+        QCOMPARE(summary.value(QStringLiteral("phase")).toString(), QStringLiteral("spawned"));
+        found = true;
+    }
+    QVERIFY(found);
+    QVERIFY(!QJsonDocument(model.cacheSnapshot()).toJson().contains("_subagent"));
+}
+
+void NativeCoreTest::controllerTracksJobsFromListAndEvents() {
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
+    const auto restore = qScopeGuard([&] {
+        qputenv("CLARP_BASE_URL", oldBase);
+        qputenv("CLARP_TOKEN", oldToken);
+    });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
+    qputenv("CLARP_TOKEN", "test-token");
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/agents/snapshot"), 200,
+        {{QStringLiteral("agents"), QJsonArray{rosterRow(QStringLiteral("alpha"), QStringLiteral("a"), 10,
+            {{QStringLiteral("background_jobs"), QJsonObject{{QStringLiteral("count"), 1},
+                                                             {QStringLiteral("sub_agents"), 0}}}})}}});
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/background-jobs"), 200,
+        {{QStringLiteral("jobs"), QJsonArray{
+            jobJson(QStringLiteral("watch"), QStringLiteral("a"), QStringLiteral("running"), now),
+            jobJson(QStringLiteral("scout"), QStringLiteral("a"), QStringLiteral("running"), now,
+                    QStringLiteral("sub-agent"))}}});
+    AppController controller;
+    QTRY_VERIFY(controller.connected());
+    QTRY_COMPARE(controller.agents()->rowCount(), 1);
+    const QModelIndex alpha = controller.agents()->index(0, 0);
+    // The list arrives after the snapshot and replaces its counts.
+    QTRY_COMPARE_WITH_TIMEOUT(alpha.data(AgentListModel::BackgroundJobCountRole).toInt(), 2, 5000);
+    QCOMPARE(alpha.data(AgentListModel::SubAgentCountRole).toInt(), 1);
+    QVariantMap processes = controller.agentProcesses(QStringLiteral("alpha"));
+    QCOMPARE(processes.value(QStringLiteral("jobs")).toList().size(), 2);
+
+    const quint64 revision = controller.processRevision();
+    server.setJsonResponse(QStringLiteral("GET"), QStringLiteral("/background-jobs"), 200,
+        {{QStringLiteral("jobs"), QJsonArray{
+            jobJson(QStringLiteral("watch"), QStringLiteral("a"), QStringLiteral("running"), now)}}});
+    server.sendEvent({{QStringLiteral("type"), QStringLiteral("background-job-updated")},
+                      {QStringLiteral("job_id"), QStringLiteral("scout")},
+                      {QStringLiteral("status"), QStringLiteral("succeeded")},
+                      {QStringLiteral("job"), jobJson(QStringLiteral("scout"), QStringLiteral("a"),
+                                                      QStringLiteral("succeeded"), now + 10,
+                                                      QStringLiteral("sub-agent"))}});
+    QTRY_COMPARE(alpha.data(AgentListModel::SubAgentCountRole).toInt(), 0);
+    QCOMPARE(alpha.data(AgentListModel::BackgroundJobCountRole).toInt(), 1);
+    QVERIFY(controller.processRevision() > revision);
+    processes = controller.agentProcesses(QStringLiteral("alpha"));
+    QCOMPARE(processes.value(QStringLiteral("jobs")).toList().size(), 1);
 }
 
 void NativeCoreTest::circularPortraitsAreBoundedAndAntialiased() {
