@@ -295,7 +295,7 @@ def serve_stt_stream(handler, query: dict[str, str], *,
 
     ledger = TurnLedger(
         session=session, provider=provider, model=model, keyterms=keyterms,
-        capacity=capacity, new_trace=_trace.new_id, record_turn=record_turn_run,
+        capacity=capacity, new_trace=_trace.new_trace_id, record_turn=record_turn_run,
         retain=retain)
     run_relay(handler, upstream, ledger, session=session,
               agent_id=(agent or {}).get("agent_id"), engine=f"{provider}:{model}",

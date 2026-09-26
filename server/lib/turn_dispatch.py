@@ -408,7 +408,7 @@ _REQUEST_LOCKS_GUARD = threading.Lock()
 
 @dataclass(frozen=True)
 class DispatchCommand:
-    """One send, built once where it enters (``TurnDispatchService.dispatch``,
+    """One send, built once where it enters (``TurnDispatchService.submit``,
     the HTTP send handler, a scheduler adapter) and serialized once across the
     runtime RPC. Admission — the Janitor-demand authority check, the
     leader-tick gate, the durable write — runs on the side that owns turns,
