@@ -91,7 +91,7 @@ def test_stopping_runner_terminates_descendants_only(tmp_path, monkeypatch, back
 
 
 def test_account_recovery_kills_detached_output_descendant(tmp_path):
-    from lib.claude_failover import finish_owned_group
+    from lib.account_failover import finish_owned_group
     from lib.process_registry import TurnHandle
     import threading
     child_code = ("import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "

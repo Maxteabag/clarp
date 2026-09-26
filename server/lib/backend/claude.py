@@ -213,6 +213,7 @@ class ClaudeBackend(Backend):
     runner = 'clarp'
     config_model_field = 'claude_model'
     config_effort_field = 'claude_effort'
+    config_account_switch_field = 'claude_account_switch_command'
     context_window = 1000000
     # Host ``claude_cli`` values -> the executable each selects; the first
     # entry is the default an unknown value falls back to.
@@ -686,8 +687,8 @@ class ClaudeBackend(Backend):
     # --- credentials and quota --------------------------------------------
 
     def account_pool(self) -> str:
-        """The pool is named after the CLI: its ``claude-switch`` command and
-        failover coordinator are keyed by this name in turn_dispatch."""
+        """The pool is named after the CLI; turn_dispatch keys its failover
+        coordinator by it and reads ``config_account_switch_field``."""
         return self.id
 
     def quota_identity(self, window: dict) -> Any:

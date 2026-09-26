@@ -10,7 +10,7 @@ import uuid
 import pytest
 
 from lib import agents, backends, config, turn_dispatch
-from lib.claude_failover import ClaudeFailover
+from lib.account_failover import AccountFailover
 from lib.protocol import AgentState
 
 
@@ -60,8 +60,8 @@ else:
                 raise AssertionError("Old Claude process was not reaped")
         switched.append(models)
         return True
-    coordinator = ClaudeFailover(turn_dispatch.OwnershipLock(), switch=switch)
-    monkeypatch.setattr(turn_dispatch, "_CLAUDE_FAILOVER", coordinator)
+    coordinator = AccountFailover(turn_dispatch.OwnershipLock(), switch=switch)
+    monkeypatch.setitem(turn_dispatch._FAILOVERS, "claude", coordinator)
     ctx = SimpleNamespace(default_session="one", agents_path=tmp_path / "unused.json",
                           stream=SimpleNamespace(broadcast=lambda event: None))
     service = turn_dispatch.TurnDispatchService(ctx, home=tmp_path)

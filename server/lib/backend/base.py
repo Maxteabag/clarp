@@ -135,6 +135,9 @@ class Backend:
     runner: str = ""
     config_model_field: str = ""
     config_effort_field: str = ""
+    # Config field naming the account switch command of this CLI's pool
+    # (``account_pool()``); "" when the CLI has no account switching.
+    config_account_switch_field: str = ""
     fallback_models: tuple[tuple[str, str], ...] = ()
     resumable: bool = True
     # Context gauge: the window (tokens) the CLI's transcript fills, or None
