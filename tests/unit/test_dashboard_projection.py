@@ -256,3 +256,29 @@ def test_snapshot_compacting_falls_back_to_persisted_state_when_runtime_is_down(
         backends.configure_runtime_client(None)
     assert rows['busy']['compacting'] is True and rows['busy']['busy'] is True
     assert rows['quiet']['compacting'] is False
+
+
+
+def test_active_background_jobs_show_the_agent_as_background():
+    """A durable job or a Clarp sub-agent keeps the running indicator on after
+    the turn ends, instead of the agent reading as idle."""
+    from lib import background_jobs
+    aid = agents.create_agent(persona='Waiter', voice_id='', cwd='/tmp', session='waiter')
+    agents.record_state(aid, 'done', {})
+    row = next(r for r in build_agent_snapshot(None)['agents'] if r['agent_id'] == aid)
+    assert row['latest_state'] == 'done'
+    assert row['background_jobs'] == {'count': 0, 'sub_agents': 0}
+
+    job = background_jobs.upsert(session='waiter', job_id='build', kind='implementation', title='Build')
+    row = next(r for r in build_agent_snapshot(None)['agents'] if r['agent_id'] == aid)
+    assert row['latest_state'] == 'background'
+    assert row['status_text'] == 'Build'
+
+    background_jobs.upsert(session='waiter', job_id='sub-agent-a', kind='sub-agent', title='Stream A')
+    row = next(r for r in build_agent_snapshot(None)['agents'] if r['agent_id'] == aid)
+    assert row['background_jobs'] == {'count': 2, 'sub_agents': 1}
+    assert row['status_text'] == '2 background jobs running'
+
+    background_jobs.finish('build', generation=job['generation'])
+    row = next(r for r in build_agent_snapshot(None)['agents'] if r['agent_id'] == aid)
+    assert row['status_text'] == 'Stream A'

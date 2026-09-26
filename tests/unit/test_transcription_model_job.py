@@ -317,9 +317,10 @@ def test_model_worker_transitions_are_visible_on_sse(monkeypatch):
         monotonic=lambda: 0, sleep=lambda _seconds: None)
     watcher._poll_once()
 
-    assert len(stream.events) == 2
-    assert stream.events[-1]["status"] == "succeeded"
-    assert stream.events[-1]["job"]["kind"] == "transcription-model-install"
+    jobs = [e for e in stream.events if e["type"] == "background-job-updated"]
+    assert len(jobs) == 2
+    assert jobs[-1]["status"] == "succeeded"
+    assert jobs[-1]["job"]["kind"] == "transcription-model-install"
 
 
 def test_vanished_model_worker_reconciles_failed(monkeypatch):

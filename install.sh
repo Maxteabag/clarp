@@ -304,6 +304,7 @@ backup_external "$BIN/clarp-agent-artifacts"
 backup_external "$BIN/clarp-podcast-history"
 backup_external "$BIN/clarp-media-publish"
 backup_external "$BIN/clarp-agent-bg"
+backup_external "$BIN/clarp-sub-agent"
 backup_external "$BIN/clarp-github-workflow-artifact"
 backup_external "$BIN/clarp-message-watch"
 backup_external "$BIN/clarp-adopt"
@@ -435,6 +436,7 @@ write_python_wrapper clarp-agent-artifacts scripts/agent_artifacts.py
 write_python_wrapper clarp-podcast-history scripts/podcast_history.py
 write_python_wrapper clarp-media-publish scripts/clarp-media-publish.py
 write_python_wrapper clarp-agent-bg scripts/agent_bg.py
+write_python_wrapper clarp-sub-agent skills/clarp-sub-agents/scripts/sub_agent.py
 write_python_wrapper clarp-github-workflow-artifact scripts/github_workflow_artifact.py
 write_python_wrapper clarp-message-watch skills/clarp-message-watch/scripts/watch_messages.py
 write_python_wrapper clarp-adopt skills/clarp-adopt/scripts/adopt_session.py
@@ -442,7 +444,7 @@ write_python_wrapper clarp-runtime-service runtime.py
 mkdir -p "$SHARE/bin"
 for _helper in clarp-admin clarp-tui clarp-agent-tasks clarp-agent-artifacts \
         clarp-podcast-history \
-        clarp-media-publish clarp-agent-bg clarp-github-workflow-artifact \
+        clarp-media-publish clarp-agent-bg clarp-sub-agent clarp-github-workflow-artifact \
         clarp-message-watch clarp-adopt clarp-runtime-service; do
     cp "$BIN/$_helper" "$SHARE/bin/$_helper"
 done
