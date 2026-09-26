@@ -382,3 +382,12 @@ def _bump_revision(agent_id: str) -> None:
            ON CONFLICT(agent_id) DO UPDATE SET revision = revision + 1""",
         (agent_id,),
     )
+
+
+def cancel_for_traces(c, agent_id: str, trace_ids: list[str]) -> None:
+    """Cancel an agent's pending rows for ``trace_ids`` inside the caller's
+    transaction (the janitor fence commits them with its own rows)."""
+    for trace in trace_ids:
+        c.execute("UPDATE queued_turns SET status='cancelled',text='' "
+                  "WHERE agent_id=? AND trace_id=? AND status IN ('queued','claimed')",
+                  (agent_id, trace))

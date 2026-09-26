@@ -25,16 +25,11 @@ OWNERS = {
     "janitor_": "lib/janitor_store.py",
     "turns": "lib/turn_lifecycle.py",
     "state_log": "lib/turn_lifecycle.py",
+    "queued_turns": "lib/turn_queue.py",
 }
 
 _MIGRATION = "schema creation, seed rows or a one-time migration"
 ALLOWED = {
-    # Stream C leftovers that live in files owned by other streams.
-    ("settings", "lib/backend_usage.py"): "TODO(integration, Stream B): write through settings_store",
-    ("agents", "lib/janitor_store.py"): "TODO(integration: move to agents.py): janitor conversion, release, label and built-in identity writes share the janitor transaction",
-    ("agents", "lib/agent_portraits.py"): "TODO(integration: move to agents.py): _set_agent_avatar_path inside the portrait transaction",
-    ("janitor_label_ownership", "lib/agents.py"): "TODO(integration): set_custom_status should call janitor_store.forget_label_ownership",
-    ("queued_turns", "lib/janitor_store.py"): "TODO(integration: move to turn_queue.py): the janitor fence cancels its own queued turns in one transaction",
     # Schema seeds and migrations.
     ("settings", "lib/db_migrations.py"): _MIGRATION,
     ("agents", "lib/db_migrations.py"): _MIGRATION,

@@ -35,7 +35,7 @@ import uuid
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import db, events, server_identity
+from . import db, events, server_identity, settings_store
 from .clock import now_ms as _now_ms
 from .log import log, log_exception
 
@@ -326,33 +326,11 @@ def _canonical_id(prefix: str, payload: dict[str, Any], *, size: int = 32) -> st
 
 
 def _identity_secret() -> bytes:
-    database = db.conn()
-    candidate = secrets.token_hex(32)
-    database.execute("BEGIN IMMEDIATE")
-    try:
-        row = database.execute(
-            "SELECT value FROM settings WHERE key=?",
-            (_IDENTITY_SECRET_KEY,),).fetchone()
-        if row is None:
-            database.execute(
-                """INSERT INTO settings(key,value,updated_at) VALUES (?,?,?)
-                   ON CONFLICT(key) DO NOTHING""",
-                (_IDENTITY_SECRET_KEY, candidate, db.now_ms()),)
-        elif not str(row["value"]).strip():
-            database.execute(
-                "UPDATE settings SET value=?,updated_at=? "
-                "WHERE key=? AND TRIM(value)=''",
-                (candidate, db.now_ms(), _IDENTITY_SECRET_KEY),)
-        row = database.execute(
-            "SELECT value FROM settings WHERE key=?",
-            (_IDENTITY_SECRET_KEY,),).fetchone()
-        database.execute("COMMIT")
-    except Exception:
-        database.execute("ROLLBACK")
-        raise
-    if row is None or not str(row["value"]).strip():
+    stored = settings_store.set_text_if_blank(
+        _IDENTITY_SECRET_KEY, secrets.token_hex(32)).strip()
+    if not stored:
         raise RuntimeError("provider usage identity secret unavailable")
-    return str(row["value"]).strip().encode()
+    return stored.encode()
 
 
 def _private_ref(kind: str, value: str) -> str:

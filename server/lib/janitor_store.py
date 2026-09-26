@@ -7,10 +7,11 @@ optional connection `c` so a caller inside `write()` reads and writes through
 the same BEGIN IMMEDIATE transaction; without one they use this thread's
 autocommit connection.
 
-A handful of functions here touch `agents`, `queued_turns` and `state_log`
-because the janitor transaction needs them in the same commit. Each carries
-a TODO(integration) naming the store it moves to; they exist so janitors.py
-and janitor_builtins.py contain no SQL at all.
+Writes to neighbouring tables that must commit in the janitor transaction
+(the agent's janitor flag and status, the built-in identity row, cancelled
+queued turns) live in their owners, `agents.py` and `turn_queue.py`, as
+functions that take the same connection. The few reads of those tables that
+remain here are lookups inside that transaction.
 """
 from __future__ import annotations
 
@@ -514,34 +515,7 @@ def set_quota_receipt_delivery(receipt_id: str, delivery_json: str, c=None) -> N
     _c(c).execute("UPDATE janitor_quota_receipts SET delivery_json=? WHERE receipt_id=?", (delivery_json, receipt_id))
 
 
-# ---- neighbouring tables the janitor transaction needs ----------------------
-#
-# TODO(integration: move to agents.py) - the five agent writes below and the
-# reads next to them. They are here so janitors.py/janitor_builtins.py carry
-# no SQL; agents.py is Stream A's file and gains them at integration.
-
-def convert_agent_to_janitor(c, agent_id: str) -> None:
-    c.execute("UPDATE agents SET is_janitor=1,heartbeat_enabled=0,dreaming_enabled=0 WHERE agent_id=?", (agent_id,))
-
-
-def mark_agent_janitor(c, agent_id: str) -> None:
-    c.execute("UPDATE agents SET is_janitor=1 WHERE agent_id=?", (agent_id,))
-
-
-def release_agent_from_janitor(c, agent_id: str) -> None:
-    c.execute("UPDATE agents SET is_janitor=0 WHERE agent_id=?", (agent_id,))
-
-
-def set_agent_custom_status(c, agent_id: str, status: str) -> None:
-    c.execute("UPDATE agents SET custom_status=? WHERE agent_id=?", (status, agent_id))
-
-
-def insert_builtin_agent(c, *, agent_id: str, persona: str, cwd: str, session: str, backend: str,
-                         model: str, effort: str, now: int) -> None:
-    c.execute("""INSERT INTO agents(agent_id,persona,voice_id,cwd,session,backend,model,effort,
-        is_janitor,heartbeat_enabled,dreaming_enabled,created_at) VALUES (?,?,?,?,?,?,?,?,1,0,0,?)""",
-        (agent_id, persona, "", cwd, session, backend, model, effort, now))
-
+# ---- reads of neighbouring tables inside the janitor transaction ------------
 
 def agent_row(agent_id: str, c=None):
     return _c(c).execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
@@ -560,20 +534,11 @@ def session_occupant(session: str, c=None):
 
 
 def latest_state_id(agent_id: str, c=None):
-    # TODO(integration: move to turn_lifecycle / agents.py) - read of state_log.
     return _c(c).execute("SELECT MAX(state_id) FROM state_log WHERE agent_id=?", (agent_id,)).fetchone()[0]
 
 
 def has_queued_turn(agent_id: str, c=None) -> bool:
-    # TODO(integration: move to turn_queue.py) - read of queued_turns.
     return bool(_c(c).execute("SELECT 1 FROM queued_turns WHERE agent_id=? AND status IN ('queued','claimed') LIMIT 1", (agent_id,)).fetchone())
-
-
-def cancel_queued_turns_for_traces(c, agent_id: str, trace_ids: list[str]) -> None:
-    # TODO(integration: move to turn_queue.py) - the one queued_turns write a
-    # janitor fence needs in its own transaction.
-    for trace in trace_ids:
-        c.execute("UPDATE queued_turns SET status='cancelled',text='' WHERE agent_id=? AND trace_id=? AND status IN ('queued','claimed')", (agent_id, trace))
 
 
 def task_signature_rows(c, agent_ids: list[str]) -> list:

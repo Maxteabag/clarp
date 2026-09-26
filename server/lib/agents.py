@@ -201,14 +201,50 @@ def update_voice(agent_id: str, voice_id: str) -> None:
     )
 
 
+# ---- writes inside a caller's transaction (janitors, portraits) -------------
+# Each takes the connection that holds the caller's BEGIN IMMEDIATE so the
+# agent row commits together with the janitor or portrait rows around it.
+
+def set_janitor_status(c, agent_id: str, status: str) -> None:
+    """A Janitor-owned label write (ownership is recorded by janitor_store)."""
+    c.execute("UPDATE agents SET custom_status=? WHERE agent_id=?", (status, agent_id))
+
+
+def convert_to_janitor(c, agent_id: str) -> None:
+    c.execute("UPDATE agents SET is_janitor=1,heartbeat_enabled=0,dreaming_enabled=0 WHERE agent_id=?",
+              (agent_id,))
+
+
+def mark_janitor(c, agent_id: str) -> None:
+    c.execute("UPDATE agents SET is_janitor=1 WHERE agent_id=?", (agent_id,))
+
+
+def release_from_janitor(c, agent_id: str) -> None:
+    c.execute("UPDATE agents SET is_janitor=0 WHERE agent_id=?", (agent_id,))
+
+
+def insert_builtin_janitor(c, *, agent_id: str, persona: str, cwd: str, session: str,
+                           backend: str, model: str, effort: str, now: int) -> None:
+    c.execute("""INSERT INTO agents(agent_id,persona,voice_id,cwd,session,backend,model,effort,
+        is_janitor,heartbeat_enabled,dreaming_enabled,created_at) VALUES (?,?,?,?,?,?,?,?,1,0,0,?)""",
+        (agent_id, persona, "", cwd, session, backend, model, effort, now))
+
+
+def set_avatar_path(c, agent_id: str, avatar_path: str) -> None:
+    """The primary portrait's path, inside the portrait transaction."""
+    c.execute("UPDATE agents SET avatar_path=? WHERE agent_id=? AND deleted_at IS NULL",
+              (avatar_path, agent_id))
+
+
 def set_custom_status(agent_id: str, status: str | None) -> None:
     """Persist free-text agent status shown while the agent is not busy."""
+    from . import janitor_store
     c = conn()
     # A deliberate manual/legacy write owns the field, even if it repeats the
     # same text. A Janitor cannot reclaim it by comparing the visible string.
     c.execute("SAVEPOINT manual_custom_status")
     try:
-        c.execute("DELETE FROM janitor_label_ownership WHERE target_agent_id=?", (agent_id,))
+        janitor_store.forget_label_ownership(c, agent_id)
         c.execute("UPDATE agents SET custom_status = ? WHERE agent_id = ?",
                   ((status or "").strip(), agent_id))
         c.execute("RELEASE SAVEPOINT manual_custom_status")
