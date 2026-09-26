@@ -44,7 +44,7 @@ OUTPUT_HANGOVER = 1.2
 
 _AUDIO_EVENTS = {"session.input_audio.append": "audio", "session.output_audio.delta": "delta"}
 # Journal fields worth keeping per event; audio payloads are counted, never copied.
-_JOURNAL_FIELDS = ("delta", "start_ms", "end_ms", "delegation", "delegation_id", "content",
+_JOURNAL_FIELDS = ("delta", "start_ms", "end_ms", "delegation", "delegation_id", "content", "name", "agent",
                    "usage", "error", "message", "reason", "event_id", "client_event_id", "session_id")
 
 
@@ -140,10 +140,13 @@ _SWITCH_CLAIM = __import__("re").compile(
 # A user who has been talking this long with no delegation and no reply, and
 # has then paused for RESULT_RELEASE_SILENCE_SECONDS, gets Oracle nudged.
 UNANSWERED_SECONDS = 8.0
+# An earcon (oracle_earcons) waits until Oracle's audio has been silent this
+# long, so a cue never lands between two chunks of a reply.
+EARCON_QUIET_SECONDS = 0.6
 DECISION_POLL_SECONDS = 1.0
 DECISION_PRESENTATION_COOLDOWN_SECONDS = 4.0
 from .oracle_prompt import PROMPT  # one voice prompt for every engine
-from . import oracle_attention, oracle_relay, oracle_strategy, oracle_voice_context, oracle_memory, oracle_voices
+from . import oracle_attention, oracle_earcons, oracle_relay, oracle_strategy, oracle_voice_context, oracle_memory, oracle_voices
 ROUTING = """Route every actionable request in current_user_requests using the
 actual roster and authoritative task records. These are the new unadmitted
 user fragments; conversation is historical reference for resolving their
@@ -313,6 +316,10 @@ def client_event(raw):
             if value["narration"] not in ("on", "off"):
                 return None
             event["narration"] = value["narration"]
+        if "earcons" in value:
+            if not isinstance(value["earcons"], bool):
+                return None
+            event["earcons"] = value["earcons"]
         return event if len(event) > 1 else None
     return None
 
@@ -352,6 +359,10 @@ class Conversation:
         self.active_relay = None
         self.narration = "on"
         self.progress_interval = 0
+        # Sound cues ([oracle] earcons, or the earcons preference); queued
+        # while Oracle speaks.
+        self.earcons = True
+        self.cue_queue = []
         # Talking to an agent directly: {"persona", "session", "voice"}, or
         # None while the user talks to Oracle. A requested switch waits in
         # pending_swap for Oracle's announcement; open_upstream(session) ->
@@ -412,6 +423,7 @@ class Conversation:
             self.forwarded_findings = saved.get("forwarded_findings", {})
             self.relay_cursors = dict(saved.get("relay_cursors", {}))
             self.narration = saved.get("narration", "on")
+            self.earcons = saved.get("earcons", True) is not False
             with self.tools.lock:
                 self.tools.delegations.update(row["delegation_id"] for row in self.memory.work())
 
@@ -422,6 +434,7 @@ class Conversation:
                     "results_sent": sorted(self.results_sent), "forwarded_findings": self.forwarded_findings,
                     "provider_session": self.provider_session,
                     "relay_cursors": self.relay_cursors, "narration": self.narration,
+                    "earcons": self.earcons,
                     "routed_revision": self.routed_revision})
 
     def journal_event(self, direction, event):
@@ -482,8 +495,14 @@ class Conversation:
                 self.narration = narration
                 self.append("instructions", NARRATION_OFF if narration == "off" else NARRATION_ON)
                 self.checkpoint()
+            if "earcons" in event and event["earcons"] != self.earcons:
+                with self.lock:
+                    self.earcons = event["earcons"]
+                    if not self.earcons:
+                        self.cue_queue.clear()
+                self.checkpoint()
             receipt = {"type": "oracle_v2.preferences", "progress_interval_seconds": self.progress_interval,
-                       "narration": self.narration}
+                       "narration": self.narration, "earcons": self.earcons}
             self.journal_event("host", receipt)
             self.downstream(receipt)
             return
@@ -716,6 +735,8 @@ class Conversation:
                             if self.journal:
                                 self.journal.record("router.receipt", {"delegation_id": ident,
                                     "call_id": call_id, "result": output})
+                            if output.get("status") in ("accepted", "queued"):
+                                self.cue("handed_off")
                             if direct and output.get("status") in ("accepted", "queued"):
                                 self.direct_admitted_revisions.add(revision)
                                 self.append("thinking", oracle_strategy.admission_context(
@@ -749,6 +770,7 @@ class Conversation:
             self.mark_relay_spoken()
             self.journal_event("host", {"type": "oracle_v2.quiet"})
             self.downstream({"type": "oracle_v2.quiet"})
+        self.flush_cues(now)
         self.guard_void(now)
         if self.pending_swap is not None:
             # Nothing new goes to a session that is about to be replaced.
@@ -775,6 +797,8 @@ class Conversation:
             row = self.pending.pop(0)
             self.last_append = now
         relay = self.relay_for(row)
+        if row["status"] == "completed" and relay.next == 0:
+            self.cue("result")
         if self.contact is not None and row.get("session") == self.contact["session"]:
             relay.verbatim = True  # the agent's own words, in the agent's voice
         if self.delegation_strategy == "direct_contact":
@@ -984,8 +1008,40 @@ class Conversation:
                 return
             relay.done = max(relay.done, relay.next)
 
-    def cue(self, name, **kwargs):
-        """Earcons land in the next step."""
+    def cue(self, name, persona=None):
+        """Play earcon ``name`` on the phone once Oracle is not speaking.
+
+        The cue goes down as ``oracle_v2.cue {name, agent?}`` followed by its
+        audio as a ``session.output_audio.delta``, which every client already
+        plays; a client that renders cues itself can drop that audio.
+        """
+        if not self.earcons:
+            return
+        with self.lock:
+            self.cue_queue.append((name, persona))
+        self.flush_cues()
+
+    def flush_cues(self, now=None):
+        now = self.clock() if now is None else now
+        with self.lock:
+            if not self.cue_queue or not self.earcons or now - self.last_output < EARCON_QUIET_SECONDS:
+                return
+            cues, self.cue_queue = self.cue_queue, []
+            speaking = self.last_output_active
+        for name, persona in cues:
+            event = {"type": "oracle_v2.cue", "name": name}
+            if persona:
+                event["agent"] = persona
+            audio = {"type": "session.output_audio.delta",
+                     "delta": base64.b64encode(oracle_earcons.pcm(name, persona)).decode()}
+            self.journal_event("host", event)
+            self.journal_event("host", audio)
+            self.downstream(event)
+            self.downstream(audio)
+        if not speaking:
+            # The phone shows "speaking" while it plays audio; end the cue's turn.
+            self.journal_event("host", {"type": "oracle_v2.quiet"})
+            self.downstream({"type": "oracle_v2.quiet"})
 
     def knows_agent(self, name):
         try:
@@ -1113,6 +1169,7 @@ class Conversation:
         with self.lock:
             self.pending_swap = {"contact": contact, "announced_at": None}
             self.last_switch_at = self.clock()
+        self.cue("switch_started")
         if self.journal:
             self.journal.record("contact.switch_requested", {"to": who,
                 "voice": contact["voice"] if contact else VOICE})
@@ -1208,6 +1265,10 @@ class Conversation:
                                                     "provider_session": self.provider_session})
         self.downstream({"type": "oracle_v2.contact", "agent": contact["persona"] if contact else None,
                          "session": contact["session"] if contact else None, "voice": voice})
+        if contact:
+            self.cue("connected", contact["persona"])
+        else:
+            self.cue("back_to_oracle")
         if self.narration == "off":
             self.append("instructions", NARRATION_OFF)
         self.checkpoint()
@@ -1494,6 +1555,8 @@ def serve(handler):
             conversation = Conversation(upstream, downstream, tools, key, delegation_strategy=strategy, memory=memory, provider_session=token)
             conversation.open_upstream = lambda session: _open_upstream(key, session)
             conversation.voice_overrides = dict(getattr(cfg, "oracle_agent_voices", {}) or {})
+            if not getattr(cfg, "oracle_earcons", True):
+                conversation.earcons = False
             conversation.voice_context = voice_context
         if getattr(cfg, "oracle_diagnostics", False):
             from .oracle_diagnostics import OracleJournal

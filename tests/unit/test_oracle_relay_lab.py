@@ -783,3 +783,91 @@ def test_switch_announcement_says_connecting_not_done(lab):
     lab.user("Put me through to Theo")
     [note] = _host_notes(lab, "Connecting you to Theo")
     assert "Putting you through" not in note["content"]
+
+
+# ---- earcons ----------------------------------------------------------------
+
+def _cues(lab):
+    return [e["name"] for e in lab.down if e["type"] == "oracle_v2.cue"]
+
+
+def _cue_audio_follows_each_cue(lab):
+    for i, event in enumerate(lab.down):
+        if event["type"] == "oracle_v2.cue":
+            audio = lab.down[i + 1]
+            assert audio["type"] == "session.output_audio.delta"
+            assert base64.b64decode(audio["delta"]) == mod.oracle_earcons.pcm(
+                event["name"], event.get("agent"))
+
+
+def test_a_switch_plays_started_then_a_connected_chime_and_back_plays_falling(lab):
+    lab = lab()
+    _switch_to_theo(lab)
+    assert _cues(lab) == ["switch_started", "connected"]
+    connected = next(e for e in lab.down if e.get("name") == "connected")
+    assert connected["agent"] == "Theo"
+    lab.user("Back to Oracle")
+    lab.oracle_speaks(1)
+    lab.wait(2)
+    assert _cues(lab) == ["switch_started", "connected", "switch_started", "back_to_oracle"]
+    _cue_audio_follows_each_cue(lab)
+
+
+def test_a_failed_switch_plays_the_low_double_tone(lab):
+    lab = lab()
+    lab.open_error = OSError("upstream refused")
+    lab.user("Put me through to Theo")
+    lab.oracle_speaks(1.5)
+    lab.wait(2)
+    assert _cues(lab) == ["switch_started", "switch_failed"]
+
+
+def test_handed_off_work_ticks_and_a_result_rings_before_its_read_out(lab):
+    lab = lab()
+    lab.user("Check the deploy")
+    assert _cues(lab) == ["handed_off"]
+    lab.tools.rows.append({"delegation_id": "new-1", "session": "theo-97e5", "status": "completed",
+                           "request_text": "Check the deploy", "result_text": "The deploy is green."})
+    lab.wait(6)
+    assert _cues(lab) == ["handed_off", "result"]
+    [part] = lab.parts()
+    assert "The deploy is green." in part
+    _cue_audio_follows_each_cue(lab)
+
+
+def test_cues_wait_for_oracle_to_stop_speaking(lab):
+    lab = lab()
+    lab.oracle_speaks(1)
+    lab.conv.cue("result")
+    assert _cues(lab) == [], "never inside Oracle's speech"
+    lab.oracle_speaks(1)
+    lab.wait(2)
+    types = lab.down_types()
+    cue = types.index("oracle_v2.cue")
+    model_audio = [i for i, e in enumerate(lab.down) if e["type"] == "session.output_audio.delta" and i != cue + 1]
+    assert max(model_audio) < cue
+    assert "oracle_v2.quiet" in types[cue:], "the phone returns to listening after the cue"
+
+
+def test_earcons_off_by_preference_sends_nothing(lab):
+    lab = lab()
+    lab.conv.input({"type": "oracle_v2.preferences", "earcons": False})
+    receipt = [e for e in lab.down if e["type"] == "oracle_v2.preferences"][-1]
+    assert receipt["earcons"] is False
+    _switch_to_theo(lab)
+    lab.user("Check the deploy")
+    assert _cues(lab) == []
+    assert len(lab.opened()) == 1
+
+
+def test_earcons_off_by_config_sends_nothing(lab):
+    lab = lab()
+    lab.conv.earcons = False
+    lab.user("Check the deploy")
+    assert _cues(lab) == []
+
+
+@pytest.mark.parametrize("value,accepted", [(True, True), (False, True), ("on", False), (1, False)])
+def test_the_earcons_preference_must_be_a_boolean(value, accepted):
+    event = mod.client_event(json.dumps({"type": "oracle_v2.preferences", "earcons": value}))
+    assert (event == {"type": "oracle_v2.preferences", "earcons": value}) is accepted
