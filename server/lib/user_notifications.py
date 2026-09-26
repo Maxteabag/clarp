@@ -9,10 +9,13 @@ from __future__ import annotations
 import hashlib
 import re
 import time
-from typing import Any
+from typing import Any, Callable
 
 from . import agents as agents_db, db, origins, settings_store
 from .log import log
+from .policies import notifications as notification_policy
+from .policies.notifications import (
+    AgentCapabilities, CompletedTurn, Notify, NotificationSettings)
 from .protocol import SSEType
 from .voice_markup import clean_for_display
 
@@ -182,6 +185,19 @@ def _select_content_source(rows) -> tuple[Any | None, str, str]:
     return None, "", ""
 
 
+ContentSource = tuple[Any | None, str, str]
+
+
+def _settle_wait(select: Callable[[], ContentSource], timeout: float) -> ContentSource:
+    """Poll ``select`` until it finds a source or ``timeout`` seconds pass."""
+    deadline = time.monotonic() + timeout
+    while True:
+        found = select()
+        if found[0] is not None or time.monotonic() >= deadline:
+            return found
+        time.sleep(SETTLE_POLL_S)
+
+
 def _turn_was_interrupted(cause_message_id: str) -> bool:
     if not cause_message_id:
         return False
@@ -285,12 +301,20 @@ def _persist(payload: dict[str, Any]) -> dict[str, Any]:
 def classify_completed_turn(*, agent_id: str, session: str, persona: str,
                             done_ts: int, backend_session_id: str = "",
                             trace_id: str = "",
-                            settle_timeout_s: float | None = None) -> dict[str, Any]:
+                            settle_timeout_s: float | None = None,
+                            wait_for_message: Callable[
+                                [Callable[[], ContentSource], float],
+                                ContentSource] | None = None) -> dict[str, Any]:
     """Classify and persist the completed turn's user-facing notification.
 
     The causing user row is the durable source of provenance. We deliberately do
     not trust live assistant-row origin because fast backends can stream before
     the dispatch path finishes appending the pending user row.
+
+    ``wait_for_message(select, timeout)`` bounds the wait for the final
+    assistant row; the default polls the database until ``select`` finds one
+    or ``timeout`` seconds pass. Everything after the wait is gather inputs,
+    call ``policies.notifications.notify_decision``, persist.
     """
     agent_id = (agent_id or "").strip()
     session = (session or "").strip()
@@ -325,49 +349,37 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
     next_user_at = _next_user_after(agent_id, backend_session_id, done_ts)
     if next_user_at:
         ceiling_ms = min(ceiling_ms, next_user_at - 1)
-    source = None
-    preview = ""
-    content_reason = ""
     timeout = SETTLE_TIMEOUT_S if settle_timeout_s is None else float(settle_timeout_s)
-    deadline = time.monotonic() + timeout
-    while True:
-        source, preview, content_reason = _select_content_source(
-            _assistant_candidates(agent_id, backend_session_id, floor_ms, ceiling_ms)
-        )
-        if source is not None or time.monotonic() >= deadline:
-            break
-        time.sleep(SETTLE_POLL_S)
+    wait = _settle_wait if wait_for_message is None else wait_for_message
+    source, preview, content_reason = wait(
+        lambda: _select_content_source(
+            _assistant_candidates(agent_id, backend_session_id, floor_ms, ceiling_ms)),
+        timeout,
+    )
 
     source_message_id = source["message_id"] if source is not None else ""
-    special_automation = settings_store.get_bool(
-        "automation_special_treatment", default=False)
     agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
-    if origin == "janitor" or (agent and not agents_db.interaction_capabilities(agent)["can_chat"]):
-        reason = "janitor-maintenance"
-    elif not agent_id:
-        reason = "missing-agent"
-    elif cause is None:
-        reason = "missing-causing-row"
-    elif special_automation and origin not in USER_FACING_ORIGINS:
-        reason = f"not-user-facing-origin:{origin or 'unknown'}"
-    elif (special_automation and origin == "leader_tick"
-          and not _is_team_leader(agent_id)):
-        reason = "leader-tick-non-leader"
-    elif content_reason:
-        reason = content_reason
-    elif _turn_was_interrupted(cause_message_id):
-        # The turn was killed before it could say anything; that is not the
-        # same event as an agent that had nothing to say.
-        reason = "turn-interrupted"
-    else:
-        reason = "no-user-facing-content"
-    notify = reason in {"speak", "text-reply"}
-    muted = False
-    if notify:
-        agent = agents_db.get_by_agent_id(agent_id)
-        muted = bool(agent and agent.get("muted"))
-        if muted:
-            reason = f"{reason}-muted"
+    decision = notification_policy.notify_decision(
+        origin,
+        CompletedTurn(
+            agent_id=agent_id,
+            has_cause=cause is not None,
+            content=content_reason,
+            interrupted=_turn_was_interrupted(cause_message_id),
+        ),
+        AgentCapabilities(
+            present=agent is not None,
+            can_chat=agents_db.interaction_capabilities(agent)["can_chat"] if agent else True,
+            muted=bool(agent and agent.get("muted")),
+            is_team_leader=_is_team_leader(agent_id),
+        ),
+        NotificationSettings(
+            special_automation=settings_store.get_bool(
+                "automation_special_treatment", default=False)),
+    )
+    notify = isinstance(decision, Notify)
+    muted = decision.muted if notify else False
+    reason = decision.reason
     payload = {
         "notification_id": notification_id,
         "agent_id": agent_id,
@@ -380,7 +392,7 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
         "cause_message_id": cause_message_id,
         "origin": origin,
         "notify": notify,
-        "push": notify and not muted,
+        "push": notify and decision.push,
         "badge": notify,
         "unread": notify,
         "muted": muted,
