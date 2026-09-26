@@ -52,7 +52,8 @@ def test_stable_session_instructions_carry_the_roster_and_contact():
     # Without a contact she is told to ask, not to pretend.
     bare = oracle_live_stable.live_config(roster={"agents": [], "oracle_contact": None})
     assert "No contact is configured" in bare["instructions"]
-    assert oracle_live_stable.live_config()["instructions"] == PROMPT
+    # The stable engine can switch the call to an agent's voice, and says so.
+    assert oracle_live_stable.live_config()["instructions"] == PROMPT + oracle_live_stable.oracle_voices.SWITCH_NOTE
 
 
 def test_quiet_timer_is_shared_and_longer_than_a_breath():

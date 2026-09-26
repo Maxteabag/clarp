@@ -572,3 +572,27 @@ def test_create_call_validates_contact_before_registering(monkeypatch):
         mod.create_call(ctx=None, principal="p", attempt_id="att-1", sdp="v=0\r\nm=audio 9\r\n",
                         fallback="ghost", stop=lambda s: None)
     assert mod._CALLS == {}
+
+
+def test_read_agent_transcript_reads_newest_messages_without_dispatch(tools, monkeypatch):
+    rows = [{"id": f"m{i}", "role": "user" if i % 2 else "assistant", "timestamp": _ago(minutes=40 - i),
+             "text": f"message {i} " + ("z" * (7000 if i == 38 else 10))} for i in range(40)]
+    rows.insert(5, {"id": "tool", "role": "tool", "timestamp": _ago(minutes=35), "text": "hidden"})
+    seen = {}
+
+    def list_messages(**kw):
+        seen.update(kw)
+        return rows[-kw["limit"]:]
+    monkeypatch.setattr(message_store, "list_messages", list_messages)
+    monkeypatch.setattr(mod.oracle_delegations, "dispatch",
+                        lambda **kw: pytest.fail("reading a transcript must not prompt the agent"))
+    out = tools.execute("read_agent_transcript", {"agent": "Mike", "limit": 4}, "c")
+    assert seen["agent_id"] == "a-mike" and seen["include_automated"] is False
+    assert [m["id"] for m in out["messages"]] == ["m36", "m37", "m38", "m39"]
+    assert out["messages"][2]["truncated"] is True and len(out["messages"][2]["text"]) == 6000
+    assert "truncated" not in out["messages"][0]
+    assert out["truncated"] is True          # older messages exist beyond the window
+    assert out["agent"] == "Mike" and out["newest_message_age"] == "1 minute ago"
+    # Limit is bounded and defaults to ten.
+    assert len(tools.execute("read_agent_transcript", {"agent": "Mike", "limit": 999}, "c")["messages"]) == 30
+    assert len(tools.execute("read_agent_transcript", {"agent": "Mike"}, "c")["messages"]) == 10

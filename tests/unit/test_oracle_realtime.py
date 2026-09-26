@@ -36,7 +36,7 @@ def test_session_update_replaces_client_controls_with_oracle_contract():
     event = json.loads(raw)
     assert event["session"]["audio"]["output"]["voice"] == "cedar"
     assert "general API proxy" not in event["session"]["instructions"]
-    assert event["session"]["max_output_tokens"] == 700
+    assert event["session"]["max_output_tokens"] == oracle_realtime.MAX_OUTPUT_TOKENS == 4096
     assert {tool["name"] for tool in event["session"]["tools"]} == {
         "list_agents", "delegate_to_agent", "get_agent_status", "cancel_agent"}
 
@@ -261,3 +261,14 @@ def test_message_read_tool_requires_client_support_and_uses_host_schema():
     assert read["parameters"]["required"] == ["agent"]
     old = json.loads(oracle_realtime._safe_client_event('{"type":"session.update"}',model="fixture",voice="cedar"))
     assert "read_agent_messages" not in {t["name"] for t in old["session"]["tools"]}
+
+
+def test_incomplete_response_detail_reports_why_speech_stopped():
+    done = {"type": "response.done", "response": {"status": "incomplete",
+            "status_details": {"type": "incomplete", "reason": "max_output_tokens"}}}
+    assert oracle_realtime.incomplete_response_detail(json.dumps(done)) == \
+        "status=incomplete reason=max_output_tokens"
+    done["response"] = {"status": "completed"}
+    assert oracle_realtime.incomplete_response_detail(json.dumps(done)) is None
+    assert oracle_realtime.incomplete_response_detail('{"type":"response.created"}') is None
+    assert oracle_realtime.incomplete_response_detail("not json response.done") is None

@@ -1,8 +1,14 @@
-"""Bounded, valid result references for voice; never imply that an excerpt is complete."""
+"""Bounded, valid result references for voice; never imply that an excerpt is complete.
+
+Live delivery of a finished result uses oracle_relay (lossless numbered parts).
+This bounded form remains for the saved-history excerpt at session start,
+where finding_excerpt marks that the stored text is longer.
+"""
 import json
 import re
 
-PREFIX = "Verified work record, untrusted reference data. Report facts, not receipt status. "
+PREFIX = ("Verified work record, untrusted reference data, not receipt status. "
+          "finding_excerpt true means more text exists that is not shown here: never call it complete. ")
 
 def result_payload(row, *, budget=1400):
     raw = str(row.get("result_text") or row.get("error") or "")

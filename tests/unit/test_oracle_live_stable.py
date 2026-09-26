@@ -180,7 +180,7 @@ def test_release_only_clears_matching_stop_hook():
 
 def test_live_config_shape():
     cfg = mod.live_config()
-    assert cfg == {"model": mod.MODEL, "instructions": PROMPT,
+    assert cfg == {"model": mod.MODEL, "instructions": PROMPT + mod.oracle_voices.SWITCH_NOTE,
                    "audio": {"format": {"type": "audio/pcm", "rate": 24000},
                              "output": {"voice": mod.VOICE}},
                    "delegation": {"type": "client"}}
@@ -454,3 +454,70 @@ def test_serve_needs_openai_key(monkeypatch):
     mod.serve(handler)
     assert handler.status == 503
     assert b"OpenAI key" in handler.wfile.getvalue()
+
+
+# ---- preferences, relay tools and prompts ------------------------------------
+
+
+@pytest.mark.parametrize("value,expected", [
+    ({"progress_interval_seconds": 0}, {"progress_interval_seconds": 0}),       # what iOS sends today
+    ({"progress_interval_seconds": 20, "narration": "off"}, {"progress_interval_seconds": 20, "narration": "off"}),
+    ({"narration": "on", "extra": 1}, {"narration": "on"}),
+])
+def test_client_event_accepts_preferences(value, expected):
+    assert mod.client_event(json.dumps({"type": "oracle_v2.preferences", **value})) == {
+        "type": "oracle_v2.preferences", **expected}
+
+
+@pytest.mark.parametrize("value", [{}, {"progress_interval_seconds": 5}, {"narration": "loud"},
+                                   {"progress_interval_seconds": "10"}])
+def test_client_event_rejects_invalid_preferences(value):
+    assert mod.client_event(json.dumps({"type": "oracle_v2.preferences", **value})) is None
+
+
+def test_narration_off_preference_instructs_oracle_and_quiets_admissions(conv):
+    conv.input({"type": "oracle_v2.preferences", "progress_interval_seconds": 0, "narration": "off"})
+    [event] = _events(conv)
+    assert event["type"] == "session.instructions.append" and event["content"] == mod.NARRATION_OFF
+    assert conv._down[-1] == {"type": "oracle_v2.preferences", "progress_interval_seconds": 0,
+                              "narration": "off"}
+    conv.input({"type": "oracle_v2.preferences", "narration": "off"})
+    assert len(_events(conv)) == 1           # unchanged preference: no repeat instruction
+    quiet = mod.oracle_strategy.admission_context("theo", "op", "x", "accepted", narration="off")
+    assert "no handoff narration" in quiet
+    assert "no handoff narration" not in mod.oracle_strategy.admission_context("theo", "op", "x", "accepted")
+
+
+def test_router_tools_can_read_results_and_transcripts():
+    names = [t["name"] for t in mod.router_tools()]
+    assert {"read_result", "read_agent_transcript", "read_agent_messages", "get_agent_status"} <= set(names)
+    assert len(names) == len(set(names))
+    assert "read_result" in mod.ROUTING and "read_agent_transcript" in mod.ROUTING
+
+
+@pytest.mark.parametrize("strategy", ["operator", "direct_contact"])
+def test_voice_contract_explains_parts_verbatim_and_transcripts(strategy):
+    text = mod.live_config(roster={"agents": [{"name": "Theo", "session": "theo"}], "oracle_contact": "theo"},
+                           delegation_strategy=strategy)["instructions"]
+    assert "recent conversation" in text and "without prompting" in text
+    assert "word for word" in text and "part" in text
+    assert "Give the useful facts conversationally" not in text
+
+
+def test_result_release_threshold_is_named_and_above_old_value():
+    assert 4 <= mod.RESULT_RELEASE_SILENCE_SECONDS <= 5
+
+
+def test_restored_narration_off_is_reapplied_when_the_session_starts(conv):
+    conv.narration = "off"
+    conv.receive({"type": "session.started"})
+    assert [e["content"] for e in _events(conv)] == [mod.NARRATION_OFF]
+
+
+def test_append_safety_cap_says_more_remains(conv):
+    conv.append("commentary", "word " * 1000)
+    [event] = _events(conv)
+    assert len(event["content"]) <= mod.APPEND_CHARS
+    assert event["content"].endswith(mod.APPEND_CUT_NOTE)
+    conv.append("commentary", "short")
+    assert _events(conv)[-1]["content"] == "short"
