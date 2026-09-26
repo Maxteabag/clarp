@@ -6,6 +6,7 @@
     {"id": "clarp-adopt", "pack": "core", "description": "Resume a terminal CLI conversation as a Clarp agent"},
     {"id": "clarp-self-prompt", "pack": "core", "description": "Prompt an agent now or later"},
     {"id": "clarp-background-jobs", "pack": "core", "description": "Register and cancel background jobs"},
+    {"id": "clarp-sub-agents", "pack": "core", "description": "Spawn sub-agents that survive session restarts and show as running jobs"},
     {"id": "clarp-janitors", "pack": "core", "description": "Configure maintenance agents and inspect guarded effects"},
     {"id": "clarp-artifacts", "pack": "core", "description": "Shared secure artifact transport used by enabled artifact skills"},
     {"id": "clarp-decisions", "pack": "artifacts", "description": "Ask a native question or request explicit approval, with attention priority"},
