@@ -25,11 +25,14 @@ def report(principal, instance_id, sequence, foreground, input_age_ms, sent_at_m
         raise ValueError("stale activity report")
     key = PREFIX + hashlib.sha256(f"{principal}\0{instance_id}".encode()).hexdigest()
     with settings_store.transaction():
-        settings_store.prune_prefix(PREFIX, updated_before=now - 300_000)
+        settings_store.prune_prefix_due(PREFIX, now=now, updated_before=now - 300_000)
         stored = settings_store.get(key)
         if stored is not None and sequence <= json.loads(stored)["sequence"]:
             return {"accepted": False}
-        if stored is None and settings_store.count_prefix(PREFIX) >= 256:
+        # Pruning runs on a timer; at the cap, prune now before refusing.
+        if stored is None and settings_store.count_prefix(PREFIX) >= 256 and (
+                settings_store.prune_prefix(PREFIX, updated_before=now - 300_000) == 0
+                or settings_store.count_prefix(PREFIX) >= 256):
             raise ValueError("too many activity instances")
         value = json.dumps({"owner": principal, "sequence": sequence, "foreground": foreground,
             "expires_at": min(now, sent_at_ms) + 45_000, "input_at": min(now, sent_at_ms) - input_age_ms})
