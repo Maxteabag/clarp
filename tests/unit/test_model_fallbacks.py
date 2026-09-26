@@ -450,11 +450,9 @@ ANSWER_SCHEMA = {
 @pytest.mark.parametrize("backend", ["claude", "codex", "agy", "opencode"])
 def test_structured_fallback_runs_on_every_provider(backend, monkeypatch, tmp_path):
     """One extractor, one argv builder: no per-CLI branching in the fallback."""
-    import importlib
     from lib import backends as registry
 
-    adapter = registry.get(backend)
-    runner = importlib.import_module(f"lib.{adapter.routing_module}")
+    runner = registry.get(backend)
     script = tmp_path / "cli"
     script.write_text('#!/bin/sh\necho \'{"answer":"from ' + backend + '"}\'\n')
     script.chmod(0o755)
@@ -470,10 +468,9 @@ def test_structured_fallback_runs_on_every_provider(backend, monkeypatch, tmp_pa
 def test_structured_fallback_reports_a_dead_provider_as_a_provider_failure(
     monkeypatch, tmp_path
 ):
-    import importlib
     from lib import backends as registry
 
-    runner = importlib.import_module(f"lib.{registry.get('codex').routing_module}")
+    runner = registry.get('codex')
     script = tmp_path / "cli"
     script.write_text("#!/bin/sh\necho 'fetch failed' >&2\nexit 1\n")
     script.chmod(0o755)
