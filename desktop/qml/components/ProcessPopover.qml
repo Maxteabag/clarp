@@ -31,8 +31,9 @@ Popup {
     function openFor(session, anchor) {
         root.session = session;
         if (anchor) {
+            // Right-aligned under the anchor; `margins` keeps it inside the window.
             root.parent = anchor;
-            root.x = Math.min(0, anchor.width - root.width);
+            root.x = anchor.width - root.width;
             root.y = anchor.height + 4;
         }
         root.open();
@@ -40,6 +41,7 @@ Popup {
 
     width: 340
     padding: 0
+    margins: 8
     focus: true
     modal: false
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside

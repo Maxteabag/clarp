@@ -366,6 +366,161 @@ int main(int argc, char* argv[]) {
                                std::max(520, size.at(1).toInt()));
         }
     }
+    // Background jobs, sub-agents and nested helpers: three agents running
+    // 0, 1 and 3 processes, a running helper under its parent, two finished
+    // helpers collapsed, and a transcript with Harness sub-agent cells.
+    // CLARP_SCREENSHOT_OPEN_PROCESSES=header|sidebar opens the process list.
+    if (!screenshotPath.isEmpty() && controller != nullptr && rootWindow != nullptr
+        && screenshotScenario == QStringLiteral("background-processes")) {
+        QTimer::singleShot(1'700, &application, [controller, rootWindow] {
+            const qint64 now = QDateTime::currentMSecsSinceEpoch();
+            const auto row = [now](const QString& session, const QString& persona, qint64 ageMs,
+                                   const QJsonObject& extra) {
+                QJsonObject agent{{QStringLiteral("agent_id"), session + QStringLiteral("-id")},
+                                  {QStringLiteral("session"), session},
+                                  {QStringLiteral("persona"), persona},
+                                  {QStringLiteral("backend"), QStringLiteral("claude")},
+                                  {QStringLiteral("cwd"), QStringLiteral("/home/user/src/clarp")},
+                                  {QStringLiteral("alive"), true},
+                                  {QStringLiteral("latest_state"), QStringLiteral("idle")},
+                                  {QStringLiteral("last_activity"), static_cast<double>(now - ageMs)}};
+                for (auto it = extra.begin(); it != extra.end(); ++it) agent.insert(it.key(), it.value());
+                return agent;
+            };
+            const auto jobs = [](int count, int subAgents) {
+                return QJsonObject{{QStringLiteral("count"), count}, {QStringLiteral("sub_agents"), subAgents}};
+            };
+            const auto helper = [](const QString& state) {
+                return QJsonObject{{QStringLiteral("role"), QStringLiteral("helper")},
+                                   {QStringLiteral("parent_agent_id"), QStringLiteral("atlas-id")},
+                                   {QStringLiteral("helper_state"), state}};
+            };
+            QJsonObject scout = helper(QStringLiteral("running"));
+            scout.insert(QStringLiteral("latest_state"), QStringLiteral("tool"));
+            scout.insert(QStringLiteral("status_text"), QStringLiteral("Reading ProtocolTypes.cpp"));
+            scout.insert(QStringLiteral("last_message"), QStringLiteral("Mapping the snapshot fields"));
+            QJsonObject atlas{{QStringLiteral("background_jobs"), jobs(2, 1)},
+                              {QStringLiteral("latest_state"), QStringLiteral("background")},
+                              {QStringLiteral("status_text"), QStringLiteral("2 background jobs running")},
+                              {QStringLiteral("last_message"), QStringLiteral("Sent Scout to map the protocol")},
+                              {QStringLiteral("role"), QStringLiteral("agent")},
+                              {QStringLiteral("child_count"), 3},
+                              {QStringLiteral("running_children"), 1}};
+            QJsonObject beacon{{QStringLiteral("background_jobs"), jobs(1, 0)},
+                               {QStringLiteral("latest_state"), QStringLiteral("background")},
+                               {QStringLiteral("status_text"), QStringLiteral("Watching the release pipeline")},
+                               {QStringLiteral("last_message"), QStringLiteral("I'll tell you when CI finishes")}};
+            QJsonObject done1 = helper(QStringLiteral("done"));
+            done1.insert(QStringLiteral("last_message"), QStringLiteral("Report delivered"));
+            QJsonObject done2 = helper(QStringLiteral("reported"));
+            controller->agents()->applySnapshot({{QStringLiteral("agents"), QJsonArray{
+                row(QStringLiteral("scout"), QStringLiteral("Scout"), 20'000, scout),
+                row(QStringLiteral("atlas"), QStringLiteral("Atlas"), 60'000, atlas),
+                row(QStringLiteral("quill"), QStringLiteral("Quill"), 30'000, done1),
+                row(QStringLiteral("ember"), QStringLiteral("Ember"), 90'000, done2),
+                row(QStringLiteral("beacon"), QStringLiteral("Beacon"), 300'000, beacon),
+                row(QStringLiteral("nova"), QStringLiteral("Nova"), 900'000,
+                    {{QStringLiteral("last_message"), QStringLiteral("All tests pass on main")}}),
+            }}});
+            const auto job = [now](const QString& id, const QString& agent, const QString& kind,
+                                   const QString& title, const QString& detail, qint64 startedAgo,
+                                   qint64 heartbeatAgo) {
+                return QJsonObject{{QStringLiteral("job_id"), id},
+                                   {QStringLiteral("agent_id"), agent},
+                                   {QStringLiteral("session"), agent.chopped(3)},
+                                   {QStringLiteral("kind"), kind},
+                                   {QStringLiteral("title"), title},
+                                   {QStringLiteral("detail"), detail},
+                                   {QStringLiteral("status"), QStringLiteral("running")},
+                                   {QStringLiteral("started_at"), static_cast<double>(now - startedAgo)},
+                                   {QStringLiteral("updated_at"), static_cast<double>(now - heartbeatAgo)},
+                                   {QStringLiteral("heartbeat_at"), static_cast<double>(now - heartbeatAgo)}};
+            };
+            controller->seedScreenshotBackgroundJobs({{QStringLiteral("jobs"), QJsonArray{
+                job(QStringLiteral("deploy"), QStringLiteral("atlas-id"), QStringLiteral("watch"),
+                    QStringLiteral("Watch the preview deploy"), QStringLiteral("clarp-desktop-preview"),
+                    1'140'000, 6'000),
+                job(QStringLiteral("audit"), QStringLiteral("atlas-id"), QStringLiteral("sub-agent"),
+                    QStringLiteral("Audit the SSE parser"), QStringLiteral("claude · sonnet"), 260'000, 12'000),
+                job(QStringLiteral("ci"), QStringLiteral("beacon-id"), QStringLiteral("watch"),
+                    QStringLiteral("Watching the release pipeline"), QStringLiteral("GitHub Actions"),
+                    420'000, 3'000),
+            }}});
+            QString session = qEnvironmentVariable("CLARP_SCREENSHOT_SELECT_SESSION");
+            if (session.isEmpty()) session = QStringLiteral("atlas");
+            {
+                const QSignalBlocker blockPaneSelection(controller->panes());
+                controller->panes()->setActiveSession(session);
+            }
+            emit controller->panes()->treeChanged();
+            controller->selectSession(session);
+            if (clarp::ConversationModel* model = controller->conversationForSession(session)) {
+                const auto cell = [](const QString& id, const QString& title, const QString& summary,
+                                     const QString& status, const QString& label, const QString& text) {
+                    return QJsonObject{{QStringLiteral("id"), id},
+                                       {QStringLiteral("kind"), QStringLiteral("subagents")},
+                                       {QStringLiteral("title"), title},
+                                       {QStringLiteral("summary"), summary},
+                                       {QStringLiteral("status"), status},
+                                       {QStringLiteral("lines"), QJsonArray{QJsonObject{
+                                           {QStringLiteral("label"), label},
+                                           {QStringLiteral("text"), text}}}}};
+                };
+                model->applyLog({{QStringLiteral("conversation_id"), QStringLiteral("screenshot-processes")},
+                                 {QStringLiteral("latest_revision"), 2},
+                                 {QStringLiteral("turns"), QJsonArray{
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("fixture-user")},
+                                {QStringLiteral("role"), QStringLiteral("user")},
+                                {QStringLiteral("text"), QStringLiteral("Map the protocol and audit the parser in parallel.")},
+                                {QStringLiteral("revision"), 1}},
+                    QJsonObject{{QStringLiteral("id"), QStringLiteral("fixture-agents")},
+                                {QStringLiteral("role"), QStringLiteral("assistant")},
+                                {QStringLiteral("text"), QStringLiteral("Two sub-agents are on it; I'll merge their findings.")},
+                                {QStringLiteral("revision"), 2},
+                                {QStringLiteral("activity_count"), 3},
+                                {QStringLiteral("display_cells"), QJsonArray{
+                                    cell(QStringLiteral("c1"), QStringLiteral("Spawned agent"), QStringLiteral("Kepler (explorer)"),
+                                         QStringLiteral("ok"), QStringLiteral("Task"), QStringLiteral("Map every snapshot field the desktop reads")),
+                                    cell(QStringLiteral("c2"), QStringLiteral("Waiting for agents"), QStringLiteral("2 agents"),
+                                         QStringLiteral("running"), QStringLiteral("Kepler"), QStringLiteral("Running - reading AgentListModel.cpp")),
+                                    cell(QStringLiteral("c3"), QStringLiteral("Finished waiting"), QStringLiteral("Hubble (reviewer)"),
+                                         QStringLiteral("ok"), QStringLiteral("Hubble"), QStringLiteral("Completed - no parser regressions")),
+                                }}}}}},
+                                clarp::ConversationModel::LoadKind::Tail);
+            }
+            controller->setToolsVisible(true);
+            controller->clearError();
+            // The fixture Host is offline on purpose; its connection errors
+            // would cover the header this scenario exists to show.
+            QTimer::singleShot(500, controller, [controller, session] {
+                controller->clearError();
+                if (clarp::ConversationModel* model = controller->conversationForSession(session))
+                    model->setError({});
+            });
+            const QString open = qEnvironmentVariable("CLARP_SCREENSHOT_OPEN_PROCESSES");
+            if (!open.isEmpty()) {
+                QTimer::singleShot(600, rootWindow, [rootWindow, open] {
+                    const QString name = open == QStringLiteral("sidebar")
+                        ? QStringLiteral("sidebarProcessIndicator") : QStringLiteral("headerProcessIndicator");
+                    // Delegates are only reachable through the visual tree.
+                    auto* window = qobject_cast<QQuickWindow*>(rootWindow);
+                    QList<QQuickItem*> pending{window != nullptr ? window->contentItem() : nullptr};
+                    while (!pending.isEmpty()) {
+                        QQuickItem* item = pending.takeLast();
+                        if (item == nullptr) continue;
+                        if (item->objectName() == name && item->isVisible() &&
+                            item->property("total").toInt() > 1) {
+                            QMetaObject::invokeMethod(item, "clicked");
+                            return;
+                        }
+                        pending.append(item->childItems());
+                    }
+                    qCritical("No visible process indicator to open");
+                    QCoreApplication::exit(EXIT_FAILURE);
+                });
+            }
+        });
+    }
     if (!screenshotPath.isEmpty() && controller != nullptr && !screenshotScenario.isEmpty()) {
         QTimer::singleShot(1'900, &application,
                            [controller, screenshotScenario] {
