@@ -15,11 +15,12 @@ from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 from . import agents as agents_db
-from . import backend_usage, backends, config, db, error_classify, eventlog, origins
+from . import backend_usage, backends, config, db, error_classify, eventlog
 from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
 from . import turn_lifecycle, turn_slots
 from .turn_lifecycle import TurnEvent
 from .turn_slots import OwnershipLock, defer_on
+from .policies import admission as admission_policy
 from .log import log, log_exception
 from .protocol import AgentState, SSEType
 from .prompt_admissions import PromptAdmission
@@ -269,15 +270,51 @@ class JanitorDispatchError(DispatchError):
     """A maintenance run lost authorization; retrying cannot restore it."""
 
 
+def _janitor_run_active(agent: dict, run_id: str, trace_id: str) -> bool | None:
+    """The one lookup the Janitor rules need; None when they do not apply."""
+    if not run_id or admission_policy.can_chat(agent):
+        return None
+    from . import janitors
+    return bool(janitors.validate_dispatch(agent["session"], run_id, trace_id))
+
+
+def _admission_facts(origin: str) -> tuple["admission_policy.HostSettings", list]:
+    """The host facts admission needs, read only for the origins that use them."""
+    origin = (origin or "").strip()
+    settings = admission_policy.HostSettings()
+    if origin == "heartbeat":
+        from . import heartbeat
+        settings = admission_policy.HostSettings(
+            heartbeats_disabled=bool(heartbeat.globally_disabled()))
+    teams = team_store.list_teams() if origin == "leader_tick" else []
+    return settings, teams
+
+
+def _admit(origin: str, agent: dict, request: "admission_policy.LiveWork", *,
+           facts: tuple, queue_paused: bool,
+           ) -> "admission_policy.Allow | admission_policy.Queue":
+    """Ask the admission policy; raise the matching error on a refusal."""
+    settings, teams = facts
+    decision = admission_policy.admission(
+        origin, agent, teams, settings, request,
+        admission_policy.QueueState(paused=queue_paused))
+    if isinstance(decision, admission_policy.Reject):
+        error = JanitorDispatchError if decision.janitor else DispatchError
+        raise error(decision.status, decision.reason)
+    return decision
+
+
 def _validate_janitor_target(agent: dict, run_id: str, trace_id: str) -> None:
-    if not agents_db.interaction_capabilities(agent)["can_chat"]:
-        if not run_id:
-            raise JanitorDispatchError(409, "Janitors accept configured maintenance runs only")
-        from . import janitors
-        if not janitors.validate_dispatch(agent["session"], run_id, trace_id):
-            raise JanitorDispatchError(409, "Maintenance run is not active for this configuration")
-    elif run_id:
-        raise JanitorDispatchError(409, "Maintenance run does not target a Janitor")
+    """The Janitor half of admission, re-checked before every later attempt
+    (queue drains, retries, recovery) of a turn admitted earlier."""
+    request = admission_policy.LiveWork(
+        client_msg_id=run_id, janitor_run_id=run_id,
+        janitor_run_active=_janitor_run_active(agent, run_id, trace_id))
+    decision = admission_policy.admission(
+        "janitor" if run_id else "", agent, (), admission_policy.HostSettings(),
+        request, admission_policy.QueueState())
+    if isinstance(decision, admission_policy.Reject):
+        raise JanitorDispatchError(decision.status, decision.reason)
 
 
 def _recovered_janitor_run(row: dict) -> str:
@@ -634,10 +671,17 @@ class TurnDispatchService:
         unheard_audio_sessions = command.unheard_audio_sessions
         allow_paused_queue = command.allow_paused_queue
         janitor_run_id = command.janitor_run_id
-        if origin == "heartbeat" and client_msg_id.startswith("janitor-demand-"):
+        # The Janitor-demand authority is looked up before routing, as it
+        # always was; admission_policy decides what the answer means.
+        janitor_demand_valid = None
+        if admission_policy.needs_janitor_demand_check(origin, client_msg_id):
             from .janitor_autonomy import validate_dispatch
-            if not validate_dispatch(requested_session, client_msg_id):
-                raise DispatchError(409, "Heartbeat decision authority changed")
+            janitor_demand_valid = bool(
+                validate_dispatch(requested_session, client_msg_id))
+        early = admission_policy.before_routing(
+            origin, client_msg_id, janitor_demand_valid)
+        if early is not None:
+            raise DispatchError(early.status, early.reason)
         # NB: the live session->trace mapping is set only when a turn actually
         # spawns (see below / _finish_turn), NOT here — a message that merely
         # queues behind a busy agent must not move the trace, or the running
@@ -673,31 +717,24 @@ class TurnDispatchService:
         if not agent:
             raise DispatchError(404, "unknown agent")
         agent_id = agent["agent_id"]
-        _validate_janitor_target(agent, janitor_run_id, trace_id)
-        if janitor_run_id:
-            if client_msg_id and client_msg_id != janitor_run_id:
-                raise JanitorDispatchError(409, "Maintenance request ID must match its run")
-            if durable_queue_id and durable_queue_id != janitor_run_id:
-                raise JanitorDispatchError(409, "Maintenance queue ID must match its run")
-            client_msg_id = janitor_run_id
-            origin = "janitor"
+        request = admission_policy.LiveWork(
+            client_msg_id=client_msg_id, durable_queue_id=durable_queue_id,
+            janitor_run_id=janitor_run_id, sender_agent_id=sender_agent_id,
+            queue_if_busy=queue_if_busy, skip_admission=skip_admission,
+            allow_paused_queue=allow_paused_queue,
+            janitor_demand_valid=janitor_demand_valid,
+            janitor_run_active=_janitor_run_active(agent, janitor_run_id, trace_id))
+        facts = _admission_facts(origin)
+        decision = _admit(origin, agent, request, facts=facts, queue_paused=False)
+        effective = decision.effective
+        client_msg_id = effective.client_msg_id
+        origin = effective.origin
+        queue_if_busy = effective.queue_if_busy
+        if effective.mute_audio:
             synthesize_audio = False
-            queue_if_busy = True
             unheard_audio = False
-        elif origin == "janitor":
-            raise JanitorDispatchError(409, "Janitor origin requires an admitted run")
-        if origin == "heartbeat":
-            from . import heartbeat
-            if heartbeat.globally_disabled():
-                raise DispatchError(409, "Heartbeats are disabled on this Host")
-        if origin not in origins.ROUTINE_AUTOMATION_ORIGINS:
+        if effective.notify_herald:
             self._notify_herald(session)
-        if origin == "leader_tick" and not any(
-            t.get("leader_enabled") and t.get("nudge_enabled")
-            and t.get("leader_agent_id") == agent_id
-            for t in team_store.list_teams()
-        ):
-            raise DispatchError(409, "team leader nudging is disabled")
         # Sticky focus: addressing an agent by name makes them the new default,
         # so subsequent un-named messages keep going to them (hands-free, you
         # don't want to re-say the name every turn).
@@ -862,26 +899,29 @@ class TurnDispatchService:
                 f"client_msg_id={spec.client_msg_id or spec.trace_id}")
             return DispatchResult(session=session, backend=backend)
 
-        if queue_if_busy and turn_queue.is_paused(spec.agent_id) and not allow_paused_queue:
-            if spec.origin in {"user", "oracle"} and not skip_admission:
-                # Stop parks already-admitted follow-ups, not the conversation.
-                # Fresh user intent can arrive through chat OR an Oracle handoff.
-                # Admit this request only: lifting the global pause would also
-                # drain old parked work. Recovery/retries must not grant fresh
-                # intent to a durable item that Stop already fenced.
-                log("pausedQueueBypassedByFreshSend",
-                    f"agent={spec.agent_id} origin={spec.origin} trace={spec.trace_id or '∅'}")
-            else:
-                self._broadcast_queue_state(spec, started=False)
-                queue_state = turn_queue.state(spec.agent_id)
-                return DispatchResult(
-                    session=session, backend=backend, queued=True,
-                    queue_depth=queue_state["count"],
-                    queue_revision=queue_state["revision"])
+        # The pause is read after the durable receipt, as before; the policy
+        # is asked again with that one fact, every other input unchanged.
+        decision = _admit(command.origin, agent, request, facts=facts,
+                          queue_paused=turn_queue.is_paused(spec.agent_id))
+        if decision.effective.paused_bypass:
+            # Stop parks already-admitted follow-ups, not the conversation.
+            # Fresh user intent can arrive through chat OR an Oracle handoff.
+            # Admit this request only: lifting the global pause would also
+            # drain old parked work. Recovery/retries must not grant fresh
+            # intent to a durable item that Stop already fenced.
+            log("pausedQueueBypassedByFreshSend",
+                f"agent={spec.agent_id} origin={spec.origin} trace={spec.trace_id or '∅'}")
+        elif isinstance(decision, admission_policy.Queue):
+            self._broadcast_queue_state(spec, started=False)
+            queue_state = turn_queue.state(spec.agent_id)
+            return DispatchResult(
+                session=session, backend=backend, queued=True,
+                queue_depth=queue_state["count"],
+                queue_revision=queue_state["revision"])
 
         # A live Codex turn accepts follow-ups through the official turn/steer
         # protocol. Other backends retain their existing dispatch behavior.
-        if (not queue_if_busy or spec.origin == "oracle") and self._steer_if_supported(spec):
+        if decision.effective.steer_allowed and self._steer_if_supported(spec):
             return DispatchResult(session=session, backend=backend)
         if self._enqueue_if_busy(spec, queue_if_busy=queue_if_busy):
             if queue_if_busy:
@@ -1507,12 +1547,9 @@ class TurnDispatchService:
         _validate_janitor_target(
             agents_db.get_by_agent_id(spec.agent_id) or {},
             spec.janitor_run_id, spec.trace_id)
-        if spec.origin == "leader_tick" and not any(
-            t.get("leader_enabled") and t.get("nudge_enabled")
-            and t.get("leader_agent_id") == spec.agent_id
-            for t in team_store.list_teams()
-        ):
-            raise DispatchError(409, "team leader nudging is disabled")
+        if (spec.origin == "leader_tick" and not admission_policy.leader_nudge_allowed(
+                spec.agent_id, team_store.list_teams())):
+            raise DispatchError(409, admission_policy.LEADER_NUDGE_DISABLED)
         digest, inbox_ids = team_store.pending_digest(spec.agent_id)
         spec = replace(spec, team_digest=digest, team_inbox_ids=tuple(inbox_ids),
                        team_protocol=team_store.team_protocol_instruction(spec.agent_id, turn_origin=spec.origin))

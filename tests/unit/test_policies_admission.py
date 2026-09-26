@@ -220,3 +220,12 @@ def test_traits_of_unknown_or_blank_origin_are_inert():
 def test_origin_is_stripped_before_matching():
     decision = decide("  heartbeat ", settings=HostSettings(heartbeats_disabled=True))
     assert decision == Reject(409, policy.HEARTBEATS_DISABLED)
+
+
+def test_before_routing_refuses_only_a_verified_bad_demand():
+    adm = policy
+    assert adm.before_routing("heartbeat", "janitor-demand-x", False) == adm.Reject(
+        409, adm.HEARTBEAT_AUTHORITY_CHANGED)
+    assert adm.before_routing("heartbeat", "janitor-demand-x", None) is None
+    assert adm.before_routing("heartbeat", "janitor-demand-x", True) is None
+    assert adm.before_routing("user", "janitor-demand-x", False) is None

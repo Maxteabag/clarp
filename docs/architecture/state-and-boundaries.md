@@ -49,7 +49,7 @@ server/lib/turn_slots.py      TurnSlots: in-flight, queued, claimed; durable
 server/lib/events.py          one constructor per SSEType; broadcast() type-checks
 server/lib/revisioned_cache.py  bounded, locked cache keyed by a cross-process
                               revision (PRAGMA data_version or a table revision)
-server/lib/policies/          origins.py (admission), notifications.py,
+server/lib/policies/          admission.py, notifications.py,
                               failover.py, agent_spec.py: pure decisions
 server/lib/janitor_store.py   the janitor tables' only writer
 server/lib/http_utils.py      Principal, Responder, require_full_scope()

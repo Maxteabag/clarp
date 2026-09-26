@@ -153,6 +153,16 @@ def can_chat(agent: Mapping) -> bool:
     return not bool(agent.get("is_janitor"))
 
 
+def before_routing(origin: str, client_msg_id: str,
+                   janitor_demand_valid: bool | None) -> Reject | None:
+    """The one rule that needs no agent: a forged or stale Janitor demand is
+    refused before the dispatcher routes the text to anyone."""
+    if (needs_janitor_demand_check((origin or "").strip(), client_msg_id or "")
+            and janitor_demand_valid is False):
+        return Reject(409, HEARTBEAT_AUTHORITY_CHANGED)
+    return None
+
+
 def admission(origin: str, agent: Mapping, teams: Sequence[Mapping],
               settings: HostSettings, live_work: LiveWork,
               queue: QueueState) -> Decision:
@@ -167,9 +177,9 @@ def admission(origin: str, agent: Mapping, teams: Sequence[Mapping],
     queue_if_busy = live_work.queue_if_busy
     mute_audio = False
 
-    if (needs_janitor_demand_check(origin, client_msg_id)
-            and live_work.janitor_demand_valid is False):
-        return Reject(409, HEARTBEAT_AUTHORITY_CHANGED)
+    early = before_routing(origin, client_msg_id, live_work.janitor_demand_valid)
+    if early is not None:
+        return early
 
     run_id = live_work.janitor_run_id or ""
     if not can_chat(agent):
