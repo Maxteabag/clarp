@@ -556,6 +556,20 @@ void AudioController::playBufferedMedia(const QByteArray& audio, const QUrl& sou
         return;
     }
     ensurePlayer();
+    if (!m_player->isAvailable()) {
+        // Without a Qt Multimedia backend (for example qt6-multimedia-ffmpeg
+        // built against a newer ffmpeg than is installed) play() silently does
+        // nothing: the clip never ended and every later clip queued behind it.
+        // Fail it at once and say why, once per run.
+        const QString reason = QStringLiteral(
+            "No audio backend is available; install a Qt Multimedia backend that matches the system ffmpeg");
+        finishCurrentClip(QStringLiteral("play-fail"), reason);
+        if (!m_reportedMissingBackend) {
+            m_reportedMissingBackend = true;
+            emit mediaError(reason);
+        }
+        return;
+    }
     m_player->setSourceDevice(&m_playbackBuffer, sourceUrl);
     m_player->play();
 }

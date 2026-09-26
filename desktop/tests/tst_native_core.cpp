@@ -35,6 +35,7 @@
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QMediaPlayer>
 #include <QTest>
 #include <QTimer>
 #include <QTemporaryFile>
@@ -104,6 +105,10 @@ class FakeClarpServer final : public QTcpServer {
     }
     [[nodiscard]] qsizetype requestCount(const QString& method, const QString& path) const {
         return m_requests.count(method + u' ' + path);
+    }
+
+    void setBytesResponse(const QByteArray& path, const QByteArray& body, const QByteArray& contentType) {
+        m_bytesResponses.insert(path, {body, contentType});
     }
 
     void setJsonResponse(const QString& method, const QString& path, int status,
@@ -255,6 +260,11 @@ class FakeClarpServer final : public QTcpServer {
                      {QStringLiteral("focus"), QStringLiteral("agent-rachel")},
                      {QStringLiteral("available_mcp_servers"),
                       QJsonArray{QStringLiteral("github"), QStringLiteral("figma")}}});
+            return;
+        }
+        if (m_bytesResponses.contains(QByteArray(path).split('?').first())) {
+            const auto response = m_bytesResponses.value(QByteArray(path).split('?').first());
+            respondBytes(socket, response.first, response.second);
             return;
         }
         if (path.startsWith("/static/avatars/rachel.png")) {
@@ -582,6 +592,7 @@ class FakeClarpServer final : public QTcpServer {
     QStringList m_requests;
     QHash<QString, QByteArray> m_requestBodies;
     QHash<QString, QPair<int, QJsonObject>> m_jsonResponses;
+    QHash<QByteArray, QPair<QByteArray, QByteArray>> m_bytesResponses;
     QPointer<QTcpSocket> m_heldLogSocket;
     QPointer<QTcpSocket> m_heldUploadSocket;
     bool m_holdSnapshot = false;
@@ -691,6 +702,8 @@ class NativeCoreTest final : public QObject {
     void contactsExcludeActivePersonas();
     void microphoneCanCaptureNativePcm();
     void backgroundTranscriptionsKeepTheirChatOwnership();
+    void clipFailsFastWithoutMediaBackend();
+    void narrationClipWithoutMediaBackendStaysBounded();
     void sharedPlaybackDoesNotDuplicateDownloads();
     void markdownParagraphsBecomeVisibleDisplayBlocks();
     void agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent();
@@ -3433,6 +3446,70 @@ void NativeCoreTest::microphoneCanCaptureNativePcm() {
     audio.cancelRecording();
     QVERIFY(!audio.recording());
     QCOMPARE(errors.count(), 0);
+}
+
+void NativeCoreTest::clipFailsFastWithoutMediaBackend() {
+    {
+        QMediaPlayer probe;
+        if (probe.isAvailable()) QSKIP("A Qt Multimedia backend is installed; nothing to fall back from");
+    }
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    server.setBytesResponse("/clips/1/complete.mp3", QByteArray("ID3fixture"), "audio/mpeg");
+    AudioController audio;
+    QSignalSpy errors(&audio, &AudioController::mediaError);
+    audio.setEndpoint(QUrl(server.baseUrl()), QUuid::createUuid().toString());
+    const QJsonObject first{{QStringLiteral("clip_id"), 1},
+                            {QStringLiteral("url"), QStringLiteral("/clips/1/complete.mp3")},
+                            {QStringLiteral("complete_url"), QStringLiteral("/clips/1/complete.mp3")},
+                            {QStringLiteral("audio_format"), QJsonObject{{QStringLiteral("container"), QStringLiteral("mp3")}}}};
+    QJsonObject second = first;
+    second.insert(QStringLiteral("clip_id"), 2);
+    audio.enqueueClip(first);
+    audio.enqueueClip(second);
+    // Both clips are queued and then failed, instead of the first blocking forever.
+    QTRY_COMPARE_WITH_TIMEOUT(server.requestCount(QStringLiteral("POST"), QStringLiteral("/clips/ack")), 4, 5'000);
+    QCOMPARE(server.requestJson(QStringLiteral("POST"), QStringLiteral("/clips/ack")).value(QStringLiteral("status")).toString(),
+             QStringLiteral("play-fail"));
+    QVERIFY(!audio.playing());
+    QCOMPARE(errors.count(), 1);  // Reported once, not per clip.
+}
+
+void NativeCoreTest::narrationClipWithoutMediaBackendStaysBounded() {
+    // Repro probe for the runaway-memory freeze: play a real narration clip
+    // through AudioController exactly as the app does and watch memory.
+    const QString clipFile = qEnvironmentVariable("CLARP_TEST_CLIP_FILE");
+    if (clipFile.isEmpty()) QSKIP("Set CLARP_TEST_CLIP_FILE to a narration .mp3 to run this probe");
+    QFile clip(clipFile);
+    QVERIFY(clip.open(QIODevice::ReadOnly));
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    server.setBytesResponse("/clips/7647/complete.mp3", clip.readAll(), "audio/mpeg");
+    AudioController audio;
+    audio.setEndpoint(QUrl(server.baseUrl()), QUuid::createUuid().toString());
+    const auto rssMb = [] {
+        QFile status(QStringLiteral("/proc/self/status"));
+        if (!status.open(QIODevice::ReadOnly)) return 0LL;
+        for (const QByteArray& line : status.readAll().split('\n'))
+            if (line.startsWith("VmRSS:")) return line.mid(6).trimmed().split(' ').first().toLongLong() / 1024;
+        return 0LL;
+    };
+    const qint64 before = rssMb();
+    audio.enqueueClip({{QStringLiteral("clip_id"), 7647},
+                       {QStringLiteral("session"), QStringLiteral("marcus-4e32")},
+                       {QStringLiteral("url"), QStringLiteral("/clips/7647/complete.mp3")},
+                       {QStringLiteral("complete_url"), QStringLiteral("/clips/7647/complete.mp3")},
+                       {QStringLiteral("audio_format"), QJsonObject{{QStringLiteral("container"), QStringLiteral("mp3")}}}});
+    qint64 peak = before;
+    for (int second = 1; second <= 20; ++second) {
+        QTest::qWait(1000);
+        peak = std::max(peak, rssMb());
+        qInfo().noquote() << QStringLiteral("t+%1s rss=%2MB playing=%3 downloads=%4 acks=%5")
+                                 .arg(second).arg(rssMb()).arg(audio.playing())
+                                 .arg(server.requestCount(QStringLiteral("GET"), QStringLiteral("/clips/7647/complete.mp3")))
+                                 .arg(server.requestCount(QStringLiteral("POST"), QStringLiteral("/clips/ack")));
+    }
+    QVERIFY2(peak - before < 200, qPrintable(QStringLiteral("memory grew %1 MB").arg(peak - before)));
 }
 
 void NativeCoreTest::sharedPlaybackDoesNotDuplicateDownloads() {

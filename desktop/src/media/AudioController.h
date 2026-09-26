@@ -123,6 +123,7 @@ class AudioController : public QObject {
     bool m_recording = false;
     bool m_downloading = false;
     bool m_playStarted = false;
+    bool m_reportedMissingBackend = false;
     bool m_hasCurrentClip = false;
     bool m_muted = false;
     bool m_remotePlaying = false;
