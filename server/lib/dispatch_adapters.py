@@ -98,12 +98,11 @@ class DispatchAdapters:
     def dream(self, session: str, text: str) -> bool:
         """DreamingScheduler: run one isolated dream round if the agent is
         idle everywhere (no turn, no backend handle, no compaction)."""
-        from . import compaction
-        from . import dreaming
+        from . import dreaming, turn_dispatch
         agent = self._idle_agent(session)
         if (agent is None
                 or backends.active_handles(agent.get("backend"), agent["agent_id"])
-                or compaction.is_compacting(session)):
+                or turn_dispatch.live_work(agent["agent_id"], session=session).compacting):
             return False
         return dreaming.dispatch_isolated_dream(agent, text)
 

@@ -24,7 +24,7 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from . import agents as agents_db
-from . import backends, compaction, config, db, dream_seeds, location, origins
+from . import backends, config, db, dream_seeds, location, origins
 from . import settings_store
 from . import trace as _trace
 from .log import log, log_exception
@@ -1079,7 +1079,8 @@ def _skip_busy_reason(agent: dict) -> str:
         return "busy"
     if backends.active_handles(agent.get("backend"), agent_id) and not routine_busy:
         return "active"
-    if compaction.is_compacting(session):
+    from . import turn_dispatch
+    if turn_dispatch.live_work(agent_id, session=session).compacting:
         return "compacting"
     return ""
 

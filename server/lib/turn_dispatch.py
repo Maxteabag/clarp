@@ -122,7 +122,7 @@ def reset_for_tests() -> None:
 
 
 def _terminal_live(agent_id: str) -> bool:
-    return turn_slots._terminal_live(agent_id)
+    return _SLOTS.live_work(agent_id).terminal
 
 
 def _slot_is_spawning(agent_id: str) -> bool:
