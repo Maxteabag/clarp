@@ -325,7 +325,7 @@ def create(session: str, template_id: str = "task-labels", scope=None, attachmen
         if a["backend"] != observed_backend or agents.is_busy(a["agent_id"]) or runtime_busy or turn_queue.pending_count(a["agent_id"]):
             raise JanitorError("Wait for this agent's current work and queue to finish before converting it", 409, "agent_busy")
         if existing:
-            store.convert_agent_to_janitor(c, a["agent_id"])
+            agents.convert_to_janitor(c, a["agent_id"])
             return get(session, include_runtime=False)
         selected_scope = _scope(scope if scope is not None else {})
         values = _attachment_values(attachments if attachments is not None else [{"trigger_id": template(template_id)["default_trigger_id"]}], a["agent_id"], template_id)
@@ -335,7 +335,7 @@ def create(session: str, template_id: str = "task-labels", scope=None, attachmen
         selected_options = {} if options is _UNSET else _option_patch(template_id, options)
         store.insert_config(c, a["agent_id"], _template(template_id), scope=selected_scope,
                             execution=execution, options=selected_options, now=now)
-        store.convert_agent_to_janitor(c, a["agent_id"])
+        agents.convert_to_janitor(c, a["agent_id"])
         _save_attachments(c, a["agent_id"], values, now)
     return get(session)
 
@@ -381,7 +381,7 @@ def list_janitors(*, include_runtime: bool = True) -> list[dict]:
 def _fence(c, agent_id: str, now: int):
     traces = store.active_trace_ids(agent_id, c)
     store.cancel_active_runs(c, agent_id, now)
-    store.cancel_queued_turns_for_traces(c, agent_id, traces)
+    turn_queue.cancel_for_traces(c, agent_id, traces)
     if traces:
         turn_queue._bump_revision(agent_id)
     store.clear_next_runs(c, agent_id)
@@ -593,7 +593,7 @@ def release(session: str, expected_revision: int, *, successor_session: str | No
             handoff = _handoff_labels(c, a, row, successor_session, successor_revision, now, runtime_busy)
         _fence(c, a["agent_id"], now)
         store.bump_config(c, a["agent_id"], now)
-        store.release_agent_from_janitor(c, a["agent_id"])
+        agents.release_from_janitor(c, a["agent_id"])
     result = get(session)
     if handoff is not None:
         result["ownership_handoff"] = handoff
@@ -872,7 +872,7 @@ def review(run_id: str, target_session: str, observed_state_id: int, outcome: st
             outcome = "same_task"
         now = db.now_ms()
         if outcome == "changed":
-            store.set_agent_custom_status(c, target["agent_id"], after)
+            agents.set_janitor_status(c, target["agent_id"], after)
             store.upsert_label_ownership(c, target_agent_id=target["agent_id"], owner_agent_id=run["agent_id"], run_id=run_id,
                                          label=after, task_signature=_task_signature(c, target["agent_id"]),
                                          valid_until=now + LABEL_MAX_AGE_MS, now=now)
@@ -1119,7 +1119,7 @@ def create_reserved_agent(request_id: str, *, persona: str, voice_id: str, cwd: 
             return result["agent_id"]
         agent_id = agents.create_agent(persona=persona, voice_id="", cwd=cwd, session=session,
                                        backend=backend, model=model, effort=effort)
-        store.mark_agent_janitor(c, agent_id)
+        agents.mark_janitor(c, agent_id)
         store.link_creation_agent(c, request_id, agent_id)
         return agent_id
 

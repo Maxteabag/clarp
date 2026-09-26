@@ -8,6 +8,7 @@ import secrets
 from typing import Any
 from urllib.parse import quote
 
+from . import agents as agents_db
 from . import db
 
 
@@ -101,7 +102,7 @@ def select_primary(*, session: str, portrait_id: str,
             "UPDATE agent_portraits SET is_primary=1 WHERE portrait_id=?",
             (row["portrait_id"],),
         )
-        _set_agent_avatar_path(con, agent["agent_id"], str(path))
+        agents_db.set_avatar_path(con, agent["agent_id"], str(path))
         _prune_unavailable_alternates(con, agent["agent_id"])
         con.execute("COMMIT")
     except Exception:
@@ -263,15 +264,6 @@ def _ensure_current_primary(
     except Exception:
         con.execute("ROLLBACK")
         raise
-
-
-def _set_agent_avatar_path(con, agent_id: str, avatar_path: str) -> None:
-    """The primary portrait's path on the agent row, inside the caller's
-    transaction. TODO(integration: move to agents.py)."""
-    con.execute(
-        "UPDATE agents SET avatar_path=? WHERE agent_id=? AND deleted_at IS NULL",
-        (avatar_path, agent_id),
-    )
 
 
 def _collection(agent: dict[str, Any]) -> dict[str, Any]:
