@@ -23,6 +23,8 @@ OWNERS = {
     "agents": "lib/agents.py",
     "artifacts": "lib/artifacts.py",
     "janitor_": "lib/janitor_store.py",
+    "turns": "lib/turn_lifecycle.py",
+    "state_log": "lib/turn_lifecycle.py",
 }
 
 _MIGRATION = "schema creation, seed rows or a one-time migration"
@@ -33,8 +35,6 @@ ALLOWED = {
     ("agents", "lib/agent_portraits.py"): "TODO(integration: move to agents.py): _set_agent_avatar_path inside the portrait transaction",
     ("janitor_label_ownership", "lib/agents.py"): "TODO(integration): set_custom_status should call janitor_store.forget_label_ownership",
     ("queued_turns", "lib/janitor_store.py"): "TODO(integration: move to turn_queue.py): the janitor fence cancels its own queued turns in one transaction",
-    ("turns", "lib/turn_dispatch.py"): "Stream A: turn_lifecycle becomes the only writer of turns",
-    ("state_log", "lib/maintenance.py"): "retention pruning; Stream A decides whether turn_lifecycle owns it",
     # Schema seeds and migrations.
     ("settings", "lib/db_migrations.py"): _MIGRATION,
     ("agents", "lib/db_migrations.py"): _MIGRATION,
@@ -46,6 +46,7 @@ ALLOWED = {
     ("janitor_trigger_definitions", "lib/audio_bookkeeper.py"): _MIGRATION + " (its SCHEMA seeds the audio trigger)",
     # Retention sweeps: maintenance.py deletes expired rows from many tables.
     ("background_job_events", "lib/maintenance.py"): "retention sweep",
+    ("state_log", "lib/maintenance.py"): "retention sweep",
     ("clips", "lib/maintenance.py"): "retention sweep",
     ("judgment_decisions", "lib/maintenance.py"): "retention sweep",
     ("sse_events", "lib/maintenance.py"): "retention sweep",

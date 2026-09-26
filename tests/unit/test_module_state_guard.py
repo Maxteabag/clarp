@@ -30,7 +30,6 @@ THROTTLE = "rate limit, circuit breaker or log-once memory; losing it on restart
 JOBS = "tracks in-process background threads, subprocesses or sockets that cannot outlive the process"
 ORACLE = "live realtime call and socket registry; sessions die with the process"
 IMPORT = "table filled once at import time and read-only afterwards"
-TURNS = "Stream A: in-flight/queued turn memory moves into TurnSlots, durable through turns/queued_turns"
 
 ALLOWED: dict[tuple[str, str], str] = {
     ("lib/apns.py", "_BG_LAST_BY_SESSION"): THROTTLE,
@@ -116,10 +115,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/transcription_models.py", "_activation_retry_after"): THROTTLE,
     ("lib/transcription_models.py", "_tasks"): JOBS,
     ("lib/transcription_results.py", "_locks"): LOCKS,
-    ("lib/turn_dispatch.py", "_CLAIMED_AT"): TURNS,
-    ("lib/turn_dispatch.py", "_INFLIGHT"): TURNS,
     ("lib/turn_dispatch.py", "_JANITOR_SPAWN_LOCKS"): LOCKS,
-    ("lib/turn_dispatch.py", "_QUEUED"): TURNS,
     ("lib/turn_dispatch.py", "_REQUEST_LOCKS"): LOCKS,
     ("lib/turn_dispatch.py", "_RUNTIME_CLIENT"): CLIENT,
     ("lib/viz_learning.py", "_failed_until"): THROTTLE,
