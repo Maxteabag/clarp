@@ -427,7 +427,38 @@ class TurnDispatchService:
         finally:
             _RECOVERY_LOCK.release()
 
+    def _rehydrate_once(self) -> None:
+        """First recovery after boot: rebuild the slot view from the durable
+        rows. An open turns row whose process this runtime can still see
+        owns its slot again; Stop-parked sends become queued work (the
+        barrier that parked them died with the previous process)."""
+        global _REHYDRATED
+        if _REHYDRATED:
+            return
+        _REHYDRATED = True
+
+        def live(agent_id: str, trace_id: str) -> bool:
+            agent = agents_db.get_by_agent_id(agent_id)
+            if not agent or agents_db.get_trace(agent_id) != trace_id:
+                return False
+            try:
+                return bool(self.backends.active_handles(
+                    self.backends.normalize(agent.get("backend")), agent_id))
+            except Exception:  # noqa: BLE001
+                return False
+
+        try:
+            result = _SLOTS.rehydrate(live=live)
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("turnSlotsRehydrateFail", exc)
+            return
+        if result["adopted"] or result["requeued_parked"]:
+            log("turnSlotsRehydrated",
+                f"adopted={len(result['adopted'])} "
+                f"requeued_parked={result['requeued_parked']}")
+
     def _recover_queued_locked(self) -> int:
+        self._rehydrate_once()
         turn_queue.reset_stale_claims()
         recovered = 0
         deferred = False
@@ -439,10 +470,9 @@ class TurnDispatchService:
                     self.backends.normalize(agent.get("backend")), row["agent_id"]):
                 deferred = True
                 continue
-            with _TURN_LOCK:
-                already_memory_queued = any(
-                    spec.queue_id == row["queue_id"]
-                    for spec in _QUEUED.get(row["agent_id"], []))
+            already_memory_queued = _SLOTS.has_queued(
+                row["agent_id"],
+                lambda spec, queue_id=row["queue_id"]: spec.queue_id == queue_id)
             if already_memory_queued:
                 continue
             try:
