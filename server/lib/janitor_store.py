@@ -425,6 +425,12 @@ def refresh_label_ownership(c, target_agent_id: str, *, task_signature: str, val
               (task_signature, valid_until, now, target_agent_id))
 
 
+def forget_label_ownership(c, target_agent_id: str) -> None:
+    """A manual status write owns the field again. TODO(integration): agents.
+    set_custom_status runs this DELETE inline today; call this instead."""
+    c.execute("DELETE FROM janitor_label_ownership WHERE target_agent_id=?", (target_agent_id,))
+
+
 def transfer_label_ownership(c, successor_agent_id: str, target_agent_ids: list[str], now: int) -> None:
     c.executemany("UPDATE janitor_label_ownership SET owner_agent_id=?,revision=revision+1,updated_at=? WHERE target_agent_id=?",
                   [(successor_agent_id, now, target_id) for target_id in target_agent_ids])
