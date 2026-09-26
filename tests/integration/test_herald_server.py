@@ -237,13 +237,13 @@ def test_focus_endpoint_updates_sqlite_focus_for_sticky_routing(server_with_hera
 
 
 def test_send_to_held_agent_releases_them(server_with_herald, monkeypatch):
-    from lib import clarp_runner
+    from lib.backend.registry import by_id
     calls = []
     # Exercise HTTP/admission/herald behavior without launching a real provider.
     def complete_turn(**kwargs):
         calls.append(kwargs)
         kwargs["on_result"]({"subtype": "success", "result": "QA complete"})
-    monkeypatch.setattr(clarp_runner, "spawn_turn", complete_turn)
+    monkeypatch.setattr(by_id("claude"), "spawn_turn", complete_turn)
     base, ctx, _srv = server_with_herald
     ctx.herald.set_focus("claude")
     ctx.herald.ingest_clip("rachel", url="/audio/r1.mp3", ts=1)

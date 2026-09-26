@@ -303,12 +303,13 @@ def test_exhausted_fallbacks_are_bounded_and_visible(agent):
 
 
 def test_isolated_agy_does_not_finalize_against_primary_conversation(monkeypatch):
-    from lib import agy_runner
+    from lib.backend.agy import _TurnState
+    from lib.backend.registry import by_id
     def forbidden(**_):
         pytest.fail("isolated fallback must not claim primary conversation authority")
     monkeypatch.setattr(agents, "commit_agy_assistant_turn", forbidden)
-    state = agy_runner._TurnState(pending_result={"last_agent_message": "Recovered"})
-    agy_runner._finalize_success(state, agent_id="", session="robot", trace_id="r", stream=None, enqueue=None)
+    state = _TurnState(pending_result={"last_agent_message": "Recovered"})
+    by_id("agy")._finalize_success(state, agent_id="", session="robot", trace_id="r", stream=None, enqueue=None)
     assert state.live_text == "Recovered"
 
 
