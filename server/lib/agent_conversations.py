@@ -150,38 +150,39 @@ def list_conversations(limit: int = 200) -> list[dict[str, Any]]:
 
 
 def _list_conversations_uncached(limit: int) -> list[dict[str, Any]]:
+    # The aggregate reads only idx_messages_pair_summary (agent, sender, role,
+    # revision, timestamp, seq): no table rows, no text. The newest row per
+    # pair is then one indexed lookup per room rather than a window function
+    # over every pair message. INDEXED BY is deliberate: left to itself the
+    # planner walks the dashboard index and reads every row's text, which is
+    # 16 s on a cold page cache against 0.9 s here (65 ms warm).
     rows = conn().execute(f"""
         WITH pair_rows AS (
-            SELECT m.message_id, m.agent_id, m.role, m.timestamp, m.text, m.revision,
-                   m.sender_agent_id, m.seq, {_ACTIVITY} AS activity,
+            SELECT m.role, m.revision, {_ACTIVITY} AS activity,
                    MIN(m.agent_id, m.sender_agent_id) AS low,
                    MAX(m.agent_id, m.sender_agent_id) AS high
-              FROM messages m
+              FROM messages m INDEXED BY idx_messages_pair_summary
               JOIN agents a ON a.agent_id = m.agent_id AND a.deleted_at IS NULL
               JOIN agents s ON s.agent_id = m.sender_agent_id AND s.deleted_at IS NULL
              WHERE {_PAIR_WHERE} AND m.role IN ('user', 'assistant')
         ),
-        delivered AS (SELECT DISTINCT low, high FROM pair_rows WHERE role = 'user'),
         aggregated AS (
             SELECT low, high, COUNT(*) AS message_count,
-                   MAX(revision) AS latest_revision, MAX(activity) AS latest_activity
+                   MAX(revision) AS latest_revision, MAX(activity) AS latest_activity,
+                   MAX(role = 'user') AS delivered
               FROM pair_rows GROUP BY low, high
-        ),
-        ranked AS (
-            SELECT low, high, message_id, agent_id, role, timestamp, text, revision, sender_agent_id,
-                   ROW_NUMBER() OVER (PARTITION BY low, high
-                       ORDER BY COALESCE(timestamp, '') DESC, seq DESC) AS position
-              FROM pair_rows
         )
-        SELECT aggregated.low, aggregated.high, aggregated.message_count,
-               aggregated.latest_revision, aggregated.latest_activity,
-               ranked.message_id, ranked.agent_id, ranked.role, ranked.timestamp,
-               ranked.text, ranked.revision, ranked.sender_agent_id
-          FROM aggregated
-          JOIN delivered ON delivered.low = aggregated.low AND delivered.high = aggregated.high
-          JOIN ranked ON ranked.low = aggregated.low AND ranked.high = aggregated.high
-                     AND ranked.position = 1
-         ORDER BY aggregated.latest_activity DESC
+        SELECT g.low, g.high, g.message_count, g.latest_revision, g.latest_activity,
+               r.message_id, r.agent_id, r.role, r.timestamp, r.text, r.revision, r.sender_agent_id
+          FROM aggregated g
+          JOIN messages r ON r.rowid = (
+               SELECT m.rowid FROM messages m INDEXED BY idx_messages_pair_summary
+                WHERE ((m.agent_id = g.low AND m.sender_agent_id = g.high)
+                    OR (m.agent_id = g.high AND m.sender_agent_id = g.low))
+                  AND {_PAIR_WHERE} AND m.role IN ('user', 'assistant')
+                ORDER BY COALESCE(m.timestamp, '') DESC, m.seq DESC LIMIT 1)
+         WHERE g.delivered = 1
+         ORDER BY g.latest_activity DESC
          LIMIT ?""", (limit,)).fetchall()
     known = _participants_for({row[key] for row in rows for key in ("low", "high")})
     out = []

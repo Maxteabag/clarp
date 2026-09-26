@@ -253,8 +253,11 @@ AppController::AppController(QObject* parent)
         setConnectionState(m_sse.connected() ? QStringLiteral("live")
                                              : QStringLiteral("reconnecting"));
         if (m_sse.connected()) {
+            // The sidebar waits on the snapshot; attention, jobs and the
+            // artifact library can follow once it has arrived instead of
+            // competing with it for the Host on a cold start.
             requestSnapshot();
-            loadUpdates();
+            QTimer::singleShot(1'500, this, [this] { if (m_sse.connected()) loadUpdates(); });
         } else {
             m_agents.markTransportUnavailable();
             m_archivedAgents.markTransportUnavailable();

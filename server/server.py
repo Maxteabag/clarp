@@ -115,6 +115,7 @@ from lib.team_leader import TeamLeaderScheduler  # noqa: E402
 from lib.transcript_streamer import TranscriptStreamer  # noqa: E402
 from lib.tts_worker import TTSWorker  # noqa: E402
 from lib.workers import BOOT, SERVING, Worker, WorkerSet, started  # noqa: E402
+from lib.cache_warmup import CacheWarmupWorker  # noqa: E402
 
 
 from lib.config import load as load_config  # noqa: E402
@@ -5428,6 +5429,10 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         Worker("usage-refresh",
                lambda: started(backend_usage.UsageRefreshWorker(stream=ctx.stream))),
         Worker("resource-telemetry", lambda: started(ResourceTelemetryWorker())),
+        # Warm the heavy read caches (pair rooms, dashboard previews, model
+        # catalogue, artifacts) once the listeners are up, so the first client
+        # after a restart does not pay for a cold page cache on the request path.
+        Worker("cache-warmup", lambda: started(CacheWarmupWorker()), stage=SERVING),
         Worker("decision-delivery", lambda: started(
             DecisionDeliveryWorker(lambda: _deliver_decision_rows(ctx)))),
         # Transcript streamer: tails ~/.claude/projects/.../<uuid>.jsonl via

@@ -48,3 +48,24 @@ queries that ranked every message of every live agent. Two changes:
 - The desktop coalesces snapshot requests closer together than 700 ms into one
   trailing request, so a burst of roster events during streaming produces one
   fetch instead of a fetch per event.
+
+## Third pass: the cold start after a reboot
+
+With the caches in place the warm snapshot was ~50 ms, but the first sidebar
+after a reboot still took up to 37 s. Telemetry for one cold start: the pair
+list 18.6 s (36.9 s max, all SQLite), the snapshot 7.4 s, the model catalogue
+5 s of CLI probing, artifacts 6.7 s, and trivial calls such as presence at 3 s
+because they queued behind those. The pair query read every agent-to-agent
+row, text included, through an index the planner chose on its own.
+
+- `idx_messages_pair_summary` (schema v92) covers exactly the columns the
+  pair aggregate needs; `list_conversations` forces it with `INDEXED BY`.
+  On the rehearsed live store: 0.9 s cold and 65 ms warm, against 16 s cold
+  and 137 ms warm when the planner picks the dashboard index.
+- `CacheWarmupWorker` runs the pair list, dashboard previews, model catalogue
+  and first artifacts page once, 1.5 s after the listeners are up, so the
+  first client after a restart finds warm caches. Each step logs
+  `cacheWarmup step=… ms=…`.
+- Connections get 128 MB of page cache and a 1 GB mmap window.
+- The desktop asks for the snapshot alone at connect and fetches attention,
+  jobs and the artifact library 1.5 s later.

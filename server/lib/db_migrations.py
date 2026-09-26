@@ -106,6 +106,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             _migrate_to_v90(con)
         if version < 91:
             _migrate_to_v91(con)
+        if version < 92:
+            _migrate_to_v92(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -384,6 +386,29 @@ def _migrate_to_v91(con: sqlite3.Connection) -> None:
                         COALESCE(CAST((julianday(timestamp) - 2440587.5) * 86400000 AS INTEGER), updated_at) DESC,
                         seq DESC, updated_at DESC)
             WHERE COALESCE(text, '') != '' AND COALESCE(tool_name, '') = ''
+    """)
+
+
+def _migrate_to_v92(con: sqlite3.Connection) -> None:
+    """Covering index behind the agent-pair conversation list.
+
+    agent_conversations.list_conversations aggregates every agent-to-agent
+    message (count, newest revision, newest activity, whether the pair was
+    delivered). Before this index that meant reading ~100k full rows, text
+    included, on every call: 0.4 s warm and 18-37 s on a cold page cache
+    after a reboot, with every other request queued behind it. The index
+    carries exactly the columns the aggregate needs, so it never touches the
+    table, and the newest row per pair is one indexed lookup.
+    """
+    con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_messages_pair_summary
+            ON messages(agent_id, sender_agent_id, role, revision, timestamp, seq)
+            WHERE COALESCE(origin, 'user') = 'agent'
+      AND COALESCE(sender_agent_id, '') != ''
+      AND sender_agent_id != agent_id
+      AND COALESCE(text, '') != ''
+      AND COALESCE(tool_name, '') = ''
+      AND role IN ('user', 'assistant')
     """)
 
 
