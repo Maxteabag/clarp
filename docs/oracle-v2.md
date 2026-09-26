@@ -72,3 +72,108 @@ Validation: `tests/unit/test_oracle_live.py` and the Oracle cases in
 `tests/integration/test_server_di.py` cover the fixed contract, authentication,
 real local WebSocket bridge with a fake upstream, audio forwarding and close.
 Paid provider experiments remain outside ordinary CI.
+
+## Talking to an agent directly
+
+In a `/oracle/v2` call the user can say "put me through to Theo", "let me talk
+to Theo directly" or "switch me to Theo". From then on Theo's replies are
+spoken word for word in a voice of Theo's own, and substantive turns go
+straight to Theo (the direct-contact path aimed at that agent). "Back to
+Oracle" or "switch back" returns to Oracle's voice, Marin. GPT-Live's own
+voice activity detection and turn-taking stay in charge throughout.
+
+GPT-Live fixes a session's voice when it starts, so a switch is a new upstream
+session (`server/lib/oracle_live_stable.py`, `Conversation.swap_upstream`):
+
+1. The switch is recognised by a deterministic pre-check
+   (`oracle_voices.switch_request`) that only accepts a short turn made of an
+   explicit switch phrase, or by the operator router's `switch_contact` tool.
+   "Ask Theo to talk to Lena" and "put me through to Theo and ask him about the
+   deploy" are work, not switches, and route as before.
+2. Oracle says "Putting you through to Theo." (skipped when narration is
+   off). Nothing else is sent to the old session meanwhile.
+3. Once it has gone quiet (0.8 s, at most 5 s), the Host opens a new
+   GPT-Live session with the agent's voice, the agent's instructions ("You are
+   the voice of Theo ... never claim to be Oracle") and the conversation as
+   history (`oracle_memory.startup_history`, about 6.5 KB). Only after that
+   session has started does it replace the old one, under the send lock.
+4. The phone's socket never closes. The retired session's trailing events,
+   including its `session.closed`, are dropped, so the phone does not
+   reconnect. The receive loop (`pump_upstream`) reads the current upstream
+   on every iteration. Each session has its own `provider_session`, which
+   keys its transcript fragments.
+5. The Host sends `oracle_v2.contact {agent, session, voice}` (`agent` and
+   `session` are null back at Oracle). Clients that don't know it ignore it.
+6. Relay parts the old voice never finished speaking are resent to the new
+   voice, and parts it did finish are not repeated. A part counts as spoken
+   when Oracle went quiet after it and the user did not speak over it.
+
+If the new session fails to open, the call stays on the current session. The
+Host logs `oracleV2Swap` and tells the current voice to say it could not put
+the user through.
+
+The expected gap is the new session's start time: about 1.0–1.3 s in the
+2026-09-26 probe, plus the 0.8 s quiet wait.
+
+### Voices
+
+Every agent has a voice other than Marin, and each voice matches the gender of
+the agent's Cartesia voice (checked against the Cartesia catalog on
+2026-09-26). Unmapped agents get a deterministic pick, a hash of the persona
+name, from their gender's pool, or from both pools when the gender is unknown.
+
+| Agent | Voice | Agent | Voice |
+|---|---|---|---|
+| Theo | meridian | Lena | gleam |
+| Omar | vesper | Nadia | willow |
+| Caleb | stone | Priya | quartz |
+| Adam | ripple | Yuki | delta |
+| Josh | cinder | Domi | delta |
+| Sam | beacon | Freya | coral |
+| Marcus | cedar | Bella | sage |
+| Felix | ash | Elli | shimmer |
+| Diego | verse | | |
+| Antoni | ballad | | |
+| Mike | echo | | |
+
+Pools: masculine meridian, vesper, stone, ripple, cinder, beacon, cedar, ash,
+verse, ballad, echo; feminine gleam, willow, quartz, delta, coral, sage,
+shimmer. With seven feminine voices and eight feminine personas, Yuki and Domi
+share delta. tempo and bossa are left out because they are Portuguese-language
+voices.
+
+Override the mapping in `config.toml`. Names are case-insensitive. A value
+that is `marin` or not a known voice is logged (`oracleAgentVoiceIgnored`)
+and ignored:
+
+```toml
+[oracle.agent_voices]
+Theo = "ash"
+Nadia = "coral"
+```
+
+Probe, 2026-09-26, with the Host's OpenAI key: for each voice, one session was
+started on `gpt-live-1` with that voice and closed before any audio was sent.
+
+| Voice | Result |
+|---|---|
+| marin, meridian, vesper, stone, ripple, cinder, beacon, gleam, willow, quartz, delta | `session.started` |
+| cedar, ash, coral, sage, verse, ballad, alloy, echo, shimmer (older Realtime voices) | `session.started`, voice echoed back in the session |
+| cove (the subscription voice) | `error` forbidden, "Voice session access denied." |
+| an invented name | `error` forbidden, the same message |
+
+The invented name is rejected, so a started session means the voice is
+accepted, not silently replaced. How the older voices actually sound on
+gpt-live-1 was not heard; alloy is left out of the pools because it is
+gender-neutral.
+
+### Limits and follow-ups
+
+- Host WebSocket path only. The WebRTC path, where the phone talks to OpenAI
+  directly (`OracleRealtimeClient+AppAPI.swift`), cannot switch voices. That
+  is a follow-up.
+- The subscription (`gpt-live-1-codex`) engine is not covered.
+- The contact is not saved across a reconnect. After a dropped socket the
+  call comes back as Oracle, with the conversation intact.
+- Mid-part accuracy: a part the user spoke over is resent in full. The
+  new voice cannot know how far the old one got.
