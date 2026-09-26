@@ -28,6 +28,7 @@ from typing import Any
 from .activity import summarize_tool_activity
 from .log import log_exception
 from .text_util import truncate
+from .voice_markup import strip_hidden_blocks
 
 
 TOOL_OUTPUT_LINE_LIMIT = 5
@@ -1486,7 +1487,16 @@ def _append_visible_message(turns: list[dict], *, role: str, text: str,
     """Append one visible chat message, deduplicating dual event formats."""
     if not text or role not in {"user", "assistant"}:
         return
-    if turns and turns[-1].get("role") == role and turns[-1].get("text") == text:
+    if turns and turns[-1].get("role") == role and (
+        turns[-1].get("text") == text
+        # One copy (agent_message) can omit a hidden metadata block that the
+        # other (response_item) keeps; compared raw they imported as two
+        # identical bubbles. Keep the fuller copy so the block is not lost.
+        or strip_hidden_blocks(turns[-1].get("text") or "").strip()
+        == strip_hidden_blocks(text).strip()
+    ):
+        if len(text) > len(turns[-1].get("text") or ""):
+            turns[-1]["text"] = text
         if kind and not turns[-1].get("kind"):
             turns[-1]["kind"] = kind
         return

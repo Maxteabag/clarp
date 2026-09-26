@@ -866,3 +866,26 @@ def test_find_latest_jsonl_matches_uuid_suffix(tmp_path):
     assert codex_transcript.find_latest_jsonl(
         "nonexistent", sessions_root=tmp_path / "sessions") is None
     assert codex_transcript.find_latest_jsonl("") is None
+
+
+def test_dual_reply_events_differing_only_by_a_hidden_block_are_one_turn(tmp_path):
+    # Codex writes a reply as an agent_message and as a response_item. Only
+    # the response_item kept the memory-citation block, so the two differed
+    # raw and one answer imported as two identical bubbles.
+    answer = "I reviewed the inbox.\n\n| Sender | Note |\n|---|---|\n| A | B |"
+    f = tmp_path / "rollout.jsonl"
+    _write_rollout(f, [
+        {"timestamp": "2026-09-23T04:13:00Z", "type": "event_msg",
+         "payload": {"type": "user_message", "message": "summarize my mail"}},
+        {"timestamp": "2026-09-23T04:13:29Z", "type": "event_msg",
+         "payload": {"type": "agent_message", "message": answer,
+                     "phase": "final_answer"}},
+        {"timestamp": "2026-09-23T04:13:29Z", "type": "response_item",
+         "payload": {"type": "message", "role": "assistant", "phase": "final_answer",
+                     "content": [{"type": "output_text", "text": answer
+                         + "\n\n<oai-mem-citation>\nMEMORY.md:1-2\n</oai-mem-citation>"}]}},
+    ])
+    turns = codex_transcript.parse_turns(f)
+    assert [t["role"] for t in turns] == ["user", "assistant"]
+    # The fuller copy survives, so the hidden block is still available.
+    assert "oai-mem-citation" in turns[1]["text"]
