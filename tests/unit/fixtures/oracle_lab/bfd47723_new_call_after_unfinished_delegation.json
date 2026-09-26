@@ -1,0 +1,151 @@
+{
+ "source": "diagnostics journal bfd47723 (2026-09-26), GPT-Live stable engine, direct_contact, primary Theo. A new call opened 6.7 min after call 6bd3aeea ended; Theo's reply to that call's delegation arrived after it ended. Input transcript deltas only: Oracle's output in the journal was the bug (it read the old reply at 0.3 s).",
+ "prior_call_ended_ms_before_open": 401307,
+ "prior_operation": {
+  "delegation_id": "rtc-b6ab865ac2dbd27bcc8c0a6c3577da97ed7a6081",
+  "session": "theo-97e5",
+  "status": "completed",
+  "request_text": "Handle the current user request. Current user message, verbatim:\n. Ups",
+  "result_text": "Ingen oppgave for meg her. Du snakket med stemmeassistenten om at norsken hørtes litt gebrokken ut. \"Ups\" var bare en kommentar på at du ikke hadde valgt hvem du ville snakke med. Jeg har ikke gjort noe."
+ },
+ "unread_completion": {
+  "notification_id": "pn-12d81ee227a080aff536",
+  "source_message_id": "live-eaf3ea52d16b36a7e89f",
+  "cause_message_id": "u-oracle-rtc-b6ab865ac2dbd27bcc8c0a6c3577da97ed7a6081",
+  "agent": "Theo",
+  "session": "theo-97e5",
+  "origin": "oracle",
+  "age_ms_at_open": 398144,
+  "source_text": "Ingen oppgave for meg her. Du snakket med stemmeassistenten om at norsken hørtes litt gebrokken ut. \"Ups\" var bare en kommentar på at du ikke hadde valgt hvem du ville snakke med. Jeg har ikke gjort noe."
+ },
+ "events": [
+  {
+   "seq": 15,
+   "elapsed_ms": 4909,
+   "type": "session.input_transcript.delta",
+   "delta": " lite",
+   "start_ms": 1400,
+   "end_ms": 1600
+  },
+  {
+   "seq": 19,
+   "elapsed_ms": 5502,
+   "type": "session.input_transcript.delta",
+   "delta": " roligere",
+   "start_ms": 2000,
+   "end_ms": 2200
+  },
+  {
+   "seq": 22,
+   "elapsed_ms": 6450,
+   "type": "session.input_transcript.delta",
+   "delta": " om man",
+   "start_ms": 3000,
+   "end_ms": 3200
+  },
+  {
+   "seq": 26,
+   "elapsed_ms": 7006,
+   "type": "session.input_transcript.delta",
+   "delta": " får",
+   "start_ms": 3600,
+   "end_ms": 3800
+  },
+  {
+   "seq": 28,
+   "elapsed_ms": 7231,
+   "type": "session.input_transcript.delta",
+   "delta": " en",
+   "start_ms": 3800,
+   "end_ms": 4000
+  },
+  {
+   "seq": 29,
+   "elapsed_ms": 7669,
+   "type": "session.input_transcript.delta",
+   "delta": " snakk",
+   "start_ms": 4200,
+   "end_ms": 4400
+  },
+  {
+   "seq": 32,
+   "elapsed_ms": 8102,
+   "type": "session.input_transcript.delta",
+   "delta": " så",
+   "start_ms": 4600,
+   "end_ms": 4800
+  },
+  {
+   "seq": 34,
+   "elapsed_ms": 8530,
+   "type": "session.input_transcript.delta",
+   "delta": " vidt det",
+   "start_ms": 4800,
+   "end_ms": 5000
+  },
+  {
+   "seq": 39,
+   "elapsed_ms": 9896,
+   "type": "session.input_transcript.delta",
+   "delta": " Og",
+   "start_ms": 5800,
+   "end_ms": 6000
+  },
+  {
+   "seq": 41,
+   "elapsed_ms": 9898,
+   "type": "session.input_transcript.delta",
+   "delta": " i",
+   "start_ms": 6000,
+   "end_ms": 6200
+  },
+  {
+   "seq": 43,
+   "elapsed_ms": 9901,
+   "type": "session.input_transcript.delta",
+   "delta": " med",
+   "start_ms": 6400,
+   "end_ms": 6600
+  },
+  {
+   "seq": 46,
+   "elapsed_ms": 10320,
+   "type": "session.input_transcript.delta",
+   "delta": " kamera",
+   "start_ms": 7000,
+   "end_ms": 7200
+  },
+  {
+   "seq": 48,
+   "elapsed_ms": 10540,
+   "type": "session.input_transcript.delta",
+   "delta": " på",
+   "start_ms": 7200,
+   "end_ms": 7400
+  },
+  {
+   "seq": 50,
+   "elapsed_ms": 11313,
+   "type": "session.input_transcript.delta",
+   "delta": " beskyt",
+   "start_ms": 8000,
+   "end_ms": 8200
+  },
+  {
+   "seq": 52,
+   "elapsed_ms": 11564,
+   "type": "session.input_transcript.delta",
+   "delta": " og",
+   "start_ms": 8200,
+   "end_ms": 8400
+  },
+  {
+   "seq": 55,
+   "elapsed_ms": 11814,
+   "type": "session.input_transcript.delta",
+   "delta": " form",
+   "start_ms": 8600,
+   "end_ms": 8800
+  }
+ ]
+}
