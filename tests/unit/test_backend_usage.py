@@ -868,3 +868,14 @@ def test_refilled_account_clears_the_block(monkeypatch):
     }}, identity=("auth-a", "account-a"), source_detail="/wham/usage")
 
     assert backend_usage.exhausted_backends() == {}
+
+
+def test_reconciling_limits_with_nothing_expired_takes_no_write_lock():
+    from lib import db
+    statements = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        assert backend_usage._reconcile_expired_limits(db.now_ms()) == []
+    finally:
+        db.conn().set_trace_callback(None)
+    assert statements and not [s for s in statements if s.startswith("BEGIN")]
