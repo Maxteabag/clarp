@@ -4,6 +4,7 @@ from __future__ import annotations
 import threading
 
 from . import agents as agents_db
+from . import events
 from .log import log_exception
 
 
@@ -70,4 +71,4 @@ class RuntimeEventWatcher:
             self._last_id = max(self._last_id, int(row.get("event_id") or 0))
             if not row.pop(_RUNTIME_MARKER, False):
                 continue
-            self.stream.broadcast_ephemeral(row)
+            events.broadcast_ephemeral(self.stream, events.as_event(row))

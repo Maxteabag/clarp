@@ -21,7 +21,7 @@ from .. import tts_queue
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
-from ..protocol import AgentState
+from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from .base import BackendBrand, CompactionStrategy, hooked
 from .stream_json import StreamJsonBackend, make_handle, popen_turn
@@ -542,7 +542,7 @@ class AgyBackend(StreamJsonBackend):
 
         def admit_spawn() -> None:
             if runtime_agent_id:
-                self._record_state(runtime_agent_id, AgentState.THINKING,
+                self._transition(runtime_agent_id, TurnEvent.SPAWN_STARTED,
                                    {"dispatch": self.runner, "trace_id": trace_id})
             process.append(popen_turn(cmd, cwd=cwd, session=session))
         try:
@@ -696,7 +696,7 @@ class AgyBackend(StreamJsonBackend):
             conv_id = _event_conversation_id(event)
             _bind_session(conv_id, st, trace_id=trace_id,
                           on_session_init=on_session_init)
-            self._record_state(agent_id, AgentState.THINKING, {
+            self._transition(agent_id, TurnEvent.SPAWN_STARTED, {
                 "dispatch": self.runner, "agy_raw_evidence": evidence,
                 "provider_init": {
                     "model": payload.get("model") if isinstance(payload.get("model"), str) else None,
@@ -737,7 +737,7 @@ class AgyBackend(StreamJsonBackend):
                 st.live_text += delta
                 self._persist_live_text(st, agent_id=agent_id, session=session,
                                         trace_id=trace_id, stream=stream)
-            self._record_state(agent_id, AgentState.THINKING, {
+            self._transition(agent_id, TurnEvent.TEXT_STREAMED, {
                 "dispatch": self.runner, "agy_raw_evidence": evidence,
                 "step_index": update.get("step_index"), "step_state": state,
                 "trace_id": trace_id,
@@ -759,16 +759,17 @@ class AgyBackend(StreamJsonBackend):
                     if isinstance(update.get("subagent_info"), dict) else None,
                 "trace_id": trace_id,
             }
-            self._record_state(agent_id, AgentState.TOOL, detail)
+            self._transition(agent_id, TurnEvent.TOOL_FINISHED if state == "DONE"
+                             else TurnEvent.TOOL_STARTED, detail)
             self._broadcast_transcript(stream, agent_id, session)
             if state == "DONE":
-                self._record_state(agent_id, AgentState.THINKING, {
+                self._transition(agent_id, TurnEvent.TEXT_STREAMED, {
                     "dispatch": self.runner, "agy_raw_evidence": evidence,
                     "trace_id": trace_id,
                 })
             return
         if step_type == "checkpoint":
-            self._record_state(agent_id, AgentState.THINKING, {
+            self._transition(agent_id, TurnEvent.TEXT_STREAMED, {
                 "dispatch": self.runner, "agy_raw_evidence": evidence,
                 "trace_id": trace_id,
             })
@@ -852,8 +853,8 @@ class AgyBackend(StreamJsonBackend):
         self.speak(text, st, agent_id=agent_id, session=session, trace_id=trace_id,
                    enqueue=enqueue)
 
-    def _record_state(self, agent_id: str, kind: str, detail: dict | None = None) -> None:
-        self.record_state(agent_id, kind, detail)
+    def _transition(self, agent_id: str, turn_event: str, detail: dict | None = None) -> None:
+        self.transition(agent_id, turn_event, detail)
 
     def _broadcast_transcript(self, stream: Any, agent_id: str, session: str) -> None:
         self.broadcast_transcript(stream, agent_id, session)

@@ -12,6 +12,7 @@ import threading
 import time
 
 from . import oracle_voice_context, oracle_strategy, config, oracle_contact, oracle_delegations, oracle_live, oracle_live_provider, oracle_memory
+from .http_utils import principal_of, require_full_scope, responder_of
 from .log import log_exception
 from .oracle_calls import AgentTools, validate_offer
 from .oracle_live_wire import LiveWire
@@ -317,12 +318,14 @@ def get(principal, attempt):
 
 
 def handle(handler, action):
-    if not (getattr(handler, "_request_auth_validated", False) and
-            getattr(handler, "_request_device_scope", "") == "full" and getattr(handler, "_request_principal", "")):
-        return handler._send(403, b'{"error":"Oracle requires full-device authentication"}', "application/json")
+    respond = responder_of(handler)
+    who = principal_of(handler)
+    denied = require_full_scope(who, message="Oracle requires full-device authentication")
+    if denied:
+        return respond.send_error(403, denied)
     from urllib.parse import parse_qs, urlparse
     try:
-        principal = handler._request_principal
+        principal = who.principal
         if action == "status":
             query = parse_qs(urlparse(handler.path).query)
             try: cursor = int(query.get("after", ["0"])[0])
@@ -330,7 +333,7 @@ def handle(handler, action):
             if cursor < 0: raise CallError("Invalid event cursor", 400)
             result = get(principal, query.get("attempt_id", [""])[0]).snapshot(cursor)
         else:
-            data = handler._read_json()
+            data = respond.read_json()
             if not isinstance(data, dict): raise CallError("Invalid Oracle command", 400)
             if action == "create":
                 result = create(ctx=handler.ctx, principal=principal, data=data,
@@ -347,25 +350,26 @@ def handle(handler, action):
                     call.last_control = call.clock()
                     call.conversation.input(command)
                     result = {"accepted": True}
-        return handler._send(200, json.dumps(result).encode(), "application/json")
+        return respond.send_json(200, result)
     except CallError as exc:
-        return handler._send(exc.status, json.dumps({"error": str(exc)}).encode(), "application/json")
+        return respond.send_error(exc.status, str(exc))
     except (ValueError, TypeError) as exc:
         # A bug or a malformed body, never a normal outcome: say which.
         log_exception("oracleLiveCallInvalid", exc, detail=action)
-        return handler._send(400, json.dumps({"error": f"Invalid Oracle call: {exc}"}).encode(),
-                             "application/json")
+        return respond.send_error(400, f"Invalid Oracle call: {exc}")
 
 
 def context_image(handler):
-    if not (getattr(handler, "_request_auth_validated", False) and getattr(handler, "_request_device_scope", "") == "full"):
-        return handler._send(403, b"Forbidden", "text/plain")
+    respond = responder_of(handler)
+    who = principal_of(handler)
+    if require_full_scope(who):
+        return respond.send_error(403, "Forbidden", content_type="text/plain")
     from urllib.parse import parse_qs, urlparse
     query = parse_qs(urlparse(handler.path).query)
     try:
-        store = oracle_memory.ThreadStore(query.get("thread_id", [""])[0], handler._request_principal, "")
+        store = oracle_memory.ThreadStore(query.get("thread_id", [""])[0], who.principal, "")
         row = next((row for row in store.contexts(include_images=True) if row["context_id"] == query.get("context_id", [""])[0] and row["image"] is not None), None)
-        if row: return handler._send(200, row["image"], row["mime_type"])
+        if row: return respond.send_bytes(200, row["image"], row["mime_type"])
     except ValueError:
         pass
-    return handler._send(404, b"Image not found", "text/plain")
+    return respond.send_error(404, "Image not found", content_type="text/plain")

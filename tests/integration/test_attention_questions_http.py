@@ -31,6 +31,9 @@ def host(tmp_path, monkeypatch):
         def __init__(self, ctx):
             pass
 
+        def submit(self, command):
+            return self.dispatch(**command.as_kwargs())
+
         def dispatch(self, **kwargs):
             state.deliveries.append(kwargs)
             if state.fail_delivery:

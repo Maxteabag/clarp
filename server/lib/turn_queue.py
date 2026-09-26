@@ -24,6 +24,77 @@ def enqueue(*, queue_id: str, agent_id: str, session: str, text: str,
     return inserted
 
 
+# --- Stop-parked sends ---------------------------------------------------------
+#
+# A send admitted while the Stop barrier is up has no durable queue row of its
+# own unless it asked to queue. It used to wait only in the dispatcher's memory
+# and vanished with the process; ``parked`` rows keep it. They are invisible to
+# the queue UI (``pending``/``state`` count ``queued`` only) and become ``queued``
+# again when ``turn_slots.rehydrate`` runs after a restart.
+
+def park(*, queue_id: str, agent_id: str, session: str, text: str,
+         trace_id: str, client_msg_id: str, synthesize_audio: bool,
+         origin: str, sender_agent_id: str,
+         prompt_admission_id: str = "") -> bool:
+    cursor = db.conn().execute(
+        """INSERT INTO queued_turns (
+               queue_id, agent_id, session, text, trace_id, client_msg_id,
+               synthesize_audio, origin, sender_agent_id, status, enqueued_at,
+               prompt_admission_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?)
+           ON CONFLICT(queue_id) DO NOTHING""",
+        (queue_id, agent_id, session, text, trace_id, client_msg_id,
+         int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
+         prompt_admission_id),
+    )
+    return cursor.rowcount == 1
+
+
+def unpark(queue_id: str) -> bool:
+    if not queue_id:
+        return False
+    cursor = db.conn().execute(
+        "DELETE FROM queued_turns WHERE queue_id = ? AND status = 'parked'",
+        (queue_id,))
+    return bool(cursor.rowcount)
+
+
+def discard_parked(agent_id: str) -> int:
+    """Drop every parked row of an agent whose memory queue was cleared."""
+    cursor = db.conn().execute(
+        "DELETE FROM queued_turns WHERE agent_id = ? AND status = 'parked'",
+        (agent_id,))
+    return int(cursor.rowcount or 0)
+
+
+def parked(agent_id: str = "") -> list[dict]:
+    if agent_id:
+        rows = db.conn().execute(
+            """SELECT * FROM queued_turns
+                WHERE status = 'parked' AND agent_id = ? ORDER BY queue_seq""",
+            (agent_id,))
+    else:
+        rows = db.conn().execute(
+            "SELECT * FROM queued_turns WHERE status = 'parked' ORDER BY queue_seq")
+    return [dict(row) for row in rows]
+
+
+def requeue_parked(agent_id: str = "") -> int:
+    """Turn parked rows back into visible queued work (after a restart)."""
+    if agent_id:
+        rows = db.conn().execute(
+            """UPDATE queued_turns SET status = 'queued'
+                WHERE status = 'parked' AND agent_id = ? RETURNING agent_id""",
+            (agent_id,)).fetchall()
+    else:
+        rows = db.conn().execute(
+            """UPDATE queued_turns SET status = 'queued'
+                WHERE status = 'parked' RETURNING agent_id""").fetchall()
+    for owner in {str(row["agent_id"]) for row in rows}:
+        _bump_revision(owner)
+    return len(rows)
+
+
 def contains(queue_id: str) -> bool:
     if not queue_id:
         return False
@@ -311,3 +382,12 @@ def _bump_revision(agent_id: str) -> None:
            ON CONFLICT(agent_id) DO UPDATE SET revision = revision + 1""",
         (agent_id,),
     )
+
+
+def cancel_for_traces(c, agent_id: str, trace_ids: list[str]) -> None:
+    """Cancel an agent's pending rows for ``trace_ids`` inside the caller's
+    transaction (the janitor fence commits them with its own rows)."""
+    for trace in trace_ids:
+        c.execute("UPDATE queued_turns SET status='cancelled',text='' "
+                  "WHERE agent_id=? AND trace_id=? AND status IN ('queued','claimed')",
+                  (agent_id, trace))

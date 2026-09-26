@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 92
+_SCHEMA_VERSION = 93
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -50,8 +50,13 @@ CREATE TABLE agents (
     avatar_path TEXT NOT NULL DEFAULT '',
     archived_at INTEGER,
     is_janitor INTEGER NOT NULL DEFAULT 0 CHECK (is_janitor IN (0, 1)),
-    voice_verbosity INTEGER NOT NULL DEFAULT 0
+    voice_verbosity INTEGER NOT NULL DEFAULT 0,
+    parent_agent_id TEXT,
+    role TEXT NOT NULL DEFAULT 'agent',
+    helper_state TEXT,
+    helper_completed_at INTEGER
 );
+CREATE INDEX idx_agents_parent ON agents(parent_agent_id) WHERE parent_agent_id IS NOT NULL;
 
 CREATE TABLE runtimes (
     runtime_id INTEGER PRIMARY KEY AUTOINCREMENT,

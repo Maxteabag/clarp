@@ -35,10 +35,9 @@ import uuid
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import db, server_identity
+from . import db, events, server_identity, settings_store
 from .clock import now_ms as _now_ms
 from .log import log, log_exception
-from .protocol import SSEType
 
 
 CLAUDE = "claude"
@@ -327,33 +326,11 @@ def _canonical_id(prefix: str, payload: dict[str, Any], *, size: int = 32) -> st
 
 
 def _identity_secret() -> bytes:
-    database = db.conn()
-    candidate = secrets.token_hex(32)
-    database.execute("BEGIN IMMEDIATE")
-    try:
-        row = database.execute(
-            "SELECT value FROM settings WHERE key=?",
-            (_IDENTITY_SECRET_KEY,),).fetchone()
-        if row is None:
-            database.execute(
-                """INSERT INTO settings(key,value,updated_at) VALUES (?,?,?)
-                   ON CONFLICT(key) DO NOTHING""",
-                (_IDENTITY_SECRET_KEY, candidate, db.now_ms()),)
-        elif not str(row["value"]).strip():
-            database.execute(
-                "UPDATE settings SET value=?,updated_at=? "
-                "WHERE key=? AND TRIM(value)=''",
-                (candidate, db.now_ms(), _IDENTITY_SECRET_KEY),)
-        row = database.execute(
-            "SELECT value FROM settings WHERE key=?",
-            (_IDENTITY_SECRET_KEY,),).fetchone()
-        database.execute("COMMIT")
-    except Exception:
-        database.execute("ROLLBACK")
-        raise
-    if row is None or not str(row["value"]).strip():
+    stored = settings_store.set_text_if_blank(
+        _IDENTITY_SECRET_KEY, secrets.token_hex(32)).strip()
+    if not stored:
         raise RuntimeError("provider usage identity secret unavailable")
-    return str(row["value"]).strip().encode()
+    return stored.encode()
 
 
 def _private_ref(kind: str, value: str) -> str:
@@ -413,24 +390,23 @@ def _window_id(
     })
 
 
-def _event_payload(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "type": "provider-limit",
-        "provider_limit_event_id": row["provider_limit_event_id"],
-        "episode_id": row["episode_id"],
-        "provider_instance_id": row["provider_instance_id"],
-        "provider_id": row["provider_id"],
-        "window_id": row["window_id"],
-        "kind": row["kind"],
-        "threshold_id": row.get("threshold_id"),
-        "used_percentage": row.get("used_percentage"),
-        "resets_at": row.get("resets_at"),
-        "observed_at": _normalize_time(int(row["observed_at"]) / 1000),
-        "freshness": row["freshness"],
-        "source": {"kind": row["source_kind"]},
-        "dedupe_key": row.get("dedupe_key"),
-    }
+def _event_payload(row: dict[str, Any]) -> events.Event:
+    return events.provider_limit(
+        schema_version=SCHEMA_VERSION,
+        provider_limit_event_id=row["provider_limit_event_id"],
+        episode_id=row["episode_id"],
+        provider_instance_id=row["provider_instance_id"],
+        provider_id=row["provider_id"],
+        window_id=row["window_id"],
+        kind=row["kind"],
+        threshold_id=row.get("threshold_id"),
+        used_percentage=row.get("used_percentage"),
+        resets_at=row.get("resets_at"),
+        observed_at=_normalize_time(int(row["observed_at"]) / 1000),
+        freshness=row["freshness"],
+        source={"kind": row["source_kind"]},
+        dedupe_key=row.get("dedupe_key"),
+    )
 
 
 def _insert_limit_event(
@@ -1132,7 +1108,7 @@ class UsageRefreshWorker:
         try:
             payload = get_backend_usage()
             for event in payload.get("limit_events") or []:
-                self._stream.broadcast(event)
+                events.broadcast(self._stream, events.as_event(event))
             current = {
                 provider: (row["window"], row["resets_at"])
                 for provider, row in exhausted_backends().items()
@@ -1140,8 +1116,7 @@ class UsageRefreshWorker:
             if self._last is not None and current != self._last:
                 # Snapshot rows carry the projection; this makes clients
                 # refetch them instead of learning on the next failed send.
-                self._stream.broadcast({
-                    "type": SSEType.AGENT_ROSTER, "kind": "backend-quota"})
+                events.broadcast(self._stream, events.agent_roster("backend-quota"))
             self._last = current
         except Exception as exc:  # noqa: BLE001
             log_exception("usageRefreshWorkerFail", exc)

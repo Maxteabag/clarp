@@ -1,23 +1,25 @@
-"""Application service for creating, relaunching, forking, and deleting agents."""
+"""Application service for creating, relaunching, forking, and deleting agents.
+
+Request validation and defaulting are ``policies.agent_spec.AgentSpec.parse``;
+this module gathers the roster view, checks the collisions only the database
+can see, persists the agent and announces it.
+"""
 from __future__ import annotations
 
 import os
-import base64
 import pathlib
 import secrets
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from . import agents as agents_db
-from . import backends
+from . import backends, events, identity
 from .agent_store import AGENT_ROSTER, load_agents, save_agents
 from .fork import fork_session
 from .log import log, log_exception
 from .mcp_selection import encode as encode_mcp_selection
-from .protocol import SSEType
-from . import roster
-from .roster import lookup_persona
+from .policies.agent_spec import AgentSpec, RosterView, SpecError
 from . import personas as persona_store
 
 
@@ -66,304 +68,111 @@ class AgentLifecycleService:
             return self._create_locked(data, janitor=True)
 
     def _create_locked(self, data: dict, *, janitor: bool = False) -> AgentLifecycleResult:
-        if data.get("open_existing") is True and data.get("resume_session_id") and not janitor:
-            backend = backends.normalize(data.get("backend"))
-            sid = str(data["resume_session_id"]).strip()
-            owner = agents_db.get_by_backend_session(sid)
-            if owner and backends.normalize(owner.get("backend")) == backend:
-                return AgentLifecycleResult(owner["session"], owner["persona"], owner["voice_id"], backend)
-            if not backends.get(backend).resumable:
-                raise AgentLifecycleError(400, "resume_unsupported")
-            from .launch_paths import recover_user_path
-            cwd = str(recover_user_path(str(data.get("cwd") or "~")))
-            if not any(item.get("id") == sid for item in backends.list_sessions(backend, cwd, limit=100)):
-                raise AgentLifecycleError(404, "Session is no longer available in this directory")
-        if data.get("auto_contact") is True and not janitor:
-            if data.get("anonymous") or data.get("replace_sid"):
-                raise AgentLifecycleError(400, "conflicting launch options")
-            from .contact_assignment import available_contacts
-            choices = available_contacts(backends.normalize(data.get("backend")))
-            if not choices:
-                raise AgentLifecycleError(409, "contact_pool_empty")
-            data = dict(data, name=choices[0]["name"])
-        if data.get("anonymous") is True and not janitor:
-            if data.get("replace_sid"):
-                raise AgentLifecycleError(400, "anonymous launch must be fresh")
-            data = dict(data)
-            backend_name = backends.normalize(data.get("backend"))
-            label = {"codex": "Codex", "claude": "Claude", "grok": "Grok", "agy": "AGY", "opencode": "OpenCode", "deepseek": "DeepSeek"}.get(backend_name, backend_name)
-            occupied = {str(a["persona"]).casefold() for a in agents_db.list_agents()}
-            while True:
-                name = f"{label}-{secrets.token_hex(2)}"
-                if name.casefold() not in occupied and not persona_store.get(name):
-                    break
-            data.update(name=name, voice_id="{}", personality="", avatar_symbol="")
-            data.pop("session", None)
-        persona = (data.get("name") or "").strip()
-        if not persona:
-            raise AgentLifecycleError(400, "name required")
-        voice_id = "" if janitor else (data.get("voice_id") or "").strip()
-        persona_definition = persona_store.get(persona)
-        avatar_temp = None
-        avatar_raw = None
-        avatar_data = str(data.get("avatar_base64") or "").strip()
-        if avatar_data:
-            try:
-                raw = base64.b64decode(avatar_data, validate=True)
-                if len(raw) > 512_000:
-                    raise ValueError("avatar is too large")
-                avatar_raw = raw
-            except (ValueError, OSError) as exc:
-                raise AgentLifecycleError(400, "invalid avatar", message=str(exc)) from exc
-        # Session id selection. The client (incl. the native app) often
-        # re-sends a persona-derived id like "bella" on every create. If we
-        # honored that verbatim it would collide with the soft-deleted old
-        # "bella" row and RESURRECT it — old agent_id, old turns/clips/
-        # conversation all come back. That's the "I deleted it but the old
-        # conversation is still there" bug.
-        #
-        # So: honor an explicit id only when it's genuinely unused (fresh
-        # automation/tests). Otherwise mint a unique `<persona>-<hex>` id so
-        # "delete and start over" is a truly fresh agent. Deliberate
-        # resurrection still happens via replace_sid (relaunch) below.
-        explicit_session = "".join(
-            c for c in (data.get("session") or "").strip()
-            if c.isalnum() or c in "._-")
-        if janitor and explicit_session and agents_db.session_exists(explicit_session):
-            raise AgentLifecycleError(409, "session_taken",
-                message="The reserved Janitor identity is already in use")
-        if explicit_session and not agents_db.session_exists(explicit_session):
-            session = explicit_session
-        else:
-            session = self._mint_session(persona)
-        cwd = _existing_cwd(data.get("cwd"))
-        replace_sid = (data.get("replace_sid") or "").strip()
-        fork_id = (data.get("fork_session_id") or "").strip()
-        backend = backends.normalize(data.get("backend"))
-        synthesize_audio = not janitor and data.get("anonymous") is not True and data.get("synthesize_audio", True) is not False
+        """Parse the request, check the IO-backed collisions, persist, announce."""
         agents = load_agents(self.ctx.agents_path)
-        clear_retained_model = False
-        clear_retained_effort = False
-        retained_model = ""
-        retained_effort = ""
-        if replace_sid:
-            if replace_sid not in agents:
-                raise AgentLifecycleError(404, "no such agent to replace")
-            session = replace_sid
-            current = agents[replace_sid]
-            voice_id = voice_id or current.get("voice_id") or voice_id
-            persona = persona or current.get("name") or persona
-            if not data.get("backend"):
-                backend = backends.normalize(current.get("backend"))
-            existing_agent = agents_db.get_by_session(replace_sid) or {}
-            if not agents_db.interaction_capabilities(existing_agent)["can_restart"]:
-                raise AgentLifecycleError(409, "janitor_managed",
-                    message="Janitors are managed from their maintenance configuration")
-            # A relaunch inherits the agent's directory the same way it inherits
-            # voice and backend. Without this an omitted cwd falls back to $HOME:
-            # on a host that silently wakes the agent up outside its repo, and in
-            # a container it is rejected as outside the workspace root.
-            if not str(data.get("cwd") or "").strip():
-                cwd = _existing_cwd(
-                    current.get("cwd") or existing_agent.get("cwd"))
-            previous_backend = backends.normalize(existing_agent.get("backend"))
-            retained_model = str(existing_agent.get("model") or "").strip()
-            retained_effort = str(existing_agent.get("effort") or "").strip()
-            if backend != previous_backend:
-                clear_retained_model = (
-                    "model" not in data
-                    and not backends.is_valid_model(backend, retained_model)
-                )
-                clear_retained_effort = (
-                    "effort" not in data and bool(retained_effort)
-                    and retained_effort not in backends.valid_efforts(backend)
-                )
-
-        # A contact's tier names the backend it was designed for. That is a
-        # recommendation the clients surface, not a rule: the owner may run
-        # Rachel on Codex or Cipher on Claude (requested 2026-09-20).
-        persona_tier = persona_definition.get("tier") if persona_definition else ""
-        is_recommended, recommended_backend = roster.validate_contact_backend(persona, backend, persona_tier)
-        if not is_recommended and recommended_backend:
-            log(f"[agents] {persona} starts on '{backend}'; its "
-                f"{(persona_tier or roster.tier_for_contact(persona) or 'listed')} tier "
-                f"recommends '{recommended_backend}'")
-
-        occupied = next((
-            (sid, info) for sid, info in agents.items()
-            if sid != replace_sid
-            and str((info or {}).get("name") or sid).strip().casefold()
-            == persona.casefold()
-        ), None)
-        if occupied is not None:
-            owner_session, owner_info = occupied
-            owner = str((owner_info or {}).get("name") or owner_session)
-            raise AgentLifecycleError(
-                409, "contact_occupied",
-                message=(f"{owner} already has an active session. "
-                         "Open or release that chat before starting another."),
-                extra={"owner": owner, "session": owner_session},
-            )
-        if not replace_sid and session in agents:
-            owner = (agents[session] or {}).get("name") or session
-            raise AgentLifecycleError(
-                409, "session_taken",
-                message=(f"Cannot start {persona}: session '{session}' is already "
-                         f"used by {owner}. Stop {owner} first or pick a different session id."),
-                extra={"owner": owner, "session": session},
-            )
-        if "model" in data and data.get("model") is not None \
-                and not isinstance(data.get("model"), str):
-            raise AgentLifecycleError(400, "model must be a string or null")
-        requested_model = (data.get("model") or "").strip() if "model" in data else ""
-        if "model" in data and not backends.is_valid_model(backend, requested_model):
-            raise AgentLifecycleError(400, "invalid model for backend")
-        if "effort" in data and data.get("effort") is not None \
-                and not isinstance(data.get("effort"), str):
-            raise AgentLifecycleError(400, "effort must be a string or null")
-        requested_effort = ((data.get("effort") or "").strip().lower()
-                            if "effort" in data else "")
-        if ("effort" in data and requested_effort
-                and requested_effort not in backends.valid_efforts(backend)):
-            raise AgentLifecycleError(400, "invalid effort for backend")
-        effective_requested_model = (
-            requested_model if "model" in data
-            else ("" if clear_retained_model else retained_model))
-        effective_requested_effort = (
-            requested_effort if "effort" in data
-            else ("" if clear_retained_effort else retained_effort))
-        from . import config as app_config
-        cfg = app_config.load()
-        from .session_models import launch_default, recorded_model
-        if not effective_requested_model and not janitor:
-            resume_id = str(data.get("resume_session_id") or data.get("fork_session_id") or "")
-            effective_requested_model = (recorded_model(backend, resume_id) if resume_id
-                                         else launch_default(backend, cfg))
-        requested_mcp_servers: list[str] | None = None
-        if "mcp_servers" in data:
-            raw_mcp = data.get("mcp_servers")
-            if not isinstance(raw_mcp, list) or any(
-                    not isinstance(item, str) for item in raw_mcp):
-                raise AgentLifecycleError(400, "mcp_servers must be a list of names")
-            requested_mcp_servers = list(dict.fromkeys(
-                item.strip() for item in raw_mcp if item.strip()))
-            if requested_mcp_servers and not backends.adapter_for(backend).supports_mcp:
-                raise AgentLifecycleError(
-                    400, "mcp servers unsupported for backend",
-                    message=f"MCP server selection is unavailable for {backends.label(backend)}.")
-            available_mcp = app_config.read_global_mcp_servers()
-            unknown_mcp = [
-                item for item in requested_mcp_servers if item not in available_mcp
-            ]
-            if unknown_mcp:
-                raise AgentLifecycleError(
-                    400, "unknown mcp server",
-                    message=f"Unknown MCP server: {', '.join(unknown_mcp)}")
-        effective_validation_model = effective_requested_model
-        effort_compatibility_unknown = backends.adapter_for(backend).effort_compatibility_unknown
-        if effort_compatibility_unknown:
-            effective_validation_model = (
-                effective_validation_model
-                or backends.default_model_effort(backend, cfg)[0])
-        if (effort_compatibility_unknown and effective_validation_model
-                and effective_requested_effort):
-            raise AgentLifecycleError(
-                400, "AGY model-specific effort compatibility is unknown")
-        if not janitor and not voice_id:
-            _, roster_voice = lookup_persona(persona)
-            voice_id = ((persona_definition or {}).get("voice_id")
-                        or roster_voice or next(iter(AGENT_ROSTER.values())))
-        from .voice import CARTESIA, resolve_voice
-        selected_cartesia = "" if janitor else resolve_voice(voice_id, CARTESIA)
-        if selected_cartesia:
-            for sid, info in agents.items():
-                if sid == replace_sid or (info or {}).get("is_janitor"):
-                    continue
-                existing_cartesia = (
-                    resolve_voice((info or {}).get("voice_id"), CARTESIA)
-                    or cfg.cartesia_voice_for(str((info or {}).get("name") or "")))
-                if existing_cartesia == selected_cartesia:
-                    raise AgentLifecycleError(
-                        409, "voice_in_use",
-                        message=f"That voice is already used by {(info or {}).get('name') or sid}.")
-
-        resume_session_id = (data.get("resume_session_id") or "").strip()
-        if fork_id:
-            if not backends.capabilities(backend).supports_fork:
-                raise AgentLifecycleError(
-                    400, "fork_unsupported",
-                    message=f"{backends.label(backend)} does not support session forks.",
-                )
-            try:
-                resume_session_id = fork_session(fork_id, cwd)
-                log("forkOk", f"{fork_id} -> {resume_session_id} in {cwd}")
-            except FileNotFoundError as e:
-                log_exception("forkSourceMissing", e, detail=fork_id)
-                raise AgentLifecycleError(404, "fork source not found") from e
-            except OSError as e:
-                log_exception("forkIoFail", e, detail=fork_id)
-                raise AgentLifecycleError(500, "fork io failed") from e
-
+        parsed = AgentSpec.parse(
+            data, backends=backends, roster=self._roster_view(agents),
+            personas=persona_store, janitor=janitor)
+        if isinstance(parsed, SpecError):
+            raise AgentLifecycleError(parsed.status, parsed.message,
+                                      message=parsed.detail or None,
+                                      extra=dict(parsed.extra))
+        if parsed.reopen is not None:
+            owner = parsed.reopen
+            return AgentLifecycleResult(
+                owner["session"], owner["persona"], owner["voice_id"], parsed.backend)
+        if parsed.recommendation:
+            log(parsed.recommendation)
+        spec = parsed if parsed.session else replace(
+            parsed, session=self._mint_session(parsed.persona))
+        resume_session_id = self._fork_or_resume(spec)
         self._reject_owned_backend_session(
-            backend=backend,
-            backend_session_id=resume_session_id,
-            session=session,
+            backend=spec.backend, backend_session_id=resume_session_id,
+            session=spec.session)
+        agent = self._persist(spec, agents, resume_session_id)
+        return self._announce(spec, agent)
+
+    @staticmethod
+    def _roster_view(agents: dict) -> RosterView:
+        from . import config as app_config
+        from .contact_assignment import available_contacts
+        from .launch_paths import recover_user_path
+        from .session_models import launch_default, recorded_model
+        cfg = app_config.load()
+        return RosterView(
+            agents=agents,
+            occupied_personas=frozenset(
+                str(a["persona"]).casefold() for a in agents_db.list_agents()),
+            existing_agent=lambda session: agents_db.get_by_session(session) or {},
+            session_exists=agents_db.session_exists,
+            contact_pool=lambda backend: [c["name"] for c in available_contacts(backend)],
+            resume_owner=agents_db.get_by_backend_session,
+            resume_listed=lambda backend, cwd, sid: any(
+                item.get("id") == sid
+                for item in backends.list_sessions(backend, cwd, limit=100)),
+            existing_cwd=_existing_cwd,
+            recover_user_path=lambda raw: str(recover_user_path(raw)),
+            launch_default=lambda backend: launch_default(backend, cfg),
+            recorded_model=recorded_model,
+            default_model=lambda backend: backends.default_model_effort(backend, cfg)[0],
+            global_mcp_servers=app_config.read_global_mcp_servers(),
+            cartesia_voice_for=cfg.cartesia_voice_for,
+            default_roster_voice=next(iter(AGENT_ROSTER.values())),
+            resolve_agent=lambda raw: getattr(identity.resolve(raw), "agent_id", ""),
+            ancestors=agents_db.ancestors,
         )
-        if avatar_raw is not None:
+
+    @staticmethod
+    def _fork_or_resume(spec: AgentSpec) -> str:
+        if not spec.fork_id:
+            return spec.resume_session_id
+        try:
+            resumed = fork_session(spec.fork_id, spec.cwd)
+            log("forkOk", f"{spec.fork_id} -> {resumed} in {spec.cwd}")
+            return resumed
+        except FileNotFoundError as e:
+            log_exception("forkSourceMissing", e, detail=spec.fork_id)
+            raise AgentLifecycleError(404, "fork source not found") from e
+        except OSError as e:
+            log_exception("forkIoFail", e, detail=spec.fork_id)
+            raise AgentLifecycleError(500, "fork io failed") from e
+
+    def _persist(self, spec: AgentSpec, agents: dict, resume_session_id: str) -> dict:
+        session = spec.session
+        avatar_temp = None
+        if spec.avatar_raw is not None:
             from .deployment import LAYOUT
             avatar_dir = LAYOUT.data_root / "avatars"
             avatar_dir.mkdir(parents=True, exist_ok=True)
             handle = tempfile.NamedTemporaryFile(
                 dir=avatar_dir, prefix=".avatar-", suffix=".jpg", delete=False)
-            handle.write(avatar_raw); handle.close()
+            handle.write(spec.avatar_raw)
+            handle.close()
             avatar_temp = pathlib.Path(handle.name)
         agents[session] = {
-            "name": persona, "voice_id": voice_id, "cwd": cwd, "backend": backend,
+            "name": spec.persona, "voice_id": spec.voice_id, "cwd": spec.cwd,
+            "backend": spec.backend,
         }
-        if janitor:
+        if spec.janitor:
             agents_db.create_agent(
-                persona=persona, voice_id="", cwd=cwd, session=session, backend=backend,
-                model=effective_requested_model, effort=effective_requested_effort,
-                **({"creation_request_id": str(data["creation_request_id"])}
-                   if data.get("creation_request_id") else {}))
+                persona=spec.persona, voice_id="", cwd=spec.cwd, session=session,
+                backend=spec.backend, model=spec.model, effort=spec.effort,
+                **({"creation_request_id": spec.creation_request_id}
+                   if spec.creation_request_id else {}))
         else:
             save_agents(agents, self.ctx.agents_path)
         agent = agents_db.get_by_session(session)
         if not agent:
             raise AgentLifecycleError(500, "agent persistence failed")
-        # Per-agent model / effort override (create + relaunch). Only fields the
-        # client actually sent are touched, so a relaunch that omits them keeps
-        # the existing pins. Effort is validated against the backend's CLI.
-        llm_update: dict[str, str] = {}
-        if "model" in data:
-            llm_update["model"] = effective_requested_model
-        elif clear_retained_model or (not retained_model and effective_requested_model):
-            llm_update["model"] = effective_requested_model
-        if "effort" in data:
-            llm_update["effort"] = requested_effort
-        elif clear_retained_effort:
-            llm_update["effort"] = ""
-        if llm_update:
-            agents_db.update_agent(agent["agent_id"], **llm_update)
-        if requested_mcp_servers is not None:
+        if spec.llm_update:
+            agents_db.update_agent(agent["agent_id"], **spec.llm_update)
+        if spec.mcp_servers is not None:
             agents_db.update_agent(
                 agent["agent_id"],
-                mcp_servers=encode_mcp_selection(requested_mcp_servers),
+                mcp_servers=encode_mcp_selection(list(spec.mcp_servers)),
             )
-        presentation_update = {
-            "avatar_symbol": str(data.get("avatar_symbol")
-                                 or (persona_definition or {}).get("avatar_symbol") or "").strip()[:64],
-            "personality": str(data.get("personality")
-                               or (persona_definition or {}).get("personality") or "").strip()[:4000],
-            "avatar_path": str((persona_definition or {}).get("avatar_path") or ""),
-        }
-        if replace_sid:
-            presentation_update = {
-                key: value for key, value in presentation_update.items()
-                if key in data
-            }
-        if presentation_update:
-            agents_db.update_agent(agent["agent_id"], **presentation_update)
+        if spec.presentation_update:
+            agents_db.update_agent(agent["agent_id"], **spec.presentation_update)
         if avatar_temp:
             try:
                 from .deployment import LAYOUT
@@ -373,6 +182,15 @@ class AgentLifecycleService:
                 agents_db.update_agent(agent["agent_id"], avatar_path=str(path))
             except OSError as exc:
                 raise AgentLifecycleError(400, "invalid avatar", message=str(exc)) from exc
+        if spec.write_lineage:
+            try:
+                agents_db.set_lineage(agent["agent_id"],
+                                      parent_agent_id=spec.parent_agent_id or None,
+                                      role=spec.role)
+            except agents_db.ParentRefused as exc:
+                raise AgentLifecycleError(409, exc.code) from exc
+            if spec.fork_id and spec.parent_agent_id:
+                log("forkParent", f"{session} <- {spec.parent_agent_id}")
         agents_db.start_runtime(agent["agent_id"], session)
         if resume_session_id:
             try:
@@ -381,28 +199,29 @@ class AgentLifecycleService:
                 agents_db.end_current_runtime(agent["agent_id"])
                 log_exception("agentResumeBindConflict", e, detail=session)
                 raise AgentLifecycleError(409, "session in use") from e
-        agents_db.record_path_usage(cwd)
+        agents_db.record_path_usage(spec.cwd)
+        return agent
 
+    def _announce(self, spec: AgentSpec, agent: dict) -> AgentLifecycleResult:
         announcement = (
-            f"{persona} relaunched." if replace_sid
-            else f"{persona} forked and ready." if fork_id
-            else f"{persona} is ready."
+            f"{spec.persona} relaunched." if spec.replace_sid
+            else f"{spec.persona} forked and ready." if spec.fork_id
+            else f"{spec.persona} is ready."
         )
-        if synthesize_audio:
+        if spec.synthesize_audio:
             # Pass session so the announcement engine can resolve the agent's
-            # persona → Cartesia voice (else it falls back to ElevenLabs).
-            self.ctx.speak_announcement(announcement, voice_id, session=session)
-        if janitor:
-            return AgentLifecycleResult(session, persona, "", backend)
-        self.ctx.stream.broadcast({
-            "type": SSEType.AGENT_ROSTER,
-            "kind": "relaunched" if replace_sid else ("forked" if fork_id else "created"),
-            "session": session,
-            "persona": persona,
-            "voice_id": voice_id,
-            "backend": backend,
-        })
-        return AgentLifecycleResult(session, persona, voice_id, backend)
+            # persona -> Cartesia voice (else it falls back to ElevenLabs).
+            self.ctx.speak_announcement(announcement, spec.voice_id, session=spec.session)
+        if spec.janitor:
+            return AgentLifecycleResult(spec.session, spec.persona, "", spec.backend)
+        events.broadcast(self.ctx.stream, events.agent_roster(
+            "relaunched" if spec.replace_sid else ("forked" if spec.fork_id else "created"),
+            session=spec.session,
+            persona=spec.persona,
+            voice_id=spec.voice_id,
+            backend=spec.backend,
+        ))
+        return AgentLifecycleResult(spec.session, spec.persona, spec.voice_id, spec.backend)
 
     @staticmethod
     def _mint_session(persona: str) -> str:
@@ -439,9 +258,7 @@ class AgentLifecycleService:
             agents_db.soft_delete(agent["agent_id"])
         if agents_db.get_focus() == agent["agent_id"]:
             agents_db.set_focus(None)
-        self.ctx.stream.broadcast({
-            "type": SSEType.AGENT_ROSTER, "kind": "deleted", "session": session,
-        })
+        events.broadcast(self.ctx.stream, events.agent_roster("deleted", session=session))
 
     @staticmethod
     def _reject_owned_backend_session(*, backend: str,

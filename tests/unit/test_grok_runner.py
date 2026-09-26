@@ -17,6 +17,7 @@ _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
 from lib import agents as agents_db  # noqa: E402
+from lib import turn_lifecycle  # noqa: E402
 from lib import grok_runner  # noqa: E402
 from lib.backend import stream_json  # noqa: E402
 from lib import grok_transcript  # noqa: E402
@@ -103,8 +104,9 @@ def test_text_deltas_stream_into_live_row_and_speak(monkeypatch):
         return {"changed": True}
 
     monkeypatch.setattr(agents_db, "upsert_live_assistant_message", fake_upsert)
-    monkeypatch.setattr(agents_db, "record_state",
-                        lambda agent_id, kind, detail=None: states.append((kind, (detail or {}).get("tool", ""))))
+    monkeypatch.setattr(turn_lifecycle, "transition",
+                        lambda agent_id, event, detail=None: states.append(
+                            (turn_lifecycle.target(event), (detail or {}).get("tool", ""))))
     monkeypatch.setattr(agents_db, "latest_turn_synthesize_audio", lambda agent_id: True)
     monkeypatch.setattr(agents_db, "get_by_agent_id",
                         lambda agent_id: {"persona": "Margrok", "voice_id": "v1"})
@@ -140,8 +142,9 @@ def test_tool_call_lifecycle_refreshes_pane(monkeypatch):
     monkeypatch.setattr(agents_db, "upsert_live_assistant_message",
                         lambda **_k: {"changed": False})
     states: list[str] = []
-    monkeypatch.setattr(agents_db, "record_state",
-                        lambda agent_id, kind, detail=None: states.append(kind))
+    monkeypatch.setattr(turn_lifecycle, "transition",
+                        lambda agent_id, event, detail=None: states.append(
+                            turn_lifecycle.target(event)))
     stream = _Stream()
     events = [ev for ev in _stream_events()
               if ev["type"] in {"tool_call", "tool_call_update"}]
@@ -156,7 +159,7 @@ def test_live_text_cadence_is_bounded(monkeypatch):
     live_writes: list[str] = []
     monkeypatch.setattr(agents_db, "upsert_live_assistant_message",
                         lambda **kw: live_writes.append(kw["text"]) or {"changed": True})
-    monkeypatch.setattr(agents_db, "record_state", lambda *a, **k: None)
+    monkeypatch.setattr(turn_lifecycle, "transition", lambda *a, **k: None)
     monkeypatch.setattr(grok_runner, "LIVE_TEXT_INTERVAL_SEC", 60.0)
     st = _run_events([{"type": "text", "data": f"w{i} "} for i in range(20)])
     assert live_writes == ["w0 "]
@@ -167,7 +170,7 @@ def test_live_text_cadence_is_bounded(monkeypatch):
 
 
 def test_error_event_fails_turn(monkeypatch):
-    monkeypatch.setattr(agents_db, "record_state", lambda *a, **k: None)
+    monkeypatch.setattr(turn_lifecycle, "transition", lambda *a, **k: None)
     errors: list[str] = []
     st = _run_events([{"type": "error", "error": {"message": "rate limited"}}],
                      on_error=errors.append)

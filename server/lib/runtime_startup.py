@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import pathlib
-import uuid
 from typing import Callable
 
 from . import agents as agents_db
 from . import db
 from .log import log, log_exception
+from .trace import new_trace_id
 from .resume import resume_missing_sessions
 from .timing import SQLITE_RECOVERY_BUSY_TIMEOUT_MS
 
@@ -82,23 +82,24 @@ def recover_runtime(
         interrupted = ([] if clean_handoff else
                        mark_interrupted(stream=getattr(ctx, "stream", None)))
         reconciled = int(reconcile() or 0)
+    from .turn_dispatch import DispatchCommand
     sent = 0
     trace_ids: list[str] = []
     for agent in ([] if clean_handoff else restart_agents()):
         session = str(agent.get("session") or "")
         if not session:
             continue
-        trace_id = str(uuid.uuid4())
+        trace_id = new_trace_id()
         trace_ids.append(trace_id)
         try:
-            dispatch.dispatch(
+            dispatch.submit(DispatchCommand(
                 text=restart_prompt(agent),
                 requested_session=session,
                 forced_session=session,
                 trace_id=trace_id,
                 synthesize_audio=False,
                 origin="heartbeat",
-            )
+            ))
             sent += 1
         except Exception as exc:  # one unavailable provider must not block boot
             log_exception("runtimeRestartHeartbeatFail", exc, detail=session)

@@ -17,7 +17,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Callable, ContextManager
 
-from . import settings_store
+from . import events, settings_store
 from .intent import classify_intent
 from .log import log, log_exception
 
@@ -450,40 +450,27 @@ class HeraldManager:
                          herald: bool = False) -> bool:
         name = url.rsplit("/", 1)[-1] if "/" in url else url
         meta = self._clip_meta.get(url, {})
-        event = {
-            "type": "audio", "url": url, "name": name, "session": session,
-        }
+        fields: dict = {"url": url, "name": name, "session": session}
         # Cross-agent clips (the "ready for an update" herald + just-granted
         # held clips) must play regardless of which agent the client is
         # focused on, and with priority — flag them so the client doesn't
         # starve them behind the focused conversation.
         if herald:
-            event["herald"] = True
-        if meta.get("clip_id"):
-            event["clip_id"] = meta["clip_id"]
-        if meta.get("trace_id"):
-            event["trace_id"] = meta["trace_id"]
-        if meta.get("persona"):
-            event["persona"] = meta["persona"]
-        if meta.get("agent_id"):
-            event["agent_id"] = meta["agent_id"]
+            fields["herald"] = True
+        for key in ("clip_id", "trace_id", "persona", "agent_id"):
+            if meta.get(key):
+                fields[key] = meta[key]
         # Preserve the producer-selected delivery URL and any delivery-
         # specific fields (delivery=hls + playlist_url, or stream_url for
         # the chunked-file and raw-pcm paths).
         if meta.get("streamable"):
-            event["streamable"] = True
-            if meta.get("delivery"):
-                event["delivery"] = meta["delivery"]
-            if meta.get("playlist_url"):
-                event["playlist_url"] = meta["playlist_url"]
-            if meta.get("stream_url"):
-                event["stream_url"] = meta["stream_url"]
-            if meta.get("complete_url"):
-                event["complete_url"] = meta["complete_url"]
-            if meta.get("audio_format"):
-                event["audio_format"] = meta["audio_format"]
+            fields["streamable"] = True
+            for key in ("delivery", "playlist_url", "stream_url",
+                        "complete_url", "audio_format"):
+                if meta.get(key):
+                    fields[key] = meta[key]
         try:
-            self._stream.broadcast(event)
+            events.broadcast(self._stream, events.audio(**fields))
             self._clip_meta.pop(url, None)
             return True
         except Exception as e:

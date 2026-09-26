@@ -188,7 +188,7 @@ class Harness:
             agents=lambda: agents_db.session_dict(),
         )
         self.herald.set_focus("claude")
-        ctx.herald = self.herald
+        ctx.replace_service("herald", self.herald)
 
         self.port = _free_port()
         self.srv = build_server(ctx, self.port, bind_addr="127.0.0.1")

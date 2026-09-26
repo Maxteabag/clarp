@@ -106,7 +106,7 @@ def dispatch(*, ctx, delegation_id: str, session: str,
     """Idempotently admit a silent, durable agent turn for Oracle."""
     from . import agents as agents_db
     from . import message_store, prompt_admissions
-    from .turn_dispatch import TurnDispatchService
+    from .turn_dispatch import DispatchCommand, TurnDispatchService
 
     delegation_id = normalize_id(delegation_id)
     session = str(session or "").strip()
@@ -150,7 +150,7 @@ def dispatch(*, ctx, delegation_id: str, session: str,
         original_text=request_text,
     )
     try:
-        result = TurnDispatchService(ctx).dispatch(
+        result = TurnDispatchService(ctx).submit(DispatchCommand(
             text=request_text,
             requested_session=session,
             forced_session=session,
@@ -160,7 +160,7 @@ def dispatch(*, ctx, delegation_id: str, session: str,
             origin="oracle",
             prompt_admission=admission,
             queue_if_busy=True,
-        )
+        ))
     except Exception as exc:
         fail(delegation_id, str(exc))
         raise

@@ -13,6 +13,9 @@ import os
 import uuid
 
 from . import agents, backends, db, janitors
+from . import janitor_store as store
+from . import turn_lifecycle
+from .turn_lifecycle import TurnEvent
 
 
 ROLES = ("message-delegator", "tool-explainer", "audio-bookkeeper", "heartbeat-decider", "quota-monitor")
@@ -47,10 +50,10 @@ def _metadata(value) -> dict:
 
 def get_builtin(role: str) -> dict | None:
     """Read the installed identity even when paused; never resurrect a tombstone."""
-    row = db.conn().execute("SELECT agent_id FROM janitor_builtins WHERE role=?", (_role(role),)).fetchone()
-    if not row or not agents.get_by_agent_id(row[0]):
+    agent_id = store.builtin_agent_id(_role(role))
+    if not agent_id or not agents.get_by_agent_id(agent_id):
         return None
-    return janitors.get(row[0], include_runtime=False)
+    return janitors.get(agent_id, include_runtime=False)
 
 
 def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> dict:
@@ -65,9 +68,9 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
         raise janitors.JanitorError("Invalid built-in seed configuration")
     with janitors._write() as c:
         for trigger, name in [("heartbeat-decision-requested", "When continuity needs review"), ("quota-check-requested", "When provider quota needs checking"), ("account-switch-requested", "When the account in use runs low")]:
-            c.execute("INSERT OR IGNORE INTO janitor_trigger_definitions(trigger_id,version,name,kind,defaults_json) VALUES (?,1,?,'demand','{}')", (trigger,name))
+            store.ensure_trigger_definition(c, trigger, name)
         for role in ROLES:
-            if c.execute("SELECT 1 FROM janitor_builtins WHERE role=?", (role,)).fetchone():
+            if store.builtin_agent_id(role, c):
                 continue
             defaults = janitors.template(role)
             seed = initial.get(role, {})
@@ -85,23 +88,23 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
             janitors._model({"backend": backend}, model, effort, provider=execution["provider"])
             options = janitors._option_patch(role, seed.get("options", {}))
             agent_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"clarp:janitor:builtin:{role}"))
-            if c.execute("SELECT 1 FROM agents WHERE agent_id=?", (agent_id,)).fetchone():
+            if store.agent_id_exists(agent_id, c):
                 raise janitors.JanitorError("Built-in identity is already owned", 409, "builtin_identity_conflict")
             session = f"clarp-{role}"
-            if c.execute("SELECT 1 FROM agents WHERE session=?", (session,)).fetchone():
+            if store.agent_session_exists(session, c):
                 session += "-" + agent_id[:8]
-            if c.execute("SELECT 1 FROM agents WHERE session=?", (session,)).fetchone():
+            if store.agent_session_exists(session, c):
                 raise janitors.JanitorError("Built-in session is already owned", 409, "builtin_identity_conflict")
             now = db.now_ms()
-            c.execute("""INSERT INTO agents(agent_id,persona,voice_id,cwd,session,backend,model,effort,
-                is_janitor,heartbeat_enabled,dreaming_enabled,created_at) VALUES (?,?,?,?,?,?,?,?,1,0,0,?)""",
-                (agent_id, defaults["name"], "", cwd or os.getcwd(), session, backend, model or "", effort or "", now))
-            agents.record_state(agent_id, "spawned", {"origin": "janitor", "builtin_role": role})
-            c.execute("""INSERT INTO janitor_configs(agent_id,template_id,enabled,scope_json,execution_json,options_json,created_at,updated_at)
-                VALUES (?,?,?,'{}',?,?,?,?)""", (agent_id, role, int(enabled), janitors._json(execution), janitors._json(options), now, now))
-            janitors._save_attachments(c, agent_id, [{"attachment_id": f"builtin-{role}-v1",
+            agents.insert_builtin_janitor(c, agent_id=agent_id, persona=defaults["name"], cwd=cwd or os.getcwd(),
+                                       session=session, backend=backend, model=model or "", effort=effort or "", now=now)
+            turn_lifecycle.transition(agent_id, TurnEvent.AGENT_CREATED,
+                                      {"origin": "janitor", "builtin_role": role})
+            store.insert_config(c, agent_id, role, scope={}, execution=execution, options=options,
+                                now=now, enabled=enabled)
+            store.save_attachments(c, agent_id, [{"attachment_id": f"builtin-{role}-v1",
                 "trigger_id": defaults["default_trigger_id"], "trigger_version": 1, "enabled": True, "config": {}}], now)
-            c.execute("INSERT INTO janitor_builtins(role,agent_id,seed_version,created_at) VALUES (?,?,?,?)", (role, agent_id, SEED_VERSION, now))
+            store.register_builtin(c, role, agent_id, SEED_VERSION, now)
     return {role: get_builtin(role) for role in ROLES}
 
 
@@ -154,7 +157,7 @@ def begin_run(role: str, request_id: str, *, context=None, target_agent_id: str 
     metadata = _metadata(context)
     with janitors._write() as c:
         _recover_expired(c, db.now_ms())
-        existing = c.execute("SELECT * FROM janitor_runs WHERE run_id=?", (run_id,)).fetchone()
+        existing = store.run_row(run_id, c)
         if existing:
             frozen = janitors._decode(existing["configuration_json"], {})
             if frozen.get("context") != metadata or frozen.get("target_agent_id") != target_agent_id:
@@ -176,22 +179,17 @@ def begin_run(role: str, request_id: str, *, context=None, target_agent_id: str 
             "trigger_version": attachment["trigger_version"], "config": attachment["config"],
             "context": metadata, "target_agent_id": target_agent_id, "expires_at": now + DEMAND_RUN_TTL_MS,
             "effective_chain": effective}
-        c.execute("""INSERT INTO janitor_runs(run_id,agent_id,session,attachment_id,generation,trace_id,status,
-            candidates_json,configuration_json,created_at,started_at) VALUES (?,?,?,?,?,?,'running','[]',?,?,?)""",
-            (run_id, config["agent_id"], config["session"], attachment["attachment_id"], config["generation"], run_id,
-             janitors._json(frozen), now, now))
+        store.insert_run(c, run_id=run_id, agent_id=config["agent_id"], session=config["session"],
+                         attachment_id=attachment["attachment_id"], generation=config["generation"], trace_id=run_id,
+                         status="running", candidates=[], configuration=frozen, created_at=now, started_at=now)
     return janitors.get_run(run_id)
 
 
 def _recover_expired(c, now: int) -> int:
-    expired = [dict(row) for row in c.execute("""SELECT * FROM janitor_runs
-        WHERE status IN ('queued','running') AND json_extract(configuration_json,'$.executor')='ephemeral'
-        AND COALESCE(json_extract(configuration_json,'$.expires_at'),created_at+?)<=?""", (DEMAND_RUN_TTL_MS, now))]
+    expired = store.expired_demand_runs(c, DEMAND_RUN_TTL_MS, now)
     for run in expired:
-        c.execute("UPDATE janitor_runs SET status='cancelled',outcome='cancelled',finished_at=?,error=? WHERE run_id=?",
-                  (now, "Demand run expired before completion", run["run_id"]))
-        c.execute("UPDATE janitor_configs SET last_run_at=?,last_error=?,updated_at=? WHERE agent_id=?",
-                  (now, "Demand run expired before completion", now, run["agent_id"]))
+        store.cancel_run(c, run["run_id"], now, error="Demand run expired before completion")
+        store.record_config_run(c, run["agent_id"], now, "Demand run expired before completion")
     return len(expired)
 
 
@@ -210,8 +208,7 @@ def is_current(run_id: str, *, connection=None) -> bool:
             return False
         if db.now_ms() >= frozen.get("expires_at", run["created_at"] + DEMAND_RUN_TTL_MS):
             return False
-        config = c.execute("""SELECT a.backend,a.model,a.effort,j.template_id,j.scope_json,j.execution_json,j.options_json
-            FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id WHERE a.agent_id=?""", (run["agent_id"],)).fetchone()
+        config = store.agent_config_row(run["agent_id"], c)
         from .janitor_design_policy import effective_chain
         if frozen.get("effective_chain") and effective_chain(run["session"]) != frozen["effective_chain"]:
             return False
@@ -228,7 +225,7 @@ def is_current(run_id: str, *, connection=None) -> bool:
             return False
         target_id = frozen.get("target_agent_id")
         if target_id:
-            target = c.execute("SELECT * FROM agents WHERE agent_id=?", (target_id,)).fetchone()
+            target = store.agent_row(target_id, c)
             if not target or not janitors._in_scope(frozen["scope"], dict(target)):
                 return False
         return True
@@ -241,7 +238,7 @@ def claim_run(run_id: str) -> bool:
     with janitors._write() as c:
         if not is_current(run_id, connection=c):
             return False
-        return bool(c.execute("INSERT OR IGNORE INTO janitor_demand_claims(run_id,claimed_at) VALUES (?,?)", (run_id, db.now_ms())).rowcount)
+        return store.claim_run(c, run_id, db.now_ms())
 
 
 def complete_run(run_id: str, outcome: str = "completed", *, result=None, error: str = "", connection=None) -> bool:
@@ -252,20 +249,20 @@ def complete_run(run_id: str, outcome: str = "completed", *, result=None, error:
     if not isinstance(error, str) or len(error) > 500:
         raise janitors.JanitorError("Demand errors must be bounded metadata")
     with (janitors._write() if connection is None else nullcontext(connection)) as c:
-        run = c.execute("SELECT * FROM janitor_runs WHERE run_id=?", (run_id,)).fetchone()
+        run = store.run_row(run_id, c)
         if not run or janitors._decode(run["configuration_json"], {}).get("executor") != "ephemeral":
             return False
-        c.execute("UPDATE janitor_demand_claims SET finished_at=COALESCE(finished_at,?) WHERE run_id=?", (db.now_ms(), run_id))
-        prior = c.execute("SELECT result_json FROM janitor_demand_results WHERE run_id=?", (run_id,)).fetchone()
-        if prior:
-            if prior[0] != janitors._json(result) or run["outcome"] != outcome or run["error"] != error:
+        store.finish_claim(c, run_id, db.now_ms())
+        prior = store.demand_result_json(run_id, c)
+        if prior is not None:
+            if prior != janitors._json(result) or run["outcome"] != outcome or run["error"] != error:
                 raise janitors.JanitorError("Demand result already refers to different work", 409, "result_conflict")
             return True
         now = db.now_ms()
         if not is_current(run_id, connection=c):
-            c.execute("UPDATE janitor_runs SET status='cancelled',outcome='cancelled',finished_at=? WHERE run_id=? AND status IN ('queued','running')", (now, run_id))
+            store.cancel_run(c, run_id, now, statuses=store.ACTIVE_STATUSES)
             return False
-        c.execute("INSERT INTO janitor_demand_results(run_id,result_json,created_at) VALUES (?,?,?)", (run_id, janitors._json(result), now))
-        c.execute("UPDATE janitor_runs SET status=?,outcome=?,finished_at=?,error=? WHERE run_id=?", (outcome, outcome, now, error, run_id))
-        c.execute("UPDATE janitor_configs SET last_run_at=?,last_error=?,updated_at=? WHERE agent_id=?", (now, error, now, run["agent_id"]))
+        store.insert_demand_result(c, run_id, result, now)
+        store.finish_run_row(c, run_id, status=outcome, outcome=outcome, now=now, error=error)
+        store.record_config_run(c, run["agent_id"], now, error)
         return True

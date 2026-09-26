@@ -79,7 +79,7 @@ def test_reference_client_full_turn(core_server):
     # Stub the spawn: file the durable user row exactly like dispatch does,
     # return without launching a backend.
     from lib.turn_dispatch import DispatchResult, TurnDispatchService
-    real_dispatch = TurnDispatchService.dispatch
+    real_dispatch = TurnDispatchService.submit
 
     def fake_dispatch(self, *, text, requested_session, trace_id,
                       client_msg_id="", **kwargs):
@@ -90,7 +90,8 @@ def test_reference_client_full_turn(core_server):
         )
         return DispatchResult(session=requested_session, backend="codex")
 
-    TurnDispatchService.dispatch = fake_dispatch  # type: ignore[method-assign]
+    TurnDispatchService.submit = (  # type: ignore[method-assign]
+        lambda self, command: fake_dispatch(self, **command.as_kwargs()))
     try:
         proc = subprocess.Popen(
             ["node", str(CLIENT), f"--base={base}",
@@ -121,7 +122,7 @@ def test_reference_client_full_turn(core_server):
                 proc.kill()
                 proc.communicate()
     finally:
-        TurnDispatchService.dispatch = real_dispatch  # type: ignore[method-assign]
+        TurnDispatchService.submit = real_dispatch  # type: ignore[method-assign]
 
     assert proc.returncode == 0, f"client exited {proc.returncode}: {out[-2000:]}"
     summary = json.loads(out.strip().splitlines()[-1])
