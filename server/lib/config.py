@@ -593,6 +593,8 @@ def _load_locked(path: pathlib.Path | None) -> Config:
     if path is None:
         # Bare load(): whatever is cached is the process-wide answer, even
         # when it was primed from an explicit path (tests and tools do that).
+        if _CACHED is not None and _CACHED_PATH is None:
+            return _CACHED  # injected without a file (tests): nothing to watch
         path = _CACHED_PATH if _CACHED is not None else _resolve_config_path()
     path = path.expanduser().resolve(strict=False)
     if _CACHED is not None and _CACHED_PATH == path:

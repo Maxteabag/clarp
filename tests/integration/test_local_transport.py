@@ -26,7 +26,7 @@ def test_local_identity_is_persistent_private_and_not_silently_replaced(tmp_path
 
 def test_tls_auth_pin_revocation_and_nonblocking_handshake(fake_ctx, tmp_path, monkeypatch):
     monkeypatch.setattr('lib.bonjour.BonjourAdvertiser.start', lambda self: True)
-    fake_ctx.auth_token = 'local-admin'
+    fake_ctx = fake_ctx.with_(auth_token='local-admin')
     owner = server_module.ContextHTTPServer(('127.0.0.1',0),server_module.Handler,fake_ctx)
     local = LocalHTTPS(owner,server_module.Handler,tmp_path/'tls',0,bind='127.0.0.1')
     owner.local_transport=local
@@ -63,9 +63,8 @@ def test_local_listener_accepts_only_private_ipv4_peers(value, expected):
 
 def test_busy_local_port_does_not_take_the_primary_host_offline(fake_ctx, tmp_path):
     busy=socket.socket();busy.bind(('127.0.0.1',0));busy.listen()
-    fake_ctx.auth_token='local-admin'
-    fake_ctx.local_tls_port=busy.getsockname()[1]
-    fake_ctx.local_tls_directory=tmp_path/'tls'
+    fake_ctx=fake_ctx.with_(auth_token='local-admin',local_tls_port=busy.getsockname()[1],
+                            local_tls_directory=tmp_path/'tls')
     try:
         server=server_module.build_server(fake_ctx,0,bind_addr='127.0.0.1')
         try:
