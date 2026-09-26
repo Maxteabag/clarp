@@ -43,57 +43,70 @@ def released(demands):
 
 
 def request(level, prepared, releases, debounce, *, guard=None):
+    """Answer each prepared item and record viewer demand for pending ones.
+
+    Everything is read before the write lock: a poll whose items are ready,
+    cancelled or disabled never takes it. The transaction holds only the
+    writes plus `guard`, which must be cheap (compare a revision, never
+    resolve a configuration). Expiry pruning belongs to `claim()`.
+    """
     now=cache.now_ms()
+    db=conn()
+    released_now=set(releases)
+    admitted=bool(level) and (guard is None or guard(db))
+    queued=None
+    added=0
     responses=[]
-    if level and prepared and not releases:
-        # Ready hits need only reads; do not take the database writer lock on
-        # every re-render or repeated poll of an already completed explanation.
-        db=conn()
-        for identity,key,activity,demand in prepared:
-            if demand and db.execute('SELECT 1 FROM tool_explanation_releases WHERE demand_id=? AND expires_at>?',(demand,now)).fetchone():
-                responses.append({'id':identity,'status':'cancelled'})
-                continue
+    writes=[]
+    for identity,key,activity,demand in prepared:
+        if demand and (demand in released_now or db.execute('SELECT 1 FROM tool_explanation_releases WHERE demand_id=? AND expires_at>?',(demand,now)).fetchone()):
+            value={'status':'cancelled'}
+        elif not admitted:
+            value={'status':'disabled'}
+        else:
             ready=db.execute('SELECT explanation,source,provenance_json FROM tool_explanation_cache WHERE cache_key=? AND expires_at>?',(key,now)).fetchone()
-            if not ready:
-                break
-            responses.append({'id':identity,**_ready(ready)})
-        if len(responses)==len(prepared) and (guard is None or guard(db)):
-            return responses
-        responses=[]
-    with transaction() as db:
-        for demand in releases:
-            db.execute('INSERT INTO tool_explanation_releases VALUES(?,?) ON CONFLICT(demand_id) DO UPDATE SET expires_at=excluded.expires_at',(demand,now+120000))
-            db.execute('DELETE FROM tool_explanation_demands WHERE demand_id=?',(demand,))
-        _prune(db,now)
-        admitted=bool(level) and (guard is None or guard(db))
-        db.execute('DELETE FROM tool_explanation_releases WHERE demand_id IN (SELECT demand_id FROM tool_explanation_releases ORDER BY expires_at DESC LIMIT -1 OFFSET 4096)')
-        for identity,key,activity,demand in prepared:
-            value=None
-            if demand and db.execute('SELECT 1 FROM tool_explanation_releases WHERE demand_id=?',(demand,)).fetchone():
-                value={'status':'cancelled'}
-            elif not admitted:
-                value={'status':'disabled'}
+            job=None if ready else db.execute('SELECT status,failure_reason,available_at FROM tool_explanation_jobs WHERE cache_key=?',(key,)).fetchone()
+            # An expired failure is pruned lazily; until then it is no job at all.
+            if job and job[0]=='failed' and job[2]<=now:
+                job=None
+            if ready:
+                value=_ready(ready)
+            elif job and job[0]=='failed':
+                value={'status':'failed','reason':job[1]}
             else:
-                ready=db.execute('SELECT explanation,source,provenance_json FROM tool_explanation_cache WHERE cache_key=?',(key,)).fetchone()
-                job=db.execute('SELECT status,failure_reason FROM tool_explanation_jobs WHERE cache_key=?',(key,)).fetchone()
-                if ready:
-                    value=_ready(ready)
-                elif job and job[0]=='failed':
-                    value={'status':'failed','reason':job[1]}
-                elif not job and db.execute("SELECT count(*) FROM tool_explanation_jobs WHERE status='queued'").fetchone()[0]>=64:
+                if not job and queued is None:
+                    queued=db.execute("SELECT count(*) FROM tool_explanation_jobs WHERE status='queued'").fetchone()[0]
+                if not job and queued+added>=64:
                     value={'status':'busy','reason':'queue_full'}
                 else:
                     owner=demand or 'legacy'
-                    exists=db.execute('SELECT 1 FROM tool_explanation_demands WHERE cache_key=? AND demand_id=?',(key,owner)).fetchone()
-                    count=db.execute('SELECT count(*) FROM tool_explanation_demands WHERE cache_key=?',(key,)).fetchone()[0]
-                    if not exists and count>=256:
+                    exists=db.execute('SELECT 1 FROM tool_explanation_demands WHERE cache_key=? AND demand_id=? AND expires_at>?',(key,owner,now)).fetchone()
+                    if not exists and db.execute('SELECT count(*) FROM tool_explanation_demands WHERE cache_key=? AND expires_at>?',(key,now)).fetchone()[0]>=256:
                         value={'status':'busy','reason':'too_many_views'}
                     else:
-                        if not job:
-                            db.execute("INSERT INTO tool_explanation_jobs(cache_key,detail_level,activity_json,status,created_at,available_at) VALUES(?,?,?,'queued',?,?)",(key,level,json.dumps(activity),now,now+int(debounce*1000)))
-                        db.execute('INSERT INTO tool_explanation_demands VALUES(?,?,?) ON CONFLICT(cache_key,demand_id) DO UPDATE SET expires_at=excluded.expires_at',(key,owner,now+5000 if demand else now+cache.TTL_MS))
+                        added+=0 if job else 1
+                        writes.append((key,level,activity,owner,now+5000 if demand else now+cache.TTL_MS))
                         value={'status':'pending'}
-            responses.append({'id':identity,**value})
+        responses.append({'id':identity,**value})
+    if not releases and not writes:
+        return responses
+    with transaction() as db:
+        if releases:
+            db.executemany('INSERT INTO tool_explanation_releases VALUES(?,?) ON CONFLICT(demand_id) DO UPDATE SET expires_at=excluded.expires_at',[(d,now+120000) for d in releases])
+            keys={key for d in releases for (key,) in db.execute('DELETE FROM tool_explanation_demands WHERE demand_id=? RETURNING cache_key',(d,)).fetchall()}
+            # A job nobody still views stops here, not at the next claim().
+            db.executemany("DELETE FROM tool_explanation_jobs WHERE cache_key=? AND status='queued' AND NOT EXISTS (SELECT 1 FROM tool_explanation_demands d WHERE d.cache_key=tool_explanation_jobs.cache_key)",[(k,) for k in keys])
+            db.execute('DELETE FROM tool_explanation_releases WHERE demand_id IN (SELECT demand_id FROM tool_explanation_releases ORDER BY expires_at DESC LIMIT -1 OFFSET 4096)')
+        if writes and guard is not None and not guard(db):
+            # The configuration changed since the reads: no new demand.
+            return [{'id':entry['id'],'status':'disabled'} if entry['status']=='pending' else entry for entry in responses]
+        # Every pending key gets its job: one read as present may have been
+        # pruned by claim() since, and an expired failure is replaced.
+        db.executemany("DELETE FROM tool_explanation_jobs WHERE cache_key=? AND status='failed' AND available_at<=?",[(p[0],now) for p in writes])
+        db.executemany("INSERT INTO tool_explanation_jobs(cache_key,detail_level,activity_json,status,created_at,available_at) VALUES(?,?,?,'queued',?,?) ON CONFLICT(cache_key) DO NOTHING",
+                       [(p[0],p[1],json.dumps(p[2]),now,now+int(debounce*1000)) for p in writes])
+        db.executemany('INSERT INTO tool_explanation_demands VALUES(?,?,?) ON CONFLICT(cache_key,demand_id) DO UPDATE SET expires_at=excluded.expires_at',
+                       [(p[0],p[3],p[4]) for p in writes])
     return responses
 
 

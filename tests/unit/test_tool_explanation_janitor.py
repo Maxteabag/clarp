@@ -625,3 +625,42 @@ def test_adopting_explicit_default_revokes_legacy_detail_without_pausing(phase):
         assert runs == []
     elif phase == "running":
         assert runs[0]["status"] == "cancelled" and runs[0]["demand_result"] is None
+
+
+def test_request_resolves_the_janitor_outside_the_write_transaction(monkeypatch):
+    seed()
+    real = tool_explanations.janitor_builtins.resolve
+    calls = []
+
+    def recording(role, **kwargs):
+        calls.append(db.conn().in_transaction)
+        return real(role, **kwargs)
+
+    monkeypatch.setattr(tool_explanations.janitor_builtins, "resolve", recording)
+    statements = []
+    with tool_explanations.ToolExplanations(translate=lambda *_: pytest.fail("debounced"), debounce=5) as service:
+        db.conn().set_trace_callback(statements.append)
+        try:
+            assert service.request(3, [ITEM])["items"][0]["status"] == "pending"
+        finally:
+            db.conn().set_trace_callback(None)
+    assert calls and not any(calls)
+    begin = next(i for i, s in enumerate(statements) if s.startswith("BEGIN"))
+    inside = statements[begin:]
+    assert not [s for s in inside if "janitor_attachments" in s or "count(*)" in s]
+
+
+def test_request_pending_after_a_pause_during_resolve_is_disabled(monkeypatch):
+    config = seed()
+    real = tool_explanations.janitor_builtins.resolve
+
+    def resolve_then_pause(role, **kwargs):
+        selected = real(role, **kwargs)
+        if selected:
+            pause(config)
+        return selected
+
+    monkeypatch.setattr(tool_explanations.janitor_builtins, "resolve", resolve_then_pause)
+    with tool_explanations.ToolExplanations(translate=lambda *_: pytest.fail("paused"), debounce=5) as service:
+        assert service.request(3, [ITEM])["items"][0]["status"] == "disabled"
+    assert db.conn().execute("SELECT count(*) FROM tool_explanation_demands").fetchone()[0] == 0
