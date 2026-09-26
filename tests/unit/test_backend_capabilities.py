@@ -1,10 +1,11 @@
-"""Backends are polymorphic: behaviour a CLI differs on is declared on its
-``BackendAdapter`` and looked up, never branched on by identity.
+"""Backends are polymorphic: behaviour a CLI differs on lives on its
+``Backend`` class and is looked up, never branched on by identity.
 
 Two halves: a source guard that fails when a new ``backend == X`` branch
-appears outside the registry and the per-CLI runner modules, and unit tests
-that every adapter declares every capability plus a few of the decisions the
-adapters replaced (terminal argv, resume-target checks, spawn kwargs).
+appears outside the registry and the per-CLI transcript parsers, and unit
+tests that every backend declares every capability plus a few of the
+decisions the old adapter rows replaced (terminal argv, resume-target
+checks, spawn kwargs).
 """
 from __future__ import annotations
 
@@ -34,11 +35,11 @@ BRANCH = re.compile(
     rf"|(?:==|!=)\s*{_LIT}"          # x == "codex"
     rf"|{_LIT}\s*(?:==|!=)"          # "codex" == x
 )
-# The registry itself, the model catalogue and the per-CLI runner/transcript
-# modules are allowed to know which CLI they are. transcript_streamer.py and
-# reconcile.py are being refactored separately.
+# The facade, the model catalogue and the per-CLI transcript parsers are
+# allowed to know which CLI they are. The runner bodies live on the classes
+# in ``lib.backend``, which are guarded below like any other caller.
 EXCLUDED = {"backends.py", "provider_capabilities.py"}
-EXCLUDED_SUFFIXES = ("_runner.py", "_transcript.py")
+EXCLUDED_SUFFIXES = ("_transcript.py",)
 
 # Branches that remain, with why. ``cfg.oracle_router_backend`` chooses the
 # oracle's router transport ("api" = OpenAI HTTP, "codex" = the Codex CLI as
@@ -84,8 +85,8 @@ def test_no_backend_identity_branches_outside_the_registry():
             else:
                 seen_allowed.add(key)
     assert not offenders, (
-        "Backend identity branch found; declare the capability on "
-        "BackendAdapter in server/lib/backends.py and look it up instead:\n"
+        "Backend identity branch found; give the Backend class in "
+        "server/lib/backend/ a method or attribute and call it instead:\n"
         + "\n".join(offenders))
     stale = set(ALLOWLIST) - seen_allowed
     assert not stale, f"allowlist entries no longer match any line: {sorted(stale)}"
@@ -127,8 +128,10 @@ REQUIRED_STR = ("api_providers", "janitor_default_model", "model_family")
 REQUIRED_BOOL = ("native_tool_explainer",)
 REQUIRED_CALLABLE = ()
 OPTIONAL = ("context_window",)
-# Decisions that are methods on the Backend classes now (slice 2 of the
-# contract), so no adapter row may declare them as flags any more.
+# Decisions that are methods on the Backend classes now (slices 2 and 4 of
+# the contract), so no class may declare them as flags any more.
+# ``supports_compact`` is not among them: it is a property derived from
+# ``compaction()``, never declared.
 DELETED_FLAGS = ("preassigns_session_id", "hook_source_marker", "account_pool",
                  "usage_limit_recovery", "restarts_runner_on_credential_change",
                  "terminal_resume_argv", "terminal_fresh_argv",
@@ -138,7 +141,7 @@ DELETED_FLAGS = ("preassigns_session_id", "hook_source_marker", "account_pool",
                  "transcript_dir_encodes_cwd", "resumes_by_transcript_file",
                  "locks_turn_callbacks", "records_classified_usage_limit",
                  "quota_reset_jittered", "compact_launch", "compact_command",
-                 "compaction_watches_transcript", "supports_compact",
+                 "compaction_watches_transcript",
                  "recorded_model_source", "transcript_module",
                  "session_catalog_reader", "transcript_reader_injected",
                  "spawn_kwargs", "goal_module", "supports_goal",
