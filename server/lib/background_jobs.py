@@ -25,6 +25,23 @@ WORKER_TERM_TIMEOUT_SEC = 2.0
 WORKER_KILL_TIMEOUT_SEC = 2.0
 
 
+def active_by_agent() -> dict[str, list[dict[str, str]]]:
+    """Running or queued jobs per agent, oldest first, for the dashboard.
+
+    One indexed read per snapshot. Stale jobs are reconciled by the watcher,
+    so a crashed worker drops out within a heartbeat timeout.
+    """
+    marks = ",".join("?" for _ in ACTIVE_STATUSES)
+    out: dict[str, list[dict[str, str]]] = {}
+    for row in db.conn().execute(
+            f"SELECT agent_id, kind, title FROM background_jobs WHERE status IN ({marks}) "
+            "AND COALESCE(agent_id, '') != '' "
+            "ORDER BY started_at", tuple(sorted(ACTIVE_STATUSES))):
+        out.setdefault(row["agent_id"], []).append(
+            {"kind": str(row["kind"] or ""), "title": str(row["title"] or "")})
+    return out
+
+
 def job_handle(job: dict) -> str:
     return f"bg1:{int(job.get('generation') or 1)}:{job['job_id']}"
 
