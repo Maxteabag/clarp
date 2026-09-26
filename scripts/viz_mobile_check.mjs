@@ -65,7 +65,12 @@ try{
   const after=await page.evaluate(({x,y})=>{const s=window.fleetWorldSnapshot();return {sx:x*s.camera.k+s.camera.x,sy:y*s.camera.k+s.camera.y};},slateHit);
   await page.touchscreen.tap(after.sx,after.sy);await page.waitForTimeout(300);
   assert(await page.locator('#inspector').isVisible(),'a work slate opens its details on tap');
-  const detail=await page.locator('#node-detail').textContent();assert(detail.includes('Intent:')&&detail.includes('Outcome:'));
+  const detail=await page.locator('#node-detail').textContent();
+  if(!detail.includes('Intent:')||!detail.includes('Outcome:')){
+   await page.screenshot({path:`${out}/${viewport.width}-tap-failure.png`});
+   await fs.writeFile(out+'/tap-failure.json',JSON.stringify({detail,slateHit,after,snapshot:await page.evaluate(()=>({camera:fleetWorldSnapshot().camera,hits:fleetWorldSnapshot().meta.hits}))},null,2));
+  }
+  assert(detail.includes('Intent:')&&detail.includes('Outcome:'));
   await page.screenshot({path:`${out}/${viewport.width}-work.png`});await page.locator('#close-inspector').click();
   await page.locator('#live').click();await page.waitForTimeout(400);
   for(const id of ['flow-demo','flow-labels']){
