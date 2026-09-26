@@ -92,8 +92,9 @@ FIELDS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# Keys the stream hub adds after construction; tolerated on re-validation.
-_HUB_KEYS = frozenset({"event_id"})
+# Keys the stream hub adds after construction (the durable row id and its
+# timestamp); tolerated on re-validation of a relayed or replayed row.
+_HUB_KEYS = frozenset({"event_id", "ts"})
 
 
 def _build(event_type: str, pairs: list[tuple[str, Any]], *,

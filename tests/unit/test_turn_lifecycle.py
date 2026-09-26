@@ -161,14 +161,17 @@ def test_no_server_module_writes_state_without_an_event():
     callers = []
     for path in sorted(server.rglob("*.py")):
         tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                    and node.func.attr in {"record_state", "record"}
-                    and isinstance(node.func.value, ast.Name)
-                    and node.func.value.id in {"agents", "agents_db", "turn_lifecycle"}):
-                callers.append(f"{path.relative_to(server)}:{node.lineno}")
+        for func in ast.walk(tree):
+            if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for node in ast.walk(func):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and node.func.attr in {"record_state", "record"}
+                        and isinstance(node.func.value, ast.Name)
+                        and node.func.value.id in {"agents", "agents_db", "turn_lifecycle"}):
+                    callers.append(f"{path.relative_to(server)}:{func.name}")
     # The fixture wrapper itself delegates to turn_lifecycle.record.
-    assert callers == ["lib/agents.py:462"], callers
+    assert callers == ["lib/agents.py:record_state"], callers
 
 
 def test_audit_note_repeats_the_current_state(tmp_path):

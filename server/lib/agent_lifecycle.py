@@ -14,13 +14,12 @@ import threading
 from dataclasses import dataclass, replace
 
 from . import agents as agents_db
-from . import backends
+from . import backends, events
 from .agent_store import AGENT_ROSTER, load_agents, save_agents
 from .fork import fork_session
 from .log import log, log_exception
 from .mcp_selection import encode as encode_mcp_selection
 from .policies.agent_spec import AgentSpec, RosterView, SpecError
-from .protocol import SSEType
 from . import personas as persona_store
 
 
@@ -204,14 +203,13 @@ class AgentLifecycleService:
             self.ctx.speak_announcement(announcement, spec.voice_id, session=spec.session)
         if spec.janitor:
             return AgentLifecycleResult(spec.session, spec.persona, "", spec.backend)
-        self.ctx.stream.broadcast({
-            "type": SSEType.AGENT_ROSTER,
-            "kind": "relaunched" if spec.replace_sid else ("forked" if spec.fork_id else "created"),
-            "session": spec.session,
-            "persona": spec.persona,
-            "voice_id": spec.voice_id,
-            "backend": spec.backend,
-        })
+        events.broadcast(self.ctx.stream, events.agent_roster(
+            "relaunched" if spec.replace_sid else ("forked" if spec.fork_id else "created"),
+            session=spec.session,
+            persona=spec.persona,
+            voice_id=spec.voice_id,
+            backend=spec.backend,
+        ))
         return AgentLifecycleResult(spec.session, spec.persona, spec.voice_id, spec.backend)
 
     @staticmethod
@@ -249,9 +247,7 @@ class AgentLifecycleService:
             agents_db.soft_delete(agent["agent_id"])
         if agents_db.get_focus() == agent["agent_id"]:
             agents_db.set_focus(None)
-        self.ctx.stream.broadcast({
-            "type": SSEType.AGENT_ROSTER, "kind": "deleted", "session": session,
-        })
+        events.broadcast(self.ctx.stream, events.agent_roster("deleted", session=session))
 
     @staticmethod
     def _reject_owned_backend_session(*, backend: str,

@@ -19,6 +19,7 @@ from typing import Any
 
 from . import agents as agents_db
 from . import clip_pacing
+from . import events
 from . import health
 from . import tts_queue
 from .clip_delivery import ClipDelivery, ClipDeliverySession
@@ -29,7 +30,6 @@ from .config import load as load_config
 from .eleven_ws import ElevenWSError, synthesize_streaming
 from .log import log_exception
 from .paths import RuntimePaths
-from .protocol import SSEType
 from .voice import (
     CARTESIA, DEEPGRAM, ELEVENLABS, resolve_voice,
 )
@@ -356,14 +356,13 @@ def _publish_tts_error(stream: Any | None, row: dict,
     else:
         message = "Voice synthesis failed."
     try:
-        stream.broadcast({
-            "type": SSEType.TTS_ERROR,
-            "session": row.get("session"),
-            "agent_id": row.get("agent_id"),
-            "persona": (agent or {}).get("persona"),
-            "message": message,
-            "error": (error or "")[:300],
-        })
+        events.broadcast(stream, events.tts_error(
+            session=row.get("session"),
+            agent_id=row.get("agent_id"),
+            persona=(agent or {}).get("persona"),
+            message=message,
+            error=(error or "")[:300],
+        ))
     except Exception as e:  # noqa: BLE001
         log_exception("ttsErrorBroadcastFail", e, detail=message)
 
@@ -417,18 +416,16 @@ def _publish_clip_event(*, stream: Any | None, herald: Any | None,
         except Exception as e:  # noqa: BLE001
             log_exception("ttsWorkerHeraldPublishFail", e, detail=url)
     if stream is not None:
-        event = {
-            "type": SSEType.AUDIO,
-            "url": url,
-            "name": name,
-            "session": row["session"],
-            "clip_id": session.clip_id,
-            "agent_id": agent["agent_id"],
-            "persona": agent.get("persona"),
-            "trace_id": trace_id,
+        events.broadcast(stream, events.audio(
+            url=url,
+            name=name,
+            session=row["session"],
+            clip_id=session.clip_id,
+            agent_id=agent["agent_id"],
+            persona=agent.get("persona"),
+            trace_id=trace_id,
             **session.sse_fields,
-        }
-        stream.broadcast(event)
+        ))
 
 
 class TTSWorker:

@@ -27,6 +27,7 @@ from .codex_runner import (
 from .log import log, log_exception
 from .protocol import TurnSource
 from . import turn_lifecycle
+from . import events
 from .turn_lifecycle import TurnEvent
 
 
@@ -261,7 +262,7 @@ class _Client:
                                 else getattr(self, "stream", None))
                 if event_stream is not None:
                     for event in snapshot.get("limit_events") or []:
-                        event_stream.broadcast(event)
+                        events.broadcast(event_stream, events.as_event(event))
             except Exception as exc:  # noqa: BLE001
                 log_exception("codexRateLimitsUpdateFail", exc,
                               detail=self.agent_id)
@@ -369,7 +370,7 @@ class _Client:
                 row = None
             stream = getattr(self, "stream", None)
             if stream is not None:
-                stream.broadcast(agent_goals.event(agent, row))
+                events.broadcast(stream, events.as_event(agent_goals.event(agent, row)))
         except Exception as exc:  # noqa: BLE001 - a mirror failure must not stop the reader
             log_exception("codexGoalMirrorFail", exc, detail=thread_id)
 

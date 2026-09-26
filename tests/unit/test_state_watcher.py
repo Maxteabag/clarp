@@ -3,6 +3,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
 from lib import agents as agents_db  # noqa: E402
+from lib import events  # noqa: E402
 from lib.protocol import SSEType  # noqa: E402
 from lib.state_watcher import StateLogWatcher  # noqa: E402
 
@@ -88,7 +89,9 @@ def test_poll_once_returns_while_completed_turn_classification_blocks(monkeypatc
     pushed = []
     monkeypatch.setattr(user_notifications, "classify_completed_turn", slow_classify)
     monkeypatch.setattr(user_notifications, "event_payload",
-                        lambda n: {"type": SSEType.USER_NOTIFICATION, **n})
+                        lambda n: {"type": SSEType.USER_NOTIFICATION, **{
+                            k: v for k, v in n.items()
+                            if k in events.FIELDS[SSEType.USER_NOTIFICATION]}})
     monkeypatch.setattr(apns, "on_user_notification", pushed.append)
 
     agent_id = _done_agent("rachel")

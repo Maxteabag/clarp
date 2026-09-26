@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import threading
 
-from . import background_jobs
+from . import background_jobs, events
 from .log import log_exception
-from .protocol import SSEType
 from .timing import SERVER_TIMING
 
 
@@ -40,24 +39,23 @@ class BackgroundJobWatcher:
                 log_exception("backgroundJobWatcherTickFail", exc)
 
     def _poll_once(self) -> None:
-        events = background_jobs.events_after(self._last_id)
-        for event in events:
+        changes = background_jobs.events_after(self._last_id)
+        for event in changes:
             job = background_jobs.get(
                 event["job_id"], reconcile=False,
                 observed_at=int(event["observed_at"]))
             self._last_id = int(event["event_id"])
             if not job:
                 continue
-            self.stream.broadcast({
-                "type": SSEType.BACKGROUND_JOB_UPDATED,
-                "change_revision": self._last_id,
-                "observed_at": int(event["observed_at"]),
-                "job_id": job["job_id"],
-                "session": job["session"],
-                "agent_id": job["agent_id"],
-                "status": job["status"],
-                "job": job,
-            })
+            events.broadcast(self.stream, events.background_job_updated(
+                change_revision=self._last_id,
+                observed_at=int(event["observed_at"]),
+                job_id=job["job_id"],
+                session=job["session"],
+                agent_id=job["agent_id"],
+                status=job["status"],
+                job=job,
+            ))
             # The agent row derives its background state from active jobs, so
             # a start or finish must reach the list without waiting for a poll.
             # Heartbeats also produce events; only a status change nudges.
@@ -66,4 +64,4 @@ class BackgroundJobWatcher:
                 self._statuses[job["job_id"]] = job["status"]
                 if job["status"] not in background_jobs.ACTIVE_STATUSES:
                     self._statuses.pop(job["job_id"], None)
-                self.stream.broadcast({"type": SSEType.AGENT_ROSTER, "kind": "background-job"})
+                events.broadcast(self.stream, events.agent_roster("background-job"))

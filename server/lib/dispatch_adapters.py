@@ -18,10 +18,9 @@ import time
 from typing import Any, Callable
 
 from . import agents as agents_db
-from . import backends
+from . import backends, events
 from . import trace as _trace
 from .log import log_exception
-from .protocol import SSEType
 from .timing import SERVER_TIMING
 
 # origin per scheduler; the read model files hidden traffic by these names.
@@ -136,8 +135,7 @@ class DispatchAdapters:
             return
         self._attention_due = now + SERVER_TIMING.janitor_attention_interval_sec
         if janitor_attention.reconcile():
-            self.ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER,
-                                       "kind": "janitor-attention"})
+            events.broadcast(self.ctx.stream, events.agent_roster("janitor-attention"))
 
     def recover_janitor_quota(self, provider, owner_id, generation, approval_id):
         """AutonomyJanitors: quota recovery runs wherever dispatch runs."""
