@@ -53,7 +53,8 @@ class FakeTools:
         return [row for row in self.rows if row["status"] in ("completed", "failed", "cancelled")]
 
     AGENTS = {"theo": {"session": "theo-97e5", "persona": "Theo", "agent_id": "a-theo"},
-              "nadia": {"session": "nadia-1c2d", "persona": "Nadia", "agent_id": "a-nadia"}}
+              "nadia": {"session": "nadia-1c2d", "persona": "Nadia", "agent_id": "a-nadia"},
+              "marcus": {"session": "marcus-5b1a", "persona": "Marcus", "agent_id": "a-marcus"}}
 
     def resolve(self, name):
         wanted = str(name or "").strip().casefold()
@@ -159,6 +160,34 @@ class Lab:
         with self.conv.lock:
             self.conv.routing += 1
         self.conv.route("item_" + str(self.delegation))
+
+    def replay(self, events, until_seq=None):
+        """Feed journal events at their recorded times; a delegation is routed
+        synchronously, as in ``user``. Output transcript deltas come with
+        audible audio, as GPT-Live streams them."""
+        if not hasattr(self, "replay_base"):
+            self.replay_base, self.replayed = self.now[0], 0
+        for event in events:
+            if event["seq"] <= self.replayed:
+                continue
+            if until_seq is not None and event["seq"] > until_seq:
+                break
+            self.replayed = event["seq"]
+            target = self.replay_base + event["elapsed_ms"] / 1000
+            while self.now[0] + STEP <= target:
+                self.now[0] += STEP
+                self.conv.tick()
+            self.now[0] = max(self.now[0], target)
+            kind = event["type"]
+            if kind == "session.delegation.created":
+                self.delegation += 1
+                with self.conv.lock:
+                    self.conv.routing += 1
+                self.conv.route(event["delegation"]["id"])
+                continue
+            if kind == "session.output_transcript.delta":
+                self.conv.receive({"type": "session.output_audio.delta", "delta": _audio(3000)})
+            self.conv.receive({key: event[key] for key in ("type", "delta", "start_ms", "end_ms")})
 
     def appends(self, index=0):
         return [event for event in map(json.loads, self.upstreams[index].sent) if event["type"].endswith(".append")
@@ -612,3 +641,62 @@ def test_pump_follows_the_swapped_upstream_instead_of_ending_the_call():
     conv.upstream = _Socket([], conv, swap_to=new)
     mod.pump_upstream(conv, TimeoutError)
     assert events == [("session.output_transcript.delta", new), ("session.closed", new)]
+
+
+# ---- call 7946a1a7: "can you put me through to, can you put me through to Marcus"
+
+MARCUS_CALL = json.loads((FIXTURES / "7946a1a7_put_me_through_to_marcus.json").read_text())["events"]
+
+
+def test_7946a1a7_a_restarted_switch_request_split_by_a_pause_puts_the_user_through(lab):
+    lab = lab()
+    lab.replay(MARCUS_CALL, until_seq=62)
+    assert lab.tools.dispatched == [], "a switch request is never also sent to the primary as work"
+    assert lab.conv.pending_swap is not None and lab.conv.pending_swap["contact"]["persona"] == "Marcus"
+    lab.replay(MARCUS_CALL, until_seq=74)   # Oracle: "Sure, put you through to Marcus."
+    lab.wait(2)
+    [session] = lab.opened()
+    assert _session_voice(session) == "cedar"
+    assert "You are the voice of Marcus" in session["instructions"]
+    assert lab.conv.contact["session"] == "marcus-5b1a"
+
+
+def test_the_turn_is_the_whole_utterance_since_oracle_last_spoke(lab):
+    lab = lab()
+    lab.conv.receive({"type": "session.output_transcript.delta", "delta": "Go on.", "start_ms": 0, "end_ms": 400})
+    lab.user_fragments("Can you check", "the deploy on", "staging")
+    [work] = lab.tools.dispatched
+    assert work["request"].endswith("verbatim:\nCan you check the deploy on staging")
+
+
+def test_speech_before_oracle_last_spoke_is_not_part_of_the_turn(lab):
+    lab = lab()
+    lab.user_fragments("so the plan is recursive goals")
+    lab.tools.dispatched.clear()
+    lab.ms += 2000
+    lab.conv.receive({"type": "session.input_transcript.delta", "delta": "can you can you",
+                      "start_ms": lab.ms, "end_ms": lab.ms + 800})
+    lab.conv.receive({"type": "session.output_transcript.delta", "delta": "Go on.",
+                      "start_ms": lab.ms + 900, "end_ms": lab.ms + 1300})
+    lab.user_fragments("Check the deploy")
+    [work] = lab.tools.dispatched
+    assert work["request"].endswith("verbatim:\nCheck the deploy")
+
+
+def test_a_name_after_a_dangling_switch_phrase_and_oracles_go_on_switches(lab):
+    lab = lab()
+    lab.user_fragments("Can you put me through to")
+    lab.tools.dispatched.clear()
+    lab.conv.receive({"type": "session.output_transcript.delta", "delta": " Go on.",
+                      "start_ms": lab.ms, "end_ms": lab.ms + 400})
+    lab.user_fragments("Marcus")
+    assert lab.tools.dispatched == []
+    assert lab.conv.pending_swap["contact"]["persona"] == "Marcus"
+
+
+def test_a_switch_to_an_unknown_agent_is_not_sent_to_the_primary(lab):
+    lab = lab()
+    lab.user("Can you put me through to Zorblax")
+    assert lab.tools.dispatched == []
+    assert lab.opened() == [] and lab.conv.pending_swap is None
+    assert any("no agent called Zorblax" in e["content"] for e in lab.appends(0))
