@@ -148,10 +148,14 @@ int main(int argc, char* argv[]) {
             // GUI stall watchdog: any block longer than the threshold writes the
             // GUI thread's stack to the stall log. CLARP_STALL_THRESHOLD_MS=0
             // disables it.
+            // Screenshot and test runs (CLARP_SCREENSHOT_PATH) keep it off unless
+            // asked: they must not signal the GUI thread mid-test or write into
+            // the user's stall log.
+            const bool screenshotRun = qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH");
             const int stallThresholdMs = qEnvironmentVariableIsSet("CLARP_STALL_THRESHOLD_MS")
-                ? qEnvironmentVariableIntValue("CLARP_STALL_THRESHOLD_MS") : 150;
+                ? qEnvironmentVariableIntValue("CLARP_STALL_THRESHOLD_MS") : (screenshotRun ? 0 : 150);
             const int stallMemoryMb = qEnvironmentVariableIsSet("CLARP_STALL_MEMORY_MB")
-                ? qEnvironmentVariableIntValue("CLARP_STALL_MEMORY_MB") : 1536;
+                ? qEnvironmentVariableIntValue("CLARP_STALL_MEMORY_MB") : (screenshotRun ? 0 : 1536);
             stallMonitor = std::make_unique<clarp::StallMonitor>(
                 stallThresholdMs, qEnvironmentVariable("CLARP_STALL_LOG"), nullptr, stallMemoryMb);
             clarp::StallMonitor* stalls = stallMonitor.get();
