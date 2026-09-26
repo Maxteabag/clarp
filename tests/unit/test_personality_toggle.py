@@ -1,5 +1,5 @@
 from lib import settings_store
-from lib.codex_runner import persona_identity_instruction
+from lib.voice_preamble import persona_identity_instruction
 from lib.personalities import KEY_ENABLED
 
 

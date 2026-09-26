@@ -121,13 +121,13 @@ def test_attention_inspects_all_priorities_then_optionally_filters_session(monke
 
 
 def test_both_app_instructions_allow_native_questions_but_prohibit_cli_popups(monkeypatch):
-    from lib import codex_runner
+    from lib import voice_preamble
 
     monkeypatch.syspath_prepend(str(_ROOT / "plugin/hooks"))
     spec = importlib.util.spec_from_file_location("question_pwa_hook", _ROOT / "plugin/hooks/pwa_source_flag.py")
     hook = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(hook)
-    for text in (codex_runner._NO_INTERACTIVE_QUESTIONS,
+    for text in (voice_preamble._NO_INTERACTIVE_QUESTIONS,
                  hook._build_additional_context(app_dispatched=True, voiced=False)):
         assert "clarp-agent-artifacts question" in text
         assert "supports native" in text
