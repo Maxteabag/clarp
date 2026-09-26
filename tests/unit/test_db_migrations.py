@@ -271,3 +271,24 @@ def test_v93_adds_helper_lineage_and_backfills_janitor_role(tmp_path):
     assert rows["j1"]["role"] == "janitor"
     assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     db._migrate(upgraded)
+
+
+def test_v94_indexes_tool_explanation_release_expiry(tmp_path):
+    path = tmp_path / "v93.sqlite"
+    con = _fresh(path)
+    con.executescript("""
+        DROP INDEX tool_explanation_releases_expiry;
+        INSERT INTO tool_explanation_releases VALUES ('view', 5);
+        PRAGMA user_version = 93;
+    """)
+    con.close()
+
+    upgraded = _connect(path)
+    db._migrate(upgraded)
+
+    assert "tool_explanation_releases_expiry" in _names(upgraded, "index")
+    assert upgraded.execute("SELECT expires_at FROM tool_explanation_releases").fetchone()[0] == 5
+    plan = " ".join(r[3] for r in upgraded.execute(
+        "EXPLAIN QUERY PLAN DELETE FROM tool_explanation_releases WHERE expires_at<=?", (1,)))
+    assert "tool_explanation_releases_expiry" in plan
+    assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION

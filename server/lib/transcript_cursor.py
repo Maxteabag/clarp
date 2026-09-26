@@ -88,6 +88,13 @@ class TranscriptCursor:
     def write_position(self, pos: int) -> None:
         try:
             from . import db
+            # Hooks call this on every poll; an unchanged position needs no write lock.
+            row = db.conn().execute(
+                "SELECT position FROM cursor_positions WHERE backend_session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            if row and int(row["position"]) == int(pos):
+                return
             db.conn().execute(
                 """INSERT INTO cursor_positions (backend_session_id, position, updated_at)
                    VALUES (?, ?, ?)

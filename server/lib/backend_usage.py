@@ -770,27 +770,38 @@ def _response_row(backend: str, now_ms: int) -> dict[str, Any]:
     }
 
 
+_OPEN_LIMITS_SQL = """SELECT e.*,w.used_percentage,w.resets_at
+     FROM provider_limit_episodes e
+     JOIN provider_usage_windows w
+       ON w.provider_instance_id=e.provider_instance_id
+      AND w.auth_generation_id=e.auth_generation_id
+      AND w.window_id=e.window_id
+    WHERE e.status='open'
+      AND e.current_kind IN ('warning','hard_limit')
+      AND w.resets_at IS NOT NULL AND w.resets_at<>''"""
+
+
+def _expired_limits(database, now_ms: int) -> list[dict[str, Any]]:
+    expired = []
+    for raw in database.execute(_OPEN_LIMITS_SQL).fetchall():
+        episode = dict(raw)
+        reset_ms = _iso_to_ms(episode.get("resets_at"))
+        if reset_ms is not None and now_ms >= reset_ms:
+            expired.append(episode)
+    return expired
+
+
 def _reconcile_expired_limits(now_ms: int) -> list[dict[str, Any]]:
     database = db.conn()
+    # Every usage GET lands here; only an episode whose reset has passed
+    # needs the write lock, so look first on the autocommit connection.
+    if not _expired_limits(database, now_ms):
+        return []
     events: list[dict[str, Any]] = []
     database.execute("BEGIN IMMEDIATE")
     try:
-        rows = database.execute(
-            """SELECT e.*,w.used_percentage,w.resets_at
-                 FROM provider_limit_episodes e
-                 JOIN provider_usage_windows w
-                   ON w.provider_instance_id=e.provider_instance_id
-                  AND w.auth_generation_id=e.auth_generation_id
-                  AND w.window_id=e.window_id
-                WHERE e.status='open'
-                  AND e.current_kind IN ('warning','hard_limit')
-                  AND w.resets_at IS NOT NULL AND w.resets_at<>''""",
-        ).fetchall()
-        for raw in rows:
-            episode = dict(raw)
-            reset_ms = _iso_to_ms(episode.get("resets_at"))
-            if reset_ms is None or now_ms < reset_ms:
-                continue
+        # Re-read under the lock: a concurrent GET may have closed them.
+        for episode in _expired_limits(database, now_ms):
             event = _insert_limit_event(
                 database, episode=episode, kind="unknown",
                 threshold_id=None, used_percentage=None,
