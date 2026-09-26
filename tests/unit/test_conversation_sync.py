@@ -431,3 +431,35 @@ def test_only_client_rows_do_not_make_adopted_history_warm(tmp_path, monkeypatch
             lambda _: [{'role':'assistant','text':'prior history','timestamp':'2025-01-01T00:00:00Z'}])
     result = load_conversation(session='reliable', background_import=True)
     assert any(t['text'] == 'prior history' for t in result['turns'])
+
+
+def test_claude_subagent_cell_reaches_the_log_intact(tmp_path):
+    import json
+    from lib.transcript_log import parse_turns
+
+    agent_id = _agent(tmp_path)
+    transcript = tmp_path / "parent.jsonl"
+    transcript.write_text("\n".join(json.dumps(r) for r in [
+        {"type": "assistant", "timestamp": "2026-01-01T00:00:00Z", "message": {"content": [
+            {"type": "tool_use", "id": "toolu_bg", "name": "Agent", "input": {
+                "description": "Map auth", "prompt": "Read it",
+                "subagent_type": "Explore", "run_in_background": True}}]}},
+        {"type": "user", "timestamp": "2026-01-01T00:00:01Z", "toolUseResult": {
+            "isAsync": True, "status": "async_launched", "agentId": "a0bg"},
+         "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_bg",
+                                  "content": "Async agent launched successfully."}]}},
+    ]) + "\n")
+    _store(agent_id, parse_turns(transcript))
+
+    [turn] = _load("reliable", limit=20)["turns"]
+    [cell] = turn["display_cells"]
+    assert cell["kind"] == "subagents"
+    assert cell["status"] == "running"
+    assert cell["ephemeral"] is True
+    assert cell["background"] is True
+    assert turn["tools"] == []
+
+    [compact] = _load("reliable", limit=20, include_tool_details=False)["turns"]
+    assert compact["display_cells"][0]["kind"] == "subagents"
+    assert compact["display_cells"][0]["ephemeral"] is True
+    assert compact["activity_count"] == 1

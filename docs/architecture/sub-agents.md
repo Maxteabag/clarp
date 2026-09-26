@@ -90,7 +90,9 @@ caller, and cleanup when done.
   shows any agent with an active job as `background`. The apps already draw
   the running hourglass for that, and can switch to the agent glyph when
   `sub_agents > 0`.
-- Harness sub-agents: index Claude's `subagents/agent-*.jsonl` files and emit
-  the same `subagents` cell Codex gets, and add the missing desktop renderer.
-  Mark these "ephemeral: dies with the turn", so it is clear which helpers
-  survive a restart.
+- Harness sub-agents: Claude's `Agent`/`Task` calls now become the same
+  `subagents` cell Codex gets, marked `ephemeral: true` ("dies with the
+  turn") so it is clear which helpers survive a restart, and linked to the
+  sub-agent's `subagents/agent-*.jsonl` transcript. Those transcripts are
+  not imported as conversations. See "Display cells" in
+  [docs/protocol.md](../protocol.md). The desktop renderer is still missing.
