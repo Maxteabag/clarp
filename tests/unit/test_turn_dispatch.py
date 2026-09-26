@@ -10,7 +10,6 @@ from lib.turn_dispatch import (
     MAX_ATTEMPTS,
     DispatchError,
     TurnDispatchService,
-    _spoken_failure_text,
     clear_for_agent,
 )
 import lib.turn_dispatch as _td
@@ -984,17 +983,6 @@ def test_interruption_is_recorded_but_not_spoken(tmp_path):
     assert state["detail"]["reason"] == "usage_limit"
     # Muted: nothing is queued for TTS.
     assert tts_queue.recent(5) == []
-
-
-def test_spoken_usage_limit_includes_reset_time():
-    text = _spoken_failure_text(
-        persona="Mike",
-        category="usage_limit",
-        human="Usage limit reached",
-        message="You've hit your usage limit. Try again at 3:29 PM.",
-    )
-
-    assert text == "Mike is out of usage. Try again at 3:29 PM."
 
 
 def test_nonzero_runner_exit_notifies_without_retry(tmp_path):

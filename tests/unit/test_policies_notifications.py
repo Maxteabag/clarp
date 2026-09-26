@@ -93,14 +93,5 @@ def test_muted_agent_keeps_badge_but_not_push(content):
     assert notify_decision("user", turn(""), muted, STRICT) == Suppress("no-user-facing-content")
 
 
-@pytest.mark.parametrize("origin", ALL_ORIGINS)
-@pytest.mark.parametrize("present", [False, True])
-def test_desktop_presence_does_not_change_classification(origin, present):
-    for caps in (CHAT, LEADER, JANITOR):
-        for settings in (STRICT, LAX):
-            assert notify_decision(origin, turn(), caps, settings, desktop_present=present) == \
-                notify_decision(origin, turn(), caps, settings)
-
-
 def test_origin_is_stripped():
     assert notify_decision("  agent ", turn(), CHAT, STRICT) == Suppress("not-user-facing-origin:agent")

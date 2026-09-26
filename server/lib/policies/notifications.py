@@ -68,13 +68,10 @@ Decision = Notify | Suppress
 
 def notify_decision(origin: str, completed_turn: CompletedTurn,
                     capabilities: AgentCapabilities,
-                    settings: NotificationSettings,
-                    desktop_present: bool = False) -> Decision:
+                    settings: NotificationSettings) -> Decision:
     """Decide whether the completed turn pages the user.
 
-    ``desktop_present`` is accepted so the caller has one place to hand
-    presence over; today presence is applied at delivery (``apns``) and does
-    not change classification, and a test pins that.
+    Desktop presence is applied at delivery (``apns``), not here.
     """
     origin = (origin or "").strip()
     if origin == "janitor" or (capabilities.present and not capabilities.can_chat):

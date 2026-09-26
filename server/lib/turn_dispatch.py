@@ -5,7 +5,6 @@ import contextlib
 import dataclasses
 import pathlib
 import json
-import re
 import threading
 import functools
 import weakref
@@ -138,45 +137,6 @@ def free_stale_slot(agent_id: str) -> str | None:
     nothing queued behind it. Returns the dead trace id, or None if nothing
     was freed. Spawning slots and terminal sentinels are left alone."""
     return _SLOTS.free_stale(agent_id)
-
-
-def _reset_hint(message: str) -> str:
-    msg = message or ""
-    patterns = (
-        r"(?:try again|resets?)\s+(?:at|in)?\s*([^.\n,;]+(?:\([^)]+\))?)",
-        r"(?:try again|resets?)\s+([^.\n,;]+(?:\([^)]+\))?)",
-    )
-    for pattern in patterns:
-        m = re.search(pattern, msg, re.I)
-        if m:
-            value = " ".join(m.group(1).split())
-            return value.strip(" .")
-    return ""
-
-
-def _spoken_failure_text(
-    *,
-    persona: str,
-    category: str,
-    human: str,
-    message: str,
-) -> str:
-    name = (persona or "This agent").strip()
-    if category == error_classify.USAGE_LIMIT:
-        reset = _reset_hint(message)
-        if reset:
-            return f"{name} is out of usage. Try again at {reset}."
-        return f"{name} is out of usage or credits right now."
-    if category == error_classify.RUNNER_EXIT:
-        return (
-            f"{name} stopped before returning a reply. "
-            "The command exited without usable output."
-        )
-    if category == error_classify.TRANSIENT:
-        return f"{name} hit a temporary API error. Try again in a moment."
-    if category == error_classify.CONNECTION:
-        return f"{name} lost connection and retries were exhausted."
-    return f"{name} was interrupted. {human}."
 
 
 @dataclass(frozen=True)
@@ -2010,7 +1970,8 @@ class TurnDispatchService:
                 "provider_limit_event_id"]
         turn_lifecycle.try_transition(
             spec.agent_id, TurnEvent.PROCESS_EXITED_FAILED, state_detail)
-        self._speak_interruption(spec, category, human, message)
+        # Interruptions surface as agent state and the turnInterrupted event;
+        # they are not spoken aloud (hearing raw failure text was jarring).
         eventlog.emit("server", "turnInterrupted", context=spec.context,
                       detail={"reason": category, "attempts": attempts,
                               "err": (message or "")[:300]})
@@ -2023,48 +1984,6 @@ class TurnDispatchService:
         # Terminal: a killed/interrupted turn still drains anything queued
         # behind it (e.g. an explicit stop, then your next message runs).
         self._finish_turn(spec)
-
-    def _speak_interruption(
-        self,
-        spec: _TurnSpec,
-        category: str,
-        human: str,
-        message: str | None,
-    ) -> None:
-        # Interruptions are recorded as agent state + a turnInterrupted event
-        # (see _mark_interrupted) so the UI can surface them, but they are no
-        # longer spoken aloud — hearing raw failure text read out was jarring.
-        # Flip this return to re-enable voiced interruption notices.
-        return
-        if not spec.synthesize_audio:
-            return
-        try:
-            agent = agents_db.get_by_agent_id(spec.agent_id)
-            if not agent:
-                return
-            text = _spoken_failure_text(
-                persona=agent.get("persona") or spec.session,
-                category=category,
-                human=human,
-                message=message or "",
-            )
-            tts_queue.enqueue(
-                agent_id=spec.agent_id,
-                text=text,
-                voice_id=agent.get("voice_id") or "",
-                session=spec.session,
-                source="turn_interrupted",
-                trace_id=spec.trace_id,
-                synthesize_audio=True,
-            )
-            eventlog.emit(
-                "server",
-                "turnInterruptedSpoken",
-                context=spec.context,
-                detail={"reason": category, "text": text},
-            )
-        except Exception as e:  # noqa: BLE001
-            log_exception("turnInterruptedSpeakFail", e, detail=spec.session)
 
     def _sticky_session(self) -> str:
         """Session of the currently-focused agent — the last one addressed by
