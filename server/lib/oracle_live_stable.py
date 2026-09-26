@@ -119,10 +119,18 @@ RESULT_RELEASE_SILENCE_SECONDS = 4.5
 # A relayed part Oracle never started speaking stops blocking newer results
 # after this long; the relay stays continuable.
 RELAY_STALL_SECONDS = 15.0
+# A contact switch ("put me through to Theo") waits for Oracle to finish its
+# one-line announcement: this much silence after it spoke, or at most
+# SWAP_ANNOUNCE_TIMEOUT when the announcement never plays.
+SWAP_QUIET_SECONDS = 0.8
+SWAP_ANNOUNCE_TIMEOUT = 5.0
+# Upper bound on the conversation excerpt a swapped-in session starts with
+# when there is no durable thread (GPT-Live accepts 8192 input tokens).
+SWAP_HISTORY_BYTES = 6000
 DECISION_POLL_SECONDS = 1.0
 DECISION_PRESENTATION_COOLDOWN_SECONDS = 4.0
 from .oracle_prompt import PROMPT  # one voice prompt for every engine
-from . import oracle_attention, oracle_relay, oracle_strategy, oracle_voice_context, oracle_memory
+from . import oracle_attention, oracle_relay, oracle_strategy, oracle_voice_context, oracle_memory, oracle_voices
 ROUTING = """Route every actionable request in current_user_requests using the
 actual roster and authoritative task records. These are the new unadmitted
 user fragments; conversation is historical reference for resolving their
@@ -146,6 +154,9 @@ already in authoritative_tasks is served with read_result, never by asking the
 agent again; its relay field shows how many parts were already sent. To see
 what an agent or the user said recently, use read_agent_transcript; it reads
 without prompting the agent.
+When the user asks to talk to an agent directly or to be put through to them,
+call switch_contact with that agent; to return to Oracle, call it with
+"oracle". Asking an agent to talk to someone else is ordinary work, not a switch.
 """
 
 
@@ -194,17 +205,28 @@ def router_tools():
         "Omit operation_id for the latest reply; omit from_part to continue after the last part sent.",
         {"operation_id": {"type": "string"}, "from_part": {"type": "integer", "minimum": 1},
          "verbatim": {"type": "boolean"}}, []))
+    tools.append(_tool("switch_contact",
+        "Put the user through to one agent so they talk to that agent directly, in the agent's own voice, or "
+        "return them to Oracle with agent \"oracle\". Only for an explicit request to talk to someone directly; "
+        "never for work the agent should do.",
+        {"agent": {"type": "string"}}, ["agent"]))
     return tools
 
 
-def live_config(*, roster=None, delegation_strategy="operator", voice_context=None, history=()):
+def live_config(*, roster=None, delegation_strategy="operator", voice_context=None, history=(),
+                voice=VOICE, contact=None):
     """Session config; the roster and contact ride in the instructions.
 
     The voice model holds no tools, so unless it is told who the agents are it
     cannot know that "Omar" is someone it can reach. `roster` is the output of
-    the list_agents tool.
+    the list_agents tool. `contact` names the agent the user is talking to
+    directly; that session speaks as the agent, in `voice`.
     """
-    instructions = oracle_strategy.DIRECT_INSTRUCTIONS if delegation_strategy == "direct_contact" else PROMPT
+    if contact:
+        instructions = oracle_voices.contact_instructions(contact)
+    else:
+        instructions = oracle_strategy.DIRECT_INSTRUCTIONS if delegation_strategy == "direct_contact" else PROMPT
+        instructions += oracle_voices.SWITCH_NOTE
     if roster:
         names = ", ".join(f"{a['name']} ({a['session']})" for a in roster.get("agents", [])[:40])
         contact = roster.get("oracle_contact") or ""
@@ -216,7 +238,7 @@ def live_config(*, roster=None, delegation_strategy="operator", voice_context=No
     instructions += oracle_voice_context.instructions(voice_context)
     result = {"model": MODEL, "instructions": instructions,
             "audio": {"format": {"type": "audio/pcm", "rate": 24000},
-                      "output": {"voice": VOICE}}, "delegation": {"type": "client"}}
+                      "output": {"voice": voice}}, "delegation": {"type": "client"}}
     if history: result["input"] = list(history)
     return result
 
@@ -295,6 +317,15 @@ class Conversation:
         self.active_relay = None
         self.narration = "on"
         self.progress_interval = 0
+        # Talking to an agent directly: {"persona", "session", "voice"}, or
+        # None while the user talks to Oracle. A requested switch waits in
+        # pending_swap for Oracle's announcement; open_upstream(session) ->
+        # (socket, provider session id) is supplied by serve().
+        self.contact = None
+        self.pending_swap = None
+        self.open_upstream = None
+        self.voice_overrides = {}
+        self.voice_context = None
         self.direct_call_prefix = __import__("uuid").uuid4().hex
         self.stop = threading.Event()
         self.closed = threading.Event()
@@ -425,7 +456,13 @@ class Conversation:
                     self.last_input = self.clock()
             self.send(event)
 
-    def receive(self, event):
+    def receive(self, event, source=None):
+        if source is not None and source is not self.upstream:
+            # A session retired by a voice switch: its trailing audio and its
+            # session.closed must not reach the phone, which would reconnect.
+            if self.journal and isinstance(event, dict) and event.get("type") not in _AUDIO_EVENTS:
+                self.journal.record("upstream.retired_event", {"event_type": event.get("type")})
+            return
         kind = event.get("type")
         if kind == "session.output_audio.delta":
             data = base64.b64decode(event.get("delta", ""))
@@ -517,6 +554,12 @@ class Conversation:
                         if revision <= self.resume_revision or self.memory.admissions(revision):
                             if self.journal:self.journal.record("route.saved_history_not_replayed", {"revision":revision})
                             return
+                    if self.serve_contact_switch(conversation, revision):
+                        self.routed_revision = revision
+                        self.checkpoint()
+                        return
+                    contact = self.contact
+                    direct = contact is not None or self.delegation_strategy == "direct_contact"
                     tools = router_tools()
                     with self.tools.lock:
                         task_ids = tuple(self.tools.delegations)
@@ -533,7 +576,8 @@ class Conversation:
                             "input": json.dumps(input_payload, ensure_ascii=False),
                             "tools": tools, "max_output_tokens": 2400,
                             "reasoning": {"effort": "low"}, "parallel_tool_calls": True}
-                    if self.delegation_strategy == "direct_contact":
+                    if direct:
+                        # Direct-to-primary, or the agent the user asked to talk to directly.
                         if revision in self.direct_admitted_revisions:
                             return
                         if self.serve_meta_turn(conversation, revision):
@@ -541,7 +585,8 @@ class Conversation:
                             self.checkpoint()
                             return
                         result = oracle_strategy.direct_proposal(conversation, self.tools,
-                            "direct-" + self.direct_call_prefix + "-" + str(revision))
+                            "direct-" + self.direct_call_prefix + "-" + str(revision),
+                            target=contact["session"] if contact else None)
                     else:
                         request = Request("https://api.openai.com/v1/responses", json.dumps(body).encode(),
                                           {"Authorization": "Bearer "+self.api_key, "Content-Type": "application/json"})
@@ -569,6 +614,17 @@ class Conversation:
                                         "revision": revision, "name": item["name"], "arguments": arguments})
                                 self.read_result(arguments.get("operation_id"), arguments.get("from_part"),
                                                  verbatim=arguments.get("verbatim"))
+                                action_index += 1
+                                continue
+                            if item["name"] == "switch_contact":
+                                # A voice switch, not agent work: no admission.
+                                if self.journal:
+                                    self.journal.record("router.proposal", {"delegation_id": ident,
+                                        "revision": revision, "name": item["name"], "arguments": arguments})
+                                try:
+                                    self.request_switch(arguments.get("agent"))
+                                except ValueError as exc:
+                                    self.deliver_tool_output(item["name"], {"error": str(exc)})
                                 action_index += 1
                                 continue
                             admission = self.memory.admission(revision, action_index, item["name"], arguments) if self.memory else None
@@ -602,9 +658,10 @@ class Conversation:
                             if self.journal:
                                 self.journal.record("router.receipt", {"delegation_id": ident,
                                     "call_id": call_id, "result": output})
-                            if self.delegation_strategy == "direct_contact" and output.get("status") in ("accepted", "queued"):
+                            if direct and output.get("status") in ("accepted", "queued"):
                                 self.direct_admitted_revisions.add(revision)
-                                self.append("thinking", oracle_strategy.admission_context(self.tools.fallback,
+                                self.append("thinking", oracle_strategy.admission_context(
+                                    contact["session"] if contact else self.tools.fallback,
                                     output.get("operation_id"), arguments.get("request", ""), output["status"],
                                     narration=self.narration))
                             if output.get("status") not in ("accepted", "queued") and not output.get("cancelled"):
@@ -629,11 +686,16 @@ class Conversation:
 
     def tick(self):
         now = self.clock()
-        self.notify_pending_context()
         if self.last_output_active and now-self.last_output > QUIET_AFTER_SECONDS:
             self.last_output_active = False
+            self.mark_relay_spoken()
             self.journal_event("host", {"type": "oracle_v2.quiet"})
             self.downstream({"type": "oracle_v2.quiet"})
+        if self.pending_swap is not None:
+            # Nothing new goes to a session that is about to be replaced.
+            self.advance_swap(now)
+            return
+        self.notify_pending_context()
         for row in self.tools.results():
             ident = row["delegation_id"]
             with self.lock:
@@ -653,6 +715,9 @@ class Conversation:
                 return
             row = self.pending.pop(0)
             self.last_append = now
+        relay = self.relay_for(row)
+        if self.contact is not None and row.get("session") == self.contact["session"]:
+            relay.verbatim = True  # the agent's own words, in the agent's voice
         if self.delegation_strategy == "direct_contact":
             key = oracle_strategy.native_finding_identity(row)
             if key and key in self.forwarded_findings:
@@ -662,10 +727,10 @@ class Conversation:
                 self.results_sent.add(row["delegation_id"])
                 self.checkpoint()
                 return
-            self.relay(self.relay_for(row), now)
+            self.relay(relay, now)
             if key:self.forwarded_findings[key] = row["delegation_id"]
         else:
-            self.relay(self.relay_for(row), now)
+            self.relay(relay, now)
         self.results_sent.add(row["delegation_id"])
         self.checkpoint()
 
@@ -680,7 +745,7 @@ class Conversation:
                 relay = self.relays[ident] = oracle_relay.result_relay(row)
                 cursor = self.relay_cursors.get(ident)
                 if isinstance(cursor, int):
-                    relay.next = relay.sent = min(max(cursor, 0), relay.total)
+                    relay.next = relay.sent = relay.done = min(max(cursor, 0), relay.total)
             return relay
 
     def task_record(self, row):
@@ -700,6 +765,7 @@ class Conversation:
             self.relays[relay.key] = relay
             self.active_relay = relay
             relay.next = start
+            relay.done = min(relay.done, start)
             relay.auto = 0
             relay.held = False
         self.send_part(relay, now, served=served, resumed=resumed)
@@ -844,6 +910,171 @@ class Conversation:
         self.relay(oracle_relay.transcript_relay(output, verbatim=verbatim), served=True)
         return True
 
+    # ---- talking to an agent directly (oracle_voices) -----------------------
+
+    def mark_relay_spoken(self):
+        """Oracle went quiet: the parts it was sent are spoken, unless the user
+        cut in after the newest part or a switch announcement followed it."""
+        with self.lock:
+            relay = self.active_relay
+            if relay is None or self.last_output <= relay.sent_at:
+                return
+            if max(self.last_transcript, self.last_input) > relay.sent_at:
+                return
+            announced = (self.pending_swap or {}).get("announced_at")
+            if announced is not None and announced > relay.sent_at:
+                return
+            relay.done = max(relay.done, relay.next)
+
+    def serve_contact_switch(self, conversation, revision):
+        """Start a switch for an unrouted turn that is only a switch phrase."""
+        current = _current_user_requests(conversation, self.routed_revision)
+        latest = " ".join(str(row.get("text") or "").strip() for row in current)
+        wanted = oracle_voices.switch_request(latest)
+        if wanted is None:
+            return False
+        kind, name = wanted
+        try:
+            served = self.request_switch(name if kind == "agent" else "oracle")
+        except ValueError:
+            return False  # not an agent we know: route the turn as usual
+        if self.journal:
+            self.journal.record("route.contact_switch", {"revision": revision, "target": name or "oracle"})
+        return served
+
+    def request_switch(self, name):
+        """Queue a switch to agent ``name`` or back to Oracle.
+
+        Raises ValueError for an unknown agent. The swap itself happens in
+        tick() once Oracle has said it is putting the user through.
+        """
+        target = str(name or "").strip()
+        if not target or target.casefold() in ("oracle", "back"):
+            contact = None
+        else:
+            agent = self.tools.resolve(target)
+            persona = str(agent.get("persona") or target)
+            contact = {"persona": persona, "session": agent["session"],
+                       "voice": oracle_voices.voice_for(persona, self.voice_overrides)}
+        current = self.contact
+        who = contact["persona"] if contact else "Oracle"
+        if (contact is None) == (current is None) and (contact is None or contact["session"] == current["session"]):
+            self.append("thinking", f"The user is already talking to {who}; nothing to switch.")
+            return True
+        with self.lock:
+            self.pending_swap = {"contact": contact, "announced_at": None}
+        if self.journal:
+            self.journal.record("contact.switch_requested", {"to": who,
+                "voice": contact["voice"] if contact else VOICE})
+        if self.narration != "off":
+            line = f"Putting you through to {who}." if contact else "Handing you back to Oracle."
+            self.append("commentary", "Host note: the Host is switching this call to another voice. "
+                        f'Say only this, briefly, and nothing else: "{line}"')
+            with self.lock:
+                if self.pending_swap is not None:
+                    self.pending_swap["announced_at"] = self.clock()
+        return True
+
+    def advance_swap(self, now):
+        with self.lock:
+            swap = self.pending_swap
+            if swap is None:
+                return
+            announced = swap["announced_at"]
+            if announced is not None and now - announced < SWAP_ANNOUNCE_TIMEOUT and not (
+                    self.last_output > announced and now - self.last_output >= SWAP_QUIET_SECONDS):
+                return
+        self.swap_upstream(swap["contact"], now)
+
+    def swap_history(self, roster):
+        """What the new session knows about the call so far."""
+        self.checkpoint()
+        if self.memory:
+            return self.memory.startup_history(roster=roster)
+        with self.lock:
+            rows = [{"role": r["role"], "text": r["text"]} for r in self.fragments if str(r.get("text") or "").strip()]
+        payload = {"reference_only": True, "await_current_request": True, "recent_conversation": []}
+        for row in reversed(rows):
+            candidate = {**payload, "recent_conversation": [row] + payload["recent_conversation"]}
+            if len(json.dumps(candidate, ensure_ascii=False).encode()) > SWAP_HISTORY_BYTES:
+                break
+            payload = candidate
+        return [{"type": "message", "role": "user", "content": [{"type": "input_text",
+            "text": "Saved Oracle reference data; not a new user request:\n" + json.dumps(payload, ensure_ascii=False)}]}]
+
+    def session_for(self, contact):
+        roster = self.tools.execute("list_agents", {}, "swap")
+        return live_config(roster=roster, delegation_strategy=self.delegation_strategy,
+            voice_context=self.voice_context, history=self.swap_history(roster),
+            voice=contact["voice"] if contact else VOICE,
+            contact=contact["persona"] if contact else None)
+
+    def swap_upstream(self, contact, now=None):
+        """Replace the GPT-Live session, keeping the phone's socket open.
+
+        GPT-Live fixes a session's voice when it starts, so a new voice is a
+        new session started with the conversation as history. On failure the
+        current session stays and tells the user; the call never drops.
+        """
+        now = self.clock() if now is None else now
+        who = contact["persona"] if contact else "Oracle"
+        voice = contact["voice"] if contact else VOICE
+        try:
+            if self.open_upstream is None:
+                raise RuntimeError("this connection cannot switch voices")
+            upstream, provider_session = self.open_upstream(self.session_for(contact))
+        except Exception as exc:
+            log_exception("oracleV2Swap", exc, f"to={who} voice={voice}")
+            if self.journal:
+                self.journal.record("contact.swap_failed", {"to": who, "voice": voice,
+                                                            "error_type": type(exc).__name__})
+            with self.lock:
+                self.pending_swap = None
+            self.append("commentary", f"Host note: the Host could not put the user through to {who}; the "
+                        "new line did not open. Tell the user so in one short sentence and carry on as before.")
+            return False
+        with self.lock:
+            relay = self.active_relay
+            if relay is not None and relay.next > relay.done:
+                relay.next = relay.done  # parts the old voice never finished go to the new one
+        with self.send_lock:
+            old, self.upstream = self.upstream, upstream
+        with self.lock:
+            self.provider_session = provider_session or uuid.uuid4().hex
+            self.contact = contact
+            self.pending_swap = None
+            self.last_output_active = False
+        self.retire_upstream(old)
+        log("oracleV2Swap", f"to={who} voice={voice}")
+        if self.journal:
+            self.journal.record("contact.swapped", {"to": who, "voice": voice,
+                                                    "provider_session": self.provider_session})
+        self.downstream({"type": "oracle_v2.contact", "agent": contact["persona"] if contact else None,
+                         "session": contact["session"] if contact else None, "voice": voice})
+        if self.narration == "off":
+            self.append("instructions", NARRATION_OFF)
+        self.checkpoint()
+        if relay is not None and relay.remaining > 0 and not relay.held:
+            with self.lock:
+                relay.auto = 0
+            self.send_part(relay, now, resumed=relay.next > 0)
+        elif self.narration != "off":
+            self.append("commentary", f"Host note: you are now on the line as {who}. Greet the user in a "
+                        f"few words as {who}" + (", for example: I'm back." if contact is None else "."))
+        return True
+
+    def retire_upstream(self, old):
+        try:
+            old.send(json.dumps({"type": "session.close"}))
+        except Exception as exc:
+            log_exception("oracleV2SwapRetire", exc, "session.close to the retired upstream")
+        try:
+            # shutdown() drops the socket without waiting on a close frame the
+            # receive thread may be reading; the lab's fake only has close().
+            (getattr(old, "shutdown", None) or old.close)()
+        except Exception as exc:
+            log_exception("oracleV2SwapRetire", exc, "closing the retired upstream")
+
     def deliver_tool_output(self, name, output):
         """Router tool results: transcripts and long outputs arrive in parts."""
         if name in ("read_agent_transcript", "read_agent_messages") and isinstance(output.get("messages"), list):
@@ -946,6 +1177,70 @@ class Conversation:
             break
 
 
+def pump_upstream(conversation, timeout_exc):
+    """Feed upstream events to ``conversation`` until the call ends.
+
+    The upstream is read afresh every loop: a voice switch replaces it, and
+    the retired socket's error or end must not end the call. Errors on the
+    current socket propagate to the caller.
+    """
+    while not conversation.stop.is_set():
+        sock = conversation.upstream
+        try:
+            raw = sock.recv()
+        except timeout_exc:
+            continue
+        except Exception:
+            if sock is not conversation.upstream:
+                continue
+            raise
+        if not raw:
+            if sock is not conversation.upstream:
+                continue
+            break
+        conversation.receive(json.loads(raw), source=sock)
+        if conversation.closed.is_set():
+            break
+
+
+def _connect_upstream(key):
+    import websocket
+    upstream = websocket.create_connection("wss://api.openai.com/v1/live/sessions",
+        header={"Authorization": "Bearer "+key}, suppress_origin=True, timeout=20)
+    upstream.settimeout(1)
+    return upstream
+
+
+def _open_upstream(key, session, *, timeout=10.0):
+    """Open and start a GPT-Live session; return (socket, provider session id).
+
+    Used for voice switches: the new session must be live before the old one
+    is retired, so this waits for session.started and raises on an error.
+    """
+    import websocket
+    upstream = _connect_upstream(key)
+    try:
+        upstream.send(json.dumps({"type": "session.start", "session": session}))
+        deadline = time.monotonic() + timeout
+        while True:
+            if time.monotonic() > deadline:
+                raise TimeoutError("GPT-Live did not start the session")
+            try:
+                raw = upstream.recv()
+            except websocket.WebSocketTimeoutException:
+                continue
+            if not raw:
+                raise ConnectionError("GPT-Live closed before the session started")
+            event = json.loads(raw)
+            if event.get("type") == "session.started":
+                return upstream, str((event.get("session") or {}).get("id") or uuid.uuid4().hex)
+            if event.get("type") in ("error", "session.closed"):
+                raise RuntimeError("GPT-Live refused the session: " + json.dumps(event.get("error") or event)[:300])
+    except BaseException:
+        upstream.close()
+        raise
+
+
 def serve(handler):
     headers = {k.lower(): v for k, v in handler.headers.items()}
     if not ws.is_websocket_upgrade(headers):
@@ -1021,9 +1316,7 @@ def serve(handler):
                 position=float(query.get("position", ["0"])[0]), context=podcast_context,
                 source=podcast_source, model=MODEL, voice=VOICE)
         import websocket
-        upstream = websocket.create_connection("wss://api.openai.com/v1/live/sessions",
-            header={"Authorization": "Bearer "+key}, suppress_origin=True, timeout=20)
-        upstream.settimeout(1)
+        upstream = _connect_upstream(key)
         handler.wfile.write(ws.handshake_response(headers["sec-websocket-key"]))
         handler.wfile.flush()
         handler.connection.settimeout(CLIENT_IDLE_TIMEOUT)
@@ -1041,6 +1334,9 @@ def serve(handler):
             tools = AgentTools(handler.ctx, principal, fallback,
                 lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
             conversation = Conversation(upstream, downstream, tools, key, delegation_strategy=strategy, memory=memory, provider_session=token)
+            conversation.open_upstream = lambda session: _open_upstream(key, session)
+            conversation.voice_overrides = dict(getattr(cfg, "oracle_agent_voices", {}) or {})
+            conversation.voice_context = voice_context
         if getattr(cfg, "oracle_diagnostics", False):
             from .oracle_diagnostics import OracleJournal
             conversation.journal = OracleJournal()
@@ -1063,17 +1359,9 @@ def serve(handler):
 
         def pump():
             try:
-                while not conversation.stop.is_set():
-                    try:
-                        raw = upstream.recv()
-                    except websocket.WebSocketTimeoutException:
-                        continue
-                    if not raw:
-                        break
-                    conversation.receive(json.loads(raw))
-                    if conversation.closed.is_set():
-                        break
-            except Exception:
+                pump_upstream(conversation, websocket.WebSocketTimeoutException)
+            except Exception as exc:
+                log_exception("oracleV2Pump", exc, "upstream receive failed")
                 if not conversation.stop.is_set():
                     try:
                         downstream({"type": "error", "error": {"message": "Oracle v2 disconnected"}})
@@ -1131,8 +1419,13 @@ def serve(handler):
                     pass
             conversation.stop.set()
             conversation.pool.shutdown(wait=False, cancel_futures=True)
-        if upstream:
-            upstream.close()
+        # A voice switch may have replaced the socket this call opened with.
+        current = getattr(conversation, "upstream", None) or upstream
+        if current:
+            try:
+                current.close()
+            except Exception as exc:
+                log_exception("oracleV2Close", exc, "closing the upstream")
         if conversation:
             summary = dict(conversation.counts)
             summary["seconds"] = round(time.monotonic() - opened_at, 1)

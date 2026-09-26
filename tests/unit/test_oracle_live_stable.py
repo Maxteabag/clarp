@@ -180,7 +180,7 @@ def test_release_only_clears_matching_stop_hook():
 
 def test_live_config_shape():
     cfg = mod.live_config()
-    assert cfg == {"model": mod.MODEL, "instructions": PROMPT,
+    assert cfg == {"model": mod.MODEL, "instructions": PROMPT + mod.oracle_voices.SWITCH_NOTE,
                    "audio": {"format": {"type": "audio/pcm", "rate": 24000},
                              "output": {"voice": mod.VOICE}},
                    "delegation": {"type": "client"}}

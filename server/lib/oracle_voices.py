@@ -126,6 +126,17 @@ to the Host.
 """
 
 
+# Appended to Oracle's own instructions on the Host WebSocket engine, the one
+# engine that can switch voices.
+SWITCH_NOTE = """
+The Host can put the user through to an agent so they talk to that agent
+directly, in the agent's own voice. When the user asks to be put through to an
+agent, to talk to one directly, or later to come back to you, hand that request
+to the Host; do not say it is done until the Host switches the call. Asking an
+agent to talk to someone else is ordinary work, not a switch.
+"""
+
+
 _MAX_WORDS = 12
 _TAIL = r"(?: please| now| thanks| thank you)*"
 _LEAD = r"(?:(?:can|could|would|will) you |please )?"

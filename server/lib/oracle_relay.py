@@ -58,6 +58,9 @@ class Relay:
     # Index of the next part to send; ``sent`` is the furthest part ever sent.
     next: int = 0
     sent: int = 0
+    # Parts Oracle has spoken through to silence without the user cutting in;
+    # a voice switch resends the parts after this one (oracle_voices).
+    done: int = 0
     auto: int = 0
     sent_at: float = 0.0
     held: bool = False
