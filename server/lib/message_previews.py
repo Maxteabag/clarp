@@ -10,6 +10,7 @@ from typing import Any
 
 from .db import conn
 from . import origins, team_leader
+from .revisioned_cache import RevisionedCache
 from .voice_markup import clean_for_display
 from .message_context import _automation_kind, _display_text_for_message
 from .message_writes import _message_activity_sql
@@ -233,7 +234,8 @@ def last_message_preview(*, agent_id: str, max_len: int = 80) -> str:
 # Per-agent preview entries keyed by the agent's message revisions. A snapshot
 # during quiet minutes reuses every entry; while agents stream, only the
 # agents whose rows changed run their three indexed queries again.
-_PREVIEW_CACHE: dict[str, tuple[tuple[tuple[str, int], ...], dict[str, Any]]] = {}
+_PREVIEW_CACHE: RevisionedCache[str, dict[str, Any]] = RevisionedCache(
+    "message_previews.dashboard", max_entries=1024)
 
 
 def _agent_preview(agent_id: str, max_len: int, routine: tuple[str, ...]) -> dict[str, Any]:
@@ -303,18 +305,15 @@ def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
     for agent_id in live:
         key = tuple(sorted((str(session or ''), rev, stamps.get(agent_id, {}).get(session, 0))
                            for session, rev in revisions.get(agent_id, {}).items()))
-        cached = _PREVIEW_CACHE.get(agent_id)
-        if cached is not None and cached[0] == key and max_len == 80:
-            entry = dict(cached[1])
+        if max_len == 80:
+            entry = dict(_PREVIEW_CACHE.get_or_compute(
+                agent_id, key, lambda: dict(_agent_preview(agent_id, max_len, routine))))
         else:
             entry = _agent_preview(agent_id, max_len, routine)
-            if max_len == 80:
-                _PREVIEW_CACHE[agent_id] = (key, dict(entry))
         if agent_id in revisions:
             entry['revisions'] = dict(revisions[agent_id])
         result[agent_id] = entry
-    for stale in [agent_id for agent_id in _PREVIEW_CACHE if agent_id not in result]:
-        _PREVIEW_CACHE.pop(stale, None)
+    _PREVIEW_CACHE.retain(result)
     return result
 
 
