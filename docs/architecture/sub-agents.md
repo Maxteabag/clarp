@@ -1,6 +1,9 @@
 # Sub-agents
 
-Status: proposed 2026-09-26. Decision owner: Peter.
+Status: proposed 2026-09-26. Decision owner: Peter. The minimum data model,
+creation with `--parent`, the helper lifecycle and the snapshot fields are
+implemented (schema v93, Host contract 11); `clarp-sub-agent start
+--clarp-agent` creates helpers. The app rendering below is still to do.
 
 ## The question
 
