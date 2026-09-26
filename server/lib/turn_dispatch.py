@@ -15,6 +15,8 @@ from typing import Any, Callable
 from . import agents as agents_db
 from . import backend_usage, backends, config, db, error_classify, eventlog, origins
 from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
+from . import turn_lifecycle
+from .turn_lifecycle import TurnEvent
 from .log import log, log_exception
 from .protocol import AgentState, SSEType
 from .prompt_admissions import PromptAdmission
@@ -1194,15 +1196,14 @@ class TurnDispatchService:
             # A very fast backend may complete before spawn_turn returns. Do
             # not overwrite its terminal state with a late THINKING record.
             latest = agents_db.latest_state(spec.agent_id)
-            if (latest and latest.get("kind") in {
-                    AgentState.DONE, AgentState.IDLE, AgentState.INTERRUPTED}):
+            if latest and latest.get("kind") in turn_lifecycle.TERMINAL:
                 detail = latest.get("detail") or {}
                 if (detail.get("trace_id") == spec.trace_id
                         or agents_db.get_trace(spec.agent_id) != spec.trace_id):
                     return
-            agents_db.record_state(
+            turn_lifecycle.try_transition(
                 spec.agent_id,
-                AgentState.THINKING,
+                TurnEvent.SPAWN_STARTED,
                 {
                     "source": "pwa",
                     "dispatch": spec.backend,
@@ -1377,8 +1378,8 @@ class TurnDispatchService:
                 and (account_selector(spec.backend) or account_failover(spec.backend).recovering)):
             def pause():
                 _CLAIMED_AT[spec.agent_id] = time.monotonic()
-                agents_db.record_state(
-                    spec.agent_id, AgentState.THINKING,
+                turn_lifecycle.try_transition(
+                    spec.agent_id, TurnEvent.ACCOUNT_RECOVERY_WAIT,
                     {"dispatch": spec.backend, "trace_id": spec.trace_id,
                      "account_recovery": "waiting",
                      "message": f"Waiting for a {spec.backend} account with available usage"})
@@ -1527,7 +1528,8 @@ class TurnDispatchService:
                 # DONE is the durable completion signal consumed by the
                 # user-facing push and unread/badge policy. It is non-busy,
                 # just like IDLE, but preserves the completion edge.
-                agents_db.record_state(agent_id, AgentState.DONE, detail)
+                turn_lifecycle.try_transition(
+                    agent_id, TurnEvent.PROCESS_EXITED_OK, detail)
                 # Local usage accounting. The CLI's own numbers, for every
                 # dispatch mode — this is what feeds /backend-usage now that
                 # the statusline source is gone (it never ran under `-p`).
@@ -1666,8 +1668,8 @@ class TurnDispatchService:
             return
         # Unrecognised failure: keep the old behaviour — flip to IDLE so the
         # UI doesn't hang on THINKING, and log the turn as failed.
-        agents_db.record_state(
-            spec.agent_id, AgentState.IDLE,
+        turn_lifecycle.try_transition(
+            spec.agent_id, TurnEvent.TURN_FAILED_UNCLASSIFIED,
             {"dispatch": spec.backend, "error": msg[:200]},
         )
         eventlog.emit("server", "clarpTurnFail", context=spec.context,
@@ -1717,7 +1719,7 @@ class TurnDispatchService:
             result(event)
         def failed(error):
             self._mark_interrupted(spec, error_classify.RUNNER_EXIT, error, attempts=len(snapshot["models"])+1)
-        agents_db.record_state(spec.agent_id, AgentState.THINKING,
+        turn_lifecycle.try_transition(spec.agent_id, TurnEvent.MODEL_FALLBACK_STARTED,
             {"trace_id": spec.trace_id, "fallback": True, "reason": category})
         threading.Thread(target=turn_model_fallback.run,
             args=(self,spec,state,snapshot,owned,succeeded,failed),daemon=True,
@@ -1730,8 +1732,8 @@ class TurnDispatchService:
         delay = BACKOFF_BASE_SEC * (2 ** (attempt - 1))
         # Keep the agent visibly busy across the gap rather than flicking to
         # idle and back; detail marks it as a reconnect, not fresh work.
-        agents_db.record_state(
-            spec.agent_id, AgentState.THINKING,
+        turn_lifecycle.try_transition(
+            spec.agent_id, TurnEvent.RETRY_SCHEDULED,
             {"dispatch": spec.backend, "reconnect": next_attempt,
              "of": MAX_ATTEMPTS, "after_ms": int(delay * 1000),
              "summary": "Reconnecting… Your message is saved.",
@@ -1811,10 +1813,8 @@ class TurnDispatchService:
         if limit_event:
             state_detail["provider_limit_event_id"] = limit_event[
                 "provider_limit_event_id"]
-        agents_db.record_state(
-            spec.agent_id, AgentState.INTERRUPTED,
-            state_detail,
-        )
+        turn_lifecycle.try_transition(
+            spec.agent_id, TurnEvent.PROCESS_EXITED_FAILED, state_detail)
         self._speak_interruption(spec, category, human, message)
         eventlog.emit("server", "turnInterrupted", context=spec.context,
                       detail={"reason": category, "attempts": attempts,
@@ -2013,11 +2013,10 @@ def _record_janitor_cancelled(ctx, agent_id: str, session: str, trace_id: str) -
     """Publish a truthful terminal state only for this agent's current trace."""
     if agents_db.get_trace(agent_id) != trace_id:
         return
-    agents_db.record_state(agent_id, AgentState.INTERRUPTED, {
+    turn_lifecycle.try_transition(agent_id, TurnEvent.STOP_REQUESTED, {
         "source": "janitor_pause", "origin": "janitor", "trace_id": trace_id,
         "message": "Maintenance run cancelled"})
-    db.conn().execute("UPDATE turns SET ended_at=? WHERE agent_id=? AND trace_id=? AND ended_at IS NULL",
-                      (db.now_ms(), agent_id, trace_id))
+    turn_lifecycle.close_turns_for_trace(agent_id, trace_id)
     if getattr(ctx, "stream", None) is not None:
         ctx.stream.broadcast({"type": SSEType.AGENT_STATE, "session": session,
             "agent_id": agent_id, "kind": AgentState.INTERRUPTED, "origin": "janitor"})
