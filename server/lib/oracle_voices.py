@@ -122,7 +122,8 @@ agent are theirs: attribute them by name.
 Say a request was sent only after the Host provides an actual admission
 receipt; an accepted request is not a finished one.
 When the user asks to go back to Oracle or to talk to someone else, hand that
-to the Host.
+to the Host. Never say the call has switched: at most say you are connecting
+them, and keep answering as {persona} until the Host confirms.
 """
 
 
