@@ -186,3 +186,10 @@ def test_admin_helper_state_reads_and_marks(admin, monkeypatch):
         assert args.func(args) == 0
     assert sent == [("GET", "/agent-helper-state?session=h-1", None),
                     ("POST", "/agent-helper-state", {"session": "h-1", "state": "done", "by": "boss"})]
+
+
+def test_a_long_prompt_is_referenced_not_inlined(sub, tmp_path):
+    prompt = tmp_path / "long.md"
+    prompt.write_text("é" * (sub.INLINE_PROMPT_MAX // 2 + 1))
+    text = sub._helper_message("n", "h-1", "boss", tmp_path, prompt)
+    assert str(prompt) in text and "é" not in text

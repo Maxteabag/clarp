@@ -35,7 +35,7 @@ DEFAULT_MODEL = "claude-opus-5-5"
 HEARTBEAT_SEC = 90
 POLL_SEC = 30
 CLARP_BACKENDS = ("claude", "codex", "grok", "agy", "opencode", "deepseek")
-# A prompt longer than this is not inlined into the message; the helper is
+# A prompt longer than this many bytes is not inlined into the message; the helper is
 # told to read the copied prompt file instead (argv and chat rows stay small).
 INLINE_PROMPT_MAX = 60_000
 # helper_state -> the background job's end: reported and done are success.
@@ -88,7 +88,7 @@ def _admin(*args: str) -> dict:
 def _helper_message(name: str, helper: str, parent: str, workdir: pathlib.Path,
                     prompt_file: pathlib.Path) -> str:
     prompt = prompt_file.read_text()
-    body = prompt if len(prompt) <= INLINE_PROMPT_MAX else (
+    body = prompt if len(prompt.encode()) <= INLINE_PROMPT_MAX else (
         f"Your task is too long to inline. Read it in full from {prompt_file} first.")
     return (
         f"You are the Clarp helper agent `{helper}` ({name}), working for `{parent}` "
