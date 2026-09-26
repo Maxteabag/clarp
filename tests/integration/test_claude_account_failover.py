@@ -60,7 +60,7 @@ else:
                 raise AssertionError("Old Claude process was not reaped")
         switched.append(models)
         return True
-    coordinator = ClaudeFailover(turn_dispatch._TURN_LOCK, switch=switch)
+    coordinator = ClaudeFailover(turn_dispatch.OwnershipLock(), switch=switch)
     monkeypatch.setattr(turn_dispatch, "_CLAUDE_FAILOVER", coordinator)
     ctx = SimpleNamespace(default_session="one", agents_path=tmp_path / "unused.json",
                           stream=SimpleNamespace(broadcast=lambda event: None))
