@@ -52,9 +52,14 @@ class FakeTools:
     def results(self):
         return [row for row in self.rows if row["status"] in ("completed", "failed", "cancelled")]
 
+    AGENTS = {"theo": {"session": "theo-97e5", "persona": "Theo", "agent_id": "a-theo"},
+              "nadia": {"session": "nadia-1c2d", "persona": "Nadia", "agent_id": "a-nadia"}}
+
     def resolve(self, name):
-        if str(name or "").strip().casefold() in ("theo", "theo-97e5"):
-            return {"session": "theo-97e5", "persona": "Theo", "agent_id": "a-theo"}
+        wanted = str(name or "").strip().casefold()
+        for agent in self.AGENTS.values():
+            if wanted in (agent["session"], agent["persona"].casefold()):
+                return dict(agent)
         raise ValueError("Unknown or ambiguous agent; use a session from list_agents")
 
     def execute(self, name, arguments, call_id):
@@ -62,6 +67,8 @@ class FakeTools:
         if name == "list_agents":
             return {"agents": [{"name": "Theo", "session": "theo-97e5"}], "oracle_contact": "theo-97e5"}
         if name in ("investigate_with_oracle", "delegate_to_agent"):
+            if name == "delegate_to_agent":
+                self.resolve(arguments.get("agent"))
             self.dispatched.append(dict(arguments))
             return {"status": "accepted", "operation_id": "new-" + str(len(self.dispatched)),
                     "session": "theo-97e5"}
@@ -72,18 +79,48 @@ class FakeTools:
         raise AssertionError("unexpected tool " + name)
 
 
+class FakeUpstream:
+    """One GPT-Live session socket: what the Host sent it, and whether it was closed."""
+
+    def __init__(self, session=None):
+        self.session = session
+        self.sent = []
+        self.closed = False
+
+    def send(self, raw):
+        self.sent.append(raw)
+
+    def close(self):
+        self.closed = True
+
+
 class Lab:
     def __init__(self, monkeypatch, *, rows=(), transcript=(), strategy="direct_contact"):
         monkeypatch.setattr(mod.oracle_attention, "pending_decisions", lambda: [])
         monkeypatch.setattr(mod.oracle_attention, "pending_completion_notifications", lambda: [])
         self.now = [100.0]
-        self.sent, self.down = [], []
+        self.down = []
+        self.upstreams = [FakeUpstream()]
+        self.sent = self.upstreams[0].sent
+        self.open_error = None
         self.tools = FakeTools(rows, transcript)
-        self.conv = mod.Conversation(type("Up", (), {"send": self.sent.append})(), self.down.append,
+        self.conv = mod.Conversation(self.upstreams[0], self.down.append,
                                      self.tools, "key", clock=lambda: self.now[0],
                                      delegation_strategy=strategy)
+        self.conv.open_upstream = self.open_upstream
         self.ms = 0
         self.delegation = 0
+
+    def open_upstream(self, session):
+        """The fake GPT-Live: a new session per swap, or the scripted failure."""
+        if self.open_error is not None:
+            raise self.open_error
+        upstream = FakeUpstream(session)
+        self.upstreams.append(upstream)
+        return upstream, "live_" + str(len(self.upstreams))
+
+    def opened(self):
+        return [up.session for up in self.upstreams[1:]]
 
     def close(self):
         self.conv.stop.set()
@@ -123,12 +160,15 @@ class Lab:
             self.conv.routing += 1
         self.conv.route("item_" + str(self.delegation))
 
-    def appends(self):
-        return [event for event in map(json.loads, self.sent) if event["type"].endswith(".append")
+    def appends(self, index=0):
+        return [event for event in map(json.loads, self.upstreams[index].sent) if event["type"].endswith(".append")
                 and event["type"] != "session.input_audio.append"]
 
-    def parts(self):
-        return [event["content"] for event in self.appends() if "\nText:\n" in event["content"]]
+    def parts(self, index=0):
+        return [event["content"] for event in self.appends(index) if "\nText:\n" in event["content"]]
+
+    def down_types(self):
+        return [event["type"] for event in self.down]
 
 
 def _body(part):
@@ -350,3 +390,220 @@ def test_every_part_fits_one_append_even_for_multibyte_text():
     parts = [relay.part(i, served=True, resumed=True, pause_after=True) for i in range(relay.total)]
     assert all(len(part) <= oracle_relay.APPEND_CHARS for part in parts)
     assert "".join(_body(part) for part in parts) == text
+
+
+
+# ---- talking to an agent directly (per-agent voices) ------------------------
+
+def _session_voice(session):
+    return session["audio"]["output"]["voice"]
+
+
+def _history_text(session):
+    return json.dumps(session.get("input", []))
+
+
+def _switch_to_theo(lab):
+    lab.user("Put me through to Theo")
+    lab.oracle_speaks(1.5)   # "Putting you through to Theo."
+    lab.wait(2)
+
+
+def test_put_me_through_opens_theo_in_his_own_voice_on_the_same_phone_line(lab):
+    lab = lab()
+    lab.user("so the plan is recursive goals")
+    lab.tools.dispatched.clear()
+    lab.user("Put me through to Theo")
+    assert lab.tools.dispatched == [], "a switch is not work for the primary"
+    assert any("Putting you through to Theo" in e["content"] for e in lab.appends(0))
+    assert lab.opened() == [], "the swap waits for Oracle to say it is putting the user through"
+    old_session = lab.conv.provider_session
+    lab.oracle_speaks(1.5)
+    lab.wait(2)
+
+    [session] = lab.opened()
+    assert _session_voice(session) == "meridian"
+    assert "You are the voice of Theo" in session["instructions"]
+    assert "recursive goals" in _history_text(session)
+    assert lab.conv.upstream is lab.upstreams[1]
+    assert lab.upstreams[0].closed
+    assert lab.conv.provider_session not in (None, old_session)
+    contact = [e for e in lab.down if e["type"] == "oracle_v2.contact"]
+    assert contact == [{"type": "oracle_v2.contact", "agent": "Theo", "session": "theo-97e5",
+                        "voice": "meridian"}]
+
+    # The retired session's close never reaches the phone or ends the call.
+    lab.conv.receive({"type": "session.closed", "reason": "close_requested"}, source=lab.upstreams[0])
+    lab.conv.receive({"type": "session.output_audio.delta", "delta": _audio(3000)}, source=lab.upstreams[0])
+    assert "session.closed" not in lab.down_types()
+    assert "session.output_audio.delta" not in lab.down_types()
+    assert not lab.conv.closed.is_set() and not lab.conv.stop.is_set()
+
+    # From now on substantive turns go to Theo, and the receipt goes to his session.
+    lab.user("What is the status of the deploy?")
+    [work] = lab.tools.dispatched
+    assert work["agent"] == "theo-97e5" and "What is the status of the deploy?" in work["request"]
+    assert any("Work admission" in e["content"] for e in lab.appends(1))
+    assert not any("Work admission" in e["content"] for e in lab.appends(0))
+
+
+def test_back_to_oracle_restores_marin_and_oracles_instructions(lab):
+    lab = lab()
+    _switch_to_theo(lab)
+    lab.user("Back to Oracle")
+    assert lab.tools.dispatched == []
+    lab.oracle_speaks(1)
+    lab.wait(2)
+    assert [_session_voice(s) for s in lab.opened()] == ["meridian", "marin"]
+    back = lab.opened()[1]
+    assert "You are the voice of" not in back["instructions"]
+    assert "Put me through to Theo" in _history_text(back)
+    assert lab.conv.upstream is lab.upstreams[2] and lab.upstreams[1].closed
+    assert [e for e in lab.down if e["type"] == "oracle_v2.contact"][-1] == {
+        "type": "oracle_v2.contact", "agent": None, "session": None, "voice": "marin"}
+    lab.user("Check the deploy")
+    assert lab.tools.dispatched and "agent" not in lab.tools.dispatched[-1]
+
+
+def test_a_second_agent_gets_a_different_voice_than_the_first(lab):
+    lab = lab()
+    _switch_to_theo(lab)
+    lab.user("Put me through to Nadia")
+    lab.oracle_speaks(1)
+    lab.wait(2)
+    assert [_session_voice(s) for s in lab.opened()] == ["meridian", "willow"]
+    assert "You are the voice of Nadia" in lab.opened()[1]["instructions"]
+
+
+def test_asking_for_the_agent_already_on_the_line_does_not_reopen(lab):
+    lab = lab()
+    _switch_to_theo(lab)
+    lab.user("Put me through to Theo")
+    lab.wait(8)
+    assert len(lab.opened()) == 1
+
+
+def test_relay_parts_pending_across_a_switch_continue_in_theos_session(lab):
+    lab = lab(rows=[_theo_row()])
+    lab.wait(STEP)
+    lab.oracle_speaks(8)            # part 1 spoken in full
+    lab.wait(2)
+    assert len(lab.parts(0)) == 2   # part 2 sent, not yet spoken
+    _switch_to_theo(lab)
+    old, new = lab.parts(0), lab.parts(1)
+    assert [p.split(" of ")[0].rsplit("part ", 1)[1] for p in old] == ["1", "2"]
+    assert new and "part 2 of" in new[0], "the unspoken part is resent to the new voice"
+    total = len(oracle_relay.Relay("k", "x", "y", THEO_REPLY).chunks)
+    for _ in range(total):
+        lab.oracle_speaks(6)
+        lab.wait(2)
+    new = lab.parts(1)
+    assert "".join(_body(p) for p in old[:1] + new) == THEO_REPLY
+    assert len(new) == total - 1
+    assert lab.tools.dispatched == []
+
+
+def test_a_reply_spoken_before_the_switch_is_not_repeated_after_it(lab):
+    lab = lab(rows=[_theo_row()])
+    lab.wait(STEP)
+    total = len(oracle_relay.Relay("k", "x", "y", THEO_REPLY).chunks)
+    for _ in range(total):
+        lab.oracle_speaks(6)
+        lab.wait(2)
+    assert len(lab.parts(0)) == total
+    _switch_to_theo(lab)
+    lab.wait(10)
+    assert len(lab.opened()) == 1 and lab.parts(1) == []
+
+
+def test_work_requests_that_mention_talking_to_someone_do_not_switch(lab):
+    lab = lab()
+    lab.user("Ask Theo to talk to Lena")
+    lab.oracle_speaks(1)
+    lab.wait(8)
+    assert lab.opened() == []
+    assert len(lab.tools.dispatched) == 1
+
+
+def test_a_failed_swap_keeps_the_call_on_the_current_session_and_says_so(lab):
+    lab = lab()
+    lab.open_error = OSError("upstream refused")
+    lab.user("Put me through to Theo")
+    lab.oracle_speaks(1.5)
+    lab.wait(2)
+    assert lab.opened() == []
+    assert lab.conv.upstream is lab.upstreams[0] and not lab.upstreams[0].closed
+    assert not lab.conv.stop.is_set()
+    assert any("could not put the user through to Theo" in e["content"] for e in lab.appends(0))
+    assert lab.conv.contact is None
+    lab.user("Check the deploy")            # the call still works as Oracle
+    assert len(lab.tools.dispatched) == 1 and "agent" not in lab.tools.dispatched[0]
+
+
+def test_narration_off_switches_without_an_announcement(lab):
+    lab = lab()
+    lab.conv.input({"type": "oracle_v2.preferences", "narration": "off"})
+    lab.user("Let me talk to Theo directly")
+    assert not any("Putting you through" in e["content"] for e in lab.appends(0))
+    lab.wait(STEP)
+    [session] = lab.opened()
+    assert _session_voice(session) == "meridian"
+    assert any(mod.NARRATION_OFF in e["content"] for e in lab.appends(1))
+
+
+def test_config_override_picks_the_agent_voice(lab):
+    lab = lab()
+    lab.conv.voice_overrides = {"theo": "ash"}
+    _switch_to_theo(lab)
+    assert _session_voice(lab.opened()[0]) == "ash"
+
+
+def test_operator_router_can_switch_contact(lab, monkeypatch):
+    lab = lab(strategy="operator")
+    body = {"output": [{"type": "function_call", "name": "switch_contact", "call_id": "c1",
+                        "arguments": json.dumps({"agent": "Theo"})}]}
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+    monkeypatch.setattr(mod, "urlopen", lambda *a, **k: Response(json.dumps(body).encode()))
+    lab.user("could I have a word with Theo himself")
+    lab.oracle_speaks(1.5)
+    lab.wait(2)
+    assert [_session_voice(s) for s in lab.opened()] == ["meridian"]
+    assert lab.tools.dispatched == []
+    assert any(t["name"] == "switch_contact" for t in mod.router_tools())
+
+
+class _Socket:
+    """A scripted upstream for pump(): frames, then close."""
+
+    def __init__(self, frames, conversation=None, swap_to=None):
+        self.frames, self.conversation, self.swap_to = list(frames), conversation, swap_to
+
+    def recv(self):
+        if self.swap_to is not None and self.conversation.upstream is self:
+            self.conversation.upstream = self.swap_to
+            raise ConnectionError("socket closed by swap")
+        return self.frames.pop(0) if self.frames else ""
+
+
+def test_pump_follows_the_swapped_upstream_instead_of_ending_the_call():
+    events = []
+
+    class Conv:
+        stop, closed = threading.Event(), threading.Event()
+
+        def receive(self, event, source=None):
+            events.append((event["type"], source))
+            if event["type"] == "session.closed":
+                self.closed.set()
+    conv = Conv()
+    new = _Socket([json.dumps({"type": "session.output_transcript.delta", "delta": "Theo here"}),
+                   json.dumps({"type": "session.closed"})])
+    conv.upstream = _Socket([], conv, swap_to=new)
+    mod.pump_upstream(conv, TimeoutError)
+    assert events == [("session.output_transcript.delta", new), ("session.closed", new)]
