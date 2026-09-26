@@ -96,7 +96,7 @@ QVariant AgentListModel::data(const QModelIndex& index, int role) const {
     case SubAgentCountRole:
         return m_transportAvailable ? jobCounts(agent).subAgents : 0;
     case ProcessCountRole:
-        return m_transportAvailable ? jobCounts(agent).total + runningChildren(agent) : 0;
+        return m_transportAvailable ? runningWork(agent) : 0;
     default:
         return {};
     }
@@ -404,7 +404,17 @@ void AgentListModel::clearLiveJobCounts() {
 
 BackgroundJobCounts AgentListModel::jobCounts(const Agent& agent) const {
     if (m_liveJobsKnown) return m_liveJobCounts.value(agent.agentId);
-    return {.total = agent.backgroundJobCount, .subAgents = agent.backgroundSubAgentCount};
+    // Since Host contract 16 the snapshot counts processes (`count`) apart from
+    // running helpers (`sub_agents`); the live job list still carries each
+    // helper's mirror job. Fold the snapshot into the job-list shape.
+    return {.total = agent.backgroundJobCount + agent.backgroundSubAgentCount,
+            .subAgents = agent.backgroundSubAgentCount};
+}
+
+int AgentListModel::runningWork(const Agent& agent) const {
+    // A helper shows up both as a running child and as its mirror job.
+    const BackgroundJobCounts counts = jobCounts(agent);
+    return (counts.total - counts.subAgents) + std::max(counts.subAgents, runningChildren(agent));
 }
 
 int AgentListModel::runningChildren(const Agent& agent) const {
@@ -561,7 +571,7 @@ QVariantMap describeAgentProcesses(const AgentListModel& agents,
             {QStringLiteral("jobCount"), counts.total},
             {QStringLiteral("subAgentCount"), counts.subAgents},
             {QStringLiteral("runningChildren"), running},
-            {QStringLiteral("total"), counts.total + running}};
+            {QStringLiteral("total"), agents.runningWork(*agent)}};
 }
 
 } // namespace clarp

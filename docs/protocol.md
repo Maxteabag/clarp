@@ -29,6 +29,8 @@ they drift.
 | **revision** | A per-conversation monotonic counter. Every insert or update of a message bumps it. It is the only ordering key a client should rely on. |
 | **clip** | One synthesized voice reply, identified by `clip_id`. |
 | **focus** | The server-wide "current agent" used for hands-free voice routing. Shared by every client of one server. |
+| **sub-agent** | A Clarp helper agent: an agent with `role: "helper"` and a `parent_agent_id`. It has its own chat and can be opened and steered. Counted from the parent's running children. |
+| **background process** | A durable background job (`/background-jobs`) that is not merely a helper's mirror: a detached worker, a watcher, a CI wait. Inspect one with `GET /background-jobs/<job_id>`. |
 
 The HTTP service and agent runtime have separate lifetimes. A planned HTTP
 restart closes client connections, but the active backend turn continues in
@@ -141,6 +143,25 @@ Rules:
   `running`. Nest helpers under their parent; a done helper is archived
   after the grace period (`[agents] helper_archive_grace_hours`, 24 by
   default). `agent-roster` with `kind: "helper-state"` asks for a refetch.
+- `background_jobs` separates the two kinds of work that keep an agent busy
+  after its turn ends. `sub_agents` is the number of its helper agents still
+  `running` (the same number as `running_children`). `count` is the number
+  of active background processes: jobs that are not the watcher job
+  `clarp-sub-agent --clarp-agent` registers for a helper (kind `sub-agent`
+  whose `detail` or `metadata.helper_session` names one of this agent's
+  helpers), so a helper is never counted twice. Either makes `latest_state`
+  `background`. Show the numbers from `background_jobs` (a badge);
+  `status_text` does not repeat them. When the agent has set no status of
+  its own it describes the activity instead: one running helper as
+  "slice5-helper: running tests" (the helper's own status, else its latest
+  activity summary), several as a roll-up such as "3 working, 1 waiting"
+  (`working`, `waiting`, `idle` from each helper's latest state), and a
+  process by its latest progress line or title ("CI: build 3/10", the most
+  recently active job when there are several). Helpers and a process are
+  joined with " · ". Only a process with neither title nor progress falls
+  back to a bare "1 background process". Before Host contract 16 `count`
+  included the mirror jobs and `sub_agents` counted jobs of kind
+  `sub-agent`.
 - There is no `/sessions` in this layer. The list of chats is
   `agents[].session` filtered by `archived_at == null`.
 
@@ -538,11 +559,52 @@ any subset. Payload shapes are documented in the handler docstrings in
 | Autonomy | `/heartbeat/settings`, `/agent-heartbeat/status`, `/dreaming/settings`, `/dreaming/runs`, `/automation-settings`, `/herald/settings`, `/orchestrator/settings`, `/orchestrator/route-delegation` | `heartbeat.py`, `dreaming.py`, `herald.py`, `orchestrator.py` |
 | Transcription | `/transcription-capabilities`, `/transcription-guidance`, `/transcription-models/install`, `/transcription-models/remove` | `transcription_models.py`, `vocab.py` |
 | Voice providers | `/tts/providers`, `/voice-catalog`, `/voice-preview`, `/cartesia-voices`, `/cartesia-voice-preview` | `voice_catalog.py` |
-| Background jobs and updates | `/background-jobs`, `/server-update`, `/status`, `/compact`, `/managed-skills`, `/diagnostics/settings` | `background_jobs.py`, `server_update.py`, `managed_skills.py` |
+| Background jobs and updates | `/background-jobs`, `GET /background-jobs/<job_id>` (see below), `DELETE /background-jobs/<job_id>` (cancel), `/server-update`, `/status`, `/compact`, `/managed-skills`, `/diagnostics/settings` | `background_jobs.py`, `server_update.py`, `managed_skills.py` |
 | Location and calendar | `/location`, `/location/request`, `/calendar/request`, `/calendar/response` | `location.py`, `calendar_request.py` |
 | Prompt history | `/identity/prompt-history` | `prompt_history.py` |
 | Voice timeline | `POST /voice-events`, `GET /voice-events`, `GET /voice-events/utterances`; `/transcribe` headers `X-Utterance-ID`, `X-Client-Ts` | `voice_events.py`, `audio_metrics.py`, `docs/voice-tracing.md` |
 | Diagnostics | `/crash` (MetricKit), `/diagnostics/health` | `ios_diagnostics.py`, `health.py` |
+
+### Inspecting a background process: `GET /background-jobs/<job_id>`
+
+Returns 404 for an unknown job, otherwise:
+
+```json
+{
+  "job": { "…": "the same row as /background-jobs, plus progress_text, progress_at, log_path, worker_cwd, started_trace_id" },
+  "handle": "bg1:2:sub-agent-stream-a",
+  "is_process": true,
+  "owner_session": "nadia", "owner_agent_id": "…",
+  "started_trace_id": "0123456789abcdef",
+  "helper_session": "",
+  "progress": {"text": "running tests 3/10", "at": 1756800000000},
+  "timeline": [
+    {"event_id": 41, "observed_at": 1756799000000, "status": "running", "note": "", "change": "status"},
+    {"event_id": 57, "observed_at": 1756800000000, "status": "running", "note": "running tests 3/10", "change": "progress"}
+  ],
+  "log": {"path": "/var/tmp/clarp-sub-agents/stream-a.log", "available": true, "reason": "",
+          "text": "…last 64 KB…", "size": 181234, "truncated": true}
+}
+```
+
+- `started_trace_id` is the trace of the owner's turn that registered this
+  generation, or empty when it was registered between turns.
+  `helper_session` names the helper agent this job mirrors (then
+  `is_process` is false), else it is empty.
+- `timeline` is the job's change feed, oldest first, at most 200 entries:
+  `change` is `status` when `status` differs from the entry before,
+  `progress` when the entry carries a progress `note`, else `update`.
+- `log` is the tail of the file the worker registered with `clarp-agent-bg
+  SESSION job-log HANDLE /abs/path`: the last 64 KB, starting on a line
+  boundary when `truncated`. It is read only when the fully resolved path is
+  a regular file under the worker's working directory, the owner agent's
+  cwd, or `/var/tmp`; otherwise `available` is false and `reason` is one of
+  `no_log`, `not_absolute`, `outside_allowed_roots`, `missing`,
+  `not_a_regular_file`, `unreadable`. A limited device gets `reason:
+  "forbidden"` and no text.
+- Progress written with `clarp-agent-bg SESSION job-progress HANDLE "text"`
+  also arrives live as `background-job-updated`, whose `job` carries
+  `progress_text`. Cancel stays `DELETE /background-jobs/<job_id>`.
 
 ## Compatibility policy
 

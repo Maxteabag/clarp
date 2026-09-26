@@ -292,3 +292,31 @@ def test_v94_indexes_tool_explanation_release_expiry(tmp_path):
         "EXPLAIN QUERY PLAN DELETE FROM tool_explanation_releases WHERE expires_at<=?", (1,)))
     assert "tool_explanation_releases_expiry" in plan
     assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+
+
+def test_v95_adds_background_job_inspection_columns(tmp_path):
+    path = tmp_path / "v94.sqlite"
+    con = _fresh(path)
+    con.executescript("""
+        ALTER TABLE background_jobs DROP COLUMN progress_text;
+        ALTER TABLE background_jobs DROP COLUMN progress_at;
+        ALTER TABLE background_jobs DROP COLUMN log_path;
+        ALTER TABLE background_jobs DROP COLUMN worker_cwd;
+        ALTER TABLE background_jobs DROP COLUMN started_trace_id;
+        ALTER TABLE background_job_events DROP COLUMN status;
+        ALTER TABLE background_job_events DROP COLUMN note;
+        INSERT INTO background_job_events (job_id, observed_at) VALUES ('j', 1);
+        PRAGMA user_version = 94;
+    """)
+    con.close()
+
+    upgraded = _connect(path)
+    db._migrate(upgraded)
+
+    assert {"progress_text", "progress_at", "log_path", "worker_cwd",
+            "started_trace_id"} <= _columns(upgraded, "background_jobs")
+    assert {"status", "note"} <= _columns(upgraded, "background_job_events")
+    assert tuple(upgraded.execute(
+        "SELECT status, note FROM background_job_events").fetchone()) == ("", "")
+    assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+    db._migrate(upgraded)

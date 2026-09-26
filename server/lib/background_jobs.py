@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -23,23 +24,63 @@ DEFAULT_HEARTBEAT_TIMEOUT_MS = 600_000
 TERMINAL_VISIBILITY_MS = 24 * 60 * 60 * 1000
 WORKER_TERM_TIMEOUT_SEC = 2.0
 WORKER_KILL_TIMEOUT_SEC = 2.0
+PROGRESS_MAX = 500
+LOG_TAIL_BYTES = 64 * 1024
+TIMELINE_LIMIT = 200
+# Besides the worker's own directory and its owner's cwd, logs may live here.
+SHARED_LOG_ROOTS = ("/var/tmp",)
 
 
-def active_by_agent() -> dict[str, list[dict[str, str]]]:
+def active_by_agent() -> dict[str, list[dict[str, Any]]]:
     """Running or queued jobs per agent, oldest first, for the dashboard.
 
     One indexed read per snapshot. Stale jobs are reconciled by the watcher,
     so a crashed worker drops out within a heartbeat timeout.
     """
     marks = ",".join("?" for _ in ACTIVE_STATUSES)
-    out: dict[str, list[dict[str, str]]] = {}
+    out: dict[str, list[dict[str, Any]]] = {}
     for row in db.conn().execute(
-            f"SELECT agent_id, kind, title FROM background_jobs WHERE status IN ({marks}) "
+            f"SELECT job_id, agent_id, kind, title, detail, metadata_json, "
+            f"progress_text, COALESCE(progress_at, started_at) AS active_at "
+            f"FROM background_jobs WHERE status IN ({marks}) "
             "AND COALESCE(agent_id, '') != '' "
             "ORDER BY started_at", tuple(sorted(ACTIVE_STATUSES))):
-        out.setdefault(row["agent_id"], []).append(
-            {"kind": str(row["kind"] or ""), "title": str(row["title"] or "")})
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        out.setdefault(row["agent_id"], []).append({
+            "job_id": str(row["job_id"]),
+            "kind": str(row["kind"] or ""), "title": str(row["title"] or ""),
+            "detail": str(row["detail"] or ""),
+            "metadata": metadata if isinstance(metadata, dict) else {},
+            "progress_text": str(row["progress_text"] or ""),
+            "active_at": int(row["active_at"] or 0),
+        })
     return out
+
+
+def mirrored_helper_session(job: dict, helper_sessions: set[str] | frozenset[str]) -> str:
+    """The helper session a job only mirrors, or "" when it is a real process.
+
+    `clarp-sub-agent --clarp-agent` registers a `sub-agent` job whose detail is
+    the helper's session so the parent looked busy before helpers existed.
+    The helper itself is the sub-agent; its watcher job is not a second one.
+    `helper_sessions` are the sessions of this job owner's helper children.
+    """
+    if str(job.get("kind") or "") != "sub-agent":
+        return ""
+    metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+    for candidate in (metadata.get("helper_session"), job.get("detail")):
+        candidate = str(candidate or "").strip()
+        if candidate and candidate in helper_sessions:
+            return candidate
+    return ""
+
+
+def background_processes(jobs: list[dict], helper_sessions: set[str] | frozenset[str]) -> list[dict]:
+    """Active jobs that are background processes, not helper mirrors."""
+    return [job for job in jobs if not mirrored_helper_session(job, helper_sessions)]
 
 
 def job_handle(job: dict) -> str:
@@ -267,6 +308,7 @@ def upsert(
     agent = agents.get_by_session(session)
     if not agent:
         raise ValueError(f"unknown session: {session}")
+    from . import identity
     return _upsert_owned(
         owner_kind="agent", agent_id=agent["agent_id"], session=session,
         computer_id="", job_id=job_id, kind=kind, title=title, detail=detail,
@@ -274,6 +316,7 @@ def upsert(
         heartbeat_timeout_ms=heartbeat_timeout_ms, worker_pid=worker_pid,
         worker_start_token=worker_start_token,
         restart_cancelled=restart_cancelled,
+        started_trace_id=identity.open_trace_id(agent),
     )
 
 
@@ -301,7 +344,7 @@ def _upsert_owned(
     job_id: str, kind: str, title: str, detail: str,
     metadata: dict[str, Any] | None, status: str, heartbeat_timeout_ms: int,
     worker_pid: int | None, worker_start_token: str,
-    restart_cancelled: bool,
+    restart_cancelled: bool, started_trace_id: str = "",
 ) -> dict:
     if status not in ACTIVE_STATUSES:
         raise ValueError(f"background job must start queued or running: {status}")
@@ -349,7 +392,17 @@ def _upsert_owned(
             next_pid = pid
             next_token = token
             next_heartbeat_source = "worker_registration"
+            # A new run starts a clean inspection record: its own trace, and
+            # no progress line or log left over from the previous generation.
+            next_trace = started_trace_id
+            next_progress, next_progress_at = "", None
+            next_log, next_cwd = "", ""
         else:
+            next_trace = str(existing["started_trace_id"] or "")
+            next_progress = str(existing["progress_text"] or "")
+            next_progress_at = existing["progress_at"]
+            next_log = str(existing["log_path"] or "")
+            next_cwd = str(existing["worker_cwd"] or "")
             next_pid = pid if token else existing["worker_pid"]
             next_token = token or old_token
             # Idempotent callers must not erase a launch claim or a worker's
@@ -363,8 +416,10 @@ def _upsert_owned(
                 started_at, updated_at, metadata_json, heartbeat_at,
                 heartbeat_timeout_ms, heartbeat_source, worker_pid,
                 worker_start_token, terminal_at, terminal_reason, revision,
-                generation)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '', 0, ?)
+                generation, started_trace_id, progress_text, progress_at,
+                log_path, worker_cwd)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '', 0, ?,
+                       ?, ?, ?, ?, ?)
                ON CONFLICT(job_id) DO UPDATE SET
                  owner_kind=excluded.owner_kind,
                  computer_id=excluded.computer_id,
@@ -379,13 +434,20 @@ def _upsert_owned(
                  worker_start_token=excluded.worker_start_token,
                  terminal_at=NULL, terminal_reason='', cancelled_at=NULL,
                  metadata_json=excluded.metadata_json,
-                 generation=excluded.generation""",
+                 generation=excluded.generation,
+                 started_trace_id=excluded.started_trace_id,
+                 progress_text=excluded.progress_text,
+                 progress_at=excluded.progress_at,
+                 log_path=excluded.log_path,
+                 worker_cwd=excluded.worker_cwd""",
             (
                 job_id, agent_id, session, owner_kind, computer_id or None,
                 kind[:40], title[:120], detail[:1000], next_status,
                 next_started_at, now,
                 json.dumps(metadata or {}, separators=(",", ":")), now, timeout,
                 next_heartbeat_source, next_pid, next_token, generation,
+                next_trace[:200], next_progress, next_progress_at,
+                next_log, next_cwd,
             ),
         )
         _record_event(c, job_id, now)
@@ -483,7 +545,9 @@ def cancel(job_id: str) -> dict | None:
     return cancel_with_result(job_id)[0]
 
 
-def cancel_with_result(job_id: str) -> tuple[dict | None, bool]:
+def cancel_with_result(
+    job_id: str, *, reason: str = "user_cancelled",
+) -> tuple[dict | None, bool]:
     now = db.now_ms()
     c = db.conn()
     c.execute("BEGIN IMMEDIATE")
@@ -500,9 +564,9 @@ def cancel_with_result(job_id: str) -> tuple[dict | None, bool]:
         c.execute(
             """UPDATE background_jobs
                   SET status='cancelled', cancelled_at=?, terminal_at=?,
-                      terminal_reason='user_cancelled', updated_at=?
+                      terminal_reason=?, updated_at=?
                 WHERE job_id=? AND status IN ('queued','running')""",
-            (now, now, now, job_id),
+            (now, now, reason[:1000], now, job_id),
         )
         _record_event(c, job_id, now)
         c.execute("COMMIT")
@@ -587,6 +651,228 @@ def finish(
         c.execute("ROLLBACK")
         raise
     return get(job_id, reconcile=False)
+
+
+def _owned_active_row(c, job_id: str, *, session: str, generation: int):
+    """The job row when `session` owns this active generation, else None."""
+    row = c.execute(
+        "SELECT * FROM background_jobs WHERE job_id=?", (job_id,)).fetchone()
+    if (row is None or str(row["owner_kind"] or "agent") != "agent"
+            or str(row["session"] or "") != session
+            or int(row["generation"] or 1) != int(generation)
+            or row["status"] not in ACTIVE_STATUSES):
+        return None
+    return row
+
+
+def cancel_owned(job_id: str, *, session: str, generation: int) -> dict | None:
+    """Let the owning agent session close its own job.
+
+    Finish and fail stay fenced to the registered worker PID so one process
+    cannot report another's outcome. Cancelling is different: the owner
+    must be able to close a job whose worker is gone or unreachable, and a
+    cancel reports no outcome. Returns None when `session` does not own
+    this active generation.
+    """
+    c = db.conn()
+    c.execute("BEGIN IMMEDIATE")
+    try:
+        owned = _owned_active_row(c, job_id, session=session, generation=generation)
+        c.execute("COMMIT")
+    except BaseException:
+        c.execute("ROLLBACK")
+        raise
+    if owned is None:
+        return None
+    job, _changed = cancel_with_result(job_id, reason="owner_cancelled")
+    return job if job and int(job.get("generation") or 1) == int(generation) else None
+
+
+def set_progress(
+    job_id: str, *, session: str, generation: int, text: str,
+) -> dict | None:
+    """Store the worker's latest progress line and publish it."""
+    text = " ".join(str(text or "").split())[:PROGRESS_MAX]
+    now = db.now_ms()
+    c = db.conn()
+    c.execute("BEGIN IMMEDIATE")
+    try:
+        if _owned_active_row(c, job_id, session=session, generation=generation) is None:
+            c.execute("COMMIT")
+            return None
+        c.execute(
+            """UPDATE background_jobs SET progress_text=?, progress_at=?, updated_at=?
+                WHERE job_id=?""",
+            (text, now, now, job_id))
+        _record_event(c, job_id, now, note=text)
+        c.execute("COMMIT")
+    except BaseException:
+        c.execute("ROLLBACK")
+        raise
+    return get(job_id, reconcile=False)
+
+
+def set_log(
+    job_id: str, *, session: str, generation: int, path: str, worker_cwd: str = "",
+) -> dict | None:
+    """Register the log file a worker writes. The path must be absolute."""
+    path = str(path or "").strip()
+    if not os.path.isabs(path):
+        raise ValueError(f"log path must be absolute: {path!r}")
+    worker_cwd = str(worker_cwd or "").strip()
+    if worker_cwd and not os.path.isabs(worker_cwd):
+        worker_cwd = ""
+    c = db.conn()
+    c.execute("BEGIN IMMEDIATE")
+    try:
+        if _owned_active_row(c, job_id, session=session, generation=generation) is None:
+            c.execute("COMMIT")
+            return None
+        c.execute(
+            "UPDATE background_jobs SET log_path=?, worker_cwd=? WHERE job_id=?",
+            (path[:4096], worker_cwd[:4096], job_id))
+        c.execute("COMMIT")
+    except BaseException:
+        c.execute("ROLLBACK")
+        raise
+    return get(job_id, reconcile=False)
+
+
+def timeline(job_id: str, *, limit: int = TIMELINE_LIMIT) -> list[dict]:
+    """The job's change feed, oldest first: status changes and progress."""
+    rows = db.conn().execute(
+        """SELECT event_id, observed_at, status, note FROM background_job_events
+            WHERE job_id=? ORDER BY event_id DESC LIMIT ?""",
+        (job_id, max(1, min(int(limit), 1000))),
+    ).fetchall()
+    out: list[dict] = []
+    previous = ""
+    for row in reversed(rows):
+        status = str(row["status"] or "")
+        note = str(row["note"] or "")
+        if status and status != previous:
+            change = "status"
+        elif note:
+            change = "progress"
+        else:
+            change = "update"
+        out.append({
+            "event_id": int(row["event_id"]), "observed_at": int(row["observed_at"]),
+            "status": status, "note": note, "change": change,
+        })
+        previous = status or previous
+    return out
+
+
+def _inside(path: str, root: str) -> bool:
+    return path == root or path.startswith(root.rstrip("/") + "/")
+
+
+def log_roots(job: dict, *, owner_cwd: str = "") -> list[str]:
+    """Directories a job's log may resolve into, symlinks resolved."""
+    roots = []
+    for raw in (job.get("worker_cwd"), owner_cwd, *SHARED_LOG_ROOTS):
+        raw = str(raw or "").strip()
+        if not raw or not os.path.isabs(raw):
+            continue
+        real = os.path.realpath(raw)
+        # A worker started in / (or an agent whose cwd is /) must not turn
+        # the whole filesystem into a readable log directory.
+        if real != "/" and real not in roots:
+            roots.append(real)
+    return roots
+
+
+def read_log_tail(
+    path: str, roots: list[str], *, limit: int = LOG_TAIL_BYTES,
+) -> dict:
+    """The last `limit` bytes of a registered log, or why it is withheld.
+
+    Only a regular file whose fully resolved path lies under one of `roots`
+    is read, so a symlink anywhere in the path cannot point the Host at a
+    file outside them. The final component is opened without following a
+    symlink, so swapping one in after the check is refused too.
+    """
+    out: dict[str, Any] = {"path": path, "available": False, "reason": "",
+                           "text": "", "size": 0, "truncated": False}
+    if not path:
+        out["reason"] = "no_log"
+        return out
+    if not os.path.isabs(path):
+        out["reason"] = "not_absolute"
+        return out
+    real = os.path.realpath(path)
+    if not any(_inside(real, root) for root in roots):
+        out["reason"] = "outside_allowed_roots"
+        return out
+    try:
+        fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
+    except FileNotFoundError:
+        out["reason"] = "missing"
+        return out
+    except OSError:
+        out["reason"] = "unreadable"
+        return out
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            out["reason"] = "not_a_regular_file"
+            return out
+        size = int(info.st_size)
+        start = max(0, size - max(1, int(limit)))
+        os.lseek(fd, start, os.SEEK_SET)
+        chunks, remaining = [], size - start
+        while remaining > 0:
+            chunk = os.read(fd, min(remaining, 65536))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    finally:
+        os.close(fd)
+    data = b"".join(chunks)
+    if start > 0:
+        # Drop the partial first line so the tail starts on a line boundary.
+        newline = data.find(b"\n")
+        if 0 <= newline < len(data) - 1:
+            data = data[newline + 1:]
+    out.update(available=True, text=data.decode("utf-8", errors="replace"),
+               size=size, truncated=start > 0)
+    return out
+
+
+def detail(job_id: str, *, include_log: bool = True) -> dict | None:
+    """One background process with its timeline, progress, log and owners."""
+    job = get(job_id)
+    if job is None:
+        return None
+    owner = agents.get_by_agent_id(job["agent_id"]) if job.get("agent_id") else None
+    helper_sessions = frozenset(
+        str(child["session"]) for child in agents.children(job["agent_id"])
+        if str(child.get("role") or "") == "helper"
+    ) if owner else frozenset()
+    helper = mirrored_helper_session(job, helper_sessions)
+    log = read_log_tail(
+        str(job.get("log_path") or ""),
+        log_roots(job, owner_cwd=str(owner.get("cwd") or "") if owner else ""),
+    ) if include_log else {
+        "path": "", "available": False, "reason": "forbidden", "text": "",
+        "size": 0, "truncated": False,
+    }
+    return {
+        "job": job,
+        "handle": job_handle(job),
+        "is_process": not helper,
+        "owner_session": str(job.get("session") or ""),
+        "owner_agent_id": str(job.get("agent_id") or ""),
+        "started_trace_id": str(job.get("started_trace_id") or ""),
+        "helper_session": helper,
+        "progress": {"text": str(job.get("progress_text") or ""),
+                     "at": job.get("progress_at")},
+        "timeline": timeline(job_id),
+        "log": log,
+    }
 
 
 def is_active(job_id: str, *, generation: int | None = None) -> bool:
@@ -708,9 +994,19 @@ def run_terminal_generation_cleanup(
 
 def reconcile_stale(
     *, job_id: str | None = None, now_ms: int | None = None,
-    process_probe: Callable[[int, str], bool] = worker_is_alive,
+    process_probe: Callable[[int, str], bool] | None = None,
 ) -> list[str]:
+    """Fail active jobs nobody is running any more.
+
+    Two independent reasons end a running job: its heartbeat is older than
+    `heartbeat_timeout_ms` (whether or not a worker PID is recorded, since a
+    live but wedged worker is no better than a dead one), or its recorded
+    worker PID no longer matches the start token it registered with. The
+    second is checked on every pass, so a worker killed with `systemctl stop`
+    drops out at once instead of a heartbeat timeout later.
+    """
     now = int(now_ms if now_ms is not None else db.now_ms())
+    probe = process_probe or worker_is_alive
     params: list[Any] = [now]
     job_clause = ""
     if job_id:
@@ -719,18 +1015,22 @@ def reconcile_stale(
     rows = db.conn().execute(
         f"""SELECT * FROM background_jobs
              WHERE status IN ('queued','running')
-               AND (? - COALESCE(heartbeat_at, updated_at)) > heartbeat_timeout_ms
+               AND ((? - COALESCE(heartbeat_at, updated_at)) > heartbeat_timeout_ms
+                    OR (status='running' AND COALESCE(worker_pid, 0) > 0
+                        AND worker_start_token != ''))
                {job_clause}""",
         tuple(params),
     ).fetchall()
     changed: list[str] = []
     for row in rows:
+        expired = now - int(row["heartbeat_at"] or row["updated_at"]) > int(
+            row["heartbeat_timeout_ms"])
         if row["status"] == "queued":
             try:
                 metadata = json.loads(row["metadata_json"] or "{}")
             except json.JSONDecodeError:
                 metadata = {}
-            if metadata.get("expire_queued") is not True:
+            if not expired or metadata.get("expire_queued") is not True:
                 continue
             if _fail_stale_observation(
                 row, now=now, reason="worker_never_started"):
@@ -738,26 +1038,35 @@ def reconcile_stale(
             continue
         pid = int(row["worker_pid"] or 0)
         token = str(row["worker_start_token"] or "")
-        alive = bool(pid and token and process_probe(pid, token))
+        alive = bool(pid and token and probe(pid, token))
+        if not expired and (alive or not (pid and token)):
+            continue
         terminal_reason = (
             "heartbeat_expired" if alive or not (pid or token)
             else "worker_vanished")
-        if _fail_stale_observation(row, now=now, reason=terminal_reason):
+        if _fail_stale_observation(
+                row, now=now, reason=terminal_reason, require_expired=expired):
             changed.append(row["job_id"])
     return changed
 
 
-def _fail_stale_observation(row: Any, *, now: int, reason: str) -> bool:
+def _fail_stale_observation(
+    row: Any, *, now: int, reason: str, require_expired: bool = True,
+) -> bool:
+    """Fail `row` only if nothing touched it since it was read."""
     observed_heartbeat = int(row["heartbeat_at"] or row["updated_at"])
+    expiry_clause = (
+        "AND (? - COALESCE(heartbeat_at,updated_at)) > heartbeat_timeout_ms"
+        if require_expired else "AND ? > 0")
     c = db.conn()
     c.execute("BEGIN IMMEDIATE")
     try:
         changed = c.execute(
-            """UPDATE background_jobs
+            f"""UPDATE background_jobs
                   SET status='failed', terminal_at=?, terminal_reason=?, updated_at=?
                 WHERE job_id=? AND status=? AND revision=?
                   AND COALESCE(heartbeat_at,updated_at)=?
-                  AND (? - COALESCE(heartbeat_at,updated_at)) > heartbeat_timeout_ms""",
+                  {expiry_clause}""",
             (
                 now, reason, now, row["job_id"], row["status"],
                 int(row["revision"]),
@@ -839,10 +1148,13 @@ def _active_update(
     return get(job_id, reconcile=False)
 
 
-def _record_event(c, job_id: str, observed_at: int) -> int:
+def _record_event(c, job_id: str, observed_at: int, *, note: str = "") -> int:
+    row = c.execute(
+        "SELECT status FROM background_jobs WHERE job_id=?", (job_id,)).fetchone()
     cur = c.execute(
-        "INSERT INTO background_job_events(job_id, observed_at) VALUES (?, ?)",
-        (job_id, observed_at),
+        "INSERT INTO background_job_events(job_id, observed_at, status, note) "
+        "VALUES (?, ?, ?, ?)",
+        (job_id, observed_at, str(row["status"] if row else ""), note[:PROGRESS_MAX]),
     )
     revision = int(cur.lastrowid)
     c.execute(

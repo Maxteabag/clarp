@@ -996,6 +996,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/teams/") and path.endswith("/messages"):
             team_id = path[len("/teams/"):-len("/messages")].strip("/")
             return self._handle_team_messages(team_id)
+        if path.startswith("/background-jobs/"):
+            return self._handle_background_job_detail(
+                path[len("/background-jobs/"):].strip("/"))
         if path.startswith("/artifacts/"):
             return self._handle_artifact_get(unquote(path[len("/artifacts/"):].strip("/")))
         if path.startswith("/static/"):
@@ -4172,6 +4175,19 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_background_jobs(self):
         from lib import background_jobs
         return self._json_ok(background_jobs.snapshot())
+
+    def _handle_background_job_detail(self, job_id: str):
+        from lib import background_jobs
+        job_id = unquote(job_id)
+        if not job_id or "/" in job_id:
+            return self._send(404, b"not found")
+        # A log may hold anything the worker printed; a limited device gets
+        # the timeline and progress but not the file contents.
+        limited = getattr(self, "_request_device_scope", "") == "limited"
+        detail = background_jobs.detail(job_id, include_log=not limited)
+        if detail is None:
+            return self._json_error(404, "job not found")
+        return self._json_ok(detail)
 
     def _broadcast_artifact(self, artifact: dict) -> None:
         if getattr(self.ctx, "stream", None) is None:

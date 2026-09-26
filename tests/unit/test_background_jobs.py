@@ -420,7 +420,8 @@ def test_succeeded_job_can_start_a_new_observed_run():
     assert restarted["generation"] == first["generation"] + 1
 
 
-def test_superseded_worker_cannot_finish_new_generation():
+def test_superseded_worker_cannot_finish_new_generation(monkeypatch):
+    monkeypatch.setattr(background_jobs, "worker_is_alive", lambda _pid, _token: True)
     _agent()
     old = background_jobs.upsert(
         session="nadia-test", job_id="watch", kind="email", title="Watch",
