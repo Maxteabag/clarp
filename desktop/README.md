@@ -134,6 +134,12 @@ after creation.
 
 Your own chat messages use a lighter background instead of a left accent line.
 
+Agents running background work show a blue hourglass, or an animated agent
+glyph while a sub-agent runs, with a count once more than one process runs;
+click it to list the jobs and helpers. Helper agents nest under their parent and
+finished helpers fold into an "N helpers done" line. See
+[docs/background-processes.md](docs/background-processes.md).
+
 Settings is keyboard-first: `Ctrl+,` opens it and focuses the last-used setting.
 Use `↑`/`↓`, `J`/`K`, or `Tab`/`Shift+Tab` to move through actionable rows;
 `Home`/`End` jump to the first/last. `Space`/`Enter` toggles a value or opens a
