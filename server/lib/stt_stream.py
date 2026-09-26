@@ -24,6 +24,7 @@ from typing import Callable
 from urllib.parse import urlencode
 
 from . import ws
+from .http_utils import responder_of
 from .log import log, log_exception
 
 SAMPLE_RATE = 16_000
@@ -213,9 +214,8 @@ def _open_upstream(url: str, api_key: str):
 
 
 def _send_http_error(handler, code: int, message: str) -> None:
-    body = json.dumps({"error": message}).encode()
     try:
-        handler._send(code, body, "application/json")
+        responder_of(handler).send_error(code, message)
     except Exception:  # noqa: BLE001
         pass
 

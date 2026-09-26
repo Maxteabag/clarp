@@ -1,11 +1,11 @@
 """Authenticated Janitor management routes; no independent agent executor."""
 from __future__ import annotations
 
-import json
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import agents, db, janitors
 from .agent_lifecycle import AgentLifecycleError, AgentLifecycleService
+from .http_utils import responder_of
 from .protocol import SSEType
 
 
@@ -30,7 +30,7 @@ def _send(handler, status: int, value: dict) -> None:
         value["janitor"] = wire_janitor(value["janitor"])
     if isinstance(value.get("janitors"), list):
         value["janitors"] = [wire_janitor(row) for row in value["janitors"]]
-    handler._send(status, json.dumps(value).encode(), "application/json")
+    responder_of(handler).send_json(status, value)
 
 
 def _changed(handler) -> None:
@@ -111,7 +111,7 @@ def handle(handler, method: str) -> None:
         if method == "GET" and len(parts) == 3 and parts[0] == "janitors" and parts[2] == "effective-model-chain":
             return _send(handler, 200, design.effective_chain(parts[1]))
         if method == "POST" and path == "/janitor-policy":
-            body = handler._read_json() or {}
+            body = responder_of(handler).read_json() or {}
             return _send(handler, 200, design.configure(body.get("configuration"), body.get("expected_revision")))
         if method == "GET":
             if path == "/janitors":
@@ -147,7 +147,7 @@ def handle(handler, method: str) -> None:
                 return _send(handler, 200, _required(janitors.run_context(parts[1]), "Run"))
 
         if method == "POST":
-            data = handler._read_json()
+            data = responder_of(handler).read_json()
             if data is None:
                 raise ValueError("Expected a JSON object")
             if path == "/janitors":

@@ -1,15 +1,16 @@
 """Full-device, contextual podcast history API. No agent dispatch."""
-import json
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import podcast_history
+from .http_utils import principal_of, require_full_scope, responder_of
 
 
 def handle(handler, method):
-    if not (getattr(handler, "_request_auth_validated", False)
-            and getattr(handler, "_request_device_scope", "") == "full"
-            and getattr(handler, "_request_principal", "")):
-        return handler._send(403, b'{"error":"Podcast history requires full-device authentication"}', "application/json")
+    respond = responder_of(handler)
+    denied = require_full_scope(principal_of(handler),
+                                message="Podcast history requires full-device authentication")
+    if denied:
+        return respond.send_error(403, denied)
     parsed = urlparse(handler.path)
     query = parse_qs(parsed.query)
     param = lambda name, default="": query.get(name, [default])[0]
@@ -27,14 +28,14 @@ def handle(handler, method):
                 through_event_id=int(param("through_event_id")) if param("through_event_id") else None,
                 limit=int(param("limit", "500")))
             if value is None:
-                return handler._send(404, b'{"error":"Podcast conversation not found"}', "application/json")
+                return respond.send_error(404, "Podcast conversation not found")
         elif method == "POST" and suffix.endswith("/feedback"):
-            data = handler._read_json()
+            data = respond.read_json()
             if not isinstance(data, dict):
                 raise ValueError("JSON object required")
             value = podcast_history.feedback(suffix[:-len("/feedback")], data)
         else:
-            return handler._send(404, b'{"error":"Not found"}', "application/json")
+            return respond.send_error(404, "Not found")
     except (ValueError, TypeError) as exc:
-        return handler._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
-    return handler._send(200, json.dumps(value).encode(), "application/json")
+        return respond.send_error(400, str(exc))
+    return respond.send_json(200, value)
