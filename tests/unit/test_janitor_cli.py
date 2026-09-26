@@ -184,7 +184,7 @@ def test_remove_uses_guarded_archive_route():
 
 
 def test_shared_persona_prompt_carries_no_bookkeeping_but_skill_keeps_lifecycle():
-    from lib.codex_runner import persona_identity_instruction
+    from lib.voice_preamble import persona_identity_instruction
     text = persona_identity_instruction("Theo", session="theo")
     assert "clarp-background-jobs" not in text
     assert "Detached statuses" not in text

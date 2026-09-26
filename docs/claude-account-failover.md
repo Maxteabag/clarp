@@ -63,7 +63,7 @@ Existing runtime startup recovery remains responsible for a runtime/Host crash.
 Run focused tests with:
 
 ```bash
-uv run --group dev pytest -n 2 tests/unit/test_claude_failover.py \
+uv run --group dev pytest -n 2 tests/unit/test_account_failover.py \
   tests/unit/test_turn_dispatch.py tests/unit/test_clarp_runner.py \
   tests/unit/test_config.py
 ```

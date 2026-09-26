@@ -136,3 +136,23 @@ def test_recent_events_keeps_one_row_per_singleton_type_sorted_by_id(monkeypatch
     ids = [e["event_id"] for e in sse_store.recent_events(60_000)]
     assert ids == [version, other, focus_b]
     assert focus_a not in ids
+
+
+def test_event_row_is_never_left_without_its_event_id(monkeypatch):
+    """A failure after the INSERT must not leave a replayable row lacking event_id."""
+    real = db.conn()
+    before = real.execute("SELECT COUNT(*) FROM sse_events").fetchone()[0]
+
+    class FailingUpdate:
+        def execute(self, sql, *args):
+            if sql.lstrip().startswith("UPDATE sse_events"):
+                raise db.sqlite3.OperationalError("database is locked")
+            return real.execute(sql, *args)
+
+    monkeypatch.setattr(sse_store, "conn", lambda: FailingUpdate())
+    with pytest.raises(db.sqlite3.OperationalError):
+        sse_store.record_sse_event({"type": "agent-state", "session": "theo"})
+    assert real.execute("SELECT COUNT(*) FROM sse_events").fetchone()[0] == before
+    monkeypatch.undo()
+    for (payload,) in real.execute("SELECT payload FROM sse_events"):
+        assert "event_id" in json.loads(payload)

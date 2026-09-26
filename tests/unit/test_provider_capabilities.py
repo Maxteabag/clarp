@@ -195,11 +195,11 @@ def test_parse_deepseek_models_keeps_only_deepseek_rows_with_provider_labels():
 
 
 def test_claude_resolution_honors_configured_runtime_binary(monkeypatch):
-    from lib import clarp_runner
+    from lib.backend.registry import by_id
 
     seen: list[str] = []
     monkeypatch.setattr(
-        clarp_runner, "configured_claude_bin", lambda: "clarp-custom")
+        by_id("claude"), "executable", lambda: "clarp-custom")
     monkeypatch.setattr(
         capabilities.shutil, "which",
         lambda binary: seen.append(binary) or f"/resolved/{binary}",

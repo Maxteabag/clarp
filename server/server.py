@@ -1634,7 +1634,7 @@ class Handler(BaseHTTPRequestHandler):
         qs = self._query()
         session = (qs.get("session", [self.ctx.default_session])[0] or self.ctx.default_session).strip()
         agent = identity.lookup(session)
-        # busy state is purely DB-driven now (hooks + clarp_runner write
+        # busy state is purely DB-driven now (hooks + the backend runners write
         # to state_log). The old terminal-scrape fallback is gone.
         busy = bool(agent and agents_db.is_busy(agent["agent_id"]))
         runtime_payload = {
@@ -3104,7 +3104,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "backend": backend, "valid_efforts": valid})
             update["effort"] = effort
         next_model = update.get("model", str(agent.get("model") or "").strip())
-        effort_compatibility_unknown = backends.adapter_for(backend).effort_compatibility_unknown
+        effort_compatibility_unknown = backends.by_id(backend).effort_compatibility_unknown
         if effort_compatibility_unknown and not next_model:
             next_model = backends.default_model_effort(backend, config.load())[0]
         next_effort = update.get("effort", str(agent.get("effort") or "").strip())
@@ -4021,7 +4021,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_stop(self):
         """Terminate any in-flight clarp turn for the given agent. With
         there is no long-lived subprocess to send Escape to; instead the per-turn
-        clarp subprocess is registered in clarp_runner._ACTIVE and we
+        clarp subprocess is registered in the backend's process registry and we
         SIGTERM the lot."""
         data = self._read_json() or {}
         if self._reject_janitor_control(data):

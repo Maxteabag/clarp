@@ -24,7 +24,7 @@ explanations. This document applies it to the rest.
 | `heartbeat.py:25` | idle heartbeat | read HEARTBEAT.md, review the durable plan, "audit durable background jobs and update stale ones", reply HEARTBEAT_OK |
 | `server.py:4314` job-cancelled prompt | user cancels a job | run `clarp-agent-bg job-cancelled` and verify worker identity before stopping anything |
 | 33 managed skills symlinked into `~/.claude/skills` and `~/.codex/skills` (`managed_skills.py`) | always; the core pack cannot be disabled | see section 2 |
-| Repo `AGENTS.md` "Uncommitted work needs a decision artifact" | every turn in this repo | raise a native question via `clarp-agent-artifacts question` before ending with uncommitted changes |
+| Repo `AGENTS.md` "Push to main" | every turn in this repo | once the relevant gates pass, commit and push to main directly; never leave the turn's work uncommitted |
 
 The Host already observes a lot without asking: hook sensors write thinking/tool/
 done/waiting/compacting states and tool summaries (`plugin/hooks/*.py`),
@@ -61,7 +61,7 @@ with clarp-agent-bg run".
 
 | Obligation today | Owner | Why |
 |---|---|---|
-| Create a plan before multi-step work; write 5–8 outcome steps | A, with J fallback | Intent is the agent's. But when an agent forgets, a **task-plan Janitor** can seed a plan from the same evidence the label Janitor already reads (objective, tool activity, TodoWrite todos captured by `transcript_log.py:107`) |
+| Create a plan before multi-step work; write 5–8 outcome steps | A, with J fallback | Intent is the agent's. But when an agent forgets, a **task-plan Janitor** can seed a plan from the same evidence the label Janitor already reads (objective, tool activity, TodoWrite todos captured by `claude_transcript.py:107`) |
 | Use the returned `plan_id`, not the supplied one | H | Helper detail; return the same id or resolve by session |
 | Keep exactly one item `in_progress`; update at transitions | J | Step boundaries correlate with tool-call clusters and TodoWrite changes; a Janitor marks progress and closes stale `in_progress` items on `agent-work-completed` |
 | `finish` for blocked/cancelled plans | J | Terminal turn state plus final reply is enough evidence |

@@ -1,11 +1,12 @@
 """Tests for `lib.backends` — the AI-CLI backend registry that routes a
-turn to Claude (clarp_runner) or Codex (codex_runner) and picks the right
+turn to the right backend object and picks the right
 history parser per backend.
 """
 from __future__ import annotations
 
 import pathlib
 import sys
+from types import SimpleNamespace
 
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
@@ -62,15 +63,14 @@ def test_capabilities_are_explicit_per_backend():
 
 
 def test_claude_capability_uses_configured_cli(monkeypatch):
-    from lib import clarp_runner
+    from lib import config
 
-    monkeypatch.setattr(clarp_runner, "configured_claude_bin", lambda: "clarp")
+    monkeypatch.setattr(config, "load", lambda: SimpleNamespace(claude_cli="clarp"))
     assert backends.capabilities("claude").required_binary == "clarp"
 
 
 def test_spawn_turn_routes_grok_and_opencode(monkeypatch):
     calls: dict[str, dict] = {}
-    from lib import grok_runner, opencode_runner
 
     def fake_grok(**kw):
         calls["grok"] = kw
@@ -80,8 +80,8 @@ def test_spawn_turn_routes_grok_and_opencode(monkeypatch):
         calls["opencode"] = kw
         return "o"
 
-    monkeypatch.setattr(grok_runner, "spawn_turn", fake_grok)
-    monkeypatch.setattr(opencode_runner, "spawn_turn", fake_opencode)
+    monkeypatch.setattr(backends.by_id("grok"), "start_turn", fake_grok)
+    monkeypatch.setattr(backends.by_id("opencode"), "start_turn", fake_opencode)
     assert backends.spawn_turn("grok", text="hi", cwd=pathlib.Path("/tmp")) == "g"
     assert backends.spawn_turn("opencode", text="yo", cwd=pathlib.Path("/tmp")) == "o"
     assert calls["grok"]["text"] == "hi"
@@ -93,7 +93,7 @@ def test_spawn_turn_routes_to_the_right_runner(monkeypatch):
     Claude live-partial path receive the SSE stream."""
     calls: dict[str, dict] = {}
 
-    from lib import clarp_runner, codex_app_server
+    from lib import codex_app_server
 
     def fake_clarp(**kw):
         calls["claude"] = kw
@@ -103,7 +103,7 @@ def test_spawn_turn_routes_to_the_right_runner(monkeypatch):
         calls["codex"] = kw
         return "codex-handle"
 
-    monkeypatch.setattr(clarp_runner, "spawn_turn", fake_clarp)
+    monkeypatch.setattr(backends.by_id("claude"), "start_turn", fake_clarp)
     monkeypatch.setattr(codex_app_server, "spawn_turn", fake_codex)
 
     h1 = backends.spawn_turn("claude", text="hi", cwd=pathlib.Path("/tmp"),
@@ -120,9 +120,9 @@ def test_spawn_turn_routes_to_the_right_runner(monkeypatch):
 
 
 def test_interrupt_routes_by_backend(monkeypatch):
-    from lib import clarp_runner, codex_app_server
+    from lib import codex_app_server
     seen: list[str] = []
-    monkeypatch.setattr(clarp_runner, "interrupt",
+    monkeypatch.setattr(backends.by_id("claude"), "interrupt",
                         lambda aid: seen.append(f"claude:{aid}") or 1)
     monkeypatch.setattr(codex_app_server, "interrupt",
                         lambda aid: seen.append(f"codex:{aid}") or 2)
@@ -134,10 +134,10 @@ def test_interrupt_routes_by_backend(monkeypatch):
 
 
 def test_active_handles_routes_by_backend(monkeypatch):
-    from lib import agy_runner, clarp_runner, codex_app_server
-    monkeypatch.setattr(clarp_runner, "active_handles", lambda aid: [f"claude:{aid}"])
+    from lib import codex_app_server
+    monkeypatch.setattr(backends.by_id("claude"), "active_handles", lambda aid: [f"claude:{aid}"])
     monkeypatch.setattr(codex_app_server, "active_handles", lambda aid: [f"codex:{aid}"])
-    monkeypatch.setattr(agy_runner, "active_handles", lambda aid: [f"agy:{aid}"])
+    monkeypatch.setattr(backends.by_id("agy"), "active_handles", lambda aid: [f"agy:{aid}"])
 
     assert backends.active_handles("claude", "x") == ["claude:x"]
     assert backends.active_handles("codex", "x") == ["codex:x"]
@@ -146,11 +146,11 @@ def test_active_handles_routes_by_backend(monkeypatch):
 
 def test_history_dispatch_picks_codex_parser(monkeypatch):
     from lib import codex_transcript
-    from lib import transcript_log
+    from lib import claude_transcript
 
     monkeypatch.setattr(codex_transcript, "find_latest_jsonl",
                         lambda sid: pathlib.Path(f"/codex/{sid}.jsonl"))
-    monkeypatch.setattr(transcript_log, "find_latest_jsonl",
+    monkeypatch.setattr(claude_transcript, "find_latest_jsonl",
                         lambda sid, projects_root=None: pathlib.Path(f"/claude/{sid}.jsonl"))
 
     assert str(backends.find_session_jsonl("codex", "s1")) == "/codex/s1.jsonl"
@@ -173,9 +173,8 @@ def test_stream_kwargs_strips_synthesize_audio(monkeypatch):
     unexpected keyword argument 'synthesize_audio'`. turn_dispatch passes
     synthesize_audio (for the Claude path); the stream runners read it from
     the DB instead, so backends must strip it before delegating to them."""
-    from lib import grok_runner
     seen = {}
-    monkeypatch.setattr(grok_runner, "spawn_turn", lambda **kw: seen.update(kw))
+    monkeypatch.setattr(backends.by_id("grok"), "start_turn", lambda **kw: seen.update(kw))
     backends.by_id("grok").spawn_turn(
         text="hi", cwd="/tmp", stream=None, voice_preamble=True, synthesize_audio=True)
     out = seen

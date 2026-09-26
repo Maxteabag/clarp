@@ -4,7 +4,7 @@ Models propose continuity; current source/identity/stop fences own admission.
 No model can change accounts, approve decisions, or dispatch outside its snapshot.
 """
 from __future__ import annotations
-import hashlib,json,threading,time,importlib,subprocess,shutil,os
+import hashlib,json,threading,time,subprocess,shutil,os
 from . import agents,db,janitors,janitor_builtins,settings_store,backends,janitor_hotseat
 from . import janitor_store
 from .protocol import AgentState
@@ -70,12 +70,12 @@ def decision_model(packet,run):
         if provider=='openai':return orchestrator._call_openai(prompt,orchestrator.OrchestratorSettings(provider=provider,model=model['model'],effort=model.get('effort',''),timeout_ms=30000))
         adapter=backends.get(provider)
         if not adapter or not adapter.supports_routing:raise ValueError('Provider does not support bounded decision calls')
-        runner=importlib.import_module('lib.'+adapter.routing_module);cmd=runner.routing_cmd(prompt,model=model['model'],effort=model.get('effort',''))
+        cmd=adapter.routing_cmd(prompt,model=model['model'],effort=model.get('effort',''))
         if not shutil.which(cmd[0]):raise model_fallbacks.ProviderFailure('Decision CLI unavailable')
         from .launch_paths import existing_workspace_path
         p=subprocess.run(cmd,cwd=str(existing_workspace_path(None)),stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=120,check=False)
         if p.returncode:raise model_fallbacks.provider_error((p.stderr or '')[:500])
-        return orchestrator._extract_json(runner.routing_text(p.stdout))
+        return orchestrator._extract_json(adapter.routing_text(p.stdout))
     return model_fallbacks.execute(run['agent_id'],run['run_id']+':decision',primary,invoke,current=lambda:janitor_builtins.is_current(run['run_id']))
 
 def validate_decision(value):

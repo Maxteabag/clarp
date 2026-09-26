@@ -11,7 +11,7 @@ import re
 import time
 from typing import Any, Callable
 
-from . import agents as agents_db, db, origins, settings_store
+from . import agents as agents_db, artifacts, db, origins, settings_store
 from .log import log
 from .policies import notifications as notification_policy
 from .policies.notifications import (
@@ -402,13 +402,18 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
         "updated_at": now,
     }
     result = _persist(payload)
+    # Live, not persisted: whether this agent still has an unanswered question
+    # or approval decides push urgency below. Recomputed at classification time
+    # rather than frozen in the stored row, since a decision can be answered
+    # (or a new one opened) after this exact notification was first persisted.
+    result["needs_response"] = bool(result["notify"]) and artifacts.has_pending_decision(agent_id)
     log(
         "userNotificationClassified",
         f"notification={result['notification_id']} agent={agent_id} session={session} "
         f"done_ts={done_ts} cause={result['cause_message_id'] or '-'} "
         f"source={result['source_message_id'] or '-'} reason={result['reason']} "
         f"source_delta_ms={int(source['updated_at']) - done_ts if source is not None else '-'} "
-        f"push={int(result['push'])}",
+        f"push={int(result['push'])} needs_response={int(result['needs_response'])}",
     )
     if not result["notify"]:
         log("userNotificationSuppressed",

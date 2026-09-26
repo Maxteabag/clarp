@@ -47,6 +47,31 @@ dispatch path finishes updating live provenance.
 Those channels are worker, automation, or team-system traffic. They may remain
 visible as transcript/activity rows, but they must not page or badge the user.
 
+## Push Urgency
+
+A push that fires is not automatically the loud, interrupting kind. Two tiers,
+decided by whether the user has something to answer, not by the reply's own
+wording:
+
+- **Ordinary reply** (`needs_response=False`): banners, badges and threads
+  normally, but arrives with no sound and no vibration, and at the "active"
+  interruption level, so it respects Focus and Do Not Disturb like any other
+  chat message.
+- **Needs a response** (`needs_response=True`): plays the system alert sound
+  and uses "time-sensitive", which breaks through Focus. This fires for a
+  newly created decision or question (`decision_payload`, always true — a
+  decision is by definition something to answer) and for a turn-done push
+  whose agent still holds any pending decision when the turn completes
+  (`user_notifications.classify_completed_turn` calls
+  `artifacts.has_pending_decision`, live at classification time, not frozen in
+  the stored row).
+
+`decision_payload` separately narrows interruption-level with
+`decision_needs_interruption` (`blocks_progress` or `urgency=="time_sensitive"`
+only), so a non-blocking question still gets the sound but does not break
+through Focus. Both fields ride the same `aps` payload built by
+`apns.turn_done_payload`.
+
 ## Client Contract
 
 Native and web clients treat `user-notification` as the unread/badge event.

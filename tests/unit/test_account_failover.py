@@ -6,8 +6,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from lib.claude_failover import (
-    MAX_PARK_SECONDS, RECHECK_SECONDS, Attempt, ClaudeFailover, switch_account)
+from lib.account_failover import (
+    MAX_PARK_SECONDS, RECHECK_SECONDS, Attempt, AccountFailover, switch_account)
 
 
 def make_attempt(agent="a", *, model="sonnet"):
@@ -19,7 +19,7 @@ def make_attempt(agent="a", *, model="sonnet"):
 
 def make_coordinator(switch=None):
     scheduled = []
-    coordinator = ClaudeFailover(threading.RLock(), switch=switch or Mock(return_value=True),
+    coordinator = AccountFailover(threading.RLock(), switch=switch or Mock(return_value=True),
         schedule=lambda delay, callback: scheduled.append((delay, callback)), now=lambda: 100)
     return coordinator, scheduled
 
@@ -50,7 +50,7 @@ def make_clocked_coordinator(switch):
     """A coordinator whose clock the test advances, to drive many recheck cycles."""
     clock = {"t": 100.0}
     scheduled = []
-    coordinator = ClaudeFailover(
+    coordinator = AccountFailover(
         threading.RLock(), switch=switch,
         schedule=lambda delay, callback: scheduled.append((delay, callback)),
         now=lambda: clock["t"])

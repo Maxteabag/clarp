@@ -100,3 +100,24 @@ def test_deterministic_role_cannot_admit_provider_work(setup):
     _,target=setup
     assert janitor_builtins.begin_run('audio-bookkeeper','no-model',target_agent_id=target) is None
     assert db.conn().execute('SELECT COUNT(*) FROM janitor_demand_claims').fetchone()[0]==0
+
+def test_drain_with_nothing_pending_takes_no_write_lock(setup):
+    statements=[]
+    c=db.conn();c.set_trace_callback(statements.append)
+    try:
+        assert audio_bookkeeper.drain()==0
+    finally:
+        c.set_trace_callback(None)
+    assert statements
+    assert not [s for s in statements if s.lstrip().upper().startswith('BEGIN')]
+
+def test_drain_skips_an_event_whose_owner_changed_after_resolve(setup, monkeypatch):
+    owner,target=setup;clip(target)
+    real=janitor_builtins.resolve
+    def resolve_then_pause(role,**kw):
+        config=real(role,**kw)
+        janitors.set_enabled(owner['session'],owner['revision'],False)
+        return config
+    monkeypatch.setattr(janitor_builtins,'resolve',resolve_then_pause)
+    assert audio_bookkeeper.drain()==0
+    assert db.conn().execute('SELECT COUNT(*) FROM audio_bookkeeping_events WHERE completed_at IS NULL').fetchone()[0]==2

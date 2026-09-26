@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import threading
 from . import agents, db, error_classify, model_fallbacks
-from .claude_failover import finish_owned_group
+from .account_failover import finish_owned_group
 from .process_registry import ProcessRegistry
 from .log import log_exception
 

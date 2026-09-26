@@ -355,6 +355,8 @@ class Config:
     # [oracle.agent_voices]: persona -> GPT-Live voice for "talk to X
     # directly" (keys casefolded); see oracle_voices.voice_for.
     oracle_agent_voices: dict[str, str] = field(default_factory=dict)
+    # [oracle] earcons: short sound cues in Oracle v2 calls (oracle_earcons).
+    oracle_earcons: bool = True
     openai_realtime_transcription_model: str = "gpt-4o-mini-transcribe"
     cartesia_model: str = "sonic-3.5"
     cartesia_voices: dict[str, str] = field(
@@ -720,6 +722,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         oracle_voice_backend = str(openai.get("oracle_voice_backend", "api")).strip(),
         oracle_live_webrtc = bool(openai.get("oracle_live_webrtc", False)),
         oracle_agent_voices = _agent_voices(data.get("oracle")),
+        oracle_earcons = (data.get("oracle") or {}).get("earcons", True) is not False
+            if isinstance(data.get("oracle"), dict) else True,
         openai_realtime_transcription_model = str(openai.get(
             "realtime_transcription_model", "gpt-4o-mini-transcribe")).strip(),
         cartesia_model  = str(cartesia.get("model", "sonic-3.5")),

@@ -18,10 +18,13 @@ sys.path.insert(0, str(_SERVER_DIR))
 
 from lib import agents as agents_db  # noqa: E402
 from lib import turn_lifecycle  # noqa: E402
-from lib import grok_runner  # noqa: E402
+from lib.backend import grok  # noqa: E402
+from lib.backend.registry import by_id  # noqa: E402
 from lib.backend import stream_json  # noqa: E402
 from lib import grok_transcript  # noqa: E402
 from lib.protocol import AgentState, SSEType  # noqa: E402
+
+GROK = by_id("grok")
 
 
 SID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -72,9 +75,9 @@ class _Stream:
 def _run_events(events, *, agent_id="agent-1", session="sess-1",
                 trace_id="trace-1", stream=None, enqueue=None,
                 on_error=None):
-    st = grok_runner._TurnState(session_id=SID)
+    st = grok._TurnState(session_id=SID)
     for ev in events:
-        grok_runner._handle_event(
+        GROK._handle_event(
             ev, st, agent_id=agent_id, session=session, trace_id=trace_id,
             on_error=on_error, stream=stream,
             enqueue=enqueue or (lambda **_k: 1))
@@ -82,14 +85,14 @@ def _run_events(events, *, agent_id="agent-1", session="sess-1",
 
 
 def test_build_cmd_fresh_and_resume():
-    fresh = grok_runner.build_cmd("sid-1", is_new_session=True, model="grok-4.6",
+    fresh = GROK.build_cmd("sid-1", is_new_session=True, model="grok-4.6",
                                   effort="high")
     assert fresh[0] == "grok"
     assert fresh[fresh.index("--output-format") + 1] == "streaming-json"
     assert fresh[fresh.index("--session-id") + 1] == "sid-1"
     assert fresh[fresh.index("--model") + 1] == "grok-4.6"
     assert fresh[fresh.index("--reasoning-effort") + 1] == "high"
-    resume = grok_runner.build_cmd("sid-1")
+    resume = GROK.build_cmd("sid-1")
     assert resume[resume.index("--resume") + 1] == "sid-1"
     assert "--session-id" not in resume
 
@@ -112,7 +115,7 @@ def test_text_deltas_stream_into_live_row_and_speak(monkeypatch):
                         lambda agent_id: {"persona": "Margrok", "voice_id": "v1"})
     monkeypatch.setattr(agents_db, "get_focus", lambda: "agent-1")
     monkeypatch.setattr(agents_db, "get_trace", lambda agent_id: "")
-    monkeypatch.setattr(grok_runner, "LIVE_TEXT_INTERVAL_SEC", 0.0)
+    monkeypatch.setattr(GROK, "live_text_interval", 0.0)
     stream = _Stream()
     st = _run_events(
         _stream_events(), stream=stream,
@@ -160,10 +163,10 @@ def test_live_text_cadence_is_bounded(monkeypatch):
     monkeypatch.setattr(agents_db, "upsert_live_assistant_message",
                         lambda **kw: live_writes.append(kw["text"]) or {"changed": True})
     monkeypatch.setattr(turn_lifecycle, "transition", lambda *a, **k: None)
-    monkeypatch.setattr(grok_runner, "LIVE_TEXT_INTERVAL_SEC", 60.0)
+    monkeypatch.setattr(GROK, "live_text_interval", 60.0)
     st = _run_events([{"type": "text", "data": f"w{i} "} for i in range(20)])
     assert live_writes == ["w0 "]
-    grok_runner._persist_live_text(
+    GROK._persist_live_text(
         st, agent_id="agent-1", session="sess-1", trace_id="trace-1",
         stream=None, force=True)
     assert live_writes[-1] == st.live_text
@@ -186,13 +189,13 @@ def test_broadcast_failure_is_logged_not_raised(monkeypatch):
     logged: list[str] = []
     monkeypatch.setattr(stream_json, "log_exception",
                         lambda name, *a, **k: logged.append(name))
-    grok_runner._broadcast(Broken(), "agent-1", "sess-1")
+    GROK._broadcast(Broken(), "agent-1", "sess-1")
     assert logged == ["grokBroadcastFail"]
 
 
 def test_routing_text_concatenates_real_stream():
     stdout = "".join(json.dumps(ev) + "\n" for ev in _stream_events())
-    assert grok_runner.routing_text(stdout) == (
+    assert GROK.routing_text(stdout) == (
         "<speak>Hi from Grok.</speak> I'll run it now.The directory holds one file.")
 
 
@@ -219,7 +222,7 @@ def test_spawn_turn_binds_session_and_results(tmp_path, monkeypatch):
     _install_fake_grok(bin_dir, "".join(json.dumps(row) + "\n" for row in _stream_events()))
     results: list[dict] = []
     sessions: list[str] = []
-    handle = grok_runner.spawn_turn(
+    handle = GROK.start_turn(
         text="hello", cwd=tmp_path, backend_session_id=SID,
         on_session_init=lambda sid: sessions.append(sid) or True,
         on_result=results.append, enqueue=lambda **_k: 1,
@@ -238,7 +241,7 @@ def test_spawn_turn_binds_session_and_results(tmp_path, monkeypatch):
 def test_missing_grok_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     try:
-        grok_runner.spawn_turn(text="hi", cwd=tmp_path)
+        GROK.start_turn(text="hi", cwd=tmp_path)
         raise AssertionError("expected FileNotFoundError")
     except FileNotFoundError as error:
         assert "grok" in str(error)

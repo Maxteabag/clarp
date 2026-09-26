@@ -60,7 +60,7 @@ def test_marker_carries_disabled_audio_policy(tmp_path):
 
 
 # The PARAGRAPH_BREAK_SENTINEL constant — and its scrubber in
-# transcript_log — were deleted along with the rest of the pre-clarp
+# claude_transcript — were deleted along with the rest of the pre-clarp
 # legacy. Per-paragraph TTS now rides on clarp's native
 # --include-partial-messages stream-json deltas.
 

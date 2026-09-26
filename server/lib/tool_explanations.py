@@ -28,7 +28,7 @@ import threading
 import time
 from .log import log
 from . import backends, db
-from . import janitor_builtins, judgment_sites, judgments, model_fallbacks
+from . import janitor_builtins, janitor_store, judgment_sites, judgments, model_fallbacks
 from . import tool_explanation_mappings as mappings
 from . import tool_explanation_queue as durable_queue
 from . import tool_explanation_templates as templates
@@ -203,8 +203,15 @@ class ToolExplanations:
             raise ValueError("invalid released demand IDs")
         if target_agent_id is not None and (not isinstance(target_agent_id, str) or not 1 <= len(target_agent_id) <= 128):
             raise ValueError("invalid target agent ID")
+        # Resolve once, fingerprinted first; later checks (one of them inside
+        # the queue's write transaction) compare the fingerprint instead of
+        # resolving again.
+        revision = janitor_store.role_revision(ROLE, target_agent_id)
         selected = janitor_builtins.resolve(ROLE, target_agent_id=target_agent_id)
         identity = self._identity(selected, target_agent_id)
+
+        def unchanged(connection):
+            return identity is not None and janitor_store.role_revision(ROLE, target_agent_id, connection) == revision
         configured = selected or janitor_builtins.get_builtin(ROLE)
         model = configured["model"] if configured else ""
         level = self._detail_level(configured, level)
@@ -240,13 +247,13 @@ class ToolExplanations:
                     {"id": item["id"], "status": "disabled" if not level else "failed",
                      **({"reason": "service_stopping"} if level else {})} for item in items]}
             response = durable_queue.request(level, prepared, release, self._debounce,
-                                             guard=lambda connection: self._matches(identity)) if prepared or release else []
+                                             guard=unchanged) if prepared or release else []
             self._condition.notify()
         if scripted:
             # The exact-match bypass needs no model and no queue, but still
             # honours a paused Janitor and a viewer that released the row.
             gone = durable_queue.released([demand for demand, _ in scripted.values()]) | set(release)
-            admitted = self._matches(identity)
+            admitted = unchanged(db.conn())
             answers = {entry["id"]: entry for entry in response}
             for identifier, (demand, value) in scripted.items():
                 answers[identifier] = {"id": identifier, **({"status": "cancelled"} if demand in gone and demand
@@ -324,7 +331,7 @@ class ToolExplanations:
                     def translate(model):
                         if self._translate is not None:
                             value = self._translate(level, requests)
-                        elif backends.adapter_for(model["backend"]).native_tool_explainer:
+                        elif backends.by_id(model["backend"]).native_tool_explainer:
                             selected = {**run, "configuration": {**run["configuration"], **model, "provider": model["backend"]}}
                             value = self._run_codex(level, requests, run=selected)
                         else:

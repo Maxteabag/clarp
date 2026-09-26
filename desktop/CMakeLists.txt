@@ -211,6 +211,13 @@ target_compile_definitions(clarp-desktop PRIVATE
     CLARP_DESKTOP_VERSION="${PROJECT_VERSION}"
 )
 
+# Opt-in QML profiling for performance work: enables the QML debugger
+# services so `qmlprofiler` can attach. Never set in shipped builds.
+option(CLARP_QML_PROFILE "Build with the QML debugger/profiler services" OFF)
+if(CLARP_QML_PROFILE)
+    target_compile_definitions(clarp-desktop PRIVATE QT_QML_DEBUG)
+endif()
+
 target_link_libraries(clarp-desktop PRIVATE
     Qt6::Concurrent
     Qt6::Core

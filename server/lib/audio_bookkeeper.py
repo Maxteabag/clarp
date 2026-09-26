@@ -40,38 +40,56 @@ SCHEMA_STATEMENTS = [
  END""",
 ]
 
+_PENDING_SQL = """SELECT e.* FROM audio_bookkeeping_events e
+    JOIN agents a ON a.agent_id=e.agent_id
+    WHERE e.completed_at IS NULL AND a.deleted_at IS NULL AND a.archived_at IS NULL
+      AND a.is_janitor=0 AND EXISTS (
+        SELECT 1 FROM janitor_configs jc WHERE jc.template_id=? AND jc.enabled=1
+        AND (COALESCE(json_array_length(jc.scope_json,'$.agent_ids'),0)=0 OR
+             e.agent_id IN (SELECT value FROM json_each(jc.scope_json,'$.agent_ids')))
+        AND e.agent_id NOT IN (SELECT value FROM json_each(jc.scope_json,'$.exclude_agent_ids')))
+    ORDER BY e.event_id LIMIT ?"""
+
+
 def drain(limit=32):
     """Complete a bounded batch under current Janitor authority, never call a model.
 
     A paused/ambiguous owner leaves events pending. Each event is a first-observed
     stage, not a playback-attempt counter; repeated plays cannot invent new facts.
-    Gate, run, result and outbox completion commit atomically under one write lock.
+    Pending rows are read and the owner resolved without the write lock, so an
+    idle tick never takes it. Inside the lock only a configuration fingerprint is
+    compared; a change since the resolve leaves the event for the next tick.
     """
     from . import db, janitor_builtins, janitor_store
+    # Filter paused/out-of-scope targets before LIMIT: their older pending
+    # observations must not starve an eligible target's bookkeeping.
+    rows = db.conn().execute(_PENDING_SQL, (ROLE, max(1, min(int(limit), 128)))).fetchall()
+    if not rows:
+        return 0
+    owners = {}
+    for row in rows:
+        target = row['agent_id']
+        if target not in owners:
+            # Fingerprint first: a change during resolve() makes the check below fail.
+            revision = janitor_store.role_revision(ROLE, target)
+            owners[target] = (revision, janitor_builtins.resolve(ROLE, target_agent_id=target))
     done = 0
     with janitor_store.write() as c:
-        # Filter paused/out-of-scope targets before LIMIT: their older pending
-        # observations must not starve an eligible target's bookkeeping.
-        rows = c.execute("""SELECT e.* FROM audio_bookkeeping_events e
-            JOIN agents a ON a.agent_id=e.agent_id
-            WHERE e.completed_at IS NULL AND a.deleted_at IS NULL AND a.archived_at IS NULL
-              AND a.is_janitor=0 AND EXISTS (
-                SELECT 1 FROM janitor_configs jc WHERE jc.template_id=? AND jc.enabled=1
-                AND (COALESCE(json_array_length(jc.scope_json,'$.agent_ids'),0)=0 OR
-                     e.agent_id IN (SELECT value FROM json_each(jc.scope_json,'$.agent_ids')))
-                AND e.agent_id NOT IN (SELECT value FROM json_each(jc.scope_json,'$.exclude_agent_ids')))
-            ORDER BY e.event_id LIMIT ?""", (ROLE,max(1,min(int(limit),128)))).fetchall()
+        current = {}
         for row in rows:
-            target = c.execute('SELECT deleted_at,archived_at FROM agents WHERE agent_id=?',(row['agent_id'],)).fetchone()
-            if not target or target['deleted_at'] or target['archived_at']:
-                continue
-            config = janitor_builtins.resolve(ROLE, target_agent_id=row['agent_id'])
+            revision, config = owners[row['agent_id']]
             if not config:
                 continue
-            # Config read and write share the transaction: pause/generation changes
-            # cannot race the committed result. No provider claim exists to expire.
+            if row['agent_id'] not in current:
+                current[row['agent_id']] = janitor_store.role_revision(ROLE, row['agent_id'], c)
+            if current[row['agent_id']] != revision:
+                continue
             run_id = 'audio-bookkeeping-' + str(row['event_id'])
             now = db.now_ms()
+            # A concurrent drain may have completed this event since the read.
+            if not c.execute('UPDATE audio_bookkeeping_events SET run_id=?,completed_at=? WHERE event_id=? AND completed_at IS NULL',
+                             (run_id, now, row['event_id'])).rowcount:
+                continue
             attachment = next(a for a in config['attachments'] if a['enabled'] and a['trigger_id']=='audio-lifecycle-observed')
             frozen = {'template_id':ROLE,'executor':'deterministic','generation':config['generation'],
                       'context':{'event_id':row['event_id'],'clip_id':row['clip_id'],'stage':row['stage'],
@@ -83,8 +101,6 @@ def drain(limit=32):
                 status='completed',outcome='completed',candidates=[],configuration=frozen,
                 created_at=now,started_at=now,finished_at=now,ignore_existing=True)
             janitor_store.insert_demand_result(c,run_id,result,now,ignore_existing=True)
-            c.execute('UPDATE audio_bookkeeping_events SET run_id=?,completed_at=? WHERE event_id=? AND completed_at IS NULL',
-                      (run_id,now,row['event_id']))
             janitor_store.record_config_run(c,config['agent_id'],now,touch_updated=False)
             done += 1
     return done

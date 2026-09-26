@@ -18,7 +18,7 @@ class ServerTiming:
     # their agents on this cadence by lib.decision_delivery.
     decision_delivery_interval_sec: float = 5.0
     # NOTE: the per-turn watchdog (idle/startup/post-init deadlines) was
-    # removed in favour of preempt-kill-and-resume — see clarp_runner
+    # removed in favour of preempt-kill-and-resume — see lib.backend.claude
     # 'No turn timer'. Its knobs lived here unreferenced until 2026-08-24.
 
 

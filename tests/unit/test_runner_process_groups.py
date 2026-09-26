@@ -1,8 +1,8 @@
 """Stop reaches descendants of each real runner, without signaling other turns."""
 from __future__ import annotations
 
-import importlib
 import os
+import shutil
 from pathlib import Path
 import signal
 import subprocess
@@ -13,6 +13,7 @@ import time
 import pytest
 
 from lib import agents
+from lib.backend.registry import by_id
 from lib.process_registry import TurnHandle
 
 pytestmark = pytest.mark.skipif(
@@ -44,9 +45,9 @@ def test_wait_includes_stdout_drain_completion():
     assert committed.is_set()
 
 
-@pytest.mark.parametrize("backend", ["clarp", "codex", "agy", "grok", "opencode"])
+@pytest.mark.parametrize("backend", ["claude", "codex", "agy", "grok", "opencode"])
 def test_stopping_runner_terminates_descendants_only(tmp_path, monkeypatch, backend):
-    runner = importlib.import_module(f"lib.{backend}_runner")
+    runner = by_id(backend)
     pid_file = tmp_path / "child.pid"
     executable = tmp_path / "backend.py"
     executable.write_text(
@@ -54,23 +55,23 @@ def test_stopping_runner_terminates_descendants_only(tmp_path, monkeypatch, back
         "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
         f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))\n"
         "time.sleep(60)\n")
-    monkeypatch.setattr(runner.shutil, "which", lambda _name: sys.executable)
+    monkeypatch.setattr(shutil, "which", lambda _name: sys.executable)
     monkeypatch.setattr(runner, "build_cmd", lambda *a, **kw: [sys.executable, str(executable)])
     agent_id = agents.create_agent(
         persona="Fixture", voice_id="", cwd=str(tmp_path), session="fixture",
-        backend="claude" if backend == "clarp" else backend)
+        backend=backend)
     other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     handle = None
     child_pid = 0
     try:
-        handle = runner.spawn_turn(
+        handle = runner.start_turn(
             text="fixture", cwd=tmp_path, session="fixture", agent_id=agent_id)
         deadline = time.monotonic() + 5
         while not pid_file.exists() and time.monotonic() < deadline:
             time.sleep(0.01)
         assert pid_file.exists()
         child_pid = int(pid_file.read_text())
-        assert runner.interrupt(agent_id) == 1
+        assert runner.interrupt_all(agent_id) == 1
         handle.wait(timeout=5)
         deadline = time.monotonic() + 2
         while _alive(child_pid) and time.monotonic() < deadline:
@@ -90,7 +91,7 @@ def test_stopping_runner_terminates_descendants_only(tmp_path, monkeypatch, back
 
 
 def test_account_recovery_kills_detached_output_descendant(tmp_path):
-    from lib.claude_failover import finish_owned_group
+    from lib.account_failover import finish_owned_group
     from lib.process_registry import TurnHandle
     import threading
     child_code = ("import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "

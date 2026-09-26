@@ -14,13 +14,13 @@ Item {
     property int runningChildren: 0
     property bool reducedMotion: false
     property real glyphSize: 14
-    readonly property int total: Math.max(0, jobCount) + Math.max(0, runningChildren)
+    readonly property int total: Math.max(0, jobCount - subAgentCount) + Math.max(subAgentCount, runningChildren, 0)
     readonly property bool subAgentMode: subAgentCount > 0 || runningChildren > 0
     readonly property string glyphKind: subAgentMode ? "agent" : "hourglass"
     readonly property string summary: {
         const parts = [];
         const plain = Math.max(0, jobCount - subAgentCount);
-        const agents = Math.max(0, subAgentCount) + Math.max(0, runningChildren);
+        const agents = Math.max(0, subAgentCount, runningChildren);
         if (plain > 0) parts.push(plain + (plain === 1 ? " background job" : " background jobs"));
         if (agents > 0) parts.push(agents + (agents === 1 ? " sub-agent" : " sub-agents"));
         return parts.join(", ");

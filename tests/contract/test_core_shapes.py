@@ -32,7 +32,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from fake_claude import FakeClaude  # noqa: E402
 from lib import agents as agents_db  # noqa: E402
 from lib import message_store  # noqa: E402
-from lib.transcript_log import parse_turns  # noqa: E402
+from lib.claude_transcript import parse_turns  # noqa: E402
 
 from schema_check import validate  # noqa: E402  (tests/contract dir, see sys.path above)
 
