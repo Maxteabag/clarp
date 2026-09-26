@@ -1,14 +1,14 @@
-"""ServerContext resolves provider/model for the vocabulary budget."""
+"""VocabService resolves provider/model for the vocabulary budget."""
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-from lib.context import ServerContext, TranscriptionVocab
+from lib.context import TranscriptionVocab
+from lib.vocab_service import VocabService
 
 
 def _resolve(requested, stt):
-    fn = ServerContext.__dict__["_transcription_provider_model"]
-    return fn(SimpleNamespace(stt=stt), requested)
+    return VocabService(stt=lambda: stt)._provider_model(requested)
 
 
 def test_server_default_uses_the_loaded_whisper_model():

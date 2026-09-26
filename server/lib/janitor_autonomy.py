@@ -6,6 +6,7 @@ No model can change accounts, approve decisions, or dispatch outside its snapsho
 from __future__ import annotations
 import hashlib,json,threading,time,importlib,subprocess,shutil,os
 from . import agents,db,janitors,janitor_builtins,settings_store,backends,janitor_hotseat
+from . import janitor_store
 from .protocol import AgentState
 
 SCHEMA='''CREATE TABLE IF NOT EXISTS janitor_continuity (
@@ -108,7 +109,7 @@ class AutonomyJanitors:
             if snap is None:continue
             owner=janitor_builtins.resolve('heartbeat-decider',target_agent_id=agent['agent_id'])
             if not owner:continue
-            prior=db.conn().execute('SELECT * FROM janitor_continuity WHERE target_id=?',(agent['agent_id'],)).fetchone()
+            prior=janitor_store.continuity_row(agent['agent_id'])
             fingerprint=digest(snap)
             if prior and prior['due_at']>now and prior['snapshot']==fingerprint:continue
             request_id=digest([agent['agent_id'],fingerprint,prior['run_id'] if prior else '',owner['generation']])
@@ -120,7 +121,7 @@ class AutonomyJanitors:
             except Exception:
                 janitor_builtins.complete_run(run['run_id'],'failed',error='Decision unavailable or invalid; no target was woken')
                 # Backoff is a capacity guard, not a rigid wake decision.
-                db.conn().execute('INSERT OR REPLACE INTO janitor_continuity VALUES (?,?,?,?,?,?)',(agent['agent_id'],fingerprint,run['run_id'],'{}',now+owner['options']['review_interval_seconds']*1000,'failed'))
+                janitor_store.save_continuity(agent['agent_id'],fingerprint,run['run_id'],'{}',now+owner['options']['review_interval_seconds']*1000,'failed')
                 continue
             current=agents.get_by_agent_id(agent['agent_id']);fresh=snapshot(current) if current else None
             if self.stop_event.is_set() or fresh is None or digest(fresh)!=fingerprint or not janitor_builtins.is_current(run['run_id']):
@@ -128,24 +129,24 @@ class AutonomyJanitors:
             with janitors._write() as c:
                 # Persist the exact decision before external dispatch; same request ID on retry.
                 if not janitor_builtins.is_current(run['run_id'],connection=c):continue
-                c.execute('INSERT OR REPLACE INTO janitor_continuity VALUES (?,?,?,?,?,?)',(agent['agent_id'],fingerprint,run['run_id'],json.dumps(decision),now+decision['delay_seconds']*1000,'pending' if decision['action']=='wake' else decision['action']))
+                janitor_store.save_continuity(agent['agent_id'],fingerprint,run['run_id'],json.dumps(decision),now+decision['delay_seconds']*1000,'pending' if decision['action']=='wake' else decision['action'],c)
             if decision['action']=='wake':
                 self.deliver(agent['agent_id'],run)
             else:janitor_builtins.complete_run(run['run_id'],result={'summary':decision.get('reason',''),'status':decision['action']})
         # Pending accepted decisions recover with the exact identity, never a new payload.
-        for row in db.conn().execute("SELECT * FROM janitor_continuity WHERE status='pending'").fetchall():
+        for row in janitor_store.pending_continuity_rows():
             run=janitors.get_run(row['run_id'])
             if run:self.deliver(row['target_id'],run)
     def deliver(self,target_id,run):
-        row=db.conn().execute('SELECT * FROM janitor_continuity WHERE target_id=?',(target_id,)).fetchone();agent=agents.get_by_agent_id(target_id)
+        row=janitor_store.continuity_row(target_id);agent=agents.get_by_agent_id(target_id)
         if not row or row['status']!='pending':return
         fresh=snapshot(agent) if agent else None
         if fresh is None or digest(fresh)!=row['snapshot'] or not janitor_builtins.is_current(run['run_id']):
-            db.conn().execute("UPDATE janitor_continuity SET status='cancelled' WHERE target_id=?",(target_id,));janitor_builtins.complete_run(run['run_id'],'cancelled',result={'reason':'Dispatch guard rejected stale target'});return
+            janitor_store.set_continuity_status(target_id,'cancelled');janitor_builtins.complete_run(run['run_id'],'cancelled',result={'reason':'Dispatch guard rejected stale target'});return
         value=json.loads(row['decision_json'])
         accepted=self.dispatch(agent['session'],value['message'],run['run_id'])
         if accepted:
-            db.conn().execute("UPDATE janitor_continuity SET status='delivered' WHERE target_id=?",(target_id,))
+            janitor_store.set_continuity_status(target_id,'delivered')
             janitor_builtins.complete_run(run['run_id'],result={'summary':value.get('reason',''),'status':'dispatched','target_count':1})
     def quota_once(self):
         owner=janitor_builtins.resolve('quota-monitor')
@@ -182,12 +183,12 @@ class AutonomyJanitors:
                 if not janitor_builtins.is_current(run['run_id']):return
                 rid=digest([provider_id,account,window['window_id'],stamp,owner['generation']])
                 payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':f'{provider_id}: {100-used:g}% quota remaining','push':True,'reason':'quota_threshold','recovery_mode':owner['options']['recovery_mode'],'owner_generation':owner['generation']}
-                inserted=db.conn().execute('INSERT OR IGNORE INTO janitor_quota_receipts VALUES (?,?,?,NULL,?)',(rid,run['run_id'],json.dumps(payload),now)).rowcount
+                inserted=janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now)
                 if inserted:
                     if used >= 100 and owner['options']['recovery_mode']!='notify':
                         payload['recovery']=self.request_recovery(provider_id,owner,run['run_id'],rid)
                         recovery_states.append(provider_id+': '+payload['recovery'].get('status','unknown'))
-                    db.conn().execute('UPDATE janitor_quota_receipts SET payload_json=? WHERE receipt_id=?',(json.dumps(payload),rid));notifications+=1
+                    janitor_store.set_quota_receipt_payload(rid,json.dumps(payload));notifications+=1
         self.deliver_notifications(owner)
         janitor_builtins.complete_run(run['run_id'],result={'summary':f'Checked provider quota; {notifications} threshold notifications','reason':'; '.join(recovery_states)[:500],'item_count':notifications})
 
@@ -226,24 +227,24 @@ class AutonomyJanitors:
                 settings_store.set_text(marker,situation)
                 rid=digest([provider,situation,now,owner['generation']])
                 payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':text,'push':True,'reason':'account_switch','owner_generation':owner['generation']}
-                db.conn().execute('INSERT OR IGNORE INTO janitor_quota_receipts VALUES (?,?,?,NULL,?)',(rid,run['run_id'],json.dumps(payload),now))
+                janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now)
             elif decision['action']=='noop':settings_store.set_text(marker,'')
             summary=text or f"{provider}: {decision.get('active','?')} keeps {decision.get('remaining','?')}% of the {janitor_hotseat.WINDOW_LABEL[provider]} window"
             janitor_builtins.complete_run(run['run_id'],outcome,result={'summary':summary[:500],'status':decision['action'],'reason':decision.get('reason','')[:500]},error=error)
         self.deliver_notifications(owner)
 
     def deliver_notifications(self,owner):
-        rows=db.conn().execute('SELECT * FROM janitor_quota_receipts WHERE delivery_json IS NULL').fetchall()
+        rows=janitor_store.undelivered_quota_receipts()
         for row in rows:
             if self.stop_event.is_set():return
             payload=json.loads(row['payload_json'])
             if payload.get('agent_id')!=owner['agent_id']:continue
             if payload.get('owner_generation')!=owner['generation']:
-                db.conn().execute('UPDATE janitor_quota_receipts SET delivery_json=? WHERE receipt_id=?',(json.dumps({'cancelled':'Janitor configuration changed'}),row['receipt_id']));continue
+                janitor_store.set_quota_receipt_delivery(row['receipt_id'],json.dumps({'cancelled':'Janitor configuration changed'}));continue
             current=janitors.get(owner['session'])
             if not current or not current['enabled'] or current['generation']!=owner['generation']:continue
             delivery=self.notify(payload)
-            db.conn().execute('UPDATE janitor_quota_receipts SET delivery_json=? WHERE receipt_id=?',(json.dumps(delivery or {}),row['receipt_id']))
+            janitor_store.set_quota_receipt_delivery(row['receipt_id'],json.dumps(delivery or {}))
 
     def request_recovery(self,provider,owner,run_id,receipt_id):
         if provider not in {'claude','codex'}:return {'status':'unsupported','reason':'No coordinated account selector for this provider'}
@@ -298,7 +299,7 @@ def quota_crossing(provider,account,window,used,owner,stamp):
 
 def validate_dispatch(session, request_id):
     """Runtime checks the frozen continuation again; no paused queue override."""
-    row=db.conn().execute('SELECT * FROM janitor_continuity WHERE run_id=?',(request_id,)).fetchone()
+    row=janitor_store.continuity_row_for_run(request_id)
     if not row:return False
     agent=agents.get_by_session(session)
     current=snapshot(agent) if agent else None
