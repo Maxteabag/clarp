@@ -2011,6 +2011,36 @@ def cmd_schedule(args) -> int:
     return 0
 
 
+def agent_create_payload(args) -> dict:
+    """The ``POST /agents`` body for ``clarp-admin agent create``.
+
+    A helper is a working identity, not a contact: it gets no reserved voice
+    and no spoken announcement unless the caller asks for a voice."""
+    payload = {"name": args.name, "synthesize_audio": False}
+    for key in ("cwd", "backend", "model", "effort", "parent", "role", "session"):
+        value = getattr(args, key, None)
+        if value is not None:
+            payload[key] = value
+    payload["voice_id"] = args.voice_id if args.voice_id is not None else "{}"
+    if payload.get("cwd"):
+        payload["cwd"] = str(Path(payload["cwd"]).expanduser().resolve())
+    return payload
+
+
+def cmd_agent(args) -> int:
+    if args.agent_command == "create":
+        if args.role == "helper" and not args.parent:
+            raise SystemExit("--role helper needs --parent SESSION")
+        result = api_request("POST", "/agents", agent_create_payload(args))
+    else:
+        body = {"session": args.session, "state": args.state}
+        if args.from_session:
+            body["by"] = args.from_session
+        result = api_request("POST", "/agents/helper-state", body)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def cmd_janitor(args) -> int:
     from lib.janitor_cli import execute
     return execute(args, api_request)
@@ -2248,6 +2278,26 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     uninstall.add_argument("--purge-data", action="store_true")
     uninstall.add_argument("--force-network-cleanup", action="store_true")
     uninstall.set_defaults(func=cmd_uninstall)
+    agent = sub.add_parser("agent").add_subparsers(dest="agent_command", required=True)
+    agent_create = agent.add_parser(
+        "create", help="create an agent; with --parent and --role helper, a helper agent")
+    agent_create.add_argument("name", help="persona name shown in the chat list")
+    agent_create.add_argument("--parent", help="creating session or agent id (e.g. $CLARP_SESSION)")
+    agent_create.add_argument("--role", choices=("agent", "helper"))
+    agent_create.add_argument("--cwd")
+    agent_create.add_argument("--backend")
+    agent_create.add_argument("--model")
+    agent_create.add_argument("--effort")
+    agent_create.add_argument("--session", help="explicit session id; minted when omitted")
+    agent_create.add_argument("--voice-id", dest="voice_id")
+    agent_create.set_defaults(func=cmd_agent)
+    helper_state = agent.add_parser(
+        "helper-state", help="mark a helper done, failed or running again")
+    helper_state.add_argument("session")
+    helper_state.add_argument("state", choices=("done", "failed", "running"))
+    helper_state.add_argument("--from", dest="from_session",
+                              help="the session marking it (its parent)")
+    helper_state.set_defaults(func=cmd_agent)
     prompt_cmd = sub.add_parser("prompt")
     prompt_cmd.add_argument("--to", required=True)
     prompt_cmd.add_argument("--from", dest="from_session")

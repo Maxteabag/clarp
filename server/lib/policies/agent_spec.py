@@ -24,6 +24,7 @@ from typing import Callable, Collection, Mapping, Sequence
 
 from .. import roster as contact_roster
 from ..voice import CARTESIA, resolve_voice
+from . import helper_state as helper_policy
 
 AVATAR_MAX_BYTES = 512_000
 ANONYMOUS_LABELS = {
@@ -55,6 +56,8 @@ class RosterView:
     cartesia_voice_for: Callable[[str], str | None] = lambda _persona: None
     default_roster_voice: str = ""
     random_suffix: Callable[[], str] = lambda: secrets.token_hex(2)
+    resolve_agent: Callable[[str], str] = lambda _raw: ""  # session or id -> agent_id or ""
+    ancestors: Callable[[str], Sequence[str]] = lambda _agent_id: ()
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,9 @@ class AgentSpec:
     recommendation: str = ""          # log line when the tier recommends another backend
     creation_request_id: str = ""
     reopen: Mapping | None = None     # an owner to return without creating anything
+    parent_agent_id: str = ""         # the creator: an explicit parent or the fork source
+    role: str = helper_policy.Role.AGENT
+    write_lineage: bool = False       # persist parent_agent_id and role
 
     @staticmethod
     def parse(data: Mapping, *, backends, roster: RosterView, personas,
@@ -296,6 +302,11 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
     if fork_id and not backends.capabilities(backend).supports_fork:
         return SpecError(400, "fork_unsupported",
                          detail=f"{backends.label(backend)} does not support session forks.")
+    lineage = _lineage(data, roster=roster, replace_sid=replace_sid,
+                       fork_id=fork_id, janitor=janitor)
+    if isinstance(lineage, SpecError):
+        return lineage
+    parent_agent_id, role, write_lineage = lineage
 
     # Per-agent model / effort override (create + relaunch). Only fields the
     # client actually sent are touched, so a relaunch that omits them keeps
@@ -327,4 +338,47 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
         effort=effective_effort, llm_update=llm_update, mcp_servers=mcp_servers,
         presentation_update=presentation_update, recommendation=recommendation,
         creation_request_id=str(data.get("creation_request_id") or ""),
+        parent_agent_id=parent_agent_id, role=role, write_lineage=write_lineage,
     )
+
+
+def _lineage(data: dict, *, roster: RosterView, replace_sid: str, fork_id: str,
+             janitor: bool) -> tuple[str, str, bool] | SpecError:
+    """``(parent_agent_id, role, write)`` for a create, relaunch or fork.
+
+    ``parent`` names the creator by session or agent id. A fork without one
+    records its source agent as the parent. A helper must have a parent. A
+    relaunch keeps its lineage unless the request names a parent or role.
+    """
+    if janitor:
+        return "", helper_policy.Role.JANITOR, False
+    existing = roster.existing_agent(replace_sid) if replace_sid else {}
+    raw_parent = str(data.get("parent") or "").strip()
+    has_role = bool(str(data.get("role") or "").strip())
+    role = helper_policy.parse_role(data.get("role") if has_role else existing.get("role"))
+    if role is None:
+        return SpecError(400, "invalid_role",
+                         detail="role must be 'agent' or 'helper'")
+    parent_id = ""
+    if raw_parent:
+        parent_id = roster.resolve_agent(raw_parent)
+        if not parent_id:
+            return SpecError(404, "parent_not_found",
+                             detail=f"No live agent matches parent '{raw_parent}'.")
+    elif fork_id:
+        owner = roster.resume_owner(fork_id) or {}
+        parent_id = str(owner.get("agent_id") or "")
+    elif replace_sid:
+        parent_id = str(existing.get("parent_agent_id") or "")
+    if role == helper_policy.Role.HELPER and not parent_id:
+        return SpecError(400, "helper_requires_parent",
+                         detail="A helper needs a parent session.")
+    child_id = str(existing.get("agent_id") or "")
+    refusal = helper_policy.parent_refusal(
+        child_id, parent_id, roster.ancestors(parent_id) if parent_id else ())
+    if refusal:
+        return SpecError(409, refusal, detail=(
+            "An agent cannot be its own parent." if refusal == "self_parent"
+            else "That parent is already a descendant of this agent."))
+    write = not replace_sid or bool(raw_parent) or has_role
+    return parent_id, role, write
