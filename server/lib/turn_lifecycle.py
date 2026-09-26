@@ -314,6 +314,16 @@ class TurnStateMachine:
         return int(cursor.rowcount or 0)
 
     @staticmethod
+    def enable_latest_turn_audio(agent_id: str) -> None:
+        """Upgrade the newest turn to speech; never downgrade a voice turn."""
+        conn().execute(
+            """UPDATE turns SET synthesize_audio = 1
+                WHERE turn_id = (
+                   SELECT turn_id FROM turns WHERE agent_id = ?
+                    ORDER BY started_at DESC, turn_id DESC LIMIT 1)""",
+            (agent_id,))
+
+    @staticmethod
     def open_turns() -> list[dict[str, Any]]:
         """The newest open turn per agent: the durable in-flight authority."""
         rows = conn().execute(
@@ -442,6 +452,10 @@ def close_turns_for_trace(agent_id: str, trace_id: str) -> int:
 
 def open_turns() -> list[dict[str, Any]]:
     return MACHINE.open_turns()
+
+
+def enable_latest_turn_audio(agent_id: str) -> None:
+    MACHINE.enable_latest_turn_audio(agent_id)
 
 
 def record_unlaunched(agent_id: str, trace_id: str) -> Transition:
