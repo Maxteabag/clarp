@@ -17,6 +17,7 @@ struct MarkdownStyleOptions {
     QColor quoteText = QColor(QStringLiteral("#9ca1bd"));
     QColor link = QColor(QStringLiteral("#82aaff"));
     QColor rule = QColor(QStringLiteral("#303342"));
+    QString bodyFamily;              // Empty keeps the viewer's font.
 };
 
 MarkdownStyleOptions markdownStyleOptions(const QVariantMap& values);
@@ -24,4 +25,10 @@ MarkdownStyleOptions markdownStyleOptions(const QVariantMap& values);
 // Heading sizes as a multiple of the body size: h1 1.3, h2 1.18, h3 1.08,
 // then body size in bold. Returns true when the document changed.
 bool applyMarkdownStyle(QTextDocument* document, const MarkdownStyleOptions& options);
+
+// Parse, restyle and serialise in one step, so a viewer can be given text
+// whose layout is already final. Restyling a TextEdit after it has been laid
+// out changes its height, and a ListView then shifts every row below it,
+// which is what made scrolling up through a transcript jump.
+QString styledMarkdownHtml(const QString& markdown, const MarkdownStyleOptions& options);
 }  // namespace clarp

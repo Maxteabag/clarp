@@ -12,6 +12,7 @@ target_include_directories(clarp-markdown-style-tests PRIVATE ../src)
 target_link_libraries(clarp-markdown-style-tests PRIVATE Qt6::Gui Qt6::Test)
 clarp_apply_quality_settings(clarp-markdown-style-tests)
 add_test(NAME clarp-desktop-markdown-style COMMAND clarp-markdown-style-tests)
+set_tests_properties(clarp-desktop-markdown-style PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(clarp-reading-theme-tests tst_reading_theme.cpp)
 target_include_directories(clarp-reading-theme-tests PRIVATE ../src)

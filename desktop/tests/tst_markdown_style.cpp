@@ -28,7 +28,7 @@ class MarkdownStyleTest : public QObject {
         const QTextBlock h2 = blockStarting(document.data(), QStringLiteral("Second"));
         QCOMPARE(h1.begin().fragment().charFormat().intProperty(QTextFormat::FontPixelSize), 21);  // 1.3x
         QCOMPARE(h2.begin().fragment().charFormat().intProperty(QTextFormat::FontPixelSize), 19);  // 1.18x
-        QCOMPARE(h1.begin().fragment().charFormat().intProperty(QTextFormat::FontSizeAdjustment), 0);
+        QVERIFY(!h1.begin().fragment().charFormat().hasProperty(QTextFormat::FontSizeAdjustment));
         QVERIFY(h1.begin().fragment().charFormat().fontWeight() >= QFont::DemiBold);
     }
     void codeUsesMonoAndBackground() {
@@ -73,6 +73,26 @@ class MarkdownStyleTest : public QObject {
         options.bodyPixelSize = 17;
         QVERIFY(clarp::applyMarkdownStyle(document.data(), options));  // Changed options restyle.
     }
+    void styledHtmlCarriesTheFinalLayout() {
+        clarp::MarkdownStyleOptions options;
+        options.bodyPixelSize = 16;
+        options.codeBackground = QColor(QStringLiteral("#123456"));
+        const QString html = clarp::styledMarkdownHtml(
+            QStringLiteral("# Title\n\nText with `code`.\n\n```\nblock\n```\n"), options);
+        // Heading at 1.3x of 16 px, never the importer's web size.
+        QVERIFY2(html.contains(QStringLiteral("font-size:21px")), qPrintable(html.mid(html.indexOf(QStringLiteral("Title")) - 300, 320)));
+        QVERIFY(html.contains(QStringLiteral("#123456")));
+        QVERIFY(!html.contains(QStringLiteral("font-family:;")));
+        // No heading tags: the viewer would scale them a second time.
+        QVERIFY(!html.contains(QStringLiteral("<h1")) && !html.contains(QStringLiteral("<h2")));
+        // Loading the HTML into a fresh document must not need a second pass:
+        // the viewer lays it out once, at its final height.
+        QTextDocument reloaded;
+        reloaded.setHtml(html);
+        QTextBlock heading = reloaded.begin();
+        QCOMPARE(heading.text(), QStringLiteral("Title"));
+        QCOMPARE(heading.begin().fragment().charFormat().intProperty(QTextFormat::FontPixelSize), 21);
+    }
     void optionsParseFromQml() {
         const auto options = clarp::markdownStyleOptions({{QStringLiteral("bodyPixelSize"), 17},
                                                           {QStringLiteral("link"), QStringLiteral("#1f7a78")},
@@ -82,5 +102,5 @@ class MarkdownStyleTest : public QObject {
         QCOMPARE(options.codeBackground, QColor(QStringLiteral("#20212e")));  // invalid input keeps the default
     }
 };
-QTEST_GUILESS_MAIN(MarkdownStyleTest)
+QTEST_MAIN(MarkdownStyleTest)  // Fonts need a QGuiApplication.
 #include "tst_markdown_style.moc"

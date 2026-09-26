@@ -529,6 +529,21 @@ QUrl AppController::contactAvatarSource(const QString& name) const {
     return m_contactAvatarSources.value(name);
 }
 
+QString AppController::styledMarkdownHtml(const QString& markdown, const QVariantMap& options) const {
+    QStringList parts;
+    for (auto it = options.cbegin(); it != options.cend(); ++it)
+        parts.append(it.key() + QLatin1Char('=') + it.value().toString());
+    const QString key = parts.join(QLatin1Char(';')) + QLatin1Char('|') + markdown;
+    const auto found = m_styledMarkdown.constFind(key);
+    if (found != m_styledMarkdown.cend()) return found.value();
+    // Transcripts are re-rendered as rows are recycled while scrolling; a
+    // bounded cache keeps that free without growing with the whole history.
+    if (m_styledMarkdown.size() > 2000) m_styledMarkdown.clear();
+    const QString html = clarp::styledMarkdownHtml(markdown, markdownStyleOptions(options));
+    m_styledMarkdown.insert(key, html);
+    return html;
+}
+
 void AppController::styleMarkdown(QObject* textDocument, const QVariantMap& options) const {
     auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
     if (quickDocument == nullptr || quickDocument->textDocument() == nullptr) return;
