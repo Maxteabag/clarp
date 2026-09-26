@@ -2028,15 +2028,27 @@ def agent_create_payload(args) -> dict:
 
 
 def cmd_agent(args) -> int:
+    try:
+        return _cmd_agent(args)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace").strip()
+        print(f"clarp-admin: HTTP {exc.code}: {body or exc.reason}", file=sys.stderr)
+        return 1
+
+
+def _cmd_agent(args) -> int:
     if args.agent_command == "create":
         if args.role == "helper" and not args.parent:
             raise SystemExit("--role helper needs --parent SESSION")
         result = api_request("POST", "/agents", agent_create_payload(args))
+    elif args.state is None:
+        query = urllib.parse.urlencode({"session": args.session})
+        result = api_request("GET", f"/agent-helper-state?{query}")
     else:
         body = {"session": args.session, "state": args.state}
         if args.from_session:
             body["by"] = args.from_session
-        result = api_request("POST", "/agents/helper-state", body)
+        result = api_request("POST", "/agent-helper-state", body)
     print(json.dumps(result, indent=2))
     return 0
 
@@ -2292,9 +2304,10 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     agent_create.add_argument("--voice-id", dest="voice_id")
     agent_create.set_defaults(func=cmd_agent)
     helper_state = agent.add_parser(
-        "helper-state", help="mark a helper done, failed or running again")
+        "helper-state",
+        help="show an agent's helper state, or mark a helper done, failed or running again")
     helper_state.add_argument("session")
-    helper_state.add_argument("state", choices=("done", "failed", "running"))
+    helper_state.add_argument("state", nargs="?", choices=("done", "failed", "running"))
     helper_state.add_argument("--from", dest="from_session",
                               help="the session marking it (its parent)")
     helper_state.set_defaults(func=cmd_agent)

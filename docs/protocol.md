@@ -410,6 +410,9 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   parent; without it the mark is the user's. An agent-origin `/send` from a
   helper to its parent moves it to `reported` on its own, and one from the
   parent back to a reported helper returns it to `running`.
+- `GET /agent-helper-state?session=` — `{"agent_id", "session", "role",
+  "parent_agent_id", "helper_state", "helper_completed_at", "archived_at"}`
+  for one agent, so a watcher can poll without the snapshot.
 - `DELETE /agents/<session>` — release the agent (soft delete).
 - `POST /agent-mute`, `/agent-archive`, `/agent-heartbeat`, `/agent-dreaming`,
   `/agent-voice` — per-agent toggles: `{"session", "<flag>": bool}`.
