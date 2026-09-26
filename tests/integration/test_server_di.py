@@ -762,11 +762,12 @@ def test_prompt_history_ingests_authenticated_send_and_excludes_legacy(
     fake_ctx, monkeypatch,
 ):
     from lib import agents as agents_db
-    from lib import clarp_runner, message_store
+    from lib import message_store
+    from lib.backend.registry import by_id
 
     monkeypatch.setattr(
-        clarp_runner,
-        "spawn_turn",
+        by_id("claude"),
+        "start_turn",
         lambda **_kwargs: type("_FakeHandle", (), {"pid": 99})(),
     )
     agent = agents_db.get_by_session("claude")
@@ -866,11 +867,11 @@ def test_prompt_history_ingests_authenticated_send_and_excludes_legacy(
 def test_prompt_history_excludes_send_admitted_without_auth(
     running_server, monkeypatch,
 ):
-    from lib import clarp_runner
+    from lib.backend.registry import by_id
 
     monkeypatch.setattr(
-        clarp_runner,
-        "spawn_turn",
+        by_id("claude"),
+        "start_turn",
         lambda **_kwargs: type("_FakeHandle", (), {"pid": 99})(),
     )
     base, ctx, _srv = running_server
@@ -899,7 +900,8 @@ def test_prompt_history_excludes_send_admitted_without_auth(
 def test_prompt_history_preserves_routed_voice_admission(
     fake_ctx, monkeypatch,
 ):
-    from lib import clarp_runner, orchestrator, settings_store
+    from lib import orchestrator, settings_store
+    from lib.backend.registry import by_id
 
     settings_store.set_bool("orchestrator.enabled", True)
     monkeypatch.setattr(
@@ -915,8 +917,8 @@ def test_prompt_history_preserves_routed_voice_admission(
         },
     )
     monkeypatch.setattr(
-        clarp_runner,
-        "spawn_turn",
+        by_id("claude"),
+        "start_turn",
         lambda **_kwargs: type("_FakeHandle", (), {"pid": 99})(),
     )
     fake_ctx = fake_ctx.with_(auth_token="secret-token")
@@ -1571,7 +1573,7 @@ def test_large_json_responses_are_gzipped_when_requested(running_server):
     assert json.loads(gzip.decompress(encoded))["agents"]
 
 
-def test_post_send_dispatches_text_via_clarp_runner(running_server, monkeypatch):
+def test_post_send_dispatches_text_via_claude_backend(running_server, monkeypatch):
     """/send spawns clarp -p for each turn.
     Monkeypatch the runner so we don't actually need clarp on PATH, and
     assert the handler called it with the user's text."""
@@ -1583,13 +1585,13 @@ def test_post_send_dispatches_text_via_clarp_runner(running_server, monkeypatch)
         calls.append({"text": text, "cwd": str(cwd),
                       **metadata})
         return _FakeHandle()
-    from lib import clarp_runner
-    monkeypatch.setattr(clarp_runner, "spawn_turn", fake_spawn)
+    from lib.backend.registry import by_id
+    monkeypatch.setattr(by_id("claude"), "start_turn", fake_spawn)
 
     status, _ = _post(base + "/send", {"text": "hello mike", "session": "claude"})
     assert status == 200
     assert len(calls) == 1, (
-        f"clarp_runner.spawn_turn should be called once per /send; "
+        f"ClaudeBackend.start_turn should be called once per /send; "
         f"got {len(calls)} calls"
     )
     assert calls[0]["text"] == "hello mike"
@@ -1608,8 +1610,8 @@ def test_post_send_retry_with_same_client_id_dispatches_once(running_server, mon
         calls.append({"text": text, **metadata})
         return _FakeHandle()
 
-    from lib import clarp_runner
-    monkeypatch.setattr(clarp_runner, "spawn_turn", fake_spawn)
+    from lib.backend.registry import by_id
+    monkeypatch.setattr(by_id("claude"), "start_turn", fake_spawn)
     payload = {
         "text": "deliver exactly once",
         "session": "claude",
@@ -1629,9 +1631,11 @@ def test_successful_send_releases_cached_transcription(running_server, monkeypat
     class _FakeHandle:
         pid = 99
 
-    from lib import clarp_runner, db
+    from lib import db
+
+    from lib.backend.registry import by_id
     monkeypatch.setattr(
-        clarp_runner, "spawn_turn", lambda **_metadata: _FakeHandle())
+        by_id("claude"), "start_turn", lambda **_metadata: _FakeHandle())
     headers = {
         "Content-Type": "audio/webm",
         "X-Transcription-ID": "recording-cleanup-send",
@@ -1908,9 +1912,9 @@ def test_post_send_orchestrator_fallback_uses_legacy_dispatch(
         calls.append({"text": text, "cwd": str(cwd), **metadata})
         return type("_FakeHandle", (), {"pid": 99})()
 
-    from lib import clarp_runner
+    from lib.backend.registry import by_id
     monkeypatch.setattr(server_module, "OrchestratorService", FakeOrchestrator)
-    monkeypatch.setattr(clarp_runner, "spawn_turn", fake_spawn)
+    monkeypatch.setattr(by_id("claude"), "start_turn", fake_spawn)
 
     status, _ = _post(base + "/send", {
         "text": "hello fallback",
@@ -1940,8 +1944,8 @@ def test_post_send_forwards_silent_turn_policy(running_server, monkeypatch):
         calls.append(metadata)
         return type("_FakeHandle", (), {"pid": 99})()
 
-    from lib import clarp_runner
-    monkeypatch.setattr(clarp_runner, "spawn_turn", fake_spawn)
+    from lib.backend.registry import by_id
+    monkeypatch.setattr(by_id("claude"), "start_turn", fake_spawn)
 
     status, _ = _post(base + "/send", {
         "text": "silent", "session": "claude", "synthesize_audio": False,
@@ -1971,8 +1975,8 @@ def test_post_send_defaults_user_origin_to_audio(running_server, monkeypatch):
     def fake_spawn(*, text, cwd, **metadata):
         return type("_FakeHandle", (), {"pid": 99})()
 
-    from lib import clarp_runner
-    monkeypatch.setattr(clarp_runner, "spawn_turn", fake_spawn)
+    from lib.backend.registry import by_id
+    monkeypatch.setattr(by_id("claude"), "start_turn", fake_spawn)
 
     status, _ = _post(base + "/send", {"text": "normal", "session": "claude"})
 
@@ -2245,8 +2249,8 @@ def test_post_send_defaults_sender_origin_to_silent(running_server, monkeypatch)
     def fake_spawn(*, text, cwd, **metadata):
         return type("_FakeHandle", (), {"pid": 99})()
 
-    from lib import clarp_runner
-    monkeypatch.setattr(clarp_runner, "spawn_turn", fake_spawn)
+    from lib.backend.registry import by_id
+    monkeypatch.setattr(by_id("claude"), "start_turn", fake_spawn)
 
     status, _ = _post(base + "/send", {
         "text": "agent coordination",
@@ -2265,8 +2269,8 @@ def test_post_send_allows_agent_origin_to_opt_into_audio(running_server, monkeyp
     def fake_spawn(*, text, cwd, **metadata):
         return type("_FakeHandle", (), {"pid": 99})()
 
-    from lib import clarp_runner
-    monkeypatch.setattr(clarp_runner, "spawn_turn", fake_spawn)
+    from lib.backend.registry import by_id
+    monkeypatch.setattr(by_id("claude"), "start_turn", fake_spawn)
 
     status, _ = _post(base + "/send", {
         "text": "agent coordination but voiced",
@@ -3654,8 +3658,8 @@ def test_build_server_attaches_the_herald_before_workers_start(fake_ctx):
 def test_helper_agent_create_report_and_mark_over_http(running_server, monkeypatch, tmp_path):
     base, _ctx, _srv = running_server
     _unlink_claude_source_marker()
-    from lib import clarp_runner
-    monkeypatch.setattr(clarp_runner, "spawn_turn", lambda **kw: type("_H", (), {"pid": 99})())
+    from lib.backend.registry import by_id
+    monkeypatch.setattr(by_id("claude"), "start_turn", lambda **kw: type("_H", (), {"pid": 99})())
 
     status, body = _post(base + "/agents", {
         "name": "stream-a", "parent": "claude", "role": "helper", "voice_id": "{}",
