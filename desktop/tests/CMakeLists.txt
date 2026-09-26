@@ -7,6 +7,13 @@ target_link_libraries(clarp-palette-tests PRIVATE Qt6::Gui Qt6::Test)
 clarp_apply_quality_settings(clarp-palette-tests)
 add_test(NAME clarp-desktop-palette COMMAND clarp-palette-tests)
 
+add_executable(clarp-stall-monitor-tests tst_stall_monitor.cpp ../src/app/StallMonitor.cpp ../src/app/StallMonitor.h)
+target_include_directories(clarp-stall-monitor-tests PRIVATE ../src)
+target_link_libraries(clarp-stall-monitor-tests PRIVATE Qt6::Core Qt6::Test)
+set_target_properties(clarp-stall-monitor-tests PROPERTIES ENABLE_EXPORTS ON)
+clarp_apply_quality_settings(clarp-stall-monitor-tests)
+add_test(NAME clarp-desktop-stall-monitor COMMAND clarp-stall-monitor-tests)
+
 add_executable(clarp-markdown-style-tests tst_markdown_style.cpp ../src/app/MarkdownStyle.cpp)
 target_include_directories(clarp-markdown-style-tests PRIVATE ../src)
 target_link_libraries(clarp-markdown-style-tests PRIVATE Qt6::Gui Qt6::Test)

@@ -1,5 +1,7 @@
 #pragma once
+#include <QDateTime>
 #include <QFile>
+#include <unistd.h>
 #include <cstring>
 #include <QQuickItem>
 #include <QQuickWindow>
@@ -23,6 +25,28 @@ inline QVariantMap processMemoryKb() {
         }
     }
     return values;
+}
+
+// Process CPU (user + system) in milliseconds per second since the previous
+// call; the first call returns 0.
+inline qint64 processCpuMsPerSecond() {
+    static qint64 lastTicks = -1;
+    static qint64 lastMs = 0;
+    QFile stat(QStringLiteral("/proc/self/stat"));
+    if (!stat.open(QIODevice::ReadOnly)) return 0;
+    const QByteArray line = stat.readAll();
+    const qsizetype close = line.lastIndexOf(')');
+    const QList<QByteArray> fields = line.mid(close + 2).split(' ');
+    if (fields.size() < 13) return 0;
+    const qint64 ticks = fields.at(11).toLongLong() + fields.at(12).toLongLong();
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const long hz = sysconf(_SC_CLK_TCK);
+    qint64 result = 0;
+    if (lastTicks >= 0 && now > lastMs && hz > 0)
+        result = (ticks - lastTicks) * 1000 / hz * 1000 / (now - lastMs);
+    lastTicks = ticks;
+    lastMs = now;
+    return result;
 }
 
 // Live Qt Quick items under a window, and how many of them are text editors.

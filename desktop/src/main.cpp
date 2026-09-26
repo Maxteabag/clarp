@@ -8,6 +8,7 @@
 #include "app/AppController.h"
 #include "app/DesktopPalette.h"
 #include "app/MemoryDiagnostics.h"
+#include "app/StallMonitor.h"
 #include "platform/DesktopIntegration.h"
 
 #include <QApplication>
@@ -110,12 +111,19 @@ int main(int argc, char* argv[]) {
             && !qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")));
     const bool emptyStartup = !restoreDesktop && !versionManager && launchParser.isSet(QStringLiteral("no-new-agent"));
     application.setProperty("clarpEmptyStartup", emptyStartup);
-    application.setProperty("clarpLaunchMode", launchOnStartup);
+    // Launch mode pauses fleet loading so an auto-started agent is not slowed
+    // by it. Only a command-line launch that names a backend auto-starts; the
+    // interactive New Session hub needs the fleet (its contacts come from the
+    // snapshot) and sits over a live sidebar, which stayed "No agents yet"
+    // until an agent was created when this covered every launch.
+    const bool autoStartLaunch = launchOnStartup && !launchBackend.isEmpty();
+    application.setProperty("clarpLaunchMode", autoStartLaunch);
     if (!versionManager) engine.setInitialProperties({{QStringLiteral("launchOnStartup"), launchOnStartup},
         {QStringLiteral("sidebarVisible"), emptyStartup}});
     if (versionManager) application.setApplicationName(QStringLiteral("ClarpPreviewVersionManager"));
     engine.loadFromModule("Clarp.Desktop", versionManager ? "PreviewVersionWindow" : "Main");
 
+    std::unique_ptr<clarp::StallMonitor> stallMonitor;
     std::unique_ptr<clarp::DesktopIntegration> desktopIntegration;
     std::unique_ptr<clarp::DesktopPresence> desktopPresence;
     QQuickWindow* rootWindow = nullptr;
@@ -137,13 +145,26 @@ int main(int argc, char* argv[]) {
             // items, and the controller's caches. CLARP_MEMORY_LOG_SECONDS=0 disables.
             const int memoryLogSeconds = qEnvironmentVariableIsSet("CLARP_MEMORY_LOG_SECONDS")
                 ? qEnvironmentVariableIntValue("CLARP_MEMORY_LOG_SECONDS") : 60;
+            // GUI stall watchdog: any block longer than the threshold writes the
+            // GUI thread's stack to the stall log. CLARP_STALL_THRESHOLD_MS=0
+            // disables it.
+            const int stallThresholdMs = qEnvironmentVariableIsSet("CLARP_STALL_THRESHOLD_MS")
+                ? qEnvironmentVariableIntValue("CLARP_STALL_THRESHOLD_MS") : 150;
+            const int stallMemoryMb = qEnvironmentVariableIsSet("CLARP_STALL_MEMORY_MB")
+                ? qEnvironmentVariableIntValue("CLARP_STALL_MEMORY_MB") : 1536;
+            stallMonitor = std::make_unique<clarp::StallMonitor>(
+                stallThresholdMs, qEnvironmentVariable("CLARP_STALL_LOG"), nullptr, stallMemoryMb);
+            clarp::StallMonitor* stalls = stallMonitor.get();
             if (memoryLogSeconds > 0) {
                 auto* memoryLog = new QTimer(controller);
                 memoryLog->setInterval(memoryLogSeconds * 1000);
-                QObject::connect(memoryLog, &QTimer::timeout, controller, [rootWindow, controller] {
+                QObject::connect(memoryLog, &QTimer::timeout, controller, [rootWindow, controller, stalls] {
                     QVariantMap report = clarp::processMemoryKb();
                     report.insert(clarp::windowItemCounts(rootWindow));
                     report.insert(controller->memoryCounters());
+                    report.insert(QStringLiteral("cpuMsPerSec"), clarp::processCpuMsPerSecond());
+                    report.insert(QStringLiteral("stalls"), stalls->stallCount());
+                    report.insert(QStringLiteral("longestStallMs"), stalls->takeLongestStallMs());
                     qInfo().noquote() << "memory"
                         << QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(report)).toJson(QJsonDocument::Compact));
                 });
@@ -167,7 +188,7 @@ int main(int argc, char* argv[]) {
         }
     }
     if (rootWindow != nullptr && controller != nullptr && launchOnStartup) {
-        controller->setLaunchMode(true);
+        if (autoStartLaunch) controller->setLaunchMode(true);
         const QString launchDirectory = launchParser.value(QStringLiteral("cwd"));
         const QString launchModel = launchParser.value(QStringLiteral("model"));
         const QString launchEffort = launchParser.value(QStringLiteral("effort"));

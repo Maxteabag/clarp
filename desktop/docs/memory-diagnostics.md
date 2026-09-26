@@ -1,4 +1,30 @@
-# Desktop memory diagnostics
+# Desktop memory and lag diagnostics
+
+## Stall and memory watchdog
+
+`StallMonitor` runs in every desktop instance. A watchdog thread expects the
+GUI thread to beat every 20 ms. When it misses for more than 150 ms, or when
+resident memory first passes 1.5 GB (then every further 512 MB), the
+watchdog interrupts the GUI thread with a real-time signal, captures its call
+stack at that instant, and appends it to the stall log; when a stall ends it
+logs how long it lasted. The executable exports its symbols, so stacks name
+Clarp functions as well as Qt's.
+
+- Log: `~/.local/state/clarp/desktop-stalls.log` (rotates at 4 MB to `.1`).
+- `CLARP_STALL_THRESHOLD_MS` (default 150, 0 disables),
+  `CLARP_STALL_MEMORY_MB` (default 1536, 0 disables), `CLARP_STALL_LOG`.
+- The minute `memory {…}` line also carries `cpuMsPerSec`, `stalls` and
+  `longestStallMs`.
+
+Read it with `~/dotfiles/skills/qt-clarp-desktop/scripts/clarp-desktop-stalls`,
+which groups stalls by their innermost Clarp or Qt frame. Demangle raw stacks
+with `c++filt`.
+
+The first real capture (2026-09-26) showed a 162 ms stall at startup in
+`AgentFilterModel::refreshTree` → `QSortFilterProxyModel::invalidate` →
+`QQmlDelegateModel::handleModelReset`: every sidebar reorder rebuilds all
+visible rows and loads fonts for them.
+
 
 The `clarp-desktop` launchers run the app in a systemd scope capped at 3 GiB
 (`clarp-desktop-guard`). On 2026-09-25 a preview window (`--no-new-agent`,
