@@ -135,3 +135,17 @@ def test_concurrent_first_loads_share_one_parse(tmp_path, monkeypatch):
     assert results == [7003] * 8
     assert len(parses) == 1
     config.reset_cache()
+
+
+def test_anonymous_launch_names_speak_with_their_archetype_voice(tmp_path):
+    # Issue 127: "Claude-5628" carries no voice of its own; the Cartesia map is
+    # keyed on the archetype name the launch path minted it from.
+    config.reset_cache_for_tests()
+    loaded = config.load(tmp_path / "missing.toml")
+    assert loaded.cartesia_voice_for("Claude") is not None
+    assert loaded.cartesia_voice_for("Claude-5628") == loaded.cartesia_voice_for("Claude")
+    assert loaded.cartesia_voice_for("Codex-0a1b") == loaded.cartesia_voice_for("Codex")
+    # Only the four-hex-digit suffix is an anonymous name; other names stay unmapped.
+    assert loaded.cartesia_voice_for("Nobody-5628") is None
+    assert loaded.cartesia_voice_for("Claude-Smith") is None
+    config.reset_cache_for_tests()
