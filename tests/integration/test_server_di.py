@@ -243,6 +243,9 @@ def test_http_server_can_be_replaced_while_runtime_keeps_active_turn(
     active = {}
 
     class PersistentDispatch:
+        def submit(self, command):
+            return self.dispatch(**command.as_kwargs())
+
         def dispatch(self, **kwargs):
             agent = __import__("lib.agents", fromlist=["get_by_session"]).get_by_session(
                 kwargs["forced_session"])
@@ -417,6 +420,9 @@ def test_background_job_snapshot_and_idempotent_cancel_http(
     class FakeDispatch:
         def __init__(self, _ctx):
             pass
+
+        def submit(self, command):
+            return self.dispatch(**command.as_kwargs())
 
         def dispatch(self, **kwargs):
             dispatched.append(kwargs)
@@ -3166,6 +3172,9 @@ def test_decision_delivery_is_private_and_bypasses_user_queue(monkeypatch):
     class FakeDispatch:
         def __init__(self, _ctx):
             pass
+
+        def submit(self, command):
+            return self.dispatch(**command.as_kwargs())
 
         def dispatch(self, **kwargs):
             dispatched.append(kwargs)

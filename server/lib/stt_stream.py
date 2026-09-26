@@ -251,7 +251,7 @@ def serve_stt_stream(handler, query: dict[str, str], *,
     capacity = stt_providers.budget_for(provider).capacity
     vocab_fn = getattr(handler.ctx, "vocab_for_transcription", None)
     from . import trace as _trace
-    stream_trace = _trace.new_id()
+    stream_trace = _trace.new_trace_id()
     if callable(vocab_fn):
         try:
             vocab = vocab_fn(delegated=False, session=session,
