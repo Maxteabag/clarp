@@ -59,6 +59,15 @@ session, so the phone and desktop show that you are waiting on it.
 
 ## Notes
 
+- **Never use `pgrep -f` or `pkill -f` inside a sub-agent.** They match
+  full command lines, and a sub-agent's command line is its prompt. If the
+  prompt mentions `install.sh` or `npm ci`, a "kill leaked install.sh"
+  cleanup kills the sub-agent itself. Its working directory is the
+  worktree, so a cwd filter matches too. On 2026-09-26 three workers each
+  killed themselves this way right after their test gate. To clean up
+  leaked test children, match on the executable (`pgrep -x bash` plus
+  `/proc/PID/cmdline` starting with the script path) and skip your own
+  process tree.
 - Linux only (systemd). On macOS `start` exits with status 3; use
   `launchctl submit` with the same command until a launchd path exists.
 - Progress is visible through `git log` in the worktree. With
