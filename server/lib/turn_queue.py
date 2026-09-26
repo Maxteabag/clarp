@@ -24,6 +24,66 @@ def enqueue(*, queue_id: str, agent_id: str, session: str, text: str,
     return inserted
 
 
+# --- Stop-parked sends ------------------------------------------------------
+#
+# A normal send admitted while an agent's Stop barrier is up has no queue row
+# of its own (only explicit queue-after-current requests get one), yet it must
+# survive a runtime restart like any admitted message. It is parked here in
+# status ``parked``: invisible to the queue the user sees, removed the moment
+# it launches, and turned back into ``queued`` by ``requeue_parked()`` at
+# rehydration so recovery re-admits it.
+
+def park(*, queue_id: str, agent_id: str, session: str, text: str,
+         trace_id: str, client_msg_id: str, synthesize_audio: bool,
+         origin: str, sender_agent_id: str,
+         prompt_admission_id: str = "") -> bool:
+    cursor = db.conn().execute(
+        """INSERT INTO queued_turns (
+               queue_id, agent_id, session, text, trace_id, client_msg_id,
+               synthesize_audio, origin, sender_agent_id, enqueued_at,
+               prompt_admission_id, status
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked')
+           ON CONFLICT(queue_id) DO NOTHING""",
+        (queue_id, agent_id, session, text, trace_id, client_msg_id,
+         int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
+         prompt_admission_id),
+    )
+    return cursor.rowcount == 1
+
+
+def unpark(queue_id: str) -> bool:
+    if not queue_id:
+        return False
+    cursor = db.conn().execute(
+        "DELETE FROM queued_turns WHERE queue_id = ? AND status = 'parked'",
+        (queue_id,),
+    )
+    return bool(cursor.rowcount)
+
+
+def parked(agent_id: str = "") -> list[dict]:
+    if agent_id:
+        rows = db.conn().execute(
+            """SELECT * FROM queued_turns
+                 WHERE status = 'parked' AND agent_id = ? ORDER BY queue_seq""",
+            (agent_id,))
+    else:
+        rows = db.conn().execute(
+            "SELECT * FROM queued_turns WHERE status = 'parked' ORDER BY queue_seq")
+    return [dict(row) for row in rows]
+
+
+def requeue_parked() -> int:
+    """Parked rows become ordinary queued rows (after a restart the barrier
+    that parked them is gone). Returns how many were requeued."""
+    rows = db.conn().execute(
+        """UPDATE queued_turns SET status = 'queued'
+            WHERE status = 'parked' RETURNING agent_id""").fetchall()
+    for agent_id in {str(row["agent_id"]) for row in rows}:
+        _bump_revision(agent_id)
+    return len(rows)
+
+
 def contains(queue_id: str) -> bool:
     if not queue_id:
         return False
