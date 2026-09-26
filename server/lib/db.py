@@ -29,6 +29,7 @@ exclusive WAL checkpoint in the HTTP process cannot skip INTERRUPTED marks.
 """
 from __future__ import annotations
 
+import itertools
 import os
 import pathlib
 import sqlite3
@@ -210,6 +211,7 @@ def write_generation() -> int:
 # each has its own count and a write on the same connection leaves it flat.
 _STAMP_LOCK = threading.Lock()
 _STAMP_CONN: sqlite3.Connection | None = None
+_STAMP_FAILURES = itertools.count(1)
 
 
 def _stamp_connection() -> sqlite3.Connection:
@@ -248,8 +250,10 @@ def change_stamp() -> tuple[int, int]:
             row = _stamp_connection().execute("PRAGMA data_version").fetchone()
             data_version = int(row[0]) if row else 0
         except sqlite3.Error:
+            # Unknown is never equal to anything cached: a fresh negative
+            # value per failure keeps readers recomputing until it recovers.
             _close_stamp_connection()
-            data_version = -1
+            data_version = -next(_STAMP_FAILURES)
         return data_version, _WRITE_GENERATION
 
 
