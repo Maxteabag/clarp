@@ -17,6 +17,7 @@ import os
 import pathlib
 import threading
 import tomllib
+import re
 from . import xdg
 from dataclasses import dataclass, field
 from typing import Any
@@ -494,10 +495,21 @@ class Config:
         return str(migrated) if migrated.is_file() else str(configured)
 
     def cartesia_voice_for(self, persona: str) -> str | None:
-        """Cartesia voice id for a persona, or None if unmapped."""
+        """Cartesia voice id for a persona, or None if unmapped.
+
+        An anonymous-launch agent is named ``<Archetype>-<hex>`` ("Claude-5628")
+        and carries no voice of its own; it speaks with the archetype's default
+        voice, which is what the map is keyed on (#127).
+        """
         if not persona:
             return None
-        return self.cartesia_voices.get(persona) or None
+        direct = self.cartesia_voices.get(persona)
+        if direct:
+            return direct
+        archetype = _ANONYMOUS_SUFFIX.sub("", persona)
+        if archetype != persona:
+            return self.cartesia_voices.get(archetype) or None
+        return None
 
     @staticmethod
     def auth_token_or_env(value: str, env_name: str) -> str:
@@ -507,6 +519,10 @@ class Config:
 _CACHED: Config | None = None
 _CACHED_PATH: pathlib.Path | None = None
 _LOAD_LOCK = threading.RLock()  # re-entrant: a load failure logs, and logging may consult config
+
+
+# "Claude-5628": the anonymous-launch name suffix (agent_lifecycle mints token_hex(2)).
+_ANONYMOUS_SUFFIX = re.compile(r"-[0-9a-f]{4}$")
 
 
 class ConfigError(RuntimeError):
