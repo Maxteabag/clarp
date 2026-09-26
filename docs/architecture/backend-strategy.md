@@ -39,14 +39,13 @@ server/lib/backend/
   grok.py         GrokBackend(StreamJsonBackend)
   opencode.py     OpenCodeBackend(StreamJsonBackend)
   deepseek.py     DeepSeekBackend(OpenCodeBackend): composition over OpenCode
-  registry.py     by_id(), for_agent(), all(), the only place ids are listed
-server/lib/backends.py   facade: constants, normalize(), by_id(), for_agent()
+  registry.py     by_id(), all(), the only place ids are listed
+server/lib/backends.py   facade: constants, normalize(), by_id()
 ```
 
 `backends.py` stays the import path callers use; it re-exports from the
-package. The `*_runner.py` and `*_transcript.py` modules keep their names
-while callers migrate, then become the bodies of the classes (runners) or
-stay as parsers the classes call (transcripts).
+package. The runner bodies are the classes; the `*_transcript.py` modules
+(`claude_transcript.py` for Claude) stay as parsers the classes call.
 
 ## What a Backend owns
 
@@ -94,6 +93,7 @@ Each slice was one commit on the branch, gated by the full suite against the
 clean baseline, behaviour-preserving unless a line here says otherwise. The
 `BackendAdapter` dataclass survives only as the declarative catalogue row a
 backend is built from; `adapter_for()` and `get()` return the backend object.
+Slice 5 removed both the dataclass and the alias.
 
 1. Package, `Backend` base, registry, six subclasses whose methods delegate
    to today's runner modules and adapter callables. `backends.py` gains
@@ -124,12 +124,28 @@ backend is built from; `adapter_for()` and `get()` return the backend object.
    class attributes (DeepSeek overrides only what differs from OpenCode),
    `Backend.__init__` validates them, and the facade's tables (`_BY_ID`,
    `LABELS`, `EFFORTS`, `CAPABILITIES`) are derived from the registry.
-   `adapter_for()` is an alias of `by_id()`. The guard test bans identity
+   `adapter_for()` stayed as an alias of `by_id()` until the runner tests
+   moved (below). The guard test bans identity
    branching everywhere outside `registry.py`, including `reconcile.py` and
    `transcript_streamer.py`, whose last Claude branches are gone.
 
-   Deviation, on purpose: the five `<runner>_runner.py` modules stay as thin
-   delegators to the classes. No production code calls them any more, but
-   106 runner tests exercise the runners through those module names and
-   patch their globals. Porting those tests is a follow-up; until then the
-   modules are the test seam and nothing else.
+   The runner tests now drive the backend objects (`by_id("codex")
+   .start_turn(...)`) and patch attributes on those instances
+   (`required_binary`, `live_text_interval`, `start_turn`) or the
+   collaborators the class modules import (`lib.config`, `lib.agents`,
+   `proc_util.stderr_text`). With that, `Backend._hook`, `@hooked`,
+   `runner_module`, `routing_module`, `extra_interrupt_modules` and the
+   five `<runner>_runner.py` delegators are deleted; nothing in `bin/`,
+   `plugin/`, `skills/` or `scripts/` imported them. `codex_app_server` reaches the event mapping as
+   public `CodexBackend` methods and the preamble helpers through
+   `voice_preamble`. `ClaudeBackend.executable()` reads the `claude_cli`
+   setting that `configured_claude_bin` used to. The facade lost
+   `adapter_for()`, `for_agent()`, `adapters()`, `all_backends` and
+   `supports_compact()` (now a property derived from `compaction()`);
+   callers use `by_id()`. The account-failover coordinators
+   (`AccountFailover`, formerly `ClaudeFailover`) are keyed by
+   `account_pool()` and each pool names its switch command through
+   `config_account_switch_field`, so `turn_dispatch` no longer lists
+   backend ids. The identity guard covers every module in `server/lib`
+   except the facade, the model catalogue and the `*_transcript.py`
+   parsers.
