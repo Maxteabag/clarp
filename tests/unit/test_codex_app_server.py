@@ -10,8 +10,8 @@ from pathlib import Path
 
 from lib import agents as agents_db
 from lib import codex_app_server
-from lib import codex_runner
-from lib.codex_runner import _TurnState
+from lib.backend.codex import TurnState as _TurnState
+from lib.backend.registry import by_id
 
 
 class _Handle:
@@ -225,7 +225,7 @@ def _install_fake_codex(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("CODEX_HOME", str(home))
     monkeypatch.setenv("CLARP_QA_PROVIDER_ROOT", str(home))
-    monkeypatch.setattr(codex_runner, "CODEX_BIN", str(FAKE_CODEX))
+    monkeypatch.setattr(by_id("codex"), "required_binary", str(FAKE_CODEX))
     codex_app_server._CLIENTS.clear()
     return home
 

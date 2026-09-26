@@ -271,19 +271,19 @@ def test_streamer_does_not_walk_projects_for_an_unbound_agent_every_tick(streame
     """An agent whose session is bound but whose transcript has not been
     written yet is retried every second; that retry must be a dict lookup,
     and the bind must still land on the first tick after the file appears."""
-    from lib import transcript_log
+    from lib import claude_transcript
     streamer, tmp_path = streamer_env
-    transcript_log.reset_transcript_index()
+    claude_transcript.reset_transcript_index()
     agent_id = agents_db.create_agent(persona="Late", voice_id="V", cwd=str(tmp_path), session="late")
     agents_db.start_runtime(agent_id, "late")
     agents_db.bind_backend_session(agent_id, "cs-late")
     projects = tmp_path / ".claude" / "projects" / "test-project"
     projects.mkdir(parents=True, exist_ok=True)
     rebuilds = []
-    original = transcript_log._TranscriptIndex._rebuild
-    monkeypatch.setattr(transcript_log._TranscriptIndex, "_rebuild",
+    original = claude_transcript._TranscriptIndex._rebuild
+    monkeypatch.setattr(claude_transcript._TranscriptIndex, "_rebuild",
                         lambda self: (rebuilds.append(1), original(self))[1])
-    monkeypatch.setattr(transcript_log, "_glob_latest_jsonl",
+    monkeypatch.setattr(claude_transcript, "_glob_latest_jsonl",
                         lambda *a: pytest.fail("unbound agent must not glob the projects tree"))
     for _ in range(10):
         streamer.reconcile_once()
@@ -295,4 +295,4 @@ def test_streamer_does_not_walk_projects_for_an_unbound_agent_every_tick(streame
     streamer.reconcile_once()
     assert streamer.pool.has(agent_id)
     assert time.monotonic() - started < 2.0
-    transcript_log.reset_transcript_index()
+    claude_transcript.reset_transcript_index()

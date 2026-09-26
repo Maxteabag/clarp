@@ -61,7 +61,7 @@ with clarp-agent-bg run".
 
 | Obligation today | Owner | Why |
 |---|---|---|
-| Create a plan before multi-step work; write 5–8 outcome steps | A, with J fallback | Intent is the agent's. But when an agent forgets, a **task-plan Janitor** can seed a plan from the same evidence the label Janitor already reads (objective, tool activity, TodoWrite todos captured by `transcript_log.py:107`) |
+| Create a plan before multi-step work; write 5–8 outcome steps | A, with J fallback | Intent is the agent's. But when an agent forgets, a **task-plan Janitor** can seed a plan from the same evidence the label Janitor already reads (objective, tool activity, TodoWrite todos captured by `claude_transcript.py:107`) |
 | Use the returned `plan_id`, not the supplied one | H | Helper detail; return the same id or resolve by session |
 | Keep exactly one item `in_progress`; update at transitions | J | Step boundaries correlate with tool-call clusters and TodoWrite changes; a Janitor marks progress and closes stale `in_progress` items on `agent-work-completed` |
 | `finish` for blocked/cancelled plans | J | Terminal turn state plus final reply is enough evidence |

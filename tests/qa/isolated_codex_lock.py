@@ -133,7 +133,7 @@ def run_second_process_still_conflicts(home: Path) -> None:
 
 
 def _assign_const(tree: ast.AST, name: str):
-    for node in tree.body:
+    for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == name:
@@ -164,13 +164,13 @@ def run_source_shared_client() -> None:
 
 
 def run_source_agy_print_timeout() -> None:
-    src = (SERVER_LIB / "agy_runner.py").read_text()
+    src = (SERVER_LIB / "backend" / "agy.py").read_text()
     tree = ast.parse(src)
-    assert _assign_const(tree, "AGY_PRINT_TIMEOUT") == "24h"
+    assert _assign_const(tree, "print_timeout") == "24h"
     build = _fn(tree, "build_cmd")
     dumped = ast.dump(build)
     assert "--print-timeout" in dumped or "print-timeout" in dumped
-    assert "AGY_PRINT_TIMEOUT" in dumped
+    assert "print_timeout" in dumped
     classify = (SERVER_LIB / "error_classify.py").read_text()
     assert "timeout waiting for response" in classify
 

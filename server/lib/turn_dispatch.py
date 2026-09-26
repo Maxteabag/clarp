@@ -5,7 +5,6 @@ import contextlib
 import dataclasses
 import pathlib
 import json
-import re
 import threading
 import functools
 import weakref
@@ -25,7 +24,7 @@ from .policies import admission as admission_policy
 from .log import log, log_exception
 from .protocol import AgentState, SSEType
 from .prompt_admissions import PromptAdmission
-from .claude_failover import Attempt as ClaudeAttempt, ClaudeFailover
+from .account_failover import Attempt as FailoverAttempt, AccountFailover
 from . import prompt_admissions
 from .send_service import SendTarget, resolve_send_target
 
@@ -55,27 +54,25 @@ _SLOTS = turn_slots.TurnSlots(lock=_TURN_LOCK)
 # _TURN_LOCK -> coordinator: the coordinator never takes _TURN_LOCK while it
 # holds its own; the callbacks it runs (owned, pause, resume) read slots
 # without the lock or defer their work past the coordinator's release.
-_CLAUDE_FAILOVER = ClaudeFailover(OwnershipLock())
-_CODEX_FAILOVER = ClaudeFailover(OwnershipLock())
-# Account pool (backend.account_pool()) -> (coordinator, config field naming
-# the account switch command). Coordinators are read through thunks so a
-# monkeypatched module global is honoured. Backends without a pool of their
-# own book-keep in Claude's coordinator, as they always have.
-_ACCOUNT_POOLS = {
-    "claude": (lambda: _CLAUDE_FAILOVER, "claude_account_switch_command"),
-    "codex": (lambda: _CODEX_FAILOVER, "codex_account_switch_command"),
+# One coordinator per account pool, keyed by ``backend.account_pool()``.
+_FAILOVERS: dict[str, AccountFailover] = {
+    pool: AccountFailover(OwnershipLock())
+    for pool in dict.fromkeys(backends.by_id(b).account_pool() for b in backends.ids())
+    if pool
 }
-_DEFAULT_ACCOUNT_POOL = "claude"
 
-def _account_pool(backend):
-    pool = backends.by_id(backend).account_pool() or _DEFAULT_ACCOUNT_POOL
-    return _ACCOUNT_POOLS[pool]
+def _pool_backend(backend):
+    """The backend whose pool runs ``backend``'s failover. Backends without
+    a pool of their own book-keep in the default backend's, as they always
+    have."""
+    owner = backends.by_id(backend)
+    return owner if owner.account_pool() else backends.by_id(backends.DEFAULT)
 
 def account_failover(backend):
-    return _account_pool(backend)[0]()
+    return _FAILOVERS[_pool_backend(backend).account_pool()]
 
 def account_selector(backend):
-    return getattr(config.load(), _account_pool(backend)[1])
+    return getattr(config.load(), _pool_backend(backend).config_account_switch_field)
 
 _INFLIGHT: dict[str, str] = _SLOTS.inflight
 _QUEUED: dict[str, list] = _SLOTS.queued
@@ -107,8 +104,8 @@ def runtime_status() -> dict[str, Any]:
     status = _SLOTS.snapshot()
     status.update({
         "compactions": compaction.active_sessions(),
-        "claude_account_recovery": _CLAUDE_FAILOVER.status(),
-        "codex_account_recovery": _CODEX_FAILOVER.status(),
+        **{f"{pool}_account_recovery": coordinator.status()
+           for pool, coordinator in _FAILOVERS.items()},
     })
     return status
 
@@ -138,45 +135,6 @@ def free_stale_slot(agent_id: str) -> str | None:
     nothing queued behind it. Returns the dead trace id, or None if nothing
     was freed. Spawning slots and terminal sentinels are left alone."""
     return _SLOTS.free_stale(agent_id)
-
-
-def _reset_hint(message: str) -> str:
-    msg = message or ""
-    patterns = (
-        r"(?:try again|resets?)\s+(?:at|in)?\s*([^.\n,;]+(?:\([^)]+\))?)",
-        r"(?:try again|resets?)\s+([^.\n,;]+(?:\([^)]+\))?)",
-    )
-    for pattern in patterns:
-        m = re.search(pattern, msg, re.I)
-        if m:
-            value = " ".join(m.group(1).split())
-            return value.strip(" .")
-    return ""
-
-
-def _spoken_failure_text(
-    *,
-    persona: str,
-    category: str,
-    human: str,
-    message: str,
-) -> str:
-    name = (persona or "This agent").strip()
-    if category == error_classify.USAGE_LIMIT:
-        reset = _reset_hint(message)
-        if reset:
-            return f"{name} is out of usage. Try again at {reset}."
-        return f"{name} is out of usage or credits right now."
-    if category == error_classify.RUNNER_EXIT:
-        return (
-            f"{name} stopped before returning a reply. "
-            "The command exited without usable output."
-        )
-    if category == error_classify.TRANSIENT:
-        return f"{name} hit a temporary API error. Try again in a moment."
-    if category == error_classify.CONNECTION:
-        return f"{name} lost connection and retries were exhausted."
-    return f"{name} was interrupted. {human}."
 
 
 @dataclass(frozen=True)
@@ -1574,7 +1532,7 @@ class TurnDispatchService:
                 # only once both are released.
                 defer_on(coordinator.lock, lambda: self._pause_for_account(spec))
 
-            account_attempt = ClaudeAttempt(
+            account_attempt = FailoverAttempt(
                 agent_id=spec.agent_id, trace_id=spec.trace_id, model=spec.model,
                 state=state, owned=lambda: (
                     # Lock-free: the coordinator calls this under its own lock
@@ -2010,7 +1968,8 @@ class TurnDispatchService:
                 "provider_limit_event_id"]
         turn_lifecycle.try_transition(
             spec.agent_id, TurnEvent.PROCESS_EXITED_FAILED, state_detail)
-        self._speak_interruption(spec, category, human, message)
+        # Interruptions surface as agent state and the turnInterrupted event;
+        # they are not spoken aloud (hearing raw failure text was jarring).
         eventlog.emit("server", "turnInterrupted", context=spec.context,
                       detail={"reason": category, "attempts": attempts,
                               "err": (message or "")[:300]})
@@ -2023,48 +1982,6 @@ class TurnDispatchService:
         # Terminal: a killed/interrupted turn still drains anything queued
         # behind it (e.g. an explicit stop, then your next message runs).
         self._finish_turn(spec)
-
-    def _speak_interruption(
-        self,
-        spec: _TurnSpec,
-        category: str,
-        human: str,
-        message: str | None,
-    ) -> None:
-        # Interruptions are recorded as agent state + a turnInterrupted event
-        # (see _mark_interrupted) so the UI can surface them, but they are no
-        # longer spoken aloud — hearing raw failure text read out was jarring.
-        # Flip this return to re-enable voiced interruption notices.
-        return
-        if not spec.synthesize_audio:
-            return
-        try:
-            agent = agents_db.get_by_agent_id(spec.agent_id)
-            if not agent:
-                return
-            text = _spoken_failure_text(
-                persona=agent.get("persona") or spec.session,
-                category=category,
-                human=human,
-                message=message or "",
-            )
-            tts_queue.enqueue(
-                agent_id=spec.agent_id,
-                text=text,
-                voice_id=agent.get("voice_id") or "",
-                session=spec.session,
-                source="turn_interrupted",
-                trace_id=spec.trace_id,
-                synthesize_audio=True,
-            )
-            eventlog.emit(
-                "server",
-                "turnInterruptedSpoken",
-                context=spec.context,
-                detail={"reason": category, "text": text},
-            )
-        except Exception as e:  # noqa: BLE001
-            log_exception("turnInterruptedSpeakFail", e, detail=spec.session)
 
     def _sticky_session(self) -> str:
         """Session of the currently-focused agent — the last one addressed by
@@ -2266,8 +2183,8 @@ def _cancel_fenced_janitor_run(ctx, run: dict, agent: dict, backend_registry) ->
     try:
         _remove_queued_run(run_id)
         turn_queue.set_paused(agent_id, queue_was_paused)
-        _CLAUDE_FAILOVER.discard(agent_id, run_id)
-        _CODEX_FAILOVER.discard(agent_id, run_id)
+        for coordinator in _FAILOVERS.values():
+            coordinator.discard(agent_id, run_id)
         _record_janitor_cancelled(ctx, agent_id, run["session"], run_id)
     finally:
         complete_stop(ctx, agent_id, snapshot, {run_id}, backend_registry=backend_registry)
@@ -2275,8 +2192,8 @@ def _cancel_fenced_janitor_run(ctx, run: dict, agent: dict, backend_registry) ->
 
 
 def _recovery_parked(agent_id: str, trace_id: str | None) -> bool:
-    return bool(_CLAUDE_FAILOVER.parked(agent_id, trace_id)
-                or _CODEX_FAILOVER.parked(agent_id, trace_id))
+    return any(coordinator.parked(agent_id, trace_id)
+               for coordinator in _FAILOVERS.values())
 
 
 def snapshot_stop_state(agent_id: str) -> dict:

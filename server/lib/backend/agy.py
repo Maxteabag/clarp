@@ -23,7 +23,7 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
-from .base import BackendBrand, CompactionStrategy, hooked
+from .base import BackendBrand, CompactionStrategy
 from .stream_json import StreamJsonBackend, make_handle, popen_turn
 
 _CLEAN_STATUSES = {"SUCCESS"}
@@ -388,7 +388,7 @@ def _canonical_tool_input(name: str, value: Any) -> dict[str, Any]:
 
 class AgyBackend(StreamJsonBackend):
     """Runs ``agy --print`` once per turn; validates model ids against its catalogue."""
-    # --- catalogue data (was the BackendAdapter registry row) ------------
+    # --- catalogue data ---------------------------------------------------
     id = 'agy'
     label = 'Antigravity'
     required_binary = 'agy'
@@ -457,9 +457,9 @@ class AgyBackend(StreamJsonBackend):
 
         Model values must be present in the last observed or bundled fallback
         catalog. ``4.8`` is rejected before spawn because it is not a catalog id."""
-        cmd = [self._hook("AGY_BIN", self.required_binary), "--dangerously-skip-permissions",
+        cmd = [self.required_binary, "--dangerously-skip-permissions",
                "--output-format", "stream-json",
-               "--print-timeout", self._hook("AGY_PRINT_TIMEOUT", self.print_timeout)]
+               "--print-timeout", self.print_timeout]
         if model and effort:
             raise ValueError(
                 "AGY model-specific effort compatibility is unknown; "
@@ -499,7 +499,7 @@ class AgyBackend(StreamJsonBackend):
         isolated: bool = False,
     ) -> TurnHandle:
         """Spawn one AGY turn and normalize its NDJSON stream asynchronously."""
-        agy_bin = self._hook("AGY_BIN", self.required_binary)
+        agy_bin = self.required_binary
         if shutil.which(agy_bin) is None:
             raise FileNotFoundError(
                 f"`{agy_bin}` not on PATH — install the antigravity CLI to run "
@@ -516,7 +516,7 @@ class AgyBackend(StreamJsonBackend):
             persona=persona,
             session=session,
         )
-        cmd = self._hook("build_cmd", self.build_cmd)(
+        cmd = self.build_cmd(
             backend_session_id, is_new_session=is_new_session,
             model=model, effort=effort)
         if isolated:
@@ -580,8 +580,6 @@ class AgyBackend(StreamJsonBackend):
         run_if_owned,
     ) -> None:
         """Drain NDJSON with a strict exactly-one terminal callback latch."""
-        # Slice-3 seam: ``test_agy_runner`` monkeypatches ``agy_runner.stderr_text``.
-        read_stderr = self._hook("stderr_text", stderr_text)
         st = _TurnState(expected_conversation_id=expected_conversation_id)
         try:
             st.evidence_scope = _turn_evidence_scope(agent_id, trace_id)
@@ -612,7 +610,7 @@ class AgyBackend(StreamJsonBackend):
                             _runner_error(f"parser error: {str(error)[:300]}"), st,
                             on_error=on_error)
             rc = proc.wait()
-            err = read_stderr(proc).strip()
+            err = stderr_text(proc).strip()
             if st.terminal == "result" and rc != 0:
                 st.terminal = "error"
                 st.pending_result = None
@@ -834,7 +832,7 @@ class AgyBackend(StreamJsonBackend):
         now = time.monotonic()
         if not force and st.last_live_write_at and (
                 now - st.last_live_write_at
-                < self._hook("LIVE_TEXT_INTERVAL_SEC", self.live_text_interval)):
+                < self.live_text_interval):
             return
         try:
             row = agents_db.upsert_live_assistant_message(
@@ -861,7 +859,6 @@ class AgyBackend(StreamJsonBackend):
 
     # ---- orchestrator routing ----------------------------------------------
 
-    @hooked
     def routing_cmd(self, prompt: str, *, model: str = "", effort: str = "") -> list[str]:
         """argv for one isolated AGY request (orchestrator).
 
@@ -869,7 +866,7 @@ class AgyBackend(StreamJsonBackend):
         catalogue admission: the orchestrator's model pin was validated on save.
         The prompt stays bound to ``--print=`` (see ``build_cmd``).
         """
-        cmd = [self._hook("AGY_BIN", self.required_binary), "--dangerously-skip-permissions"]
+        cmd = [self.required_binary, "--dangerously-skip-permissions"]
         if model:
             cmd += ["--model", model]
         if effort:
@@ -877,7 +874,6 @@ class AgyBackend(StreamJsonBackend):
         cmd.append(f"--print={prompt}")
         return cmd
 
-    @hooked
     def routing_text(self, stdout: str) -> str:
         """The reply text of a ``routing_cmd`` run."""
         return stdout or ""

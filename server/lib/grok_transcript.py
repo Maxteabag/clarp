@@ -9,7 +9,7 @@ import urllib.parse
 from typing import Any
 
 from .voice_preamble import strip_voice_preamble
-from .transcript_log import summarise_tool, truncate
+from .claude_transcript import summarise_tool, truncate
 
 
 def grok_home() -> pathlib.Path:
@@ -42,7 +42,7 @@ def _text_of(value: Any) -> str:
 
 
 # Grok Build tool names → the Claude-shaped names the clients already render
-# with rich cards (transcript_log.summarise_tool). Argument names are mapped
+# with rich cards (claude_transcript.summarise_tool). Argument names are mapped
 # alongside so the summariser sees the fields it expects.
 _TOOL_NAMES = {
     "run_terminal_command": "Bash",

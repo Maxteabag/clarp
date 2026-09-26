@@ -17,7 +17,7 @@ from .avatar_urls import (versioned_avatar_url, janitor_avatar_url,
                           static_persona_avatar_url)
 from .log import log_exception
 from .activity import state_activity_event
-from .transcript_log import context_tokens_from_jsonl, find_latest_jsonl
+from .claude_transcript import context_tokens_from_jsonl, find_latest_jsonl
 from .protocol import AgentBackend, AgentState
 
 
@@ -185,7 +185,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         # automatically". Computed from the last assistant message's usage,
         # not the cumulative result event.
         context_tokens = None
-        context_window = backends.adapter_for(backend).context_window
+        context_window = backends.by_id(backend).context_window
         if context_window is not None and bsid:
             j = find_latest_jsonl(bsid)
             if j is not None:

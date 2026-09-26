@@ -48,7 +48,7 @@ def main():
         if key.endswith('_API_KEY') or key in ('ELEVEN_API_KEY', 'CLAUDE_PWA_TTS_PROVIDER'):
             os.environ.pop(key, None)
     sys.path.insert(0, str(REPO / 'server'))
-    from lib import agents, backends, codex_runner, codex_transcript, db, telemetry
+    from lib import agents, backends, codex_transcript, db, telemetry
     # Storage location is injected; discovery and parsing remain production code.
     codex_transcript._codex_home = lambda: root / 'provider'
     for path in (db.DB_PATH, telemetry.TELEMETRY_PATH):
@@ -57,7 +57,7 @@ def main():
     from lib.audio_stream import AudioStream
     from lib.context import ServerContext, StubSTT
     from lib.tts_engine import FakeTTSEngine
-    codex_runner.CODEX_BIN = str(REPO / 'tests/qa/fake_codex.py')
+    backends.by_id('codex').required_binary = str(REPO / 'tests/qa/fake_codex.py')
     provider_spawn = backends.spawn_turn
     def deterministic_spawn(backend, **kwargs):
         if backends.normalize(backend) != 'codex':

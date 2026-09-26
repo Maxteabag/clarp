@@ -167,12 +167,12 @@ def test_parse_turns_keeps_user_question_that_quotes_environment_context(tmp_pat
 def test_parse_turns_strips_voice_preamble_from_user_message(tmp_path):
     """The <speak> instruction we prepend for PWA/native Codex turns must be
     stripped from the user message in the history pane."""
-    from lib import codex_runner
+    from lib.voice_preamble import apply_voice_preamble
     f = tmp_path / "rollout.jsonl"
     _write_rollout(f, [
         {"timestamp": "t0", "type": "event_msg",
          "payload": {"type": "user_message",
-                     "message": "› " + codex_runner.apply_voice_preamble("hello there")}},
+                     "message": "› " + apply_voice_preamble("hello there")}},
         {"timestamp": "t1", "type": "event_msg",
          "payload": {"type": "agent_message", "message": "<speak>Hi.</speak>"}},
     ])

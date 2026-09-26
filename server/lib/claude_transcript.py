@@ -664,6 +664,3 @@ def find_latest_jsonl(
         return None
     projects_root = projects_root or (pathlib.Path.home() / ".claude" / "projects")
     return _index_for(projects_root).lookup(backend_session_id)
-    for jsonl in projects_root.glob(f"*/{backend_session_id}.jsonl"):
-        return jsonl
-    return None

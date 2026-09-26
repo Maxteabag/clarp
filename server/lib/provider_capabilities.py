@@ -520,13 +520,8 @@ def _resolve_executable(provider_id: str) -> str | None:
     adapter = _adapter(provider_id)
     # A card that fronts another CLI (DeepSeek runs through OpenCode) is
     # installed exactly when that CLI is.
-    binary = adapter.required_binary if adapter and adapter.required_binary else provider_id
-    if provider_id == "claude":
-        # clarp_runner supports a configured Claude-compatible executable.
-        # Import lazily so provider discovery remains independent of startup.
-        from . import clarp_runner
-
-        binary = clarp_runner.configured_claude_bin()
+    # ``executable()`` applies any Host override (the Claude CLI setting).
+    binary = adapter.executable() if adapter and adapter.required_binary else provider_id
     return shutil.which(binary)
 
 

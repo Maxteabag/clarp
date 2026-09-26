@@ -45,10 +45,11 @@ def test_facade_names_are_the_same_objects():
     assert db._SCHEMA_VERSION == db_schema._SCHEMA_VERSION
     assert db._migrate is db_migrations._migrate
     assert db._create_schema is db_migrations._create_schema
-    for module in (message_context, message_writes, message_live, message_previews):
-        for name, value in vars(module).items():
-            if name.startswith("__") or name == "_facade" or not callable(value):
-                continue
-            if getattr(value, "__module__", None) != module.__name__:
-                continue
-            assert getattr(message_store, name) is value, name
+    # The facade re-exports only names something calls through it; each one
+    # is the owning module's object, so a patch on either side is visible.
+    owners = {m.__name__: m for m in (
+        message_context, message_writes, message_live, message_previews)}
+    for name, value in vars(message_store).items():
+        owner = owners.get(getattr(value, "__module__", None))
+        if owner is not None and callable(value):
+            assert getattr(owner, name) is value, name

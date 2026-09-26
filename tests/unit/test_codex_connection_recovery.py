@@ -4,7 +4,8 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from lib import agents, codex_app_server, codex_runner
+from lib import agents, codex_app_server
+from lib.backend.registry import by_id
 from lib.activity import state_activity_event
 from lib.turn_dispatch import TurnDispatchService, clear_for_agent
 from test_codex_app_server import FAKE_CODEX, _Stream
@@ -19,7 +20,7 @@ from test_codex_app_server import FAKE_CODEX, _Stream
 def test_connection_recovery_real_dispatch(tmp_path, monkeypatch, mode, expected, turns):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path))
     monkeypatch.setenv('CLARP_QA_PROVIDER_ROOT', str(tmp_path))
-    monkeypatch.setattr(codex_runner, 'CODEX_BIN', str(FAKE_CODEX))
+    monkeypatch.setattr(by_id('codex'), 'required_binary', str(FAKE_CODEX))
     (tmp_path / 'quota-mode').write_text(mode)
     codex_app_server._CLIENTS.clear()
     agent = agents.create_agent(persona='Recovery', voice_id='v', cwd=str(tmp_path), session='recovery', backend='codex')

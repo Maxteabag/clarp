@@ -15,7 +15,8 @@ import pytest
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
-from lib import agy_runner          # noqa: E402
+from lib.backend import agy          # noqa: E402
+from lib.backend.registry import by_id  # noqa: E402
 from lib import agents as agents_db  # noqa: E402
 from lib import error_classify  # noqa: E402
 from lib import message_store  # noqa: E402
@@ -23,9 +24,11 @@ from lib.conversation import load_conversation  # noqa: E402
 from lib.protocol import AgentState  # noqa: E402
 from lib.turn_dispatch import _result_detail  # noqa: E402
 
+AGY = by_id("agy")
+
 
 def test_build_cmd_fresh_vs_resume():
-    fresh = agy_runner.build_cmd("", is_new_session=True)
+    fresh = AGY.build_cmd("", is_new_session=True)
     assert fresh[0] == "agy"
     assert "--dangerously-skip-permissions" in fresh
     # The prompt is NOT a bare positional and -p must not appear without a
@@ -38,7 +41,7 @@ def test_build_cmd_fresh_vs_resume():
                    for a in fresh)
     assert "--conversation" not in fresh
     assert fresh[fresh.index("--output-format") + 1] == "stream-json"
-    resume = agy_runner.build_cmd("conv-9")
+    resume = AGY.build_cmd("conv-9")
     assert "--conversation" in resume
     assert resume[resume.index("--conversation") + 1] == "conv-9"
 
@@ -47,10 +50,10 @@ def test_build_cmd_pins_print_timeout_past_agy_default():
     """agy's own --print-timeout default (5m0s) killed long turns mid-work:
     rc=1 with `status=ERROR: timeout waiting for response`, the reply rolled
     back, and the agent went silent. Every dispatch must override it."""
-    for cmd in (agy_runner.build_cmd("", is_new_session=True),
-                agy_runner.build_cmd("conv-9")):
-        assert cmd[cmd.index("--print-timeout") + 1] == agy_runner.AGY_PRINT_TIMEOUT
-    assert agy_runner.AGY_PRINT_TIMEOUT == "24h"
+    for cmd in (AGY.build_cmd("", is_new_session=True),
+                AGY.build_cmd("conv-9")):
+        assert cmd[cmd.index("--print-timeout") + 1] == AGY.print_timeout
+    assert AGY.print_timeout == "24h"
 
 
 def test_agy_print_timeout_reads_as_timeout_not_runner_exit():
@@ -61,18 +64,18 @@ def test_agy_print_timeout_reads_as_timeout_not_runner_exit():
 
 def test_build_cmd_model_pin_opt_in():
     """Only strict discovered-style slugs and low/medium/high efforts pass."""
-    assert "--model" not in agy_runner.build_cmd("")
-    cmd = agy_runner.build_cmd(
+    assert "--model" not in AGY.build_cmd("")
+    cmd = AGY.build_cmd(
         "", is_new_session=True, model="gemini-3.7-flash-low")
     assert cmd[cmd.index("--model") + 1] == "gemini-3.7-flash-low"
-    effort_cmd = agy_runner.build_cmd("", effort="high")
+    effort_cmd = AGY.build_cmd("", effort="high")
     assert effort_cmd[effort_cmd.index("--effort") + 1] == "high"
     with pytest.raises(ValueError, match="unavailable AGY model"):
-        agy_runner.build_cmd("", model="4.8")
+        AGY.build_cmd("", model="4.8")
     with pytest.raises(ValueError, match="effort"):
-        agy_runner.build_cmd("", effort="ultra")
+        AGY.build_cmd("", effort="ultra")
     with pytest.raises(ValueError, match="compatibility is unknown"):
-        agy_runner.build_cmd("", model="gemini-3.7-flash-low", effort="high")
+        AGY.build_cmd("", model="gemini-3.7-flash-low", effort="high")
 
 
 def test_invalid_options_fail_before_tempfile(monkeypatch):
@@ -83,10 +86,10 @@ def test_invalid_options_fail_before_tempfile(monkeypatch):
         called = True
         raise AssertionError("tempfile must not be created")
 
-    monkeypatch.setattr(agy_runner.tempfile, "mkstemp", forbidden)
-    monkeypatch.setattr(agy_runner.shutil, "which", lambda _name: sys.executable)
+    monkeypatch.setattr(agy.tempfile, "mkstemp", forbidden)
+    monkeypatch.setattr(agy.shutil, "which", lambda _name: sys.executable)
     with pytest.raises(ValueError, match="unavailable AGY model"):
-        agy_runner.spawn_turn(text="hi", cwd=pathlib.Path("/tmp"),
+        AGY.start_turn(text="hi", cwd=pathlib.Path("/tmp"),
                               model="4.8")
     assert called is False
 
@@ -215,7 +218,7 @@ def test_spawn_turn_binds_conversation_speaks_and_results(fake_agy, tmp_path):
     trace_id = _open_owned_turn(agent_id, "spawn-success")
     fake_agy(_stream("Here is the answer.\n<speak>The answer is forty-two.</speak>\n"))
     sids, results = [], []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="what's the answer?", cwd=tmp_path, agent_id=agent_id,
         session="elli", on_session_init=sids.append,
         on_result=results.append, voice_preamble=True, trace_id=trace_id)
@@ -251,7 +254,7 @@ def test_final_response_is_authoritative_and_persisted_once(
     fake_agy(_stream("<speak>Latest answer.</speak>"))
     agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="turn-final")
 
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="new prompt", cwd=tmp_path, backend_session_id=_FAKE_CONV,
         agent_id=agent_id, session="arnold", trace_id="turn-final")
     handle.wait(timeout=8.0)
@@ -307,7 +310,7 @@ def test_prompt_is_bound_to_print_flag_not_a_positional(fake_agy, tmp_path):
     appear only as --print's value."""
     agent_id = _make_agy_agent(persona="Sam", session="sam")
     fake_agy(_stream("<speak>hi</speak>"))
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="what is 2 plus 2?", cwd=tmp_path, agent_id=agent_id,
         session="sam", voice_preamble=False)
     handle.wait(timeout=8.0)
@@ -317,7 +320,7 @@ def test_prompt_is_bound_to_print_flag_not_a_positional(fake_agy, tmp_path):
     assert len(print_args) == 1, f"expected one --print=…, got {argv}"
     # The prompt rides on --print=; even on a silent turn it now carries the
     # always-on no-interactive-questions preamble. Strip recovers the user text.
-    from lib.codex_runner import strip_voice_preamble
+    from lib.voice_preamble import strip_voice_preamble
     assert strip_voice_preamble(print_args[0][len("--print="):]) == "what is 2 plus 2?"
     # The skip-permissions flag must be its own token, never the prompt.
     assert "--dangerously-skip-permissions" in argv
@@ -329,7 +332,7 @@ def test_spawn_turn_nonzero_exit_calls_on_error(fake_agy, tmp_path):
     agent_id = _make_agy_agent(persona="Domi", session="domi")
     fake_agy("not-json\n", rc=3)
     errs = []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="domi",
         on_error=errs.append)
     handle.wait(timeout=8.0)
@@ -340,7 +343,7 @@ def test_spawn_turn_expands_tilde_cwd(fake_agy):
     agent_id = _make_agy_agent(persona="Bella", session="bella")
     fake_agy(_stream("<speak>ok</speak>"))
     sids = []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="hi", cwd=pathlib.Path("~"), agent_id=agent_id,
         session="bella", on_session_init=sids.append)
     handle.wait(timeout=8.0)
@@ -350,18 +353,18 @@ def test_spawn_turn_expands_tilde_cwd(fake_agy):
 def test_missing_agy_raises_filenotfound(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", "")
     with pytest.raises(FileNotFoundError):
-        agy_runner.spawn_turn(text="hi", cwd=tmp_path, agent_id="x")
+        AGY.start_turn(text="hi", cwd=tmp_path, agent_id="x")
 
 
 def test_interrupt_safe_when_idle():
-    assert agy_runner.interrupt("nobody") == 0
+    assert AGY.interrupt("nobody") == 0
 
 
 def test_success_envelope_with_nonzero_exit_is_error(fake_agy, tmp_path):
     agent_id = _make_agy_agent(persona="Tooler", session="tooler")
     fake_agy(_stream("TOOL_DONE", tool=True), rc=7)
     results, errors = [], []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="run", cwd=tmp_path, agent_id=agent_id, session="tooler",
         on_result=results.append, on_error=errors.append)
     handle.wait(timeout=8)
@@ -556,8 +559,8 @@ def test_retry_baseline_does_not_reimport_failed_provider_transcript(
          "content": "failed provider text"},
     ])
     _open_owned_turn(agent_id, "retry")
-    state = agy_runner._TurnState(evidence_scope={"agent_id": agent_id})
-    agy_runner._bind_session(
+    state = agy._TurnState(evidence_scope={"agent_id": agent_id})
+    agy._bind_session(
         _FAKE_CONV, state, trace_id="retry", on_session_init=lambda _sid: True)
     assert state.baseline_snapshot["messages"] == []
 
@@ -570,7 +573,7 @@ def test_empty_string_is_valid_but_missing_response_is_error(
     trace_id = _open_owned_turn(agent_id, f"empty-{response or 'blank'}")
     fake_agy(_stream(response))
     results, errors = [], []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="empty",
         on_result=results.append, on_error=errors.append, trace_id=trace_id)
     handle.wait(timeout=8)
@@ -604,7 +607,7 @@ def test_authoritative_empty_response_retracts_streamed_partial(
     ]
     fake_agy("\n".join(json.dumps(row) for row in rows) + "\n")
     results = []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="retract",
         trace_id="retract-trace", on_result=results.append)
     handle.wait(timeout=8)
@@ -635,7 +638,7 @@ def test_post_terminal_log_import_respects_turn_authority(
         stream = _stream(response)
     fake_agy(stream)
     results, errors = [], []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="prompt", cwd=tmp_path, backend_session_id=_FAKE_CONV,
         agent_id=agent_id, session=session, trace_id=trace_id,
         on_result=results.append, on_error=errors.append)
@@ -670,7 +673,7 @@ def test_malformed_result_calls_one_parser_error(fake_agy, tmp_path):
     ]
     fake_agy("\n".join(json.dumps(row) for row in rows) + "\n", rc=9)
     results, errors = [], []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="bad",
         on_result=results.append, on_error=errors.append)
     handle.wait(timeout=8)
@@ -683,10 +686,10 @@ def test_drain_exception_after_result_forces_error(fake_agy, tmp_path, monkeypat
     agent_id = _make_agy_agent(persona="Drain", session="drain")
     fake_agy(_stream("would-be success"))
     monkeypatch.setattr(
-        agy_runner, "stderr_text",
+        agy, "stderr_text",
         lambda _proc: (_ for _ in ()).throw(RuntimeError("stderr drain failed")))
     results, errors = [], []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="drain",
         on_result=results.append, on_error=errors.append)
     handle.wait(timeout=8)
@@ -722,7 +725,7 @@ def test_derived_failure_restores_full_turn_state(fake_agy, tmp_path, monkeypatc
     monkeypatch.setattr(
         agents_db, "apply_final_assistant_side_effects", fail_after_derived)
     results, errors = [], []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="derived",
         trace_id=trace_id, on_result=results.append, on_error=errors.append)
     handle.wait(timeout=8)
@@ -749,7 +752,7 @@ def test_provider_error_preserves_classifier_boundary(fake_agy, tmp_path):
         agent_id = _make_agy_agent(persona=f"E{idx}", session=f"e{idx}")
         fake_agy(_stream("", status="ERROR", error=message))
         errors = []
-        handle = agy_runner.spawn_turn(
+        handle = AGY.start_turn(
             text="hi", cwd=tmp_path, agent_id=agent_id, session=f"e{idx}",
             on_error=errors.append)
         handle.wait(timeout=8)
@@ -766,7 +769,7 @@ def test_real_1_1_21_fixtures(fake_agy, tmp_path, fixture_name, expected):
     trace_id = _open_owned_turn(agent_id, f"fixture-{fixture_name}")
     fake_agy((_FIXTURES / fixture_name).read_text())
     results, errors = [], []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="fixture", cwd=tmp_path, agent_id=agent_id,
         session=fixture_name, on_result=results.append, on_error=errors.append,
         trace_id=trace_id)
@@ -801,28 +804,28 @@ def test_real_1_1_21_fixtures(fake_agy, tmp_path, fixture_name, expected):
 
 
 def test_provider_event_revision_dedupe_conflict_and_stale_order():
-    st = agy_runner._TurnState(evidence_scope={
+    st = agy._TurnState(evidence_scope={
         "provider_instance_id": "computer:agy",
         "account_auth_generation": None,
         "turn_execution_id": "computer:turn:1",
     })
     event = {"event": "init", "conversation_id": _FAKE_CONV, "init": {}}
-    first = agy_runner._provider_evidence(event, 1, st)
+    first = agy._provider_evidence(event, 1, st)
     assert first is not None
-    assert agy_runner._provider_evidence(event, 1, st) is None
+    assert agy._provider_evidence(event, 1, st) is None
     with pytest.raises(ValueError, match="conflicting"):
-        agy_runner._provider_evidence(
+        agy._provider_evidence(
             {**event, "init": {"model": "different"}}, 1, st)
-    assert agy_runner._provider_evidence(
+    assert agy._provider_evidence(
         {"event": "future", "conversation_id": _FAKE_CONV}, 3, st) is not None
-    assert agy_runner._provider_evidence(
+    assert agy._provider_evidence(
         {"event": "late", "conversation_id": _FAKE_CONV}, 2, st) is None
-    other_turn = agy_runner._TurnState(evidence_scope={
+    other_turn = agy._TurnState(evidence_scope={
         "provider_instance_id": "computer:agy",
         "account_auth_generation": None,
         "turn_execution_id": "computer:turn:2",
     })
-    second = agy_runner._provider_evidence(event, 1, other_turn)
+    second = agy._provider_evidence(event, 1, other_turn)
     assert second["provider_event_ref"] != first["provider_event_ref"]
 
 
@@ -849,7 +852,7 @@ def test_drain_dedupes_identical_text_and_tool_events(
 
     monkeypatch.setattr(agents_db, "upsert_live_assistant_message", record)
     results = []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="replay",
         on_result=results.append, trace_id=trace_id)
     handle.wait(timeout=8)
@@ -886,7 +889,7 @@ def test_identical_active_text_deltas_remain_ordered(fake_agy, tmp_path, monkeyp
 
     monkeypatch.setattr(agents_db, "upsert_live_assistant_message", record)
     results = []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="repeat",
         on_result=results.append, trace_id=trace_id)
     handle.wait(timeout=8)
@@ -901,7 +904,7 @@ def test_resumed_conversation_mismatch_is_single_terminal_error(fake_agy, tmp_pa
     agent_id = _make_agy_agent(persona="Mismatch", session="mismatch")
     fake_agy(_stream("wrong conversation"), rc=8)
     results, errors = [], []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="hi", cwd=tmp_path,
         backend_session_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         agent_id=agent_id, session="mismatch",
@@ -916,7 +919,7 @@ def test_rejected_init_cannot_persist_or_speak(fake_agy, tmp_path):
     agent_id = _make_agy_agent(persona="Reject", session="reject")
     fake_agy(_stream("<speak>must not leak</speak>"))
     results, errors = [], []
-    handle = agy_runner.spawn_turn(
+    handle = AGY.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="reject",
         on_session_init=lambda _sid: False,
         on_result=results.append, on_error=errors.append)
@@ -937,7 +940,7 @@ def test_preempted_owner_gate_blocks_all_stream_side_effects(fake_agy, tmp_path)
     results, errors = [], []
     sessions = []
     with pytest.raises(RuntimeError, match="ownership lost"):
-        agy_runner.spawn_turn(
+        AGY.start_turn(
             text="hi", cwd=tmp_path, agent_id=agent_id, session="preempt",
             trace_id="turn-a", stream=stream,
             run_if_owned=lambda _action: False,

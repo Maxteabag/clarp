@@ -7,6 +7,7 @@ an adapter flag — or raises ``Unsupported`` where the CLI has no such mode.
 """
 from __future__ import annotations
 
+import importlib
 import pathlib
 import sys
 from types import SimpleNamespace
@@ -35,27 +36,27 @@ def test_every_backend_is_a_backend_in_registry_order():
     every = registry.all()
     assert all(isinstance(b, Backend) for b in every)
     assert tuple(b.id for b in every) == backends.ids() == IDS
-    assert backends.all_backends() == every
-    assert backends.by_id is registry.by_id and backends.for_agent is registry.for_agent
+    assert backends.by_id is registry.by_id
+    for gone in ("adapter_for", "for_agent", "adapters", "all_backends",
+                 "supports_compact", "_mod"):
+        assert not hasattr(backends, gone), gone
+    assert not hasattr(registry, "for_agent")
 
 
 def test_singletons_are_shared():
     assert registry.by_id("codex") is registry.by_id("CODEX") is backends.by_id("codex")
 
 
-def test_ids_and_aliases_round_trip_through_by_id_and_for_agent():
-    for adapter in backends.adapters():
+def test_ids_and_aliases_round_trip_through_by_id():
+    for adapter in registry.all():
         for spelling in (adapter.id, adapter.id.upper(), f" {adapter.id} ", *adapter.aliases):
             assert registry.by_id(spelling).id == adapter.id, spelling
-            assert registry.for_agent({"backend": spelling}).id == adapter.id, spelling
             assert registry.by_id(spelling).id == backends.normalize(spelling)
     assert registry.by_id("antigravity").id == "agy"
     assert registry.by_id("claude-code").id == backends.normalize("claude-code")
     # Unknown, empty and missing fall back the way normalize() does.
     for garbage in ("nonsense", "", None):
         assert registry.by_id(garbage).id == backends.DEFAULT
-    assert registry.for_agent({}).id == backends.DEFAULT
-    assert registry.for_agent(None).id == backends.DEFAULT
 
 
 def test_class_shapes():
@@ -71,10 +72,10 @@ def test_class_shapes():
 @pytest.mark.parametrize("backend", IDS)
 def test_data_attributes_copy_the_adapter_row(backend):
     b = registry.by_id(backend)
-    # get(), adapter_for() and the facade table all hand out the backend
-    # object itself; there is no separate catalogue row any more.
+    # get(), by_id() and the facade table all hand out the backend object
+    # itself; there is no separate catalogue row any more.
     assert backends.get(backend) is b
-    assert backends.adapter_for(backend) is b
+    assert backends.by_id(backend) is b
     a = backends._BY_ID[b.id]
     assert a is b
     for name in ("id", "label", "required_binary", "aliases", "efforts",
@@ -84,7 +85,7 @@ def test_data_attributes_copy_the_adapter_row(backend):
                  "brand", "hidden", "effort_help", "resumable", "supports_fork",
                  "supports_steer", "supports_transcript_streaming",
                  "supports_mcp", "supports_usage", "native_tool_explainer",
-                 "routing_module", "config_model_field", "config_effort_field",
+                 "supports_compact", "config_model_field", "config_effort_field",
                  "supports_routing", "supports_auth",
                  "effort_compatibility_unknown", "model_carries_effort"):
         assert getattr(b, name) == getattr(a, name), name
@@ -173,9 +174,9 @@ def test_on_credential_change_logs_a_failed_recycle(monkeypatch):
 
 
 def test_executable_matches_the_adapter(monkeypatch):
-    from lib import clarp_runner
-    monkeypatch.setattr(clarp_runner, "configured_claude_bin", lambda: "clarp")
-    for a in backends.adapters():
+    from lib import config
+    monkeypatch.setattr(config, "load", lambda: SimpleNamespace(claude_cli="clarp-cli"))
+    for a in registry.all():
         assert registry.by_id(a.id).executable() == backends.capabilities(a.id).required_binary
         if a.id != "claude":
             assert registry.by_id(a.id).executable() == a.required_binary
@@ -188,7 +189,7 @@ def test_is_valid_model_matches_the_adapter(monkeypatch):
     monkeypatch.setattr(provider_capabilities, "is_dispatchable_agy_model",
                         lambda model: model.startswith("gemini-"))
     samples = ("gemini-3.7-flash-high", "gpt-5.4", "", None, "  ")
-    for a in backends.adapters():
+    for a in registry.all():
         b = registry.by_id(a.id)
         for model in samples:
             assert b.is_valid_model(model) is backends.is_valid_model(a.id, model), (a.id, model)
@@ -205,7 +206,7 @@ def test_default_model_effort_and_clean_effort_match_the_facade():
                           grok_model="", grok_effort="max",
                           opencode_model="opencode/gpt-5.4", opencode_effort="max",
                           deepseek_model="", deepseek_effort="")
-    for a in backends.adapters():
+    for a in registry.all():
         assert registry.by_id(a.id).default_model_effort(cfg) == backends.default_model_effort(a.id, cfg)
     assert registry.by_id("claude").default_model_effort(cfg) == ("opus", "high")
     assert registry.by_id("grok").default_model_effort(cfg) == ("", "")  # grok has no "max"
@@ -228,69 +229,50 @@ def test_compaction_strategy_per_backend_or_unsupported():
         if name not in COMPACTION:
             with pytest.raises(Unsupported, match=f"compaction unsupported for {name}"):
                 b.compaction("sess")
-            assert backends.supports_compact(name) is False, name
+            assert b.supports_compact is False, name
             assert backends.catalogue_fields(name)["supports_compact"] is False, name
             continue
         assert b.compaction("sess") == COMPACTION[name]
-        assert backends.supports_compact(name) is True, name
+        assert b.supports_compact is True, name
         assert backends.catalogue_fields(name)["supports_compact"] is True, name
 
 
-def _fake_spawn(calls, module):
-    def spawn(**kw):
-        calls.setdefault(module, []).append(("spawn", kw))
-        return f"{module}-handle"
-    return spawn
-
-
-def test_runner_modules_delegate_to_the_classes(monkeypatch):
-    """The ``<runner>_runner`` modules are thin delegators: patching the
-    class instance is what a test needs, and the module and the facade both
-    land on it. DeepSeek shares OpenCode's runner (and process registry)."""
+def test_the_facade_lands_on_the_class_instance(monkeypatch):
+    """Patching the backend instance is what a test needs; the facade
+    lands on it. DeepSeek shares OpenCode's runner (and process registry)."""
     spec = {"text": "hi", "cwd": "/x", "stream": None}
-    for a in backends.adapters():
-        b = registry.by_id(a.id)
+    for b in registry.all():
         calls: list = []
-        monkeypatch.setattr(b, "spawn_turn", lambda **kw: calls.append(("spawn", kw)) or f"{b.id}-handle")
-        # The module delegators call the full-signature ``start_turn``; the
-        # class's ``spawn_turn`` filters the host's kwargs down to it.
         monkeypatch.setattr(b, "start_turn", lambda **kw: calls.append(("spawn", kw)) or f"{b.id}-handle")
         monkeypatch.setattr(b, "interrupt", lambda aid: calls.append(("interrupt", aid)) or 2)
         monkeypatch.setattr(b, "active_handles", lambda aid: calls.append(("active", aid)) or [f"{b.id}:{aid}"])
-        # Codex's module keeps its historical narrower surface: it interrupts
-        # and lists only the exec processes, not the app-server threads the
-        # class's full interrupt also covers.
-        if hasattr(b, "interrupt_exec"):
-            monkeypatch.setattr(b, "interrupt_exec", lambda aid: calls.append(("interrupt", aid)) or 2)
-            monkeypatch.setattr(b, "active_exec_handles", lambda aid: calls.append(("active", aid)) or [f"{b.id}:{aid}"])
-        assert backends.spawn_turn(a.id, **spec) == f"{b.id}-handle"
-        assert backends.interrupt(a.id, "a1") == 2
-        assert backends.active_handles(a.id, "a1") == [f"{b.id}:a1"]
-        if b.id != "deepseek":
-            module = backends._mod(b.runner_module)
-            assert module.spawn_turn(**spec) == f"{b.id}-handle"
-            assert module.interrupt("a1") == 2
-            assert module.active_handles("a1") == [f"{b.id}:a1"]
+        if b.id == "codex":
+            # Codex spawns through the app-server pool, not ``start_turn``.
+            from lib import codex_app_server
+            monkeypatch.setattr(codex_app_server, "spawn_turn",
+                                lambda **kw: calls.append(("spawn", kw)) or "codex-handle")
+        assert backends.spawn_turn(b.id, **spec) == f"{b.id}-handle"
+        assert backends.interrupt(b.id, "a1") == 2
+        assert backends.active_handles(b.id, "a1") == [f"{b.id}:a1"]
         assert [c[0] for c in calls][:3] == ["spawn", "interrupt", "active"]
     assert registry.by_id("deepseek").runner == registry.by_id("opencode").runner
     assert isinstance(registry.by_id("deepseek"), type(registry.by_id("opencode")))
 
 
-def test_routing_modules_delegate_to_the_classes(monkeypatch):
-    for a in backends.adapters():
-        if a.id == "deepseek":
-            continue
-        b = registry.by_id(a.id)
-        monkeypatch.setattr(b, "routing_cmd", lambda prompt, model="", effort="": [b.id, prompt, model, effort])
-        monkeypatch.setattr(b, "routing_text", lambda stdout: f"{b.id}:{stdout}")
-        module = backends._mod(b.runner_module)
-        assert module.routing_cmd("p", model="m", effort="e") == [b.id, "p", "m", "e"]
-        assert module.routing_text("out") == f"{b.id}:out"
+def test_interrupt_any_stops_every_runner_once_including_codex_exec(monkeypatch):
+    calls: list = []
+    for b in registry.all():
+        monkeypatch.setattr(b, "interrupt", lambda aid, _id=b.id: calls.append(_id) or 1)
+    codex = registry.by_id("codex")
+    monkeypatch.setattr(codex, "interrupt_exec", lambda aid: calls.append("codex-exec") or 1)
+    # DeepSeek shares OpenCode's registry, so it is not signalled twice.
+    assert backends.interrupt_any("a1") == 6
+    assert sorted(calls) == sorted(["claude", "codex", "codex-exec", "agy", "grok", "opencode"])
 
 
 TRANSCRIPT_MODULES = {
     # The parser module each backend reads its sessions through.
-    "claude": "transcript_log", "codex": "codex_transcript", "agy": "agy_transcript",
+    "claude": "claude_transcript", "codex": "codex_transcript", "agy": "agy_transcript",
     "grok": "grok_transcript", "opencode": "opencode_transcript",
     "deepseek": "opencode_transcript",
 }
@@ -298,18 +280,18 @@ TRANSCRIPT_MODULES = {
 
 def test_transcript_access_matches_the_facade(monkeypatch):
     for m in set(TRANSCRIPT_MODULES.values()):
-        module = backends._mod(m)
+        module = importlib.import_module(f"lib.{m}")
         monkeypatch.setattr(module, "find_latest_jsonl",
                             lambda sid, projects_root=None, _m=m: pathlib.Path(f"/{_m}/{sid}.jsonl"))
         monkeypatch.setattr(module, "parse_turns", lambda path, _m=m: [{"module": _m, "path": str(path)}])
-    for a in backends.adapters():
+    for a in registry.all():
         b, m = registry.by_id(a.id), TRANSCRIPT_MODULES[a.id]
         assert b.find_transcript("s1") == backends.find_session_jsonl(a.id, "s1") == pathlib.Path(f"/{m}/s1.jsonl")
         assert b.parse_transcript("/p") == backends.parse_turns(a.id, "/p") == [{"module": m, "path": "/p"}]
     # Claude threads a home into its projects root; the others own their roots.
     seen = {}
-    from lib import transcript_log
-    monkeypatch.setattr(transcript_log, "find_latest_jsonl",
+    from lib import claude_transcript
+    monkeypatch.setattr(claude_transcript, "find_latest_jsonl",
                         lambda sid, projects_root=None: seen.setdefault("root", projects_root))
     registry.by_id("claude").find_transcript("s1", home=pathlib.Path("/h"))
     assert seen["root"] == pathlib.Path("/h/.claude/projects")
@@ -319,8 +301,8 @@ def test_list_sessions_matches_the_facade(monkeypatch):
     from lib import session_catalog
     monkeypatch.setattr(session_catalog, "list_claude_sessions",
                         lambda cwd, *, all_projects, limit: [{"id": f"claude:{cwd}:{limit}:{all_projects}"}])
-    for m in set(TRANSCRIPT_MODULES.values()) - {"transcript_log"}:
-        module = backends._mod(m)
+    for m in set(TRANSCRIPT_MODULES.values()) - {"claude_transcript"}:
+        module = importlib.import_module(f"lib.{m}")
         if m == "agy_transcript":
             # agy's catalogue takes no scope flag; "all" is an empty cwd.
             monkeypatch.setattr(module, "list_sessions",
@@ -328,7 +310,7 @@ def test_list_sessions_matches_the_facade(monkeypatch):
         else:
             monkeypatch.setattr(module, "list_sessions",
                                 lambda cwd, *, limit, all_projects=False, _m=m: [{"id": f"{_m}:{cwd}:{limit}:{all_projects}"}])
-    for a in backends.adapters():
+    for a in registry.all():
         b, m = registry.by_id(a.id), TRANSCRIPT_MODULES[a.id]
         for all_projects in (False, True):
             got = b.list_sessions("/w", limit=5, all_projects=all_projects)
@@ -450,7 +432,7 @@ def test_quota_identity_matches_the_janitor_window_key():
         {"window_id": "w-plain"},
         {"window_id": "w-bad", "kind": "weekly", "resets_at": "not-a-date"},
     ]
-    for a in backends.adapters():
+    for a in registry.all():
         b = registry.by_id(a.id)
         for window in windows:
             expected = janitor_autonomy.quota_window_key(a.id, "acct", window)
@@ -523,8 +505,8 @@ def test_codex_model_transcript_prefers_the_thread_index(monkeypatch, tmp_path):
     assert codex.model_transcript("stale") == pathlib.Path("/scan/stale.jsonl")
     assert codex.model_transcript("unknown") == pathlib.Path("/scan/unknown.jsonl")
     # Every other backend's model transcript is its session transcript.
-    from lib import transcript_log
-    monkeypatch.setattr(transcript_log, "find_latest_jsonl",
+    from lib import claude_transcript
+    monkeypatch.setattr(claude_transcript, "find_latest_jsonl",
                         lambda sid, projects_root=None: pathlib.Path(f"/claude/{sid}.jsonl"))
     assert registry.by_id("claude").model_transcript("s1") == pathlib.Path("/claude/s1.jsonl")
 
@@ -594,34 +576,29 @@ def test_stream_json_shared_surface_carries_the_runner_prefix(monkeypatch):
 
 
 def test_runner_registries_are_shared_per_runner():
-    """DeepSeek turns live in OpenCode's registry, as they did when the
-    registry was ``opencode_runner._REGISTRY``; every other CLI has its own."""
-    from lib import clarp_runner, codex_runner, grok_runner, opencode_runner, agy_runner
+    """DeepSeek turns live in OpenCode's registry; every other CLI has its own."""
     assert registry.by_id("deepseek")._registry is registry.by_id("opencode")._registry
-    assert opencode_runner._REGISTRY is registry.by_id("opencode")._registry
-    assert grok_runner._REGISTRY is registry.by_id("grok")._registry
-    assert agy_runner._REGISTRY is registry.by_id("agy")._registry
-    assert clarp_runner._REGISTRY is registry.by_id("claude")._registry
-    assert codex_runner._REGISTRY is registry.by_id("codex")._registry
     distinct = {id(registry.by_id(n)._registry) for n in ("claude", "codex", "agy", "grok", "opencode")}
     assert len(distinct) == 5
 
 
-def test_hook_prefers_a_test_double_over_the_modules_own_delegator(monkeypatch):
-    """The slice-3 seam: a monkeypatched runner-module global intercepts
-    the class body; the module's own delegator does not recurse into it."""
-    from lib import grok_runner
+def test_no_runner_module_seam_survives():
+    """Slice 5: tests patch the backend instance; there is no module-level
+    runner API and no ``_hook`` indirection left to intercept it."""
+    for name in ("clarp", "codex", "agy", "grok", "opencode"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(f"lib.{name}_runner")
     grok = registry.by_id("grok")
-    assert grok._hook("build_cmd") is None
-    assert grok._hook("build_cmd", "own") == "own"
-    assert grok._hook("GROK_BIN", "x") == "grok"
-    monkeypatch.setattr(grok_runner, "GROK_BIN", "fake-grok")
+    assert not hasattr(grok, "_hook") and not hasattr(grok, "runner_module")
+    assert not hasattr(grok, "routing_module") and not hasattr(grok, "extra_interrupt_modules")
+
+
+def test_patching_the_instance_reaches_the_class_body(monkeypatch):
+    grok = registry.by_id("grok")
+    monkeypatch.setattr(grok, "required_binary", "fake-grok")
     assert grok.build_cmd("")[0] == "fake-grok"
-    monkeypatch.setattr(grok_runner, "build_cmd", lambda *a, **kw: ["patched"])
+    monkeypatch.setattr(grok, "build_cmd", lambda *a, **kw: ["patched"])
     assert grok.routing_cmd("p") == ["patched", "-p", "p"]
-    monkeypatch.setattr(grok_runner, "routing_text", lambda stdout: f"double:{stdout}")
-    assert grok.routing_text("o") == "double:o"
-    assert grok_runner.routing_text("o") == "double:o"
 
 
 def test_base_defaults_are_documented_no_ops_or_not_implemented():

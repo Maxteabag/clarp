@@ -4,7 +4,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
-from lib.transcript_log import find_latest_jsonl, parse_turns  # noqa: E402
+from lib.claude_transcript import find_latest_jsonl, parse_turns  # noqa: E402
 
 PARENT = "11111111-2222-3333-4444-555555555555"
 
