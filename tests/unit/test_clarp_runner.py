@@ -1,4 +1,4 @@
-"""Tests for `lib.clarp_runner` — the per-turn clarp -p dispatcher.
+"""Tests for `ClaudeBackend` — the per-turn clarp -p dispatcher.
 
 We don't run real `clarp` here. Instead the tests:
   * verify `build_cmd` produces the expected argv for both fresh and
@@ -23,10 +23,12 @@ import pytest
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
-from lib import clarp_runner          # noqa: E402
 from lib import config                # noqa: E402
 from lib import agents as agents_db    # noqa: E402
+from lib.backend.registry import by_id  # noqa: E402
 from lib.protocol import SSEType       # noqa: E402
+
+CLAUDE = by_id("claude")
 
 
 # ---- build_cmd ---------------------------------------------------------
@@ -35,7 +37,7 @@ from lib.protocol import SSEType       # noqa: E402
 def test_build_cmd_no_session_omits_continuity_flag():
     """No session id at all → no --continue, no --resume, no
     --session-id. Legacy / safety fallback."""
-    cmd = clarp_runner.build_cmd()
+    cmd = CLAUDE.build_cmd()
     assert cmd[0] == "claude"
     assert "-p" in cmd
     assert "--continue" not in cmd
@@ -50,13 +52,13 @@ def test_build_cmd_can_use_clarp_provider(monkeypatch):
     config.reset_cache_for_tests()
     monkeypatch.setenv("CLAUDE_PWA_CLAUDE_CLI", "clarp")
     try:
-        assert clarp_runner.build_cmd()[0] == "clarp"
+        assert CLAUDE.build_cmd()[0] == "clarp"
     finally:
         config.reset_cache_for_tests()
 
 
 def test_build_cmd_existing_session_uses_resume():
-    cmd = clarp_runner.build_cmd("abc-123")
+    cmd = CLAUDE.build_cmd("abc-123")
     assert "--resume" in cmd
     i = cmd.index("--resume")
     assert cmd[i + 1] == "abc-123"
@@ -69,7 +71,7 @@ def test_build_cmd_new_session_uses_session_id_flag():
     --session-id so claude adopts our uuid as the session identifier
     rather than generating its own (which would force us to wait for
     system.init to discover what id was used)."""
-    cmd = clarp_runner.build_cmd("new-uuid-here", is_new_session=True)
+    cmd = CLAUDE.build_cmd("new-uuid-here", is_new_session=True)
     assert "--session-id" in cmd
     i = cmd.index("--session-id")
     assert cmd[i + 1] == "new-uuid-here"
@@ -81,7 +83,7 @@ def test_build_cmd_includes_dangerously_skip_permissions():
     """Production already runs claude with this flag; tests pin it so a
     future refactor doesn't silently drop the permission bypass and
     block voice turns waiting for an approval the PWA can't surface."""
-    cmd = clarp_runner.build_cmd()
+    cmd = CLAUDE.build_cmd()
     assert "--dangerously-skip-permissions" in cmd
     assert "--input-format" in cmd
     assert cmd[cmd.index("--input-format") + 1] == "stream-json"
@@ -89,22 +91,22 @@ def test_build_cmd_includes_dangerously_skip_permissions():
 
 def test_build_cmd_model_pin_opt_in():
     """Empty model → no --model (default behavior). Set → passed through."""
-    assert "--model" not in clarp_runner.build_cmd()
-    cmd = clarp_runner.build_cmd(model="claude-haiku-4-5-20251001")
+    assert "--model" not in CLAUDE.build_cmd()
+    cmd = CLAUDE.build_cmd(model="claude-haiku-4-5-20251001")
     i = cmd.index("--model")
     assert cmd[i + 1] == "claude-haiku-4-5-20251001"
 
 
 def test_build_cmd_effort_pin_opt_in():
     """Empty effort → no --effort. Set → passed through (Claude --effort)."""
-    assert "--effort" not in clarp_runner.build_cmd()
-    cmd = clarp_runner.build_cmd(model="opus", effort="high")
+    assert "--effort" not in CLAUDE.build_cmd()
+    cmd = CLAUDE.build_cmd(model="opus", effort="high")
     assert cmd[cmd.index("--effort") + 1] == "high"
 
 
 def test_build_cmd_persona_identity_opt_in():
-    assert "--append-system-prompt" not in clarp_runner.build_cmd()
-    cmd = clarp_runner.build_cmd(persona="Bella", session="bella")
+    assert "--append-system-prompt" not in CLAUDE.build_cmd()
+    cmd = CLAUDE.build_cmd(persona="Bella", session="bella")
     i = cmd.index("--append-system-prompt")
     prompt = cmd[i + 1]
     assert "You are Bella." in prompt
@@ -118,23 +120,23 @@ def test_build_cmd_scopes_mcp_per_agent_selection(tmp_path, monkeypatch):
     import json as _json
     from lib.config import Config
     monkeypatch.setenv("HOME", str(tmp_path))   # scoped configs write under HOME
-    monkeypatch.setattr(clarp_runner._config, "load",
+    monkeypatch.setattr(config, "load",
                         lambda *a, **k: Config(mcp_strict=True))
-    monkeypatch.setattr(clarp_runner._config, "read_global_mcp_servers",
+    monkeypatch.setattr(config, "read_global_mcp_servers",
                         lambda: {"alpha": {"type": "http", "url": "x"},
                                  "beta": {"type": "stdio", "command": "y"}})
 
     # No per-agent selection → strict, and NO --mcp-config.
-    monkeypatch.setattr(clarp_runner.agents_db, "get_by_session", lambda s: None)
-    cmd = clarp_runner.build_cmd("sid", session="adam")
+    monkeypatch.setattr(agents_db, "get_by_session", lambda s: None)
+    cmd = CLAUDE.build_cmd("sid", session="adam")
     assert "--strict-mcp-config" in cmd
     assert "--mcp-config" not in cmd
 
     # Selection ["alpha"] → strict + a scoped config with only alpha.
     monkeypatch.setattr(
-        clarp_runner.agents_db, "get_by_session",
+        agents_db, "get_by_session",
         lambda s: {"mcp_servers": '{"configured":true,"servers":["alpha"]}'})
-    cmd = clarp_runner.build_cmd("sid", session="bella")
+    cmd = CLAUDE.build_cmd("sid", session="bella")
     assert "--strict-mcp-config" in cmd
     path = cmd[cmd.index("--mcp-config") + 1]
     written = _json.loads(open(path).read())
@@ -142,18 +144,18 @@ def test_build_cmd_scopes_mcp_per_agent_selection(tmp_path, monkeypatch):
 
     # Explicitly selecting none loads nothing.
     monkeypatch.setattr(
-        clarp_runner.agents_db, "get_by_session",
+        agents_db, "get_by_session",
         lambda s: {"mcp_servers": '{"configured":true,"servers":[]}'})
-    cmd = clarp_runner.build_cmd("sid", session="bella")
+    cmd = CLAUDE.build_cmd("sid", session="bella")
     assert "--mcp-config" not in cmd
 
 
 def test_build_cmd_strict_off_loads_global_mcp(tmp_path, monkeypatch):
     """mcp_strict=False restores the old behavior (inherit global MCP)."""
     from lib.config import Config
-    monkeypatch.setattr(clarp_runner._config, "load",
+    monkeypatch.setattr(config, "load",
                         lambda *a, **k: Config(mcp_strict=False))
-    cmd = clarp_runner.build_cmd("sid", session="adam")
+    cmd = CLAUDE.build_cmd("sid", session="adam")
     assert "--strict-mcp-config" not in cmd
 
 
@@ -223,7 +225,7 @@ def test_spawn_turn_fires_on_session_init_with_session_id(fake_clarp, tmp_path):
     ])
     captured_sids: list[str] = []
     captured_results: list[dict] = []
-    handle = clarp_runner.spawn_turn(
+    handle = CLAUDE.start_turn(
         text="hello",
         cwd=tmp_path,
         on_session_init=captured_sids.append,
@@ -243,7 +245,7 @@ def test_rejected_session_bind_stops_before_assistant_events(fake_clarp, tmp_pat
         {"type": "result", "subtype": "success", "result": "must not leak"},
     ])
     results, errors = [], []
-    handle = clarp_runner.spawn_turn(
+    handle = CLAUDE.start_turn(
         text="hi", cwd=tmp_path, on_session_init=lambda _sid: False,
         on_result=results.append, on_error=errors.append)
     handle.wait(timeout=5)
@@ -270,7 +272,7 @@ def test_spawn_turn_streams_assistant_partials_to_message_store(fake_clarp, tmp_
     ])
 
     agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-live")
-    handle = clarp_runner.spawn_turn(
+    handle = CLAUDE.start_turn(
         text="hi",
         cwd=tmp_path,
         backend_session_id="sid-live",
@@ -303,7 +305,7 @@ def test_spawn_turn_appends_delta_partials(fake_clarp, tmp_path):
     ])
 
     agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-delta")
-    handle = clarp_runner.spawn_turn(
+    handle = CLAUDE.start_turn(
         text="hi",
         cwd=tmp_path,
         backend_session_id="sid-delta",
@@ -353,7 +355,7 @@ def test_spawn_turn_handles_claude_stream_event_text_deltas(fake_clarp, tmp_path
 
     agents_db.open_turn(
         agent_id=agent_id, source="pwa", trace_id="trace-stream-event")
-    handle = clarp_runner.spawn_turn(
+    handle = CLAUDE.start_turn(
         text="hi",
         cwd=tmp_path,
         backend_session_id="sid-stream-event",
@@ -396,7 +398,7 @@ def test_isolated_spawn_turn_returns_all_assistant_text_blocks(fake_clarp, tmp_p
     ])
     captured: list[dict] = []
 
-    handle = clarp_runner.spawn_turn(
+    handle = CLAUDE.start_turn(
         text="dream",
         cwd=tmp_path,
         backend_session_id="sid-isolated",
@@ -418,7 +420,7 @@ def test_spawn_turn_propagates_missing_clarp_as_filenotfound(tmp_path,
     can surface a clear 500 rather than starting a zombie subprocess."""
     monkeypatch.setenv("PATH", "")
     with pytest.raises(FileNotFoundError):
-        clarp_runner.spawn_turn(text="hi", cwd=tmp_path)
+        CLAUDE.start_turn(text="hi", cwd=tmp_path)
 
 
 def test_spawn_turn_zero_exit_without_result_calls_on_error(fake_clarp, tmp_path):
@@ -430,7 +432,7 @@ def test_spawn_turn_zero_exit_without_result_calls_on_error(fake_clarp, tmp_path
     ])
     sids: list[str] = []
     errs: list[str] = []
-    handle = clarp_runner.spawn_turn(
+    handle = CLAUDE.start_turn(
         text="hi", cwd=tmp_path,
         on_session_init=sids.append,
         on_error=errs.append,
@@ -449,7 +451,7 @@ def test_structured_usage_limit_events_are_classified(fake_clarp, tmp_path, stat
         {"type": "result", "subtype": "success", "result": "done"},
     ])
     errors = []
-    handle = clarp_runner.spawn_turn(text="hi", cwd=tmp_path, on_error=errors.append)
+    handle = CLAUDE.start_turn(text="hi", cwd=tmp_path, on_error=errors.append)
     handle.wait(timeout=5)
     assert errors == (["Claude usage limit reached"]
                       if status in {"blocked", "rejected"} else [])
@@ -461,7 +463,7 @@ def test_spawn_turn_zero_exit_usage_limit_stderr_calls_on_error(fake_clarp, tmp_
         stderr="You've hit your session limit · resets 3:20pm (Europe/Oslo)",
     )
     errs: list[str] = []
-    handle = clarp_runner.spawn_turn(
+    handle = CLAUDE.start_turn(
         text="hi", cwd=tmp_path,
         on_error=errs.append,
     )
@@ -473,7 +475,7 @@ def test_spawn_turn_zero_exit_usage_limit_stderr_calls_on_error(fake_clarp, tmp_
 def test_spawn_turn_drainer_is_daemon_so_python_can_exit(fake_clarp, tmp_path):
     """Daemonised so a zombie clarp can't block test interpreter shutdown."""
     fake_clarp([{"type": "system", "subtype": "init", "session_id": "x"}])
-    handle = clarp_runner.spawn_turn(text="x", cwd=tmp_path)
+    handle = CLAUDE.start_turn(text="x", cwd=tmp_path)
     handle.wait(timeout=5.0)
     # Drainer thread should be a daemon — if for some reason the
     # subprocess hung, this guarantees the process can still exit.
@@ -490,7 +492,7 @@ def test_spawn_turn_callback_exception_is_isolated(fake_clarp, tmp_path):
     results: list[dict] = []
     def bad_init(_sid):
         raise RuntimeError("intentional test failure inside callback")
-    handle = clarp_runner.spawn_turn(
+    handle = CLAUDE.start_turn(
         text="x", cwd=tmp_path,
         on_session_init=bad_init,
         on_result=results.append,
@@ -526,7 +528,7 @@ def test_spawn_turn_silent_turn_is_not_timed_out(tmp_path, monkeypatch):
 
     results: list[dict] = []
     errs: list[str] = []
-    handle = clarp_runner.spawn_turn(
+    handle = CLAUDE.start_turn(
         text="hi", cwd=tmp_path,
         on_result=results.append, on_error=errs.append)
     handle.wait(timeout=10.0)
@@ -563,7 +565,7 @@ def test_spawn_turn_streaming_turn_completes(tmp_path, monkeypatch):
 
     results: list[dict] = []
     errs: list[str] = []
-    handle = clarp_runner.spawn_turn(
+    handle = CLAUDE.start_turn(
         text="hi", cwd=tmp_path,
         on_result=results.append, on_error=errs.append)
     handle.wait(timeout=5.0)
@@ -596,7 +598,7 @@ def test_spawn_turn_delivers_prompt_on_stdin_not_argv(tmp_path, monkeypatch):
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
 
-    handle = clarp_runner.spawn_turn(text="route this to Sam", cwd=tmp_path)
+    handle = CLAUDE.start_turn(text="route this to Sam", cwd=tmp_path)
     handle.wait(timeout=5.0)
 
     assert _wait_for(capture.exists)
@@ -615,5 +617,5 @@ def test_default_model_pin_means_cli_default():
     """The picker used to store "default" as a pin; Claude Code does not know
     that alias and would send it to the API verbatim (HTTP 400 "does not
     support this model"). It must dispatch as no --model at all."""
-    assert "--model" not in clarp_runner.build_cmd(model="default")
-    assert "--model" not in clarp_runner.build_cmd(model="Default ")
+    assert "--model" not in CLAUDE.build_cmd(model="default")
+    assert "--model" not in CLAUDE.build_cmd(model="Default ")
