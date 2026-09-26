@@ -15,6 +15,7 @@ from typing import Any
 
 from . import origins, turn_lifecycle
 from . import voice_verbosity as voice_verbosity_lib
+from .policies import helper_state as helper_policy
 from .db import conn, now_ms
 from .protocol import AgentBackend, AgentState, ClipStatus, TurnSource
 
@@ -33,7 +34,8 @@ def list_agents() -> list[dict[str, Any]]:
                model, effort, mcp_servers, heartbeat_enabled,
                dreaming_enabled, dreaming_last_local_date, muted,
                custom_status, avatar_symbol, avatar_path, personality,
-               archived_at, is_janitor, voice_verbosity
+               archived_at, is_janitor, voice_verbosity,
+               parent_agent_id, role, helper_state, helper_completed_at
           FROM agents
          WHERE deleted_at IS NULL
          ORDER BY created_at
@@ -48,7 +50,8 @@ def get_by_session(session: str) -> dict[str, Any] | None:
                model, effort, mcp_servers, heartbeat_enabled,
                dreaming_enabled, dreaming_last_local_date, muted,
                custom_status, avatar_symbol, avatar_path, personality,
-               archived_at, is_janitor, voice_verbosity
+               archived_at, is_janitor, voice_verbosity,
+               parent_agent_id, role, helper_state, helper_completed_at
           FROM agents
          WHERE session = ? AND deleted_at IS NULL
     """, (session,)).fetchone()
@@ -76,7 +79,8 @@ def get_by_backend_session(backend_session_id: str) -> dict[str, Any] | None:
                a.heartbeat_enabled, a.dreaming_enabled,
                a.dreaming_last_local_date, a.muted, a.custom_status,
                a.avatar_symbol, a.avatar_path, a.personality, a.archived_at,
-               a.is_janitor, a.voice_verbosity
+               a.is_janitor, a.voice_verbosity, a.parent_agent_id, a.role,
+               a.helper_state, a.helper_completed_at
           FROM agents a
           JOIN runtimes r ON r.agent_id = a.agent_id
          WHERE r.backend_session_id = ?
@@ -114,7 +118,8 @@ def get_by_agent_id(agent_id: str) -> dict[str, Any] | None:
                model, effort, mcp_servers, heartbeat_enabled,
                dreaming_enabled, dreaming_last_local_date, muted,
                custom_status, avatar_symbol, avatar_path, personality,
-               archived_at, is_janitor, voice_verbosity
+               archived_at, is_janitor, voice_verbosity,
+               parent_agent_id, role, helper_state, helper_completed_at
           FROM agents
          WHERE agent_id = ? AND deleted_at IS NULL
     """, (agent_id,)).fetchone()
@@ -174,7 +179,9 @@ def create_agent(*, persona: str, voice_id: str, cwd: str,
         c.execute("""
             UPDATE agents SET deleted_at = NULL, persona = ?, voice_id = ?,
                    cwd = ?, backend = ?, created_at = ?, model = ?, effort = ?,
-                   custom_status = ''
+                   custom_status = '', parent_agent_id = NULL,
+                   role = CASE WHEN is_janitor = 1 THEN 'janitor' ELSE 'agent' END,
+                   helper_state = NULL, helper_completed_at = NULL
              WHERE agent_id = ?
         """, (persona, voice_id, cwd, backend, now_ms(), model, effort, agent_id))
         turn_lifecycle.transition(
@@ -211,22 +218,24 @@ def set_janitor_status(c, agent_id: str, status: str) -> None:
 
 
 def convert_to_janitor(c, agent_id: str) -> None:
-    c.execute("UPDATE agents SET is_janitor=1,heartbeat_enabled=0,dreaming_enabled=0 WHERE agent_id=?",
+    c.execute("UPDATE agents SET is_janitor=1,role='janitor',heartbeat_enabled=0,dreaming_enabled=0 "
+              "WHERE agent_id=?",
               (agent_id,))
 
 
 def mark_janitor(c, agent_id: str) -> None:
-    c.execute("UPDATE agents SET is_janitor=1 WHERE agent_id=?", (agent_id,))
+    c.execute("UPDATE agents SET is_janitor=1,role='janitor' WHERE agent_id=?", (agent_id,))
 
 
 def release_from_janitor(c, agent_id: str) -> None:
-    c.execute("UPDATE agents SET is_janitor=0 WHERE agent_id=?", (agent_id,))
+    c.execute("UPDATE agents SET is_janitor=0,role='agent' WHERE agent_id=?", (agent_id,))
 
 
 def insert_builtin_janitor(c, *, agent_id: str, persona: str, cwd: str, session: str,
                            backend: str, model: str, effort: str, now: int) -> None:
     c.execute("""INSERT INTO agents(agent_id,persona,voice_id,cwd,session,backend,model,effort,
-        is_janitor,heartbeat_enabled,dreaming_enabled,created_at) VALUES (?,?,?,?,?,?,?,?,1,0,0,?)""",
+        is_janitor,role,heartbeat_enabled,dreaming_enabled,created_at)
+        VALUES (?,?,?,?,?,?,?,?,1,'janitor',0,0,?)""",
         (agent_id, persona, "", cwd, session, backend, model, effort, now))
 
 
@@ -259,6 +268,113 @@ def set_archived(agent_id: str, archived: bool) -> None:
         "UPDATE agents SET archived_at=? WHERE agent_id=? AND deleted_at IS NULL",
         (now_ms() if archived else None, agent_id),
     )
+    if archived:
+        abandon_children(agent_id)
+
+
+# ---- lineage: parent, role and the helper lifecycle --------------------
+#
+# A helper is an agent another agent created to do one piece of work. The
+# transitions are ``policies.helper_state``; these functions only read the
+# facts it needs and write what it decides. A parent going away flags its
+# unfinished helpers ``abandoned``; nothing ever cascades.
+
+class ParentRefused(ValueError):
+    """The requested parent would make an agent its own ancestor."""
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
+
+
+def ancestors(agent_id: str, *, limit: int = 64) -> list[str]:
+    """``agent_id``'s parent, grandparent and so on, nearest first.
+
+    Deleted rows count: a soft-deleted parent is still part of the chain a
+    resurrected agent could close. ``limit`` bounds a chain that is already
+    corrupt."""
+    chain: list[str] = []
+    c = conn()
+    current = agent_id
+    while current and len(chain) < limit:
+        row = c.execute("SELECT parent_agent_id FROM agents WHERE agent_id = ?",
+                        (current,)).fetchone()
+        current = str(row["parent_agent_id"] or "") if row else ""
+        if not current or current in chain:
+            break
+        chain.append(current)
+    return chain
+
+
+def set_lineage(agent_id: str, *, parent_agent_id: str | None,
+                role: str = helper_policy.Role.AGENT) -> None:
+    """Record who created ``agent_id`` and in what role.
+
+    A helper starts ``running``; any other role carries no helper state.
+    Raises ``ParentRefused`` for self-parenting or a cycle."""
+    parent = str(parent_agent_id or "")
+    refusal = helper_policy.parent_refusal(
+        agent_id, parent, ancestors(parent) if parent else ())
+    if refusal:
+        raise ParentRefused(refusal)
+    state = helper_policy.initial_state(role)
+    conn().execute(
+        "UPDATE agents SET parent_agent_id = ?, role = ?, helper_state = ?, "
+        "helper_completed_at = NULL WHERE agent_id = ?",
+        (parent or None, str(role), state.value if state else None, agent_id))
+
+
+def apply_helper_event(agent_id: str, event: str, *,
+                       now: int | None = None) -> str | None:
+    """Move a helper through ``event``; return its new state, or None when
+    the policy ignores the event (not a helper, or not legal from here).
+
+    The write is a compare-and-set on the state it read, so two racing
+    events cannot both apply to the same starting state."""
+    c = conn()
+    row = c.execute(
+        "SELECT helper_state FROM agents WHERE agent_id = ? AND deleted_at IS NULL",
+        (agent_id,)).fetchone()
+    current = row["helper_state"] if row else None
+    step = helper_policy.next_state(current, event)
+    if step is None:
+        return None
+    stamp = (now_ms() if now is None else int(now)) if step.completed else None
+    cur = c.execute(
+        "UPDATE agents SET helper_state = ?, helper_completed_at = ? "
+        "WHERE agent_id = ? AND helper_state = ?",
+        (step.state.value, stamp, agent_id, current))
+    return step.state.value if cur.rowcount else None
+
+
+def children(agent_id: str) -> list[dict[str, Any]]:
+    """Live agents whose parent is ``agent_id``, oldest first."""
+    rows = conn().execute("""
+        SELECT agent_id, session, persona, role, helper_state,
+               helper_completed_at, archived_at
+          FROM agents
+         WHERE parent_agent_id = ? AND deleted_at IS NULL
+         ORDER BY created_at
+    """, (agent_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def abandon_children(agent_id: str) -> list[str]:
+    """Flag ``agent_id``'s unfinished helpers ``abandoned``; return their ids."""
+    return [child["agent_id"] for child in children(agent_id)
+            if apply_helper_event(child["agent_id"],
+                                  helper_policy.HelperEvent.PARENT_GONE)]
+
+
+def helper_rows() -> list[dict[str, Any]]:
+    """Every live helper with the fields the archive policy reads."""
+    rows = conn().execute("""
+        SELECT agent_id, session, role, helper_state, helper_completed_at,
+               archived_at
+          FROM agents
+         WHERE role = 'helper' AND deleted_at IS NULL
+    """).fetchall()
+    return [dict(r) for r in rows]
 
 
 def update_agent(agent_id: str, *, persona: str | None = None,
@@ -359,6 +475,7 @@ def soft_delete(agent_id: str) -> None:
     from . import artifacts
     artifacts.cancel_for_agent(agent_id)
     end_current_runtime(agent_id)
+    abandon_children(agent_id)
     turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.AGENT_DELETED,
                               {"reason": "deleted"})
 

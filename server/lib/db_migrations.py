@@ -108,6 +108,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             _migrate_to_v91(con)
         if version < 92:
             _migrate_to_v92(con)
+        if version < 93:
+            _migrate_to_v93(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -387,6 +389,26 @@ def _migrate_to_v91(con: sqlite3.Connection) -> None:
                         seq DESC, updated_at DESC)
             WHERE COALESCE(text, '') != '' AND COALESCE(tool_name, '') = ''
     """)
+
+
+def _migrate_to_v93(con: sqlite3.Connection) -> None:
+    """Helper agents: a parent, a role and a helper lifecycle on agents.
+
+    ``parent_agent_id`` names the agent that created this one. It is not a
+    foreign key with a cascade on purpose: deleting a parent flags its
+    helpers ``abandoned`` instead of removing them. ``role`` absorbs
+    ``is_janitor``, which stays until its readers move over.
+    """
+    columns = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    for name, definition in (("parent_agent_id", "TEXT"),
+                             ("role", "TEXT NOT NULL DEFAULT 'agent'"),
+                             ("helper_state", "TEXT"),
+                             ("helper_completed_at", "INTEGER")):
+        if name not in columns:
+            con.execute(f"ALTER TABLE agents ADD COLUMN {name} {definition}")
+    con.execute("UPDATE agents SET role = 'janitor' WHERE is_janitor = 1")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_agent_id) "
+                "WHERE parent_agent_id IS NOT NULL")
 
 
 def _migrate_to_v92(con: sqlite3.Connection) -> None:
