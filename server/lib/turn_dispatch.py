@@ -999,7 +999,7 @@ class TurnDispatchService:
         # Other agents are unaffected; this only serializes the same agent.
         if _terminal_live(agent_id):
             depth = _SLOTS.hold_for_terminal(agent_id, spec)
-            _TURN_LOCK.defer(lambda: (
+            defer_on(_TURN_LOCK, lambda: (
                 eventlog.emit("server", "turnQueuedBehindTerminal",
                               context=spec.context, detail={"depth": depth}),
                 log("turnQueuedBehindTerminal",
@@ -1017,7 +1017,7 @@ class TurnDispatchService:
             # and take it over now instead of queuing behind a phantom
             # forever. Checked here, on every send — no timer/interval.
             if not self._has_live_turn(spec):
-                _TURN_LOCK.defer(lambda: (
+                defer_on(_TURN_LOCK, lambda: (
                     eventlog.emit("server", "staleInflightCleared",
                                   context=spec.context,
                                   detail={"dead_trace": current}),
@@ -1030,7 +1030,7 @@ class TurnDispatchService:
                 return False, False
             if queue_if_busy:
                 depth = _SLOTS.enqueue(agent_id, spec)
-                _TURN_LOCK.defer(lambda: (
+                defer_on(_TURN_LOCK, lambda: (
                     eventlog.emit("server", "turnQueued", context=spec.context,
                                   detail={"depth": depth}),
                     log("turnQueued",
@@ -1040,7 +1040,7 @@ class TurnDispatchService:
             # Take the slot first so the preempted turn's dying callback is
             # already superseded, then interrupt once the lock is released.
             _SLOTS.claim(agent_id, spec.trace_id)
-            _TURN_LOCK.defer(lambda: self._preempt_for(spec, current))
+            defer_on(_TURN_LOCK, lambda: self._preempt_for(spec, current))
             return False, False
         _SLOTS.claim(agent_id, spec.trace_id)
         return False, False
@@ -1136,7 +1136,7 @@ class TurnDispatchService:
         _remove_queued_run(spec.queue_id)
         with _TURN_LOCK:
             if _SLOTS.owns(spec.agent_id, spec.trace_id):
-                _TURN_LOCK.defer(lambda: _record_janitor_cancelled(
+                defer_on(_TURN_LOCK, lambda: _record_janitor_cancelled(
                     self.ctx, spec.agent_id, spec.session, spec.trace_id))
         self._finish_turn(spec)
 
@@ -1155,7 +1155,7 @@ class TurnDispatchService:
                 return
             # The handover is decided; the spawn runs once no thread waits on
             # this lock (a terminal callback may hold it around this call).
-            _TURN_LOCK.defer(
+            defer_on(_TURN_LOCK, 
                 lambda: self._spawn_next(agent_id, next_spec))
 
     def _spawn_next(self, agent_id: str, next_spec: _TurnSpec) -> None:
@@ -1407,7 +1407,7 @@ class TurnDispatchService:
         with _TURN_LOCK:
             if _SLOTS.owns(spec.agent_id, spec.trace_id):
                 _SLOTS.touch_claim(spec.agent_id)
-            _TURN_LOCK.defer(lambda: turn_lifecycle.try_transition(
+            defer_on(_TURN_LOCK, lambda: turn_lifecycle.try_transition(
                 spec.agent_id, TurnEvent.ACCOUNT_RECOVERY_WAIT,
                 {"dispatch": spec.backend, "trace_id": spec.trace_id,
                  "account_recovery": "waiting",
