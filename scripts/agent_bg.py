@@ -12,6 +12,9 @@ Usage:
     agent_bg.py <session> job-fail <handle> [reason]
     agent_bg.py <session> job-active <handle>
     agent_bg.py <session> job-cancelled <handle>
+    agent_bg.py <session> job-cancel <handle>          # owner closes its own job
+    agent_bg.py <session> job-progress <handle> <text>
+    agent_bg.py <session> job-log <handle> </abs/path>
 
 Run on the server host; writes to the live claude-pwa DB so the running server
 broadcasts the state change. The label is durable agent metadata, so it keeps
@@ -115,11 +118,38 @@ def main(argv: list[str]) -> int:
         job_id, generation = parse_job_handle(argv[3])
         return 0 if background_jobs.is_cancelled(
             job_id, generation=generation) else 1
+    if len(argv) >= 4 and argv[2] == "job-cancel":
+        # No PID fence: the owning session may close its own job even when
+        # the worker that registered it is dead or unreachable.
+        from lib import background_jobs
+        job_id, generation = parse_job_handle(argv[3])
+        job = background_jobs.cancel_owned(
+            job_id, session=argv[1], generation=generation)
+        if not job:
+            print(f"agent_bg: {argv[1]!r} has no active job {argv[3]!r}", file=sys.stderr)
+        return 0 if job and job["status"] == "cancelled" else 1
+    if len(argv) >= 5 and argv[2] == "job-progress":
+        from lib import background_jobs
+        job_id, generation = parse_job_handle(argv[3])
+        job = background_jobs.set_progress(
+            job_id, session=argv[1], generation=generation, text=argv[4])
+        return 0 if job else 1
+    if len(argv) >= 5 and argv[2] == "job-log":
+        from lib import background_jobs
+        job_id, generation = parse_job_handle(argv[3])
+        try:
+            job = background_jobs.set_log(
+                job_id, session=argv[1], generation=generation, path=argv[4],
+                worker_cwd=os.getcwd())
+        except ValueError as exc:
+            print(f"agent_bg: {exc}", file=sys.stderr)
+            return 2
+        return 0 if job else 1
     if len(argv) < 3 or argv[2] not in {"on", "off"}:
         print(
             "usage: agent_bg.py <session> on|off [label] | "
             "job-upsert|job-restart|job-start|job-heartbeat|job-finish|"
-            "job-fail|job-active|job-cancelled ...",
+            "job-fail|job-active|job-cancelled|job-cancel|job-progress|job-log ...",
             file=sys.stderr,
         )
         return 2

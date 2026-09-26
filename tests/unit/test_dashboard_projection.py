@@ -260,8 +260,8 @@ def test_snapshot_compacting_falls_back_to_persisted_state_when_runtime_is_down(
 
 
 def test_active_background_jobs_show_the_agent_as_background():
-    """A durable job or a Clarp sub-agent keeps the running indicator on after
-    the turn ends, instead of the agent reading as idle."""
+    """A durable background process keeps the running indicator on after the
+    turn ends, instead of the agent reading as idle."""
     from lib import background_jobs
     aid = agents.create_agent(persona='Waiter', voice_id='', cwd='/tmp', session='waiter')
     agents.record_state(aid, 'done', {})
@@ -274,11 +274,14 @@ def test_active_background_jobs_show_the_agent_as_background():
     assert row['latest_state'] == 'background'
     assert row['status_text'] == 'Build'
 
-    background_jobs.upsert(session='waiter', job_id='sub-agent-a', kind='sub-agent', title='Stream A')
+    worker = background_jobs.upsert(session='waiter', job_id='worker-a', kind='worker', title='Stream A')
+    background_jobs.set_progress('worker-a', session='waiter', generation=worker['generation'],
+                                 text='tests 3/10')
     row = next(r for r in build_agent_snapshot(None)['agents'] if r['agent_id'] == aid)
-    assert row['background_jobs'] == {'count': 2, 'sub_agents': 1}
-    assert row['status_text'] == '2 background jobs running'
+    # The badge carries the count; the line says what is happening.
+    assert row['background_jobs'] == {'count': 2, 'sub_agents': 0}
+    assert row['status_text'] == 'Stream A: tests 3/10'
 
-    background_jobs.finish('build', generation=job['generation'])
+    background_jobs.finish('worker-a', generation=worker['generation'])
     row = next(r for r in build_agent_snapshot(None)['agents'] if r['agent_id'] == aid)
-    assert row['status_text'] == 'Stream A'
+    assert row['status_text'] == 'Build'

@@ -133,6 +133,18 @@ def backend_session(agent: AgentRef | dict[str, Any] | str) -> str:
     return _agents.live_backend_session(ref.agent_id) if ref else ""
 
 
+def open_trace_id(agent: AgentRef | dict[str, Any] | str) -> str:
+    """The trace id of the agent's newest open turn, or '' between turns."""
+    ref = resolve(agent)
+    if ref is None:
+        return ""
+    from .db import conn
+    row = conn().execute(
+        "SELECT trace_id FROM turns WHERE agent_id = ? AND ended_at IS NULL "
+        "ORDER BY turn_id DESC LIMIT 1", (ref.agent_id,)).fetchone()
+    return str(row["trace_id"] or "") if row else ""
+
+
 def turn_ref(agent: AgentRef | dict[str, Any] | str, trace_id: object,
              *, turn_id: int | None = None) -> TurnRef | None:
     """Bind a trace id to an agent's current runtime.

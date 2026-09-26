@@ -75,11 +75,12 @@ TestCase {
         indicator.jobCount = 2;
         indicator.subAgentCount = 1;
         indicator.runningChildren = 1;
-        compare(indicator.total, 3);
+        // The sub-agent job mirrors the running helper: one sub-agent, not two.
+        compare(indicator.total, 2);
         compare(indicator.glyphKind, "agent");
         const badge = findChild(indicator, "processIndicatorBadge");
         verify(badge.visible);
-        compare(indicator.summary, "1 background job, 2 sub-agents");
+        compare(indicator.summary, "1 background job, 1 sub-agent");
         // A running helper alone switches to the agent glyph with no badge.
         indicator.jobCount = 0;
         indicator.subAgentCount = 0;
@@ -136,7 +137,7 @@ TestCase {
         const row = createTemporaryObject(rowComponent, testCase);
         const indicator = findChild(row, "sidebarProcessIndicator");
         verify(indicator.visible);
-        compare(indicator.total, 3);
+        compare(indicator.total, 2);
         const requested = createTemporaryObject(signalSpy, testCase, { target: row, signalName: "processesRequested" });
         const selected = createTemporaryObject(signalSpy, testCase, { target: row, signalName: "chatSelected" });
         mouseClick(indicator);

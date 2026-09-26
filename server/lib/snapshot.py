@@ -109,12 +109,20 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     # Helper tree counts come from the rows already read: no extra query.
     child_count: dict[str, int] = {}
     running_children: dict[str, int] = {}
+    helper_sessions: dict[str, set[str]] = {}
+    # What each running helper is doing, so the parent's status line can say
+    # it instead of repeating the count the badge already shows.
+    helper_activity: dict[str, list[dict[str, Any]]] = {}
     for a in agent_rows:
         parent_id = a.get("parent_agent_id")
         if parent_id:
             child_count[parent_id] = child_count.get(parent_id, 0) + 1
+            if (a.get("role") or "agent") == "helper":
+                helper_sessions.setdefault(parent_id, set()).add(str(a.get("session") or ""))
             if a.get("helper_state") == "running":
                 running_children[parent_id] = running_children.get(parent_id, 0) + 1
+                helper_activity.setdefault(parent_id, []).append(
+                    _helper_activity(a, states.get(a["agent_id"], {}), visible_labels))
     for a in agent_rows:
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
@@ -150,20 +158,19 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         status_text = str(visible_labels.get(agent_id, a.get("custom_status")) or "").strip() or None
         if status_text is None and agent_id not in visible_labels and state.get("kind") == "background":
             status_text = str(_sdetail.get("label") or "").strip() or None
-        # A durable background job (or a Clarp sub-agent, which is one) means
-        # the agent is waiting on work even though its turn ended: show it as
-        # background so the apps draw the running indicator, not idle.
-        jobs = active_jobs.get(agent_id, [])
-        sub_agents = sum(1 for job in jobs if job["kind"] == "sub-agent")
-        if jobs and latest_state not in {"thinking", "tool", "compacting", "background"}:
+        # Two different things keep an agent busy after its turn ends. A
+        # SUB-AGENT is a Clarp helper agent it created (role helper), counted
+        # from its running children. A BACKGROUND PROCESS is a durable job
+        # that is not merely the watcher mirroring one of those helpers.
+        # Either shows the agent as background so the apps draw the running
+        # indicator instead of idle.
+        processes = background_jobs.background_processes(
+            active_jobs.get(agent_id, []), helper_sessions.get(agent_id, set()))
+        sub_agents = running_children.get(agent_id, 0)
+        if (processes or sub_agents) and latest_state not in {"thinking", "tool", "compacting", "background"}:
             latest_state = "background"
-        if jobs and status_text is None:
-            if len(jobs) == 1:
-                status_text = jobs[0]["title"] or ("Sub-agent running" if sub_agents else "Background job running")
-            elif sub_agents == len(jobs):
-                status_text = f"{len(jobs)} sub-agents running"
-            else:
-                status_text = f"{len(jobs)} background jobs running"
+        if (processes or sub_agents) and status_text is None:
+            status_text = _work_summary(helper_activity.get(agent_id, []), processes)
         turn_started_at = int(state.get('turn_started_at') or 0)
         if active and not turn_started_at:
             turn_started_at = int(rt.get('open_turn_started_at') or 0)
@@ -263,7 +270,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "turn_started_at": turn_started_at,
             "latest_state":   latest_state,
             "status_text":    status_text,
-            "background_jobs": {"count": len(jobs), "sub_agents": sub_agents},
+            "background_jobs": {"count": len(processes), "sub_agents": sub_agents},
             "team_ids":       team_memberships.get(agent_id, []),
             "latest_state_ts": state.get("ts"),
             "context_tokens": context_tokens,
@@ -314,6 +321,64 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         # The menu of MCP servers an agent can be granted (from ~/.claude.json).
         "available_mcp_servers": sorted(config.read_global_mcp_servers().keys()),
     }
+
+
+# How a running helper's latest state reads in its parent's roll-up.
+_HELPER_BUCKETS = {
+    "thinking": "working", "tool": "working", "compacting": "working",
+    "background": "working", "waiting": "waiting", "interrupted": "waiting",
+}
+
+
+def _helper_activity(helper: dict[str, Any], state: dict[str, Any],
+                     visible_labels: dict[str, Any]) -> dict[str, Any]:
+    """One running helper as its parent's status line describes it."""
+    kind = str(state.get("kind") or "")
+    detail = state.get("detail") if isinstance(state.get("detail"), dict) else {}
+    text = str(visible_labels.get(helper["agent_id"], helper.get("custom_status")) or "").strip()
+    if not text and kind:
+        text = str(state_activity_event(
+            agent_id=helper["agent_id"], session=helper["session"],
+            persona=helper["persona"], kind=kind, ts=int(state.get("ts") or 0),
+            detail=detail)["summary"] or "").strip()
+    bucket = _HELPER_BUCKETS.get(kind, "idle")
+    if detail.get("account_recovery"):
+        bucket = "waiting"
+    return {"session": str(helper["session"]), "text": text, "bucket": bucket,
+            "ts": int(state.get("ts") or 0)}
+
+
+def _work_summary(helpers: list[dict[str, Any]], processes: list[dict[str, Any]]) -> str:
+    """Say what the agent's sub-agents and processes are doing.
+
+    The row's badge already carries the counts (`background_jobs`), so this
+    line describes activity: one helper as "slice5-helper: running tests",
+    several as a roll-up "3 working, 1 waiting", a process by its latest
+    progress line or its title. A bare count is the last resort.
+    """
+    parts: list[str] = []
+    if len(helpers) == 1:
+        helper = helpers[0]
+        parts.append(f"{helper['session']}: {helper['text']}" if helper["text"] else helper["session"])
+    elif helpers:
+        buckets: dict[str, int] = {}
+        for helper in helpers:
+            buckets[helper["bucket"]] = buckets.get(helper["bucket"], 0) + 1
+        parts.append(", ".join(f"{buckets[b]} {b}" for b in ("working", "waiting", "idle")
+                               if buckets.get(b)))
+    if processes:
+        # Most recent progress wins; on a tie, the later-started job.
+        latest = max(enumerate(processes),
+                     key=lambda item: (int(item[1].get("active_at") or 0), item[0]))[1]
+        text = str(latest.get("progress_text") or "").strip()
+        title = str(latest.get("title") or "").strip()
+        described = f"{title}: {text}" if title and text else (text or title)
+        if described:
+            parts.append(described)
+        else:
+            noun = "process" if len(processes) == 1 else "processes"
+            parts.append(f"{len(processes)} background {noun}")
+    return " · ".join(parts)
 
 
 def _agent_mcp_list(raw: str | None) -> list[str]:
