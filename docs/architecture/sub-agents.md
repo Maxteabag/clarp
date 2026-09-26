@@ -82,14 +82,34 @@ caller, and cleanup when done.
 - Finished helpers collapse into one line ("3 helpers done") that expands on
   tap. The parent–helper pair chat becomes the helper's report view.
 
+## Vocabulary
+
+Two words, used the same way in the snapshot, the apps and the skills
+(Host contract 15):
+
+- A **sub-agent** is a Clarp helper agent: `role = helper` with a
+  `parent_agent_id`. It is counted from the parent's running children
+  (`background_jobs.sub_agents`, equal to `running_children`).
+- A **background process** is a durable background job that is not a helper
+  mirror: a systemd worker (kind `worker`), a message watcher, a CI wait
+  (`background_jobs.count`). `GET /background-jobs/<job_id>` shows its
+  timeline, progress, owner and log tail.
+
+`clarp-sub-agent start --clarp-agent` still registers a watcher job of kind
+`sub-agent` whose detail is the helper's session. That job only mirrors the
+helper, so it is not counted as a process; counting both made three helpers
+read as "6 sub-agents running". A job whose worker PID has exited fails at
+once (`worker_vanished`), and the owning session can close its own job with
+`clarp-agent-bg SESSION job-cancel HANDLE` even when the worker is gone.
+
 ## Until then
 
-- The `clarp-sub-agents` skill runs a detached sub-agent as its own systemd
-  unit and registers it as a background job of kind `sub-agent`. The snapshot
-  now reports `background_jobs.count` and `background_jobs.sub_agents`, and
-  shows any agent with an active job as `background`. The apps already draw
-  the running hourglass for that, and can switch to the agent glyph when
-  `sub_agents > 0`.
+- The `clarp-sub-agents` skill without `--clarp-agent` runs a detached
+  worker as its own systemd unit and registers it as a background job of
+  kind `worker`, with its streamed log registered for inspection. Any agent
+  with a running helper or an active process shows as `background`. The
+  apps already draw the running hourglass for that, and can switch to the
+  agent glyph when `sub_agents > 0`.
 - Harness sub-agents: Claude's `Agent`/`Task` calls now become the same
   `subagents` cell Codex gets, marked `ephemeral: true` ("dies with the
   turn") so it is clear which helpers survive a restart, and linked to the

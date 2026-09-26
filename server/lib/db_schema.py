@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 93
+_SCHEMA_VERSION = 94
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -639,7 +639,12 @@ CREATE TABLE background_jobs (
     revision INTEGER NOT NULL DEFAULT 0,
     generation INTEGER NOT NULL DEFAULT 1,
     owner_kind TEXT NOT NULL DEFAULT 'agent',
-    computer_id TEXT
+    computer_id TEXT,
+    progress_text TEXT NOT NULL DEFAULT '',
+    progress_at INTEGER,
+    log_path TEXT NOT NULL DEFAULT '',
+    worker_cwd TEXT NOT NULL DEFAULT '',
+    started_trace_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX idx_background_jobs_active ON background_jobs(status, updated_at DESC);
 CREATE INDEX idx_background_jobs_session ON background_jobs(session, updated_at DESC);
@@ -810,7 +815,9 @@ CREATE INDEX idx_prompt_admissions_history ON prompt_admissions( agent_id, coope
 CREATE TABLE background_job_events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id TEXT NOT NULL,
-    observed_at INTEGER NOT NULL
+    observed_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX idx_background_job_events_job ON background_job_events(job_id, event_id DESC);
 

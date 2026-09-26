@@ -463,6 +463,37 @@ def test_background_job_snapshot_and_idempotent_cancel_http(
     assert dispatched[0]["forced_session"] == "rachel"
 
 
+def test_background_job_detail_http(running_server, tmp_path, monkeypatch):
+    from lib import background_jobs
+
+    base, _ctx, _srv = running_server
+    monkeypatch.setattr(background_jobs, "SHARED_LOG_ROOTS", (str(tmp_path),))
+    job = background_jobs.upsert(
+        session="rachel", job_id="http-detail", kind="worker", title="Build")
+    handle_generation = job["generation"]
+    background_jobs.set_progress(
+        "http-detail", session="rachel", generation=handle_generation,
+        text="compiling")
+    log = tmp_path / "build.log"
+    log.write_text("line one\nline two\n")
+    background_jobs.set_log(
+        "http-detail", session="rachel", generation=handle_generation,
+        path=str(log))
+
+    status, body = _get(base + "/background-jobs/http-detail")
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["job"]["job_id"] == "http-detail"
+    assert payload["owner_session"] == "rachel"
+    assert payload["progress"]["text"] == "compiling"
+    assert payload["log"]["text"] == "line one\nline two\n"
+    assert [e["change"] for e in payload["timeline"]] == ["status", "progress"]
+
+    with pytest.raises(urllib.error.HTTPError) as missing:
+        _get(base + "/background-jobs/nope")
+    assert missing.value.code == 404
+
+
 def test_server_update_http_registers_default_owner_session(
     running_server, monkeypatch,
 ):

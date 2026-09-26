@@ -193,3 +193,47 @@ def test_a_long_prompt_is_referenced_not_inlined(sub, tmp_path):
     prompt.write_text("é" * (sub.INLINE_PROMPT_MAX // 2 + 1))
     text = sub._helper_message("n", "h-1", "boss", tmp_path, prompt)
     assert str(prompt) in text and "é" not in text
+
+
+# ---- default (systemd) mode: a background process with a live log ----------
+
+def test_render_turns_claude_stream_json_into_readable_lines(sub):
+    text = json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "text", "text": "Reading the parser.\n"},
+        {"type": "tool_use", "name": "Bash", "input": {"command": "pytest  -q tests"}},
+    ]}})
+    assert sub.render("claude", text + "\n") == ["Reading the parser.", "→ Bash: pytest -q tests"]
+    assert sub.render("claude", json.dumps({"type": "system", "subtype": "init"})) == []
+    assert sub.render("claude", json.dumps({"type": "result", "num_turns": 7})) == ["[done] 7 turns"]
+    assert sub.render("claude", "plain error\n") == ["plain error"]
+    assert sub.render("codex", "{not json but codex}\n") == ["{not json but codex}"]
+    assert sub.render("codex", "\n") == []
+
+
+def test_claude_worker_streams_json_so_the_log_is_live(sub):
+    cmd = sub._command("claude", "", "do it")
+    assert cmd[cmd.index("--output-format") + 1] == "stream-json"
+    assert "--verbose" in cmd
+
+
+def test_run_registers_a_worker_job_with_its_log_and_streams_output(sub, tmp_path, monkeypatch, capsys):
+    sub.DIR.mkdir(parents=True)
+    (sub.DIR / "w.title").write_text("Worker W\n")
+    (sub.DIR / "w.prompt.md").write_text("task\n")
+    lines = [json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "text", "text": "Step one done"}]}}) + "\n"]
+
+    class FakeProc:
+        stdout = iter(lines)
+
+        def wait(self):
+            return 0
+    monkeypatch.setattr(sub.subprocess, "Popen", lambda argv, **kw: FakeProc())
+
+    assert sub.run("w", "claude", "", "boss") == 0
+
+    bg = sub.calls["bg"]
+    assert bg[0] == ("boss", "job-upsert", "sub-agent-w", "worker", "Worker W", "w")
+    assert ("boss", "job-log", "bg1:1:job", str((sub.DIR / "w.log").resolve())) in bg
+    assert bg[-1] == ("boss", "job-finish", "bg1:1:job")
+    assert "Step one done" in capsys.readouterr().out

@@ -110,6 +110,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             _migrate_to_v92(con)
         if version < 93:
             _migrate_to_v93(con)
+        if version < 94:
+            _migrate_to_v94(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -389,6 +391,29 @@ def _migrate_to_v91(con: sqlite3.Connection) -> None:
                         seq DESC, updated_at DESC)
             WHERE COALESCE(text, '') != '' AND COALESCE(tool_name, '') = ''
     """)
+
+
+def _migrate_to_v94(con: sqlite3.Connection) -> None:
+    """Inspectable background processes.
+
+    A job carries the worker's last progress line, the log file it writes
+    (and the directory it ran in, which bounds what the Host will read), and
+    the trace of the turn that registered it. Each change-feed event records
+    the status it left and an optional note, so a job has a timeline.
+    """
+    for table, columns in (
+        ("background_jobs", (("progress_text", "TEXT NOT NULL DEFAULT ''"),
+                             ("progress_at", "INTEGER"),
+                             ("log_path", "TEXT NOT NULL DEFAULT ''"),
+                             ("worker_cwd", "TEXT NOT NULL DEFAULT ''"),
+                             ("started_trace_id", "TEXT NOT NULL DEFAULT ''"))),
+        ("background_job_events", (("status", "TEXT NOT NULL DEFAULT ''"),
+                                   ("note", "TEXT NOT NULL DEFAULT ''"))),
+    ):
+        existing = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+        for name, definition in columns:
+            if name not in existing:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
 
 def _migrate_to_v93(con: sqlite3.Connection) -> None:

@@ -14,8 +14,11 @@ the calling session, cwd = WORKDIR) that the owner can open and steer. It is
 sent the prompt as an agent-origin message and reports back the same way. A
 small watcher unit keeps the background job alive until the helper reports.
 
-Either way the work is registered as a background job of kind "sub-agent" on
-the parent session so the phone and desktop show it running.
+In default mode the unit registers a background job of kind "worker" on the
+parent session: a background process, with its log registered and streamed so
+the apps can show the live tail. With --clarp-agent the helper itself is the
+sub-agent; its watcher's job (kind "sub-agent", detail = helper session) only
+mirrors it and is not counted as a second one.
 """
 from __future__ import annotations
 
@@ -33,6 +36,8 @@ import time
 DIR = pathlib.Path(os.environ.get("CLARP_SUB_AGENT_DIR", "/var/tmp/clarp-sub-agents"))
 DEFAULT_MODEL = "claude-opus-5-5"
 HEARTBEAT_SEC = 90
+PROGRESS_SEC = 20
+PROGRESS_MAX = 200
 POLL_SEC = 30
 CLARP_BACKENDS = ("claude", "codex", "grok", "agy", "opencode", "deepseek")
 # A prompt longer than this many bytes is not inlined into the message; the helper is
@@ -62,8 +67,59 @@ def _command(backend: str, model: str, prompt: str) -> list[str]:
     if backend == "codex":
         return ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox",
                 *(["-m", model] if model else []), prompt]
+    # stream-json so the log grows while the agent works; render() turns it
+    # back into readable text.
     return ["claude", "-p", prompt, "--model", model or DEFAULT_MODEL,
-            "--dangerously-skip-permissions", "--output-format", "text", "--max-turns", "400"]
+            "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose",
+            "--max-turns", "400"]
+
+
+def _tool_summary(block: dict) -> str:
+    args = block.get("input") if isinstance(block.get("input"), dict) else {}
+    hint = next((str(args[k]) for k in ("command", "file_path", "path", "pattern",
+                                         "description", "url", "query") if args.get(k)), "")
+    hint = " ".join(hint.split())
+    return f"→ {block.get('name') or 'tool'}" + (f": {hint[:160]}" if hint else "")
+
+
+def render(backend: str, line: str) -> list[str]:
+    """Readable log lines for one line of backend output.
+
+    Claude's stream-json becomes its assistant text and one short line per
+    tool call; anything that is not JSON (codex, errors) passes through.
+    """
+    line = line.rstrip("\n")
+    if backend == "codex" or not line.startswith("{"):
+        return [line] if line.strip() else []
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return [line]
+    if not isinstance(event, dict):
+        return []
+    if event.get("type") == "assistant":
+        message = event.get("message") if isinstance(event.get("message"), dict) else {}
+        out: list[str] = []
+        for block in message.get("content") or []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text" and str(block.get("text") or "").strip():
+                out.append(str(block["text"]).rstrip())
+            elif block.get("type") == "tool_use":
+                out.append(_tool_summary(block))
+        return out
+    if event.get("type") == "result":
+        status = "error" if event.get("is_error") else "done"
+        return [f"[{status}] {event.get('num_turns', '?')} turns"]
+    return []
+
+
+def _progress_line(lines: list[str]) -> str:
+    for text in reversed(lines):
+        first = next((part.strip() for part in text.splitlines() if part.strip()), "")
+        if first:
+            return first[:PROGRESS_MAX]
+    return ""
 
 
 class AdminError(RuntimeError):
@@ -193,18 +249,42 @@ def watch(name: str, helper: str, parent: str, *, poll_sec: float = POLL_SEC,
 
 
 def run(name: str, backend: str, model: str, parent: str) -> int:
-    """Body of the systemd unit: register the job, heartbeat it, run, finish it."""
+    """Body of the systemd unit: register the job, heartbeat it, run, finish it.
+
+    This is a background process, not a sub-agent: kind "worker". Its stdout
+    is the log file, registered on the job so the apps can show the tail, and
+    the backend's output is rendered into it line by line as it arrives.
+    """
     title = (DIR / f"{name}.title").read_text().strip()
-    handle = _bg(parent, "job-upsert", f"sub-agent-{name}", "sub-agent", title, name) if parent else ""
+    handle = _bg(parent, "job-upsert", f"sub-agent-{name}", "worker", title, name) if parent else ""
     stop = threading.Event()
+    latest = {"line": "", "sent": ""}
     if handle:
         _bg(parent, "job-active", handle)
+        _bg(parent, "job-log", handle, str((DIR / f"{name}.log").resolve()))
+
         def beat() -> None:
-            while not stop.wait(HEARTBEAT_SEC):
-                _bg(parent, "job-heartbeat", handle)
+            waited = 0
+            while not stop.wait(PROGRESS_SEC):
+                waited += PROGRESS_SEC
+                line = latest["line"]
+                if line and line != latest["sent"]:
+                    latest["sent"] = line
+                    _bg(parent, "job-progress", handle, line)
+                if waited >= HEARTBEAT_SEC:
+                    waited = 0
+                    _bg(parent, "job-heartbeat", handle)
         threading.Thread(target=beat, daemon=True).start()
     prompt = (DIR / f"{name}.prompt.md").read_text()
-    rc = subprocess.run(_command(backend, model, prompt), stdin=subprocess.DEVNULL).returncode
+    proc = subprocess.Popen(_command(backend, model, prompt), stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, text=True, bufsize=1, errors="replace")
+    assert proc.stdout is not None
+    for raw in proc.stdout:
+        lines = render(backend, raw)
+        if lines:
+            print("\n".join(lines), flush=True)
+            latest["line"] = _progress_line(lines) or latest["line"]
+    rc = proc.wait()
     stop.set()
     if handle:
         if rc == 0:

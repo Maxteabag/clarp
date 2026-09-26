@@ -109,10 +109,13 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     # Helper tree counts come from the rows already read: no extra query.
     child_count: dict[str, int] = {}
     running_children: dict[str, int] = {}
+    helper_sessions: dict[str, set[str]] = {}
     for a in agent_rows:
         parent_id = a.get("parent_agent_id")
         if parent_id:
             child_count[parent_id] = child_count.get(parent_id, 0) + 1
+            if (a.get("role") or "agent") == "helper":
+                helper_sessions.setdefault(parent_id, set()).add(str(a.get("session") or ""))
             if a.get("helper_state") == "running":
                 running_children[parent_id] = running_children.get(parent_id, 0) + 1
     for a in agent_rows:
@@ -150,20 +153,19 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         status_text = str(visible_labels.get(agent_id, a.get("custom_status")) or "").strip() or None
         if status_text is None and agent_id not in visible_labels and state.get("kind") == "background":
             status_text = str(_sdetail.get("label") or "").strip() or None
-        # A durable background job (or a Clarp sub-agent, which is one) means
-        # the agent is waiting on work even though its turn ended: show it as
-        # background so the apps draw the running indicator, not idle.
-        jobs = active_jobs.get(agent_id, [])
-        sub_agents = sum(1 for job in jobs if job["kind"] == "sub-agent")
-        if jobs and latest_state not in {"thinking", "tool", "compacting", "background"}:
+        # Two different things keep an agent busy after its turn ends. A
+        # SUB-AGENT is a Clarp helper agent it created (role helper), counted
+        # from its running children. A BACKGROUND PROCESS is a durable job
+        # that is not merely the watcher mirroring one of those helpers.
+        # Either shows the agent as background so the apps draw the running
+        # indicator instead of idle.
+        processes = background_jobs.background_processes(
+            active_jobs.get(agent_id, []), helper_sessions.get(agent_id, set()))
+        sub_agents = running_children.get(agent_id, 0)
+        if (processes or sub_agents) and latest_state not in {"thinking", "tool", "compacting", "background"}:
             latest_state = "background"
-        if jobs and status_text is None:
-            if len(jobs) == 1:
-                status_text = jobs[0]["title"] or ("Sub-agent running" if sub_agents else "Background job running")
-            elif sub_agents == len(jobs):
-                status_text = f"{len(jobs)} sub-agents running"
-            else:
-                status_text = f"{len(jobs)} background jobs running"
+        if (processes or sub_agents) and status_text is None:
+            status_text = _work_summary(sub_agents, len(processes))
         turn_started_at = int(state.get('turn_started_at') or 0)
         if active and not turn_started_at:
             turn_started_at = int(rt.get('open_turn_started_at') or 0)
@@ -263,7 +265,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "turn_started_at": turn_started_at,
             "latest_state":   latest_state,
             "status_text":    status_text,
-            "background_jobs": {"count": len(jobs), "sub_agents": sub_agents},
+            "background_jobs": {"count": len(processes), "sub_agents": sub_agents},
             "team_ids":       team_memberships.get(agent_id, []),
             "latest_state_ts": state.get("ts"),
             "context_tokens": context_tokens,
@@ -314,6 +316,17 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         # The menu of MCP servers an agent can be granted (from ~/.claude.json).
         "available_mcp_servers": sorted(config.read_global_mcp_servers().keys()),
     }
+
+
+def _work_summary(sub_agents: int, processes: int) -> str:
+    """"3 sub-agents", "1 background process", "3 sub-agents · 1 process"."""
+    agents_part = f"{sub_agents} sub-agent{'' if sub_agents == 1 else 's'}"
+    if not processes:
+        return agents_part
+    noun = "process" if processes == 1 else "processes"
+    if not sub_agents:
+        return f"{processes} background {noun}"
+    return f"{agents_part} · {processes} {noun}"
 
 
 def _agent_mcp_list(raw: str | None) -> list[str]:
