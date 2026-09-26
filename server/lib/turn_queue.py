@@ -59,6 +59,14 @@ def unpark(queue_id: str) -> bool:
     return bool(cursor.rowcount)
 
 
+def discard_parked(agent_id: str) -> int:
+    """Drop every parked row of an agent whose memory queue was cleared."""
+    cursor = db.conn().execute(
+        "DELETE FROM queued_turns WHERE agent_id = ? AND status = 'parked'",
+        (agent_id,))
+    return int(cursor.rowcount or 0)
+
+
 def parked(agent_id: str = "") -> list[dict]:
     if agent_id:
         rows = db.conn().execute(

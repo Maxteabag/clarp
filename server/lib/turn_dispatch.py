@@ -239,6 +239,26 @@ class _TurnSpec:
     recovery_attempted: bool = False
     # Private runtime capability; never sourced from an ordinary send payload.
     janitor_run_id: str = ""
+    # queued_turns row (status 'parked') holding a send admitted behind the
+    # Stop barrier, so it survives a runtime restart; "" when not parked.
+    park_id: str = ""
+
+
+def _park(spec: _TurnSpec) -> str:
+    """Persist a send that is about to wait behind the Stop barrier."""
+    park_id = f"stop-park-{spec.trace_id}"
+    try:
+        turn_queue.park(
+            queue_id=park_id, agent_id=spec.agent_id, session=spec.session,
+            text=spec.text, trace_id=spec.trace_id,
+            client_msg_id=spec.client_msg_id,
+            synthesize_audio=spec.synthesize_audio, origin=spec.origin,
+            sender_agent_id=spec.sender_agent_id,
+            prompt_admission_id=spec.prompt_admission_id)
+    except Exception as exc:  # noqa: BLE001 - memory still holds the send
+        log_exception("stopParkPersistFail", exc, detail=spec.agent_id)
+        return ""
+    return park_id
 
 
 class DispatchError(RuntimeError):
@@ -761,10 +781,7 @@ class TurnDispatchService:
                 # The durable queue receipt remains authoritative. Release the
                 # claimed slot and retry recovery instead of leaving a phantom
                 # in-flight owner or requiring a client restart.
-                with _TURN_LOCK:
-                    if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
-                        _INFLIGHT.pop(spec.agent_id, None)
-                        _CLAIMED_AT.pop(spec.agent_id, None)
+                _SLOTS.release(spec.agent_id, spec.trace_id)
                 self.retry_scheduler(1.0, self.recover_queued)
                 queue_state = turn_queue.state(spec.agent_id)
                 return DispatchResult(
@@ -790,10 +807,7 @@ class TurnDispatchService:
                 # Spawn never started: release the in-flight slot (and drain any
                 # message that queued behind it) so the agent isn't wedged.
                 if turn_queue.contains(spec.queue_id):
-                    with _TURN_LOCK:
-                        if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
-                            _INFLIGHT.pop(spec.agent_id, None)
-                            _CLAIMED_AT.pop(spec.agent_id, None)
+                    _SLOTS.release(spec.agent_id, spec.trace_id)
                     self.retry_scheduler(1.0, self.recover_queued)
                 else:
                     self._finish_turn(spec)
@@ -815,10 +829,7 @@ class TurnDispatchService:
 
     def _abandon_unlaunched(self, spec: _TurnSpec, turn_id: int, error: BaseException) -> None:
         """A turn that was admitted and claimed but never reached the backend."""
-        with _TURN_LOCK:
-            if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
-                _INFLIGHT.pop(spec.agent_id, None)
-                _CLAIMED_AT.pop(spec.agent_id, None)
+        _SLOTS.release(spec.agent_id, spec.trace_id)
         log_exception("spawnAbandonedUnlaunched", error, detail=spec.session)
         eventlog.emit("server", "spawnAbandonedUnlaunched", context=spec.context,
                       detail={"error": str(error)[:200]})
@@ -903,104 +914,115 @@ class TurnDispatchService:
 
     def _enqueue_if_busy(self, spec: _TurnSpec, *, queue_if_busy: bool = False) -> bool:
         """Decide how to handle a new send for this agent:
+        - Stop barrier up → park behind it, return True;
         - terminal attached → queue behind it, return True (caller doesn't spawn);
         - in-flight turn running → PREEMPT it (legacy non-steerable backend);
         - stale slot (no live process) → take it over, return False;
         - idle → claim the slot, return False.
-        Returns True only in the terminal-queue case."""
-        with _TURN_LOCK:
-            if _INFLIGHT.get(spec.agent_id) == _STOPPING_SENTINEL:
-                # This send was admitted just as Stop acquired the barrier.
-                # It is newer than the stopped work, so hold it in memory and
-                # start it only after the backend-wide interrupt returns.
-                _QUEUED.setdefault(spec.agent_id, []).append(spec)
-                return True
-            # An interactive terminal is attached to this agent — queue behind
-            # it so we never run a -p turn against a session another process is
-            # holding open. drain_after_terminal() spawns this when it closes.
-            # Other agents are unaffected; this only serializes the same agent.
-            if _terminal_live(spec.agent_id):
-                if queue_if_busy:
-                    turn_queue.enqueue(
-                        queue_id=spec.queue_id, agent_id=spec.agent_id,
-                        session=spec.session, text=spec.text,
-                        trace_id=spec.trace_id, client_msg_id=spec.client_msg_id,
-                        synthesize_audio=spec.synthesize_audio, origin=spec.origin,
-                        sender_agent_id=spec.sender_agent_id,
-                    )
-                _QUEUED.setdefault(spec.agent_id, []).append(spec)
-                _INFLIGHT.setdefault(spec.agent_id, _TERMINAL_SENTINEL)
-                depth = len(_QUEUED[spec.agent_id])
+        Returns True when the send waits instead of spawning.
+
+        Only the decision is taken under _TURN_LOCK. The durable queue row is
+        written before it (a no-op when admission already wrote it, as it does
+        for every queue request), the Stop-park row is written before it and
+        withdrawn after it if the barrier had gone, and eventlog rows and the
+        preempting interrupt are deferred past the release."""
+        if queue_if_busy:
+            turn_queue.enqueue(
+                queue_id=spec.queue_id, agent_id=spec.agent_id,
+                session=spec.session, text=spec.text,
+                trace_id=spec.trace_id, client_msg_id=spec.client_msg_id,
+                synthesize_audio=spec.synthesize_audio, origin=spec.origin,
+                sender_agent_id=spec.sender_agent_id,
+            )
+        park_id = ""
+        if not spec.queue_id and _SLOTS.get(spec.agent_id) == _STOPPING_SENTINEL:
+            park_id = _park(spec)
+        parked = False
+        try:
+            with _TURN_LOCK:
+                parked, decision = self._claim_or_queue(
+                    spec, queue_if_busy=queue_if_busy, park_id=park_id)
+        finally:
+            if park_id and not parked:
+                turn_queue.unpark(park_id)
+        return decision
+
+    def _claim_or_queue(self, spec: _TurnSpec, *, queue_if_busy: bool,
+                        park_id: str) -> tuple[bool, bool]:
+        """The decision half of _enqueue_if_busy; the caller holds _TURN_LOCK.
+        Returns (parked behind Stop, send waits)."""
+        agent_id = spec.agent_id
+        if _SLOTS.get(agent_id) == _STOPPING_SENTINEL:
+            # This send was admitted just as Stop acquired the barrier. It is
+            # newer than the stopped work, so hold it and start it only after
+            # the backend-wide interrupt returns. Its parked row keeps it
+            # across a runtime restart.
+            if park_id:
+                spec = replace(spec, park_id=park_id)
+            _SLOTS.enqueue(agent_id, spec)
+            return bool(park_id), True
+        # An interactive terminal is attached to this agent — queue behind
+        # it so we never run a -p turn against a session another process is
+        # holding open. drain_after_terminal() spawns this when it closes.
+        # Other agents are unaffected; this only serializes the same agent.
+        if _terminal_live(agent_id):
+            depth = _SLOTS.hold_for_terminal(agent_id, spec)
+            _TURN_LOCK.defer(lambda: (
                 eventlog.emit("server", "turnQueuedBehindTerminal",
-                              context=spec.context, detail={"depth": depth})
+                              context=spec.context, detail={"depth": depth}),
                 log("turnQueuedBehindTerminal",
-                    f"agent={spec.agent_id} depth={depth} "
-                    f"trace={spec.trace_id or '∅'} — terminal live, queued")
-                return True
-            if spec.agent_id in _INFLIGHT:
-                if _slot_is_spawning(spec.agent_id):
-                    if queue_if_busy:
-                        turn_queue.enqueue(
-                            queue_id=spec.queue_id, agent_id=spec.agent_id,
-                            session=spec.session, text=spec.text,
-                            trace_id=spec.trace_id,
-                            client_msg_id=spec.client_msg_id,
-                            synthesize_audio=spec.synthesize_audio,
-                            origin=spec.origin,
-                            sender_agent_id=spec.sender_agent_id,
-                        )
-                    _QUEUED.setdefault(spec.agent_id, []).append(spec)
-                    return True
-                # Self-heal a leaked slot: if the in-flight turn has no live
-                # process (it died without firing its terminal callback — e.g.
-                # killed mid-flight by a restart), the slot is stale. Free it
-                # and take it over now instead of queuing behind a phantom
-                # forever. Checked here, on every send — no timer/interval.
-                if not self._has_live_turn(spec):
-                    stale = _INFLIGHT.get(spec.agent_id)
+                    f"agent={agent_id} depth={depth} "
+                    f"trace={spec.trace_id or '∅'} — terminal live, queued")))
+            return False, True
+        current = _SLOTS.get(agent_id)
+        if agent_id in _INFLIGHT:
+            if _slot_is_spawning(agent_id):
+                _SLOTS.enqueue(agent_id, spec)
+                return False, True
+            # Self-heal a leaked slot: if the in-flight turn has no live
+            # process (it died without firing its terminal callback — e.g.
+            # killed mid-flight by a restart), the slot is stale. Free it
+            # and take it over now instead of queuing behind a phantom
+            # forever. Checked here, on every send — no timer/interval.
+            if not self._has_live_turn(spec):
+                _TURN_LOCK.defer(lambda: (
                     eventlog.emit("server", "staleInflightCleared",
                                   context=spec.context,
-                                  detail={"dead_trace": stale})
+                                  detail={"dead_trace": current}),
                     log("staleInflightCleared",
-                        f"agent={spec.agent_id} dead_trace={stale or '∅'} "
-                        f"— in-flight turn has no live process; freeing slot")
-                    # Surviving queued specs (if any) still drain when this
-                    # turn finishes; nothing is dropped.
-                    _INFLIGHT[spec.agent_id] = spec.trace_id
-                    _CLAIMED_AT[spec.agent_id] = time.monotonic()
-                    return False
-                if queue_if_busy:
-                    turn_queue.enqueue(
-                        queue_id=spec.queue_id, agent_id=spec.agent_id,
-                        session=spec.session, text=spec.text,
-                        trace_id=spec.trace_id, client_msg_id=spec.client_msg_id,
-                        synthesize_audio=spec.synthesize_audio, origin=spec.origin,
-                        sender_agent_id=spec.sender_agent_id,
-                    )
-                    _QUEUED.setdefault(spec.agent_id, []).append(spec)
-                    depth = len(_QUEUED[spec.agent_id])
+                        f"agent={agent_id} dead_trace={current or '∅'} "
+                        f"— in-flight turn has no live process; freeing slot")))
+                # Surviving queued specs (if any) still drain when this
+                # turn finishes; nothing is dropped.
+                _SLOTS.claim(agent_id, spec.trace_id)
+                return False, False
+            if queue_if_busy:
+                depth = _SLOTS.enqueue(agent_id, spec)
+                _TURN_LOCK.defer(lambda: (
                     eventlog.emit("server", "turnQueued", context=spec.context,
-                                  detail={"depth": depth})
+                                  detail={"depth": depth}),
                     log("turnQueued",
-                        f"agent={spec.agent_id} depth={depth} "
-                        f"trace={spec.trace_id or '∅'}")
-                    return True
-                killed = _INFLIGHT.get(spec.agent_id)
-                try:
-                    self.backends.interrupt(spec.backend, spec.agent_id)
-                except Exception as e:  # noqa: BLE001
-                    log_exception("preemptInterruptFail", e, detail=spec.agent_id)
-                eventlog.emit("server", "turnPreempted", context=spec.context,
-                              detail={"killed_trace": killed})
-                log("turnPreempted",
-                    f"agent={spec.agent_id} killed={killed or '∅'} "
-                    f"new={spec.trace_id or '∅'} — busy, preempting and resuming")
-                _INFLIGHT[spec.agent_id] = spec.trace_id
-                _CLAIMED_AT[spec.agent_id] = time.monotonic()
-                return False
-            _INFLIGHT[spec.agent_id] = spec.trace_id
-            _CLAIMED_AT[spec.agent_id] = time.monotonic()
-            return False
+                        f"agent={agent_id} depth={depth} "
+                        f"trace={spec.trace_id or '∅'}")))
+                return False, True
+            # Take the slot first so the preempted turn's dying callback is
+            # already superseded, then interrupt once the lock is released.
+            _SLOTS.claim(agent_id, spec.trace_id)
+            _TURN_LOCK.defer(lambda: self._preempt_for(spec, current))
+            return False, False
+        _SLOTS.claim(agent_id, spec.trace_id)
+        return False, False
+
+    def _preempt_for(self, spec: _TurnSpec, killed: str) -> None:
+        try:
+            self.backends.interrupt(spec.backend, spec.agent_id)
+        except Exception as e:  # noqa: BLE001
+            log_exception("preemptInterruptFail", e, detail=spec.agent_id)
+        eventlog.emit("server", "turnPreempted", context=spec.context,
+                      detail={"killed_trace": killed})
+        log("turnPreempted",
+            f"agent={spec.agent_id} killed={killed or '∅'} "
+            f"new={spec.trace_id or '∅'} — busy, preempting and resuming")
 
     def _steer_if_supported(self, spec: _TurnSpec) -> bool:
         """Append a follow-up to an active steerable turn without replacing it."""
@@ -1163,10 +1185,7 @@ class TurnDispatchService:
             # Keep the durable head and retry it before later queue entries.
             # The client already received queued=true, so dropping it here
             # would silently lose acknowledged work.
-            with _TURN_LOCK:
-                if _INFLIGHT.get(agent_id) == next_spec.trace_id:
-                    _INFLIGHT.pop(agent_id, None)
-                    _CLAIMED_AT.pop(agent_id, None)
+            _SLOTS.release(agent_id, next_spec.trace_id)
             self.retry_scheduler(1.0, self.recover_queued)
 
     def _mark_spawned(self, spec: _TurnSpec) -> None:
