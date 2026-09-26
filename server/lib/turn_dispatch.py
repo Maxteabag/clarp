@@ -1,6 +1,7 @@
 """Application service for routing and spawning one agent turn."""
 from __future__ import annotations
 
+import contextlib
 import pathlib
 import json
 import re
@@ -77,6 +78,7 @@ _INFLIGHT: dict[str, str] = _SLOTS.inflight
 _QUEUED: dict[str, list] = _SLOTS.queued
 _CLAIMED_AT: dict[str, float] = _SLOTS.claimed_at
 _RECOVERY_LOCK = threading.Lock()
+_NO_LOCK = contextlib.nullcontext()
 _RUNTIME_CLIENT: Any | None = None
 # Weak values: a lock lives only while a caller holds it (`with` keeps a strong
 # reference for the duration), so the map cannot grow with every Janitor ever
@@ -1103,8 +1105,9 @@ class TurnDispatchService:
     def _discard_fenced_janitor(self, spec: _TurnSpec) -> None:
         _remove_queued_run(spec.queue_id)
         with _TURN_LOCK:
-            if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
-                _record_janitor_cancelled(self.ctx, spec.agent_id, spec.session, spec.trace_id)
+            if _SLOTS.owns(spec.agent_id, spec.trace_id):
+                _TURN_LOCK.defer(lambda: _record_janitor_cancelled(
+                    self.ctx, spec.agent_id, spec.session, spec.trace_id))
         self._finish_turn(spec)
 
     def _finish_turn(self, spec: _TurnSpec) -> None:
@@ -1114,24 +1117,30 @@ class TurnDispatchService:
         no-op."""
         agent_id = spec.agent_id
         with _TURN_LOCK:
-            if _INFLIGHT.get(agent_id) != spec.trace_id:
+            if _SLOTS.get(agent_id) != spec.trace_id:
                 return  # not the current turn — already drained / superseded
             account_failover(spec.backend).discard(agent_id, spec.trace_id)
-            queue = _QUEUED.get(agent_id)
-            next_spec = queue.pop(0) if queue else None
+            next_spec = _SLOTS.pop_next(agent_id, expected=spec.trace_id)
             if next_spec is None:
-                _INFLIGHT.pop(agent_id, None)
-                _CLAIMED_AT.pop(agent_id, None)
-                _QUEUED.pop(agent_id, None)
                 return
-            _INFLIGHT[agent_id] = next_spec.trace_id
-            _CLAIMED_AT[agent_id] = time.monotonic()
-        self._resume_and_spawn(agent_id, next_spec)
+            # The handover is decided; the spawn runs once no thread waits on
+            # this lock (a terminal callback may hold it around this call).
+            _TURN_LOCK.defer(
+                lambda: self._spawn_next(agent_id, next_spec))
+
+    def _spawn_next(self, agent_id: str, next_spec: _TurnSpec) -> None:
+        try:
+            self._resume_and_spawn(agent_id, next_spec)
+        except Exception as exc:  # noqa: BLE001 - never fail the releasing caller
+            log_exception("queuedSpawnFail", exc, detail=next_spec.session)
 
     def _resume_and_spawn(self, agent_id: str, next_spec: _TurnSpec) -> None:
         """Spawn a queued spec that just took over the in-flight slot. The prior
         owner (a finished turn, or a closed terminal) may have created/advanced
         the backend session, so re-resolve it before spawning."""
+        if next_spec.park_id:
+            # It launches now; the durable park row has done its job.
+            turn_queue.unpark(next_spec.park_id)
         if next_spec.queue_id:
             durable = turn_queue.get(next_spec.queue_id)
             if durable is None:
@@ -1364,6 +1373,16 @@ class TurnDispatchService:
             self._mark_interrupted(resume_spec, error_classify.RUNNER_EXIT,
                                    str(exc), attempts=attempt)
 
+    def _pause_for_account(self, spec: _TurnSpec) -> None:
+        with _TURN_LOCK:
+            if _SLOTS.owns(spec.agent_id, spec.trace_id):
+                _SLOTS.touch_claim(spec.agent_id)
+            _TURN_LOCK.defer(lambda: turn_lifecycle.try_transition(
+                spec.agent_id, TurnEvent.ACCOUNT_RECOVERY_WAIT,
+                {"dispatch": spec.backend, "trace_id": spec.trace_id,
+                 "account_recovery": "waiting",
+                 "message": f"Waiting for a {spec.backend} account with available usage"}))
+
     def _spawn_attempt_claimed(self, spec: _TurnSpec, *, attempt: int) -> None:
         """Spawn one attempt of a turn. Attempt 1 surfaces spawn failures as
         a DispatchError (so /send returns 500); later attempts run from a
@@ -1394,21 +1413,25 @@ class TurnDispatchService:
         account_attempt = None
         if (backend.account_pool()
                 and (account_selector(spec.backend) or account_failover(spec.backend).recovering)):
+            coordinator = account_failover(spec.backend)
+
             def pause():
-                _CLAIMED_AT[spec.agent_id] = time.monotonic()
-                turn_lifecycle.try_transition(
-                    spec.agent_id, TurnEvent.ACCOUNT_RECOVERY_WAIT,
-                    {"dispatch": spec.backend, "trace_id": spec.trace_id,
-                     "account_recovery": "waiting",
-                     "message": f"Waiting for a {spec.backend} account with available usage"})
+                # Called with the coordinator's lock held (and maybe
+                # _TURN_LOCK): mark the slot spawning and record the wait
+                # only once both are released.
+                defer_on(coordinator.lock, lambda: self._pause_for_account(spec))
 
             account_attempt = ClaudeAttempt(
                 agent_id=spec.agent_id, trace_id=spec.trace_id, model=spec.model,
                 state=state, owned=lambda: (
+                    # Lock-free: the coordinator calls this under its own lock
+                    # and must never wait for _TURN_LOCK there.
                     _INFLIGHT.get(spec.agent_id) == spec.trace_id
-                    and not self._superseded(spec)), pause=pause,
-                resume=lambda: self._resume_after_account_switch(spec, attempt, state))
-            if account_failover(spec.backend).register(account_attempt):
+                    and not self._superseded(spec, locked=False)), pause=pause,
+                resume=lambda: defer_on(
+                    coordinator.lock,
+                    lambda: self._resume_after_account_switch(spec, attempt, state)))
+            if coordinator.register(account_attempt):
                 return
         on_init, on_result, on_error = self._attempt_callbacks(spec, attempt, state)
         def run_if_owned(action) -> bool:
@@ -1776,16 +1799,17 @@ class TurnDispatchService:
         def _retry_spawn() -> None:
             # If a newer send preempted this turn during the backoff, abandon the
             # retry — the new turn owns the slot now.
+            # The ownership check is atomic with account recovery (which
+            # marks state under the coordinator lock before pausing); the
+            # spawn itself runs outside _TURN_LOCK. A recovery that starts in
+            # between finds the new attempt at register() and parks it.
             with _TURN_LOCK:
                 if state.get("account_recovery"):
                     return  # account recovery already owns this continuation
-                if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
+                if not _SLOTS.owns(spec.agent_id, spec.trace_id):
                     log("retryAbandoned",
                         f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
                         f"preempted during backoff")
-                    return
-                if not next_spec.janitor_run_id:
-                    self._spawn_attempt(next_spec, attempt=next_attempt)
                     return
             try:
                 self._spawn_attempt(next_spec, attempt=next_attempt)
@@ -1903,7 +1927,7 @@ class TurnDispatchService:
         except Exception:
             return ""
 
-    def _superseded(self, spec: _TurnSpec) -> bool:
+    def _superseded(self, spec: _TurnSpec, *, locked: bool = True) -> bool:
         """True if a newer turn has taken over this agent since `spec` was
         dispatched. A preempted/old turn's drain thread fires its terminal
         callback asynchronously — if we let it record INTERRUPTED/IDLE it would
@@ -1914,7 +1938,7 @@ class TurnDispatchService:
         try:
             if spec.janitor_run_id:
                 from . import janitors
-                with _TURN_LOCK:
+                with (_TURN_LOCK if locked else _NO_LOCK):
                     if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
                         return True
                     if not janitors.validate_dispatch(spec.session, spec.janitor_run_id, spec.trace_id):
