@@ -16,6 +16,7 @@ from lib import viz_normalize
 
 import gzip
 import json
+from dataclasses import asdict
 import mimetypes
 import os
 import pathlib
@@ -67,13 +68,15 @@ from lib import backend_usage  # noqa: E402
 from lib import media_store  # noqa: E402
 from lib.calendar_request import CalendarRequestError, build_calendar_request  # noqa: E402
 from lib import trace as _trace  # noqa: E402
+from lib import events  # noqa: E402
+from lib import identity  # noqa: E402
 from lib.http_utils import redact_query_secrets  # noqa: E402
 from lib.log import log, log_exception  # noqa: E402
 from lib.paths import RuntimePaths, _safe_session  # noqa: E402
 from lib.focus import current_focus_session  # noqa: E402
 from lib.send_request import SendRequest, SendRequestError  # noqa: E402
 from lib.transcription_pipeline import transcribe as run_transcription  # noqa: E402
-from lib.protocol import AgentState, ClientAction, SSEType  # noqa: E402
+from lib.protocol import AgentState, ClientAction  # noqa: E402
 from lib.orchestrator import (  # noqa: E402
     FINAL_FALLBACK,
     OrchestratorService,
@@ -237,8 +240,7 @@ def resume_persisted_agents(ctx: ServerContext) -> None:
 def broadcast_boot_version(ctx: ServerContext) -> None:
     """Push the current static-file version through SSE so already-open PWAs
     can detect a redeploy and reload immediately."""
-    ctx.stream.broadcast({"type": SSEType.SERVER_VERSION,
-                          "version": ctx.sw_version()})
+    events.broadcast(ctx.stream, events.server_version(ctx.sw_version()))
 
 
 _CARTESIA_PREVIEW_LOCKS: dict[str, threading.Lock] = {}
@@ -632,7 +634,7 @@ class Handler(BaseHTTPRequestHandler):
         from lib import diagnostics_settings
         db.begin_request_metrics(
             enabled=diagnostics_settings.allows("database"))
-        self._request_id = _trace.new_id()
+        self._request_id = _trace.new_trace_id()
         self._trace_id = None
         try:
             super().handle_one_request()
@@ -1077,18 +1079,15 @@ class Handler(BaseHTTPRequestHandler):
         if (action not in ClientAction.valid()
                 or action == ClientAction.CONTROLLER_EVENT):
             return self._json_error(400, "unknown action")
-        self.ctx.stream.broadcast_ephemeral({
-            "type": SSEType.REMOTE_ACTION,
-            "action": action,
-            "ts": int(time.time() * 1000),
-        })
+        events.broadcast_ephemeral(
+            self.ctx.stream, events.remote_action(action, int(time.time() * 1000)))
         log("remoteAction", f"GET {action}")
         # Tiny no-cache HTML so Safari shows something blank instead of raw JSON.
         body = b"<!doctype html><meta charset=utf-8><title>ok</title>"
         self._send(200, body, "text/html")
 
     def _handle_agent_avatar(self, agent_id: str):
-        row = agents_db.get_by_agent_id(agent_id)
+        row = identity.lookup(agent_id)
         path = pathlib.Path(str((row or {}).get("avatar_path") or ""))
         if not row or not path.is_file():
             return self._send(404, b"not found")
@@ -1101,8 +1100,8 @@ class Handler(BaseHTTPRequestHandler):
             notification_avatar_authorized,
         )
 
-        identity = unquote(agent_id)
-        row = agents_db.get_by_agent_id(identity)
+        agent_key = unquote(agent_id)
+        row = identity.lookup(agent_key)
         path = pathlib.Path(str((row or {}).get("avatar_path") or ""))
         if not row or not path.is_file():
             return self._send(404, b"not found")
@@ -1116,7 +1115,7 @@ class Handler(BaseHTTPRequestHandler):
         signature = str((query.get("sig") or [""])[0])
         if supplied_version != content_version or not notification_avatar_authorized(
             secret=str(getattr(self.ctx, "auth_token", "") or ""),
-            agent_id=identity,
+            agent_id=agent_key,
             content_version=content_version,
             expires_at=expires_at,
             signature=signature,
@@ -1616,7 +1615,7 @@ class Handler(BaseHTTPRequestHandler):
         UserPromptSubmit hook and cleared by Stop."""
         qs = self._query()
         session = (qs.get("session", [self.ctx.default_session])[0] or self.ctx.default_session).strip()
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         # busy state is purely DB-driven now (hooks + clarp_runner write
         # to state_log). The old terminal-scrape fallback is gone.
         busy = bool(agent and agents_db.is_busy(agent["agent_id"]))
@@ -2143,7 +2142,7 @@ class Handler(BaseHTTPRequestHandler):
         force = any(str(v).lower() in {"1", "true", "yes"} for v in qs.get("refresh", []))
         payload = backend_usage.get_backend_usage(force_codex=force)
         for event in payload.get("limit_events") or []:
-            self.ctx.stream.broadcast(event)
+            events.broadcast(self.ctx.stream, events.as_event(event))
         body = json.dumps(payload).encode()
         self._send(200, body, "application/json")
 
@@ -2281,7 +2280,7 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(data, dict):
             return self._json_error(400, "object required")
         session = data.get("session")
-        if not isinstance(session, str) or not (agent := agents_db.get_by_session(session)):
+        if not isinstance(session, str) or not (agent := identity.lookup(session)):
             return self._json_error(404, "agent not found")
         try:
             result = self.ctx.tool_explanations.request(
@@ -2402,7 +2401,7 @@ class Handler(BaseHTTPRequestHandler):
         requested_root = _raw_query_value(self.path, "root")
         if not session:
             return self._json_error(400, "session required")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "agent not found")
         cwd = requested_root or str(agent.get("cwd") or "")
@@ -2455,7 +2454,7 @@ class Handler(BaseHTTPRequestHandler):
         requested_root = _raw_query_value(self.path, "root")
         if not session or not relative:
             return self._json_error(400, "session and path required")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "agent not found")
         cwd = requested_root or str(agent.get("cwd") or "")
@@ -2601,7 +2600,8 @@ class Handler(BaseHTTPRequestHandler):
             # predate this connection, and a live stream alone never restores
             # per-agent availability on the client. The client treats this
             # event as "refetch the roster snapshot now".
-            self.wfile.write(b'data: {"type": "agent-roster"}\n\n')
+            self.wfile.write(
+                b"data: " + json.dumps(events.agent_roster()).encode() + b"\n\n")
             self.wfile.flush()
             while True:
                 try:
@@ -2647,7 +2647,7 @@ class Handler(BaseHTTPRequestHandler):
         session = str(data.get("session") or data.get("replace_sid") or "").strip()
         if not session:
             session = str(getattr(self.ctx, "default_session", "") or "")
-        agent = agents_db.get_by_session(session) if session else None
+        agent = identity.lookup(session) if session else None
         if not agent or not agent.get("is_janitor"):
             return False
         self._json(403, {
@@ -2720,7 +2720,7 @@ class Handler(BaseHTTPRequestHandler):
         sid = (data.get("session") or "").strip()
         if not sid:
             return self._json_error(400, "session required")
-        agent = agents_db.get_by_session(sid)
+        agent = identity.lookup(sid)
         herald = getattr(self.ctx, "herald", None)
         if agent and herald is not None:
             try:
@@ -2914,8 +2914,7 @@ class Handler(BaseHTTPRequestHandler):
         session = (data.get("session") or "").strip()
         if not session:
             return self._json_error(400, "session required")
-        self.ctx.stream.broadcast(
-            {"type": SSEType.LOCATION_REQUEST, "session": session})
+        events.broadcast(self.ctx.stream, events.location_request(session=session))
         return self._json_ok({"ok": True})
 
     def _handle_request_calendar(self):
@@ -2931,7 +2930,7 @@ class Handler(BaseHTTPRequestHandler):
             request = build_calendar_request(data, request_id=request_id)
         except CalendarRequestError as exc:
             return self._json_error(400, str(exc))
-        self.ctx.stream.broadcast(request.as_event(SSEType.CALENDAR_REQUEST))
+        events.broadcast(self.ctx.stream, events.calendar_request(**asdict(request)))
         return self._json_ok({"ok": True, "request_id": request_id})
 
     def _handle_crash(self):
@@ -2981,16 +2980,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(400, "unknown action")
         if action == ClientAction.CONTROLLER_EVENT:
             try:
-                event = build_controller_event(data)
+                event = events.remote_action_from(build_controller_event(data))
             except ControllerEventError as exc:
                 return self._json_error(400, str(exc))
         else:
-            event = {
-                "type": SSEType.REMOTE_ACTION,
-                "action": action,
-                "ts": int(time.time() * 1000),
-            }
-        self.ctx.stream.broadcast_ephemeral(event)
+            event = events.remote_action(action, int(time.time() * 1000))
+        events.broadcast_ephemeral(self.ctx.stream, event)
         log("remoteAction", action)
         body = {"ok": True}
         if action == ClientAction.CONTROLLER_EVENT:
@@ -3029,21 +3024,21 @@ class Handler(BaseHTTPRequestHandler):
         return self._json_ok({"ok": True})
 
     def _handle_agent_fallbacks_get(self):
-        from lib import agents, model_fallbacks
+        from lib import model_fallbacks
         session = self._query().get("session", [""])[0]
-        agent = agents.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "agent not found")
         result = {"session": session, **model_fallbacks.get(agent["agent_id"])}
         return self._json_ok(result)
 
     def _handle_agent_fallbacks_post(self):
-        from lib import agents, model_fallbacks
+        from lib import model_fallbacks
         data = self._read_json()
         try:
             if not isinstance(data, dict) or not isinstance(data.get("session"), str):
                 raise ValueError("session required")
-            agent = agents.get_by_session(data["session"])
+            agent = identity.lookup(data["session"])
             if not agent:
                 return self._json_error(404, "agent not found")
             result = model_fallbacks.configure(agent["agent_id"], data.get("models"),
@@ -3066,7 +3061,7 @@ class Handler(BaseHTTPRequestHandler):
         session = (data.get("session") or "").strip()
         if not session:
             return self._json_error(400, "session required")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such agent")
         backend = backends.normalize(agent.get("backend"))
@@ -3101,7 +3096,7 @@ class Handler(BaseHTTPRequestHandler):
  })
         if update:
             agents_db.update_agent(agent["agent_id"], **update)
-        fresh = agents_db.get_by_session(session) or {}
+        fresh = identity.lookup(session) or {}
         return self._json_ok({
             "ok": True, "backend": backend,
             "model": fresh.get("model", ""), "effort": fresh.get("effort", ""),
@@ -3122,7 +3117,7 @@ class Handler(BaseHTTPRequestHandler):
         session = (data.get("session") or "").strip()
         if not session:
             return self._json_error(400, "session required")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such agent")
         catalog = config.read_global_mcp_servers()
@@ -3159,7 +3154,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(400, "heartbeat_enabled required")
         if not isinstance(data.get("heartbeat_enabled"), bool):
             return self._json_error(400, "heartbeat_enabled must be boolean")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such agent")
         enabled = bool(data["heartbeat_enabled"])
@@ -3168,7 +3163,7 @@ class Handler(BaseHTTPRequestHandler):
             heartbeat_enabled=enabled,
         )
         heartbeat.record_heartbeat_activity(agent["agent_id"])
-        fresh = agents_db.get_by_session(session) or {}
+        fresh = identity.lookup(session) or {}
         return self._json_ok({
             "ok": True,
             "session": session,
@@ -3271,7 +3266,7 @@ class Handler(BaseHTTPRequestHandler):
         archived = data.get("archived")
         if not session or not isinstance(archived, bool):
             return self._json_error(400, "session and archived required")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such agent")
         agents_db.set_archived(agent["agent_id"], archived)
@@ -3285,7 +3280,7 @@ class Handler(BaseHTTPRequestHandler):
         session = (query.get("session", [""])[0] or "").strip()
         if not session:
             return self._json_error(400, "session required")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such agent")
         return self._json_ok({
@@ -3325,7 +3320,7 @@ class Handler(BaseHTTPRequestHandler):
         objective = str(data.get("objective") or "").strip()
         if action == "start" and not objective:
             return self._json_error(400, "objective required")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such agent")
         try:
@@ -3348,7 +3343,7 @@ class Handler(BaseHTTPRequestHandler):
         from lib import heartbeat
         query = self._query()
         session = (query.get("session", [""])[0] or "").strip()
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such agent")
         rows = db.conn().execute(
@@ -3425,12 +3420,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(400, "session required")
         if "dreaming_enabled" not in data:
             return self._json_error(400, "dreaming_enabled required")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such agent")
         enabled = data.get("dreaming_enabled") is True
         agents_db.update_agent(agent["agent_id"], dreaming_enabled=enabled)
-        fresh = agents_db.get_by_session(session) or {}
+        fresh = identity.lookup(session) or {}
         settings = dreaming.get_settings()
         return self._json_ok({
             "ok": True,
@@ -3468,11 +3463,11 @@ class Handler(BaseHTTPRequestHandler):
      "min": voice_verbosity.MIN_LEVEL,
      "max": voice_verbosity.MAX_LEVEL,
  })
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such agent")
         agents_db.update_agent(agent["agent_id"], voice_verbosity=raw)
-        fresh = agents_db.get_by_session(session) or {}
+        fresh = identity.lookup(session) or {}
         return self._json_ok({
             "ok": True,
             "session": session,
@@ -3496,12 +3491,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(400, "session required")
         if "muted" not in data:
             return self._json_error(400, "muted required")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such agent")
         muted = data.get("muted") is True
         agents_db.update_agent(agent["agent_id"], muted=muted)
-        fresh = agents_db.get_by_session(session) or {}
+        fresh = identity.lookup(session) or {}
         return self._json_ok({
             "ok": True,
             "session": session,
@@ -3523,8 +3518,8 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             return self._json_error(409, str(exc))
         if data.get("mode") != "options":
-            self.ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER, "kind": "contact-assigned",
-                                       "session": result["session"], "name": result["name"]})
+            events.broadcast(self.ctx.stream, events.agent_roster(
+                "contact-assigned", session=result["session"], name=result["name"]))
         return self._json_ok(result)
 
     def _handle_agent_rename(self):
@@ -3546,7 +3541,7 @@ class Handler(BaseHTTPRequestHandler):
         name = " ".join(str(data.get("name") or "").split())
         if not name or len(name) > 60:
             return self._json_error(400, "name required (maximum 60 characters)")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such agent")
         # Agent creation permits one live session per contact name, and the
@@ -3564,10 +3559,8 @@ class Handler(BaseHTTPRequestHandler):
  })
         if str(agent.get("persona") or "") != name:
             agents_db.update_agent(agent["agent_id"], persona=name)
-            self.ctx.stream.broadcast({
-                "type": SSEType.AGENT_ROSTER, "kind": "agent-renamed",
-                "session": session, "name": name,
-            })
+            events.broadcast(self.ctx.stream, events.agent_roster(
+                "agent-renamed", session=session, name=name))
         return self._json_ok({
             "ok": True, "session": session, "name": name,
         })
@@ -3788,10 +3781,8 @@ class Handler(BaseHTTPRequestHandler):
         # A preview plays on request, so it bypasses herald arbitration and
         # goes straight to every connected client.
         name = pathlib.Path(str(path)).name
-        self.ctx.stream.broadcast({
-            "type": SSEType.AUDIO, "url": f"/audio/{name}", "name": name,
-            "session": session, "preview": True,
-        })
+        events.broadcast(self.ctx.stream, events.audio(
+            url=f"/audio/{name}", name=name, session=session, preview=True))
         return self._json_ok({"ok": True, "url": f"/audio/{name}"})
 
     def _handle_oracle_status(self):
@@ -3992,7 +3983,7 @@ class Handler(BaseHTTPRequestHandler):
         """Authoritative local stop shared by /stop and Oracle cancellation."""
         from lib import turn_dispatch
         from lib import turn_queue
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         n = 0
         dropped = 0
         if agent:
@@ -4045,22 +4036,16 @@ class Handler(BaseHTTPRequestHandler):
                 agents_db.record_state(agent_id, AgentState.INTERRUPTED,
                                        {"source": "user_stop", "message": "Turn stopped"})
                 if getattr(self.ctx, "stream", None) is not None:
-                    self.ctx.stream.broadcast({
-                        "type": SSEType.AGENT_STATE,
-                        "session": session,
-                        "agent_id": agent_id,
-                        "kind": AgentState.INTERRUPTED,
-                    })
+                    events.broadcast(self.ctx.stream, events.agent_state(
+                        session=session, agent_id=agent_id,
+                        kind=AgentState.INTERRUPTED))
                     queue_state = turn_queue.state(agent_id)
-                    self.ctx.stream.broadcast({
-                        "type": SSEType.QUEUE_UPDATED,
-                        "session": session,
-                        "agent_id": agent_id,
-                        "queue_depth": queue_state["count"],
-                        "queue_paused": queue_state["paused"],
-                        "queue_started": False,
-                        "queue_revision": queue_state["revision"],
-                    })
+                    events.broadcast(self.ctx.stream, events.queue_updated(
+                        session=session, agent_id=agent_id,
+                        queue_depth=queue_state["count"],
+                        queue_paused=queue_state["paused"],
+                        queue_started=False,
+                        queue_revision=queue_state["revision"]))
             except Exception as exc:  # stop already succeeded
                 log_exception("turnStopBookkeepingFail", exc, detail=agent_id)
             if defer_finish:
@@ -4140,17 +4125,13 @@ class Handler(BaseHTTPRequestHandler):
     def _broadcast_artifact(self, artifact: dict) -> None:
         if getattr(self.ctx, "stream", None) is None:
             return
-        self.ctx.stream.broadcast({
-            "type": SSEType.ARTIFACT_UPDATED,
-            "session": artifact.get("session", ""),
-            "agent_id": artifact.get("agent_id", ""),
-            "artifact_id": artifact.get("artifact_id", ""),
-        })
+        events.broadcast(self.ctx.stream, events.artifact_updated(
+            session=artifact.get("session", ""),
+            agent_id=artifact.get("agent_id", ""),
+            artifact_id=artifact.get("artifact_id", "")))
         from lib import artifacts
-        self.ctx.stream.broadcast({
-            "type": SSEType.ATTENTION_UPDATED,
-            "attention_count": len(artifacts.attention(include_questions=True)),
-        })
+        events.broadcast(self.ctx.stream, events.attention_updated(
+            attention_count=len(artifacts.attention(include_questions=True))))
 
     def _handle_artifacts_list(self):
         from lib import artifacts
@@ -4354,7 +4335,7 @@ class Handler(BaseHTTPRequestHandler):
         query = self._query()
         session = (query.get("session", [self.ctx.default_session])[0]
                    or self.ctx.default_session).strip()
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "agent not found")
         state = turn_queue.state(agent["agent_id"])
@@ -4377,7 +4358,7 @@ class Handler(BaseHTTPRequestHandler):
         if data is None:
             return self._json_error(400, "bad json")
         session = str(data.get("session") or "").strip()
-        agent = agents_db.get_by_session(session) if session else None
+        agent = identity.lookup(session) if session else None
         if not agent:
             return self._json_error(404, "agent not found")
         changed = turn_queue.set_paused(agent["agent_id"], False)
@@ -4403,15 +4384,10 @@ class Handler(BaseHTTPRequestHandler):
         if getattr(self.ctx, "stream", None) is None:
             return
         state = turn_queue.state(agent_id)
-        self.ctx.stream.broadcast({
-            "type": SSEType.QUEUE_UPDATED,
-            "session": session,
-            "agent_id": agent_id,
-            "queue_depth": state["count"],
-            "queue_paused": state["paused"],
-            "queue_started": False,
-            "queue_revision": state["revision"],
-        })
+        events.broadcast(self.ctx.stream, events.queue_updated(
+            session=session, agent_id=agent_id,
+            queue_depth=state["count"], queue_paused=state["paused"],
+            queue_started=False, queue_revision=state["revision"]))
 
     def _handle_turn_queue_update(self, queue_id: str):
         from lib import turn_queue
@@ -4487,7 +4463,7 @@ class Handler(BaseHTTPRequestHandler):
                           "otherwise this cleanup was superseded by a newer generation."),
                     requested_session=job["session"],
                     forced_session=job["session"],
-                    trace_id=_trace.new_id(),
+                    trace_id=_trace.new_trace_id(),
                     synthesize_audio=False,
                     origin="automation",
                 )
@@ -4511,12 +4487,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(e.status, e.response())
         from lib.mcp_selection import decode as decode_mcp
         from lib.avatar_urls import versioned_avatar_url
-        row = agents_db.get_by_session(result.session) or {}
+        row = identity.lookup(result.session) or {}
         agent = {key: row.get(key) for key in (
             "agent_id", "session", "persona", "backend", "cwd", "model", "effort",
             "voice_id", "avatar_symbol", "muted", "heartbeat_enabled", "dreaming_enabled")}
         from lib.session_models import agent_model
-        agent["model"] = agent_model(row, agents_db.live_backend_session(row["agent_id"]))
+        agent["model"] = agent_model(row, identity.backend_session(row))
         state = agents_db.latest_state(row["agent_id"]) or {}
         agent.update(alive=True, latest_state=state.get("kind") or "idle", last_activity=row.get("created_at", 0),
                      mcp_servers=decode_mcp(row.get("mcp_servers"))[1],
@@ -4540,7 +4516,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         except (ValueError, OSError) as exc:
             return self._json_error(409, str(exc))
-        self.ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER, "kind": "persona-created"})
+        events.broadcast(self.ctx.stream, events.agent_roster("persona-created"))
         return self._json(201, {"persona": personas.public(row)})
 
     def _handle_update_persona(self):
@@ -4559,7 +4535,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         except (ValueError, OSError) as exc:
             return self._json_error(409, str(exc))
-        self.ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER, "kind": "persona-updated"})
+        events.broadcast(self.ctx.stream, events.agent_roster("persona-updated"))
         return self._json_ok({"persona": personas.public(row)})
 
     def _handle_delete_persona(self, name: str):
@@ -4570,7 +4546,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(409, str(exc))
         if not removed:
             return self._json_error(404, "personality not removable")
-        self.ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER, "kind": "persona-deleted"})
+        events.broadcast(self.ctx.stream, events.agent_roster("persona-deleted"))
         return self._json_ok({"ok": True})
 
     def _handle_persona_avatar(self, persona_id: str):
@@ -4583,7 +4559,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_delete_agent(self, session: str):
         from lib import turn_dispatch
         session = unquote(session).strip("/")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if self._reject_janitor_control({"session": session}):
             return
         if agent and getattr(self.ctx, "runtime_client", None) is None:
@@ -4670,7 +4646,7 @@ class Handler(BaseHTTPRequestHandler):
         session = (data.get("session") or "").strip()
         if not session or not all(c.isalnum() or c in "._-" for c in session):
             return self._json_error(400, "bad session name")
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such session")
         # Persist focus in the DB (what transcribe, upload and the herald read
@@ -4699,11 +4675,8 @@ class Handler(BaseHTTPRequestHandler):
         # Tell the herald manager the user's focus changed — if that agent
         # had a pending herald, their held buffer drains now.
         # Push focus change so the client doesn't have to poll for it.
-        self.ctx.stream.broadcast({
-            "type": SSEType.AGENT_FOCUS,
-            "session": session,
-            "agent_id": (agent or {}).get("agent_id"),
-        })
+        events.broadcast(self.ctx.stream, events.agent_focus(
+            session=session, agent_id=(agent or {}).get("agent_id")))
         self._json_ok({"ok": True, "session": session})
 
     def _handle_orchestrator_route_delegation(self):
@@ -4720,7 +4693,7 @@ class Handler(BaseHTTPRequestHandler):
             req = SendRequest.from_payload(
                 data,
                 default_session=self.ctx.default_session,
-                trace_id_factory=_trace.new_id,
+                trace_id_factory=_trace.new_trace_id,
                 authenticated=bool(
                     getattr(self, "_request_auth_validated", False)
                     and (getattr(self.ctx, "auth_token", "") or "")
@@ -5229,11 +5202,8 @@ class Handler(BaseHTTPRequestHandler):
         except agent_portraits.PortraitError as exc:
             return self._json_error(exc.status, str(exc))
         if changed:
-            self.ctx.stream.broadcast({
-                "type": SSEType.AGENT_ROSTER,
-                "kind": "portrait-selected",
-                "session": session,
-            })
+            events.broadcast(self.ctx.stream, events.agent_roster(
+                "portrait-selected", session=session))
         self._json_ok(result)
 
     def _handle_agent_portrait_generation_status(self):
