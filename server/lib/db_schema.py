@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 91
+_SCHEMA_VERSION = 92
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -199,6 +199,14 @@ CREATE INDEX idx_messages_dashboard_activity
                 COALESCE(CAST((julianday(timestamp) - 2440587.5) * 86400000 AS INTEGER), updated_at) DESC,
                 seq DESC, updated_at DESC)
     WHERE COALESCE(text, '') != '' AND COALESCE(tool_name, '') = '';
+CREATE INDEX idx_messages_pair_summary
+    ON messages(agent_id, sender_agent_id, role, revision, timestamp, seq)
+    WHERE COALESCE(origin, 'user') = 'agent'
+      AND COALESCE(sender_agent_id, '') != ''
+      AND sender_agent_id != agent_id
+      AND COALESCE(text, '') != ''
+      AND COALESCE(tool_name, '') = ''
+      AND role IN ('user', 'assistant');
 
 CREATE TABLE settings (
     key TEXT PRIMARY KEY,

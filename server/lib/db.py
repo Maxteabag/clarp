@@ -286,6 +286,11 @@ def _open_connection() -> sqlite3.Connection:
     con.execute("PRAGMA synchronous = NORMAL")
     con.execute("PRAGMA foreign_keys = ON")
     con.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+    # A 600 MB store with 2 MB of page cache re-reads its hot indexes from
+    # disk constantly. 128 MB of cache per connection and a 1 GB mmap window
+    # let the OS page cache serve repeat reads without copying.
+    con.execute("PRAGMA cache_size = -131072")
+    con.execute("PRAGMA mmap_size = 1073741824")
     return con
 
 
