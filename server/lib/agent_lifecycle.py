@@ -11,7 +11,7 @@ import pathlib
 import secrets
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from . import agents as agents_db
 from . import backends
