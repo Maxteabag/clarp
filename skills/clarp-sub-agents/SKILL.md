@@ -23,8 +23,13 @@ A Clarp sub-agent survives that. It comes in two modes:
 - **Default (systemd).** A raw `claude -p` / `codex exec` process in its own
   systemd user unit. Use it for fire-and-forget workers nobody needs to open.
 
-Both register a background job of kind `sub-agent` on your session, so the
-phone and desktop show that you are waiting on it.
+The words matter, and the apps count them apart. A **sub-agent** is a Clarp
+helper agent (`--clarp-agent`), counted from your running helpers. A
+**background process** is a durable job, such as a systemd worker. A
+`--clarp-agent` helper also gets a small watcher job (kind `sub-agent`) that
+only mirrors it and is not counted again; a systemd worker registers kind
+`worker` and counts as one background process. Your row then reads
+"3 sub-agents", "1 background process" or "3 sub-agents · 1 process".
 
 ## When to use which
 
@@ -57,9 +62,13 @@ phone and desktop show that you are waiting on it.
    clarp-sub-agent stop stream-a
    ```
 
-   Output goes to `/var/tmp/clarp-sub-agents/NAME.log`. `NAME.exit` holds the
-   exit code when the sub-agent finishes. The background job is finished or
-   failed to match.
+   Output goes to `/var/tmp/clarp-sub-agents/NAME.log`, streamed as it
+   happens: Claude runs with `--output-format stream-json --verbose` and its
+   assistant text and one line per tool call are written to the log. The log
+   is registered on the job, its latest line becomes the job's progress, and
+   the apps can show the tail through `GET /background-jobs/<job_id>`.
+   `NAME.exit` holds the exit code when the worker finishes. The background
+   job is finished or failed to match.
 
    As a Clarp helper agent:
 
@@ -114,5 +123,8 @@ phone and desktop show that you are waiting on it.
   `launchctl submit` with the same command until a launchd path exists.
   `--clarp-agent` works on macOS too, but without systemd no background job
   is registered.
-- Progress is visible through `git log` in the worktree. With
-  `--output-format text`, the log file is written only at the end.
+- Progress is visible through `git log` in the worktree and, in systemd
+  mode, live in the log and the job's progress line.
+- If a worker's unit was stopped, its job fails on its own as soon as the
+  Host sees the PID is gone. To close one yourself, run `clarp-agent-bg
+  "$CLARP_SESSION" job-cancel HANDLE`.

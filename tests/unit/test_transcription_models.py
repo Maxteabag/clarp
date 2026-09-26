@@ -66,6 +66,9 @@ def test_macos_catalog_recommends_whisper_cpp(monkeypatch):
 
 def test_catalog_status_recovers_installing_state_from_durable_job(monkeypatch):
     model_id = "faster-whisper:medium"
+    # The fake worker PID stands for a live install worker; a dead one is
+    # reconciled to failed at once.
+    monkeypatch.setattr(background_jobs, "worker_is_alive", lambda _pid, _token: True)
     agents.create_agent(
         persona="Mike", voice_id="voice", cwd="/tmp", session="mike")
     monkeypatch.setattr(transcription_models, "installed_records", lambda: [])
@@ -310,6 +313,9 @@ def test_container_install_launches_detached_worker_without_systemd(monkeypatch)
 
 def test_start_install_reuses_active_generation_after_server_restart(monkeypatch):
     model_id = "faster-whisper:medium"
+    # The fake worker PID stands for a live install worker; a dead one is
+    # reconciled to failed at once.
+    monkeypatch.setattr(background_jobs, "worker_is_alive", lambda _pid, _token: True)
     agents.create_agent(
         persona="Mike", voice_id="voice", cwd="/tmp", session="mike")
     monkeypatch.setattr(transcription_models, "installed_records", lambda: [])
@@ -337,6 +343,9 @@ def test_start_install_reuses_active_generation_after_server_restart(monkeypatch
 
 def test_registry_publication_does_not_outrun_active_job_truth(monkeypatch):
     model_id = "faster-whisper:medium"
+    # The fake worker PID stands for a live install worker; a dead one is
+    # reconciled to failed at once.
+    monkeypatch.setattr(background_jobs, "worker_is_alive", lambda _pid, _token: True)
     agents.create_agent(
         persona="Mike", voice_id="voice", cwd="/tmp", session="mike")
     existing = background_jobs.upsert(
