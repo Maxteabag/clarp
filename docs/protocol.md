@@ -247,7 +247,7 @@ Sub-agent cells (`kind: "subagents"`) come from two backends:
   collab event. The title says what happened ("Spawned agent", "Finished
   waiting"), the summary names the agent (`nickname [role]`), and the lines
   carry the task, thread ids and each agent's status.
-- **Claude** (`transcript_log.py`): one cell per built-in `Agent` (formerly
+- **Claude** (`claude_transcript.py`): one cell per built-in `Agent` (formerly
   `Task`) tool call, in place of a tool card. `id` is the tool_use id and
   `summary` is the call's description. `status` is `running` until the call
   settles: a foreground call settles on its tool result, and a background one

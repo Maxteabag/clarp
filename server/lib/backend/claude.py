@@ -629,7 +629,7 @@ class ClaudeBackend(Backend):
             from ..resume import find_session_jsonl
             return find_session_jsonl(
                 session_id, cwd, root or _projects_root(pathlib.Path.home()))
-        find = resolve("transcript_log", "find_latest_jsonl")
+        find = resolve("claude_transcript", "find_latest_jsonl")
         return find(session_id, projects_root=root) if root is not None else find(session_id)
 
     def transcript_cwd(self, transcript: Any) -> str:
@@ -638,7 +638,7 @@ class ClaudeBackend(Backend):
         return _cwd_from_project_dir(pathlib.Path(transcript).parent)
 
     def parse_transcript(self, path) -> list[dict]:
-        return resolve("transcript_log", "parse_turns")(path)
+        return resolve("claude_transcript", "parse_turns")(path)
 
     def list_sessions(self, cwd: str, *, limit: int = 20,
                       all_projects: bool = False) -> list[dict]:

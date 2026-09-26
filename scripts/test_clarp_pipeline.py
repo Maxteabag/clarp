@@ -74,7 +74,7 @@ def get_agent(session: str) -> dict | None:
 
 
 def find_jsonl(backend_session_id: str, cwd: str) -> pathlib.Path | None:
-    """Mirror lib.transcript_log.find_latest_jsonl's lookup rule."""
+    """Mirror lib.claude_transcript.find_latest_jsonl's lookup rule."""
     projects = pathlib.Path.home() / ".claude/projects"
     # Project dir name: cwd with '/' → '-' (Claude Code's encoding)
     candidates = [

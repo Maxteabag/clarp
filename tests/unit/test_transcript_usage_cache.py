@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from lib.transcript_log import context_tokens_from_jsonl
+from lib.claude_transcript import context_tokens_from_jsonl
 
 
 def test_unchanged_transcript_is_not_reopened_and_replacement_invalidates(tmp_path, monkeypatch):

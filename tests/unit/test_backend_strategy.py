@@ -272,7 +272,7 @@ def test_interrupt_any_stops_every_runner_once_including_codex_exec(monkeypatch)
 
 TRANSCRIPT_MODULES = {
     # The parser module each backend reads its sessions through.
-    "claude": "transcript_log", "codex": "codex_transcript", "agy": "agy_transcript",
+    "claude": "claude_transcript", "codex": "codex_transcript", "agy": "agy_transcript",
     "grok": "grok_transcript", "opencode": "opencode_transcript",
     "deepseek": "opencode_transcript",
 }
@@ -290,8 +290,8 @@ def test_transcript_access_matches_the_facade(monkeypatch):
         assert b.parse_transcript("/p") == backends.parse_turns(a.id, "/p") == [{"module": m, "path": "/p"}]
     # Claude threads a home into its projects root; the others own their roots.
     seen = {}
-    from lib import transcript_log
-    monkeypatch.setattr(transcript_log, "find_latest_jsonl",
+    from lib import claude_transcript
+    monkeypatch.setattr(claude_transcript, "find_latest_jsonl",
                         lambda sid, projects_root=None: seen.setdefault("root", projects_root))
     registry.by_id("claude").find_transcript("s1", home=pathlib.Path("/h"))
     assert seen["root"] == pathlib.Path("/h/.claude/projects")
@@ -301,7 +301,7 @@ def test_list_sessions_matches_the_facade(monkeypatch):
     from lib import session_catalog
     monkeypatch.setattr(session_catalog, "list_claude_sessions",
                         lambda cwd, *, all_projects, limit: [{"id": f"claude:{cwd}:{limit}:{all_projects}"}])
-    for m in set(TRANSCRIPT_MODULES.values()) - {"transcript_log"}:
+    for m in set(TRANSCRIPT_MODULES.values()) - {"claude_transcript"}:
         module = importlib.import_module(f"lib.{m}")
         if m == "agy_transcript":
             # agy's catalogue takes no scope flag; "all" is an empty cwd.
@@ -505,8 +505,8 @@ def test_codex_model_transcript_prefers_the_thread_index(monkeypatch, tmp_path):
     assert codex.model_transcript("stale") == pathlib.Path("/scan/stale.jsonl")
     assert codex.model_transcript("unknown") == pathlib.Path("/scan/unknown.jsonl")
     # Every other backend's model transcript is its session transcript.
-    from lib import transcript_log
-    monkeypatch.setattr(transcript_log, "find_latest_jsonl",
+    from lib import claude_transcript
+    monkeypatch.setattr(claude_transcript, "find_latest_jsonl",
                         lambda sid, projects_root=None: pathlib.Path(f"/claude/{sid}.jsonl"))
     assert registry.by_id("claude").model_transcript("s1") == pathlib.Path("/claude/s1.jsonl")
 

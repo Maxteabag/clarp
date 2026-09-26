@@ -146,11 +146,11 @@ def test_active_handles_routes_by_backend(monkeypatch):
 
 def test_history_dispatch_picks_codex_parser(monkeypatch):
     from lib import codex_transcript
-    from lib import transcript_log
+    from lib import claude_transcript
 
     monkeypatch.setattr(codex_transcript, "find_latest_jsonl",
                         lambda sid: pathlib.Path(f"/codex/{sid}.jsonl"))
-    monkeypatch.setattr(transcript_log, "find_latest_jsonl",
+    monkeypatch.setattr(claude_transcript, "find_latest_jsonl",
                         lambda sid, projects_root=None: pathlib.Path(f"/claude/{sid}.jsonl"))
 
     assert str(backends.find_session_jsonl("codex", "s1")) == "/codex/s1.jsonl"

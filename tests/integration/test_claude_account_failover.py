@@ -91,7 +91,7 @@ else:
             assert [row["flag"] for row in attempts] == ["--session-id", "--resume"]
             assert attempts[0]["sid"] == attempts[1]["sid"]
             assert attempts[0]["pid"] != attempts[1]["pid"]
-            from lib.transcript_log import parse_turns
+            from lib.claude_transcript import parse_turns
             transcript = tmp_path / ".claude/projects/test" / f'{attempts[0]["sid"]}.jsonl'
             user_texts = [turn["text"] for turn in parse_turns(transcript)
                           if turn["role"] == "user"]
