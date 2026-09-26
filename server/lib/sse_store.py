@@ -16,17 +16,29 @@ def record_sse_event(event: dict[str, Any]) -> int:
     event_type = str(payload.get("type") or "")
     session = str(payload.get("session") or "")
     agent_id = str(payload.get("agent_id") or "")
-    cur = conn().execute(
-        """INSERT INTO sse_events (ts, type, session, agent_id, payload)
-           VALUES (?, ?, ?, ?, ?)""",
-        (ts, event_type, session, agent_id, json.dumps(payload, separators=(",", ":"))),
-    )
-    event_id = int(cur.lastrowid or 0)
-    conn().execute(
-        "UPDATE sse_events SET payload = ? WHERE event_id = ?",
-        (json.dumps({**payload, "event_id": event_id}, separators=(",", ":")),
-         event_id),
-    )
+    # The id is only known after the INSERT, so the UPDATE that copies it into
+    # the payload must share its transaction: a lock error between the two
+    # would leave a replayable row without its event_id. A savepoint nests
+    # inside a caller's transaction and is a transaction of its own otherwise.
+    database = conn()
+    database.execute("SAVEPOINT record_sse_event")
+    try:
+        cur = database.execute(
+            """INSERT INTO sse_events (ts, type, session, agent_id, payload)
+               VALUES (?, ?, ?, ?, ?)""",
+            (ts, event_type, session, agent_id, json.dumps(payload, separators=(",", ":"))),
+        )
+        event_id = int(cur.lastrowid or 0)
+        database.execute(
+            "UPDATE sse_events SET payload = ? WHERE event_id = ?",
+            (json.dumps({**payload, "event_id": event_id}, separators=(",", ":")),
+             event_id),
+        )
+        database.execute("RELEASE record_sse_event")
+    except BaseException:
+        database.execute("ROLLBACK TO record_sse_event")
+        database.execute("RELEASE record_sse_event")
+        raise
     return event_id
 
 
