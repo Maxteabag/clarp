@@ -363,14 +363,30 @@ def turn_done_payload(persona: str, session: str | None,
                       body: str | None = None, avatar_url: str | None = None,
                       avatar_custom: bool = False,
                       notification_id: str = "",
-                      server_instance_id: str = "") -> dict:
+                      server_instance_id: str = "",
+                      needs_response: bool = False) -> dict:
     """APNs payload for a finished-turn alert (Choice A: "your turn"). `body`,
-    when given, previews what the agent just said; otherwise a generic prompt."""
+    when given, previews what the agent just said; otherwise a generic prompt.
+
+    `needs_response` is true only when the user has something to answer: an
+    unresolved question or approval, or (from `decision_payload`) the decision
+    being announced right now. Two distinct tiers, not one flat level for
+    everything:
+
+    - An ordinary reply is no more urgent than a WhatsApp message: it still
+      banners, badges and threads, but arrives without a sound or vibration,
+      so it respects Focus and Do Not Disturb rather than breaking through
+      them.
+    - A reply that leaves (or announces) something to answer plays the normal
+      system alert sound. `decision_payload` still decides interruption-level
+      on its own finer rule (`decision_needs_interruption`); this flag only
+      ever adds the sound, never removes the "time-sensitive" it may already
+      have set below.
+    """
     name = (persona or "").strip() or "Clarp"
     payload = {
         "aps": {
             "alert": {"title": name, "body": body or _DEFAULT_BODY},
-            "sound": "default",
             # Alert delivery and background synchronization are complementary:
             # the banner tells the user a reply arrived, while this hint gives
             # iOS a bounded chance to refresh the transcript and start its
@@ -382,7 +398,7 @@ def turn_done_payload(persona: str, session: str | None,
             # it respects Focus and Do Not Disturb rather than breaking through
             # them. "time-sensitive" is for alerts the user has asked to be
             # interrupted for, not for every finished turn.
-            "interruption-level": "active",
+            "interruption-level": "time-sensitive" if needs_response else "active",
             # Lets a Notification Service Extension rewrite the notification to
             # show the agent's avatar (WhatsApp-style). Ignored when no
             # extension is installed, so it's safe to send unconditionally.
@@ -391,7 +407,10 @@ def turn_done_payload(persona: str, session: str | None,
         "kind": "user-notification",
         "session": session or "",
         "persona": name,
+        "needs_response": bool(needs_response),
     }
+    if needs_response:
+        payload["aps"]["sound"] = "default"
     if notification_id:
         payload["notification_id"] = notification_id
     if server_instance_id:
@@ -522,6 +541,7 @@ def send_user_notification(notification: dict) -> dict:
                     avatar_custom,
                     notification_id,
                     _server_instance_id(),
+                    bool(notification.get("needs_response")),
                 )
                 try:
                     status, reason, apns_id = _send_one(
@@ -714,9 +734,13 @@ def decision_payload(persona: str, session: str | None, title: str, question: st
                      server_instance_id: str = "") -> dict:
     """APNs payload for a newly created decision. Tapping it deep-links to the
     agent's conversation, where the request card is pinned."""
+    # A decision is, by definition, something the user has to answer, so it
+    # always carries the alert sound; `time_sensitive` below separately
+    # decides whether it also breaks through Focus.
     payload = turn_done_payload(
         persona, session, (question or title or "").strip()[:500], avatar_url,
-        avatar_custom, decision_notification_id(decision_id), server_instance_id)
+        avatar_custom, decision_notification_id(decision_id), server_instance_id,
+        needs_response=True)
     alert = payload["aps"]["alert"]
     heading = (title or "").strip()
     if heading and heading != alert["body"]:
