@@ -4,9 +4,9 @@ The steerable path is the long-lived app-server (``lib.codex_app_server``,
 a connection pool, not a strategy): ``spawn_turn``, ``interrupt`` and
 ``active_handles`` go there. The bodies here are the per-turn ``codex exec
 --json`` path it falls back to for isolated jobs (``start_turn``), plus the
-event mapping both paths share (``_handle_item`` and the live text, speak
-and state wrappers), which the app-server client calls through
-``lib.codex_runner``.
+event mapping both paths share (``handle_item``, ``update_live_text`` and
+the shared ``transition``/``broadcast_transcript``), which the app-server
+client calls on the backend object.
 
 Codex has neither Claude Code's hook system nor an inotify transcript
 watcher driving the PWA, so everything the PWA needs is read straight off
@@ -52,12 +52,12 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
-from .base import BackendBrand, CompactionStrategy, hooked, resolve
+from .base import BackendBrand, CompactionStrategy, resolve
 from .stream_json import StreamJsonBackend
 
 
 @dataclass
-class _TurnState:
+class TurnState:
     """Accumulators for one turn's drainer thread."""
     saw_session: bool = False
     failed_error: str = ""
@@ -130,7 +130,7 @@ _TOOL_ITEM_TYPES = {
 
 class CodexBackend(StreamJsonBackend):
     """Runs through the long-lived Codex app-server (``codex_app_server``)."""
-    # --- catalogue data (was the BackendAdapter registry row) ------------
+    # --- catalogue data ---------------------------------------------------
     id = 'codex'
     label = 'Codex'
     required_binary = 'codex'
@@ -144,9 +144,9 @@ class CodexBackend(StreamJsonBackend):
     efforts = ('low', 'medium', 'high', 'xhigh', 'max', 'ultra')
     effort_scope = 'model'
     runner = 'codex'
-    extra_interrupt_modules = ('codex_runner',)
     config_model_field = 'codex_model'
     config_effort_field = 'codex_reasoning_effort'
+    config_account_switch_field = 'codex_account_switch_command'
     api_providers = ('openai',)
     native_tool_explainer = True
     janitor_default_model = 'gpt-5.3-codex-spark'
@@ -194,6 +194,10 @@ class CodexBackend(StreamJsonBackend):
         """SIGTERM every in-flight ``codex exec`` turn for an agent. Idempotent."""
         return self._registry.interrupt(agent_id, event=f"{self.runner}InterruptFail")
 
+    def interrupt_all(self, agent_id: str) -> int:
+        """The app-server turn and any isolated ``codex exec`` turns."""
+        return self.interrupt(agent_id) + self.interrupt_exec(agent_id)
+
     def active_exec_handles(self, agent_id: str) -> list[TurnHandle]:
         return self._registry.active_handles(agent_id)
 
@@ -218,7 +222,7 @@ class CodexBackend(StreamJsonBackend):
         [agents]). Empty → Codex defaults. Lowering reasoning effort is the
         biggest lever on time-to-first-word for hands-free voice turns.
         """
-        base = [self._hook("CODEX_BIN", self.required_binary), "exec", "--json"]
+        base = [self.required_binary, "exec", "--json"]
         if isolated:
             # Routing runs in the workspace root, which need not be a git repo;
             # without the check skipped Codex refuses to start at all.
@@ -264,7 +268,7 @@ class CodexBackend(StreamJsonBackend):
 
         Raises FileNotFoundError if `codex` isn't on PATH.
         """
-        codex_bin = self._hook("CODEX_BIN", self.required_binary)
+        codex_bin = self.required_binary
         if shutil.which(codex_bin) is None:
             raise FileNotFoundError(
                 f"`{codex_bin}` not on PATH — install the Codex CLI "
@@ -274,7 +278,7 @@ class CodexBackend(StreamJsonBackend):
         # the spawn fails with FileNotFoundError. Agents created with the default
         # working dir store the bare tilde.
         cwd = pathlib.Path(os.path.expanduser(str(cwd)))
-        cmd = self._hook("build_cmd", self.build_cmd)(
+        cmd = self.build_cmd(
             backend_session_id, is_new_session=is_new_session,
             model=model, reasoning_effort=effort, isolated=isolated)
         # Every codex turn is app-dispatched, so the instruction block is always
@@ -328,7 +332,7 @@ class CodexBackend(StreamJsonBackend):
 
         Swallows every exception per-line — a drainer crash must never take
         down a server thread."""
-        st = _TurnState(live_backend_session_id=backend_session_id)
+        st = TurnState(live_backend_session_id=backend_session_id)
         try:
             if proc.stdout is None:
                 return
@@ -389,7 +393,7 @@ class CodexBackend(StreamJsonBackend):
                 self.unregister_handle(agent_id, handle)
 
     def _handle_event(
-        self, ev: dict, st: _TurnState, *,
+        self, ev: dict, st: TurnState, *,
         agent_id: str, session: str, trace_id: str,
         on_session_init: Optional[Callable[[str], None]],
         on_error: Optional[Callable[[str], None]],
@@ -417,13 +421,13 @@ class CodexBackend(StreamJsonBackend):
                             on_error(st.failed_error)
             return
         if etype == "turn.started":
-            self._transition(agent_id, TurnEvent.SPAWN_STARTED,
+            self.transition(agent_id, TurnEvent.SPAWN_STARTED,
                                {"dispatch": self.runner, "trace_id": trace_id})
             return
         if etype in ("item.started", "item.updated", "item.completed"):
             item = ev.get("item")
             if isinstance(item, dict):
-                self._handle_item(etype, item, st, agent_id=agent_id,
+                self.handle_item(etype, item, st, agent_id=agent_id,
                                   session=session, trace_id=trace_id,
                                   stream=stream, enqueue=enqueue)
             return
@@ -432,10 +436,10 @@ class CodexBackend(StreamJsonBackend):
             if isinstance(usage, dict):
                 st.tokens_in = int(usage.get("input_tokens") or st.tokens_in or 0)
                 st.tokens_out = int(usage.get("output_tokens") or st.tokens_out or 0)
-            self._persist_live_text(
+            self.update_live_text(
                 st, agent_id=agent_id, session=session, trace_id=trace_id,
                 stream=stream, force=True)
-            self._broadcast_transcript(stream, agent_id, session)
+            self.broadcast_transcript(stream, agent_id, session)
             return
         if etype in ("turn.failed", "thread.error", "error"):
             err = ""
@@ -469,32 +473,32 @@ class CodexBackend(StreamJsonBackend):
 
         # --- turn lifecycle → agent state ---
         if inner == "task_started":
-            self._transition(agent_id, TurnEvent.SPAWN_STARTED,
+            self.transition(agent_id, TurnEvent.SPAWN_STARTED,
                                {"dispatch": self.runner, "trace_id": trace_id})
             return
 
         if inner in ("function_call", "custom_tool_call", "web_search_call",
                      "mcp_tool_call_begin", "exec_command_begin"):
             name = str(payload.get("name") or payload.get("tool") or "tool")
-            self._transition(agent_id, TurnEvent.TOOL_STARTED,
+            self.transition(agent_id, TurnEvent.TOOL_STARTED,
                                {"dispatch": self.runner, "tool": name, "trace_id": trace_id})
-            self._broadcast_transcript(stream, agent_id, session)
+            self.broadcast_transcript(stream, agent_id, session)
             return
 
         if inner in ("function_call_output", "custom_tool_call_output",
                      "patch_apply_end", "exec_command_end", "web_search_end"):
             # A tool finished — refresh the history pane; state goes back to
             # THINKING until the next agent_message / tool / task_complete.
-            self._broadcast_transcript(stream, agent_id, session)
+            self.broadcast_transcript(stream, agent_id, session)
             return
 
         if inner == "context_compacted":
-            self._transition(agent_id, TurnEvent.COMPACTION_STARTED,
+            self.transition(agent_id, TurnEvent.COMPACTION_STARTED,
                                {"dispatch": self.runner, "trace_id": trace_id})
             return
 
         if inner == "turn_aborted":
-            self._transition(agent_id, TurnEvent.TURN_FAILED_UNCLASSIFIED,
+            self.transition(agent_id, TurnEvent.TURN_FAILED_UNCLASSIFIED,
                                {"dispatch": self.runner, "aborted": True,
                                 "trace_id": trace_id})
             return
@@ -526,7 +530,7 @@ class CodexBackend(StreamJsonBackend):
             if not text:
                 return
             st.last_agent_message = text
-            self._persist_live_text(
+            self.update_live_text(
                 st, text=text, agent_id=agent_id, session=session,
                 trace_id=trace_id, stream=stream)
             self._speak(text, st, agent_id=agent_id, session=session,
@@ -543,13 +547,13 @@ class CodexBackend(StreamJsonBackend):
                 # text at completion). Speak any we haven't already.
                 self._speak(msg, st, agent_id=agent_id, session=session,
                             trace_id=trace_id, enqueue=enqueue)
-            self._persist_live_text(
+            self.update_live_text(
                 st, agent_id=agent_id, session=session, trace_id=trace_id,
                 stream=stream, force=True)
-            self._broadcast_transcript(stream, agent_id, session)
+            self.broadcast_transcript(stream, agent_id, session)
             return
 
-    def _handle_item(self, etype: str, item: dict, st: _TurnState, *,
+    def handle_item(self, etype: str, item: dict, st: TurnState, *,
                      agent_id: str, session: str, trace_id: str,
                      stream: Any, enqueue: Callable[..., int]) -> None:
         """Handle a modern item.{started,updated,completed} event.
@@ -564,7 +568,7 @@ class CodexBackend(StreamJsonBackend):
             if not text:
                 return
             st.last_agent_message = text
-            self._persist_live_text(
+            self.update_live_text(
                 st, text=text, agent_id=agent_id, session=session,
                 trace_id=trace_id, stream=stream,
                 force=etype == "item.completed")
@@ -577,24 +581,24 @@ class CodexBackend(StreamJsonBackend):
         if itype == "reasoning":
             # Model thinking — keep the agent in a busy state, but nothing to
             # speak or render.
-            self._transition(agent_id, TurnEvent.TEXT_STREAMED,
+            self.transition(agent_id, TurnEvent.TEXT_STREAMED,
                                {"dispatch": self.runner, "trace_id": trace_id})
             return
 
         if itype in _TOOL_ITEM_TYPES:
             name = str(item.get("command") or item.get("name") or itype)
-            self._transition(agent_id, TurnEvent.TOOL_STARTED,
+            self.transition(agent_id, TurnEvent.TOOL_STARTED,
                                {"dispatch": self.runner, "tool": name[:80],
                                 "trace_id": trace_id})
-            self._broadcast_transcript(stream, agent_id, session)
+            self.broadcast_transcript(stream, agent_id, session)
             return
 
         # Unknown item kind — just refresh the history pane.
-        self._broadcast_transcript(stream, agent_id, session)
+        self.broadcast_transcript(stream, agent_id, session)
 
-    def _persist_live_text(
+    def update_live_text(
         self,
-        st: _TurnState,
+        st: TurnState,
         *,
         agent_id: str,
         session: str,
@@ -611,9 +615,9 @@ class CodexBackend(StreamJsonBackend):
             backend_session_id=st.live_backend_session_id,
             agent_id=agent_id, session=session, trace_id=trace_id, stream=stream,
             force=force,
-            interval=self._hook("LIVE_TEXT_INTERVAL_SEC", self.live_text_interval))
+            interval=self.live_text_interval)
 
-    def _speak(self, text: str, st: _TurnState, *, agent_id: str, session: str,
+    def _speak(self, text: str, st: TurnState, *, agent_id: str, session: str,
                trace_id: str, enqueue: Callable[..., int]) -> None:
         """Extract <speak>…</speak> regions and enqueue each as a TTS clip.
 
@@ -624,23 +628,15 @@ class CodexBackend(StreamJsonBackend):
                       trace_id=trace_id, enqueue=enqueue):
             st.spoke_any = True
 
-    def _transition(self, agent_id: str, turn_event: str, detail: dict | None = None) -> None:
-        self.transition(agent_id, turn_event, detail)
-
-    def _broadcast_transcript(self, stream: Any, agent_id: str, session: str) -> None:
-        self.broadcast_transcript(stream, agent_id, session)
-
     # ---- orchestrator routing ----------------------------------------------
 
-    @hooked
     def routing_cmd(self, prompt: str, *, model: str = "", effort: str = "") -> list[str]:
         """argv for one ephemeral ``codex exec --json`` request (orchestrator)."""
-        cmd = self._hook("build_cmd", self.build_cmd)(
+        cmd = self.build_cmd(
             model=model, reasoning_effort=effort, isolated=True)
         cmd.append(prompt)
         return cmd
 
-    @hooked
     def routing_text(self, stdout: str) -> str:
         """The final agent message of a ``codex exec --json`` run."""
         final_text = ""
@@ -731,8 +727,8 @@ class CodexBackend(StreamJsonBackend):
         return bool(resolve("codex_app_server", "recover_usage_failure")(message))
 
     def account_pool(self) -> str:
-        """The pool is named after the CLI: its ``codex-switch`` command and
-        failover coordinator are keyed by this name in turn_dispatch."""
+        """The pool is named after the CLI; turn_dispatch keys its failover
+        coordinator by it and reads ``config_account_switch_field``."""
         return self.id
 
     def classify_usage_limit(self, message: str, *,

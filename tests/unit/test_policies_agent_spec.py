@@ -25,7 +25,7 @@ class FakeBackends:
     def valid_efforts(self, backend):
         return {"low", "high"} if backend != "grok" else set()
 
-    def adapter_for(self, backend):
+    def by_id(self, backend):
         return SimpleNamespace(supports_mcp=backend != "grok",
                                effort_compatibility_unknown=backend == "agy")
 

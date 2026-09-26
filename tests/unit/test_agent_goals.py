@@ -6,7 +6,7 @@ import threading
 import pytest
 from lib import agent_goals, backends, codex_app_server
 from lib import agents as agents_db
-from lib.codex_runner import _TurnState
+from lib.backend.codex import TurnState as _TurnState
 from lib.protocol import SSEType
 
 from tests.unit.test_codex_app_server import _Handle, _install_fake_codex

@@ -1,10 +1,11 @@
-"""Backends are polymorphic: behaviour a CLI differs on is declared on its
-``BackendAdapter`` and looked up, never branched on by identity.
+"""Backends are polymorphic: behaviour a CLI differs on lives on its
+``Backend`` class and is looked up, never branched on by identity.
 
 Two halves: a source guard that fails when a new ``backend == X`` branch
-appears outside the registry and the per-CLI runner modules, and unit tests
-that every adapter declares every capability plus a few of the decisions the
-adapters replaced (terminal argv, resume-target checks, spawn kwargs).
+appears outside the registry and the per-CLI transcript parsers, and unit
+tests that every backend declares every capability plus a few of the
+decisions the old adapter rows replaced (terminal argv, resume-target
+checks, spawn kwargs).
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "server"))
 from lib import backends  # noqa: E402
+from lib.backend import registry  # noqa: E402
 
 IDS = ("claude", "codex", "agy", "grok", "opencode", "deepseek")
 
@@ -33,11 +35,11 @@ BRANCH = re.compile(
     rf"|(?:==|!=)\s*{_LIT}"          # x == "codex"
     rf"|{_LIT}\s*(?:==|!=)"          # "codex" == x
 )
-# The registry itself, the model catalogue and the per-CLI runner/transcript
-# modules are allowed to know which CLI they are. transcript_streamer.py and
-# reconcile.py are being refactored separately.
+# The facade, the model catalogue and the per-CLI transcript parsers are
+# allowed to know which CLI they are. The runner bodies live on the classes
+# in ``lib.backend``, which are guarded below like any other caller.
 EXCLUDED = {"backends.py", "provider_capabilities.py"}
-EXCLUDED_SUFFIXES = ("_runner.py", "_transcript.py")
+EXCLUDED_SUFFIXES = ("_transcript.py",)
 
 # Branches that remain, with why. ``cfg.oracle_router_backend`` chooses the
 # oracle's router transport ("api" = OpenAI HTTP, "codex" = the Codex CLI as
@@ -83,8 +85,8 @@ def test_no_backend_identity_branches_outside_the_registry():
             else:
                 seen_allowed.add(key)
     assert not offenders, (
-        "Backend identity branch found; declare the capability on "
-        "BackendAdapter in server/lib/backends.py and look it up instead:\n"
+        "Backend identity branch found; give the Backend class in "
+        "server/lib/backend/ a method or attribute and call it instead:\n"
         + "\n".join(offenders))
     stale = set(ALLOWLIST) - seen_allowed
     assert not stale, f"allowlist entries no longer match any line: {sorted(stale)}"
@@ -126,8 +128,10 @@ REQUIRED_STR = ("api_providers", "janitor_default_model", "model_family")
 REQUIRED_BOOL = ("native_tool_explainer",)
 REQUIRED_CALLABLE = ()
 OPTIONAL = ("context_window",)
-# Decisions that are methods on the Backend classes now (slice 2 of the
-# contract), so no adapter row may declare them as flags any more.
+# Decisions that are methods on the Backend classes now (slices 2 and 4 of
+# the contract), so no class may declare them as flags any more.
+# ``supports_compact`` is not among them: it is a property derived from
+# ``compaction()``, never declared.
 DELETED_FLAGS = ("preassigns_session_id", "hook_source_marker", "account_pool",
                  "usage_limit_recovery", "restarts_runner_on_credential_change",
                  "terminal_resume_argv", "terminal_fresh_argv",
@@ -137,7 +141,7 @@ DELETED_FLAGS = ("preassigns_session_id", "hook_source_marker", "account_pool",
                  "transcript_dir_encodes_cwd", "resumes_by_transcript_file",
                  "locks_turn_callbacks", "records_classified_usage_limit",
                  "quota_reset_jittered", "compact_launch", "compact_command",
-                 "compaction_watches_transcript", "supports_compact",
+                 "compaction_watches_transcript",
                  "recorded_model_source", "transcript_module",
                  "session_catalog_reader", "transcript_reader_injected",
                  "spawn_kwargs", "goal_module", "supports_goal",
@@ -164,8 +168,8 @@ def test_every_adapter_declares_every_capability(backend):
 
 
 def test_declared_values_match_the_behaviour_they_replaced():
-    by = {a.id: a for a in backends.adapters()}
-    assert {a.id for a in backends.adapters()} == set(IDS)
+    by = {a.id: a for a in registry.all()}
+    assert {a.id for a in registry.all()} == set(IDS)
 
     # Claude is the only CLI with a context gauge.
     claude = by["claude"]
@@ -184,10 +188,10 @@ def test_declared_values_match_the_behaviour_they_replaced():
         assert a.janitor_default_model == "", other
 
     # Account failover pools: Claude and Codex only (a method now).
-    assert {b.id: b.account_pool() for b in backends.all_backends()} == {
+    assert {b.id: b.account_pool() for b in registry.all()} == {
         "claude": "claude", "codex": "codex", "agy": "", "grok": "",
         "opencode": "", "deepseek": ""}
-    assert [b.id for b in backends.all_backends() if b.account_pool()] == ["claude", "codex"]
+    assert [b.id for b in registry.all() if b.account_pool()] == ["claude", "codex"]
 
     # AGY folds effort into the model id and validates model ids.
     assert by["agy"].effort_compatibility_unknown and by["agy"].model_carries_effort
@@ -195,7 +199,7 @@ def test_declared_values_match_the_behaviour_they_replaced():
         assert not by[other].effort_compatibility_unknown, other
 
     # Model families for avatars: Claude and OpenCode front several families.
-    assert {a.id: a.model_family for a in backends.adapters()} == {
+    assert {a.id: a.model_family for a in registry.all()} == {
         "claude": "", "codex": "codex", "agy": "gemini", "grok": "grok",
         "opencode": "", "deepseek": "deepseek"}
 
@@ -217,7 +221,7 @@ def test_interactive_terminal_argv_per_backend(monkeypatch):
         # /terminal route fails for them, and still does.
         "grok": None, "opencode": None, "deepseek": None,
     }
-    for backend in backends.all_backends():
+    for backend in registry.all():
         if expected[backend.id] is None:
             for sid in ("s", ""):
                 with pytest.raises(Unsupported):
@@ -291,9 +295,11 @@ def test_resume_target_drives_transcript_checks(tmp_path):
 
 def test_account_pool_lookup_matches_the_coordinators(monkeypatch):
     from lib import turn_dispatch as td
+    # One coordinator per pool the backends declare, none listed by hand.
+    assert set(td._FAILOVERS) == {"claude", "codex"}
     claude_pool, codex_pool = object(), object()
-    monkeypatch.setattr(td, "_CLAUDE_FAILOVER", claude_pool)
-    monkeypatch.setattr(td, "_CODEX_FAILOVER", codex_pool)
+    monkeypatch.setitem(td._FAILOVERS, "claude", claude_pool)
+    monkeypatch.setitem(td._FAILOVERS, "codex", codex_pool)
     monkeypatch.setattr(td.config, "load", lambda: SimpleNamespace(
         claude_account_switch_command=("claude-switch",),
         codex_account_switch_command=("codex-switch",)))
@@ -308,12 +314,13 @@ def test_account_pool_lookup_matches_the_coordinators(monkeypatch):
 
 def test_spawn_kwargs_per_backend(monkeypatch):
     """Each backend's spawn_turn keeps the keywords its own runner takes."""
+    from lib import codex_app_server
     seen: dict[str, dict] = {}
-    for name, module in (("claude", "clarp_runner"), ("codex", "codex_app_server"),
-                         ("agy", "agy_runner"), ("grok", "grok_runner"),
-                         ("opencode", "opencode_runner")):
-        monkeypatch.setattr(backends._mod(module), "spawn_turn",
-                            lambda _n=name, **kw: seen.__setitem__(_n, kw))
+    for backend in registry.all():
+        monkeypatch.setattr(backend, "start_turn",
+                            lambda _n=backend.id, **kw: seen.__setitem__(_n, kw))
+    monkeypatch.setattr(codex_app_server, "spawn_turn",
+                        lambda **kw: seen.__setitem__("codex", kw))
     kwargs = {"text": "hi", "cwd": "/x", "stream": None, "synthesize_audio": True,
               "hook_session": "h", "run_if_owned": "gate", "voice_preamble": True}
     backends.by_id("claude").spawn_turn(**kwargs)
@@ -323,15 +330,14 @@ def test_spawn_kwargs_per_backend(monkeypatch):
     assert seen["codex"] == codex
     backends.by_id("agy").spawn_turn(**kwargs)
     assert seen["agy"] == {**codex, "run_if_owned": "gate"}
-    for backend, runner in (("grok", "grok"), ("opencode", "opencode"), ("deepseek", "opencode")):
-        seen.pop(runner, None)
+    for backend in ("grok", "opencode", "deepseek"):
         backends.by_id(backend).spawn_turn(**kwargs)
-        assert seen[runner] == codex, backend
+        assert seen[backend] == codex, backend
 
 
 def test_executable_honours_the_claude_override(monkeypatch):
-    from lib import clarp_runner
-    monkeypatch.setattr(clarp_runner, "configured_claude_bin", lambda: "clarp")
+    from lib import config
+    monkeypatch.setattr(config, "load", lambda: SimpleNamespace(claude_cli="clarp"))
     assert backends.by_id("claude").executable() == "clarp"
     assert backends.by_id("codex").executable() == "codex"
     assert backends.by_id("deepseek").executable() == "opencode"

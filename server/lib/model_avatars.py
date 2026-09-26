@@ -68,7 +68,7 @@ def families_for(backend: str, model: str, *, default_model: str = "") -> list[s
         family_for_model(model),
         family_for_model(default_model),
         # The family the CLI names when the Agent pins no model of its own.
-        backends.adapter_for(backend).model_family,
+        backends.by_id(backend).model_family,
     ]
     ordered: list[str] = []
     for family in candidates:

@@ -199,8 +199,8 @@ def test_no_drift_snapshot_makes_no_repair_writes_and_no_per_agent_queries(tmp_p
     assert writes == []
     assert repairs and all(r == {} for r in repairs)
     assert not [s for s in statements if any(aid in s for aid in ids)], statements
-    from lib import transcript_log
-    transcript_log.reset_transcript_index()
+    from lib import claude_transcript
+    claude_transcript.reset_transcript_index()
 
 
 def test_snapshot_reads_the_external_runtime_status_once_per_roster(monkeypatch):

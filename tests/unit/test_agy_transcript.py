@@ -45,10 +45,10 @@ def test_parse_turns_user_tools_assistant(tmp_path):
 
 
 def test_parse_turns_strips_voice_preamble(tmp_path):
-    from lib import codex_runner
+    from lib.voice_preamble import apply_voice_preamble
     rows = [
         {"step_index": 0, "type": "USER_INPUT", "created_at": "t0",
-         "content": "<USER_REQUEST>\n" + codex_runner.apply_voice_preamble("hello") + "\n</USER_REQUEST>"},
+         "content": "<USER_REQUEST>\n" + apply_voice_preamble("hello") + "\n</USER_REQUEST>"},
         {"step_index": 1, "type": "PLANNER_RESPONSE", "created_at": "t1",
          "content": "<speak>Hi.</speak>"},
     ]

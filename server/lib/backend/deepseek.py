@@ -14,7 +14,7 @@ from .opencode import OpenCodeBackend
 
 class DeepSeekBackend(OpenCodeBackend):
     """OpenCode with the DeepSeek catalogue and config fields."""
-    # --- catalogue data (was the BackendAdapter registry row) ------------
+    # --- catalogue data ---------------------------------------------------
     id = 'deepseek'
     label = 'DeepSeek'
     required_binary = 'opencode'

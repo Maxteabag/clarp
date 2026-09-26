@@ -267,7 +267,7 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
             return SpecError(400, "mcp_servers must be a list of names")
         mcp_servers = tuple(dict.fromkeys(
             item.strip() for item in raw_mcp if item.strip()))
-        if mcp_servers and not backends.adapter_for(backend).supports_mcp:
+        if mcp_servers and not backends.by_id(backend).supports_mcp:
             return SpecError(
                 400, "mcp servers unsupported for backend",
                 detail=f"MCP server selection is unavailable for {backends.label(backend)}.")
@@ -276,7 +276,7 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
             return SpecError(400, "unknown mcp server",
                              detail=f"Unknown MCP server: {', '.join(unknown_mcp)}")
     effective_validation_model = effective_model
-    effort_compatibility_unknown = backends.adapter_for(backend).effort_compatibility_unknown
+    effort_compatibility_unknown = backends.by_id(backend).effort_compatibility_unknown
     if effort_compatibility_unknown:
         effective_validation_model = effective_validation_model or roster.default_model(backend)
     if effort_compatibility_unknown and effective_validation_model and effective_effort:

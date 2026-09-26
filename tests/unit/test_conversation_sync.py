@@ -435,7 +435,7 @@ def test_only_client_rows_do_not_make_adopted_history_warm(tmp_path, monkeypatch
 
 def test_claude_subagent_cell_reaches_the_log_intact(tmp_path):
     import json
-    from lib.transcript_log import parse_turns
+    from lib.claude_transcript import parse_turns
 
     agent_id = _agent(tmp_path)
     transcript = tmp_path / "parent.jsonl"

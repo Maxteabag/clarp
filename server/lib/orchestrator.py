@@ -1365,8 +1365,8 @@ def call_model(packet: dict[str, Any], settings: OrchestratorSettings) -> dict[s
     """Ask the configured provider for one routing decision.
 
     OpenAI goes straight to the API. Every other provider is a registry
-    backend whose ``routing_module`` builds the one-shot argv and extracts
-    the reply text, so a new CLI can route the moment its adapter says so.
+    backend whose ``routing_cmd``/``routing_text`` build the one-shot argv and
+    extract the reply text, so a new CLI can route the moment it says so.
     """
     provider = normalize_provider(settings.provider)
     prompt = _model_prompt(packet)

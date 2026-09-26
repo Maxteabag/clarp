@@ -1,4 +1,5 @@
-"""Coordinate account recovery for Claude turns owned by one Clarp runtime.
+"""Coordinate account recovery for the turns of one account pool (Claude,
+Codex) owned by one Clarp runtime.
 
 The dispatcher supplies its ownership lock and callbacks. Account credentials
 stay in an explicitly configured local command, outside the Host database.
@@ -115,7 +116,7 @@ class Attempt:
     stopped: bool = False
 
 
-class ClaudeFailover:
+class AccountFailover:
     def __init__(self, lock, *, switch=switch_account, schedule=None,
                  now=time.monotonic):
         self.lock = lock
