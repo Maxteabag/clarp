@@ -61,6 +61,8 @@ target_sources(clarp-desktop PRIVATE
     src/app/AvatarMotionClock.h
     src/app/ReadingTheme.h
     src/app/MemoryDiagnostics.h
+    src/app/StallMonitor.cpp
+    src/app/StallMonitor.h
     src/app/MarkdownStyle.cpp
     src/app/MarkdownStyle.h
     src/app/WorkspaceContext.cpp
@@ -210,6 +212,10 @@ target_include_directories(clarp-desktop PRIVATE src src/app src/models)
 target_compile_definitions(clarp-desktop PRIVATE
     CLARP_DESKTOP_VERSION="${PROJECT_VERSION}"
 )
+
+# Export the executable's symbols so stall stacks name our own functions,
+# not just the Qt libraries around them.
+set_target_properties(clarp-desktop PROPERTIES ENABLE_EXPORTS ON)
 
 # Opt-in QML profiling for performance work: enables the QML debugger
 # services so `qmlprofiler` can attach. Never set in shipped builds.
