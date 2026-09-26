@@ -1,7 +1,7 @@
 """Regression coverage for the app-facing transcript synchronization contract."""
 import pytest
 
-from lib import agents as agents_db, backends, message_store
+from lib import agents as agents_db, backends, identity, message_store
 from lib.conversation import load_conversation
 
 
@@ -160,7 +160,7 @@ def test_tool_details_are_compact_in_transcript_and_loadable_on_demand(tmp_path)
     assert len(str(compact)) < 5_000
 
     details = message_store.message_tool_details(
-        session="reliable", message_id="tool-heavy-message")
+        agent=identity.resolve("reliable"), message_id="tool-heavy-message")
     assert details["display_cells"][0]["lines"][0]["text"] == huge
 
 
