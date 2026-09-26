@@ -207,6 +207,7 @@ void ConversationModel::applyLog(const QJsonObject& response, LoadKind kind) {
         return;
     }
 
+    emit batchStarted();
     const QJsonArray turns = response.value(QStringLiteral("turns")).toArray();
     const bool replacesConversation =
         kind == LoadKind::Replace ||
@@ -246,6 +247,7 @@ void ConversationModel::applyLog(const QJsonObject& response, LoadKind kind) {
     }
     setLoading(false);
     setError({});
+    emit batchFinished();
 }
 
 QJsonObject ConversationModel::cacheSnapshot() const {
