@@ -404,6 +404,9 @@ class Config:
     codex_account_switch_command: tuple[str, ...] = ()
     claude_model: str = ""
     claude_effort: str = ""              # "" | low | medium | high | xhigh | max
+    # Hours a helper agent marked done stays in the chat list before the
+    # maintenance worker archives it. [agents] helper_archive_grace_hours.
+    helper_archive_grace_hours: float = 24.0
     codex_model: str = ""
     codex_reasoning_effort: str = ""     # "" | "low" | "medium" | "high"
     agy_model: str = ""
@@ -550,6 +553,14 @@ def _resolve_config_path() -> pathlib.Path:
         "CLAUDE_PWA_CONFIG",
         str(xdg.config_dir() / "config.toml"),
     ))
+
+
+def _non_negative_float(raw: Any, default: float) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
 
 
 def load(path: pathlib.Path | None = None) -> Config:
@@ -724,6 +735,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
             and all(isinstance(arg, str) and arg for arg in
                     agents.get("claude_account_switch_command", ())) else (),
         claude_effort   = str(agents.get("claude_effort", "")),
+        helper_archive_grace_hours=_non_negative_float(
+            agents.get("helper_archive_grace_hours"), 24.0),
         codex_model     = str(agents.get("codex_model", "")),
         codex_reasoning_effort = str(agents.get("codex_reasoning_effort", "")),
         agy_model       = str(agents.get("agy_model", "")),
