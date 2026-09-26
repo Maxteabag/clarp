@@ -160,6 +160,17 @@ class TurnSlots:
         self.inflight: dict[str, str] = {}
         self.queued: dict[str, list] = {}
         self.claimed_at: dict[str, float] = {}
+        # Durable rows are reinstated once per process, at the first queue
+        # recovery after boot (see TurnDispatchService.recover_queued).
+        self._rehydrated = False
+
+    def first_rehydration(self) -> bool:
+        """True exactly once per process (and after reset_for_tests)."""
+        with self.lock:
+            if self._rehydrated:
+                return False
+            self._rehydrated = True
+            return True
 
     # --- reads -------------------------------------------------------------
 
@@ -413,6 +424,7 @@ class TurnSlots:
             self.inflight.clear()
             self.queued.clear()
             self.claimed_at.clear()
+            self._rehydrated = False
 
 
 # --- facts other modules own ----------------------------------------------------

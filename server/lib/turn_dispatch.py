@@ -92,9 +92,6 @@ _JANITOR_SPAWN_LOCKS: "weakref.WeakValueDictionary[str, Any]" = weakref.WeakValu
 # drains via drain_after_terminal() when the terminal closes.
 _TERMINAL_SENTINEL = turn_slots.TERMINAL_SENTINEL
 _STOPPING_SENTINEL = turn_slots.STOPPING_SENTINEL
-# Durable Stop-parked rows are reinstated once per process, at the first
-# queue recovery after boot (see TurnDispatchService.recover_queued).
-_REHYDRATED = False
 
 
 def configure_runtime_client(client: Any | None) -> None:
@@ -120,9 +117,7 @@ def live_work(agent_id: str, *, session: str = "") -> turn_slots.LiveWork:
 
 
 def reset_for_tests() -> None:
-    global _REHYDRATED
     _SLOTS.reset_for_tests()
-    _REHYDRATED = False
 
 
 def _terminal_live(agent_id: str) -> bool:
@@ -502,10 +497,8 @@ class TurnDispatchService:
         rows. An open turns row whose process this runtime can still see
         owns its slot again; Stop-parked sends become queued work (the
         barrier that parked them died with the previous process)."""
-        global _REHYDRATED
-        if _REHYDRATED:
+        if not _SLOTS.first_rehydration():
             return
-        _REHYDRATED = True
 
         def live(agent_id: str, trace_id: str) -> bool:
             agent = agents_db.get_by_agent_id(agent_id)
