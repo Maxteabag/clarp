@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from lib import agents as agents_db
 from lib import heartbeat, team_leader, team_store
-from lib import tts_queue
+from lib import tts_queue, turn_queue
 from lib.protocol import AgentState
 from lib.turn_dispatch import (
     MAX_ATTEMPTS,
@@ -1909,6 +1909,22 @@ def test_enqueue_paths_write_nothing_under_the_turn_lock(tmp_path, monkeypatch):
         service.dispatch(text="p", requested_session="mike", trace_id="t-5")
     assert writes.seen == []
     assert [spec.trace_id for spec in _td._QUEUED[agent_id]] == ["t-5"]
+
+
+def test_stop_paths_pause_the_queue_after_the_turn_lock(tmp_path):
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="t-1")
+    with _WritesUnderTurnLock() as writes:
+        _snapshot, _dropped, was_paused = _td.begin_stop(agent_id)
+    assert writes.seen == []
+    assert was_paused is False
+    assert turn_queue.is_paused(agent_id)
+    assert _td._INFLIGHT[agent_id] == _td._STOPPING_SENTINEL
+    turn_queue.set_paused(agent_id, False)
+    with _WritesUnderTurnLock() as writes:
+        _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)
+    assert [w for w in writes.seen if w[1] == "queue_state_revisions"] == []
+    assert turn_queue.is_paused(agent_id)
 
 
 def test_account_recovery_pause_writes_its_state_after_the_locks(tmp_path, monkeypatch):

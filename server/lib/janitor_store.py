@@ -427,8 +427,7 @@ def refresh_label_ownership(c, target_agent_id: str, *, task_signature: str, val
 
 
 def forget_label_ownership(c, target_agent_id: str) -> None:
-    """A manual status write owns the field again. TODO(integration): agents.
-    set_custom_status runs this DELETE inline today; call this instead."""
+    """A manual status write owns the field again (agents.set_custom_status)."""
     c.execute("DELETE FROM janitor_label_ownership WHERE target_agent_id=?", (target_agent_id,))
 
 

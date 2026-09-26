@@ -2176,14 +2176,14 @@ def clear_for_agent(
     would otherwise leak until the next send self-heals it. Returns the number of
     queued turns dropped."""
     with _TURN_LOCK:
-        # Stop needs pause + in-memory detachment to be atomic with
-        # _finish_turn(), otherwise the interrupted callback can drain the
-        # next item in between those two operations.
-        # TODO(integration): the pause flag is the one SQLite write left
-        # under _TURN_LOCK; moving it out needs _finish_turn to read it.
-        if pause_queue:
-            turn_queue.set_paused(agent_id, True)
+        # Stop must be atomic with _finish_turn(), or the interrupted callback
+        # could drain the next item in between. The Stop barrier installed
+        # here is what _finish_turn checks (its handover expects its own
+        # trace), so the durable pause flag is written as soon as the lock is
+        # released, before this function returns.
         dropped = _SLOTS.clear(agent_id, stopping=pause_queue)
+        if pause_queue:
+            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
     if preserve_queue:
         turn_queue.discard_parked(agent_id)
     durable_dropped = 0 if preserve_queue else turn_queue.remove_for_agent(agent_id)
@@ -2293,10 +2293,10 @@ def begin_stop(agent_id: str) -> tuple[dict, int, bool]:
         value = _SLOTS.get(agent_id) or None
         recovery_parked = _recovery_parked(agent_id, value)
         queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
-        # TODO(integration): like clear_for_agent, the pause flag is written
-        # under the lock so that Stop is atomic with _finish_turn().
-        turn_queue.set_paused(agent_id, True)
+        # As in clear_for_agent: the barrier keeps Stop atomic with
+        # _finish_turn(); the pause flag lands right after the release.
         stop, dropped = _SLOTS.begin_stop(agent_id)
+        _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
     snapshot = stop.as_dict()
     snapshot["account_recovery_parked"] = recovery_parked
     return snapshot, dropped, queue_was_paused

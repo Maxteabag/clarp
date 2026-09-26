@@ -96,7 +96,6 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
             if store.agent_session_exists(session, c):
                 raise janitors.JanitorError("Built-in session is already owned", 409, "builtin_identity_conflict")
             now = db.now_ms()
-            # TODO(integration: move to agents.py) - the built-in identity row.
             agents.insert_builtin_janitor(c, agent_id=agent_id, persona=defaults["name"], cwd=cwd or os.getcwd(),
                                        session=session, backend=backend, model=model or "", effort=effort or "", now=now)
             turn_lifecycle.transition(agent_id, TurnEvent.AGENT_CREATED,

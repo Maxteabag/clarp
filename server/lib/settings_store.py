@@ -4,9 +4,6 @@ Other modules keep their own key prefixes (desktop presence leases, activity
 leases, the Oracle contact) but never touch the table themselves; they call
 the functions below. `transaction()` lets a caller make a read-check-write
 sequence atomic on this thread's connection.
-
-TODO(integration): backend_usage.py (Stream B) still writes its identity
-secret directly; move it onto `set_text_if_blank()` when the streams merge.
 """
 from __future__ import annotations
 
