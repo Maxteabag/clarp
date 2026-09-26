@@ -146,6 +146,7 @@ class CodexBackend(StreamJsonBackend):
     runner = 'codex'
     config_model_field = 'codex_model'
     config_effort_field = 'codex_reasoning_effort'
+    config_account_switch_field = 'codex_account_switch_command'
     api_providers = ('openai',)
     native_tool_explainer = True
     janitor_default_model = 'gpt-5.3-codex-spark'
@@ -726,8 +727,8 @@ class CodexBackend(StreamJsonBackend):
         return bool(resolve("codex_app_server", "recover_usage_failure")(message))
 
     def account_pool(self) -> str:
-        """The pool is named after the CLI: its ``codex-switch`` command and
-        failover coordinator are keyed by this name in turn_dispatch."""
+        """The pool is named after the CLI; turn_dispatch keys its failover
+        coordinator by it and reads ``config_account_switch_field``."""
         return self.id
 
     def classify_usage_limit(self, message: str, *,

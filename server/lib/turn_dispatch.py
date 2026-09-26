@@ -24,7 +24,7 @@ from .policies import admission as admission_policy
 from .log import log, log_exception
 from .protocol import AgentState, SSEType
 from .prompt_admissions import PromptAdmission
-from .claude_failover import Attempt as ClaudeAttempt, ClaudeFailover
+from .account_failover import Attempt as FailoverAttempt, AccountFailover
 from . import prompt_admissions
 from .send_service import SendTarget, resolve_send_target
 
@@ -54,27 +54,25 @@ _SLOTS = turn_slots.TurnSlots(lock=_TURN_LOCK)
 # _TURN_LOCK -> coordinator: the coordinator never takes _TURN_LOCK while it
 # holds its own; the callbacks it runs (owned, pause, resume) read slots
 # without the lock or defer their work past the coordinator's release.
-_CLAUDE_FAILOVER = ClaudeFailover(OwnershipLock())
-_CODEX_FAILOVER = ClaudeFailover(OwnershipLock())
-# Account pool (backend.account_pool()) -> (coordinator, config field naming
-# the account switch command). Coordinators are read through thunks so a
-# monkeypatched module global is honoured. Backends without a pool of their
-# own book-keep in Claude's coordinator, as they always have.
-_ACCOUNT_POOLS = {
-    "claude": (lambda: _CLAUDE_FAILOVER, "claude_account_switch_command"),
-    "codex": (lambda: _CODEX_FAILOVER, "codex_account_switch_command"),
+# One coordinator per account pool, keyed by ``backend.account_pool()``.
+_FAILOVERS: dict[str, AccountFailover] = {
+    pool: AccountFailover(OwnershipLock())
+    for pool in dict.fromkeys(backends.by_id(b).account_pool() for b in backends.ids())
+    if pool
 }
-_DEFAULT_ACCOUNT_POOL = "claude"
 
-def _account_pool(backend):
-    pool = backends.by_id(backend).account_pool() or _DEFAULT_ACCOUNT_POOL
-    return _ACCOUNT_POOLS[pool]
+def _pool_backend(backend):
+    """The backend whose pool runs ``backend``'s failover. Backends without
+    a pool of their own book-keep in the default backend's, as they always
+    have."""
+    owner = backends.by_id(backend)
+    return owner if owner.account_pool() else backends.by_id(backends.DEFAULT)
 
 def account_failover(backend):
-    return _account_pool(backend)[0]()
+    return _FAILOVERS[_pool_backend(backend).account_pool()]
 
 def account_selector(backend):
-    return getattr(config.load(), _account_pool(backend)[1])
+    return getattr(config.load(), _pool_backend(backend).config_account_switch_field)
 
 _INFLIGHT: dict[str, str] = _SLOTS.inflight
 _QUEUED: dict[str, list] = _SLOTS.queued
@@ -106,8 +104,8 @@ def runtime_status() -> dict[str, Any]:
     status = _SLOTS.snapshot()
     status.update({
         "compactions": compaction.active_sessions(),
-        "claude_account_recovery": _CLAUDE_FAILOVER.status(),
-        "codex_account_recovery": _CODEX_FAILOVER.status(),
+        **{f"{pool}_account_recovery": coordinator.status()
+           for pool, coordinator in _FAILOVERS.items()},
     })
     return status
 
@@ -1534,7 +1532,7 @@ class TurnDispatchService:
                 # only once both are released.
                 defer_on(coordinator.lock, lambda: self._pause_for_account(spec))
 
-            account_attempt = ClaudeAttempt(
+            account_attempt = FailoverAttempt(
                 agent_id=spec.agent_id, trace_id=spec.trace_id, model=spec.model,
                 state=state, owned=lambda: (
                     # Lock-free: the coordinator calls this under its own lock
@@ -2185,8 +2183,8 @@ def _cancel_fenced_janitor_run(ctx, run: dict, agent: dict, backend_registry) ->
     try:
         _remove_queued_run(run_id)
         turn_queue.set_paused(agent_id, queue_was_paused)
-        _CLAUDE_FAILOVER.discard(agent_id, run_id)
-        _CODEX_FAILOVER.discard(agent_id, run_id)
+        for coordinator in _FAILOVERS.values():
+            coordinator.discard(agent_id, run_id)
         _record_janitor_cancelled(ctx, agent_id, run["session"], run_id)
     finally:
         complete_stop(ctx, agent_id, snapshot, {run_id}, backend_registry=backend_registry)
@@ -2194,8 +2192,8 @@ def _cancel_fenced_janitor_run(ctx, run: dict, agent: dict, backend_registry) ->
 
 
 def _recovery_parked(agent_id: str, trace_id: str | None) -> bool:
-    return bool(_CLAUDE_FAILOVER.parked(agent_id, trace_id)
-                or _CODEX_FAILOVER.parked(agent_id, trace_id))
+    return any(coordinator.parked(agent_id, trace_id)
+               for coordinator in _FAILOVERS.values())
 
 
 def snapshot_stop_state(agent_id: str) -> dict:

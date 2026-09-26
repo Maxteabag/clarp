@@ -1080,16 +1080,16 @@ def test_unknown_error_keeps_legacy_idle_flip(tmp_path):
 
 def _enable_account_failover(monkeypatch, *, available=True):
     from dataclasses import replace
-    from lib.claude_failover import ClaudeFailover
+    from lib.account_failover import AccountFailover
     from unittest.mock import Mock
     cfg = replace(_td.config.load(), claude_account_switch_command=("selector",))
     monkeypatch.setattr(_td.config, "load", lambda *args, **kwargs: cfg)
     scheduled = []
-    coordinator = ClaudeFailover(
+    coordinator = AccountFailover(
         _td.OwnershipLock(), switch=Mock(return_value=available),
         schedule=lambda delay, callback: scheduled.append((delay, callback)),
         now=lambda: 100)
-    monkeypatch.setattr(_td, "_CLAUDE_FAILOVER", coordinator)
+    monkeypatch.setitem(_td._FAILOVERS, "claude", coordinator)
     return coordinator, scheduled
 
 
@@ -1398,12 +1398,12 @@ def test_stop_cancels_codex_connection_retry(tmp_path, monkeypatch, stop_during_
 
 def test_codex_account_recovery_preserves_native_identity_and_user_stop(tmp_path,monkeypatch):
     from dataclasses import replace
-    from lib.claude_failover import ClaudeFailover
+    from lib.account_failover import AccountFailover
     from unittest.mock import Mock
     cfg=replace(_td.config.load(),codex_account_switch_command=('codex-selector',))
     monkeypatch.setattr(_td.config,'load',lambda *args,**kwargs:cfg)
-    scheduled=[];coordinator=ClaudeFailover(_td._TURN_LOCK,switch=Mock(return_value=True),schedule=lambda d,f:scheduled.append((d,f)),now=lambda:100)
-    monkeypatch.setattr(_td,'_CODEX_FAILOVER',coordinator)
+    scheduled=[];coordinator=AccountFailover(_td._TURN_LOCK,switch=Mock(return_value=True),schedule=lambda d,f:scheduled.append((d,f)),now=lambda:100)
+    monkeypatch.setitem(_td._FAILOVERS, "codex", coordinator)
     service,backend,aid=_make_service(tmp_path)
     agents_db.update_agent(aid,backend='codex')
     service.dispatch(text='Continue current task',requested_session='mike',trace_id='codex-owned',synthesize_audio=False)

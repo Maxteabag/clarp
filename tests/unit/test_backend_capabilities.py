@@ -295,9 +295,11 @@ def test_resume_target_drives_transcript_checks(tmp_path):
 
 def test_account_pool_lookup_matches_the_coordinators(monkeypatch):
     from lib import turn_dispatch as td
+    # One coordinator per pool the backends declare, none listed by hand.
+    assert set(td._FAILOVERS) == {"claude", "codex"}
     claude_pool, codex_pool = object(), object()
-    monkeypatch.setattr(td, "_CLAUDE_FAILOVER", claude_pool)
-    monkeypatch.setattr(td, "_CODEX_FAILOVER", codex_pool)
+    monkeypatch.setitem(td._FAILOVERS, "claude", claude_pool)
+    monkeypatch.setitem(td._FAILOVERS, "codex", codex_pool)
     monkeypatch.setattr(td.config, "load", lambda: SimpleNamespace(
         claude_account_switch_command=("claude-switch",),
         codex_account_switch_command=("codex-switch",)))
