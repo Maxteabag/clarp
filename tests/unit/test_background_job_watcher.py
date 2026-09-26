@@ -21,7 +21,8 @@ def test_watcher_emits_typed_persisted_job_change():
 
     watcher._poll_once()
 
-    assert stream.events == [{
+    assert stream.events[1:] == [{"type": "agent-roster", "kind": "background-job"}]
+    assert stream.events[:1] == [{
         "type": "background-job-updated",
         "change_revision": job["revision"],
         "observed_at": job["updated_at"],
@@ -64,3 +65,22 @@ def test_watcher_does_not_persist_or_emit_liveness_only_heartbeat():
     watcher._poll_once()
 
     assert stream.events == []
+
+
+def test_roster_is_nudged_only_when_a_job_changes_status():
+    agents.create_agent(
+        persona="Nadia", voice_id="voice", cwd="/tmp", session="nadia-nudge")
+    stream = FakeStream()
+    watcher = BackgroundJobWatcher(stream)
+    watcher._last_id = background_jobs.latest_event_id()
+    job = background_jobs.upsert(
+        session="nadia-nudge", job_id="sub-agent-x", kind="sub-agent", title="Helper")
+    watcher._poll_once()
+    background_jobs.upsert(
+        session="nadia-nudge", job_id="sub-agent-x", kind="sub-agent", title="Helper renamed")
+    watcher._poll_once()
+    background_jobs.finish("sub-agent-x", generation=job["generation"])
+    watcher._poll_once()
+    nudges = [e for e in stream.events if e["type"] == "agent-roster"]
+    # started, then finished; the running-to-running update is not a change.
+    assert len(nudges) == 2

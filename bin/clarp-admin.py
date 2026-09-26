@@ -1921,7 +1921,7 @@ def cmd_uninstall(args) -> int:
     for root, names in ((HOME / ".local/bin", [
             "clarp-admin", "clarp-tui", "clarp-agent-tasks", "clarp-agent-artifacts",
             "clarp-podcast-history",
-            "clarp-media-publish", "clarp-agent-bg", "clarp-message-watch",
+            "clarp-media-publish", "clarp-agent-bg", "clarp-sub-agent", "clarp-message-watch",
             "clarp-adopt",
             "clarp-github-workflow-artifact"]),):
         for name in names:
