@@ -54,17 +54,10 @@ def send_plain_http_error(handler, code: int, message: str, *, log_event: str) -
 # themselves. The handler builds one `Principal` per request and hands the
 # library a `Responder`; the library decides and answers through those.
 #
-# TODO(integration): server.py's Handler must expose the handler-side
-# constructors. The three lines it needs (Stream B owns server.py):
-#
-#     from lib.http_utils import HandlerResponder, Principal
-#     def principal(self) -> Principal:
-#         return Principal(bool(self._request_auth_validated), str(self._request_device_scope), str(self._request_principal))
-#     def responder(self) -> HandlerResponder:
-#         return HandlerResponder(self)
-#
-# Until then `principal_of()`/`responder_of()` below fall back to reading the
-# private attributes - the one place in server/lib allowed to know their names.
+# server.Handler builds both through `principal()` and `responder()`. The
+# fallbacks in `principal_of()`/`responder_of()` serve test doubles that stub
+# the auth gate's attributes instead of subclassing Handler; this is the one
+# place in server/lib allowed to know those attribute names.
 
 
 @dataclass(frozen=True)

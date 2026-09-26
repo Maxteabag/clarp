@@ -70,7 +70,7 @@ from lib.calendar_request import CalendarRequestError, build_calendar_request  #
 from lib import trace as _trace  # noqa: E402
 from lib import events  # noqa: E402
 from lib import identity  # noqa: E402
-from lib.http_utils import redact_query_secrets  # noqa: E402
+from lib.http_utils import HandlerResponder, Principal, redact_query_secrets  # noqa: E402
 from lib.log import log, log_exception  # noqa: E402
 from lib.paths import RuntimePaths, _safe_session  # noqa: E402
 from lib.focus import current_focus_session  # noqa: E402
@@ -848,6 +848,17 @@ class Handler(BaseHTTPRequestHandler):
     _PUBLIC_EXACT = {"/", "/sw.js", "/manifest.json",
                      "/styles.css", "/icon.png", "/pairing/exchange"}
     _PUBLIC_PREFIXES = ("/static/", "/notification-avatars/")
+
+    def principal(self) -> Principal:
+        """Who is asking, as `_authorized` decided it for this request. Library
+        modules receive this instead of reading the attributes below."""
+        return Principal(
+            authenticated=bool(getattr(self, "_request_auth_validated", False)),
+            device_scope=str(getattr(self, "_request_device_scope", "") or ""),
+            principal=str(getattr(self, "_request_principal", "") or ""))
+
+    def responder(self) -> HandlerResponder:
+        return HandlerResponder(self)
 
     def _authorized(self) -> bool:
         self._request_auth_validated = False
