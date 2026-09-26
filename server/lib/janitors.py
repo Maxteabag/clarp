@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from . import agents, backends, db, scheduler, turn_queue
 from . import janitor_store as store
 from .janitor_store import MAX_PAYLOAD_BYTES, JanitorError  # noqa: F401 - re-exported
-from . import turn_lifecycle
+from . import identity, turn_lifecycle
 from .protocol import AgentState
 from .turn_lifecycle import TurnEvent
 
@@ -171,7 +171,7 @@ def trigger_definitions() -> list[dict]:
 def _agent(session: str) -> dict:
     if not isinstance(session, str) or not session or len(session) > 160:
         raise JanitorError("Invalid agent identity")
-    a = agents.get_by_session(session) or agents.get_by_agent_id(session)
+    a = identity.lookup(session)
     if not a:
         raise JanitorError("Agent not found", 404, "agent_not_found")
     return a

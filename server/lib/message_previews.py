@@ -6,7 +6,7 @@ projection, activity clocks and revision watermarks.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .db import conn
 from . import origins, team_leader
@@ -14,6 +14,9 @@ from .revisioned_cache import RevisionedCache
 from .voice_markup import clean_for_display
 from .message_context import _automation_kind, _display_text_for_message
 from .message_writes import _message_activity_sql
+
+if TYPE_CHECKING:
+    from .identity import AgentRef
 
 
 def _client_tools(tools: Any, display_cells: Any) -> list:
@@ -328,14 +331,12 @@ def last_message_activity(*, agent_id: str) -> int:
     return int(row["t"] or 0)
 
 
-def message_tool_details(*, session: str, message_id: str) -> dict[str, Any] | None:
+def message_tool_details(*, agent: "AgentRef", message_id: str) -> dict[str, Any] | None:
     """Return the heavy tool payload for one message, scoped to its agent."""
     row = conn().execute(
-        """SELECT m.tools_json, m.display_cells_json
-             FROM messages m
-             JOIN agents a ON a.agent_id = m.agent_id
-            WHERE a.session = ? AND m.message_id = ? AND a.deleted_at IS NULL""",
-        (session, message_id),
+        """SELECT tools_json, display_cells_json FROM messages
+            WHERE agent_id = ? AND message_id = ?""",
+        (agent.agent_id, message_id),
     ).fetchone()
     if row is None:
         return None

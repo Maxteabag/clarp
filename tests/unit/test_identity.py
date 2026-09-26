@@ -102,3 +102,17 @@ def test_refs_are_frozen_and_hashable():
         pass
     else:
         raise AssertionError("AgentRef must be frozen")
+
+
+def test_only_identity_translates_between_session_and_agent_id():
+    """Rule 3: the 'try it as a session, then as an agent id' fallback lives
+    in identity.lookup; nowhere else pairs the two getters."""
+    import pathlib
+    import re
+    server = pathlib.Path(__file__).resolve().parents[2] / "server"
+    pattern = re.compile(
+        r"get_by_session\([^)]*\)\s+or\s+\w*\.?get_by_agent_id\("
+        r"|get_by_agent_id\([^)]*\)\s+or\s+\w*\.?get_by_session\(")
+    offenders = [str(path.relative_to(server)) for path in server.rglob("*.py")
+                 if path.name != "identity.py" and pattern.search(path.read_text())]
+    assert not offenders, offenders

@@ -2554,8 +2554,9 @@ class Handler(BaseHTTPRequestHandler):
         message_id = (qs.get("message_id", [""])[0] or "").strip()
         if not session or not message_id:
             return self._json_error(400, "session and message_id required")
-        details = message_store.message_tool_details(
-            session=session, message_id=message_id)
+        agent = identity.resolve(session)
+        details = (message_store.message_tool_details(agent=agent, message_id=message_id)
+                   if agent is not None else None)
         if details is None:
             return self._json_error(404, "message not found")
         self._json_ok(details)
