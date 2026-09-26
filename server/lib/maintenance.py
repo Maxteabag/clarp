@@ -26,6 +26,8 @@ class Policy:
     turn_usage_max_age_ms: int = 30 * DAY_MS
     background_job_events_max_age_ms: int = 30 * DAY_MS
     judgment_decisions_max_age_ms: int = 30 * DAY_MS
+    # None reads [agents] helper_archive_grace_hours on every sweep.
+    helper_archive_grace_ms: int | None = None
 
 
 def prune_database(*, now_ms: int | None = None,
@@ -77,6 +79,18 @@ def prune_database(*, now_ms: int | None = None,
     return counts
 
 
+def archive_done_helpers(*, now_ms: int | None = None, policy: Policy = Policy(),
+                         stream=None) -> int:
+    """Archive helper agents that have been done for longer than the grace."""
+    from . import helper_agents
+    grace = policy.helper_archive_grace_ms
+    if grace is None:
+        from . import config
+        grace = int(config.load().helper_archive_grace_hours * HOUR_MS)
+    now_ms = db.now_ms() if now_ms is None else int(now_ms)
+    return len(helper_agents.archive_finished(now_ms=now_ms, grace_ms=grace, stream=stream))
+
+
 def prune_hls_artifacts(audio_dir: pathlib.Path, *, now_ms: int | None = None,
                         max_age_ms: int = Policy().hls_artifact_max_age_ms) -> int:
     now_ms = db.now_ms() if now_ms is None else int(now_ms)
@@ -112,8 +126,9 @@ class MaintenanceWorker:
 
     def __init__(self, *, audio_dir: pathlib.Path, policy: Policy = Policy(),
                  interval_sec: float = 60 * 60,
-                 startup_delay_sec: float | None = None):
+                 startup_delay_sec: float | None = None, stream=None):
         self.audio_dir = pathlib.Path(audio_dir)
+        self.stream = stream
         self.policy = policy
         self.interval_sec = interval_sec
         self.startup_delay_sec = (
@@ -142,6 +157,11 @@ class MaintenanceWorker:
             self.audio_dir, max_age_ms=self.policy.hls_artifact_max_age_ms,
         )}
         counts.update(prune_database(policy=self.policy))
+        try:
+            counts["helpers_archived"] = archive_done_helpers(
+                policy=self.policy, stream=self.stream)
+        except Exception as e:  # noqa: BLE001
+            log_exception("helperArchiveFail", e)
         try:
             from . import telemetry
             counts.update(telemetry.rollup_and_prune())
