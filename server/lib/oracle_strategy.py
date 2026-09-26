@@ -69,15 +69,16 @@ def contact(requested, *, strategy, source):
     return selected
 
 
-def direct_proposal(conversation, tools, call_id, *, target=None):
+def direct_proposal(conversation, tools, call_id, *, target=None, current=None):
     """The one action for a direct turn: the primary, or ``target`` while the
-    user is talking to that agent directly (see oracle_voices)."""
+    user is talking to that agent directly (see oracle_voices). ``current`` is
+    the whole current utterance; without it, the newest user fragment."""
     selected = target or getattr(tools, 'fallback', '')
     if not selected:
         raise ValueError('No selected primary contact; no work dispatched')
     # Validate at admission too: contacts can disappear after session setup.
     tools.resolve(selected)
-    latest = next((row['text'] for row in reversed(conversation)
+    latest = (current or '').strip() or next((row['text'] for row in reversed(conversation)
                    if row.get('role') == 'user' and row.get('text', '').strip()), '')
     if not latest:
         return {'output': [{'type': 'message', 'content': [{'type': 'output_text',

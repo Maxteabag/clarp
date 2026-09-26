@@ -44,7 +44,7 @@ OUTPUT_HANGOVER = 1.2
 
 _AUDIO_EVENTS = {"session.input_audio.append": "audio", "session.output_audio.delta": "delta"}
 # Journal fields worth keeping per event; audio payloads are counted, never copied.
-_JOURNAL_FIELDS = ("delta", "start_ms", "end_ms", "delegation", "delegation_id", "content",
+_JOURNAL_FIELDS = ("delta", "start_ms", "end_ms", "delegation", "delegation_id", "content", "name", "agent",
                    "usage", "error", "message", "reason", "event_id", "client_event_id", "session_id")
 
 
@@ -128,10 +128,25 @@ SWAP_ANNOUNCE_TIMEOUT = 5.0
 # Upper bound on the conversation excerpt a swapped-in session starts with
 # when there is no durable thread (GPT-Live accepts 8192 input tokens).
 SWAP_HISTORY_BYTES = 6000
+# Oracle saying it is putting the user through while the Host starts no
+# switch within this long means the user is about to talk to silence (call
+# 7946a1a7); the Host corrects it.
+SWITCH_CLAIM_GRACE_SECONDS = 2.0
+# A switch the Host requested this long before Oracle's words backs them.
+SWITCH_CLAIM_WINDOW_SECONDS = 10.0
+_SWITCH_CLAIM = __import__("re").compile(
+    r"\b(?:put(?:ting)? you (?:straight )?through|connecting you|switching you|switching (?:over )?to"
+    r"|transferring you|handing you (?:over|back)|you're (?:now )?(?:connected|through) to)\b")
+# A user who has been talking this long with no delegation and no reply, and
+# has then paused for RESULT_RELEASE_SILENCE_SECONDS, gets Oracle nudged.
+UNANSWERED_SECONDS = 8.0
+# An earcon (oracle_earcons) waits until Oracle's audio has been silent this
+# long, so a cue never lands between two chunks of a reply.
+EARCON_QUIET_SECONDS = 0.6
 DECISION_POLL_SECONDS = 1.0
 DECISION_PRESENTATION_COOLDOWN_SECONDS = 4.0
 from .oracle_prompt import PROMPT  # one voice prompt for every engine
-from . import oracle_attention, oracle_relay, oracle_strategy, oracle_voice_context, oracle_memory, oracle_voices
+from . import oracle_attention, oracle_earcons, oracle_relay, oracle_strategy, oracle_voice_context, oracle_memory, oracle_voices
 ROUTING = """Route every actionable request in current_user_requests using the
 actual roster and authoritative task records. These are the new unadmitted
 user fragments; conversation is historical reference for resolving their
@@ -182,6 +197,28 @@ def _current_user_requests(conversation, boundary):
         elif revision > boundary:
             current.append(row)
     return current
+
+
+def _current_utterance(conversation, boundary):
+    """The user's current turn: unrouted user fragments since Oracle last spoke.
+
+    The provider splits one utterance into fragments at every pause, so
+    "can you put me through to" and, 1.8 s later, "Marcus" are two rows (call
+    7946a1a7). The turn is all of them, not the newest one. Speech before
+    Oracle's last words was already answered or ignored by Oracle.
+    """
+    rows = []
+    for row in conversation:
+        if row.get("role") == "assistant" and str(row.get("text") or "").strip():
+            rows = []
+        elif row.get("role") == "user":
+            rows.append(row)
+    wanted = {id(row) for row in _current_user_requests(conversation, boundary)}
+    return [row for row in rows if id(row) in wanted]
+
+
+def _turn_text(rows):
+    return " ".join(str(row.get("text") or "").strip() for row in rows if str(row.get("text") or "").strip())
 
 
 def router_tools():
@@ -279,6 +316,10 @@ def client_event(raw):
             if value["narration"] not in ("on", "off"):
                 return None
             event["narration"] = value["narration"]
+        if "earcons" in value:
+            if not isinstance(value["earcons"], bool):
+                return None
+            event["earcons"] = value["earcons"]
         return event if len(event) > 1 else None
     return None
 
@@ -318,12 +359,26 @@ class Conversation:
         self.active_relay = None
         self.narration = "on"
         self.progress_interval = 0
+        # Sound cues ([oracle] earcons, or the earcons preference); queued
+        # while Oracle speaks.
+        self.earcons = True
+        self.cue_queue = []
         # Talking to an agent directly: {"persona", "session", "voice"}, or
         # None while the user talks to Oracle. A requested switch waits in
         # pending_swap for Oracle's announcement; open_upstream(session) ->
         # (socket, provider session id) is supplied by serve().
         self.contact = None
         self.pending_swap = None
+        # The last turn ended in "put me through to" with no name yet.
+        self.switch_dangling = False
+        # Void guards: Oracle's words since the user last spoke, when it
+        # claimed a switch, when the Host last requested one, and when the
+        # user started talking without a reply.
+        self.output_turn = ""
+        self.switch_claim_at = None
+        self.last_switch_at = None
+        self.unanswered_since = None
+        self.unanswered_nudged = False
         self.open_upstream = None
         self.voice_overrides = {}
         self.voice_context = None
@@ -368,6 +423,7 @@ class Conversation:
             self.forwarded_findings = saved.get("forwarded_findings", {})
             self.relay_cursors = dict(saved.get("relay_cursors", {}))
             self.narration = saved.get("narration", "on")
+            self.earcons = saved.get("earcons", True) is not False
             with self.tools.lock:
                 self.tools.delegations.update(row["delegation_id"] for row in self.memory.work())
 
@@ -378,6 +434,7 @@ class Conversation:
                     "results_sent": sorted(self.results_sent), "forwarded_findings": self.forwarded_findings,
                     "provider_session": self.provider_session,
                     "relay_cursors": self.relay_cursors, "narration": self.narration,
+                    "earcons": self.earcons,
                     "routed_revision": self.routed_revision})
 
     def journal_event(self, direction, event):
@@ -438,8 +495,14 @@ class Conversation:
                 self.narration = narration
                 self.append("instructions", NARRATION_OFF if narration == "off" else NARRATION_ON)
                 self.checkpoint()
+            if "earcons" in event and event["earcons"] != self.earcons:
+                with self.lock:
+                    self.earcons = event["earcons"]
+                    if not self.earcons:
+                        self.cue_queue.clear()
+                self.checkpoint()
             receipt = {"type": "oracle_v2.preferences", "progress_interval_seconds": self.progress_interval,
-                       "narration": self.narration}
+                       "narration": self.narration, "earcons": self.earcons}
             self.journal_event("host", receipt)
             self.downstream(receipt)
             return
@@ -471,6 +534,8 @@ class Conversation:
             if audible(data):
                 self.last_output = now
                 self.last_output_active = True
+                self.unanswered_since = None
+                self.unanswered_nudged = False
                 self.counts["out_audible"] += 1
                 self.journal_event("server", event)
                 self.downstream(event)
@@ -493,6 +558,13 @@ class Conversation:
                 if role == "user" and text.strip():
                     self.revision += 1
                     self.last_transcript = self.clock()
+                    self.output_turn = ""
+                    if self.unanswered_since is None:
+                        self.unanswered_since = self.last_transcript
+                elif role == "assistant" and text.strip():
+                    self.unanswered_since = None
+                    self.unanswered_nudged = False
+                    self.watch_switch_claim(text)
                 previous = self.fragments[-1] if (self.fragments and self.fragments[-1]["role"] == role
                     and self.fragments[-1].get("provider_session") == self.provider_session) else None
                 previous_is_current = (previous and
@@ -514,6 +586,7 @@ class Conversation:
         elif kind == "session.delegation.created":
             ident = event.get("delegation", {}).get("id")
             with self.lock:
+                self.unanswered_since = None
                 if ident and ident not in self.seen:
                     self.seen.add(ident)
                     self.routing += 1
@@ -530,6 +603,8 @@ class Conversation:
                     "items":self.memory.contexts(), "revision":self.revision})
 
     def route(self, ident):
+        with self.lock:
+            self.unanswered_since = None
         try:
             with self.route_lock:
                 routed_revision = None
@@ -587,7 +662,8 @@ class Conversation:
                             return
                         result = oracle_strategy.direct_proposal(conversation, self.tools,
                             "direct-" + self.direct_call_prefix + "-" + str(revision),
-                            target=contact["session"] if contact else None)
+                            target=contact["session"] if contact else None,
+                            current=_turn_text(_current_utterance(conversation, self.routed_revision)))
                     else:
                         request = Request("https://api.openai.com/v1/responses", json.dumps(body).encode(),
                                           {"Authorization": "Bearer "+self.api_key, "Content-Type": "application/json"})
@@ -659,6 +735,8 @@ class Conversation:
                             if self.journal:
                                 self.journal.record("router.receipt", {"delegation_id": ident,
                                     "call_id": call_id, "result": output})
+                            if output.get("status") in ("accepted", "queued"):
+                                self.cue("handed_off")
                             if direct and output.get("status") in ("accepted", "queued"):
                                 self.direct_admitted_revisions.add(revision)
                                 self.append("thinking", oracle_strategy.admission_context(
@@ -692,6 +770,8 @@ class Conversation:
             self.mark_relay_spoken()
             self.journal_event("host", {"type": "oracle_v2.quiet"})
             self.downstream({"type": "oracle_v2.quiet"})
+        self.flush_cues(now)
+        self.guard_void(now)
         if self.pending_swap is not None:
             # Nothing new goes to a session that is about to be replaced.
             self.advance_swap(now)
@@ -717,6 +797,8 @@ class Conversation:
             row = self.pending.pop(0)
             self.last_append = now
         relay = self.relay_for(row)
+        if row["status"] == "completed" and relay.next == 0:
+            self.cue("result")
         if self.contact is not None and row.get("session") == self.contact["session"]:
             relay.verbatim = True  # the agent's own words, in the agent's voice
         if self.delegation_strategy == "direct_contact":
@@ -875,8 +957,7 @@ class Conversation:
         # The whole unrouted turn, not just its newest fragment: the provider
         # split "read the transcript to" / "me" in call cedb186d, and a meta
         # tail must not hide earlier unrouted work ("ask Theo ...", "and read it").
-        current = _current_user_requests(conversation, self.routed_revision)
-        latest = " ".join(str(row.get("text") or "").strip() for row in current) or next(
+        latest = _turn_text(_current_utterance(conversation, self.routed_revision)) or next(
             (row["text"] for row in reversed(conversation)
              if row.get("role") == "user" and str(row.get("text") or "").strip()), "")
         meta = oracle_relay.classify(latest)
@@ -927,21 +1008,144 @@ class Conversation:
                 return
             relay.done = max(relay.done, relay.next)
 
-    def serve_contact_switch(self, conversation, revision):
-        """Start a switch for an unrouted turn that is only a switch phrase."""
-        current = _current_user_requests(conversation, self.routed_revision)
-        latest = " ".join(str(row.get("text") or "").strip() for row in current)
-        wanted = oracle_voices.switch_request(latest)
-        if wanted is None:
+    def cue(self, name, persona=None):
+        """Play earcon ``name`` on the phone once Oracle is not speaking.
+
+        The cue goes down as ``oracle_v2.cue {name, agent?}`` followed by its
+        audio as a ``session.output_audio.delta``, which every client already
+        plays; a client that renders cues itself can drop that audio.
+        """
+        if not self.earcons:
+            return
+        with self.lock:
+            self.cue_queue.append((name, persona))
+        self.flush_cues()
+
+    def flush_cues(self, now=None):
+        now = self.clock() if now is None else now
+        with self.lock:
+            if not self.cue_queue or not self.earcons or now - self.last_output < EARCON_QUIET_SECONDS:
+                return
+            cues, self.cue_queue = self.cue_queue, []
+            speaking = self.last_output_active
+        for name, persona in cues:
+            event = {"type": "oracle_v2.cue", "name": name}
+            if persona:
+                event["agent"] = persona
+            audio = {"type": "session.output_audio.delta",
+                     "delta": base64.b64encode(oracle_earcons.pcm(name, persona)).decode()}
+            self.journal_event("host", event)
+            self.journal_event("host", audio)
+            self.downstream(event)
+            self.downstream(audio)
+        if not speaking:
+            # The phone shows "speaking" while it plays audio; end the cue's turn.
+            self.journal_event("host", {"type": "oracle_v2.quiet"})
+            self.downstream({"type": "oracle_v2.quiet"})
+
+    def knows_agent(self, name):
+        try:
+            self.tools.resolve(name)
+        except ValueError:
             return False
+        return True
+
+    def serve_contact_switch(self, conversation, revision):
+        """Start a switch for an unrouted turn that is only a switch phrase.
+
+        A switch request is never also work: a phrase that stops before the
+        name waits for the name, and in direct mode a name that is not on the
+        roster is answered here instead of going to the primary.
+        """
+        text = _turn_text(_current_utterance(conversation, self.routed_revision))
+        wanted = oracle_voices.switch_request(text, known=self.knows_agent)
+        dangling, self.switch_dangling = self.switch_dangling, False
+        if wanted is None and dangling:
+            name = oracle_voices.bare_name(text, self.knows_agent)
+            wanted = ("agent", name) if name else None
+        if wanted is None:
+            if oracle_voices.dangling_switch(text):
+                self.switch_dangling = True
+                if self.journal:
+                    self.journal.record("route.contact_switch_dangling", {"revision": revision})
+                return True
+            unknown = oracle_voices.switch_request(text)
+            if unknown is None or self.delegation_strategy != "direct_contact" or self.contact is not None:
+                return False
+            name = unknown[1]
+            log("oracleV2SwitchUnknown", f"name={name}")
+            if self.journal:
+                self.journal.record("route.contact_switch_unknown", {"revision": revision, "target": name})
+            self.cue("switch_failed")
+            self.append("commentary", f"Host note: there is no agent called {name.title()} on the roster, so the "
+                        "Host did not switch the call. Tell the user so in one short sentence, say they are still "
+                        "talking to you, and ask who they meant.")
+            return True
         kind, name = wanted
         try:
             served = self.request_switch(name if kind == "agent" else "oracle")
         except ValueError:
-            return False  # not an agent we know: route the turn as usual
+            return False  # resolved a moment ago; the roster changed: route as usual
         if self.journal:
             self.journal.record("route.contact_switch", {"revision": revision, "target": name or "oracle"})
         return served
+
+    def watch_switch_claim(self, text):
+        """Oracle's words so far this turn; note when they claim a switch.
+
+        Called with self.lock held.
+        """
+        self.output_turn = (self.output_turn + text)[-400:]
+        if self.switch_claim_at is not None or not _SWITCH_CLAIM.search(
+                self.output_turn.casefold().replace("\u2019", "'")):
+            return
+        now = self.clock()
+        if self.pending_swap is not None or (
+                self.last_switch_at is not None and now - self.last_switch_at < SWITCH_CLAIM_WINDOW_SECONDS):
+            return
+        self.switch_claim_at = now
+
+    def guard_void(self, now):
+        """Never leave the user talking to silence.
+
+        Oracle claimed a switch the Host never started: say so plainly. The
+        user has talked for a while with no delegation and no reply: nudge
+        Oracle to answer.
+        """
+        with self.lock:
+            claim = self.switch_claim_at
+            if claim is not None and now - claim >= SWITCH_CLAIM_GRACE_SECONDS:
+                self.switch_claim_at = None
+                backed = self.pending_swap is not None or (
+                    self.last_switch_at is not None and self.last_switch_at > claim - SWITCH_CLAIM_WINDOW_SECONDS)
+            else:
+                backed = None
+            since = self.unanswered_since
+            nudge = (since is not None and not self.unanswered_nudged and not self.routing
+                     and self.pending_swap is None
+                     and now - since >= UNANSWERED_SECONDS
+                     and now - self.last_transcript >= RESULT_RELEASE_SILENCE_SECONDS)
+            if nudge:
+                self.unanswered_nudged = True
+        who = self.contact["persona"] if self.contact else "Oracle"
+        if backed is False:
+            log("oracleV2SwitchClaimUnbacked", f"speaker={who} waited={now - claim:.1f}s")
+            if self.journal:
+                self.journal.record("contact.switch_claim_unbacked", {"speaker": who,
+                                                                       "waited_s": round(now - claim, 1)})
+            self.cue("switch_failed")
+            self.append("commentary", "Host note: you said you were putting the user through, but the Host could "
+                        f"not connect them and the call has not switched. Tell the user plainly, in one short "
+                        f"sentence, that you could not connect them and that they are still talking to {who}, "
+                        "then ask what they would like.")
+        if nudge:
+            log("oracleV2UnansweredNudge", f"speaker={who} talking_for={now - since:.1f}s")
+            if self.journal:
+                self.journal.record("turn.unanswered_nudge", {"speaker": who,
+                    "talking_for_s": round(now - since, 1), "silent_for_s": round(now - self.last_transcript, 1)})
+            self.append("commentary", f"Host note: the user has been speaking for a while and has had no reply. "
+                        f"Answer them now, as {who}. If they seem to be waiting for someone, tell them plainly "
+                        f"that they are talking to {who} and hand any request to the Host.")
 
     def request_switch(self, name):
         """Queue a switch to agent ``name`` or back to Oracle.
@@ -964,11 +1168,13 @@ class Conversation:
             return True
         with self.lock:
             self.pending_swap = {"contact": contact, "announced_at": None}
+            self.last_switch_at = self.clock()
+        self.cue("switch_started")
         if self.journal:
             self.journal.record("contact.switch_requested", {"to": who,
                 "voice": contact["voice"] if contact else VOICE})
         if self.narration != "off":
-            line = f"Putting you through to {who}." if contact else "Handing you back to Oracle."
+            line = f"Connecting you to {who}." if contact else "Connecting you back to Oracle."
             self.append("commentary", "Host note: the Host is switching this call to another voice. "
                         f'Say only this, briefly, and nothing else: "{line}"')
             with self.lock:
@@ -1031,8 +1237,11 @@ class Conversation:
                                                             "error_type": type(exc).__name__})
             with self.lock:
                 self.pending_swap = None
+            current = self.contact["persona"] if self.contact else "Oracle"
+            self.cue("switch_failed")
             self.append("commentary", f"Host note: the Host could not put the user through to {who}; the "
-                        "new line did not open. Tell the user so in one short sentence and carry on as before.")
+                        "new line did not open. Tell the user plainly, in one short sentence, that you could not "
+                        f"connect them and that they are still talking to {current}, then carry on as before.")
             return False
         with self.lock:
             relay = self.active_relay
@@ -1056,6 +1265,10 @@ class Conversation:
                                                     "provider_session": self.provider_session})
         self.downstream({"type": "oracle_v2.contact", "agent": contact["persona"] if contact else None,
                          "session": contact["session"] if contact else None, "voice": voice})
+        if contact:
+            self.cue("connected", contact["persona"])
+        else:
+            self.cue("back_to_oracle")
         if self.narration == "off":
             self.append("instructions", NARRATION_OFF)
         self.checkpoint()
@@ -1342,6 +1555,8 @@ def serve(handler):
             conversation = Conversation(upstream, downstream, tools, key, delegation_strategy=strategy, memory=memory, provider_session=token)
             conversation.open_upstream = lambda session: _open_upstream(key, session)
             conversation.voice_overrides = dict(getattr(cfg, "oracle_agent_voices", {}) or {})
+            if not getattr(cfg, "oracle_earcons", True):
+                conversation.earcons = False
             conversation.voice_context = voice_context
         if getattr(cfg, "oracle_diagnostics", False):
             from .oracle_diagnostics import OracleJournal
