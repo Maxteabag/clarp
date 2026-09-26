@@ -134,7 +134,7 @@ may contain multiple providers.
 
 Read `GET /agent-model-options` and select an exact ID from
 `providers[BACKEND].models`. `POST /agents` accepts `model` at creation; verify the
-stored override via `/agent-llm` and the snapshot before dispatch. Preserve the
+stored override with `clarp-admin model --session SESSION` before dispatch. Preserve the
 returned session slug. A creation response alone does not prove a model turn ran.
 
 For multi-step delegated engineering, commit a durable handoff in the project,

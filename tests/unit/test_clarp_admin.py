@@ -1237,3 +1237,84 @@ def test_schedule_list_prints_the_next_run_time(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "[ENABLED] hourly (ID: sched_1)" in out
     assert "Next:    2026-09-12 17:00:00 UTC" in out
+
+
+def _model_api(monkeypatch, *, refuse: bytes = b""):
+    calls = []
+
+    def fake(method, path, body=None, **_kw):
+        calls.append((method, path, body))
+        if path == "/agent-model-options":
+            return {"providers": {"claude": {"models": [
+                {"id": "claude-opus-5-5"}, {"id": "sonnet"}]}}}
+        if refuse:
+            raise admin.urllib.error.HTTPError(path, 400, "bad", {}, __import__("io").BytesIO(refuse))
+        return {"ok": True, "backend": "claude", "model": body.get("model", ""),
+                "effort": body.get("effort", ""), "valid_efforts": ["high"]}
+
+    monkeypatch.setattr(admin, "api_request", fake)
+    return calls
+
+
+def test_model_defaults_to_own_session_and_sets_override(monkeypatch, capsys):
+    from lib import agents
+
+    agents.create_agent(persona="Marcus", voice_id="v", cwd="/w",
+                        session="marcus", backend="claude")
+    monkeypatch.setenv("CLAUDE_PWA_SESSION", "marcus")
+    calls = _model_api(monkeypatch)
+    args = admin.parser().parse_args(["model", "claude-opus-5-5", "--effort", "default"])
+
+    assert args.func(args) == 0
+    assert calls[-1] == ("POST", "/agent-llm", {
+        "session": "marcus", "model": "claude-opus-5-5", "effort": ""})
+    out = json.loads(capsys.readouterr().out)
+    assert out["session"] == "marcus" and out["applies"] == "next turn"
+
+
+def test_model_without_changes_shows_current_and_catalog(monkeypatch, capsys):
+    from lib import agents
+
+    agents.create_agent(persona="Lena", voice_id="v", cwd="/w",
+                        session="lena", backend="claude")
+    agents.update_agent(agents.get_by_session("lena")["agent_id"], model="sonnet")
+    _model_api(monkeypatch)
+    args = admin.parser().parse_args(["model", "--session", "lena"])
+
+    assert args.func(args) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["model"] == "sonnet"
+    assert out["available"] == ["claude-opus-5-5", "sonnet"]
+
+
+def test_model_reports_server_refusal(monkeypatch):
+    from lib import agents
+
+    agents.create_agent(persona="Lena", voice_id="v", cwd="/w",
+                        session="lena", backend="claude")
+    _model_api(monkeypatch, refuse=b'{"error":"invalid effort for backend"}')
+    args = admin.parser().parse_args(["model", "sonnet", "--effort", "ultra", "--session", "lena"])
+
+    with pytest.raises(SystemExit, match="invalid effort"):
+        args.func(args)
+
+
+def test_model_rejects_unadvertised_id_before_posting(monkeypatch):
+    from lib import agents
+
+    agents.create_agent(persona="Lena", voice_id="v", cwd="/w",
+                        session="lena", backend="claude")
+    calls = _model_api(monkeypatch)
+    args = admin.parser().parse_args(["model", "claude-typo", "--session", "lena"])
+
+    with pytest.raises(SystemExit, match="not an advertised claude model"):
+        args.func(args)
+    assert all(method == "GET" for method, _path, _body in calls)
+
+
+def test_model_requires_a_session(monkeypatch):
+    monkeypatch.delenv("CLAUDE_PWA_SESSION", raising=False)
+    args = admin.parser().parse_args(["model", "sonnet"])
+
+    with pytest.raises(SystemExit, match="no session"):
+        args.func(args)
