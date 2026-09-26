@@ -220,8 +220,9 @@ def test_runtime_rpc_owns_dispatch_across_client_replacement(tmp_path):
         assert replacement_server_process.status()["active"] == {
             "agent-1": "trace-1"}
         assert replacement_server_process.recover_queued() == 4
-        assert dispatch.calls == [{
-            "text": "keep working", "requested_session": "theo"}]
+        # The whole command crosses the wire, defaults included.
+        assert dispatch.calls == [turn_dispatch.DispatchCommand(
+            text="keep working", requested_session="theo").as_kwargs()]
         assert socket_path.stat().st_mode & 0o777 == 0o600
     finally:
         runtime.shutdown()

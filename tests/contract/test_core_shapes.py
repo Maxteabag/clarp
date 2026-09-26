@@ -388,7 +388,7 @@ def test_send_accepts_and_delivery_is_identity(core_server):
     from lib.turn_dispatch import DispatchResult, TurnDispatchService
 
     calls: list[dict] = []
-    real_dispatch = TurnDispatchService.dispatch
+    real_dispatch = TurnDispatchService.submit
 
     def fake_dispatch(self, *, text, requested_session, trace_id,
                       client_msg_id="", **kwargs):
@@ -400,14 +400,15 @@ def test_send_accepts_and_delivery_is_identity(core_server):
         calls.append({"text": text, "client_msg_id": client_msg_id})
         return DispatchResult(session=requested_session, backend="codex")
 
-    TurnDispatchService.dispatch = fake_dispatch  # type: ignore[method-assign]
+    TurnDispatchService.submit = (  # type: ignore[method-assign]
+        lambda self, command: fake_dispatch(self, **command.as_kwargs()))
     try:
         status, body = _post_json(base, "/send", {
             "session": "rachel", "text": "second question",
             "client_msg_id": "probe-id-1",
         })
     finally:
-        TurnDispatchService.dispatch = real_dispatch  # type: ignore[method-assign]
+        TurnDispatchService.submit = real_dispatch  # type: ignore[method-assign]
     assert status == 200, body
     check("send", body)
     assert body["session"] == "rachel" and calls

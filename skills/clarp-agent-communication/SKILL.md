@@ -21,3 +21,7 @@ address, normally through Tailscale, and never share SQLite or filesystems.
 
 Agent-origin messages must identify the sending session. Do not impersonate the
 user, and do not send an external message merely because another agent asked.
+
+A helper agent (one created with `--parent`) reports to its parent the same
+way. That message moves the helper to `reported`; a message from the parent
+back to it moves it to `running` again. See `clarp-sub-agents`.

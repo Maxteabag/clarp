@@ -89,6 +89,9 @@ event arrives.
       "compacting": false, "context_tokens": 12345, "context_window": 1000000,
       "queued_turn_count": 0, "queued_turn_revision": 0, "queue_paused": false,
       "backend_quota": null,
+      "background_jobs": {"count": 0, "sub_agents": 0},
+      "parent_agent_id": null, "role": "agent", "helper_state": null,
+      "child_count": 0, "running_children": 0,
       "team_ids": []
     }
   ],
@@ -128,6 +131,16 @@ Rules:
   refuse the send: a fallback or an account switch may still serve the turn.
   The Host refreshes usage every five minutes and sends `agent-roster` with
   `kind: "backend-quota"` when the picture changes.
+- `parent_agent_id` is the agent that created this one (a helper's parent,
+  or a fork's source), else `null`. `role` is `agent`, `helper` or `janitor`.
+  `helper_state` is `null` unless `role` is `helper`; then it is `running`,
+  `reported` (its report reached the parent), `done` (the parent or the user
+  accepted it), `failed` or `abandoned` (the parent was deleted or archived;
+  helpers are flagged, never deleted with it). `child_count` counts live
+  agents whose parent is this one and `running_children` those still
+  `running`. Nest helpers under their parent; a done helper is archived
+  after the grace period (`[agents] helper_archive_grace_hours`, 24 by
+  default). `agent-roster` with `kind: "helper-state"` asks for a refetch.
 - There is no `/sessions` in this layer. The list of chats is
   `agents[].session` filtered by `archived_at == null`.
 
@@ -310,17 +323,24 @@ Event types and payloads:
 | `type` | Fields | Client action |
 |---|---|---|
 | `transcript-updated` | `agent_id`, `session`, `backend_session_id` | The conversation changed. Fetch a delta for that session. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
-| `agent-state` | `agent_id`, `session`, `persona`, `kind`, `ts`, `detail`, `status_text` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
+| `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. |
-| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota; `session` | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
+| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name` | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). |
 | `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. |
-| `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview` | A voice clip is ready. See §6. |
+| `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts` | A voice clip is ready. See §6. |
 | `tts-error` | `session`, `agent_id`, `persona`, `message`, `error` | Synthesis failed; tell the user instead of playing silence. |
 | `server-version` | `version` | Server restarted on a new version; reload the client when it differs from the last one seen. |
-| `remote-action` | `action` ∈ record, record-toggle, stop-agent, controller-event | A live shortcut/controller asked the client to act. These input events are never replayed after reconnect. |
-| `provider-limit`, `artifact-updated`, `attention-updated`, `background-job-updated`, `location-request`, `calendar-request` | see extension surfaces | Ignore if the client does not implement the surface. |
+| `remote-action` | `action` ∈ record, record-toggle, stop-agent, controller-event; `ts`; a controller event adds `controller_event_id`, `button`, `controller_event`, `duration_ms`, `age_ms`, `queued` and optionally `controller_id` | A live shortcut/controller asked the client to act. These input events are never replayed after reconnect. |
+| `provider-limit` | `schema_version`, `provider_limit_event_id`, `episode_id`, `provider_instance_id`, `provider_id`, `window_id`, `kind`, `threshold_id`, `used_percentage`, `resets_at`, `observed_at`, `freshness`, `source`, `dedupe_key` | A provider usage window crossed a threshold, hit its limit, or recovered. `schema_version` precedes `type` on the wire. Extension surface; ignore if not implemented. |
+| `artifact-updated` | `session`, `agent_id`, `artifact_id` | An artifact was published or resolved; refetch `/artifacts/<id>`. Extension surface. |
+| `attention-updated` | `attention_count` | The number of items awaiting the user changed. Extension surface. |
+| `background-job-updated` | `change_revision`, `observed_at`, `job_id`, `session`, `agent_id`, `status`, `job` | A durable background job changed; `job` is the full row. Extension surface. |
+| `location-request` | `session` | An agent asked for the user's location; show the one-tap share prompt for that session. Extension surface. |
+| `calendar-request` | `request_id`, `session`, `title`, `start`, `end`, `time_zone`, `location`, `notes`, `url`, `all_day`, `calendar` | An agent asked the app to write an Apple Calendar event. Extension surface. |
+| `goal-updated` | `agent_id`, `session`, `goal` | The agent's standing objective changed; `goal` is the new goal or null. Extension surface. |
+| `orchestrator-decision` | `decision_id`, `trace_id`, `action`, `kind`, `target_session`, `confidence`, `reason` | Hands-free routing picked (or declined to pick) an agent for an utterance. Informational. |
 
 `controller-event` is the simulation/relay form of a physical controller
 input. `POST /remote-action` with `action=controller-event` also carries
@@ -428,8 +448,20 @@ apply the broadcast, not re-post `/select`, or two clients loop.
 - `GET /agents` — session-keyed map of live agents (a subset of the snapshot).
 - `POST /agents` — create, relaunch, or fork: `{"name", "voice_id",
   "backend", "cwd", "model", "effort", "session" (to relaunch),
-  "resume_session_id", "fork_session_id", "avatar_symbol", "personality"}`.
+  "resume_session_id", "fork_session_id", "avatar_symbol", "personality",
+  "parent", "role"}`. `parent` is the creating session or agent id and
+  `role` is `agent` (default) or `helper`; a helper needs a parent, and a
+  fork without `parent` records its source agent. Self-parenting and cycles
+  answer 409 (`self_parent`, `parent_cycle`); an unknown parent 404.
   Answers `{"session", "persona", …}` and broadcasts `agent-roster`.
+- `POST /agent-helper-state` — `{"session", "state": "done"|"failed"|"running",
+  "by"?}` marks a helper. `by` is the marking agent and must be the helper's
+  parent; without it the mark is the user's. An agent-origin `/send` from a
+  helper to its parent moves it to `reported` on its own, and one from the
+  parent back to a reported helper returns it to `running`.
+- `GET /agent-helper-state?session=` — `{"agent_id", "session", "role",
+  "parent_agent_id", "helper_state", "helper_completed_at", "archived_at"}`
+  for one agent, so a watcher can poll without the snapshot.
 - `DELETE /agents/<session>` — release the agent (soft delete).
 - `POST /agent-mute`, `/agent-archive`, `/agent-heartbeat`, `/agent-dreaming`,
   `/agent-voice` — per-agent toggles: `{"session", "<flag>": bool}`.

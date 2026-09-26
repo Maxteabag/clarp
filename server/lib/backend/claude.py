@@ -41,11 +41,11 @@ from typing import Any, Callable, Optional
 
 from .. import agents as agents_db
 from .. import config as _config
+from .. import events
 from .. import provider_capabilities
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
-from ..protocol import SSEType
 from ..voice_preamble import persona_identity_instruction
 from .base import BackendBrand, Backend, CompactionStrategy, hooked, resolve
 from .stream_json import launch, start_drain
@@ -175,12 +175,9 @@ def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str
         if not row or not row.get("changed"):
             return
         if stream is not None:
-            stream.broadcast({
-                "type": SSEType.TRANSCRIPT_UPDATED,
-                "agent_id": agent_id,
-                "session": session,
-                "backend_session_id": backend_session_id,
-            })
+            events.broadcast(stream, events.transcript_updated(
+                agent_id=agent_id, session=session,
+                backend_session_id=backend_session_id))
     except Exception as e:                            # noqa: BLE001
         log_exception("clarpLivePartialFail", e, detail=trace_id or agent_id)
 

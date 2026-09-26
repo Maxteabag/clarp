@@ -23,12 +23,12 @@ from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
 from . import agents as agents_db
+from . import events, identity
 from . import backends, config, eventlog, janitor_builtins, janitors, settings_store
 from .db import conn, now_ms
 from .log import log_exception
 from .prompt_admissions import PromptAdmission
 from . import prompt_admissions
-from .protocol import SSEType
 
 
 DEFAULT_PROVIDER = "openai"
@@ -369,7 +369,7 @@ def _should_scan_broader(
 
 def record_routing_message(*, session: str, role: str, text: str,
                            trace_id: str = "", source: str = "orchestrator") -> None:
-    agent = agents_db.get_by_session(session)
+    agent = identity.lookup(session)
     if not agent or not text.strip():
         return
     conn().execute(
@@ -454,7 +454,7 @@ class OrchestratorService:
         client_id = (prompt_admissions.message_id(prompt_admission.client_admission_id)
                      if prompt_admission else trace_id)
         request_id = "routing-" + hashlib.sha256(client_id.encode()).hexdigest()
-        target_agent = agents_db.get_by_session(requested_session)
+        target_agent = identity.lookup(requested_session)
         target_agent_id = (target_agent or {}).get("agent_id")
         request_hash = hashlib.sha256(json.dumps({
             "utterance": text, "requested_session": requested_session,
@@ -572,7 +572,7 @@ class OrchestratorService:
             fallback_request=fallback_request,
             janitor_run_id=run_id,
         )
-        recipient = agents_db.get_by_session(result.session)
+        recipient = identity.lookup(result.session)
         failed = decision.kind == DECISION_ERROR or result.action == FINAL_ERROR
         janitor_builtins.complete_run(
             run_id, outcome="failed" if failed else "completed",
@@ -635,7 +635,7 @@ class OrchestratorService:
                 trace_id=trace_id, action="cancelled", status=409,
                 error=run.get("error") or "Message routing was cancelled before completion",
             )
-        recipient = agents_db.get_by_agent_id(receipt.get("target_agent_id", "")) or {}
+        recipient = identity.lookup(receipt.get("target_agent_id")) or {}
         pending = run.get("status") in {"queued", "running"}
         action = "pending" if pending else receipt.get("status", FINAL_CLARIFY)
         return OrchestratorOutcome(
@@ -677,7 +677,7 @@ class OrchestratorService:
 
         try:
             self._require_current(janitor_run_id)
-            control_target = agents_db.get_by_session(decision.target_session)
+            control_target = identity.lookup(decision.target_session)
             if (decision.kind in {DECISION_CONTROL, DECISION_AGENT_CONTROL}
                     and control_target is not None
                     and not agents_db.interaction_capabilities(control_target)["can_voice_target"]):
@@ -817,16 +817,10 @@ class OrchestratorService:
             fallback_used=fallback_used,
             error=error,
         )
-        self.ctx.stream.broadcast({
-            "type": "orchestrator-decision",
-            "decision_id": decision_id,
-            "trace_id": trace_id,
-            "action": final_action,
-            "kind": decision.kind,
-            "target_session": target,
-            "confidence": decision.confidence,
-            "reason": decision.reason,
-        })
+        events.broadcast(self.ctx.stream, events.orchestrator_decision(
+            decision_id=decision_id, trace_id=trace_id, action=final_action,
+            kind=decision.kind, target_session=target,
+            confidence=decision.confidence, reason=decision.reason))
         if dispatch_result is not None:
             return OrchestratorOutcome(
                 handled=True,
@@ -963,21 +957,18 @@ class OrchestratorService:
         action = (decision.control_action or "").strip().lower()
         target = decision.target_session or requested_session
         if action in {"switch", "switch_focus"}:
-            agent = agents_db.get_by_session(target)
+            agent = identity.lookup(target)
             if agent:
                 herald = getattr(self.ctx, "herald", None)
                 with agents_db.focus_guard():
                     agents_db.set_focus(agent["agent_id"])
                     if herald is not None:
                         herald.set_focus(target)
-                self.ctx.stream.broadcast({
-                    "type": SSEType.AGENT_FOCUS,
-                    "session": target,
-                    "agent_id": agent["agent_id"],
-                })
+                events.broadcast(self.ctx.stream, events.agent_focus(
+                    session=target, agent_id=agent["agent_id"]))
             return target
         if action in {"stop", "stop_agent", "interrupt"}:
-            agent = agents_db.get_by_session(target)
+            agent = identity.lookup(target)
             if agent:
                 backends.interrupt_any(agent["agent_id"])
             return target
@@ -990,7 +981,7 @@ class OrchestratorService:
         payload = dict(decision.control_payload or {})
         from .agent_lifecycle import AgentLifecycleService
 
-        existing = agents_db.get_by_session(target) if target else None
+        existing = identity.lookup(target) if target else None
         if existing and (decision.control_action or "").lower() in {
             "relaunch",
             "restart",
@@ -1007,7 +998,7 @@ class OrchestratorService:
         return result.session
 
     def _status_text(self, session: str) -> str:
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return "I do not see that agent running."
         state = conn().execute(
@@ -1037,7 +1028,7 @@ class OrchestratorService:
 
     def _speak_as_session(self, text: str, session: str,
                           *, phrase_key: str = "") -> None:
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if agent:
             if phrase_key and self._play_cached_phrase(
                 phrase_key=phrase_key,
@@ -1070,20 +1061,14 @@ class OrchestratorService:
         if not path.startswith("/audio/") and not os.path.exists(path):
             return False
         url = path if path.startswith("/audio/") else f"/audio/{os.path.basename(path)}"
-        agent = agents_db.get_by_session(session) if session else None
-        self.ctx.stream.broadcast({
-            "type": SSEType.AUDIO,
-            "url": url,
-            "session": session,
-            "agent_id": (agent or {}).get("agent_id"),
-            "voice_id": voice_id,
-            "phrase_key": phrase_key,
-            "cached_phrase": True,
-        })
+        agent = identity.lookup(session)
+        events.broadcast(self.ctx.stream, events.audio(
+            url=url, session=session, agent_id=(agent or {}).get("agent_id"),
+            voice_id=voice_id, phrase_key=phrase_key, cached_phrase=True))
         return True
 
     def _replay_last_clip(self, session: str) -> bool:
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         if not agent:
             return False
         row = conn().execute(
@@ -1098,25 +1083,19 @@ class OrchestratorService:
             return False
         path = str(row["path"] or "")
         url = path if path.startswith("/audio/") else f"/audio/{os.path.basename(path)}"
-        self.ctx.stream.broadcast({
-            "type": SSEType.AUDIO,
-            "url": url,
-            "session": session,
-            "agent_id": agent["agent_id"],
-            "voice_id": row["voice_id"],
-            "trace_id": row["trace_id"],
-            "clip_id": row["clip_id"],
-            "replay": True,
-        })
+        events.broadcast(self.ctx.stream, events.audio(
+            url=url, session=session, agent_id=agent["agent_id"],
+            voice_id=row["voice_id"], trace_id=row["trace_id"],
+            clip_id=row["clip_id"], replay=True))
         return True
 
     def _valid_target(self, session: str, sessions: set[str]) -> str:
-        target = agents_db.get_by_session(session) if session in sessions else None
+        target = identity.lookup(session) if session in sessions else None
         return session if (target and not target.get("archived_at")
                            and agents_db.interaction_capabilities(target)["can_voice_target"]) else ""
 
     def _persona_for_session(self, session: str) -> str:
-        agent = agents_db.get_by_session(session)
+        agent = identity.lookup(session)
         return str((agent or {}).get("persona") or "")
 
     def _log_decision(
@@ -1206,7 +1185,7 @@ def build_context_packet(
     fallback_request: bool = False,
 ) -> dict[str, Any]:
     focus_agent_id = agents_db.get_focus()
-    focus = agents_db.get_by_agent_id(focus_agent_id) if focus_agent_id else None
+    focus = identity.lookup(focus_agent_id)
     focus_session = (focus or {}).get("session") or requested_session
     include_all_context = context_scope == "all"
     detailed_sessions = {requested_session, focus_session}

@@ -16,7 +16,7 @@ from .. import tts_queue
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
-from ..protocol import AgentState
+from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from .base import BackendBrand, CompactionStrategy, hooked
 from .stream_json import StreamJsonBackend, iter_json_dicts
@@ -229,7 +229,7 @@ class GrokBackend(StreamJsonBackend):
             if minted:
                 self._bind(st, backend_session_id, on_session_init=on_session_init,
                            on_error=on_error, trace_id=trace_id)
-                self._record_state(agent_id, AgentState.THINKING,
+                self._transition(agent_id, TurnEvent.SPAWN_STARTED,
                                    {"dispatch": self.runner, "trace_id": trace_id})
             if proc.stdout is not None:
                 for raw in proc.stdout:
@@ -295,7 +295,7 @@ class GrokBackend(StreamJsonBackend):
             # Reasoning delta: nothing to show, but the agent is visibly busy.
             if st.phase != "thinking":
                 st.phase = "thinking"
-                self._record_state(agent_id, AgentState.THINKING,
+                self._transition(agent_id, TurnEvent.TEXT_STREAMED,
                                    {"dispatch": self.runner, "trace_id": trace_id})
             return
         if etype in _TOOL_START_TYPES:
@@ -308,7 +308,7 @@ class GrokBackend(StreamJsonBackend):
             st.live_text = ""
             st.persisted_live_text = ""
             st.phase = "tool"
-            self._record_state(agent_id, AgentState.TOOL, {
+            self._transition(agent_id, TurnEvent.TOOL_STARTED, {
                 "dispatch": self.runner, "trace_id": trace_id,
                 "tool": _tool_name_from(ev),
             })
@@ -320,13 +320,13 @@ class GrokBackend(StreamJsonBackend):
                 # The tool_result row has landed; refresh the pane so the card
                 # picks up its output and status.
                 st.phase = "thinking"
-                self._record_state(agent_id, AgentState.THINKING,
+                self._transition(agent_id, TurnEvent.TEXT_STREAMED,
                                    {"dispatch": self.runner, "trace_id": trace_id})
                 self._broadcast(stream, agent_id, session)
             return
         if etype in {"turn_started", "turn.started"}:
             st.phase = "thinking"
-            self._record_state(agent_id, AgentState.THINKING,
+            self._transition(agent_id, TurnEvent.SPAWN_STARTED,
                                {"dispatch": self.runner, "trace_id": trace_id})
             return
         if etype in {"error", "turn.failed", "turn_failed"}:
@@ -353,7 +353,7 @@ class GrokBackend(StreamJsonBackend):
             return
         if st.phase != "speaking":
             st.phase = "speaking"
-            self._record_state(agent_id, AgentState.THINKING,
+            self._transition(agent_id, TurnEvent.TEXT_STREAMED,
                                {"dispatch": self.runner, "trace_id": trace_id})
         st.live_text += delta
         st.turn_text += delta
@@ -395,8 +395,8 @@ class GrokBackend(StreamJsonBackend):
                    enqueue=enqueue, fail_event="grokSpeakFail",
                    fail_detail=trace_id)
 
-    def _record_state(self, agent_id: str, kind: str, detail: dict[str, Any]) -> None:
-        self.record_state(agent_id, kind, detail, event="grokStateFail")
+    def _transition(self, agent_id: str, turn_event: str, detail: dict[str, Any]) -> None:
+        self.transition(agent_id, turn_event, detail, log_event="grokStateFail")
 
     def _broadcast(self, stream: Any, agent_id: str, session: str) -> None:
         self.broadcast_transcript(stream, agent_id, session)

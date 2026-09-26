@@ -21,7 +21,7 @@ import threading
 import time
 
 from .log import log_exception
-from . import health
+from . import events, health
 from .protocol import ClipStatus, SSEType
 from .timing import SERVER_TIMING
 
@@ -126,7 +126,9 @@ class AudioStream:
             return _replayable([ev for _, ev in self._recent])
 
     def broadcast(self, event_dict: dict) -> None:
-        event_dict = dict(event_dict)
+        # Rule 7: only documented event types and keys reach the wire. Emit
+        # sites build Events through lib.events; anything else is re-checked.
+        event_dict = dict(events.as_event(event_dict))
         session = event_dict.get("session")
         if session:
             event_dict.setdefault("session", session)
@@ -186,7 +188,7 @@ class AudioStream:
         instant, not durable state. Replaying one later can unexpectedly start
         a microphone or stop an agent.
         """
-        self._deliver(dict(event_dict), sse_event_id=None)
+        self._deliver(dict(events.as_event(event_dict)), sse_event_id=None)
 
     def _deliver(self, event_dict: dict, *, sse_event_id: int | None) -> None:
         payload = json.dumps(event_dict)

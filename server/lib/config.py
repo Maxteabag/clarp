@@ -16,6 +16,7 @@ import json
 import os
 import pathlib
 import threading
+import time
 import tomllib
 import re
 from . import xdg
@@ -351,6 +352,9 @@ class Config:
     oracle_voice_context_file: str = ""
     oracle_voice_backend: str = "api"
     oracle_live_webrtc: bool = False
+    # [oracle.agent_voices]: persona -> GPT-Live voice for "talk to X
+    # directly" (keys casefolded); see oracle_voices.voice_for.
+    oracle_agent_voices: dict[str, str] = field(default_factory=dict)
     openai_realtime_transcription_model: str = "gpt-4o-mini-transcribe"
     cartesia_model: str = "sonic-3.5"
     cartesia_voices: dict[str, str] = field(
@@ -403,6 +407,9 @@ class Config:
     codex_account_switch_command: tuple[str, ...] = ()
     claude_model: str = ""
     claude_effort: str = ""              # "" | low | medium | high | xhigh | max
+    # Hours a helper agent marked done stays in the chat list before the
+    # maintenance worker archives it. [agents] helper_archive_grace_hours.
+    helper_archive_grace_hours: float = 24.0
     codex_model: str = ""
     codex_reasoning_effort: str = ""     # "" | "low" | "medium" | "high"
     agy_model: str = ""
@@ -519,6 +526,13 @@ class Config:
 _CACHED: Config | None = None
 _CACHED_PATH: pathlib.Path | None = None
 _LOAD_LOCK = threading.RLock()  # re-entrant: a load failure logs, and logging may consult config
+# The (mtime_ns, size) the cached Config was parsed from, and when the file
+# was last stat'ed. A rewritten config.toml is picked up on the next load()
+# after RELOAD_CHECK_INTERVAL_SEC without a restart; between checks the cache
+# answers without touching the filesystem.
+_CACHED_STAT: tuple[int, int] | None = None
+_LAST_STAT_AT = 0.0
+RELOAD_CHECK_INTERVAL_SEC = 1.0
 
 
 # "Claude-5628": the anonymous-launch name suffix (agent_lifecycle mints token_hex(2)).
@@ -544,28 +558,82 @@ def _resolve_config_path() -> pathlib.Path:
     ))
 
 
+def _non_negative_float(raw: Any, default: float) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
+
+
+def _agent_voices(section) -> dict[str, str]:
+    table = section.get("agent_voices") if isinstance(section, dict) else None
+    if not isinstance(table, dict):
+        return {}
+    return {str(k).strip().casefold(): str(v).strip().casefold()
+            for k, v in table.items() if isinstance(v, str) and v.strip()}
+
+
 def load(path: pathlib.Path | None = None) -> Config:
     """Read TOML config; return a Config with defaults filled in. Cached.
 
     The cache is keyed by the resolved path: asking for a different file
     reloads instead of silently returning whatever was cached first. Filling
-    the cache is serialized so concurrent first callers share one parse.
+    the cache is serialized so concurrent first callers share one parse. A
+    rewritten file (new mtime or size) is reloaded on the first call after
+    `RELOAD_CHECK_INTERVAL_SEC`; a reload that fails keeps the previous
+    Config and logs, so a half-written file cannot take a running Host down.
     """
     with _LOAD_LOCK:
         return _load_locked(path)
 
 
+def _file_signature(path: pathlib.Path) -> tuple[int, int] | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _cache_is_fresh(path: pathlib.Path) -> bool:
+    """True while the cached Config still matches `path` on disk.
+
+    Bounded to one stat per RELOAD_CHECK_INTERVAL_SEC: config.load() is called
+    from hot paths (auth, every transcription) and must stay a dict lookup.
+    """
+    global _LAST_STAT_AT
+    now = time.monotonic()
+    if now - _LAST_STAT_AT < RELOAD_CHECK_INTERVAL_SEC:
+        return True
+    _LAST_STAT_AT = now
+    return _file_signature(path) == _CACHED_STAT
+
+
 def _load_locked(path: pathlib.Path | None) -> Config:
-    global _CACHED, _CACHED_PATH
+    global _CACHED, _CACHED_PATH, _CACHED_STAT
     if path is None:
         # Bare load(): whatever is cached is the process-wide answer, even
         # when it was primed from an explicit path (tests and tools do that).
-        if _CACHED is not None:
-            return _CACHED
-        path = _resolve_config_path()
+        if _CACHED is not None and _CACHED_PATH is None:
+            return _CACHED  # injected without a file (tests): nothing to watch
+        path = _CACHED_PATH if _CACHED is not None else _resolve_config_path()
     path = path.expanduser().resolve(strict=False)
     if _CACHED is not None and _CACHED_PATH == path:
-        return _CACHED
+        if _cache_is_fresh(path):
+            return _CACHED
+        try:
+            return _parse_into_cache(path)
+        except ConfigError:
+            # Already logged. Keep serving the last good Config; the next
+            # explicit reset_cache()+load() will surface the error.
+            return _CACHED
+    return _parse_into_cache(path)
+
+
+def _parse_into_cache(path: pathlib.Path) -> Config:
+    global _CACHED, _CACHED_PATH, _CACHED_STAT, _LAST_STAT_AT
+    signature = _file_signature(path)
     data: dict[str, Any] = {}
     try:
         with path.open("rb") as f:
@@ -651,6 +719,7 @@ def _load_locked(path: pathlib.Path | None) -> Config:
         oracle_voice_context_file = str(openai.get("oracle_voice_context_file", "")).strip(),
         oracle_voice_backend = str(openai.get("oracle_voice_backend", "api")).strip(),
         oracle_live_webrtc = bool(openai.get("oracle_live_webrtc", False)),
+        oracle_agent_voices = _agent_voices(data.get("oracle")),
         openai_realtime_transcription_model = str(openai.get(
             "realtime_transcription_model", "gpt-4o-mini-transcribe")).strip(),
         cartesia_model  = str(cartesia.get("model", "sonic-3.5")),
@@ -678,6 +747,8 @@ def _load_locked(path: pathlib.Path | None) -> Config:
             and all(isinstance(arg, str) and arg for arg in
                     agents.get("claude_account_switch_command", ())) else (),
         claude_effort   = str(agents.get("claude_effort", "")),
+        helper_archive_grace_hours=_non_negative_float(
+            agents.get("helper_archive_grace_hours"), 24.0),
         codex_model     = str(agents.get("codex_model", "")),
         codex_reasoning_effort = str(agents.get("codex_reasoning_effort", "")),
         agy_model       = str(agents.get("agy_model", "")),
@@ -705,13 +776,19 @@ def _load_locked(path: pathlib.Path | None) -> Config:
         apns_environment = str(apns.get("environment", "production")).strip().lower(),
     )
     _CACHED_PATH = path
+    _CACHED_STAT = signature
+    _LAST_STAT_AT = time.monotonic()
     return _CACHED
 
 
 def reset_cache() -> None:
     """Clear the module-level cache so runtime settings can be reloaded."""
-    global _CACHED
-    _CACHED = None
+    global _CACHED, _CACHED_PATH, _CACHED_STAT, _LAST_STAT_AT
+    with _LOAD_LOCK:
+        _CACHED = None
+        _CACHED_PATH = None
+        _CACHED_STAT = None
+        _LAST_STAT_AT = 0.0
 
 
 def reset_cache_for_tests() -> None:

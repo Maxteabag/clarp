@@ -23,6 +23,8 @@ from lib.backend.codex import CodexBackend  # noqa: E402
 from lib.backend.deepseek import DeepSeekBackend  # noqa: E402
 from lib.backend.opencode import OpenCodeBackend  # noqa: E402
 from lib.backend.stream_json import StreamJsonBackend  # noqa: E402
+from lib import turn_lifecycle  # noqa: E402
+from lib.turn_lifecycle import TurnEvent  # noqa: E402
 
 IDS = ("claude", "codex", "agy", "grok", "opencode", "deepseek")
 
@@ -568,25 +570,25 @@ def test_stream_json_shared_surface_carries_the_runner_prefix(monkeypatch):
         def broadcast(self, event):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(agents_db, "record_state", boom)
+    monkeypatch.setattr(turn_lifecycle, "transition", boom)
     monkeypatch.setattr(agents_db, "latest_turn_synthesize_audio", lambda agent_id: False)
     for name, prefix in (("grok", "grok"), ("opencode", "opencode"), ("deepseek", "opencode")):
         b = registry.by_id(name)
         logged.clear()
-        b.record_state("a1", "thinking", None)
-        b.record_state("a1", "thinking", None, event="custom")
+        b.transition("a1", TurnEvent.TEXT_STREAMED, None)
+        b.transition("a1", TurnEvent.TEXT_STREAMED, None, log_event="custom")
         b.broadcast_transcript(Broken(), "a1", "sess")
         st = SimpleNamespace(session_id="", saw_session=False, failed_error="")
         b.bind_session(st, "sid", on_session_init=None, on_error=None, trace_id="t")
         assert b.speak("<speak>hi</speak>", st, agent_id="a1", session="s", trace_id="t", enqueue=None) == 0
-        assert logged == [(f"{prefix}RecordStateFail", "a1:thinking"),
-                          ("custom", "a1:thinking"),
+        assert logged == [(f"{prefix}RecordStateFail", "a1:text_streamed"),
+                          ("custom", "a1:text_streamed"),
                           (f"{prefix}BroadcastFail", "a1"),
                           (f"{prefix}SessionInit", "sid=sid trace=t")], name
         assert (st.session_id, st.saw_session) == ("sid", True)
     # Isolated runs (no agent) record and broadcast nothing.
     logged.clear()
-    registry.by_id("grok").record_state("", "thinking", None)
+    registry.by_id("grok").transition("", TurnEvent.TEXT_STREAMED, None)
     registry.by_id("grok").broadcast_transcript(Broken(), "", "sess")
     assert logged == []
 

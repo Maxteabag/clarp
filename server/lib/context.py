@@ -7,13 +7,20 @@ no API calls, no real subprocesses.
 
 The HTTP handler reads its dependencies via `self.server.ctx`, which is the
 standard Python pattern for sharing state without module-level globals.
+
+The context is frozen. Configuration changes by replacement (`with_`). Four
+services are installed or swapped after construction - the STT (model
+switch), tool explanations and the herald (both built after the context), and
+the runtime client - and only through the locked `replace_service` path, so
+every holder of the context sees the same current service.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import pathlib
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from .audio_stream import AudioStream
@@ -22,20 +29,9 @@ from .config import load as load_config
 from .log import log_exception
 from .paths import RuntimePaths
 from .tts_engine import ElevenLabsEngine, TTSEngine
-from .vocab import (
-    build_initial_prompt,
-    delegation_agent_names_enabled,
-    read_technical_glossary,
-)
+from .vocab_service import TranscriptionVocab, VocabService
 
-
-@dataclass(frozen=True)
-class TranscriptionVocab:
-    """What /transcribe sends the model, and the audit row it belongs to."""
-    payload: str
-    run_id: int
-    provider: str
-    model: str
+__all__ = ["ServerContext", "StubSTT", "STTLike", "TranscriptionVocab", "resolve_root"]
 
 
 def resolve_root(self_file: pathlib.Path, env) -> pathlib.Path:
@@ -75,7 +71,7 @@ class StubSTT:
     """Default STT for tests — always-ready, returns a canned transcription.
 
     Construct with `StubSTT(text="hello world")` to control what /transcribe
-    returns. Real STT replacement happens by setting `ctx.stt = ...`.
+    returns. Real STT replacement goes through `ctx.replace_stt(...)`.
     """
 
     def __init__(self, text: str = "", ends_terminal: bool = False):
@@ -90,7 +86,31 @@ class StubSTT:
         return self.text, self.ends_terminal, 0.0
 
 
-@dataclass
+class HeraldLike(Protocol):
+    """The part of lib.herald.HeraldManager the handler and workers call."""
+
+    def set_focus(self, session: str | None, *args: Any, **kwargs: Any) -> Any: ...
+
+    def ingest_clip(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
+class ToolExplanationsLike(Protocol):
+    """lib.tool_explanations.ToolExplanations as the handler uses it."""
+
+    def request(self, level: Any, items: Any, **kwargs: Any) -> Any: ...
+
+
+class RuntimeClientLike(Protocol):
+    """lib.runtime_bridge.RuntimeClient: the split runtime's RPC surface."""
+
+    def status(self) -> dict: ...
+
+
+# Services installed or swapped after construction; see replace_service.
+REPLACEABLE_SERVICES = frozenset({"stt", "tool_explanations", "herald", "runtime_client"})
+
+
+@dataclass(frozen=True)
 class ServerContext:
     # Filesystem layout
     root: pathlib.Path
@@ -129,12 +149,15 @@ class ServerContext:
     # Production HTTP processes submit agent execution to a separately managed
     # runtime. Tests and the runtime process itself leave this unset and run the
     # injected/local dispatch implementation.
-    runtime_client: Any | None = None
-    tool_explanations: Any | None = None
+    runtime_client: RuntimeClientLike | None = None
+    tool_explanations: ToolExplanationsLike | None = None
     # HeraldManager (lib.herald) deciding which off-focus agent's clip plays.
-    # Production passes it to build_server, which stores it here before any
-    # worker or handler runs; tests set it directly. None = no arbitration.
-    herald: Any | None = None
+    # Production passes it to build_server, which installs it before any
+    # worker or handler runs. None = no arbitration.
+    herald: HeraldLike | None = None
+
+    _service_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False)
 
     def __post_init__(self):
         if self.clip_broker is None:
@@ -145,6 +168,34 @@ class ServerContext:
             object.__setattr__(self, "uploads_dir", derived)
         if self.media_dir is None:
             object.__setattr__(self, "media_dir", paths.media_dir)
+
+    # ---- Replacement
+
+    def with_(self, **changes: Any) -> "ServerContext":
+        """A copy with `changes` applied; services are shared, not copied."""
+        return dataclasses.replace(self, **changes)
+
+    def replace_service(self, name: str, value: Any) -> Any:
+        """Swap one of REPLACEABLE_SERVICES in place and return the old one.
+
+        In place because the handler, the dispatch service and the workers
+        all hold this same context; a copy would leave them on the old one.
+        """
+        if name not in REPLACEABLE_SERVICES:
+            raise dataclasses.FrozenInstanceError(f"cannot replace {name!r}; use with_()")
+        with self._service_lock:
+            previous = getattr(self, name)
+            object.__setattr__(self, name, value)
+        return previous
+
+    def replace_stt(self, stt: STTLike) -> STTLike:
+        return self.replace_service("stt", stt)
+
+    def install_tool_explanations(self, service: ToolExplanationsLike) -> None:
+        self.replace_service("tool_explanations", service)
+
+    def install_herald(self, herald: HeraldLike | None) -> None:
+        self.replace_service("herald", herald)
 
     # ---- Helpers consumed by handlers (keep them on the ctx so tests can
     # override behaviour without monkey-patching the server module).
@@ -161,251 +212,33 @@ class ServerContext:
             newest = 0
         return str(int(newest))
 
+    # ---- Vocabulary: the logic lives in vocab_service; these keep the
+    # handler's `ctx.vocab_*` calls working.
+
+    @property
+    def vocab(self) -> VocabService:
+        return VocabService(stt=lambda: self.stt)
+
     def active_agent_names(self) -> list[str]:
-        names: list[str] = []
-        seen: set[str] = set()
-
-        def add(name: object) -> None:
-            text = str(name or "").strip()
-            key = text.casefold()
-            if text and key not in seen:
-                seen.add(key)
-                names.append(text)
-
-        try:
-            from . import agents as agents_db  # local: avoid startup cycles
-            for info in agents_db.list_agents():
-                if agents_db.interaction_capabilities(info)["can_voice_target"]:
-                    add(info.get("persona"))
-        except Exception as e:  # noqa: BLE001 - prompt bias must never break STT
-            log_exception("vocabAgentsFail", e)
-        return names
+        return self.vocab.active_agent_names()
 
     def vocab_prompt(self, *, delegated: bool) -> str:
-        """Legacy string form of the biasing prompt.
+        return self.vocab.prompt(delegated=delegated)
 
-        Retained for callers that only want a prompt. Prefer
-        `vocab_compile_result` when the caller can record the audit row -
-        that is the path that makes a transcript traceable to its prompt.
-        """
-        return self.vocab_compile_result(delegated=delegated).payload
-
-    def vocab_for_transcription(
-        self,
-        *,
-        delegated: bool,
-        session: str = "",
-        trace_id: str = "",
-        requested_model: str = "",
-    ) -> "TranscriptionVocab":
-        """Everything a real /transcribe needs from the vocabulary system.
-
-        Resolves the focused agent (its profile, its workspace), the provider
-        and model actually answering, the recent speech and known corrections,
-        compiles, and writes the audit row. Returns the payload plus the run id
-        so the handler can attach the transcript and latency afterwards.
-        """
-        from . import agents as agents_db
-        from . import vocab_store
-        from .vocab_compile import Sources, compile_and_record
-        from .workspace_vocab import WorkspaceSources, sources_for
-
-        provider, model = self._transcription_provider_model(requested_model)
-        agent: dict = {}
-        if session:
-            try:
-                agent = agents_db.get_by_session(session) or {}
-            except Exception as e:  # noqa: BLE001
-                log_exception("vocabAgentLookupFail", e)
-        agent_id = str(agent.get("agent_id") or "")
-
-        static, profile_id = self._vocab_static_packs(
-            delegated=delegated, agent_id=agent_id)
-        try:
-            recent = vocab_store.recent_transcripts(session) if session else ()
-        except Exception as e:  # noqa: BLE001
-            log_exception("vocabRecentFail", e)
-            recent = ()
-        try:
-            known = vocab_store.corrections()
-        except Exception as e:  # noqa: BLE001
-            log_exception("vocabCorrectionsFail", e)
-            known = ()
-        # Reading an agent's folders is a choice its profile makes. Without
-        # one, the workspace contributes nothing: this call used to be
-        # unconditional, which is how an agent rooted at /home fed hundreds of
-        # package-tree library names into the payload ahead of the glossary.
-        workspace = (
-            sources_for(agent.get("cwd"))
-            if vocab_store.agent_harvests_workspace(agent_id)
-            else WorkspaceSources())
-        include_names = delegated and delegation_agent_names_enabled()
-
-        result = compile_and_record(
-            provider=provider, model=model, static_packs=static,
-            sources=Sources(
-                agent_names=(
-                    tuple(self.active_agent_names()) if include_names else ()),
-                project_name=workspace.project_name,
-                identifiers=workspace.identifiers,
-                branches=workspace.branches,
-                commit_subjects=workspace.commit_subjects,
-                recent_transcripts=recent,
-                corrections=known,
-            ),
-            agent_id=agent_id, session=session, trace_id=trace_id,
-            profile_id=profile_id,
-        )
-        return TranscriptionVocab(
-            payload=result.payload, run_id=result.run_id,
-            provider=provider, model=model)
+    def vocab_for_transcription(self, *, delegated: bool, session: str = "", trace_id: str = "",
+                                requested_model: str = "") -> TranscriptionVocab:
+        return self.vocab.for_transcription(delegated=delegated, session=session, trace_id=trace_id,
+                                            requested_model=requested_model)
 
     def vocab_preview(self, *, session: str = "", requested_model: str = "",
                       delegated: bool = False) -> dict:
-        """What the next compile would send, per pack, without recording it.
+        return self.vocab.preview(session=session, requested_model=requested_model, delegated=delegated)
 
-        The live budget meter in the app calls this as the user toggles packs,
-        so it must reflect exactly the inputs a real turn would use.
-        """
-        from . import agents as agents_db
-        from . import vocab_store
-        from .vocab_compile import Sources, compile_for
-        from .workspace_vocab import WorkspaceSources, sources_for
-
-        provider, model = self._transcription_provider_model(requested_model)
-        agent: dict = {}
-        if session:
-            try:
-                agent = agents_db.get_by_session(session) or {}
-            except Exception as e:  # noqa: BLE001
-                log_exception("vocabAgentLookupFail", e)
-        agent_id = str(agent.get("agent_id") or "")
-        static, profile_id = self._vocab_static_packs(
-            delegated=delegated, agent_id=agent_id)
-        workspace = (
-            sources_for(agent.get("cwd"))
-            if vocab_store.agent_harvests_workspace(agent_id)
-            else WorkspaceSources())
-        include_names = delegated and delegation_agent_names_enabled()
-        result = compile_for(
-            provider=provider, model=model, static_packs=static,
-            sources=Sources(
-                agent_names=(
-                    tuple(self.active_agent_names()) if include_names else ()),
-                project_name=workspace.project_name,
-                identifiers=workspace.identifiers,
-                branches=workspace.branches,
-                commit_subjects=workspace.commit_subjects,
-                recent_transcripts=(
-                    vocab_store.recent_transcripts(session) if session else ()),
-                corrections=vocab_store.corrections(),
-            ))
-        audit = result.audit()
-        per_pack: dict[str, dict] = {}
-        for term in audit["included"]:
-            slot = per_pack.setdefault(term["pack"], {"included": 0, "dropped": 0})
-            slot["included"] += 1
-        for term in audit["dropped"]:
-            slot = per_pack.setdefault(term["pack"], {"included": 0, "dropped": 0})
-            slot["dropped"] += 1
-        return {
-            "provider": provider, "model": model, "session": session,
-            "agent_id": agent_id, "profile_id": profile_id,
-            "unit": audit["unit"], "capacity": audit["capacity"],
-            "used": audit["used"], "headroom": audit["headroom"],
-            "form": audit["form"], "rarity_floor": audit["rarity_floor"],
-            "payload": audit["payload"],
-            "included": audit["included"], "dropped": audit["dropped"],
-            "packs": [{"pack": name, **counts} for name, counts in per_pack.items()],
-        }
-
-    def _transcription_provider_model(self, requested_model: str
-                                      ) -> tuple[str, str]:
-        selected = (requested_model or "").strip()
-        if selected and selected != "server-default":
-            if ":" in selected:
-                provider, model = selected.split(":", 1)
-                return provider, model
-            return selected, ""
-        stt = self.stt
-        provider = str(getattr(stt, "provider", "") or "faster-whisper")
-        model = str(getattr(stt, "model_name", "") or "")
-        return provider, model
-
-    def _vocab_static_packs(self, *, delegated: bool, agent_id: str):
-        """Glossary setting plus the agent's assigned profile, if any."""
-        from . import vocab_store
-        from .vocab_budget import Pack, Term
-        from .vocab_generators import estimate_rarity
-
-        static: list[Pack] = []
-        profile_id: str | None = None
-        if not delegated:
-            glossary = read_technical_glossary()
-            terms = tuple(
-                Term(text=line, pack="glossary", rarity=estimate_rarity(line))
-                for line in (l.strip() for l in glossary.splitlines())
-                if line
-            )
-            if terms:
-                static.append(Pack(
-                    name="glossary", terms=terms, priority=1.5, floor=3))
-        if agent_id:
-            try:
-                profile_id = vocab_store.profile_for_agent(agent_id)
-                if profile_id:
-                    static.extend(vocab_store.profile_packs(profile_id))
-            except Exception as e:  # noqa: BLE001
-                log_exception("vocabProfileFail", e)
-        return static, profile_id
-
-    def vocab_compile_result(
-        self,
-        *,
-        delegated: bool,
-        provider: str = "faster-whisper",
-        model: str = "",
-        recent_transcripts: tuple[str, ...] = (),
-        corrections: tuple[tuple[str, str], ...] = (),
-    ):
-        """Compile this turn's biasing payload against the active model.
-
-        The two long-standing settings still govern what may contribute:
-        delegation turns are primed with agent names, ordinary turns with the
-        user's technical glossary. Everything below that is new - the glossary
-        becomes a static pack and the rest is generated, then all of it is
-        fitted to whatever the provider actually accepts.
-        """
-        from .vocab_budget import Pack, Term
-        from .vocab_compile import Sources, compile_for
-        from .vocab_generators import estimate_rarity
-
-        include_names = delegated and delegation_agent_names_enabled()
-        static: list[Pack] = []
-        if not delegated:
-            glossary = read_technical_glossary()
-            terms = tuple(
-                Term(text=line, pack="glossary", rarity=estimate_rarity(line))
-                for line in (l.strip() for l in glossary.splitlines())
-                if line
-            )
-            if terms:
-                # Curated by hand, so it earns a floor: a term the user typed
-                # should not be crowded out by generated workspace noise.
-                static.append(Pack(
-                    name="glossary", terms=terms, priority=1.5, floor=3))
-
-        return compile_for(
-            provider=provider,
-            model=model,
-            static_packs=static,
-            sources=Sources(
-                agent_names=(
-                    tuple(self.active_agent_names()) if include_names else ()),
-                recent_transcripts=recent_transcripts,
-                corrections=corrections,
-            ),
-        )
+    def vocab_compile_result(self, *, delegated: bool, provider: str = "faster-whisper", model: str = "",
+                             recent_transcripts: tuple[str, ...] = (),
+                             corrections: tuple[tuple[str, str], ...] = ()):
+        return self.vocab.compile_result(delegated=delegated, provider=provider, model=model,
+                                         recent_transcripts=recent_transcripts, corrections=corrections)
 
     def deployed_version(self) -> str:
         try:
@@ -504,3 +337,15 @@ class ServerContext:
             roster_names=tuple(get_roster().keys()),
             runtime_client=runtime_client,
         )
+
+
+def _frozen_setattr(self: ServerContext, name: str, value: Any) -> None:
+    """Refuse every assignment. A replaceable service changes through
+    `replace_service` (or `replace_stt`/`install_*`), which swaps it under the
+    service lock and returns the predecessor; anything else goes through
+    `with_()`."""
+    hint = f"replace_service({name!r}, ...)" if name in REPLACEABLE_SERVICES else "with_()"
+    raise dataclasses.FrozenInstanceError(f"cannot assign to field {name!r}; use {hint}")
+
+
+ServerContext.__setattr__ = _frozen_setattr  # type: ignore[method-assign]

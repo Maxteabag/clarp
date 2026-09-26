@@ -18,10 +18,9 @@ import time
 from typing import Any, Callable
 
 from . import agents as agents_db
-from . import backends
+from . import backends, events
 from . import trace as _trace
 from .log import log_exception
-from .protocol import SSEType
 from .timing import SERVER_TIMING
 
 # origin per scheduler; the read model files hidden traffic by these names.
@@ -46,7 +45,7 @@ def decision_queues_if_busy(pending: dict) -> bool:
 
 class DispatchAdapters:
     def __init__(self, ctx, service_factory: Callable[[Any], Any], *,
-                 new_trace_id: Callable[[], str] = _trace.new_id,
+                 new_trace_id: Callable[[], str] = _trace.new_trace_id,
                  monotonic: Callable[[], float] = time.monotonic):
         self.ctx = ctx
         self._service = service_factory
@@ -60,11 +59,12 @@ class DispatchAdapters:
                   trace_id: str = "", client_msg_id: str = "",
                   queue_if_busy: bool = False, **extra):
         """A silent turn forced onto `session`. Schedulers never route."""
-        return self._service(self.ctx).dispatch(
+        from .turn_dispatch import DispatchCommand
+        return self._service(self.ctx).submit(DispatchCommand(
             text=text, requested_session=session, forced_session=session,
             trace_id=trace_id or self._new_trace_id(),
             client_msg_id=client_msg_id, synthesize_audio=False,
-            origin=origin, queue_if_busy=queue_if_busy, **extra)
+            origin=origin, queue_if_busy=queue_if_busy, **extra))
 
     @staticmethod
     def _idle_agent(session: str) -> dict | None:
@@ -97,12 +97,11 @@ class DispatchAdapters:
     def dream(self, session: str, text: str) -> bool:
         """DreamingScheduler: run one isolated dream round if the agent is
         idle everywhere (no turn, no backend handle, no compaction)."""
-        from . import compaction
-        from . import dreaming
+        from . import dreaming, turn_dispatch
         agent = self._idle_agent(session)
         if (agent is None
                 or backends.active_handles(agent.get("backend"), agent["agent_id"])
-                or compaction.is_compacting(session)):
+                or turn_dispatch.live_work(agent["agent_id"], session=session).compacting):
             return False
         return dreaming.dispatch_isolated_dream(agent, text)
 
@@ -136,8 +135,7 @@ class DispatchAdapters:
             return
         self._attention_due = now + SERVER_TIMING.janitor_attention_interval_sec
         if janitor_attention.reconcile():
-            self.ctx.stream.broadcast({"type": SSEType.AGENT_ROSTER,
-                                       "kind": "janitor-attention"})
+            events.broadcast(self.ctx.stream, events.agent_roster("janitor-attention"))
 
     def recover_janitor_quota(self, provider, owner_id, generation, approval_id):
         """AutonomyJanitors: quota recovery runs wherever dispatch runs."""

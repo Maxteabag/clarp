@@ -7,7 +7,7 @@ import pathlib
 import re
 from urllib.parse import quote
 
-from . import agents
+from . import events, identity
 from .db import conn, now_ms
 from .voice_markup import spoken_chunks_for_tts, spoken_for_tts
 
@@ -50,7 +50,7 @@ def _normalized(text: str) -> str:
 
 def retained_events(*, session: str, message_id: str,
                     audio_dir: pathlib.Path) -> list[dict]:
-    agent = agents.get_by_session(session)
+    agent = identity.lookup(session)
     if not agent:
         return []
     message = conn().execute(
@@ -101,7 +101,7 @@ def retained_events(*, session: str, message_id: str,
         previous_id = row["queue_id"]
         selected.append(row)
     root = audio_dir.resolve()
-    events = []
+    replayed = []
     seen = set()
     for row in selected:
         path = pathlib.Path(row["path"]).resolve()
@@ -111,10 +111,10 @@ def retained_events(*, session: str, message_id: str,
         if clip_id in seen:
             continue
         seen.add(clip_id)
-        event = {"type": "audio", "clip_id": clip_id, "session": session,
-                 "agent_id": agent["agent_id"], "persona": agent["persona"],
-                 "trace_id": row["trace_id"], "ts": row["created_at"],
-                 "url": "/audio/" + quote(path.name)}
+        event = events.audio(
+            clip_id=clip_id, session=session, agent_id=agent["agent_id"],
+            persona=agent["persona"], trace_id=row["trace_id"],
+            ts=row["created_at"], url="/audio/" + quote(path.name))
         if path.suffix.lower() == ".pcm":
             saved = conn().execute(
                 "SELECT payload FROM sse_events WHERE type='audio' AND session=? "
@@ -129,5 +129,5 @@ def retained_events(*, session: str, message_id: str,
                 return []
             event.update(url=f"/clips/{clip_id}/stream", stream_url=f"/clips/{clip_id}/stream",
                          delivery="raw-pcm", audio_format=audio_format)
-        events.append(event)
-    return events
+        replayed.append(event)
+    return replayed

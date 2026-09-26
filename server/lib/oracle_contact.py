@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import agents as agents_db
-from . import db
+from . import settings_store
 from .log import log
 
 KEY = "oracle.contact_session"
@@ -47,19 +47,14 @@ def resolve(name: str | None) -> dict[str, Any] | None:
 
 
 def _stored() -> str:
-    row = db.conn().execute("SELECT value FROM settings WHERE key=?", (KEY,)).fetchone()
-    return str(row["value"] if row else "").strip()
+    return settings_store.get_text(KEY).strip()
 
 
 def _store(session: str) -> None:
-    con = db.conn()
     if session:
-        con.execute(
-            "INSERT INTO settings(key,value,updated_at) VALUES(?,?,?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
-            (KEY, session, db.now_ms()))
+        settings_store.set_text(KEY, session)
     else:
-        con.execute("DELETE FROM settings WHERE key=?", (KEY,))
+        settings_store.delete(KEY)
 
 
 def get() -> dict[str, Any]:
