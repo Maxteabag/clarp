@@ -1113,7 +1113,8 @@ void NativeCoreTest::agentRowParsesBackgroundAndHelperFieldsSafely() {
         {QStringLiteral("child_count"), QStringLiteral("many")},
         {QStringLiteral("running_children"), -1}});
     QCOMPARE(hostile.backgroundJobCount, 0);
-    QCOMPARE(hostile.backgroundSubAgentCount, 0);
+    // Helpers are counted apart from processes, so sub_agents may exceed count.
+    QCOMPARE(hostile.backgroundSubAgentCount, 9);
     QCOMPARE(hostile.role, QStringLiteral("agent"));
     QCOMPARE(hostile.childCount, 0);
     QCOMPARE(hostile.runningChildren, 0);
@@ -1192,7 +1193,8 @@ void NativeCoreTest::rosterPrefersLiveJobCountsAndCountsHelpers() {
         helperRow(QStringLiteral("old"), QStringLiteral("p"), QStringLiteral("done"), 100),
         rosterRow(QStringLiteral("quiet"), QStringLiteral("q"), 50)}}});
     const QModelIndex parent = model.index(model.indexOfSession(QStringLiteral("parent")), 0);
-    QCOMPARE(parent.data(AgentListModel::BackgroundJobCountRole).toInt(), 1);
+    // One process plus one helper, folded into the job-list shape.
+    QCOMPARE(parent.data(AgentListModel::BackgroundJobCountRole).toInt(), 2);
     QCOMPARE(parent.data(AgentListModel::SubAgentCountRole).toInt(), 1);
     // Old Host: no running_children, so the visible running helper counts.
     QCOMPARE(parent.data(AgentListModel::RunningChildrenRole).toInt(), 1);
@@ -1205,7 +1207,8 @@ void NativeCoreTest::rosterPrefersLiveJobCountsAndCountsHelpers() {
     model.applyLiveJobCounts(live);
     QCOMPARE(changed.size(), 1); // Only the parent row actually changed.
     QCOMPARE(parent.data(AgentListModel::BackgroundJobCountRole).toInt(), 3);
-    QCOMPARE(parent.data(AgentListModel::ProcessCountRole).toInt(), 4);
+    // The sub-agent job mirrors the running helper, so it counts once.
+    QCOMPARE(parent.data(AgentListModel::ProcessCountRole).toInt(), 3);
 
     BackgroundJobTracker tracker;
     tracker.applyList({{QStringLiteral("jobs"), QJsonArray{
@@ -1222,11 +1225,11 @@ void NativeCoreTest::rosterPrefersLiveJobCountsAndCountsHelpers() {
     const QVariantList helpers = processes.value(QStringLiteral("helpers")).toList();
     QCOMPARE(helpers.size(), 1);
     QCOMPARE(helpers.at(0).toMap().value(QStringLiteral("session")).toString(), QStringLiteral("worker"));
-    QCOMPARE(processes.value(QStringLiteral("total")).toInt(), 4);
+    QCOMPARE(processes.value(QStringLiteral("total")).toInt(), 3);
     QVERIFY(describeAgentProcesses(model, tracker, QStringLiteral("missing"), 0).isEmpty());
 
     model.clearLiveJobCounts();
-    QCOMPARE(parent.data(AgentListModel::BackgroundJobCountRole).toInt(), 1);
+    QCOMPARE(parent.data(AgentListModel::BackgroundJobCountRole).toInt(), 2);
     model.markTransportUnavailable();
     QCOMPARE(parent.data(AgentListModel::ProcessCountRole).toInt(), 0);
 }
