@@ -1,6 +1,9 @@
 """Small HTTP helpers shared by server handlers and tests."""
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
+from typing import Any, Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .log import log_exception
@@ -62,10 +65,6 @@ def send_plain_http_error(handler, code: int, message: str, *, log_event: str) -
 #
 # Until then `principal_of()`/`responder_of()` below fall back to reading the
 # private attributes - the one place in server/lib allowed to know their names.
-
-import json
-from dataclasses import dataclass
-from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
