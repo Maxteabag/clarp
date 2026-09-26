@@ -101,8 +101,76 @@ def test_switch_request_classifier(words, expected):
     assert oracle_voices.switch_request(words) == expected
 
 
+ROSTER = {"theo", "nadia", "marcus", "omar", "lena"}
+
+
+@pytest.mark.parametrize("words,expected", [
+    # Call 7946a1a7, the exact utterance: a restarted request.
+    ("Yeah, can you put me through to, can you put me through to Marcus", ("agent", "marcus")),
+    ("Yeah, can you put me through to , can you put me through to Marcus", ("agent", "marcus")),
+    ("Um, so, could you please put me through to Marcus", ("agent", "marcus")),
+    ("Okay can you can you put me through to Marcus please", ("agent", "marcus")),
+    ("Put me through to MARCUS now thanks", ("agent", "marcus")),
+    ("Please connect me to Marcus", ("agent", "marcus")),
+    ("Sorry, can I, can I talk to Marcus directly", ("agent", "marcus")),
+    ("Can you switch me over to Marcus", ("agent", "marcus")),
+    ("Switch to Marcus", ("agent", "marcus")),
+    ("Transfer me to Marcus please", ("agent", "marcus")),
+    ("Connect Marcus", ("agent", "marcus")),
+    ("Get me Marcus", ("agent", "marcus")),
+    ("Yeah back to Oracle please", ("oracle", None)),
+    ("Um, can you, can you switch me back", ("oracle", None)),
+    # A persona name alone after a clear switch verb needs the roster.
+    ("Switch to the old port", None),
+    ("Switch to staging", None),
+    ("Connect the database", None),
+    ("Get me the logs", None),
+    # Work requests still keep their route.
+    ("Ask Theo to talk to Lena", None),
+    ("Tell Marcus to put me through to the build logs", None),
+    ("Yeah, tell Marcus to put me through to Lena", None),
+    ("Can you ask Marcus to connect me to the VPN", None),
+    ("Put me through to Marcus and ask him about the deploy", None),
+    ("I think Marcus said switch to Theo", None),
+    ("Can you put me through to Zorblax", None),
+])
+def test_switch_request_tolerates_natural_speech(words, expected):
+    assert oracle_voices.switch_request(words, known=ROSTER.__contains__) == expected
+
+
+def test_switch_request_without_a_roster_keeps_the_strict_forms():
+    assert oracle_voices.switch_request("Can you put me through to Zorblax") == ("agent", "zorblax")
+    assert oracle_voices.switch_request("Switch to Marcus") is None
+
+
+@pytest.mark.parametrize("words,expected", [
+    ("Can you put me through to", True), ("Yeah, can you put me through to, can you put me through to", True),
+    ("Let me talk directly to", True), ("Put me through to Marcus", False), ("Check the deploy", False),
+])
+def test_dangling_switch_phrase(words, expected):
+    assert oracle_voices.dangling_switch(words) is expected
+
+
+def test_switch_note_never_lets_oracle_claim_the_switch():
+    note = oracle_voices.SWITCH_NOTE
+    assert "never say" in note.casefold() and "connecting" in note.casefold()
+    assert "the host confirms" in note.casefold()
+
+
 def test_contact_instructions_speak_as_the_agent_not_oracle():
     text = oracle_voices.contact_instructions("Theo")
     assert "You are the voice of Theo" in text
     assert "never claim to be Oracle" in text
     assert "word for word" in text
+
+
+def test_earcons_config_defaults_on_and_can_be_turned_off(tmp_path):
+    from lib import config
+    path = tmp_path / "config.toml"
+    path.write_text("[oracle]\nearcons = false\n")
+    config.reset_cache()
+    try:
+        assert config.load(path).oracle_earcons is False
+        assert config.load(tmp_path / "missing.toml").oracle_earcons is True
+    finally:
+        config.reset_cache()

@@ -53,7 +53,8 @@ class FakeTools:
         return [row for row in self.rows if row["status"] in ("completed", "failed", "cancelled")]
 
     AGENTS = {"theo": {"session": "theo-97e5", "persona": "Theo", "agent_id": "a-theo"},
-              "nadia": {"session": "nadia-1c2d", "persona": "Nadia", "agent_id": "a-nadia"}}
+              "nadia": {"session": "nadia-1c2d", "persona": "Nadia", "agent_id": "a-nadia"},
+              "marcus": {"session": "marcus-5b1a", "persona": "Marcus", "agent_id": "a-marcus"}}
 
     def resolve(self, name):
         wanted = str(name or "").strip().casefold()
@@ -159,6 +160,34 @@ class Lab:
         with self.conv.lock:
             self.conv.routing += 1
         self.conv.route("item_" + str(self.delegation))
+
+    def replay(self, events, until_seq=None):
+        """Feed journal events at their recorded times; a delegation is routed
+        synchronously, as in ``user``. Output transcript deltas come with
+        audible audio, as GPT-Live streams them."""
+        if not hasattr(self, "replay_base"):
+            self.replay_base, self.replayed = self.now[0], 0
+        for event in events:
+            if event["seq"] <= self.replayed:
+                continue
+            if until_seq is not None and event["seq"] > until_seq:
+                break
+            self.replayed = event["seq"]
+            target = self.replay_base + event["elapsed_ms"] / 1000
+            while self.now[0] + STEP <= target:
+                self.now[0] += STEP
+                self.conv.tick()
+            self.now[0] = max(self.now[0], target)
+            kind = event["type"]
+            if kind == "session.delegation.created":
+                self.delegation += 1
+                with self.conv.lock:
+                    self.conv.routing += 1
+                self.conv.route(event["delegation"]["id"])
+                continue
+            if kind == "session.output_transcript.delta":
+                self.conv.receive({"type": "session.output_audio.delta", "delta": _audio(3000)})
+            self.conv.receive({key: event[key] for key in ("type", "delta", "start_ms", "end_ms")})
 
     def appends(self, index=0):
         return [event for event in map(json.loads, self.upstreams[index].sent) if event["type"].endswith(".append")
@@ -415,7 +444,7 @@ def test_put_me_through_opens_theo_in_his_own_voice_on_the_same_phone_line(lab):
     lab.tools.dispatched.clear()
     lab.user("Put me through to Theo")
     assert lab.tools.dispatched == [], "a switch is not work for the primary"
-    assert any("Putting you through to Theo" in e["content"] for e in lab.appends(0))
+    assert any("Connecting you to Theo" in e["content"] for e in lab.appends(0))
     assert lab.opened() == [], "the swap waits for Oracle to say it is putting the user through"
     old_session = lab.conv.provider_session
     lab.oracle_speaks(1.5)
@@ -549,7 +578,7 @@ def test_narration_off_switches_without_an_announcement(lab):
     lab = lab()
     lab.conv.input({"type": "oracle_v2.preferences", "narration": "off"})
     lab.user("Let me talk to Theo directly")
-    assert not any("Putting you through" in e["content"] for e in lab.appends(0))
+    assert not any("Connecting you" in e["content"] for e in lab.appends(0))
     lab.wait(STEP)
     [session] = lab.opened()
     assert _session_voice(session) == "meridian"
@@ -612,3 +641,233 @@ def test_pump_follows_the_swapped_upstream_instead_of_ending_the_call():
     conv.upstream = _Socket([], conv, swap_to=new)
     mod.pump_upstream(conv, TimeoutError)
     assert events == [("session.output_transcript.delta", new), ("session.closed", new)]
+
+
+# ---- call 7946a1a7: "can you put me through to, can you put me through to Marcus"
+
+MARCUS_CALL = json.loads((FIXTURES / "7946a1a7_put_me_through_to_marcus.json").read_text())["events"]
+
+
+def test_7946a1a7_a_restarted_switch_request_split_by_a_pause_puts_the_user_through(lab):
+    lab = lab()
+    lab.replay(MARCUS_CALL, until_seq=62)
+    assert lab.tools.dispatched == [], "a switch request is never also sent to the primary as work"
+    assert lab.conv.pending_swap is not None and lab.conv.pending_swap["contact"]["persona"] == "Marcus"
+    lab.replay(MARCUS_CALL, until_seq=74)   # Oracle: "Sure, put you through to Marcus."
+    lab.wait(2)
+    [session] = lab.opened()
+    assert _session_voice(session) == "cedar"
+    assert "You are the voice of Marcus" in session["instructions"]
+    assert lab.conv.contact["session"] == "marcus-5b1a"
+
+
+def test_the_turn_is_the_whole_utterance_since_oracle_last_spoke(lab):
+    lab = lab()
+    lab.conv.receive({"type": "session.output_transcript.delta", "delta": "Go on.", "start_ms": 0, "end_ms": 400})
+    lab.user_fragments("Can you check", "the deploy on", "staging")
+    [work] = lab.tools.dispatched
+    assert work["request"].endswith("verbatim:\nCan you check the deploy on staging")
+
+
+def test_speech_before_oracle_last_spoke_is_not_part_of_the_turn(lab):
+    lab = lab()
+    lab.user_fragments("so the plan is recursive goals")
+    lab.tools.dispatched.clear()
+    lab.ms += 2000
+    lab.conv.receive({"type": "session.input_transcript.delta", "delta": "can you can you",
+                      "start_ms": lab.ms, "end_ms": lab.ms + 800})
+    lab.conv.receive({"type": "session.output_transcript.delta", "delta": "Go on.",
+                      "start_ms": lab.ms + 900, "end_ms": lab.ms + 1300})
+    lab.user_fragments("Check the deploy")
+    [work] = lab.tools.dispatched
+    assert work["request"].endswith("verbatim:\nCheck the deploy")
+
+
+def test_a_name_after_a_dangling_switch_phrase_and_oracles_go_on_switches(lab):
+    lab = lab()
+    lab.user_fragments("Can you put me through to")
+    lab.tools.dispatched.clear()
+    lab.conv.receive({"type": "session.output_transcript.delta", "delta": " Go on.",
+                      "start_ms": lab.ms, "end_ms": lab.ms + 400})
+    lab.user_fragments("Marcus")
+    assert lab.tools.dispatched == []
+    assert lab.conv.pending_swap["contact"]["persona"] == "Marcus"
+
+
+def test_a_switch_to_an_unknown_agent_is_not_sent_to_the_primary(lab):
+    lab = lab()
+    lab.user("Can you put me through to Zorblax")
+    assert lab.tools.dispatched == []
+    assert lab.opened() == [] and lab.conv.pending_swap is None
+    assert any("no agent called Zorblax" in e["content"] for e in lab.appends(0))
+
+
+def _oracle_says(lab, text, seconds=1.5):
+    lab.ms += 1000
+    lab.conv.receive({"type": "session.output_transcript.delta", "delta": text,
+                      "start_ms": lab.ms, "end_ms": lab.ms + 400})
+    lab.oracle_speaks(seconds)
+
+
+def _user_says(lab, text):
+    lab.ms += 1000
+    lab.conv.receive({"type": "session.input_transcript.delta", "delta": text,
+                      "start_ms": lab.ms, "end_ms": lab.ms + 400})
+
+
+def _host_notes(lab, needle, index=0):
+    return [e for e in lab.appends(index) if needle in e["content"]]
+
+
+def test_oracle_claiming_a_switch_the_host_never_started_is_corrected(lab):
+    lab = lab()
+    lab.user("Check the deploy")                     # routed as work, no switch
+    _oracle_says(lab, " Sure—put you through to Marcus.", seconds=1)
+    lab.wait(0.5)
+    assert _host_notes(lab, "could not connect") == [], "the Host gives the switch a moment to start"
+    lab.wait(2)
+    [note] = _host_notes(lab, "could not connect")
+    assert "still talking to Oracle" in note["content"]
+    lab.wait(10)
+    assert len(_host_notes(lab, "could not connect")) == 1
+
+
+def test_oracles_own_announcement_of_a_real_switch_is_not_corrected(lab):
+    lab = lab()
+    lab.user("Put me through to Theo")
+    _oracle_says(lab, " Connecting you to Theo.")
+    lab.wait(3)
+    assert len(lab.opened()) == 1
+    assert _host_notes(lab, "could not connect") == []
+
+
+def test_a_failed_swap_tells_the_user_they_are_still_with_oracle(lab):
+    lab = lab()
+    lab.open_error = OSError("upstream refused")
+    lab.user("Put me through to Theo")
+    lab.oracle_speaks(1.5)
+    lab.wait(2)
+    [note] = _host_notes(lab, "could not put the user through to Theo")
+    assert "still talking to Oracle" in note["content"]
+
+
+def test_a_user_talking_into_silence_gets_a_nudge_once(lab):
+    """7946a1a7: "Hey Marcus, how are you", "Marcus, are you there", "Hello"
+    for 35 s with no delegation and no reply."""
+    lab = lab()
+    _oracle_says(lab, " Sure.")
+    lab.wait(2)
+    _user_says(lab, " Hey Marcus, how are you")
+    lab.wait(5)
+    assert _host_notes(lab, "no reply") == []
+    lab.wait(4)
+    [note] = _host_notes(lab, "no reply")
+    _user_says(lab, " Marcus, are you there")
+    lab.wait(12)
+    assert len(_host_notes(lab, "no reply")) == 1, "one nudge until Oracle speaks again"
+    _oracle_says(lab, " Sorry, I'm here.")
+    _user_says(lab, " Hello")
+    lab.wait(10)
+    assert len(_host_notes(lab, "no reply")) == 2
+
+
+def test_a_delegated_turn_is_not_nudged(lab):
+    lab = lab()
+    lab.user("Check the deploy")
+    lab.wait(15)
+    assert _host_notes(lab, "no reply") == []
+
+
+def test_switch_announcement_says_connecting_not_done(lab):
+    lab = lab()
+    lab.user("Put me through to Theo")
+    [note] = _host_notes(lab, "Connecting you to Theo")
+    assert "Putting you through" not in note["content"]
+
+
+# ---- earcons ----------------------------------------------------------------
+
+def _cues(lab):
+    return [e["name"] for e in lab.down if e["type"] == "oracle_v2.cue"]
+
+
+def _cue_audio_follows_each_cue(lab):
+    for i, event in enumerate(lab.down):
+        if event["type"] == "oracle_v2.cue":
+            audio = lab.down[i + 1]
+            assert audio["type"] == "session.output_audio.delta"
+            assert base64.b64decode(audio["delta"]) == mod.oracle_earcons.pcm(
+                event["name"], event.get("agent"))
+
+
+def test_a_switch_plays_started_then_a_connected_chime_and_back_plays_falling(lab):
+    lab = lab()
+    _switch_to_theo(lab)
+    assert _cues(lab) == ["switch_started", "connected"]
+    connected = next(e for e in lab.down if e.get("name") == "connected")
+    assert connected["agent"] == "Theo"
+    lab.user("Back to Oracle")
+    lab.oracle_speaks(1)
+    lab.wait(2)
+    assert _cues(lab) == ["switch_started", "connected", "switch_started", "back_to_oracle"]
+    _cue_audio_follows_each_cue(lab)
+
+
+def test_a_failed_switch_plays_the_low_double_tone(lab):
+    lab = lab()
+    lab.open_error = OSError("upstream refused")
+    lab.user("Put me through to Theo")
+    lab.oracle_speaks(1.5)
+    lab.wait(2)
+    assert _cues(lab) == ["switch_started", "switch_failed"]
+
+
+def test_handed_off_work_ticks_and_a_result_rings_before_its_read_out(lab):
+    lab = lab()
+    lab.user("Check the deploy")
+    assert _cues(lab) == ["handed_off"]
+    lab.tools.rows.append({"delegation_id": "new-1", "session": "theo-97e5", "status": "completed",
+                           "request_text": "Check the deploy", "result_text": "The deploy is green."})
+    lab.wait(6)
+    assert _cues(lab) == ["handed_off", "result"]
+    [part] = lab.parts()
+    assert "The deploy is green." in part
+    _cue_audio_follows_each_cue(lab)
+
+
+def test_cues_wait_for_oracle_to_stop_speaking(lab):
+    lab = lab()
+    lab.oracle_speaks(1)
+    lab.conv.cue("result")
+    assert _cues(lab) == [], "never inside Oracle's speech"
+    lab.oracle_speaks(1)
+    lab.wait(2)
+    types = lab.down_types()
+    cue = types.index("oracle_v2.cue")
+    model_audio = [i for i, e in enumerate(lab.down) if e["type"] == "session.output_audio.delta" and i != cue + 1]
+    assert max(model_audio) < cue
+    assert "oracle_v2.quiet" in types[cue:], "the phone returns to listening after the cue"
+
+
+def test_earcons_off_by_preference_sends_nothing(lab):
+    lab = lab()
+    lab.conv.input({"type": "oracle_v2.preferences", "earcons": False})
+    receipt = [e for e in lab.down if e["type"] == "oracle_v2.preferences"][-1]
+    assert receipt["earcons"] is False
+    _switch_to_theo(lab)
+    lab.user("Check the deploy")
+    assert _cues(lab) == []
+    assert len(lab.opened()) == 1
+
+
+def test_earcons_off_by_config_sends_nothing(lab):
+    lab = lab()
+    lab.conv.earcons = False
+    lab.user("Check the deploy")
+    assert _cues(lab) == []
+
+
+@pytest.mark.parametrize("value,accepted", [(True, True), (False, True), ("on", False), (1, False)])
+def test_the_earcons_preference_must_be_a_boolean(value, accepted):
+    event = mod.client_event(json.dumps({"type": "oracle_v2.preferences", "earcons": value}))
+    assert (event == {"type": "oracle_v2.preferences", "earcons": value}) is accepted

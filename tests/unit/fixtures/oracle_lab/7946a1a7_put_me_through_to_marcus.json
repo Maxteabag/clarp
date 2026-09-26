@@ -1,0 +1,567 @@
+{
+ "source": "diagnostics journal 7946a1a7 (2026-09-26), GPT-Live stable engine, direct_contact, primary Theo; transcript deltas and the delegation event only",
+ "events": [
+  {
+   "seq": 6,
+   "elapsed_ms": 3746,
+   "type": "session.input_transcript.delta",
+   "delta": "sorry, i",
+   "start_ms": 0,
+   "end_ms": 200
+  },
+  {
+   "seq": 7,
+   "elapsed_ms": 3747,
+   "type": "session.output_transcript.delta",
+   "delta": " Hmm.",
+   "start_ms": 0,
+   "end_ms": 200
+  },
+  {
+   "seq": 8,
+   "elapsed_ms": 3860,
+   "type": "session.input_transcript.delta",
+   "delta": "this image contains",
+   "start_ms": 200,
+   "end_ms": 400
+  },
+  {
+   "seq": 9,
+   "elapsed_ms": 3982,
+   "type": "session.input_transcript.delta",
+   "delta": "160",
+   "start_ms": 400,
+   "end_ms": 600
+  },
+  {
+   "seq": 11,
+   "elapsed_ms": 5340,
+   "type": "session.output_transcript.delta",
+   "delta": " Bloop",
+   "start_ms": 2600,
+   "end_ms": 2800
+  },
+  {
+   "seq": 12,
+   "elapsed_ms": 5521,
+   "type": "session.output_transcript.delta",
+   "delta": " says",
+   "start_ms": 2800,
+   "end_ms": 3000
+  },
+  {
+   "seq": 13,
+   "elapsed_ms": 5773,
+   "type": "session.output_transcript.delta",
+   "delta": " Axel",
+   "start_ms": 3200,
+   "end_ms": 3400
+  },
+  {
+   "seq": 14,
+   "elapsed_ms": 6136,
+   "type": "session.output_transcript.delta",
+   "delta": " Senior",
+   "start_ms": 3600,
+   "end_ms": 3800
+  },
+  {
+   "seq": 15,
+   "elapsed_ms": 6533,
+   "type": "session.output_transcript.delta",
+   "delta": " is already",
+   "start_ms": 4000,
+   "end_ms": 4200
+  },
+  {
+   "seq": 16,
+   "elapsed_ms": 6957,
+   "type": "session.output_transcript.delta",
+   "delta": " on your",
+   "start_ms": 4400,
+   "end_ms": 4600
+  },
+  {
+   "seq": 17,
+   "elapsed_ms": 7121,
+   "type": "session.output_transcript.delta",
+   "delta": " turn",
+   "start_ms": 4600,
+   "end_ms": 4800
+  },
+  {
+   "seq": 18,
+   "elapsed_ms": 7503,
+   "type": "session.output_transcript.delta",
+   "delta": " now,",
+   "start_ms": 5000,
+   "end_ms": 5200
+  },
+  {
+   "seq": 19,
+   "elapsed_ms": 9014,
+   "type": "session.output_transcript.delta",
+   "delta": " after",
+   "start_ms": 5600,
+   "end_ms": 5800
+  },
+  {
+   "seq": 20,
+   "elapsed_ms": 9020,
+   "type": "session.output_transcript.delta",
+   "delta": " a brief",
+   "start_ms": 6000,
+   "end_ms": 6200
+  },
+  {
+   "seq": 21,
+   "elapsed_ms": 9025,
+   "type": "session.output_transcript.delta",
+   "delta": " limit",
+   "start_ms": 6400,
+   "end_ms": 6600
+  },
+  {
+   "seq": 22,
+   "elapsed_ms": 9320,
+   "type": "session.output_transcript.delta",
+   "delta": " right",
+   "start_ms": 6800,
+   "end_ms": 7000
+  },
+  {
+   "seq": 23,
+   "elapsed_ms": 9517,
+   "type": "session.output_transcript.delta",
+   "delta": " before",
+   "start_ms": 7000,
+   "end_ms": 7200
+  },
+  {
+   "seq": 24,
+   "elapsed_ms": 10132,
+   "type": "session.output_transcript.delta",
+   "delta": " the",
+   "start_ms": 7600,
+   "end_ms": 7800
+  },
+  {
+   "seq": 25,
+   "elapsed_ms": 10322,
+   "type": "session.output_transcript.delta",
+   "delta": " reset",
+   "start_ms": 7800,
+   "end_ms": 8000
+  },
+  {
+   "seq": 26,
+   "elapsed_ms": 10739,
+   "type": "session.output_transcript.delta",
+   "delta": " at",
+   "start_ms": 8200,
+   "end_ms": 8400
+  },
+  {
+   "seq": 27,
+   "elapsed_ms": 10937,
+   "type": "session.output_transcript.delta",
+   "delta": " 10",
+   "start_ms": 8400,
+   "end_ms": 8600
+  },
+  {
+   "seq": 28,
+   "elapsed_ms": 11118,
+   "type": "session.output_transcript.delta",
+   "delta": ":58",
+   "start_ms": 8600,
+   "end_ms": 8800
+  },
+  {
+   "seq": 29,
+   "elapsed_ms": 11333,
+   "type": "session.output_transcript.delta",
+   "delta": ".",
+   "start_ms": 8800,
+   "end_ms": 9000
+  },
+  {
+   "seq": 33,
+   "elapsed_ms": 15503,
+   "type": "session.output_transcript.delta",
+   "delta": " OPUS",
+   "start_ms": 13400,
+   "end_ms": 13600
+  },
+  {
+   "seq": 36,
+   "elapsed_ms": 15639,
+   "type": "session.output_transcript.delta",
+   "delta": " says",
+   "start_ms": 13600,
+   "end_ms": 13800
+  },
+  {
+   "seq": 37,
+   "elapsed_ms": 15782,
+   "type": "session.output_transcript.delta",
+   "delta": " they’ll",
+   "start_ms": 13800,
+   "end_ms": 14000
+  },
+  {
+   "seq": 38,
+   "elapsed_ms": 15908,
+   "type": "session.output_transcript.delta",
+   "delta": " hold",
+   "start_ms": 14000,
+   "end_ms": 14200
+  },
+  {
+   "seq": 39,
+   "elapsed_ms": 16297,
+   "type": "session.output_transcript.delta",
+   "delta": " off",
+   "start_ms": 14400,
+   "end_ms": 14600
+  },
+  {
+   "seq": 40,
+   "elapsed_ms": 16719,
+   "type": "session.output_transcript.delta",
+   "delta": " and",
+   "start_ms": 14800,
+   "end_ms": 15000
+  },
+  {
+   "seq": 41,
+   "elapsed_ms": 17140,
+   "type": "session.input_transcript.delta",
+   "delta": " Can",
+   "start_ms": 15200,
+   "end_ms": 15400
+  },
+  {
+   "seq": 42,
+   "elapsed_ms": 17296,
+   "type": "session.input_transcript.delta",
+   "delta": " you",
+   "start_ms": 15400,
+   "end_ms": 15600
+  },
+  {
+   "seq": 43,
+   "elapsed_ms": 17530,
+   "type": "session.input_transcript.delta",
+   "delta": " can",
+   "start_ms": 15800,
+   "end_ms": 16000
+  },
+  {
+   "seq": 44,
+   "elapsed_ms": 18137,
+   "type": "session.input_transcript.delta",
+   "delta": " you",
+   "start_ms": 16400,
+   "end_ms": 16600
+  },
+  {
+   "seq": 46,
+   "elapsed_ms": 19672,
+   "type": "session.output_transcript.delta",
+   "delta": " Go on",
+   "start_ms": 18000,
+   "end_ms": 18200
+  },
+  {
+   "seq": 47,
+   "elapsed_ms": 19839,
+   "type": "session.output_transcript.delta",
+   "delta": ".",
+   "start_ms": 18200,
+   "end_ms": 18400
+  },
+  {
+   "seq": 48,
+   "elapsed_ms": 20630,
+   "type": "session.input_transcript.delta",
+   "delta": " Yeah",
+   "start_ms": 19200,
+   "end_ms": 19400
+  },
+  {
+   "seq": 49,
+   "elapsed_ms": 20884,
+   "type": "session.input_transcript.delta",
+   "delta": ", can you",
+   "start_ms": 19600,
+   "end_ms": 19800
+  },
+  {
+   "seq": 50,
+   "elapsed_ms": 21332,
+   "type": "session.input_transcript.delta",
+   "delta": " put",
+   "start_ms": 20000,
+   "end_ms": 20200
+  },
+  {
+   "seq": 51,
+   "elapsed_ms": 21536,
+   "type": "session.input_transcript.delta",
+   "delta": " me",
+   "start_ms": 20200,
+   "end_ms": 20400
+  },
+  {
+   "seq": 52,
+   "elapsed_ms": 21711,
+   "type": "session.input_transcript.delta",
+   "delta": " through",
+   "start_ms": 20400,
+   "end_ms": 20600
+  },
+  {
+   "seq": 54,
+   "elapsed_ms": 22357,
+   "type": "session.input_transcript.delta",
+   "delta": " to",
+   "start_ms": 21000,
+   "end_ms": 21200
+  },
+  {
+   "seq": 55,
+   "elapsed_ms": 22519,
+   "type": "session.input_transcript.delta",
+   "delta": ", can",
+   "start_ms": 21200,
+   "end_ms": 21400
+  },
+  {
+   "seq": 56,
+   "elapsed_ms": 22726,
+   "type": "session.input_transcript.delta",
+   "delta": " you",
+   "start_ms": 21400,
+   "end_ms": 21600
+  },
+  {
+   "seq": 57,
+   "elapsed_ms": 22926,
+   "type": "session.input_transcript.delta",
+   "delta": " put",
+   "start_ms": 21600,
+   "end_ms": 21800
+  },
+  {
+   "seq": 58,
+   "elapsed_ms": 23136,
+   "type": "session.input_transcript.delta",
+   "delta": " me",
+   "start_ms": 21800,
+   "end_ms": 22000
+  },
+  {
+   "seq": 59,
+   "elapsed_ms": 23323,
+   "type": "session.input_transcript.delta",
+   "delta": " through",
+   "start_ms": 22000,
+   "end_ms": 22200
+  },
+  {
+   "seq": 60,
+   "elapsed_ms": 23504,
+   "type": "session.input_transcript.delta",
+   "delta": " to",
+   "start_ms": 22200,
+   "end_ms": 22400
+  },
+  {
+   "seq": 61,
+   "elapsed_ms": 25291,
+   "type": "session.input_transcript.delta",
+   "delta": " Marcus",
+   "start_ms": 24000,
+   "end_ms": 24200
+  },
+  {
+   "seq": 62,
+   "elapsed_ms": 26438,
+   "type": "session.delegation.created",
+   "delegation": {
+    "id": "item_7946_1",
+    "type": "delegation",
+    "target": "client"
+   }
+  },
+  {
+   "seq": 66,
+   "elapsed_ms": 26904,
+   "type": "session.output_transcript.delta",
+   "delta": " Sure",
+   "start_ms": 25600,
+   "end_ms": 25800
+  },
+  {
+   "seq": 68,
+   "elapsed_ms": 27525,
+   "type": "session.output_transcript.delta",
+   "delta": "—",
+   "start_ms": 26200,
+   "end_ms": 26400
+  },
+  {
+   "seq": 69,
+   "elapsed_ms": 27710,
+   "type": "session.output_transcript.delta",
+   "delta": "put",
+   "start_ms": 26400,
+   "end_ms": 26600
+  },
+  {
+   "seq": 70,
+   "elapsed_ms": 27808,
+   "type": "session.output_transcript.delta",
+   "delta": " you",
+   "start_ms": 26600,
+   "end_ms": 26800
+  },
+  {
+   "seq": 71,
+   "elapsed_ms": 27934,
+   "type": "session.output_transcript.delta",
+   "delta": " through",
+   "start_ms": 26800,
+   "end_ms": 27000
+  },
+  {
+   "seq": 72,
+   "elapsed_ms": 28104,
+   "type": "session.output_transcript.delta",
+   "delta": " to",
+   "start_ms": 27000,
+   "end_ms": 27200
+  },
+  {
+   "seq": 73,
+   "elapsed_ms": 28311,
+   "type": "session.output_transcript.delta",
+   "delta": " Marcus",
+   "start_ms": 27200,
+   "end_ms": 27400
+  },
+  {
+   "seq": 74,
+   "elapsed_ms": 28789,
+   "type": "session.output_transcript.delta",
+   "delta": ".",
+   "start_ms": 27800,
+   "end_ms": 28000
+  },
+  {
+   "seq": 77,
+   "elapsed_ms": 35876,
+   "type": "session.input_transcript.delta",
+   "delta": " Hey",
+   "start_ms": 35200,
+   "end_ms": 35400
+  },
+  {
+   "seq": 78,
+   "elapsed_ms": 36338,
+   "type": "session.input_transcript.delta",
+   "delta": " Marcus",
+   "start_ms": 35600,
+   "end_ms": 35800
+  },
+  {
+   "seq": 79,
+   "elapsed_ms": 36527,
+   "type": "session.input_transcript.delta",
+   "delta": ", how",
+   "start_ms": 35800,
+   "end_ms": 36000
+  },
+  {
+   "seq": 80,
+   "elapsed_ms": 36729,
+   "type": "session.input_transcript.delta",
+   "delta": " are",
+   "start_ms": 36000,
+   "end_ms": 36200
+  },
+  {
+   "seq": 81,
+   "elapsed_ms": 36884,
+   "type": "session.input_transcript.delta",
+   "delta": " you",
+   "start_ms": 36200,
+   "end_ms": 36400
+  },
+  {
+   "seq": 83,
+   "elapsed_ms": 50263,
+   "type": "session.input_transcript.delta",
+   "delta": " Marcus",
+   "start_ms": 50000,
+   "end_ms": 50200
+  },
+  {
+   "seq": 84,
+   "elapsed_ms": 50507,
+   "type": "session.input_transcript.delta",
+   "delta": ", are you",
+   "start_ms": 50400,
+   "end_ms": 50600
+  },
+  {
+   "seq": 85,
+   "elapsed_ms": 50707,
+   "type": "session.input_transcript.delta",
+   "delta": " there",
+   "start_ms": 50800,
+   "end_ms": 51000
+  },
+  {
+   "seq": 86,
+   "elapsed_ms": 53375,
+   "type": "session.input_transcript.delta",
+   "delta": " Hello",
+   "start_ms": 56600,
+   "end_ms": 56800
+  },
+  {
+   "seq": 87,
+   "elapsed_ms": 60164,
+   "type": "session.input_transcript.delta",
+   "delta": " Marcus, can",
+   "start_ms": 63600,
+   "end_ms": 63800
+  },
+  {
+   "seq": 88,
+   "elapsed_ms": 60323,
+   "type": "session.input_transcript.delta",
+   "delta": " you",
+   "start_ms": 63800,
+   "end_ms": 64000
+  },
+  {
+   "seq": 89,
+   "elapsed_ms": 60526,
+   "type": "session.input_transcript.delta",
+   "delta": " hear",
+   "start_ms": 64000,
+   "end_ms": 64200
+  },
+  {
+   "seq": 91,
+   "elapsed_ms": 60709,
+   "type": "session.input_transcript.delta",
+   "delta": " me",
+   "start_ms": 64200,
+   "end_ms": 64400
+  }
+ ]
+}
