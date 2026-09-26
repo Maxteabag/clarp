@@ -15,7 +15,7 @@ from .. import tts_queue
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
-from ..protocol import AgentState
+from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from .base import BackendBrand, hooked
 from .stream_json import StreamJsonBackend, iter_json_dicts
@@ -157,14 +157,14 @@ class OpenCodeBackend(StreamJsonBackend):
         handle: TurnHandle, backend_session_id: str,
         on_session_init, on_result, on_error, stream, enqueue,
     ) -> None:
-        # Slice-3 seam: tests monkeypatch ``opencode_runner._record_state``.
-        _record_state = self._hook("_record_state", self._record_state)
+        # Slice-3 seam: tests monkeypatch ``opencode_runner._transition``.
+        _transition = self._hook("_transition", self._transition)
         st = _TurnState(session_id=backend_session_id)
         if backend_session_id:
             self._bind(st, backend_session_id, on_session_init=on_session_init,
                        on_error=on_error, trace_id=trace_id)
-            _record_state(agent_id, AgentState.THINKING,
-                          {"dispatch": self.runner, "trace_id": trace_id})
+            _transition(agent_id, TurnEvent.SPAWN_STARTED,
+                        {"dispatch": self.runner, "trace_id": trace_id})
         try:
             if proc.stdout is not None:
                 for raw in proc.stdout:
@@ -183,7 +183,7 @@ class OpenCodeBackend(StreamJsonBackend):
                                    on_error=on_error, trace_id=trace_id)
                     etype = str(ev.get("type") or ev.get("event") or "")
                     if etype == "step_start":
-                        _record_state(agent_id, AgentState.THINKING, {
+                        _transition(agent_id, TurnEvent.TEXT_STREAMED, {
                             "dispatch": self.runner, "trace_id": trace_id,
                         })
                         self._broadcast(stream, agent_id, session)
@@ -193,7 +193,7 @@ class OpenCodeBackend(StreamJsonBackend):
                         part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
                         name = str(part.get("tool") or ev.get("tool")
                                    or ev.get("name") or "tool")
-                        _record_state(agent_id, AgentState.TOOL, {
+                        _transition(agent_id, TurnEvent.TOOL_STARTED, {
                             "dispatch": self.runner, "trace_id": trace_id, "tool": name,
                         })
                         self._broadcast(stream, agent_id, session)
@@ -259,8 +259,8 @@ class OpenCodeBackend(StreamJsonBackend):
                    enqueue=enqueue, fail_event="opencodeSpeakFail",
                    fail_detail=trace_id)
 
-    def _record_state(self, agent_id: str, kind: str, detail: dict[str, Any]) -> None:
-        self.record_state(agent_id, kind, detail, event="opencodeStateFail")
+    def _transition(self, agent_id: str, turn_event: str, detail: dict[str, Any]) -> None:
+        self.transition(agent_id, turn_event, detail, log_event="opencodeStateFail")
 
     def _broadcast(self, stream: Any, agent_id: str, session: str) -> None:
         self.broadcast_transcript(stream, agent_id, session)

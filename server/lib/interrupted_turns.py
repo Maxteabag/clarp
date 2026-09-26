@@ -21,7 +21,9 @@ from . import agents as agents_db
 from . import db, message_store, origins
 from .db import conn
 from .log import log, log_exception
+from . import turn_lifecycle
 from .protocol import AgentState, SSEType
+from .turn_lifecycle import TurnEvent
 
 MARKER_ORIGIN = origins.MARKER_ORIGIN
 RESTART_SOURCE = "server_restart"
@@ -124,7 +126,7 @@ def _mark(turn: dict[str, Any], stream) -> None:
             cause_message_id=turn["cause_message_id"],
             text=RESTART_MARKER_TEXT,
         )
-    agents_db.record_state(agent_id, AgentState.INTERRUPTED, {
+    turn_lifecycle.transition(agent_id, TurnEvent.RESTART_INTERRUPTED, {
         "source": RESTART_SOURCE,
         "reason": RESTART_SOURCE,
         "message": RESTART_MARKER_TEXT,

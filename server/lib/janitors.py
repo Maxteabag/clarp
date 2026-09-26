@@ -15,7 +15,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from . import agents, backends, db, scheduler, turn_queue
 from . import janitor_store as store
 from .janitor_store import MAX_PAYLOAD_BYTES, JanitorError  # noqa: F401 - re-exported
+from . import turn_lifecycle
 from .protocol import AgentState
+from .turn_lifecycle import TurnEvent
 
 LABEL_MAX_AGE_MS = 24 * 60 * 60 * 1000
 TERMINAL_OUTCOMES = frozenset({"changed", "same_task", "insufficient_context", "skipped", "error", "cancelled"})
@@ -549,7 +551,7 @@ def _handoff_labels(c, source: dict, source_config, successor_session: str, succ
     store.bump_config(c, successor["agent_id"], now)
     # Repeat the existing idle state; this is an administrative audit, not an
     # inferred completion, a new model receipt, or an event to notify the user.
-    agents.record_state(source["agent_id"], agents.latest_state(source["agent_id"])["kind"], {
+    turn_lifecycle.transition(source["agent_id"], TurnEvent.AUDIT_NOTED, {
         "origin": "janitor", "event": "janitor_ownership_handoff", "source_agent_id": source["agent_id"],
         "successor_agent_id": successor["agent_id"], "transferred_count": len(targets)})
     return {"successor_agent_id": successor["agent_id"], "successor_session": successor["session"], "transferred_count": len(targets)}

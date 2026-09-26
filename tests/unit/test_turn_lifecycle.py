@@ -1,4 +1,6 @@
 """TurnStateMachine: the transition table, refusals, force, and the writers."""
+import pathlib
+
 import pytest
 
 from lib import agents as agents_db
@@ -43,7 +45,7 @@ def test_busy_and_terminal_are_the_single_source():
     assert BUSY == frozenset(AgentState.busy_states())
     assert not BUSY & TERMINAL
     assert reconcile._PROCESS_BUSY_KINDS is BUSY
-    assert TurnEvent.all() == frozenset(TRANSITIONS) | {TurnEvent.RECORDED}
+    assert TurnEvent.all() == frozenset(TRANSITIONS) | {TurnEvent.RECORDED, TurnEvent.AUDIT_NOTED}
     for target, origins in TRANSITIONS.values():
         assert AgentState.is_valid(target)
         assert origins <= turn_lifecycle.ALL
@@ -150,3 +152,30 @@ def test_unlaunched_receipt_is_back_dated_before_newer_state(tmp_path):
     turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED, {"trace_id": "t-new"})
     turn_lifecycle.record_unlaunched(agent_id, "t-old")
     assert agents_db.latest_state(agent_id)["kind"] == AgentState.THINKING
+
+
+def test_no_server_module_writes_state_without_an_event():
+    """Rule 4: production writers name an event; record_state is for fixtures."""
+    import ast
+    server = pathlib.Path(__file__).resolve().parents[2] / "server"
+    callers = []
+    for path in sorted(server.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {"record_state", "record"}
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in {"agents", "agents_db", "turn_lifecycle"}):
+                callers.append(f"{path.relative_to(server)}:{node.lineno}")
+    # The fixture wrapper itself delegates to turn_lifecycle.record.
+    assert callers == ["lib/agents.py:462"], callers
+
+
+def test_audit_note_repeats_the_current_state(tmp_path):
+    aid = _agent(tmp_path, "audit")
+    _put(aid, AgentState.DONE)
+    result = turn_lifecycle.transition(aid, TurnEvent.AUDIT_NOTED, {"event": "handoff"})
+    assert (result.from_state, result.to_state) == (AgentState.DONE, AgentState.DONE)
+    _put(aid, NONE)
+    with pytest.raises(IllegalTransition):
+        turn_lifecycle.transition(aid, TurnEvent.AUDIT_NOTED)
