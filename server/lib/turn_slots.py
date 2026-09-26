@@ -428,10 +428,10 @@ class TurnSlots:
 
 
 # --- facts other modules own ----------------------------------------------------
-# TODO(integration): terminal_ws and compaction are outside this stream. They
-# are read through their public module functions here so that live_work() is
-# the single query; once they expose typed services on the ServerContext the
-# two helpers below take those instead of importing the modules.
+# terminal_ws and compaction own these two facts. Busy checks elsewhere ask
+# live_work() rather than the modules, so these helpers are the only readers.
+# compaction.is_compacting answers from the runtime's status when this process
+# does not own turns, and from its own table when it does.
 
 def _terminal_live(agent_id: str) -> bool:
     try:
@@ -444,6 +444,6 @@ def _terminal_live(agent_id: str) -> bool:
 def _compacting(session: str) -> bool:
     try:
         from . import compaction
-        return session in set(compaction.active_sessions())
+        return bool(compaction.is_compacting(session))
     except Exception:  # noqa: BLE001
         return False

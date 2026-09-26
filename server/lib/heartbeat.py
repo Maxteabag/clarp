@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Callable
 
 from . import agents as agents_db
-from . import backends, compaction, settings_store
+from . import backends, settings_store
 from .db import conn, now_ms
 from .log import log, log_exception
 from .protocol import AgentState
@@ -517,13 +517,18 @@ class _AgentSnapshot:
     recent_activity: str = ""  # _recent_real_activity_reason's skip reason
 
 
+def _compacting(agent_id: str, session: str) -> bool:
+    from . import turn_dispatch
+    return bool(session) and turn_dispatch.live_work(agent_id, session=session).compacting
+
+
 def _gather_snapshot(agent: dict, now: float) -> _AgentSnapshot:
     agent_id = agent["agent_id"]
     return _AgentSnapshot(
         latest=agents_db.latest_state(agent_id) or {},
         busy=bool(agents_db.is_busy(agent_id)),
         active=bool(backends.active_handles(agent.get("backend"), agent_id)),
-        compacting=bool(compaction.is_compacting(agent.get("session") or "")),
+        compacting=_compacting(agent_id, agent.get("session") or ""),
         recent_activity=_recent_real_activity_reason(agent_id, now),
     )
 

@@ -48,8 +48,8 @@ def has_live_work(agent_id: str, backend: str) -> bool:
         log_exception("reconcileHandlesFail", e, detail=agent_id)
         return True  # can't tell → don't repair
     try:
-        from . import terminal_ws
-        if terminal_ws.has_live_terminal(agent_id):
+        from . import turn_dispatch
+        if turn_dispatch.live_work(agent_id).terminal:
             return True
     except Exception:  # noqa: BLE001
         pass
