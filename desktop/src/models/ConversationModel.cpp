@@ -17,7 +17,7 @@ QVariantList jsonArrayToVariantList(const QJsonArray& array) { return array.toVa
 QVariantList displayCellsToVariantList(const QJsonArray& cells) {
     QVariantList result;
     result.reserve(cells.size());
-    for (const QJsonValue& value : cells) {
+    for (const auto& value : cells) {
         QJsonObject cell = value.toObject();
         if (const QJsonObject summary = describeSubagentCell(cell); !summary.isEmpty()) {
             cell.insert(QStringLiteral("_subagent"), summary);

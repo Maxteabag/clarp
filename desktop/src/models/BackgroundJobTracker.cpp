@@ -26,7 +26,7 @@ bool BackgroundJobTracker::isSubAgent(const QJsonObject& job) {
 
 void BackgroundJobTracker::applyList(const QJsonObject& response) {
     QHash<QString, QJsonObject> next;
-    for (const QJsonValue& value : response.value(QStringLiteral("jobs")).toArray()) {
+    for (const auto& value : response.value(QStringLiteral("jobs")).toArray()) {
         const QJsonObject job = value.toObject();
         const QString jobId = job.value(QStringLiteral("job_id")).toString();
         if (!jobId.isEmpty() && isActiveStatus(job.value(QStringLiteral("status")).toString())) {
@@ -58,7 +58,7 @@ bool BackgroundJobTracker::applyEvent(const QJsonObject& event) {
     if (isActiveStatus(job.value(QStringLiteral("status")).toString())) {
         if (existing != m_active.cend() && *existing == job) return false;
         m_active.insert(jobId, job);
-    } else if (m_active.remove(jobId) == 0) {
+    } else if (!m_active.remove(jobId)) {
         return false;
     }
     emit changed();

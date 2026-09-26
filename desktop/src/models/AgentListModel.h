@@ -55,9 +55,9 @@ class AgentListModel : public QAbstractListModel {
         BackgroundJobCountRole,
         SubAgentCountRole,
         ProcessCountRole,
-        LastRole = ProcessCountRole,
     };
     Q_ENUM(Role)
+    static constexpr int LastRole = ProcessCountRole;
 
     explicit AgentListModel(QObject* parent = nullptr);
     AgentListModel(bool archivedOnly, QObject* parent);

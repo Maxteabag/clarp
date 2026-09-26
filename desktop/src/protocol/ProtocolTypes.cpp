@@ -274,7 +274,7 @@ QJsonObject describeSubagentCell(const QJsonObject& cell) {
     QString agentLabel;
     QString statusLine;
     QString otherLine;
-    for (const QJsonValue& value : cell.value(QStringLiteral("lines")).toArray()) {
+    for (const auto& value : cell.value(QStringLiteral("lines")).toArray()) {
         const QJsonObject line = value.toObject();
         const QString label = line.value(QStringLiteral("label")).toString();
         const QString text = line.value(QStringLiteral("text")).toString().trimmed();

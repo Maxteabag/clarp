@@ -4,6 +4,7 @@
 #include <QString>
 #include <QVector>
 #include <algorithm>
+#include <ranges>
 
 namespace clarp {
 
@@ -48,7 +49,7 @@ struct TreePlacement {
     QVector<bool> visited(nodes.size(), false);
     // An explicit stack keeps a very deep or hostile hierarchy off the C++ stack.
     auto append = [&](int root) {
-        QVector<TreePlacement> stack{{root, 0}};
+        QVector<TreePlacement> stack{{.index = root, .depth = 0}};
         while (!stack.isEmpty()) {
             const TreePlacement current = stack.takeLast();
             if (visited.at(current.index)) continue;
@@ -56,9 +57,10 @@ struct TreePlacement {
             result.append(current);
             const QString& id = nodes.at(current.index).id;
             if (id.isEmpty()) continue;
+            // Pushed in reverse so the first sibling is visited first.
             const QVector<int> kids = children.value(id);
-            for (auto it = kids.crbegin(); it != kids.crend(); ++it) {
-                if (!visited.at(*it)) stack.append({*it, current.depth + 1});
+            for (const int kid : std::views::reverse(kids)) {
+                if (!visited.at(kid)) stack.append({.index = kid, .depth = current.depth + 1});
             }
         }
     };
