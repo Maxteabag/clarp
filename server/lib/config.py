@@ -16,6 +16,7 @@ import json
 import os
 import pathlib
 import threading
+import time
 import tomllib
 import re
 from . import xdg
@@ -519,6 +520,13 @@ class Config:
 _CACHED: Config | None = None
 _CACHED_PATH: pathlib.Path | None = None
 _LOAD_LOCK = threading.RLock()  # re-entrant: a load failure logs, and logging may consult config
+# The (mtime_ns, size) the cached Config was parsed from, and when the file
+# was last stat'ed. A rewritten config.toml is picked up on the next load()
+# after RELOAD_CHECK_INTERVAL_SEC without a restart; between checks the cache
+# answers without touching the filesystem.
+_CACHED_STAT: tuple[int, int] | None = None
+_LAST_STAT_AT = 0.0
+RELOAD_CHECK_INTERVAL_SEC = 1.0
 
 
 # "Claude-5628": the anonymous-launch name suffix (agent_lifecycle mints token_hex(2)).
@@ -549,23 +557,61 @@ def load(path: pathlib.Path | None = None) -> Config:
 
     The cache is keyed by the resolved path: asking for a different file
     reloads instead of silently returning whatever was cached first. Filling
-    the cache is serialized so concurrent first callers share one parse.
+    the cache is serialized so concurrent first callers share one parse. A
+    rewritten file (new mtime or size) is reloaded on the first call after
+    `RELOAD_CHECK_INTERVAL_SEC`; a reload that fails keeps the previous
+    Config and logs, so a half-written file cannot take a running Host down.
     """
     with _LOAD_LOCK:
         return _load_locked(path)
 
 
+def _file_signature(path: pathlib.Path) -> tuple[int, int] | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _cache_is_fresh(path: pathlib.Path) -> bool:
+    """True while the cached Config still matches `path` on disk.
+
+    Bounded to one stat per RELOAD_CHECK_INTERVAL_SEC: config.load() is called
+    from hot paths (auth, every transcription) and must stay a dict lookup.
+    """
+    global _LAST_STAT_AT
+    now = time.monotonic()
+    if now - _LAST_STAT_AT < RELOAD_CHECK_INTERVAL_SEC:
+        return True
+    _LAST_STAT_AT = now
+    return _file_signature(path) == _CACHED_STAT
+
+
 def _load_locked(path: pathlib.Path | None) -> Config:
-    global _CACHED, _CACHED_PATH
+    global _CACHED, _CACHED_PATH, _CACHED_STAT
     if path is None:
         # Bare load(): whatever is cached is the process-wide answer, even
         # when it was primed from an explicit path (tests and tools do that).
-        if _CACHED is not None:
-            return _CACHED
-        path = _resolve_config_path()
+        if _CACHED is not None and _CACHED_PATH is None:
+            return _CACHED  # injected without a file (tests): nothing to watch
+        path = _CACHED_PATH if _CACHED is not None else _resolve_config_path()
     path = path.expanduser().resolve(strict=False)
     if _CACHED is not None and _CACHED_PATH == path:
-        return _CACHED
+        if _cache_is_fresh(path):
+            return _CACHED
+        try:
+            return _parse_into_cache(path)
+        except ConfigError:
+            # Already logged. Keep serving the last good Config; the next
+            # explicit reset_cache()+load() will surface the error.
+            return _CACHED
+    return _parse_into_cache(path)
+
+
+def _parse_into_cache(path: pathlib.Path) -> Config:
+    global _CACHED, _CACHED_PATH, _CACHED_STAT, _LAST_STAT_AT
+    signature = _file_signature(path)
     data: dict[str, Any] = {}
     try:
         with path.open("rb") as f:
@@ -705,13 +751,19 @@ def _load_locked(path: pathlib.Path | None) -> Config:
         apns_environment = str(apns.get("environment", "production")).strip().lower(),
     )
     _CACHED_PATH = path
+    _CACHED_STAT = signature
+    _LAST_STAT_AT = time.monotonic()
     return _CACHED
 
 
 def reset_cache() -> None:
     """Clear the module-level cache so runtime settings can be reloaded."""
-    global _CACHED
-    _CACHED = None
+    global _CACHED, _CACHED_PATH, _CACHED_STAT, _LAST_STAT_AT
+    with _LOAD_LOCK:
+        _CACHED = None
+        _CACHED_PATH = None
+        _CACHED_STAT = None
+        _LAST_STAT_AT = 0.0
 
 
 def reset_cache_for_tests() -> None:

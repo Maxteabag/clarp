@@ -25,8 +25,8 @@ from lib.turn_dispatch import TurnDispatchService  # noqa: E402
 
 
 def main() -> int:
-    ctx = ServerContext.production(connect_runtime=False)
-    ctx.stream = RuntimeEventStream()
+    ctx = ServerContext.production(connect_runtime=False).with_(
+        stream=RuntimeEventStream())
     paths = RuntimePaths.from_home(pathlib.Path.home())
     dispatch = TurnDispatchService(ctx)
     handoff_marker = paths.cache_dir / "runtime-clean-handoff"

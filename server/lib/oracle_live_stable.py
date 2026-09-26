@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 from . import config, oracle_delegations, ws
+from .http_utils import principal_of, require_full_scope
 from . import oracle_contact
 from .log import log
 from .oracle_calls_stable import AgentTools, session_config as realtime_config
@@ -657,10 +658,11 @@ def serve(handler):
         return _send_http_error(handler, 426, "WebSocket upgrade required")
     if not headers.get("sec-websocket-key"):
         return _send_http_error(handler, 400, "Missing WebSocket key")
-    principal = str(getattr(handler, "_request_principal", "") or "")
-    if not (getattr(handler, "_request_auth_validated", False) and
-            getattr(handler, "_request_device_scope", "") == "full" and principal):
-        return _send_http_error(handler, 401, "Oracle v2 requires full-device authentication")
+    who = principal_of(handler)
+    principal = who.principal
+    denied = require_full_scope(who, message="Oracle v2 requires full-device authentication")
+    if denied:
+        return _send_http_error(handler, 401, denied)
     cfg = config.load()
     key = cfg.openai_key()
     if not key:
