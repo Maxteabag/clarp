@@ -176,7 +176,7 @@ def test_direct_result_delivery_needs_no_new_admission_after_later_speech(module
         if later_speech:
             c.tick()
             assert not [r for r in sent if 'CAST_RESULT_UNIQUE' in r]  # Existing short acoustic pacing remains.
-            now[0]+=4
+            now[0]+=max(4,getattr(module,'RESULT_RELEASE_SILENCE_SECONDS',0))
         c.tick()
         messages=[json.loads(raw) for raw in sent if 'CAST_RESULT_UNIQUE' in raw]
         assert messages and {m['type'] for m in messages}=={'session.commentary.append'}
