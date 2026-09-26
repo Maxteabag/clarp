@@ -18,7 +18,7 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
-from .base import BackendBrand, CompactionStrategy, hooked
+from .base import BackendBrand, CompactionStrategy
 from .stream_json import StreamJsonBackend, iter_json_dicts
 
 
@@ -121,7 +121,7 @@ def _usage_from(ev: dict) -> tuple[int, int]:
 
 class GrokBackend(StreamJsonBackend):
     """Runs ``grok -p --output-format streaming-json`` once per turn."""
-    # --- catalogue data (was the BackendAdapter registry row) ------------
+    # --- catalogue data ---------------------------------------------------
     id = 'grok'
     label = 'Grok'
     required_binary = 'grok'
@@ -146,7 +146,7 @@ class GrokBackend(StreamJsonBackend):
                   model: str = "", effort: str = "") -> list[str]:
         """argv for one headless Grok Build turn (prompt appended as ``-p``)."""
         cmd = [
-            self._hook("GROK_BIN", self.required_binary),
+            self.required_binary,
             "--always-approve", "--no-alt-screen",
             "--output-format", "streaming-json",
         ]
@@ -181,7 +181,7 @@ class GrokBackend(StreamJsonBackend):
         isolated: bool = False,
         **_kwargs: Any,
     ) -> TurnHandle:
-        grok_bin = self._hook("GROK_BIN", self.required_binary)
+        grok_bin = self.required_binary
         if shutil.which(grok_bin) is None:
             raise FileNotFoundError(
                 f"`{grok_bin}` not on PATH — install Grok Build "
@@ -196,7 +196,7 @@ class GrokBackend(StreamJsonBackend):
         persona = (agent or {}).get("persona") or ""
         prompt = apply_voice_preamble(
             text, voice=voice_preamble, persona=persona, session=session)
-        cmd = self._hook("build_cmd", self.build_cmd)(
+        cmd = self.build_cmd(
             backend_session_id, is_new_session=is_new_session,
             model=model, effort=effort)
         cmd += ["-p", prompt]
@@ -375,7 +375,7 @@ class GrokBackend(StreamJsonBackend):
             st, text=st.live_text, backend_session_id=st.session_id,
             agent_id=agent_id, session=session, trace_id=trace_id, stream=stream,
             force=force,
-            interval=self._hook("LIVE_TEXT_INTERVAL_SEC", self.live_text_interval))
+            interval=self.live_text_interval)
 
     def _bind(self, st: _TurnState, session_id: str, *, on_session_init, on_error,
               trace_id: str) -> None:
@@ -403,12 +403,10 @@ class GrokBackend(StreamJsonBackend):
 
     # ---- orchestrator routing ----------------------------------------------
 
-    @hooked
     def routing_cmd(self, prompt: str, *, model: str = "", effort: str = "") -> list[str]:
         """argv for one headless Grok Build request with no session (orchestrator)."""
-        return self._hook("build_cmd", self.build_cmd)(model=model, effort=effort) + ["-p", prompt]
+        return self.build_cmd(model=model, effort=effort) + ["-p", prompt]
 
-    @hooked
     def routing_text(self, stdout: str) -> str:
         """Concatenated assistant text of a streaming-json run."""
         text = ""

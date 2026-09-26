@@ -1,8 +1,8 @@
 """AI-CLI backend facade.
 
 Each coding CLI is a ``Backend`` strategy object in ``lib.backend``
-(``docs/architecture/backend-strategy.md``); ``by_id()`` / ``for_agent()``
-hand them out. This module stays the import path callers use: the id
+(``docs/architecture/backend-strategy.md``); ``by_id()`` hands them
+out. This module stays the import path callers use: the id
 constants, ``normalize()`` (the one alias normaliser) and, while the
 migration ran, the registry rows the strategies delegated
 to for their catalogue metadata, presentation and capability flags.
@@ -13,7 +13,6 @@ apps without an app release.
 """
 from __future__ import annotations
 
-import importlib
 import pathlib
 import threading
 import time
@@ -105,17 +104,8 @@ from .backend.base import (  # noqa: E402
     BackendBrand, DEFAULT_BRAND, DEFAULT_SYMBOL, LOGIN_KINDS, EFFORT_UIS, EFFORT_SCOPES)
 
 
-def _mod(name: str):
-    return importlib.import_module(f"lib.{name}")
-
-
-def adapters() -> tuple["Backend", ...]:
-    """Every backend in catalogue order (the name predates the classes)."""
-    return all_backends()
-
-
 def ids() -> tuple[str, ...]:
-    return tuple(b.id for b in all_backends())
+    return tuple(b.id for b in _all())
 
 
 def catalogue_fields(backend: str | None) -> dict[str, Any]:
@@ -129,38 +119,23 @@ def catalogue_fields(backend: str | None) -> dict[str, Any]:
         neutral = type("UnregisteredBackend", (Backend,), {
             "id": str(backend or ""), "label": str(backend or ""),
             "required_binary": ""})()
-        return neutral.catalogue_fields(len(all_backends()))
-    return row.catalogue_fields(
-        all_backends().index(row), supports_compact=supports_compact(row.id))
-
-
-def supports_compact(backend: str) -> bool:
-    """Whether the backend has a compaction strategy the Host can drive."""
-    try:
-        by_id(backend).compaction("")
-    except Unsupported:
-        return False
-    return True
+        return neutral.catalogue_fields(len(_all()))
+    return row.catalogue_fields(_all().index(row))
 
 
 def routing_adapters() -> tuple["Backend", ...]:
     """Backends that can answer one isolated orchestrator request."""
-    return tuple(b for b in all_backends() if b.supports_routing)
+    return tuple(b for b in _all() if b.supports_routing)
 
 
 def auth_adapters() -> tuple["Backend", ...]:
     """Backends whose CLI has a sign-in the Host can drive."""
-    return tuple(b for b in all_backends() if b.supports_auth)
+    return tuple(b for b in _all() if b.supports_auth)
 
 
 def get(backend: str | None):
     """The backend object for a known id or alias, else None."""
     return by_id(backend) if is_valid(backend) else None
-
-
-def adapter_for(backend: str | None):
-    """Alias of ``by_id``: the backend object, normalised like ``normalize``."""
-    return by_id(backend)
 
 
 def for_provider(provider: str) -> str:
@@ -169,7 +144,7 @@ def for_provider(provider: str) -> str:
     A registered backend id passes through; an API-key provider maps to the
     CLI whose adapter fronts it (``openai`` runs through Codex).
     """
-    for b in all_backends():
+    for b in _all():
         if provider in b.api_providers:
             return b.id
     return provider
@@ -234,14 +209,10 @@ def interrupt_any(agent_id: str) -> int:
     from .turn_model_fallback import REGISTRY
     total = REGISTRY.interrupt(agent_id, event="fallbackInterruptFail")
     seen: set[str] = set()
-    for b in all_backends():
+    for b in _all():
         if b.runner and b.runner not in seen:
             seen.add(b.runner)
-            total += int(b.interrupt(agent_id) or 0)
-        for name in b.extra_interrupt_modules:
-            if name not in seen:
-                seen.add(name)
-                total += int(_mod(name).interrupt(agent_id) or 0)
+            total += int(b.interrupt_all(agent_id) or 0)
     return total
 
 
@@ -327,21 +298,21 @@ ResultCb = Callable[[dict], None]
 # from the adapter rows above on first use, so neither import order
 # (facade first or package first) sees a half-initialised module.
 from .backend.base import Backend, CompactionStrategy, Unsupported  # noqa: E402
-from .backend.registry import by_id, for_agent  # noqa: E402
-from .backend.registry import all as all_backends  # noqa: E402
+from .backend.registry import by_id  # noqa: E402
+from .backend.registry import all as _all  # noqa: E402
 
 # Lookup tables derived from the classes. Built here, after the package
 # import, because the class modules may import this facade lazily.
-_BY_ID: dict[str, Backend] = {b.id: b for b in all_backends()}
-_ALIASES: dict[str, str] = {alias: b.id for b in all_backends() for alias in b.aliases}
+_BY_ID: dict[str, Backend] = {b.id: b for b in _all()}
+_ALIASES: dict[str, str] = {alias: b.id for b in _all() for alias in b.aliases}
 VALID: set[str] = set(_BY_ID)
-LABELS: dict[str, str] = {b.id: b.label for b in all_backends()}
-EFFORTS: dict[str, tuple[str, ...]] = {b.id: b.efforts for b in all_backends()}
+LABELS: dict[str, str] = {b.id: b.label for b in _all()}
+EFFORTS: dict[str, tuple[str, ...]] = {b.id: b.efforts for b in _all()}
 CAPABILITIES: dict[str, BackendCapabilities] = {
     b.id: BackendCapabilities(
         supports_fork=b.supports_fork,
         supports_transcript_streaming=b.supports_transcript_streaming,
         required_binary=b.required_binary,
     )
-    for b in all_backends()
+    for b in _all()
 }
