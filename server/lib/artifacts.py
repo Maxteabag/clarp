@@ -698,6 +698,29 @@ def discard(artifact_id: str, *, expected_updated_at: int) -> tuple[dict, bool]:
         con.execute("ROLLBACK"); raise
 
 
+def has_pending_decision(agent_id: str) -> bool:
+    """Whether this agent currently holds any unanswered question or approval.
+
+    Used to pick a turn-done push's urgency: an ordinary reply is a chat
+    message, but a reply that leaves the user with something to answer is
+    worth breaking through Focus for. Any pending decision counts, not only
+    ones marked `blocks_progress` — an unanswered approval still needs the
+    user's response even when the agent can otherwise continue. The push
+    fired at decision-creation time (`decision_payload`) already covers the
+    moment the decision first appears; this covers the turn-done push that
+    may follow it, or one for a decision left over from an earlier turn.
+    """
+    agent_id = (agent_id or "").strip()
+    if not agent_id:
+        return False
+    row = db.conn().execute(
+        """SELECT 1 FROM artifact_decisions d JOIN artifacts a ON a.artifact_id=d.artifact_id
+            WHERE a.agent_id=? AND d.status='pending'
+              AND (d.expires_at IS NULL OR d.expires_at>?) LIMIT 1""",
+        (agent_id, db.now_ms())).fetchone()
+    return row is not None
+
+
 def attention(*, include_questions: bool = False, include_archived: bool = False) -> list[dict]:
     _expire_decisions()
     rows = db.conn().execute(
