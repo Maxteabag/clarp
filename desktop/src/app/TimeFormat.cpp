@@ -1,6 +1,7 @@
 #include "app/TimeFormat.h"
 
 #include <QLocale>
+#include <algorithm>
 
 namespace clarp {
 namespace {
@@ -75,6 +76,16 @@ QString daySeparator(const QString& timestamp, const QString& previousTimestamp,
         return {};
     }
     return dayHeading(moment.date(), now.date());
+}
+
+QString compactDuration(qint64 milliseconds) {
+    const qint64 seconds = std::max<qint64>(0, milliseconds / 1000);
+    if (seconds < 60) return QStringLiteral("%1s").arg(seconds);
+    const qint64 minutes = seconds / 60;
+    if (minutes < 60) return QStringLiteral("%1m").arg(minutes);
+    const qint64 hours = minutes / 60;
+    if (hours < 24) return QStringLiteral("%1h %2m").arg(hours).arg(minutes % 60, 2, 10, QLatin1Char('0'));
+    return QStringLiteral("%1d").arg(hours / 24);
 }
 
 } // namespace clarp

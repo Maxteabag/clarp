@@ -120,6 +120,28 @@ Rectangle {
                     showRuntime: root.session.length > 0 && !root.pairRoom
                     ActivitySweep { anchors.fill: parent; working: headerAvatarActivity.authoritativeWorking; reducedMotion: headerAvatarActivity.reducedMotion; phase: headerAvatarActivity.phase }
                 }
+                ProcessIndicator {
+                    id: headerProcesses
+                    objectName: "headerProcessIndicator"
+                    readonly property var counts: {
+                        root.agentRevision;
+                        root.controller.processRevision;
+                        return root.session.length > 0 && !root.pairRoom
+                            && typeof root.controller.agentProcesses === "function"
+                            ? root.controller.agentProcesses(root.session) : ({});
+                    }
+                    Layout.alignment: Qt.AlignVCenter
+                    glyphSize: 15
+                    jobCount: Number(counts.jobCount || 0)
+                    subAgentCount: Number(counts.subAgentCount || 0)
+                    runningChildren: Number(counts.runningChildren || 0)
+                    reducedMotion: headerAvatarActivity.reducedMotion
+                    onClicked: headerProcessPopover.openFor(root.session, headerProcesses)
+                    ProcessPopover {
+                        id: headerProcessPopover
+                        controller: root.controller
+                    }
+                }
 
                 TuiToolButton {
                     text: root.controller.panes.zoomedPaneId === root.paneId ? "Restore" : "Maximize"

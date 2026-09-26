@@ -38,6 +38,9 @@ add_executable(clarp-desktop-tests
     ../src/app/TimeFormat.cpp
     ../src/app/MarkdownStyle.cpp
     ../src/models/AgentFilterModel.cpp
+    ../src/models/BackgroundJobTracker.cpp
+    ../src/models/BackgroundJobTracker.h
+    ../src/models/TreeOrder.h
     ../src/models/AgentFilterModel.h
     ../src/media/PortraitImage.cpp
     ../src/media/AudioController.cpp
@@ -130,6 +133,14 @@ add_test(NAME clarp-desktop-palette-popup COMMAND clarp-desktop)
 set_tests_properties(clarp-desktop-palette-popup PROPERTIES
     TIMEOUT 15
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=palette-${clarp_palette_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/palette-popup/config;CLARP_SCREENSHOT_SCENARIO=tool-spacing;CLARP_SCREENSHOT_VIEW=orchestrator;CLARP_SCREENSHOT_OPEN_POPUP=orchestratorProvider;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/palette-popup/capture.png"
+)
+# Background jobs, a running sub-agent and nested helpers: the process list
+# must open from the header indicator of an agent running three processes.
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/background-processes/config")
+add_test(NAME clarp-desktop-background-processes COMMAND clarp-desktop)
+set_tests_properties(clarp-desktop-background-processes PROPERTIES
+    TIMEOUT 20
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=background-processes-${clarp_palette_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/background-processes/config;CLARP_SCREENSHOT_SCENARIO=background-processes;CLARP_SCREENSHOT_OPEN_PROCESSES=header;CLARP_SCREENSHOT_SIDEBAR_TOGGLES=2;CLARP_SCREENSHOT_DELAY_MS=3200;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/background-processes/capture.png"
 )
 add_test(NAME clarp-desktop-activity-layout
     COMMAND ${CLARP_QML_TEST_RUNNER} -input "${CMAKE_CURRENT_SOURCE_DIR}/qml")

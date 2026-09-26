@@ -85,6 +85,18 @@ Agent Agent::fromJson(const QJsonObject& object) {
     agent.lastCompletedMessage = stringValue(object, "last_completed_message");
     agent.conversationId = stringValue(object, "conversation_id");
     agent.voiceId = stringValue(object, "voice_id");
+    agent.parentAgentId = stringValue(object, "parent_agent_id");
+    if (const QString role = stringValue(object, "role"); !role.isEmpty()) {
+        agent.role = role;
+    }
+    agent.helperState = stringValue(object, "helper_state");
+    const QJsonObject jobs = object.value(QStringLiteral("background_jobs")).toObject();
+    agent.backgroundJobCount = static_cast<int>(std::max<qint64>(0, integerValue(jobs, "count")));
+    agent.backgroundSubAgentCount = static_cast<int>(
+        std::clamp<qint64>(integerValue(jobs, "sub_agents"), 0, agent.backgroundJobCount));
+    agent.childCount = static_cast<int>(std::max<qint64>(0, integerValue(object, "child_count")));
+    agent.runningChildren =
+        static_cast<int>(std::max<qint64>(0, integerValue(object, "running_children")));
     if (object.value(QStringLiteral("schedules")).isArray()) {
         agent.schedules = object.value(QStringLiteral("schedules")).toArray();
     }
@@ -114,6 +126,20 @@ Agent Agent::fromJson(const QJsonObject& object) {
     agent.archived = !object.value(QStringLiteral("archived_at")).isNull() &&
                      !object.value(QStringLiteral("archived_at")).isUndefined();
     return agent;
+}
+
+bool Agent::isHelper() const {
+    return role == QStringLiteral("helper") && !parentAgentId.isEmpty();
+}
+
+bool Agent::helperFinished() const {
+    return isHelper() && (helperState == QStringLiteral("done") ||
+                          helperState == QStringLiteral("reported") ||
+                          helperState == QStringLiteral("abandoned"));
+}
+
+bool Agent::helperRunning() const {
+    return isHelper() && helperState == QStringLiteral("running");
 }
 
 QString Agent::quotaNotice(const QDateTime& now) const {
@@ -222,6 +248,59 @@ bool isBusyState(const QString& state) {
         QStringLiteral("compacting"),
     };
     return busyStates.contains(state);
+}
+
+QJsonObject describeSubagentCell(const QJsonObject& cell) {
+    if (cell.value(QStringLiteral("kind")).toString() != QStringLiteral("subagents")) {
+        return {};
+    }
+    const QString title = cell.value(QStringLiteral("title")).toString();
+    const QString status = cell.value(QStringLiteral("status")).toString();
+    const QString lower = title.toLower();
+    const bool running = status == QStringLiteral("running");
+    QString phase = QStringLiteral("activity");
+    if (status == QStringLiteral("error") || lower.contains(QStringLiteral("interrupted"))) {
+        phase = QStringLiteral("failed");
+    } else if (lower.contains(QStringLiteral("wait"))) {
+        phase = running ? QStringLiteral("waiting") : QStringLiteral("finished");
+    } else if (lower.contains(QStringLiteral("spawn")) || lower.contains(QStringLiteral("start"))) {
+        phase = QStringLiteral("spawned");
+    } else if (lower.contains(QStringLiteral("close")) ||
+               lower.contains(QStringLiteral("finish")) ||
+               lower.contains(QStringLiteral("complete"))) {
+        phase = QStringLiteral("finished");
+    }
+    QString task;
+    QString agentLabel;
+    QString statusLine;
+    QString otherLine;
+    for (const auto& value : cell.value(QStringLiteral("lines")).toArray()) {
+        const QJsonObject line = value.toObject();
+        const QString label = line.value(QStringLiteral("label")).toString();
+        const QString text = line.value(QStringLiteral("text")).toString().trimmed();
+        if (text.isEmpty()) continue;
+        if (task.isEmpty() && (label == QStringLiteral("Task") || label == QStringLiteral("Input"))) {
+            task = text;
+        } else if (agentLabel.isEmpty() &&
+                   (label == QStringLiteral("Agent") || label == QStringLiteral("Thread"))) {
+            agentLabel = text;
+        } else if (statusLine.isEmpty() &&
+                   line.value(QStringLiteral("kind")).toString() == QStringLiteral("status")) {
+            statusLine = label.isEmpty() ? text : label + QStringLiteral(": ") + text;
+        } else if (otherLine.isEmpty()) {
+            otherLine = label.isEmpty() ? text : label + QStringLiteral(": ") + text;
+        }
+    }
+    if (statusLine.isEmpty()) statusLine = otherLine;
+    QString name = cell.value(QStringLiteral("summary")).toString().trimmed();
+    if (name.isEmpty() || name == QStringLiteral("agent") || name == QStringLiteral("agents")) {
+        name = agentLabel.isEmpty() ? name : agentLabel;
+    }
+    if (name.isEmpty()) name = QStringLiteral("sub-agent");
+    return {{QStringLiteral("phase"), phase},
+            {QStringLiteral("running"), running},
+            {QStringLiteral("name"), name},
+            {QStringLiteral("task"), task.isEmpty() ? statusLine : task}};
 }
 
 QString displayName(const Agent& agent) {

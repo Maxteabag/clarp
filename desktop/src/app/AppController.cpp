@@ -243,6 +243,15 @@ AppController::AppController(QObject* parent)
         ++m_agentRevision;
         emit agentRevisionChanged();
     };
+    connect(&m_jobTracker, &BackgroundJobTracker::changed, this, [this] {
+        if (m_jobTracker.loaded()) {
+            m_agents.applyLiveJobCounts(m_jobTracker.countsByAgent());
+        } else {
+            m_agents.clearLiveJobCounts();
+        }
+        ++m_processRevision;
+        emit processRevisionChanged();
+    });
     connect(&m_agents, &QAbstractItemModel::modelReset, this, bumpAgentRevision);
     connect(&m_agents, &QAbstractItemModel::dataChanged, this, bumpAgentRevision);
     connect(&m_agents, &QAbstractItemModel::rowsInserted, this, bumpAgentRevision);
@@ -673,6 +682,14 @@ void AppController::seedScreenshotArtifacts(const QVariantList& artifacts) {
     emit updatesChanged();
 }
 
+void AppController::seedScreenshotBackgroundJobs(const QJsonObject& response) {
+    if (!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")) {
+        qWarning("Refusing to seed background jobs outside a screenshot run");
+        return;
+    }
+    m_jobTracker.applyList(response);
+}
+
 QVariantMap AppController::reportForArtifact(const QString& artifactId) const {
     for (const QVariant& value : m_updateArtifacts) {
         const QVariantMap map = value.toMap();
@@ -837,6 +854,7 @@ void AppController::setBaseUrl(const QString& value) {
     }
     m_attentionItems.clear();
     m_backgroundJobs.clear();
+    m_jobTracker.clear();
     m_updateArtifacts.clear();
     m_updatesError.clear();
     m_teams.clear();
@@ -1416,6 +1434,11 @@ int AppController::agentQueueCount(const QString& session) const {
 QString AppController::agentQuotaNotice(const QString& session) const {
     const Agent* agent = m_agents.find(session);
     return agent == nullptr ? QString{} : agent->quotaNotice(QDateTime::currentDateTimeUtc());
+}
+
+QVariantMap AppController::agentProcesses(const QString& session) const {
+    return describeAgentProcesses(m_agents, m_jobTracker, session,
+                                  QDateTime::currentMSecsSinceEpoch());
 }
 
 QVariantMap AppController::agentDetails(const QString& session) const {
@@ -3091,6 +3114,7 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
             m_attentionItems = object.value(QStringLiteral("items")).toArray().toVariantList();
         } else if (kind == QStringLiteral("jobs")) {
             m_backgroundJobs = object.value(QStringLiteral("jobs")).toArray().toVariantList();
+            m_jobTracker.applyList(object);
         } else if (kind == QStringLiteral("artifacts")) {
             m_updateArtifacts = object.value(QStringLiteral("artifacts")).toArray().toVariantList();
         }
@@ -3704,9 +3728,13 @@ void AppController::handleSseEvent(const QJsonObject& event) {
         if (action == QStringLiteral("stop-agent")) {
             stopAgent();
         }
+    } else if (type == QStringLiteral("background-job-updated")) {
+        // Apply the event's job at once so the row and header change without
+        // waiting for the refetch; the list that follows stays authoritative.
+        if (m_jobTracker.loaded()) m_jobTracker.applyEvent(event);
+        loadUpdates();
     } else if (type == QStringLiteral("artifact-updated") ||
-               type == QStringLiteral("attention-updated") ||
-               type == QStringLiteral("background-job-updated")) {
+               type == QStringLiteral("attention-updated")) {
         loadUpdates();
     }
 }
