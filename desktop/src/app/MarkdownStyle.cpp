@@ -57,6 +57,7 @@ MarkdownStyleOptions markdownStyleOptions(const QVariantMap& values) {
     colour("rule", options.rule);
     const QString mono = values.value(QStringLiteral("monoFamily")).toString();
     if (!mono.isEmpty()) options.monoFamily = mono;
+    options.bodyFamily = values.value(QStringLiteral("bodyFamily")).toString();
     return options;
 }
 
@@ -104,7 +105,9 @@ bool applyMarkdownStyle(QTextDocument* document, const MarkdownStyleOptions& opt
             QTextCharFormat charFormat = fragment.charFormat();
             bool changed = false;
             if (heading > 0) {
-                charFormat.setProperty(QTextFormat::FontSizeAdjustment, 0);
+                // Clear, not zero: the HTML exporter writes a zero adjustment as
+                // font-size:medium, which then overrides the pixel size below.
+                charFormat.clearProperty(QTextFormat::FontSizeAdjustment);
                 charFormat.setProperty(QTextFormat::FontPixelSize, static_cast<int>(std::lround(body * headingScale(heading))));
                 charFormat.setFontWeight(QFont::DemiBold);
                 changed = true;
@@ -154,5 +157,26 @@ bool applyMarkdownStyle(QTextDocument* document, const MarkdownStyleOptions& opt
     }
     cursor.endEditBlock();
     return true;
+}
+QString styledMarkdownHtml(const QString& markdown, const MarkdownStyleOptions& options) {
+    QTextDocument document;
+    QFont font = document.defaultFont();
+    font.setFamilies({options.bodyFamily.isEmpty() ? QStringLiteral("sans-serif") : options.bodyFamily});
+    font.setPixelSize(options.bodyPixelSize);
+    document.setDefaultFont(font);
+    document.setMarkdown(markdown, QTextDocument::MarkdownDialectGitHub);
+    applyMarkdownStyle(&document, options);
+    // Export headings as plain paragraphs. Their size and weight already sit
+    // on the text; an <h2> tag would make the viewer apply its own heading
+    // scale on top of that pixel size (h2 rendered at ~1.5x instead of 1.18x).
+    QTextCursor cursor(&document);
+    for (QTextBlock block = document.begin(); block.isValid(); block = block.next()) {
+        QTextBlockFormat format = block.blockFormat();
+        if (format.headingLevel() == 0) continue;
+        format.setHeadingLevel(0);
+        cursor.setPosition(block.position());
+        cursor.setBlockFormat(format);
+    }
+    return document.toHtml();
 }
 }  // namespace clarp

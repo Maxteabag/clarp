@@ -260,37 +260,32 @@ Item {
                             objectName: "messageTextBlock"
                             required property int index
                             width: messageBlocks.width
-                            text: root.renderedBlocks[index] || ""
-                            readOnly: true
-                            selectByMouse: true
-                            persistentSelection: true
                             // Qt's Markdown parser is not incremental-safe when a
                             // stream ends halfway through a fence/list/tag. Present
                             // growing text plainly; the finalized row upgrades to
-                            // Markdown without changing model identity.
-                            textFormat: root.messageKind === "live"
-                                ? Text.PlainText : Text.MarkdownText
+                            // pre-styled rich text without changing model identity.
+                            // Styling happens before layout: restyling after the
+                            // row is placed changes its height and makes the list
+                            // jump while scrolling up.
+                            readonly property string block: root.renderedBlocks[index] || ""
+                            text: root.messageKind === "live" || !root.controller.styledMarkdownHtml
+                                ? block
+                                : root.controller.styledMarkdownHtml(block, {
+                                    bodyPixelSize: root.readingSize, bodyFamily: root.readingFont,
+                                    monoFamily: "JetBrains Mono", codeBackground: String(Theme.control),
+                                    quoteText: String(Theme.muted), link: String(Theme.link), rule: String(Theme.rule)
+                                })
+                            readOnly: true
+                            selectByMouse: true
+                            persistentSelection: true
+                            textFormat: root.messageKind === "live" || !root.controller.styledMarkdownHtml
+                                ? (root.messageKind === "live" ? Text.PlainText : Text.MarkdownText) : Text.RichText
                             wrapMode: Text.Wrap
                             color: root.styled("text", Theme.body)
                             selectedTextColor: root.styled("selectedText", Theme.selectedText)
                             selectionColor: root.styled("selection", Theme.selection)
                             font.family: root.readingFont
                             font.pixelSize: root.readingSize
-                            // Qt's Markdown import scales headings like a web page
-                            // and leaves code and quotes bare; restyle after every
-                            // finalized import. The styler is a no-op for a document
-                            // it already handled, so this cannot loop.
-                            function restyle() {
-                                if (textFormat !== Text.MarkdownText || !root.controller.styleMarkdown) return;
-                                root.controller.styleMarkdown(textDocument, {
-                                    bodyPixelSize: root.readingSize, monoFamily: "JetBrains Mono",
-                                    codeBackground: String(Theme.control),
-                                    quoteText: String(Theme.muted), link: String(Theme.link), rule: String(Theme.rule)
-                                });
-                            }
-                            onTextChanged: restyle()
-                            onTextFormatChanged: restyle()
-                            Component.onCompleted: restyle()
                             // Routed through the controller so a non-web scheme in
                             // model output cannot reach the desktop handler.
                             onLinkActivated: link => root.controller.openExternalLink(link, root.linkOriginHost)

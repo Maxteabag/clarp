@@ -167,6 +167,8 @@ class AppController : public QObject {
     Q_INVOKABLE [[nodiscard]] QVariantMap memoryCounters() const;
     // Restyle a TextEdit's imported Markdown (headings, code, quotes, tables).
     Q_INVOKABLE void styleMarkdown(QObject* textDocument, const QVariantMap& options) const;
+    // Styled rich text for one finalized Markdown block, cached by content and options.
+    Q_INVOKABLE [[nodiscard]] QString styledMarkdownHtml(const QString& markdown, const QVariantMap& options) const;
     Q_INVOKABLE [[nodiscard]] QString chatStamp(qint64 time) const;
     Q_INVOKABLE [[nodiscard]] QVariantList mediaForSession(const QString& session) const;
     Q_INVOKABLE [[nodiscard]] QUrl mediaSource(const QString& assetId) const;
@@ -569,6 +571,7 @@ class AppController : public QObject {
     QHash<QString, QString> m_avatarUrls;
     QHash<QString, QPair<QString, QString>> m_avatarRequests;
     QHash<QString, QString> m_avatarFailures;
+    mutable QHash<QString, QString> m_styledMarkdown;  // key: options|markdown
     QHash<QString, QUrl> m_contactAvatarSources;      // contact name -> data URL
     QHash<QString, QString> m_contactAvatarUrls;      // contact name -> Host URL
     QHash<QString, QString> m_contactAvatarRequests;  // request tag -> contact name
