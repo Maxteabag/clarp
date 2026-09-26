@@ -243,7 +243,34 @@ ApplicationWindow {
             app.requestComposerFocus(app.panes.activePaneId);
     }
 
-    KeymapEditor {id:keymapEditor;objectName:"keymapEditor";anchors.fill:parent;z:300;keymap:keyboard;onClosed:app.requestComposerFocus(app.panes.activePaneId)}
+    // The keymap editor is built on first open: it cost ~0.2 s of every
+    // launch and is rarely used. The host keeps the old id, visibility and
+    // closed() contract, so callers are unchanged.
+    Item {
+        id: keymapEditor
+        objectName: "keymapEditorHost"
+        anchors.fill: parent
+        z: 300
+        visible: false
+        signal closed()
+        onClosed: app.requestComposerFocus(app.panes.activePaneId)
+        onVisibleChanged: {
+            if (visible) keymapEditorLoader.active = true;
+            if (keymapEditorLoader.item) keymapEditorLoader.item.visible = visible;
+        }
+        Loader {
+            id: keymapEditorLoader
+            anchors.fill: parent
+            active: false
+            sourceComponent: KeymapEditor {
+                objectName: "keymapEditor"
+                keymap: keyboard
+                onClosed: { keymapEditor.visible = false; keymapEditor.closed(); }
+            }
+            // Shown after load so the editor's own onVisibleChanged fills and focuses it.
+            onLoaded: item.visible = keymapEditor.visible
+        }
+    }
     AppController {
         id: app
         Component.onCompleted: Theme.style = Qt.binding(() => app.readingStyle)
