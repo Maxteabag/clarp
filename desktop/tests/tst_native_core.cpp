@@ -1,4 +1,5 @@
 #include "models/ConversationPresentationModel.h"
+#include <algorithm>
 #include <QTextDocument>
 #include <QDesktopServices>
 #include <QClipboard>
@@ -2902,6 +2903,19 @@ void NativeCoreTest::paneDraftIsDurableAndScopedToServerAndConversation() {
         QCOMPARE(first.paneDraft(QStringLiteral("pane-b"), QStringLiteral("rachel")),
                  QStringLiteral("durable thought"));
         QCOMPARE(first.paneDraft(QStringLiteral("pane-a"), QStringLiteral("bella")), QString{});
+        // Typing must not sync the settings file per keystroke; the draft is
+        // persisted once the composer goes idle (or the controller closes).
+        QSettings settings;
+        const auto persisted = [&settings] {
+            settings.sync();
+            const QStringList keys = settings.allKeys();
+            return std::ranges::any_of(keys, [&settings](const QString& key) {
+                return settings.value(key).toString() == QStringLiteral("durable thought");
+            });
+        };
+        QVERIFY(!persisted());
+        first.flushPendingDrafts();
+        QVERIFY(persisted());
     }
     {
         AppController relaunched;
@@ -3883,6 +3897,8 @@ void NativeCoreTest::relaunchPreservesHostSessionAndDraft() {
     first.restoreDesktopSession(QStringLiteral("restore-exact"));
     const auto pane = first.panes()->activePaneId();
     first.setPaneDraft(pane, QStringLiteral("restore-exact"), QStringLiteral("unsent draft"));
+    // The relaunch helper waits for this process to exit, which flushes drafts.
+    first.flushPendingDrafts();
     QSettings().sync();
     AppController nextController;
     nextController.restoreDesktopSession(QStringLiteral("restore-exact"));

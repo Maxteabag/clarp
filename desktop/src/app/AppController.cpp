@@ -109,6 +109,13 @@ AppController::AppController(QObject* parent)
     if (auto* application = QCoreApplication::instance())
         m_launchMode = application->property("clarpLaunchMode").toBool();
     m_waitingForSessionChoice = QCoreApplication::instance()->property("clarpEmptyStartup").toBool();
+    m_draftFlush.setSingleShot(true);
+    m_draftFlush.setInterval(1000);
+    connect(&m_draftFlush, &QTimer::timeout, this, &AppController::flushPendingDrafts);
+    if (QCoreApplication::instance() != nullptr) {
+        connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this,
+                &AppController::flushPendingDrafts);
+    }
     m_agentConversationsRefresh.setSingleShot(true);
     m_agentConversationsRefresh.setInterval(400);
     connect(&m_agentConversationsRefresh, &QTimer::timeout, this, &AppController::loadAgentConversations);
@@ -296,6 +303,7 @@ AppController::AppController(QObject* parent)
 }
 
 AppController::~AppController() {
+    flushPendingDrafts();
     // SseClient::stop() emits connectedChanged. Stop and detach it while all
     // model members are still alive; waiting for member destruction would run
     // the constructor lambda after those models have already been destroyed.
@@ -1881,7 +1889,12 @@ QString AppController::paneDraft(const QString& paneId, const QString& session) 
     if (session.isEmpty()) {
         return {};
     }
-    return QSettings().value(draftSettingsKey(m_baseUrl, session)).toString();
+    const QString key = draftSettingsKey(m_baseUrl, session);
+    const auto pending = m_pendingDrafts.constFind(key);
+    if (pending != m_pendingDrafts.cend()) {
+        return pending.value();
+    }
+    return QSettings().value(key).toString();
 }
 
 void AppController::setPaneDraft(const QString& paneId, const QString& session,
@@ -1889,17 +1902,32 @@ void AppController::setPaneDraft(const QString& paneId, const QString& session,
     if (paneId.isEmpty() || session.isEmpty()) {
         return;
     }
-    const QString key = draftSettingsKey(m_baseUrl, session);
-    QSettings settings;
-    if (settings.value(key).toString() == text) {
+    // Drafts change on every keystroke. Writing QSettings here synced the
+    // whole settings file (lock file plus fdatasync) on the GUI thread per
+    // key, which blocked typing for hundreds of milliseconds. Hold the text in
+    // memory and persist it once the composer has been idle for a moment.
+    if (paneDraft(paneId, session) == text) {
         return;
     }
-    if (text.isEmpty()) {
-        settings.remove(key);
-    } else {
-        settings.setValue(key, text);
-    }
+    m_pendingDrafts.insert(draftSettingsKey(m_baseUrl, session), text);
+    m_draftFlush.start();
     emit draftChanged(session, text, paneId);
+}
+
+void AppController::flushPendingDrafts() {
+    m_draftFlush.stop();
+    if (m_pendingDrafts.isEmpty()) {
+        return;
+    }
+    QSettings settings;
+    for (auto it = m_pendingDrafts.cbegin(); it != m_pendingDrafts.cend(); ++it) {
+        if (it.value().isEmpty()) {
+            settings.remove(it.key());
+        } else {
+            settings.setValue(it.key(), it.value());
+        }
+    }
+    m_pendingDrafts.clear();
 }
 
 QVariantList AppController::composerAttachments(const QString& paneId,

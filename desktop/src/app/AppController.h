@@ -367,6 +367,7 @@ class AppController : public QObject {
                                                 const QString& session) const;
     Q_INVOKABLE void setPaneDraft(const QString& paneId, const QString& session,
                                   const QString& text);
+    void flushPendingDrafts();
     Q_INVOKABLE [[nodiscard]] QVariantList composerAttachments(const QString& paneId,
                                                                const QString& session) const;
     Q_INVOKABLE [[nodiscard]] bool composerCanSend(const QString& paneId,
@@ -607,6 +608,8 @@ class AppController : public QObject {
     QHash<QString, QVariantMap> m_toolDetailRequests;
     QVariantList m_agentConversations;
     QTimer m_agentConversationsRefresh;
+    QHash<QString, QString> m_pendingDrafts;
+    QTimer m_draftFlush;
     bool m_connecting = false;
     bool m_sending = false;
     bool m_muted = false;
