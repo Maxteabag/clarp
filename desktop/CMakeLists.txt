@@ -130,6 +130,9 @@ qt_add_qml_module(clarp-desktop
         qml/components/NavRail.qml
         qml/components/ChatList.qml
         qml/components/ChatRow.qml
+        qml/components/ProcessGlyph.qml
+        qml/components/ProcessIndicator.qml
+        qml/components/ProcessPopover.qml
         qml/components/AgentOverview.qml
         qml/components/AgentAvatar.qml
         qml/components/AvatarActivity.qml

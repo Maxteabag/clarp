@@ -22,6 +22,8 @@ TestCase {
             workingDirectory: "/tmp"; avatarUrl: ""; lastMessage: "Unfinished text"
             lastCompletedMessage: "Previous completed reply"; agentState: "thinking"
             statusText: ""; lastActivity: 0; busy: true; unread: false; muted: false; queueCount: 0
+            agentId: "fixture-id"; backgroundJobCount: 0; subAgentCount: 0; runningChildren: 0
+            agentRole: "agent"; helperState: ""; treeDepth: 0; doneHelpers: []
         }
     }
     function test_completedPreviewAndWorkingAreSeparate() {

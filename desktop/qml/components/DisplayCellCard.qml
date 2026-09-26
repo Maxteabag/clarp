@@ -19,6 +19,11 @@ Rectangle {
     readonly property string status: String(cell.status || "recorded")
     readonly property var lines: Array.from(cell.lines || [])
     readonly property int detailCount: Number(cell.detail_count || cell.detailCount || lines.length)
+    // Harness sub-agent cells (Claude Agent/Task, Codex spawn_agent) get the
+    // agent glyph, a phase label and the sub-agent's task beside its name.
+    readonly property var subagent: cell._subagent || null
+    readonly property bool isSubagent: root.subagent !== null && root.subagent !== undefined
+    readonly property string subagentPhase: root.isSubagent ? String(root.subagent.phase || "") : ""
     readonly property color statusColor: status === "error" ? Theme.danger
         : (status === "running" || status === "ok") ? Theme.secondary : Theme.muted
 
@@ -54,23 +59,49 @@ Rectangle {
             spacing: 7
 
             Rectangle {
+                visible: !root.isSubagent
                 Layout.preferredWidth: 6
                 Layout.preferredHeight: 6
                 radius: Theme.radius
                 color: root.statusColor
             }
+            ProcessGlyph {
+                objectName: "subagentCellGlyph"
+                visible: root.isSubagent
+                Layout.preferredWidth: visible ? 13 : 0
+                glyphSize: 13
+                kind: "agent"
+                color: root.subagentPhase === "failed" ? Theme.danger
+                    : root.subagentPhase === "finished" ? Theme.muted : Theme.link
+                running: root.isSubagent && Boolean(root.subagent.running)
+            }
+            TuiText {
+                objectName: "subagentCellPhase"
+                visible: root.isSubagent && !explanation.narrationShown
+                text: root.subagentPhase === "activity" ? "sub-agent" : root.subagentPhase
+                color: root.subagentPhase === "failed" ? Theme.danger
+                    : root.subagentPhase === "finished" ? Theme.muted : Theme.link
+                font.family: "JetBrains Mono"
+                font.pixelSize: 11
+            }
             TuiText {
                 visible: !explanation.narrationShown
-                text: root.title
+                text: root.isSubagent ? String(root.subagent.name || root.title) : root.title
+                objectName: "displayCellTitle"
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                Layout.maximumWidth: root.isSubagent ? root.width * 0.4 : Number.POSITIVE_INFINITY
                 color: Theme.text
                 font.family: "JetBrains Mono"
                 font.pixelSize: 12
                 font.weight: Font.DemiBold
             }
             TuiText {
+                objectName: "displayCellSummary"
                 visible: !explanation.narrationShown
                 Layout.fillWidth: true
-                text: root.summary
+                textFormat: Text.PlainText
+                text: root.isSubagent ? String(root.subagent.task || root.title) : root.summary
                 color: Theme.muted
                 font.pixelSize: 12
                 elide: Text.ElideMiddle
