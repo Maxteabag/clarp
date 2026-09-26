@@ -145,6 +145,18 @@ UNANSWERED_SECONDS = 8.0
 EARCON_QUIET_SECONDS = 0.6
 DECISION_POLL_SECONDS = 1.0
 DECISION_PRESENTATION_COOLDOWN_SECONDS = 4.0
+# A connection that opens within this long of the thread's last activity
+# continues the same call (a network drop): its delegations keep relaying.
+# Anything older is a new call, and the thread's earlier work is background
+# the user can ask about but is never read out unprompted (call bfd47723 read
+# a previous call's reply over the user 0.3 s after opening).
+CALL_RESUME_GRACE_SECONDS = 30
+
+
+def wall_ms():
+    return int(time.time() * 1000)
+
+
 from .oracle_prompt import PROMPT  # one voice prompt for every engine
 from . import oracle_attention, oracle_earcons, oracle_relay, oracle_strategy, oracle_voice_context, oracle_memory, oracle_voices
 ROUTING = """Route every actionable request in current_user_requests using the
@@ -169,7 +181,9 @@ A request to continue, repeat, or read aloud (word for word) a reply that is
 already in authoritative_tasks is served with read_result, never by asking the
 agent again; its relay field shows how many parts were already sent. To see
 what an agent or the user said recently, use read_agent_transcript; it reads
-without prompting the agent.
+without prompting the agent. A task marked from_earlier_call was delegated in
+a previous call; when the user asks what that agent said or for updates, serve
+it with read_result.
 When the user asks to talk to an agent directly or to be put through to them,
 call switch_contact with that agent; to return to Oracle, call it with
 "oracle". Asking an agent to talk to someone else is ordinary work, not a switch.
@@ -408,13 +422,23 @@ class Conversation:
         self.last_context_notification = None
         self.pending = []
         self.superseded = set()
+        # Nothing from before this call (pending context, earlier results) is
+        # offered until the user has spoken and Oracle has answered.
+        self.user_spoke_at = None
+        self.opening_answered = False
         self.tools.supersede = self.supersede
         # Optional private journal (see docs/oracle-diagnostics.md) and always-on counters.
         self.journal = None
         self.counts = {"in_chunks": 0, "out_audible": 0, "out_silence_forwarded": 0, "out_silence_dropped": 0}
+        resumed_work = set()
         if self.memory:
             self.memory.reconcile()
             saved = self.memory.load()
+            active = saved.get("call_active_ms")
+            if (isinstance(active, int)
+                    and 0 <= wall_ms() - active <= CALL_RESUME_GRACE_SECONDS * 1000):
+                resumed_work = set(saved.get("call_work", []))
+                self.opening_answered = True
             self.fragments = saved.get("fragments", [])[-30:]
             self.revision = self.resume_revision = saved.get("revision", 0)
             self.routed_revision = saved.get("routed_revision", self.resume_revision)
@@ -426,6 +450,9 @@ class Conversation:
             self.earcons = saved.get("earcons", True) is not False
             with self.tools.lock:
                 self.tools.delegations.update(row["delegation_id"] for row in self.memory.work())
+        # Work delegated before this call: served on request, never relayed
+        # or cued on its own. No routing thread runs yet, so no lock.
+        self.background_work = set(getattr(self.tools, "delegations", ())) - resumed_work
 
     def checkpoint(self):
         if self.memory:
@@ -435,7 +462,13 @@ class Conversation:
                     "provider_session": self.provider_session,
                     "relay_cursors": self.relay_cursors, "narration": self.narration,
                     "earcons": self.earcons,
-                    "routed_revision": self.routed_revision})
+                    "routed_revision": self.routed_revision,
+                    "call_active_ms": wall_ms(), "call_work": self.call_work()})
+
+    def call_work(self):
+        """Operations delegated in this call."""
+        with self.tools.lock:
+            return sorted(set(self.tools.delegations) - self.background_work)
 
     def journal_event(self, direction, event):
         """Record one event in the private journal: transcript text, timing and
@@ -558,6 +591,8 @@ class Conversation:
                 if role == "user" and text.strip():
                     self.revision += 1
                     self.last_transcript = self.clock()
+                    if self.user_spoke_at is None:
+                        self.user_spoke_at = self.last_transcript
                     self.output_turn = ""
                     if self.unanswered_since is None:
                         self.unanswered_since = self.last_transcript
@@ -783,7 +818,7 @@ class Conversation:
                 if ident in self.results_seen:
                     continue
                 self.results_seen.add(ident)
-                if row["status"] != "cancelled":
+                if row["status"] != "cancelled" and ident not in self.background_work:
                     self.pending.append(row)
         if self.advance_relay(now):
             return
@@ -837,6 +872,8 @@ class Conversation:
         record = {"operation_id": row["delegation_id"], "agent": row["session"],
                   "status": row["status"], "request": str(row.get("request_text") or "")[:2000],
                   "result": text[:6000], "result_truncated": len(text) > 6000}
+        if row["delegation_id"] in self.background_work:
+            record["from_earlier_call"] = True
         relay = self.relays.get(row["delegation_id"])
         if relay is not None:
             record["relay"] = {"parts_total": relay.total, "parts_sent": relay.sent, "next_part": relay.next + 1}
@@ -961,15 +998,26 @@ class Conversation:
             (row["text"] for row in reversed(conversation)
              if row.get("role") == "user" and str(row.get("text") or "").strip()), "")
         meta = oracle_relay.classify(latest)
+        if meta is None and oracle_relay.asks_for_updates(latest):
+            row = self.background_result()
+            meta = ("earlier_result", None) if row else None
         if meta is None:
             return False
         kind, name = meta
-        if kind == "transcript":
+        if kind == "earlier_result":
+            served = self.serve_background(row)
+        elif kind == "transcript":
             try:
                 agent = self.tools.resolve(name)
             except ValueError:
                 return False
-            served = self.read_transcript(agent.get("persona") or name, latest)
+            row = self.background_result(agent["session"])
+            if row is not None:
+                # "What did Theo say?" about work from an earlier call: his
+                # stored reply, word for word, not his latest transcript.
+                served = self.serve_background(row)
+            else:
+                served = self.read_transcript(agent.get("persona") or name, latest)
         elif kind == "replay" and self.latest_relay() is None and "transcript" in latest.casefold():
             # "read the transcript" before any reply exists: the primary's conversation.
             served = self.read_transcript(self.tools.fallback, latest)
@@ -980,6 +1028,33 @@ class Conversation:
         if self.journal:
             self.journal.record("route.meta_served", {"revision": revision, "kind": kind, "served": served})
         return served
+
+    def background_result(self, session=None):
+        """The newest unheard result of work from an earlier call, optionally
+        for one agent session."""
+        rows = [row for row in self.tools.results()
+                if row["delegation_id"] in self.background_work
+                and row["delegation_id"] not in self.results_sent
+                and row["status"] != "cancelled" and (row.get("result_text") or row.get("error"))
+                and (session is None or row.get("session") == session)]
+        rows.sort(key=lambda row: row.get("completed_at") or row.get("created_at") or 0)
+        return rows[-1] if rows else None
+
+    def serve_background(self, row):
+        """The user asked: relay an earlier call's result from its first part."""
+        self.relay(self.relay_for(row), start=0, served=True)
+        with self.lock:
+            self.results_sent.add(row["delegation_id"])
+        self.checkpoint()
+        return True
+
+    def opening_done(self):
+        """The user has spoken in this call and Oracle has answered."""
+        with self.lock:
+            if (not self.opening_answered and self.user_spoke_at is not None
+                    and self.last_output > self.user_spoke_at):
+                self.opening_answered = True
+            return self.opening_answered
 
     def read_transcript(self, agent, utterance=""):
         wanted = utterance.casefold()
@@ -1315,7 +1390,7 @@ class Conversation:
         The journal receipt is local evidence that context was sent, never
         evidence of push delivery, playback or user acknowledgement.
         """
-        if self.stop.is_set():
+        if self.stop.is_set() or not self.opening_done():
             return
         now = self.clock()
         if (self.last_decision_poll is not None
@@ -1355,6 +1430,15 @@ class Conversation:
             with self.lock:
                 if dedup_key in self.context_notifications_sent:
                     continue
+            if source_kind == "completion" and source.get("stale"):
+                # Too old to volunteer; the agent's transcript still has it.
+                with self.lock:
+                    self.context_notifications_sent.add(dedup_key)
+                if self.journal:
+                    self.journal.record("oracle_context.stale_withheld", {
+                        "source_kind": source_kind, "source_id": source_id,
+                        "reference_ts": int(reference_ts), "agent": source.get("agent", "")})
+                continue
             claimed = False
             if self.memory:
                 try:
@@ -1640,6 +1724,13 @@ def serve(handler):
                     pass
             conversation.stop.set()
             conversation.pool.shutdown(wait=False, cancel_futures=True)
+            if memory and not conversation.taken_over.is_set():
+                # Stamp the call's end: a reconnect within
+                # CALL_RESUME_GRACE_SECONDS continues this call's relays.
+                try:
+                    conversation.checkpoint()
+                except Exception as exc:
+                    log_exception("oracleV2Close", exc, "checkpointing the call's end")
         # A voice switch may have replaced the socket this call opened with.
         current = getattr(conversation, "upstream", None) or upstream
         if current:

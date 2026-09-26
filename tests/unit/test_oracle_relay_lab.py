@@ -910,7 +910,8 @@ def _new_call(lab, **kwargs):
 
 def _answer_the_first_turn(lab):
     lab.replay(NEW_CALL["events"])
-    lab.oracle_speaks(2)
+    lab.ms = 10_000
+    _oracle_says(lab, " Ja, jeg hører deg.", seconds=2)
     lab.wait(8)
 
 
@@ -1054,3 +1055,14 @@ def test_a_reconnect_within_the_grace_continues_the_calls_relay(monkeypatch, aft
         assert not any(PRIOR_REPLY in body for body in bodies)
     finally:
         conv.stop.set(); conv.pool.shutdown(wait=True)
+
+
+@pytest.mark.parametrize("words,expected", [
+    ("Any updates?", True), ("Okay, anything new?", True), ("What's new", True),
+    ("Has anyone gotten back to me?", True), ("Noe nytt?", True),
+    ("Any updates on the deploy? Ask Theo to check it", False),
+    ("Tell Theo there is news", False), ("Update the config", False),
+    ("any new ideas for the roadmap", False),
+])
+def test_update_questions(words, expected):
+    assert oracle_relay.asks_for_updates(words) is expected
