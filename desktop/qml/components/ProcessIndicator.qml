@@ -28,7 +28,7 @@ Item {
     signal clicked
 
     visible: total > 0
-    implicitWidth: visible ? glyphSize + (badge.visible ? badge.width * 0.55 : 0) + 2 : 0
+    implicitWidth: visible ? glyphSize + (badge.visible ? badge.width * 0.8 : 0) + 2 : 0
     implicitHeight: glyphSize + 2
     Accessible.role: Accessible.Button
     Accessible.name: summary.length > 0 ? summary + " running" : "Nothing running"
@@ -49,7 +49,7 @@ Item {
         objectName: "processIndicatorBadge"
         visible: root.total > 1
         anchors.left: glyph.left
-        anchors.leftMargin: root.glyphSize * 0.62
+        anchors.leftMargin: root.glyphSize * 0.8
         anchors.top: parent.top
         anchors.topMargin: -3
         width: Math.max(11, badgeLabel.implicitWidth + 5)

@@ -682,6 +682,14 @@ void AppController::seedScreenshotArtifacts(const QVariantList& artifacts) {
     emit updatesChanged();
 }
 
+void AppController::seedScreenshotBackgroundJobs(const QJsonObject& response) {
+    if (!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")) {
+        qWarning("Refusing to seed background jobs outside a screenshot run");
+        return;
+    }
+    m_jobTracker.applyList(response);
+}
+
 QVariantMap AppController::reportForArtifact(const QString& artifactId) const {
     for (const QVariant& value : m_updateArtifacts) {
         const QVariantMap map = value.toMap();

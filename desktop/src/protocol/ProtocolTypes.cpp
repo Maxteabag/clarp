@@ -273,6 +273,7 @@ QJsonObject describeSubagentCell(const QJsonObject& cell) {
     QString task;
     QString agentLabel;
     QString statusLine;
+    QString otherLine;
     for (const QJsonValue& value : cell.value(QStringLiteral("lines")).toArray()) {
         const QJsonObject line = value.toObject();
         const QString label = line.value(QStringLiteral("label")).toString();
@@ -286,8 +287,11 @@ QJsonObject describeSubagentCell(const QJsonObject& cell) {
         } else if (statusLine.isEmpty() &&
                    line.value(QStringLiteral("kind")).toString() == QStringLiteral("status")) {
             statusLine = label.isEmpty() ? text : label + QStringLiteral(": ") + text;
+        } else if (otherLine.isEmpty()) {
+            otherLine = label.isEmpty() ? text : label + QStringLiteral(": ") + text;
         }
     }
+    if (statusLine.isEmpty()) statusLine = otherLine;
     QString name = cell.value(QStringLiteral("summary")).toString().trimmed();
     if (name.isEmpty() || name == QStringLiteral("agent") || name == QStringLiteral("agents")) {
         name = agentLabel.isEmpty() ? name : agentLabel;

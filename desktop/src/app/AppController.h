@@ -187,6 +187,8 @@ class AppController : public QObject {
     // Screenshot/test seam only; refuses unless a screenshot run is in progress
     // so a normal session can never inject artifacts it did not fetch.
     Q_INVOKABLE void seedScreenshotArtifacts(const QVariantList& artifacts);
+    // Screenshot-only: stands in for a `/background-jobs` response.
+    void seedScreenshotBackgroundJobs(const QJsonObject& response);
     Q_INVOKABLE [[nodiscard]] QVariantList artifactsForSession(const QString& session) const;
     [[nodiscard]] QString baseUrl() const;
     [[nodiscard]] QString selectedSession() const;
