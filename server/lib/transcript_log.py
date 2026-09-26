@@ -149,6 +149,187 @@ def _apply_tool_result(turns: list[dict], block: dict) -> None:
             return
 
 
+# Claude Code's built-in sub-agent tool. The model calls it `Agent`; older
+# releases called it `Task`.
+_SUBAGENT_TOOLS = frozenset({"Agent", "Task"})
+
+# A background sub-agent reports back through a harness envelope, first as a
+# `queue-operation` record and then as the user turn that delivers it:
+#   <task-notification><task-id>…</task-id><tool-use-id>toolu_…</tool-use-id>
+#   <status>completed|failed|killed|stopped</status><summary>…</summary>
+#   <result>…</result></task-notification>
+# Background Bash tasks use the same envelope; their tool-use ids never match
+# an Agent call, so they are ignored.
+_TASK_NOTIFICATION_RE = re.compile(
+    r"<task-notification>(.*?)(?:</task-notification>|\Z)", re.DOTALL)
+
+
+def _notification_field(body: str, name: str) -> str:
+    match = re.search(rf"<{name}>(.*?)</{name}>", body, re.DOTALL)
+    return match.group(1).strip() if match else ""
+
+
+def _one_line(text: Any, limit: int = 240) -> str:
+    return truncate(" ".join(str(text or "").split()), limit)
+
+
+def _subagent_transcripts(path: pathlib.Path) -> dict[str, pathlib.Path]:
+    """Sub-agent transcripts of one parent, keyed by agent id and tool_use id.
+
+    Claude writes them to ``<project>/<parent-id>/subagents/agent-<agent id>.jsonl``
+    with an ``agent-<agent id>.meta.json`` beside each one whose ``toolUseId``
+    names the parent's Agent call. They sit one directory below the project,
+    so the session index (top-level ``*.jsonl`` only) never mistakes them for
+    conversations of their own.
+    """
+    directory = path.parent / path.stem / "subagents"
+    found: dict[str, pathlib.Path] = {}
+    metas: list[tuple[str, pathlib.Path]] = []
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                name = entry.name
+                if not name.startswith("agent-"):
+                    continue
+                if name.endswith(".meta.json"):
+                    metas.append((name[len("agent-"):-len(".meta.json")],
+                                  pathlib.Path(entry.path)))
+                elif name.endswith(".jsonl"):
+                    found[name[len("agent-"):-len(".jsonl")]] = pathlib.Path(entry.path)
+    except OSError:
+        return {}
+    for agent_id, meta_path in metas:
+        transcript = found.get(agent_id)
+        if transcript is None:
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        tool_use_id = meta.get("toolUseId") if isinstance(meta, dict) else None
+        if isinstance(tool_use_id, str) and tool_use_id:
+            found.setdefault(tool_use_id, transcript)
+    return found
+
+
+def _subagent_cell(tool_id: str, inp: dict | None) -> dict:
+    """A `kind="subagents"` display cell for one Agent/Task call.
+
+    Same shape as the Codex sub-agent cells (codex_transcript._display_cell),
+    plus `ephemeral: true`: a harness sub-agent lives inside the parent's
+    Claude process and dies with it, unlike a detached Clarp helper. The
+    lines are rendered by _finish_subagent_cell once the whole transcript
+    has been read.
+    """
+    inp = inp or {}
+    description = _one_line(inp.get("description"), 120)
+    subagent_type = str(inp.get("subagent_type") or "").strip()
+    return {
+        "id": tool_id,
+        "kind": "subagents",
+        "title": "Running agent",
+        "summary": description or subagent_type or "agent",
+        "status": "running",
+        "lines": [],
+        "ephemeral": True,
+        "description": description,
+        "subagent_type": subagent_type,
+        "background": inp.get("run_in_background") is True,
+        "agent_id": "",
+        "transcript_path": "",
+        "_task": _one_line(inp.get("prompt")),
+        "_result": "",
+        "_stats": "",
+    }
+
+
+def _subagent_result(cell: dict, block: dict, record: dict) -> None:
+    """Apply the parent's tool_result for an Agent call.
+
+    A background launch answers at once with ``status: async_launched``; the
+    sub-agent keeps running until its task-notification arrives.
+    """
+    meta = record.get("toolUseResult")
+    meta = meta if isinstance(meta, dict) else {}
+    if isinstance(meta.get("agentId"), str):
+        cell["agent_id"] = meta["agentId"]
+    if block.get("is_error") or block.get("isError"):
+        cell["status"] = "error"
+        cell["_result"] = _one_line(_tool_result_text(block))
+        return
+    status = str(meta.get("status") or "")
+    if meta.get("isAsync") is True or status == "async_launched":
+        cell["background"] = True
+        return
+    cell["status"] = "error" if status in {"failed", "error", "killed"} else "ok"
+    cell["_result"] = _one_line(_tool_result_text(block))
+    tools_used = meta.get("totalToolUseCount")
+    duration_ms = meta.get("totalDurationMs")
+    stats = []
+    if isinstance(tools_used, int) and not isinstance(tools_used, bool):
+        stats.append(f"{tools_used} tool call{'s' if tools_used != 1 else ''}")
+    if isinstance(duration_ms, (int, float)) and not isinstance(duration_ms, bool):
+        seconds = int(duration_ms // 1000)
+        stats.append(f"{seconds // 60}m {seconds % 60}s" if seconds >= 60 else f"{seconds}s")
+    cell["_stats"] = " · ".join(stats)
+
+
+def _subagent_notifications(text: str, cells: dict[str, dict]) -> None:
+    """Settle background sub-agents from task-notification envelopes."""
+    if "<task-notification>" not in text:
+        return
+    for match in _TASK_NOTIFICATION_RE.finditer(text):
+        body = match.group(1)
+        cell = cells.get(_notification_field(body, "tool-use-id"))
+        if cell is None:
+            continue
+        status = _notification_field(body, "status").lower()
+        if status == "completed":
+            cell["status"] = "ok"
+        elif status in {"failed", "killed", "stopped"}:
+            cell["status"] = "error"
+            cell["_stopped"] = status == "stopped"
+        else:
+            continue
+        cell["background"] = True
+        agent_id = _notification_field(body, "task-id")
+        if agent_id and not cell["agent_id"]:
+            cell["agent_id"] = agent_id
+        cell["_result"] = _one_line(
+            _notification_field(body, "result") or _notification_field(body, "summary"))
+
+
+def _finish_subagent_cell(cell: dict, transcripts: dict[str, pathlib.Path]) -> None:
+    transcript = transcripts.get(cell["id"]) or transcripts.get(cell["agent_id"])
+    if transcript is not None:
+        cell["transcript_path"] = str(transcript)
+        if not cell["agent_id"]:
+            cell["agent_id"] = transcript.stem[len("agent-"):]
+    stopped = cell.pop("_stopped", False)
+    cell["title"] = {
+        "running": "Running agent",
+        "ok": "Agent finished",
+        "error": "Agent stopped" if stopped else "Agent failed",
+    }[cell["status"]]
+    task, result, stats = cell.pop("_task"), cell.pop("_result"), cell.pop("_stats")
+    lines = []
+    if task:
+        lines.append({"label": "Task", "text": task, "kind": "detail"})
+    if cell["subagent_type"]:
+        lines.append({"label": "Type", "text": cell["subagent_type"], "kind": "muted"})
+    lines.append({"label": "Mode",
+                  "text": "Background" if cell["background"] else "Foreground",
+                  "kind": "muted"})
+    if result:
+        lines.append({"label": "Result" if cell["status"] == "ok" else "Status",
+                      "text": result, "kind": "status"})
+    if stats:
+        lines.append({"label": "Usage", "text": stats, "kind": "muted"})
+    if cell["transcript_path"]:
+        lines.append({"label": "Transcript", "text": cell["transcript_path"], "kind": "muted"})
+    cell["lines"] = lines
+
+
 def parse_turns(path: pathlib.Path) -> list[dict]:
     """Read a JSONL transcript and return user/assistant turns.
 
@@ -156,6 +337,8 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
     to the client.
     """
     turns: list[dict] = []
+    # Agent/Task calls, by tool_use id → their display cell (in its turn).
+    subagent_cells: dict[str, dict] = {}
     # claude-code auto-injects "Continue from where you left off." as a
     # user-role record (isMeta=true) whenever a session is resumed while
     # the previous turn was interrupted — and emits a short assistant
@@ -171,6 +354,9 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
                 log_exception("transcriptJsonLineSkip", e, detail=str(path))
                 continue
             t = d.get("type")
+            if t == "queue-operation" and subagent_cells and isinstance(d.get("content"), str):
+                _subagent_notifications(d["content"], subagent_cells)
+                continue
             if t not in ("user", "assistant"):
                 continue
             if d.get("isMeta") is True:
@@ -197,6 +383,7 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
             content = msg.get("content", "")
             text_parts: list[str] = []
             tools: list[dict] = []
+            cells: list[dict] = []
             if isinstance(content, str):
                 text_parts.append(content)
             elif isinstance(content, list):
@@ -204,6 +391,10 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
                     ctype = c.get("type") if isinstance(c, dict) else None
                     if ctype == "text":
                         text_parts.append(c.get("text", ""))
+                    elif ctype == "tool_use" and c.get("name") in _SUBAGENT_TOOLS and c.get("id"):
+                        cell = _subagent_cell(str(c["id"]), c.get("input"))
+                        subagent_cells[cell["id"]] = cell
+                        cells.append(cell)
                     elif ctype == "tool_use":
                         tools.append(summarise_tool(
                             c.get("name", "tool"),
@@ -211,21 +402,34 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
                             c.get("id", ""),
                         ))
                     elif ctype == "tool_result":
-                        _apply_tool_result(turns, c)
+                        cell = subagent_cells.get(c.get("tool_use_id") or "")
+                        if cell is not None:
+                            _subagent_result(cell, c, d)
+                        else:
+                            _apply_tool_result(turns, c)
             text = "\n".join(p for p in text_parts if p).strip()
-            if not text and not tools:
+            if t == "user" and subagent_cells:
+                _subagent_notifications(text, subagent_cells)
+            if not text and not tools and not cells:
                 continue
             # Harness-injected user envelopes (task notifications, system
             # reminders, slash-command echoes) aren't anything the user said —
             # drop them so they don't render as a user message in the PWA.
             if t == "user" and not tools and _INJECTED_USER_NOISE_RE.match(text):
                 continue
-            turns.append({
+            turn = {
                 "role": t,
                 "text": text,
                 "tools": tools,
                 "timestamp": d.get("timestamp", ""),
-            })
+            }
+            if cells:
+                turn["display_cells"] = cells
+            turns.append(turn)
+    if subagent_cells:
+        transcripts = _subagent_transcripts(path)
+        for cell in subagent_cells.values():
+            _finish_subagent_cell(cell, transcripts)
     return turns
 
 

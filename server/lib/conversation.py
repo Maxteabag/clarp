@@ -165,7 +165,8 @@ def load_conversation(*, session: str, after_revision: int = 0,
             compact_cells = [
                 {
                     **{k: _compact_text(cell[k]) for k in (
-                        "id", "kind", "title", "summary", "status") if k in cell},
+                        "id", "kind", "title", "summary", "status",
+                        "ephemeral") if k in cell},
                     "detail_count": len(cell.get("lines") or []),
                 }
                 for cell in cells if isinstance(cell, dict)
