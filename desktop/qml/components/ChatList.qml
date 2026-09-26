@@ -34,6 +34,7 @@ Rectangle {
             Qt.callLater(() => { chats.currentIndex = chats.count > 0 ? 0 : -1; chats.forceActiveFocus(); });
             return;
         }
+        roster.revealSession(controller.selectedSession);
         if (roster.indexOfSession(controller.selectedSession) < 0) {
             scope = "all";
             search.clear();
@@ -58,6 +59,12 @@ Rectangle {
     function clearSearch() { search.clear(); }
 
     color: Theme.raised
+
+    ProcessPopover {
+        id: processPopover
+        controller: root.controller
+        onHelperOpened: root.chatSelected()
+    }
 
     AgentFilterModel {
         id: roster
@@ -409,7 +416,10 @@ Rectangle {
                 collapsed: root.collapsed
                 archived: root.showingArchive
                 onChatSelected: root.chatSelected()
+                onProcessesRequested: (session, anchor) => processPopover.openFor(session, anchor)
+                onDoneHelpersToggled: parentAgentId => roster.toggleDoneHelpers(parentAgentId)
             }
+            onContentYChanged: if (processPopover.visible) processPopover.close()
 
             ScrollBar.vertical: ScrollBar {}
 

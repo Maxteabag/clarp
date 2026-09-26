@@ -1,5 +1,7 @@
 #include "models/AgentListModel.h"
 
+#include "app/TimeFormat.h"
+
 #include <QJsonArray>
 #include <QJsonValue>
 #include <QSet>
@@ -79,6 +81,22 @@ QVariant AgentListModel::data(const QModelIndex& index, int role) const {
         return agent.mcpServers.toVariantList();
     case UnreadRole:
         return agent.unread;
+    case ParentAgentIdRole:
+        return agent.parentAgentId;
+    case AgentRoleRole:
+        return agent.role;
+    case HelperStateRole:
+        return agent.helperState;
+    case ChildCountRole:
+        return agent.childCount;
+    case RunningChildrenRole:
+        return m_transportAvailable ? runningChildren(agent) : 0;
+    case BackgroundJobCountRole:
+        return m_transportAvailable ? jobCounts(agent).total : 0;
+    case SubAgentCountRole:
+        return m_transportAvailable ? jobCounts(agent).subAgents : 0;
+    case ProcessCountRole:
+        return m_transportAvailable ? jobCounts(agent).total + runningChildren(agent) : 0;
     default:
         return {};
     }
@@ -114,6 +132,14 @@ QHash<int, QByteArray> AgentListModel::roleNames() const {
         {SchedulesRole, "schedules"},
         {McpServersRole, "mcpServers"},
         {UnreadRole, "unread"},
+        {ParentAgentIdRole, "parentAgentId"},
+        {AgentRoleRole, "agentRole"},
+        {HelperStateRole, "helperState"},
+        {ChildCountRole, "childCount"},
+        {RunningChildrenRole, "runningChildren"},
+        {BackgroundJobCountRole, "backgroundJobCount"},
+        {SubAgentCountRole, "subAgentCount"},
+        {ProcessCountRole, "processCount"},
     };
 }
 
@@ -133,6 +159,7 @@ bool AgentListModel::upsertCreatedAgent(const QJsonObject& object) {
         endInsertRows();
         emit countChanged();
     }
+    recountHelpers();
     return true;
 }
 
@@ -223,6 +250,15 @@ void AgentListModel::applySnapshot(const QJsonObject& snapshot) {
         structureChanged = true;
     }
     rebuildIndex();
+    // Parent rows count their helpers, so the counts must be current before
+    // the first row notification below reaches a view.
+    {
+        QHash<QString, int> running;
+        for (const Agent& agent : std::as_const(next)) {
+            if (agent.helperRunning()) ++running[agent.parentAgentId];
+        }
+        m_runningHelpersByParent = std::move(running);
+    }
 
     for (int desiredRow = 0; desiredRow < next.size(); ++desiredRow) {
         const QString session = next.at(desiredRow).session;
@@ -247,7 +283,7 @@ void AgentListModel::applySnapshot(const QJsonObject& snapshot) {
         }
         m_agents.replace(desiredRow, next.at(desiredRow));
         QList<int> roles;
-        for (int role = AgentIdRole; role <= UnreadRole; ++role) {
+        for (int role = AgentIdRole; role <= LastRole; ++role) {
             roles.append(role);
         }
         notifyRow(desiredRow, roles);
@@ -336,7 +372,78 @@ void AgentListModel::markTransportUnavailable() {
     m_transportAvailable = false;
     if (!m_agents.isEmpty()) {
         emit dataChanged(index(0, 0), index(static_cast<int>(m_agents.size()) - 1, 0),
-                         {StateRole, StatusTextRole, AliveRole, BusyRole});
+                         {StateRole, StatusTextRole, AliveRole, BusyRole, RunningChildrenRole,
+                          BackgroundJobCountRole, SubAgentCountRole, ProcessCountRole});
+    }
+}
+
+void AgentListModel::applyLiveJobCounts(const QHash<QString, BackgroundJobCounts>& byAgent) {
+    QList<int> changedRows;
+    for (int row = 0; row < m_agents.size(); ++row) {
+        const Agent& agent = m_agents.at(row);
+        const BackgroundJobCounts before = jobCounts(agent);
+        const BackgroundJobCounts after = byAgent.value(agent.agentId);
+        if (!(before == after)) changedRows.append(row);
+    }
+    m_liveJobCounts = byAgent;
+    m_liveJobsKnown = true;
+    for (const int row : std::as_const(changedRows)) {
+        notifyRow(row, {BackgroundJobCountRole, SubAgentCountRole, ProcessCountRole});
+    }
+}
+
+void AgentListModel::clearLiveJobCounts() {
+    if (!m_liveJobsKnown) return;
+    m_liveJobsKnown = false;
+    m_liveJobCounts.clear();
+    if (!m_agents.isEmpty()) {
+        emit dataChanged(index(0, 0), index(static_cast<int>(m_agents.size()) - 1, 0),
+                         {BackgroundJobCountRole, SubAgentCountRole, ProcessCountRole});
+    }
+}
+
+BackgroundJobCounts AgentListModel::jobCounts(const Agent& agent) const {
+    if (m_liveJobsKnown) return m_liveJobCounts.value(agent.agentId);
+    return {.total = agent.backgroundJobCount, .subAgents = agent.backgroundSubAgentCount};
+}
+
+int AgentListModel::runningChildren(const Agent& agent) const {
+    if (agent.agentId.isEmpty()) return agent.runningChildren;
+    return std::max(agent.runningChildren, m_runningHelpersByParent.value(agent.agentId));
+}
+
+const Agent* AgentListModel::findByAgentId(const QString& agentId) const {
+    if (agentId.isEmpty()) return nullptr;
+    for (const Agent& agent : m_agents) {
+        if (agent.agentId == agentId) return &agent;
+    }
+    return nullptr;
+}
+
+QList<const Agent*> AgentListModel::helpersOf(const QString& agentId) const {
+    QList<const Agent*> result;
+    if (agentId.isEmpty()) return result;
+    for (const Agent& agent : m_agents) {
+        if (agent.isHelper() && agent.parentAgentId == agentId) result.append(&agent);
+    }
+    return result;
+}
+
+void AgentListModel::recountHelpers() {
+    QHash<QString, int> running;
+    for (const Agent& agent : std::as_const(m_agents)) {
+        if (agent.helperRunning()) ++running[agent.parentAgentId];
+    }
+    if (running == m_runningHelpersByParent) return;
+    QSet<QString> touched;
+    for (auto it = running.cbegin(); it != running.cend(); ++it) touched.insert(it.key());
+    for (auto it = m_runningHelpersByParent.cbegin(); it != m_runningHelpersByParent.cend(); ++it)
+        touched.insert(it.key());
+    m_runningHelpersByParent = std::move(running);
+    for (int row = 0; row < m_agents.size(); ++row) {
+        if (touched.contains(m_agents.at(row).agentId)) {
+            notifyRow(row, {RunningChildrenRole, ProcessCountRole});
+        }
     }
 }
 
@@ -409,6 +516,52 @@ void AgentListModel::rebuildIndex() {
 void AgentListModel::notifyRow(int row, const QList<int>& roles) {
     const QModelIndex changed = index(row, 0);
     emit dataChanged(changed, changed, roles);
+}
+
+QVariantMap describeAgentProcesses(const AgentListModel& agents,
+                                   const BackgroundJobTracker& jobs, const QString& session,
+                                   qint64 nowMs) {
+    const Agent* agent = agents.find(session);
+    if (agent == nullptr) return {};
+    QVariantList jobRows;
+    if (jobs.loaded()) {
+        for (const QJsonObject& job : jobs.activeJobs(agent->agentId, agent->session)) {
+            const qint64 started = job.value(QStringLiteral("started_at")).toInteger();
+            const qint64 heartbeat = job.value(QStringLiteral("heartbeat_at")).toInteger();
+            const bool subAgent = BackgroundJobTracker::isSubAgent(job);
+            QString title = job.value(QStringLiteral("title")).toString().trimmed();
+            if (title.isEmpty()) title = subAgent ? QStringLiteral("Sub-agent") : QStringLiteral("Background job");
+            jobRows.append(QVariantMap{
+                {QStringLiteral("jobId"), job.value(QStringLiteral("job_id")).toString()},
+                {QStringLiteral("kind"), job.value(QStringLiteral("kind")).toString()},
+                {QStringLiteral("subAgent"), subAgent},
+                {QStringLiteral("title"), title},
+                {QStringLiteral("detail"), job.value(QStringLiteral("detail")).toString()},
+                {QStringLiteral("status"), job.value(QStringLiteral("status")).toString()},
+                {QStringLiteral("elapsed"), started > 0 ? compactDuration(nowMs - started) : QString{}},
+                {QStringLiteral("heartbeat"),
+                 heartbeat > 0 ? compactDuration(nowMs - heartbeat) + QStringLiteral(" ago") : QString{}},
+            });
+        }
+    }
+    QVariantList helperRows;
+    for (const Agent* helper : agents.helpersOf(agent->agentId)) {
+        if (!helper->helperRunning()) continue;
+        helperRows.append(QVariantMap{
+            {QStringLiteral("session"), helper->session},
+            {QStringLiteral("name"), displayName(*helper)},
+            {QStringLiteral("statusText"), helper->statusText},
+            {QStringLiteral("state"), agents.displayState(helper->session)},
+        });
+    }
+    const BackgroundJobCounts counts = agents.jobCounts(*agent);
+    const int running = agents.runningChildren(*agent);
+    return {{QStringLiteral("jobs"), jobRows},
+            {QStringLiteral("helpers"), helperRows},
+            {QStringLiteral("jobCount"), counts.total},
+            {QStringLiteral("subAgentCount"), counts.subAgents},
+            {QStringLiteral("runningChildren"), running},
+            {QStringLiteral("total"), counts.total + running}};
 }
 
 } // namespace clarp
