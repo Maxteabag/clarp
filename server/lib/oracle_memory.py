@@ -262,7 +262,7 @@ class ThreadStore:
         names = [{"name": row.get("name"), "session": row.get("session")} for row in roster.get("agents", [])[:30]]
         payload = {"thread_id": self.thread_id, "reference_only": True, "await_current_request": True,
             "recent_conversation": [], "work": [], "user_context": [],
-            "replay_guidance": "Voice transcript fragments may end mid-sentence when interrupted. For requests to repeat a task result, use the authoritative work finding, not an incomplete spoken fragment. An excerpt is not a complete answer; retrieve the source when needed. Do not replay tasks.",
+            "replay_guidance": "Voice transcript fragments may end mid-sentence when interrupted. For requests to repeat a task result, use the authoritative work finding, not an incomplete spoken fragment. An excerpt is not a complete answer; retrieve the source when needed. Do not replay tasks. Earlier work and results are background: do not bring them up until the user asks.",
             "roster": {"agents": names, "oracle_contact": roster.get("oracle_contact"), "is_excerpt": len(roster.get("agents", [])) > 30}}
         # A byte bound is conservative for the8,192-token input limit. Add
         # whole records instead of cutting a constraint or identifier in half.
