@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from . import agents as agents_db
-from . import db, origins
+from . import db, identity, origins
 from .prompt_admissions import PromptAdmission
 
 
@@ -37,9 +37,8 @@ class SendRequestError(ValueError):
 def _resolve_sender_agent_id(sender_raw: str) -> str:
     if not sender_raw:
         return ""
-    sender = (agents_db.get_by_session(sender_raw)
-              or agents_db.get_by_agent_id(sender_raw))
-    return sender["agent_id"] if sender else ""
+    sender = identity.resolve(sender_raw)
+    return sender.agent_id if sender else ""
 
 
 def _unheard_audio_sessions(raw: Any) -> tuple[str, ...]:
