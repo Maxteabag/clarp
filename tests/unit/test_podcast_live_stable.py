@@ -1,4 +1,4 @@
-"""Characterization tests for lib.podcast_live_stable (podcast detour engine).
+"""Characterization tests for the stable engine's podcast detours in lib.podcast_live.
 
 Pins episode metadata validation, the bounded playhead context, the Live
 session config for podcast mode, the fact-checked image loop (with the
@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from lib import oracle_live_stable, podcast_live_stable as pl
+from lib import oracle_live_stable, podcast_live as pl
 
 REV = "a" * 64
 
@@ -103,8 +103,10 @@ def test_context_for_windows_recent_text_and_marks_upcoming():
     ctx = json.loads(pl.context_for(_episode(), 95, 200))
     assert ctx == {
         "audio_revision": REV, "paused_seconds": 95,
-        # Everything ending in the last 60 s (35..95) that started by 95.
-        "recent_transcript_approximate_alignment": "middle words late words",
+        # Only passages that finished in the last 60 s (35..95); the one playing at 95 is partial.
+        "recent_transcript_approximate_alignment": "middle words",
+        "current_passages_partial_alignment": [{"start": 90, "end": 150, "text": "late words",
+            "heard_extent": "unknown within this segment; text may include unplayed words"}],
         "next_passage_not_yet_heard": "outro words",
         "source_chapter": "One", "authoritative_source": "source one",
         "editorial_corrections": "the host misspoke at 40s",
@@ -158,8 +160,8 @@ def test_context_for_linked_plain_source_is_truncated_at_6000():
 
 
 def test_session_config_overrides_instructions_and_seeds_reference_input():
-    cfg = pl.session_config("CONTEXT-JSON")
-    assert cfg["instructions"] == pl.PROMPT
+    cfg = pl.session_config("CONTEXT-JSON", stable=True)
+    assert cfg["instructions"] == pl.STABLE_PROMPT
     assert cfg["model"] == oracle_live_stable.MODEL
     assert cfg["audio"]["output"]["voice"] == oracle_live_stable.VOICE
     assert cfg["input"] == [{"type": "message", "role": "user", "content": [
@@ -167,7 +169,7 @@ def test_session_config_overrides_instructions_and_seeds_reference_input():
 
 
 def test_prompt_forbids_actions_and_greetings():
-    text = pl.PROMPT.lower()
+    text = pl.STABLE_PROMPT.lower()
     assert "no access to agents" in text
     assert "never claim to have resumed playback" in text
     assert "do not greet" in text
@@ -320,7 +322,7 @@ def podcast(monkeypatch):
         generated.append((api_key, context, question, should_continue()))
         return "IMGB64"
 
-    conv = pl.PodcastConversation(SimpleNamespace(send=sent.append), down.append, "key", "CTX",
+    conv = pl.StablePodcastConversation(SimpleNamespace(send=sent.append), down.append, "key", "CTX",
                                   images=True, clock=lambda: now[0], generate=generate)
     conv.pool = SimpleNamespace(submit=lambda fn, *a: fn(*a), shutdown=lambda **kw: None)
     conv._sent, conv._down, conv._now, conv._generated = sent, down, now, generated

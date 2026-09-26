@@ -152,3 +152,22 @@ def test_exact_segment_boundary_is_completed_not_partial():
     assert 'Prediction hides delay.' in context['recent_transcript_approximate_alignment']
     assert context['current_passages_partial_alignment'] == []
     assert context['next_passage_not_yet_heard'] == 'Next sentence'
+
+
+def test_both_engines_share_the_completed_partial_upcoming_alignment():
+    # The stable twin used to count a passage as heard once it had started and
+    # hid a passage starting exactly at the playhead from next_passage_not_yet_heard.
+    value = episode()
+    value['transcript'] = [
+        {'start': 0, 'end': 20, 'text': 'Finished.'},
+        {'start': 20, 'end': 40, 'text': 'Straddling.'},
+        {'start': 40, 'end': 60, 'text': 'Starts later.'},
+    ]
+    context = json.loads(podcast_live.context_for(value, 30, 100))
+    assert context['recent_transcript_approximate_alignment'] == 'Finished.'
+    assert [p['text'] for p in context['current_passages_partial_alignment']] == ['Straddling.']
+    assert context['next_passage_not_yet_heard'] == 'Starts later.'
+    at_start = json.loads(podcast_live.context_for(value, 40, 100))
+    assert at_start['recent_transcript_approximate_alignment'] == 'Finished. Straddling.'
+    assert at_start['current_passages_partial_alignment'] == []
+    assert at_start['next_passage_not_yet_heard'] == 'Starts later.'
