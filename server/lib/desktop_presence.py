@@ -34,15 +34,12 @@ def update(*, principal: str, instance_id: str, sequence: int, active: bool, sen
     if type(sent_at_ms) is not int or not now - LEASE_MS <= sent_at_ms <= now + 5_000:
         raise ValueError('presence report is stale or clock is out of sync')
     with settings_store.transaction():
-        settings_store.prune_prefix_due(PREFIX, now=now, updated_before=now - TOMBSTONE_MS)
+        settings_store.prune_prefix(PREFIX, updated_before=now - TOMBSTONE_MS)
         stored = settings_store.get(key)
         previous = json.loads(stored) if stored is not None else {}
         if sequence <= previous.get('sequence', 0):
             return {'accepted': False, 'lease_ms': LEASE_MS}
-        # Pruning runs on a timer; at the cap, prune now before refusing.
-        if stored is None and settings_store.count_prefix(PREFIX) >= MAX_INSTANCES and (
-                settings_store.prune_prefix(PREFIX, updated_before=now - TOMBSTONE_MS) == 0
-                or settings_store.count_prefix(PREFIX) >= MAX_INSTANCES):
+        if stored is None and settings_store.count_prefix(PREFIX) >= MAX_INSTANCES:
             raise ValueError('too many desktop instances')
         value = json.dumps({'owner': principal, 'sequence': sequence,
                             'expires_at': min(now, sent_at_ms) + LEASE_MS if active else 0})

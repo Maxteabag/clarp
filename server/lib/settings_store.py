@@ -7,7 +7,6 @@ sequence atomic on this thread's connection.
 """
 from __future__ import annotations
 
-import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -92,32 +91,17 @@ def delete(key: str) -> None:
 
 
 def prune_prefix(prefix: str, *, updated_before: int) -> int:
-    """Delete every key under `prefix` last written before `updated_before`."""
+    """Delete every key under `prefix` last written before `updated_before`.
+
+    Lease reporters call this on every report. Look before deleting so a
+    report with nothing stale issues no DELETE.
+    """
+    if conn().execute("SELECT 1 FROM settings WHERE key LIKE ? AND updated_at < ? LIMIT 1",
+                      (prefix + "%", int(updated_before))).fetchone() is None:
+        return 0
     return conn().execute(
         "DELETE FROM settings WHERE key LIKE ? AND updated_at < ?",
         (prefix + "%", int(updated_before))).rowcount
-
-
-_pruned_at: dict[str, int] = {}
-_pruned_lock = threading.Lock()
-PRUNE_INTERVAL_MS = 60_000
-
-
-def prune_prefix_due(prefix: str, *, now: int, updated_before: int,
-                     interval_ms: int = PRUNE_INTERVAL_MS) -> int:
-    """`prune_prefix`, but at most once per `interval_ms` in this process.
-
-    Lease reporters call this on every report; pruning each time turned a
-    frequent write into a table scan plus a DELETE. Readers filter by
-    `updated_at` anyway, so a stale row surviving a minute changes nothing.
-    """
-    with _pruned_lock:
-        last = _pruned_at.get(prefix)
-        # A clock that moved backwards prunes again rather than stalling.
-        if last is not None and 0 <= now - last < interval_ms:
-            return 0
-        _pruned_at[prefix] = now
-    return prune_prefix(prefix, updated_before=updated_before)
 
 
 def count_prefix(prefix: str) -> int:
