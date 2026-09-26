@@ -71,3 +71,29 @@ owning the files below and nothing else. Integration merges them here.
 Cross-stream adoption (dispatch calling the admission policy, turn_dispatch
 using event constructors, stores using AgentRef) is done at integration, not
 inside a stream.
+
+## Integration status
+
+Integrated on this branch 2026-09-26. Every rule has a guard test: rule 2
+`test_module_state_guard.py`, rule 3 `test_identity.py`, rule 4
+`test_turn_lifecycle.py`, rule 5 `test_table_writers.py`, rule 6
+`test_policies_pure.py`, rule 7 `test_events_schema.py` plus the hub check in
+`test_audio_stream.py`, rule 8 `test_http_utils.py`.
+
+What is still open, and why:
+
+- Backend turn callbacks (`on_init`, `on_result`, `on_error`) run whole
+  under `_TURN_LOCK`, so the state rows they write are written under it.
+  Moving them out means splitting each callback into a decision taken under
+  the lock and effects run after it. That is a change to the turn loop, not
+  a move of code.
+- `snapshot.py` reads the compaction set once per snapshot from the runtime
+  status instead of asking `live_work()` per agent. This is deliberate: one
+  socket round trip per snapshot.
+- The streaming routes (`audio_growing`, `clip_stream`, `terminal_ws`) still
+  write to `handler.wfile`, because `Responder` has no streaming API yet.
+- `AgentState.busy_states()` in `protocol.py` keeps its own set. The
+  protocol module is a leaf and cannot import `turn_lifecycle`; a test
+  asserts the two sets are equal.
+- `trace.LEGACY_TRACE_ID_RE` stays for rows stored before this change.
+  Nothing mints those shapes any more.
