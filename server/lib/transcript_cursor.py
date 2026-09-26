@@ -86,6 +86,9 @@ class TranscriptCursor:
         return None
 
     def write_position(self, pos: int) -> None:
+        # Hooks call this on every poll; an unchanged position needs no write lock.
+        if self.read_position() == int(pos):
+            return
         try:
             from . import db
             db.conn().execute(

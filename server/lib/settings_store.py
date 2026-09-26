@@ -7,6 +7,7 @@ sequence atomic on this thread's connection.
 """
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -54,13 +55,23 @@ def get_text(key: str, *, default: str = "") -> str:
 
 def set_text(key: str, value: str, *, updated_at: int | None = None) -> None:
     """Upsert `key`. `updated_at` defaults to now; lease writers pass the
-    clock they validated the report against so pruning and reads agree."""
+    clock they validated the report against so pruning and reads agree.
+
+    An unchanged value is not rewritten: the upsert would take the database
+    write lock only to store what is already there. A caller that passes
+    `updated_at` is refreshing a lease, so only an identical stamp is skipped.
+    """
+    value = str(value)
+    row = conn().execute("SELECT value, updated_at FROM settings WHERE key = ?", (key,)).fetchone()
+    if row is not None and str(row["value"]) == value and (
+            updated_at is None or int(row["updated_at"]) == int(updated_at)):
+        return
     conn().execute(
         """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
            ON CONFLICT(key) DO UPDATE SET
                value = excluded.value,
                updated_at = excluded.updated_at""",
-        (key, str(value), now_ms() if updated_at is None else int(updated_at)),
+        (key, value, now_ms() if updated_at is None else int(updated_at)),
     )
 
 
@@ -85,6 +96,28 @@ def prune_prefix(prefix: str, *, updated_before: int) -> int:
     return conn().execute(
         "DELETE FROM settings WHERE key LIKE ? AND updated_at < ?",
         (prefix + "%", int(updated_before))).rowcount
+
+
+_pruned_at: dict[str, int] = {}
+_pruned_lock = threading.Lock()
+PRUNE_INTERVAL_MS = 60_000
+
+
+def prune_prefix_due(prefix: str, *, now: int, updated_before: int,
+                     interval_ms: int = PRUNE_INTERVAL_MS) -> int:
+    """`prune_prefix`, but at most once per `interval_ms` in this process.
+
+    Lease reporters call this on every report; pruning each time turned a
+    frequent write into a table scan plus a DELETE. Readers filter by
+    `updated_at` anyway, so a stale row surviving a minute changes nothing.
+    """
+    with _pruned_lock:
+        last = _pruned_at.get(prefix)
+        # A clock that moved backwards prunes again rather than stalling.
+        if last is not None and 0 <= now - last < interval_ms:
+            return 0
+        _pruned_at[prefix] = now
+    return prune_prefix(prefix, updated_before=updated_before)
 
 
 def count_prefix(prefix: str) -> int:
