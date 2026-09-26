@@ -49,13 +49,10 @@ def test_services_swap_in_place_for_every_holder(tmp_path):
     assert REPLACEABLE_SERVICES == {"stt", "tool_explanations", "herald", "runtime_client"}
 
 
-def test_legacy_service_assignment_goes_through_the_same_path(tmp_path):
-    # TODO(integration): server.py still writes `ctx.stt = ...`; the shim
-    # routes it through replace_service until those three lines change.
+def test_service_assignment_is_refused_and_names_the_replacement_path(tmp_path):
     ctx = _ctx(tmp_path)
-    replacement = StubSTT(text="swapped")
-    ctx.stt = replacement
-    assert ctx.stt is replacement
+    with pytest.raises(dataclasses.FrozenInstanceError, match="replace_service"):
+        ctx.stt = StubSTT(text="swapped")
 
 
 def test_concurrent_swaps_each_return_a_distinct_predecessor(tmp_path):
