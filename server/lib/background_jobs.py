@@ -40,7 +40,8 @@ def active_by_agent() -> dict[str, list[dict[str, Any]]]:
     marks = ",".join("?" for _ in ACTIVE_STATUSES)
     out: dict[str, list[dict[str, Any]]] = {}
     for row in db.conn().execute(
-            f"SELECT job_id, agent_id, kind, title, detail, metadata_json "
+            f"SELECT job_id, agent_id, kind, title, detail, metadata_json, "
+            f"progress_text, COALESCE(progress_at, started_at) AS active_at "
             f"FROM background_jobs WHERE status IN ({marks}) "
             "AND COALESCE(agent_id, '') != '' "
             "ORDER BY started_at", tuple(sorted(ACTIVE_STATUSES))):
@@ -53,6 +54,8 @@ def active_by_agent() -> dict[str, list[dict[str, Any]]]:
             "kind": str(row["kind"] or ""), "title": str(row["title"] or ""),
             "detail": str(row["detail"] or ""),
             "metadata": metadata if isinstance(metadata, dict) else {},
+            "progress_text": str(row["progress_text"] or ""),
+            "active_at": int(row["active_at"] or 0),
         })
     return out
 

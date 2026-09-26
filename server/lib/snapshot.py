@@ -110,6 +110,9 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     child_count: dict[str, int] = {}
     running_children: dict[str, int] = {}
     helper_sessions: dict[str, set[str]] = {}
+    # What each running helper is doing, so the parent's status line can say
+    # it instead of repeating the count the badge already shows.
+    helper_activity: dict[str, list[dict[str, Any]]] = {}
     for a in agent_rows:
         parent_id = a.get("parent_agent_id")
         if parent_id:
@@ -118,6 +121,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
                 helper_sessions.setdefault(parent_id, set()).add(str(a.get("session") or ""))
             if a.get("helper_state") == "running":
                 running_children[parent_id] = running_children.get(parent_id, 0) + 1
+                helper_activity.setdefault(parent_id, []).append(
+                    _helper_activity(a, states.get(a["agent_id"], {}), visible_labels))
     for a in agent_rows:
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
@@ -165,7 +170,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         if (processes or sub_agents) and latest_state not in {"thinking", "tool", "compacting", "background"}:
             latest_state = "background"
         if (processes or sub_agents) and status_text is None:
-            status_text = _work_summary(sub_agents, len(processes))
+            status_text = _work_summary(helper_activity.get(agent_id, []), processes)
         turn_started_at = int(state.get('turn_started_at') or 0)
         if active and not turn_started_at:
             turn_started_at = int(rt.get('open_turn_started_at') or 0)
@@ -318,15 +323,62 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     }
 
 
-def _work_summary(sub_agents: int, processes: int) -> str:
-    """"3 sub-agents", "1 background process", "3 sub-agents · 1 process"."""
-    agents_part = f"{sub_agents} sub-agent{'' if sub_agents == 1 else 's'}"
-    if not processes:
-        return agents_part
-    noun = "process" if processes == 1 else "processes"
-    if not sub_agents:
-        return f"{processes} background {noun}"
-    return f"{agents_part} · {processes} {noun}"
+# How a running helper's latest state reads in its parent's roll-up.
+_HELPER_BUCKETS = {
+    "thinking": "working", "tool": "working", "compacting": "working",
+    "background": "working", "waiting": "waiting", "interrupted": "waiting",
+}
+
+
+def _helper_activity(helper: dict[str, Any], state: dict[str, Any],
+                     visible_labels: dict[str, Any]) -> dict[str, Any]:
+    """One running helper as its parent's status line describes it."""
+    kind = str(state.get("kind") or "")
+    detail = state.get("detail") if isinstance(state.get("detail"), dict) else {}
+    text = str(visible_labels.get(helper["agent_id"], helper.get("custom_status")) or "").strip()
+    if not text and kind:
+        text = str(state_activity_event(
+            agent_id=helper["agent_id"], session=helper["session"],
+            persona=helper["persona"], kind=kind, ts=int(state.get("ts") or 0),
+            detail=detail)["summary"] or "").strip()
+    bucket = _HELPER_BUCKETS.get(kind, "idle")
+    if detail.get("account_recovery"):
+        bucket = "waiting"
+    return {"session": str(helper["session"]), "text": text, "bucket": bucket,
+            "ts": int(state.get("ts") or 0)}
+
+
+def _work_summary(helpers: list[dict[str, Any]], processes: list[dict[str, Any]]) -> str:
+    """Say what the agent's sub-agents and processes are doing.
+
+    The row's badge already carries the counts (`background_jobs`), so this
+    line describes activity: one helper as "slice5-helper: running tests",
+    several as a roll-up "3 working, 1 waiting", a process by its latest
+    progress line or its title. A bare count is the last resort.
+    """
+    parts: list[str] = []
+    if len(helpers) == 1:
+        helper = helpers[0]
+        parts.append(f"{helper['session']}: {helper['text']}" if helper["text"] else helper["session"])
+    elif helpers:
+        buckets: dict[str, int] = {}
+        for helper in helpers:
+            buckets[helper["bucket"]] = buckets.get(helper["bucket"], 0) + 1
+        parts.append(", ".join(f"{buckets[b]} {b}" for b in ("working", "waiting", "idle")
+                               if buckets.get(b)))
+    if processes:
+        # Most recent progress wins; on a tie, the later-started job.
+        latest = max(enumerate(processes),
+                     key=lambda item: (int(item[1].get("active_at") or 0), item[0]))[1]
+        text = str(latest.get("progress_text") or "").strip()
+        title = str(latest.get("title") or "").strip()
+        described = f"{title}: {text}" if title and text else (text or title)
+        if described:
+            parts.append(described)
+        else:
+            noun = "process" if len(processes) == 1 else "processes"
+            parts.append(f"{len(processes)} background {noun}")
+    return " · ".join(parts)
 
 
 def _agent_mcp_list(raw: str | None) -> list[str]:

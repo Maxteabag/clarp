@@ -42,27 +42,53 @@ def _row(agent_id: str) -> dict:
 
 def test_running_helpers_are_sub_agents_not_processes():
     boss = _parent()
-    _helper(boss, "stream-a")
-    _helper(boss, "stream-b")
-    done = _helper(boss, "stream-c")
+    a = _helper(boss, "stream-a")
+    b = _helper(boss, "stream-b")
+    c = _helper(boss, "stream-c")
+    done = _helper(boss, "stream-d")
     agents.apply_helper_event(done, HelperEvent.REPORTED)
+    agents.record_state(a, "tool", {"summary": "running tests"})
+    agents.record_state(b, "thinking", {})
+    agents.record_state(c, "waiting", {"message": "Needs approval"})
 
     row = _row(boss)
 
-    assert row["background_jobs"] == {"count": 0, "sub_agents": 2}
-    assert row["running_children"] == 2
-    assert row["status_text"] == "2 sub-agents"
+    assert row["background_jobs"] == {"count": 0, "sub_agents": 3}
+    assert row["running_children"] == 3
+    # The badge has the count; the line rolls up what they are doing.
+    assert row["status_text"] == "2 working, 1 waiting"
     assert row["latest_state"] == "background"
 
 
-def test_processes_only_count_as_background_processes():
+def test_one_running_helper_is_named_with_its_activity():
     boss = _parent()
-    background_jobs.upsert(session="boss", job_id="ci", kind="ci", title="CI")
+    helper = _helper(boss, "slice5-helper")
+    agents.record_state(helper, "tool", {"summary": "running tests"})
+
+    assert _row(boss)["status_text"] == "slice5-helper: running tests"
+
+    agents.set_custom_status(helper, "Awaiting CI")
+    assert _row(boss)["status_text"] == "slice5-helper: Awaiting CI"
+
+
+def test_processes_are_described_by_progress_or_title():
+    boss = _parent()
+    job = background_jobs.upsert(session="boss", job_id="ci", kind="ci", title="CI")
 
     row = _row(boss)
-
     assert row["background_jobs"] == {"count": 1, "sub_agents": 0}
-    assert row["status_text"] == "1 background process"
+    assert row["status_text"] == "CI"
+
+    background_jobs.set_progress("ci", session="boss", generation=job["generation"],
+                                 text="build 3/10")
+    assert _row(boss)["status_text"] == "CI: build 3/10"
+
+
+def test_bare_count_only_when_nothing_describes_the_process():
+    boss = _parent()
+    background_jobs.upsert(session="boss", job_id="anon", kind="ci", title="")
+
+    assert _row(boss)["status_text"] == "1 background process"
 
 
 def test_helper_mirror_job_is_not_a_second_sub_agent():
@@ -70,7 +96,7 @@ def test_helper_mirror_job_is_not_a_second_sub_agent():
     "6 sub-agents running"."""
     boss = _parent()
     for name in ("a", "b", "c"):
-        _helper(boss, f"helper-{name}")
+        agents.record_state(_helper(boss, f"helper-{name}"), "thinking", {})
         background_jobs.upsert(
             session="boss", job_id=f"sub-agent-{name}", kind="sub-agent",
             title=f"Helper {name}", detail=f"helper-{name}")
@@ -79,7 +105,7 @@ def test_helper_mirror_job_is_not_a_second_sub_agent():
     row = _row(boss)
 
     assert row["background_jobs"] == {"count": 1, "sub_agents": 3}
-    assert row["status_text"] == "3 sub-agents · 1 process"
+    assert row["status_text"] == "3 working · Deploy"
 
 
 def test_mirror_is_recognised_from_metadata_and_only_for_own_helpers():
@@ -109,7 +135,7 @@ def test_detached_workers_and_legacy_sub_agent_jobs_are_processes():
     row = _row(boss)
 
     assert row["background_jobs"] == {"count": 2, "sub_agents": 0}
-    assert row["status_text"] == "2 background processes"
+    assert row["status_text"] == "W2"
 
 
 # ---- dead workers ------------------------------------------------------------

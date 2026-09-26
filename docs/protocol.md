@@ -150,10 +150,18 @@ Rules:
   `clarp-sub-agent --clarp-agent` registers for a helper (kind `sub-agent`
   whose `detail` or `metadata.helper_session` names one of this agent's
   helpers), so a helper is never counted twice. Either makes `latest_state`
-  `background`, and when the agent has set no status of its own
-  `status_text` reads "3 sub-agents", "1 background process" or
-  "3 sub-agents · 1 process". Before Host contract 15 `count` included the
-  mirror jobs and `sub_agents` counted jobs of kind `sub-agent`.
+  `background`. Show the numbers from `background_jobs` (a badge);
+  `status_text` does not repeat them. When the agent has set no status of
+  its own it describes the activity instead: one running helper as
+  "slice5-helper: running tests" (the helper's own status, else its latest
+  activity summary), several as a roll-up such as "3 working, 1 waiting"
+  (`working`, `waiting`, `idle` from each helper's latest state), and a
+  process by its latest progress line or title ("CI: build 3/10", the most
+  recently active job when there are several). Helpers and a process are
+  joined with " · ". Only a process with neither title nor progress falls
+  back to a bare "1 background process". Before Host contract 15 `count`
+  included the mirror jobs and `sub_agents` counted jobs of kind
+  `sub-agent`.
 - There is no `/sessions` in this layer. The list of chats is
   `agents[].session` filtered by `archived_at == null`.
 
