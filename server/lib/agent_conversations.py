@@ -12,7 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 from .avatar_urls import janitor_avatar_url, versioned_avatar_url
-from .db import conn, write_generation
+from .db import change_stamp, conn
+from .revisioned_cache import RevisionedCache
 from .voice_markup import clean_for_display, strip_hidden_blocks
 
 PREFIX = "pair:"
@@ -126,7 +127,10 @@ def _participants_for(agent_ids: set[str]) -> dict[str, dict[str, Any]]:
     return {row["agent_id"]: _participant(row) for row in rows}
 
 
-_LIST_CACHE: dict[int, tuple[int, list[dict[str, Any]]]] = {}
+# One entry per requested limit, valid until any connection in any process
+# commits (db.change_stamp covers the hooks and the runtime, not just us).
+_LIST_CACHE: RevisionedCache[int, list[dict[str, Any]]] = RevisionedCache(
+    "agent_conversations.list", max_entries=8)
 
 
 def list_conversations(limit: int = 200) -> list[dict[str, Any]]:
@@ -140,12 +144,8 @@ def list_conversations(limit: int = 200) -> list[dict[str, Any]]:
     answers from memory.
     """
     limit = max(1, min(int(limit), 1000))
-    generation = write_generation()
-    cached = _LIST_CACHE.get(limit)
-    if cached is not None and cached[0] == generation:
-        return [dict(row) for row in cached[1]]
-    result = _list_conversations_uncached(limit)
-    _LIST_CACHE[limit] = (generation, result)
+    result = _LIST_CACHE.get_or_compute(
+        limit, change_stamp(), lambda: _list_conversations_uncached(limit))
     return [dict(row) for row in result]
 
 

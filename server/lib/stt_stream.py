@@ -24,6 +24,7 @@ from typing import Callable
 from urllib.parse import urlencode
 
 from . import ws
+from .http_utils import responder_of
 from .log import log, log_exception
 
 SAMPLE_RATE = 16_000
@@ -213,9 +214,8 @@ def _open_upstream(url: str, api_key: str):
 
 
 def _send_http_error(handler, code: int, message: str) -> None:
-    body = json.dumps({"error": message}).encode()
     try:
-        handler._send(code, body, "application/json")
+        responder_of(handler).send_error(code, message)
     except Exception:  # noqa: BLE001
         pass
 
@@ -251,7 +251,7 @@ def serve_stt_stream(handler, query: dict[str, str], *,
     capacity = stt_providers.budget_for(provider).capacity
     vocab_fn = getattr(handler.ctx, "vocab_for_transcription", None)
     from . import trace as _trace
-    stream_trace = _trace.new_id()
+    stream_trace = _trace.new_trace_id()
     if callable(vocab_fn):
         try:
             vocab = vocab_fn(delegated=False, session=session,
@@ -295,7 +295,7 @@ def serve_stt_stream(handler, query: dict[str, str], *,
 
     ledger = TurnLedger(
         session=session, provider=provider, model=model, keyterms=keyterms,
-        capacity=capacity, new_trace=_trace.new_id, record_turn=record_turn_run,
+        capacity=capacity, new_trace=_trace.new_trace_id, record_turn=record_turn_run,
         retain=retain)
     run_relay(handler, upstream, ledger, session=session,
               agent_id=(agent or {}).get("agent_id"), engine=f"{provider}:{model}",

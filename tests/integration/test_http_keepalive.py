@@ -186,11 +186,11 @@ def test_backpressure_eviction_flags_queue(tmp_path):
     q = stream.subscribe(maxsize=1)
     assert isinstance(q, SubscriberQueue)
     assert q.evicted is False
-    stream.broadcast({"type": "agent-state", "session": "rachel", "state": "idle"})
-    stream.broadcast({"type": "agent-state", "session": "rachel", "state": "busy"})
+    stream.broadcast({"type": "agent-state", "session": "rachel", "kind": "idle"})
+    stream.broadcast({"type": "agent-state", "session": "rachel", "kind": "busy"})
     assert q.evicted is True
     # Evicted queue no longer receives events.
-    stream.broadcast({"type": "agent-state", "session": "rachel", "state": "idle"})
+    stream.broadcast({"type": "agent-state", "session": "rachel", "kind": "idle"})
     assert q.qsize() == 1
     # A healthy subscriber added afterwards still works.
     q2 = stream.subscribe()

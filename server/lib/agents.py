@@ -13,7 +13,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from . import origins
+from . import origins, turn_lifecycle
 from . import voice_verbosity as voice_verbosity_lib
 from .db import conn, now_ms
 from .protocol import AgentBackend, AgentState, ClipStatus, TurnSource
@@ -177,8 +177,9 @@ def create_agent(*, persona: str, voice_id: str, cwd: str,
                    custom_status = ''
              WHERE agent_id = ?
         """, (persona, voice_id, cwd, backend, now_ms(), model, effort, agent_id))
-        record_state(agent_id, AgentState.SPAWNED,
-                     {"session": session, "resurrected": True})
+        turn_lifecycle.transition(
+            agent_id, turn_lifecycle.TurnEvent.AGENT_CREATED,
+            {"session": session, "resurrected": True})
         return agent_id
 
     agent_id = _new_agent_id()
@@ -188,7 +189,8 @@ def create_agent(*, persona: str, voice_id: str, cwd: str,
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (agent_id, persona, voice_id, cwd, session, backend, now_ms(),
           model, effort))
-    record_state(agent_id, AgentState.SPAWNED, {"session": session})
+    turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.AGENT_CREATED,
+                              {"session": session})
     return agent_id
 
 
@@ -199,14 +201,50 @@ def update_voice(agent_id: str, voice_id: str) -> None:
     )
 
 
+# ---- writes inside a caller's transaction (janitors, portraits) -------------
+# Each takes the connection that holds the caller's BEGIN IMMEDIATE so the
+# agent row commits together with the janitor or portrait rows around it.
+
+def set_janitor_status(c, agent_id: str, status: str) -> None:
+    """A Janitor-owned label write (ownership is recorded by janitor_store)."""
+    c.execute("UPDATE agents SET custom_status=? WHERE agent_id=?", (status, agent_id))
+
+
+def convert_to_janitor(c, agent_id: str) -> None:
+    c.execute("UPDATE agents SET is_janitor=1,heartbeat_enabled=0,dreaming_enabled=0 WHERE agent_id=?",
+              (agent_id,))
+
+
+def mark_janitor(c, agent_id: str) -> None:
+    c.execute("UPDATE agents SET is_janitor=1 WHERE agent_id=?", (agent_id,))
+
+
+def release_from_janitor(c, agent_id: str) -> None:
+    c.execute("UPDATE agents SET is_janitor=0 WHERE agent_id=?", (agent_id,))
+
+
+def insert_builtin_janitor(c, *, agent_id: str, persona: str, cwd: str, session: str,
+                           backend: str, model: str, effort: str, now: int) -> None:
+    c.execute("""INSERT INTO agents(agent_id,persona,voice_id,cwd,session,backend,model,effort,
+        is_janitor,heartbeat_enabled,dreaming_enabled,created_at) VALUES (?,?,?,?,?,?,?,?,1,0,0,?)""",
+        (agent_id, persona, "", cwd, session, backend, model, effort, now))
+
+
+def set_avatar_path(c, agent_id: str, avatar_path: str) -> None:
+    """The primary portrait's path, inside the portrait transaction."""
+    c.execute("UPDATE agents SET avatar_path=? WHERE agent_id=? AND deleted_at IS NULL",
+              (avatar_path, agent_id))
+
+
 def set_custom_status(agent_id: str, status: str | None) -> None:
     """Persist free-text agent status shown while the agent is not busy."""
+    from . import janitor_store
     c = conn()
     # A deliberate manual/legacy write owns the field, even if it repeats the
     # same text. A Janitor cannot reclaim it by comparing the visible string.
     c.execute("SAVEPOINT manual_custom_status")
     try:
-        c.execute("DELETE FROM janitor_label_ownership WHERE target_agent_id=?", (agent_id,))
+        janitor_store.forget_label_ownership(c, agent_id)
         c.execute("UPDATE agents SET custom_status = ? WHERE agent_id = ?",
                   ((status or "").strip(), agent_id))
         c.execute("RELEASE SAVEPOINT manual_custom_status")
@@ -321,7 +359,8 @@ def soft_delete(agent_id: str) -> None:
     from . import artifacts
     artifacts.cancel_for_agent(agent_id)
     end_current_runtime(agent_id)
-    record_state(agent_id, AgentState.STOPPED, {"reason": "deleted"})
+    turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.AGENT_DELETED,
+                              {"reason": "deleted"})
 
 
 # ---- runtime rows ------------------------------------------------------
@@ -451,73 +490,12 @@ def live_backend_session(agent_id: str) -> str:
 
 def record_state(agent_id: str, kind: str,
                  detail: dict | None = None) -> None:
-    if not AgentState.is_valid(kind):
-        raise ValueError(f"invalid agent state: {kind}")
-    ts = now_ms()
-    detail = _state_detail_with_origin(agent_id, kind, detail, ts)
-    rt = current_runtime_id(agent_id)
-    conn().execute("""
-        INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
-        VALUES (?, ?, ?, ?, ?)
-    """, (agent_id, rt, ts, kind,
-          json.dumps(detail) if detail else None))
-
-
-def _state_detail_with_origin(agent_id: str, kind: str,
-                              detail: dict | None, ts: int) -> dict | None:
-    if detail and detail.get("origin"):
-        return detail
-    if kind not in {
-        AgentState.THINKING,
-        AgentState.TOOL,
-        AgentState.COMPACTING,
-        AgentState.DONE,
-        AgentState.IDLE,
-    }:
-        return detail
-    raw_detail = detail or {}
-    backend_session_id = str(
-        raw_detail.get("backend_session_id") or live_backend_session(agent_id) or "",
-    )
-    origin = ""
-    if backend_session_id:
-        try:
-            from . import message_store
-            origin = message_store.latest_turn_user_origin(
-                agent_id=agent_id,
-                backend_session_id=backend_session_id,
-                done_ts=ts,
-            )
-        except Exception:
-            origin = ""
-    if not origin:
-        origin = _recent_state_origin(agent_id, ts)
-    if not origin:
-        return detail
-    enriched = dict(detail or {})
-    enriched["origin"] = origin
-    return enriched
-
-
-def _recent_state_origin(agent_id: str, ts: int) -> str:
-    """Carry turn origin from hook DONE into immediate tail state rows."""
-    row = conn().execute(
-        """SELECT ts, detail
-             FROM state_log
-            WHERE agent_id = ?
-              AND ts <= ?
-              AND detail IS NOT NULL
-            ORDER BY ts DESC, state_id DESC
-            LIMIT 1""",
-        (agent_id, ts),
-    ).fetchone()
-    if row is None or ts - int(row["ts"] or 0) > 120_000:
-        return ""
-    try:
-        payload = json.loads(row["detail"] or "{}")
-    except json.JSONDecodeError:
-        return ""
-    return str(payload.get("origin") or "")
+    """Fixture writer: the kind is explicit and the edge is legal from every
+    state. Production code reports events through
+    ``turn_lifecycle.transition``; tests use this to put an agent in a state
+    without replaying the events that lead there. ``test_turn_lifecycle``
+    fails if a server module calls it."""
+    turn_lifecycle.record(agent_id, kind, detail)
 
 
 def latest_state(agent_id: str) -> dict[str, Any] | None:
@@ -539,7 +517,7 @@ def latest_state(agent_id: str) -> dict[str, Any] | None:
 
 def is_busy(agent_id: str) -> bool:
     s = latest_state(agent_id)
-    return bool(s) and s["kind"] in AgentState.busy_states()
+    return bool(s) and s["kind"] in turn_lifecycle.BUSY
 
 
 def dashboard_states() -> dict[str, dict[str, Any]]:
@@ -679,32 +657,14 @@ def last_turn_end(agent_id: str) -> int:
 
 def open_turn(*, agent_id: str, source: str, trace_id: str,
               synthesize_audio: bool = True) -> int:
-    if source not in TurnSource.valid():
-        raise ValueError(f"invalid turn source: {source}")
-    rt = current_runtime_id(agent_id)
-    cur = conn().execute("""
-        INSERT INTO turns
-            (agent_id, runtime_id, source, trace_id, synthesize_audio, started_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (agent_id, rt, source, trace_id, 1 if synthesize_audio else 0, now_ms()))
-    return int(cur.lastrowid or 0)
+    return turn_lifecycle.open_turn(
+        agent_id=agent_id, source=source, trace_id=trace_id,
+        synthesize_audio=synthesize_audio)
 
 
 def record_unlaunched_trace(agent_id: str, trace_id: str) -> None:
-    """Historical failure receipt, ordered before any newer turn's state.
-
-    Recording a late launch failure at wall-clock now could replace the
-    THINKING state of a newer owner. Anchor it to the admitted message instead.
-    """
-    row = conn().execute(
-        "SELECT MIN(updated_at) AS ts FROM messages WHERE agent_id=? AND trace_id=? AND role='user'",
-        (agent_id, trace_id)).fetchone()
-    ts = int(row["ts"] or now_ms()) - 1
-    conn().execute(
-        "INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail) VALUES (?, ?, ?, ?, ?)",
-        (agent_id, current_runtime_id(agent_id), ts, AgentState.INTERRUPTED,
-         json.dumps({"trace_id": trace_id, "dispatch_not_started": True,
-                     "message": "Message saved; backend did not start. Retry is safe."})))
+    """Historical failure receipt, ordered before any newer turn's state."""
+    turn_lifecycle.record_unlaunched(agent_id, trace_id)
 
 
 def trace_launch_status(agent_id: str, trace_id: str) -> str:
@@ -726,8 +686,7 @@ def trace_launch_status(agent_id: str, trace_id: str) -> str:
 
 
 def close_turn(turn_id: int) -> None:
-    conn().execute("UPDATE turns SET ended_at = ? WHERE turn_id = ?",
-                   (now_ms(), turn_id))
+    turn_lifecycle.close_turn(turn_id)
 
 
 def record_clip(*, agent_id: str, path: str, voice_id: str | None = None,
@@ -865,13 +824,7 @@ def latest_turn_synthesize_audio(agent_id: str) -> bool:
 
 def enable_latest_turn_audio(agent_id: str) -> None:
     """Upgrade the active turn to speech; never downgrade a voice turn."""
-    conn().execute("""
-        UPDATE turns SET synthesize_audio = 1
-         WHERE turn_id = (
-            SELECT turn_id FROM turns WHERE agent_id = ?
-             ORDER BY started_at DESC, turn_id DESC LIMIT 1
-         )
-    """, (agent_id,))
+    turn_lifecycle.enable_latest_turn_audio(agent_id)
 
 
 # ---- canonical wire events --------------------------------------------

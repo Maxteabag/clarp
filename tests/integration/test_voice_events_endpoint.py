@@ -189,19 +189,20 @@ def test_transcribe_files_transcript_level_and_links_send(running):
 
     # The send that follows carries the same utterance and trace.
     from lib.turn_dispatch import DispatchResult, TurnDispatchService
-    real = TurnDispatchService.dispatch
+    real = TurnDispatchService.submit
 
     def fake_dispatch(self, *, text, requested_session, trace_id, **kwargs):
         return DispatchResult(session=requested_session, backend="codex")
 
-    TurnDispatchService.dispatch = fake_dispatch  # type: ignore[method-assign]
+    TurnDispatchService.submit = (  # type: ignore[method-assign]
+        lambda self, command: fake_dispatch(self, **command.as_kwargs()))
     try:
         status, out = _post(base, "/send", {
             "session": "rachel", "text": "turn left ahead",
             "client_msg_id": "c-1", "trace_id": trace_id,
             "transcription_id": "job-7-seg-0", "utterance_id": "job-7"})
     finally:
-        TurnDispatchService.dispatch = real  # type: ignore[method-assign]
+        TurnDispatchService.submit = real  # type: ignore[method-assign]
     assert status == 200, out
     send = voice_events.query(utterance_id="job-7", event="send")
     assert len(send) == 1

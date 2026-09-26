@@ -50,7 +50,7 @@ from .. import tts_queue
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
-from ..protocol import AgentState
+from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from .base import BackendBrand, CompactionStrategy, hooked, resolve
 from .stream_json import StreamJsonBackend
@@ -417,7 +417,7 @@ class CodexBackend(StreamJsonBackend):
                             on_error(st.failed_error)
             return
         if etype == "turn.started":
-            self._record_state(agent_id, AgentState.THINKING,
+            self._transition(agent_id, TurnEvent.SPAWN_STARTED,
                                {"dispatch": self.runner, "trace_id": trace_id})
             return
         if etype in ("item.started", "item.updated", "item.completed"):
@@ -469,14 +469,14 @@ class CodexBackend(StreamJsonBackend):
 
         # --- turn lifecycle → agent state ---
         if inner == "task_started":
-            self._record_state(agent_id, AgentState.THINKING,
+            self._transition(agent_id, TurnEvent.SPAWN_STARTED,
                                {"dispatch": self.runner, "trace_id": trace_id})
             return
 
         if inner in ("function_call", "custom_tool_call", "web_search_call",
                      "mcp_tool_call_begin", "exec_command_begin"):
             name = str(payload.get("name") or payload.get("tool") or "tool")
-            self._record_state(agent_id, AgentState.TOOL,
+            self._transition(agent_id, TurnEvent.TOOL_STARTED,
                                {"dispatch": self.runner, "tool": name, "trace_id": trace_id})
             self._broadcast_transcript(stream, agent_id, session)
             return
@@ -489,12 +489,12 @@ class CodexBackend(StreamJsonBackend):
             return
 
         if inner == "context_compacted":
-            self._record_state(agent_id, AgentState.COMPACTING,
+            self._transition(agent_id, TurnEvent.COMPACTION_STARTED,
                                {"dispatch": self.runner, "trace_id": trace_id})
             return
 
         if inner == "turn_aborted":
-            self._record_state(agent_id, AgentState.IDLE,
+            self._transition(agent_id, TurnEvent.TURN_FAILED_UNCLASSIFIED,
                                {"dispatch": self.runner, "aborted": True,
                                 "trace_id": trace_id})
             return
@@ -577,13 +577,13 @@ class CodexBackend(StreamJsonBackend):
         if itype == "reasoning":
             # Model thinking — keep the agent in a busy state, but nothing to
             # speak or render.
-            self._record_state(agent_id, AgentState.THINKING,
+            self._transition(agent_id, TurnEvent.TEXT_STREAMED,
                                {"dispatch": self.runner, "trace_id": trace_id})
             return
 
         if itype in _TOOL_ITEM_TYPES:
             name = str(item.get("command") or item.get("name") or itype)
-            self._record_state(agent_id, AgentState.TOOL,
+            self._transition(agent_id, TurnEvent.TOOL_STARTED,
                                {"dispatch": self.runner, "tool": name[:80],
                                 "trace_id": trace_id})
             self._broadcast_transcript(stream, agent_id, session)
@@ -624,8 +624,8 @@ class CodexBackend(StreamJsonBackend):
                       trace_id=trace_id, enqueue=enqueue):
             st.spoke_any = True
 
-    def _record_state(self, agent_id: str, kind: str, detail: dict | None = None) -> None:
-        self.record_state(agent_id, kind, detail)
+    def _transition(self, agent_id: str, turn_event: str, detail: dict | None = None) -> None:
+        self.transition(agent_id, turn_event, detail)
 
     def _broadcast_transcript(self, stream: Any, agent_id: str, session: str) -> None:
         self.broadcast_transcript(stream, agent_id, session)

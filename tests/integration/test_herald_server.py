@@ -62,10 +62,10 @@ def server_with_herald(tmp_path):
         roster_names=("Mike", "Rachel"),
     )
     # Wire a HeraldManager and expose it on ctx so handlers can find it.
-    ctx.herald = HeraldManager(  # type: ignore[attr-defined]
+    ctx.replace_service("herald", HeraldManager(  # type: ignore[attr-defined]
         stream=stream, tts=tts,
         agents=session_dict,
-    )
+    ))
 
     port = _free_port()
     srv = build_server(ctx, port, bind_addr="127.0.0.1")

@@ -21,7 +21,10 @@ from . import agents as agents_db
 from . import db, message_store, origins
 from .db import conn
 from .log import log, log_exception
-from .protocol import AgentState, SSEType
+from . import turn_lifecycle
+from . import events
+from .protocol import AgentState
+from .turn_lifecycle import TurnEvent
 
 MARKER_ORIGIN = origins.MARKER_ORIGIN
 RESTART_SOURCE = "server_restart"
@@ -124,7 +127,7 @@ def _mark(turn: dict[str, Any], stream) -> None:
             cause_message_id=turn["cause_message_id"],
             text=RESTART_MARKER_TEXT,
         )
-    agents_db.record_state(agent_id, AgentState.INTERRUPTED, {
+    turn_lifecycle.transition(agent_id, TurnEvent.RESTART_INTERRUPTED, {
         "source": RESTART_SOURCE,
         "reason": RESTART_SOURCE,
         "message": RESTART_MARKER_TEXT,
@@ -140,19 +143,17 @@ def _mark(turn: dict[str, Any], stream) -> None:
     if stream is None:
         return
     try:
-        stream.broadcast({
-            "type": SSEType.AGENT_STATE,
-            "session": turn["session"],
-            "agent_id": agent_id,
-            "kind": AgentState.INTERRUPTED,
-            "trace_id": turn["trace_id"],
-        })
+        events.broadcast(stream, events.agent_state(
+            session=turn["session"],
+            agent_id=agent_id,
+            kind=AgentState.INTERRUPTED,
+            trace_id=turn["trace_id"],
+        ))
         if marker is not None:
-            stream.broadcast({
-                "type": SSEType.TRANSCRIPT_UPDATED,
-                "agent_id": agent_id,
-                "session": turn["session"],
-                "backend_session_id": turn["backend_session_id"],
-            })
+            events.broadcast(stream, events.transcript_updated(
+                agent_id=agent_id,
+                session=turn["session"],
+                backend_session_id=turn["backend_session_id"],
+            ))
     except Exception as e:  # noqa: BLE001
         log_exception("restartInterruptBroadcastFail", e, detail=agent_id)

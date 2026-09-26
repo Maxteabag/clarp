@@ -29,6 +29,7 @@ exclusive WAL checkpoint in the HTTP process cannot skip INTERRUPTED marks.
 """
 from __future__ import annotations
 
+import itertools
 import os
 import pathlib
 import sqlite3
@@ -183,20 +184,77 @@ def _report_database_locked(waiting_sql: object) -> None:
 
 
 # Bumped on every write statement executed in this process (the Host runs
-# SQLite in autocommit mode, so commit() is not a reliable signal). Readers that
-# aggregate large tables cache their result keyed by this value, so a quiet
-# Host answers from memory and any write invalidates the cache immediately.
+# SQLite in autocommit mode, so commit() is not a reliable signal). On its own
+# it is blind to the six hook scripts and the runtime process that share
+# state.sqlite, so cache readers combine it with SQLite's own cross-process
+# change counter through `change_stamp()` below.
 _WRITE_GENERATION = 0
 _WRITE_VERBS = frozenset({"INSERT", "UPDATE", "DELETE", "REPLACE"})
+_WRITE_GENERATION_LOCK = threading.Lock()
 
 
 def _bump_write_generation() -> None:
     global _WRITE_GENERATION
-    _WRITE_GENERATION += 1
+    with _WRITE_GENERATION_LOCK:
+        _WRITE_GENERATION += 1
 
 
 def write_generation() -> int:
     return _WRITE_GENERATION
+
+
+# One process-wide connection whose only job is `PRAGMA data_version`. SQLite
+# keeps that counter per connection and bumps it when *another* connection
+# commits, so reading it from a connection nobody writes through makes every
+# commit in the process, the hooks and the runtime visible as one monotonic
+# value. Reading it from the per-thread request connections would not work:
+# each has its own count and a write on the same connection leaves it flat.
+_STAMP_LOCK = threading.Lock()
+_STAMP_CONN: sqlite3.Connection | None = None
+_STAMP_FAILURES = itertools.count(1)
+
+
+def _stamp_connection() -> sqlite3.Connection:
+    global _STAMP_CONN
+    if _STAMP_CONN is None:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        con = sqlite3.connect(str(DB_PATH), timeout=SQLITE_CONNECT_TIMEOUT_SEC,
+                              isolation_level=None, check_same_thread=False)
+        con.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+        _STAMP_CONN = con
+    return _STAMP_CONN
+
+
+def _close_stamp_connection() -> None:
+    global _STAMP_CONN
+    if _STAMP_CONN is not None:
+        try:
+            _STAMP_CONN.close()
+        except sqlite3.Error:
+            pass
+        _STAMP_CONN = None
+
+
+def change_stamp() -> tuple[int, int]:
+    """A value that differs whenever state.sqlite may have changed.
+
+    ``(data_version, write_generation)``: the first half moves when any other
+    connection - another thread, a hook process, the runtime - commits; the
+    second moves on every write statement this process issues, which also
+    covers a thread reading its own uncommitted rows inside BEGIN IMMEDIATE.
+    Cache entries keyed by this stamp can never outlive a write, and a quiet
+    Host still answers from memory.
+    """
+    with _STAMP_LOCK:
+        try:
+            row = _stamp_connection().execute("PRAGMA data_version").fetchone()
+            data_version = int(row[0]) if row else 0
+        except sqlite3.Error:
+            # Unknown is never equal to anything cached: a fresh negative
+            # value per failure keeps readers recomputing until it recovers.
+            _close_stamp_connection()
+            data_version = -next(_STAMP_FAILURES)
+        return data_version, _WRITE_GENERATION
 
 
 class _TrackedConnection(sqlite3.Connection):
@@ -396,6 +454,8 @@ def reset_for_tests(path: pathlib.Path | None = None) -> None:
             DB_PATH = path
         _MIGRATED = False
         close_local()
+    with _STAMP_LOCK:
+        _close_stamp_connection()
     with _TRANSACTION_LOCK:
         _TRANSACTION_OWNERS.clear()
         _LAST_LOCK_REPORT_AT = 0.0

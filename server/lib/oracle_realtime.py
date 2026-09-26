@@ -8,6 +8,7 @@ import uuid
 from urllib.parse import urlencode
 
 from . import config, ws
+from .http_utils import principal_of, require_full_scope
 from .log import log, log_exception
 
 
@@ -349,13 +350,12 @@ def serve(handler) -> None:
     if not client_key:
         return _send_http_error(handler, 400, "missing Sec-WebSocket-Key")
 
-    if (not bool(getattr(handler, "_request_auth_validated", False))
-            or getattr(handler, "_request_device_scope", "") != "full"
-            or not str(getattr(handler, "_request_principal", "") or "")):
-        return _send_http_error(
-            handler, 401, "Oracle requires authenticated full-device access")
+    who = principal_of(handler)
+    denied = require_full_scope(who, message="Oracle requires authenticated full-device access")
+    if denied:
+        return _send_http_error(handler, 401, denied)
 
-    principal = str(handler._request_principal)
+    principal = who.principal
     if not _claim(principal):
         return _send_http_error(
             handler, 409, "Oracle already has an active session for this device")

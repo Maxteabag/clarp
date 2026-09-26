@@ -124,7 +124,7 @@ def _isolated_db(tmp_path, monkeypatch):
         monkeypatch.delenv(var, raising=False)
     try:
         from lib import config as _config
-        _config._CACHED = None
+        _config.reset_cache()
     except ImportError:
         pass
     for mod_name in ("lib.db",):
@@ -133,6 +133,11 @@ def _isolated_db(tmp_path, monkeypatch):
             mod.reset_for_tests(db_path)
         except (ImportError, AttributeError):
             pass
+    # Every RevisionedCache (pair-conversation list, dashboard previews, ...)
+    # registers itself; one call empties them all so no test inherits a
+    # projection computed against the previous test's database.
+    from lib import revisioned_cache as _revisioned_cache
+    _revisioned_cache.reset_all()
     try:
         from lib import telemetry as _telemetry
         _telemetry.reset_for_tests(tmp_path / "telemetry.sqlite")
@@ -187,6 +192,7 @@ def _isolated_db(tmp_path, monkeypatch):
     from lib import transcript_import_cache
     assert transcript_import_cache.wait_for_background(5), "transcript importer leaked across tests"
     transcript_import_cache.reset_for_tests()
+    _revisioned_cache.reset_all()
     for mod_name in ("lib.db",):
         try:
             mod = __import__(mod_name, fromlist=["reset_for_tests"])

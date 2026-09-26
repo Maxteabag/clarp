@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Callable
 
 from . import agents as agents_db
-from . import backends, compaction, settings_store
+from . import backends, settings_store
 from .db import conn, now_ms
 from .log import log, log_exception
 from .protocol import AgentState
@@ -283,7 +283,11 @@ def pending_heartbeat_agents(*, now: float | None = None) -> list[dict]:
         if not session:
             continue
         state = _state_for(agent_id)
-        reason = _skip_reason(agent=agent, state=state, now=now)
+        _wake_from_external_signal(agent_id, state)
+        reason = _skip_reason(snapshot=_gather_snapshot(agent, now), state=state, now=now)
+        if reason == "dormant":
+            with _STATE_LOCK:
+                state.dormant = True
         if reason:
             log("heartbeatSkip", f"agent={agent_id} session={session} reason={reason}")
             continue
@@ -503,25 +507,52 @@ def _persist_state_snapshot(agent_id: str, state: _HeartbeatState) -> None:
         log_exception("heartbeatStatePersistFail", e, detail=agent_id)
 
 
-def _skip_reason(*, agent: dict, state: _HeartbeatState, now: float) -> str:
+@dataclass(frozen=True)
+class _AgentSnapshot:
+    """What the heartbeat decision needs to know about one agent, read once."""
+    latest: dict = field(default_factory=dict)  # agents_db.latest_state row or {}
+    busy: bool = False
+    active: bool = False  # the backend still holds a live handle
+    compacting: bool = False
+    recent_activity: str = ""  # _recent_real_activity_reason's skip reason
+
+
+def _compacting(agent_id: str, session: str) -> bool:
+    from . import turn_dispatch
+    return bool(session) and turn_dispatch.live_work(agent_id, session=session).compacting
+
+
+def _gather_snapshot(agent: dict, now: float) -> _AgentSnapshot:
     agent_id = agent["agent_id"]
-    session = agent.get("session") or ""
-    _wake_from_external_signal(agent_id, state)
-    latest = agents_db.latest_state(agent_id) or {}
+    return _AgentSnapshot(
+        latest=agents_db.latest_state(agent_id) or {},
+        busy=bool(agents_db.is_busy(agent_id)),
+        active=bool(backends.active_handles(agent.get("backend"), agent_id)),
+        compacting=_compacting(agent_id, agent.get("session") or ""),
+        recent_activity=_recent_real_activity_reason(agent_id, now),
+    )
+
+
+def _skip_reason(*, snapshot: _AgentSnapshot, state: _HeartbeatState, now: float) -> str:
+    """Why this agent gets no heartbeat now, or "" when it is due.
+
+    Pure over the snapshot and the in-memory schedule state. A "dormant"
+    answer for a long-interrupted agent is recorded on ``state`` by the caller.
+    """
+    latest = snapshot.latest
     latest_kind = latest.get("kind")
     if latest_kind == AgentState.WAITING:
         return str(latest_kind)
     if latest_kind == AgentState.INTERRUPTED and _is_user_stopped(latest):
         return str(latest_kind)
-    if agents_db.is_busy(agent_id):
+    if snapshot.busy:
         return "busy"
-    if backends.active_handles(agent.get("backend"), agent_id):
+    if snapshot.active:
         return "active"
-    if compaction.is_compacting(session):
+    if snapshot.compacting:
         return "compacting"
-    recent = _recent_real_activity_reason(agent_id, now)
-    if recent:
-        return recent
+    if snapshot.recent_activity:
+        return snapshot.recent_activity
     interrupted_at = (
         float(latest.get("ts") or 0.0) / 1000.0
         if latest_kind == AgentState.INTERRUPTED
@@ -529,8 +560,6 @@ def _skip_reason(*, agent: dict, state: _HeartbeatState, now: float) -> str:
     )
     is_interrupted = latest_kind == AgentState.INTERRUPTED and not _is_user_stopped(latest)
     if is_interrupted and interrupted_at and (now - interrupted_at) >= MAX_INTERRUPTED_RETRY_SEC:
-        with _STATE_LOCK:
-            state.dormant = True
         return "dormant"
     last_event = max(state.last_started, interrupted_at)
     if last_event and now - last_event < MIN_WAKE_SPACING_SEC:
@@ -681,8 +710,7 @@ def _recent_real_activity_reason(agent_id: str, now: float) -> str:
 
 def _flooded(state: _HeartbeatState, now: float) -> bool:
     window_start = now - FLOOD_WINDOW_SEC
-    state.recent_starts = [ts for ts in state.recent_starts if ts >= window_start]
-    return len(state.recent_starts) >= FLOOD_THRESHOLD
+    return sum(1 for ts in state.recent_starts if ts >= window_start) >= FLOOD_THRESHOLD
 
 
 def _record_run_start(agent_id: str, now: float) -> None:

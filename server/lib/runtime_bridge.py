@@ -168,7 +168,12 @@ class RuntimeClient:
         )
 
     def dispatch(self, **kwargs):
-        return self._dispatch_result(self._request("dispatch", kwargs))
+        from .turn_dispatch import DispatchCommand
+        return self.dispatch_command(DispatchCommand(**kwargs))
+
+    def dispatch_command(self, command):
+        """Send one DispatchCommand; the runtime admits and launches it."""
+        return self._dispatch_result(self._request("dispatch", command.to_wire()))
 
     def dispatch_queued(self, queue_id: str):
         return self._dispatch_result(self._request(
@@ -530,20 +535,16 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 str(params.get("queue_id") or ""))
             return {"ok": True, "result": dataclasses.asdict(result)}
         if method == "dispatch":
-            values = dict(params)
-            admission = values.get("prompt_admission")
-            if isinstance(admission, dict):
-                from .prompt_admissions import PromptAdmission
-                admission = PromptAdmission.from_json(json.dumps(admission))
-                if admission is None:
-                    return {"ok": False, "status": 400,
-                            "error": "invalid prompt admission"}
-                values["prompt_admission"] = admission
-            if isinstance(values.get("unheard_audio_sessions"), list):
-                values["unheard_audio_sessions"] = tuple(
-                    str(item) for item in values["unheard_audio_sessions"])
+            from .turn_dispatch import DispatchCommand
             try:
-                result = self.dispatch_service.dispatch(**values)
+                command = DispatchCommand.from_wire(params)
+            except ValueError as exc:
+                return {"ok": False, "status": 400, "error": str(exc)}
+            # This side owns turns: the command is admitted here, once.
+            submit = getattr(self.dispatch_service, "submit", None)
+            try:
+                result = (submit(command) if submit is not None
+                          else self.dispatch_service.dispatch(**command.as_kwargs()))
             except Exception as exc:
                 from .turn_dispatch import DispatchError
                 if isinstance(exc, DispatchError):

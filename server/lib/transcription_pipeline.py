@@ -99,7 +99,7 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         return TranscriptionOutcome.error(503, "whisper model loading")
     # The trace is minted before compiling so the vocab run, the
     # transcribe event and everything downstream share one id.
-    trace_id = _trace.new_id()
+    trace_id = _trace.new_trace_id()
     focus = focus_session()
     vocab_run_id = 0
     vocab_fn = getattr(ctx, "vocab_for_transcription", None)
