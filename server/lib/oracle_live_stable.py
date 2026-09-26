@@ -128,6 +128,18 @@ SWAP_ANNOUNCE_TIMEOUT = 5.0
 # Upper bound on the conversation excerpt a swapped-in session starts with
 # when there is no durable thread (GPT-Live accepts 8192 input tokens).
 SWAP_HISTORY_BYTES = 6000
+# Oracle saying it is putting the user through while the Host starts no
+# switch within this long means the user is about to talk to silence (call
+# 7946a1a7); the Host corrects it.
+SWITCH_CLAIM_GRACE_SECONDS = 2.0
+# A switch the Host requested this long before Oracle's words backs them.
+SWITCH_CLAIM_WINDOW_SECONDS = 10.0
+_SWITCH_CLAIM = __import__("re").compile(
+    r"\b(?:put(?:ting)? you (?:straight )?through|connecting you|switching you|switching (?:over )?to"
+    r"|transferring you|handing you (?:over|back)|you're (?:now )?(?:connected|through) to)\b")
+# A user who has been talking this long with no delegation and no reply, and
+# has then paused for RESULT_RELEASE_SILENCE_SECONDS, gets Oracle nudged.
+UNANSWERED_SECONDS = 8.0
 DECISION_POLL_SECONDS = 1.0
 DECISION_PRESENTATION_COOLDOWN_SECONDS = 4.0
 from .oracle_prompt import PROMPT  # one voice prompt for every engine
@@ -348,6 +360,14 @@ class Conversation:
         self.pending_swap = None
         # The last turn ended in "put me through to" with no name yet.
         self.switch_dangling = False
+        # Void guards: Oracle's words since the user last spoke, when it
+        # claimed a switch, when the Host last requested one, and when the
+        # user started talking without a reply.
+        self.output_turn = ""
+        self.switch_claim_at = None
+        self.last_switch_at = None
+        self.unanswered_since = None
+        self.unanswered_nudged = False
         self.open_upstream = None
         self.voice_overrides = {}
         self.voice_context = None
@@ -495,6 +515,8 @@ class Conversation:
             if audible(data):
                 self.last_output = now
                 self.last_output_active = True
+                self.unanswered_since = None
+                self.unanswered_nudged = False
                 self.counts["out_audible"] += 1
                 self.journal_event("server", event)
                 self.downstream(event)
@@ -517,6 +539,13 @@ class Conversation:
                 if role == "user" and text.strip():
                     self.revision += 1
                     self.last_transcript = self.clock()
+                    self.output_turn = ""
+                    if self.unanswered_since is None:
+                        self.unanswered_since = self.last_transcript
+                elif role == "assistant" and text.strip():
+                    self.unanswered_since = None
+                    self.unanswered_nudged = False
+                    self.watch_switch_claim(text)
                 previous = self.fragments[-1] if (self.fragments and self.fragments[-1]["role"] == role
                     and self.fragments[-1].get("provider_session") == self.provider_session) else None
                 previous_is_current = (previous and
@@ -538,6 +567,7 @@ class Conversation:
         elif kind == "session.delegation.created":
             ident = event.get("delegation", {}).get("id")
             with self.lock:
+                self.unanswered_since = None
                 if ident and ident not in self.seen:
                     self.seen.add(ident)
                     self.routing += 1
@@ -554,6 +584,8 @@ class Conversation:
                     "items":self.memory.contexts(), "revision":self.revision})
 
     def route(self, ident):
+        with self.lock:
+            self.unanswered_since = None
         try:
             with self.route_lock:
                 routed_revision = None
@@ -717,6 +749,7 @@ class Conversation:
             self.mark_relay_spoken()
             self.journal_event("host", {"type": "oracle_v2.quiet"})
             self.downstream({"type": "oracle_v2.quiet"})
+        self.guard_void(now)
         if self.pending_swap is not None:
             # Nothing new goes to a session that is about to be replaced.
             self.advance_swap(now)
@@ -1001,6 +1034,63 @@ class Conversation:
             self.journal.record("route.contact_switch", {"revision": revision, "target": name or "oracle"})
         return served
 
+    def watch_switch_claim(self, text):
+        """Oracle's words so far this turn; note when they claim a switch.
+
+        Called with self.lock held.
+        """
+        self.output_turn = (self.output_turn + text)[-400:]
+        if self.switch_claim_at is not None or not _SWITCH_CLAIM.search(
+                self.output_turn.casefold().replace("\u2019", "'")):
+            return
+        now = self.clock()
+        if self.pending_swap is not None or (
+                self.last_switch_at is not None and now - self.last_switch_at < SWITCH_CLAIM_WINDOW_SECONDS):
+            return
+        self.switch_claim_at = now
+
+    def guard_void(self, now):
+        """Never leave the user talking to silence.
+
+        Oracle claimed a switch the Host never started: say so plainly. The
+        user has talked for a while with no delegation and no reply: nudge
+        Oracle to answer.
+        """
+        with self.lock:
+            claim = self.switch_claim_at
+            if claim is not None and now - claim >= SWITCH_CLAIM_GRACE_SECONDS:
+                self.switch_claim_at = None
+                backed = self.pending_swap is not None or (
+                    self.last_switch_at is not None and self.last_switch_at > claim - SWITCH_CLAIM_WINDOW_SECONDS)
+            else:
+                backed = None
+            since = self.unanswered_since
+            nudge = (since is not None and not self.unanswered_nudged and not self.routing
+                     and self.pending_swap is None
+                     and now - since >= UNANSWERED_SECONDS
+                     and now - self.last_transcript >= RESULT_RELEASE_SILENCE_SECONDS)
+            if nudge:
+                self.unanswered_nudged = True
+        who = self.contact["persona"] if self.contact else "Oracle"
+        if backed is False:
+            log("oracleV2SwitchClaimUnbacked", f"speaker={who} waited={now - claim:.1f}s")
+            if self.journal:
+                self.journal.record("contact.switch_claim_unbacked", {"speaker": who,
+                                                                       "waited_s": round(now - claim, 1)})
+            self.cue("switch_failed")
+            self.append("commentary", "Host note: you said you were putting the user through, but the Host could "
+                        f"not connect them and the call has not switched. Tell the user plainly, in one short "
+                        f"sentence, that you could not connect them and that they are still talking to {who}, "
+                        "then ask what they would like.")
+        if nudge:
+            log("oracleV2UnansweredNudge", f"speaker={who} talking_for={now - since:.1f}s")
+            if self.journal:
+                self.journal.record("turn.unanswered_nudge", {"speaker": who,
+                    "talking_for_s": round(now - since, 1), "silent_for_s": round(now - self.last_transcript, 1)})
+            self.append("commentary", f"Host note: the user has been speaking for a while and has had no reply. "
+                        f"Answer them now, as {who}. If they seem to be waiting for someone, tell them plainly "
+                        f"that they are talking to {who} and hand any request to the Host.")
+
     def request_switch(self, name):
         """Queue a switch to agent ``name`` or back to Oracle.
 
@@ -1022,11 +1112,12 @@ class Conversation:
             return True
         with self.lock:
             self.pending_swap = {"contact": contact, "announced_at": None}
+            self.last_switch_at = self.clock()
         if self.journal:
             self.journal.record("contact.switch_requested", {"to": who,
                 "voice": contact["voice"] if contact else VOICE})
         if self.narration != "off":
-            line = f"Putting you through to {who}." if contact else "Handing you back to Oracle."
+            line = f"Connecting you to {who}." if contact else "Connecting you back to Oracle."
             self.append("commentary", "Host note: the Host is switching this call to another voice. "
                         f'Say only this, briefly, and nothing else: "{line}"')
             with self.lock:
@@ -1089,8 +1180,11 @@ class Conversation:
                                                             "error_type": type(exc).__name__})
             with self.lock:
                 self.pending_swap = None
+            current = self.contact["persona"] if self.contact else "Oracle"
+            self.cue("switch_failed")
             self.append("commentary", f"Host note: the Host could not put the user through to {who}; the "
-                        "new line did not open. Tell the user so in one short sentence and carry on as before.")
+                        "new line did not open. Tell the user plainly, in one short sentence, that you could not "
+                        f"connect them and that they are still talking to {current}, then carry on as before.")
             return False
         with self.lock:
             relay = self.active_relay

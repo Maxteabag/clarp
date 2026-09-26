@@ -444,7 +444,7 @@ def test_put_me_through_opens_theo_in_his_own_voice_on_the_same_phone_line(lab):
     lab.tools.dispatched.clear()
     lab.user("Put me through to Theo")
     assert lab.tools.dispatched == [], "a switch is not work for the primary"
-    assert any("Putting you through to Theo" in e["content"] for e in lab.appends(0))
+    assert any("Connecting you to Theo" in e["content"] for e in lab.appends(0))
     assert lab.opened() == [], "the swap waits for Oracle to say it is putting the user through"
     old_session = lab.conv.provider_session
     lab.oracle_speaks(1.5)
@@ -578,7 +578,7 @@ def test_narration_off_switches_without_an_announcement(lab):
     lab = lab()
     lab.conv.input({"type": "oracle_v2.preferences", "narration": "off"})
     lab.user("Let me talk to Theo directly")
-    assert not any("Putting you through" in e["content"] for e in lab.appends(0))
+    assert not any("Connecting you" in e["content"] for e in lab.appends(0))
     lab.wait(STEP)
     [session] = lab.opened()
     assert _session_voice(session) == "meridian"
@@ -700,3 +700,86 @@ def test_a_switch_to_an_unknown_agent_is_not_sent_to_the_primary(lab):
     assert lab.tools.dispatched == []
     assert lab.opened() == [] and lab.conv.pending_swap is None
     assert any("no agent called Zorblax" in e["content"] for e in lab.appends(0))
+
+
+def _oracle_says(lab, text, seconds=1.5):
+    lab.ms += 1000
+    lab.conv.receive({"type": "session.output_transcript.delta", "delta": text,
+                      "start_ms": lab.ms, "end_ms": lab.ms + 400})
+    lab.oracle_speaks(seconds)
+
+
+def _user_says(lab, text):
+    lab.ms += 1000
+    lab.conv.receive({"type": "session.input_transcript.delta", "delta": text,
+                      "start_ms": lab.ms, "end_ms": lab.ms + 400})
+
+
+def _host_notes(lab, needle, index=0):
+    return [e for e in lab.appends(index) if needle in e["content"]]
+
+
+def test_oracle_claiming_a_switch_the_host_never_started_is_corrected(lab):
+    lab = lab()
+    lab.user("Check the deploy")                     # routed as work, no switch
+    _oracle_says(lab, " Sure—put you through to Marcus.", seconds=1)
+    lab.wait(0.5)
+    assert _host_notes(lab, "could not connect") == [], "the Host gives the switch a moment to start"
+    lab.wait(2)
+    [note] = _host_notes(lab, "could not connect")
+    assert "still talking to Oracle" in note["content"]
+    lab.wait(10)
+    assert len(_host_notes(lab, "could not connect")) == 1
+
+
+def test_oracles_own_announcement_of_a_real_switch_is_not_corrected(lab):
+    lab = lab()
+    lab.user("Put me through to Theo")
+    _oracle_says(lab, " Connecting you to Theo.")
+    lab.wait(3)
+    assert len(lab.opened()) == 1
+    assert _host_notes(lab, "could not connect") == []
+
+
+def test_a_failed_swap_tells_the_user_they_are_still_with_oracle(lab):
+    lab = lab()
+    lab.open_error = OSError("upstream refused")
+    lab.user("Put me through to Theo")
+    lab.oracle_speaks(1.5)
+    lab.wait(2)
+    [note] = _host_notes(lab, "could not put the user through to Theo")
+    assert "still talking to Oracle" in note["content"]
+
+
+def test_a_user_talking_into_silence_gets_a_nudge_once(lab):
+    """7946a1a7: "Hey Marcus, how are you", "Marcus, are you there", "Hello"
+    for 35 s with no delegation and no reply."""
+    lab = lab()
+    _oracle_says(lab, " Sure.")
+    lab.wait(2)
+    _user_says(lab, " Hey Marcus, how are you")
+    lab.wait(5)
+    assert _host_notes(lab, "no reply") == []
+    lab.wait(4)
+    [note] = _host_notes(lab, "no reply")
+    _user_says(lab, " Marcus, are you there")
+    lab.wait(12)
+    assert len(_host_notes(lab, "no reply")) == 1, "one nudge until Oracle speaks again"
+    _oracle_says(lab, " Sorry, I'm here.")
+    _user_says(lab, " Hello")
+    lab.wait(10)
+    assert len(_host_notes(lab, "no reply")) == 2
+
+
+def test_a_delegated_turn_is_not_nudged(lab):
+    lab = lab()
+    lab.user("Check the deploy")
+    lab.wait(15)
+    assert _host_notes(lab, "no reply") == []
+
+
+def test_switch_announcement_says_connecting_not_done(lab):
+    lab = lab()
+    lab.user("Put me through to Theo")
+    [note] = _host_notes(lab, "Connecting you to Theo")
+    assert "Putting you through" not in note["content"]
