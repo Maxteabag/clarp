@@ -12,6 +12,7 @@ globals.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import json
 import time
@@ -463,6 +464,43 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
         raise
 
 
+_FINAL_TWIN_WINDOW_S = 600
+
+
+def _final_twins(database, *, agent_id: str, backend_session_id: str, text: str,
+                 timestamp: Any, exclude: set[str]) -> list[str]:
+    """Finalized live rows showing `text`, written near `timestamp`."""
+    visible = _strip_voice_markup(text)
+    if not visible:
+        return []
+
+    def parse(value: Any) -> _dt.datetime | None:
+        try:
+            stamp = _dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return stamp if stamp.tzinfo else stamp.replace(tzinfo=_dt.timezone.utc)
+
+    reply_at = parse(timestamp)
+    if reply_at is None:
+        return []
+    twins = []
+    for row in database.execute(
+        """SELECT message_id, text, timestamp FROM messages
+            WHERE agent_id = ? AND backend_session_id = ? AND role = 'assistant'
+              AND source_file LIKE 'final:%'""",
+        (agent_id, backend_session_id),
+    ).fetchall():
+        if row["message_id"] in exclude or _strip_voice_markup(row["text"]) != visible:
+            continue
+        written = parse(row["timestamp"])
+        if written is None:
+            continue
+        if abs((written - reply_at).total_seconds()) <= _FINAL_TWIN_WINDOW_S:
+            twins.append(row["message_id"])
+    return twins
+
+
 def _store_transcript_turns_txn(database, *, agent_id: str,
                                 backend_session_id: str, source_file: str,
                                 turns: list[dict[str, Any]],
@@ -634,6 +672,24 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 if len(matching) == 1:
                     msg_id = matching[0]["message_id"]
                     adopted_final_ids.add(msg_id)
+            if msg_id not in adopted_final_ids:
+                # Without a request trace (the user turn could not be linked
+                # to its client row) the finalized live row was never adopted
+                # and stayed beside this reply as a second, identical bubble.
+                # Match it by visible text within the same few minutes; a
+                # reply already imported sheds an earlier import's twin.
+                twins = _final_twins(database, agent_id=agent_id,
+                                     backend_session_id=backend_session_id,
+                                     text=text, timestamp=turn.get("timestamp"),
+                                     exclude=adopted_final_ids | {msg_id})
+                if len(twins) == 1 and not slot and not current_request_trace:
+                    msg_id = twins[0]
+                    adopted_final_ids.add(msg_id)
+                elif twins and slot:
+                    removed = database.execute(
+                        f"DELETE FROM messages WHERE message_id IN ({','.join('?' * len(twins))})",
+                        twins).rowcount
+                    skipped_slot_removed = skipped_slot_removed or removed > 0
         timestamp = turn.get("timestamp")
         kind = turn.get("kind")
         tool_name = turn.get("tool_name")

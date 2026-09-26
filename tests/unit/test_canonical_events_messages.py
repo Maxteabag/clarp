@@ -512,3 +512,79 @@ def test_a_turn_owned_by_a_client_row_leaves_no_stale_row_in_its_slot(tmp_path):
     after = agents_db.list_messages(agent_id=agent_id, backend_session_id="thread")
     assert sorted(m["text"] for m in after) == [
         "Earlier answer.", "Purest yerba mate?"]
+
+
+def test_untraced_transcript_reply_adopts_its_finalized_live_row(tmp_path):
+    # A phone-sent prompt has no client row, so the transcript reply carries no
+    # request trace and the exact-trace adoption never matched the finalized
+    # live row: the same answer showed twice. Match it by visible text nearby.
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike"
+    )
+    bsid = "backend-1"
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-1")
+    final = agents_db.finalize_live_assistant_message(
+        agent_id=agent_id, backend_session_id=bsid,
+        trace_id="trace-1", text="Here is the table.")
+    assert final is not None
+    now = agents_db.conn().execute(
+        "SELECT timestamp FROM messages WHERE message_id=?", (final["id"],)
+    ).fetchone()["timestamp"]
+    turns = [
+        {"role": "user", "text": "summarize", "timestamp": now},
+        {"role": "assistant", "text": "Here is the table.", "timestamp": now},
+    ]
+    agents_db.store_transcript_turns(
+        agent_id=agent_id, backend_session_id=bsid,
+        source_file="/tmp/rollout.jsonl", turns=turns)
+    visible = agents_db.list_messages(agent_id=agent_id, backend_session_id=bsid)
+    assert [m["text"] for m in visible] == ["summarize", "Here is the table."]
+    assert visible[-1]["id"] == final["id"]
+
+
+def test_reimport_sheds_a_finalized_twin_of_an_imported_reply(tmp_path):
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike"
+    )
+    bsid = "backend-1"
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-1")
+    final = agents_db.finalize_live_assistant_message(
+        agent_id=agent_id, backend_session_id=bsid,
+        trace_id="trace-1", text="Here is the table.")
+    now = agents_db.conn().execute(
+        "SELECT timestamp FROM messages WHERE message_id=?", (final["id"],)
+    ).fetchone()["timestamp"]
+    turns = [
+        {"role": "user", "text": "summarize", "timestamp": now},
+        {"role": "assistant", "text": "Here is the table.", "timestamp": now},
+    ]
+    # An import from before this fix already stored the reply beside the twin.
+    agents_db.conn().execute(
+        """INSERT INTO messages (message_id, agent_id, backend_session_id,
+               source_file, seq, role, timestamp, text, updated_at, revision)
+           VALUES ('msg-old-import', ?, ?, '/tmp/rollout.jsonl', 1, 'assistant',
+                   ?, 'Here is the table.', 1, 1)""", (agent_id, bsid, now))
+    agents_db.store_transcript_turns(
+        agent_id=agent_id, backend_session_id=bsid,
+        source_file="/tmp/rollout.jsonl", turns=turns)
+    visible = agents_db.list_messages(agent_id=agent_id, backend_session_id=bsid)
+    assert [m["text"] for m in visible] == ["summarize", "Here is the table."]
+
+
+def test_equal_reply_to_a_later_request_is_not_mistaken_for_a_twin(tmp_path):
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike"
+    )
+    bsid = "backend-1"
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-1")
+    agents_db.finalize_live_assistant_message(
+        agent_id=agent_id, backend_session_id=bsid, trace_id="trace-1", text="Done.")
+    turns = [
+        {"role": "user", "text": "first", "timestamp": "2020-01-01T10:00:00Z"},
+        {"role": "assistant", "text": "Done.", "timestamp": "2020-01-01T10:00:05Z"},
+    ]
+    agents_db.store_transcript_turns(
+        agent_id=agent_id, backend_session_id=bsid,
+        source_file="/tmp/rollout.jsonl", turns=turns)
+    texts = [m["text"] for m in agents_db.list_messages(agent_id=agent_id, backend_session_id=bsid)]
+    assert texts.count("Done.") == 2
