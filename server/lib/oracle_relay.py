@@ -187,6 +187,7 @@ _TRANSCRIPT = [
     re.compile(rf"\b{_VERBS} (?:the )?{_KINDS} (?:of|with|from|for) (?P<agent>[a-z0-9-]+)\b"),
     re.compile(r"\b(?:look at|check|read) what (?P<agent>[a-z0-9-]+) (?:said|wrote|says)\b"),
     re.compile(r"\bwhat (?:did|has) (?P<agent>[a-z0-9-]+) (?:just )?(?:say|said|write|written)\b"),
+    re.compile(r"\bhva (?:sa|skrev|svarte) (?P<agent>[a-z0-9-]+)\b"),
 ]
 _PRONOUNS = {"he", "she", "they", "it", "you", "i", "we", "his", "her", "their", "the"}
 # Vetoes: a turn that directs work stays with the primary even when it
@@ -222,6 +223,21 @@ def _directs_work(value):
     if any(m.group("who") not in _PRONOUNS | {"we"} for m in _NAMED_SUBJECT.finditer(value)):
         return True
     return bool(_FOLLOW_ON.search(value))
+
+
+# "Any updates?": the user asking for news without naming anyone. Served
+# only when a result from an earlier call is waiting (see
+# oracle_live_stable.serve_meta_turn); otherwise the turn routes as usual.
+_UPDATES = re.compile(r"(?:(?:are|is) there |do you have |have you got |got )?(?:any|anything) "
+                      r"(?:updates?|news|new)(?: for me)?(?: then)?"
+                      r"|what'?s new|what(?:'s| is| are) the (?:update|updates|news)"
+                      r"|(?:has|did) any(?:one|body) (?:finish(?:ed)?|repl(?:y|ied)|get back|gotten back)(?: to me)?"
+                      r"|noe nytt|har du noe nytt|(?:er det )?noen oppdateringer")
+
+
+def asks_for_updates(text):
+    value = _normalize(text)
+    return bool(value) and not _directs_work(value) and bool(_UPDATES.fullmatch(value))
 
 
 def classify(text):

@@ -1,0 +1,143 @@
+{
+ "source": "diagnostics journal cae1c237 (2026-09-26), GPT-Live stable engine. The startup context carried an unread completion 3.6 h old marked stale:false; right after the user's first 'hello' Oracle volunteered an old task. Transcript deltas up to Oracle's first reply.",
+ "unread_completion": {
+  "notification_id": "pn-d5976297063041029884",
+  "source_message_id": "msg-2ffc4c8836698b0fbf82",
+  "cause_message_id": "u-EA8A3736-2E42-46DF-AC06-E53CD8CC6C84",
+  "agent": "OPUS",
+  "session": "opus-a5a4",
+  "origin": "user",
+  "age_ms_at_open": 13001540,
+  "source_text": "It is merged, I just checked GitHub. Both pull requests are merged into main, and the Host is running it."
+ },
+ "events": [
+  {
+   "seq": 7,
+   "elapsed_ms": 12598,
+   "type": "session.input_transcript.delta",
+   "delta": " Hello",
+   "start_ms": 9200,
+   "end_ms": 9400
+  },
+  {
+   "seq": 8,
+   "elapsed_ms": 12854,
+   "type": "session.input_transcript.delta",
+   "delta": ", can you",
+   "start_ms": 9400,
+   "end_ms": 9600
+  },
+  {
+   "seq": 9,
+   "elapsed_ms": 13038,
+   "type": "session.input_transcript.delta",
+   "delta": " hear me",
+   "start_ms": 9600,
+   "end_ms": 9800
+  },
+  {
+   "seq": 10,
+   "elapsed_ms": 13039,
+   "type": "session.output_transcript.delta",
+   "delta": " I'm here",
+   "start_ms": 9600,
+   "end_ms": 9800
+  },
+  {
+   "seq": 11,
+   "elapsed_ms": 13220,
+   "type": "session.output_transcript.delta",
+   "delta": ".",
+   "start_ms": 9800,
+   "end_ms": 10000
+  },
+  {
+   "seq": 12,
+   "elapsed_ms": 15226,
+   "type": "session.output_transcript.delta",
+   "delta": " I heard",
+   "start_ms": 11800,
+   "end_ms": 12000
+  },
+  {
+   "seq": 14,
+   "elapsed_ms": 15409,
+   "type": "session.output_transcript.delta",
+   "delta": " you.",
+   "start_ms": 12000,
+   "end_ms": 12200
+  },
+  {
+   "seq": 16,
+   "elapsed_ms": 15799,
+   "type": "session.output_transcript.delta",
+   "delta": " I'll",
+   "start_ms": 12400,
+   "end_ms": 12600
+  },
+  {
+   "seq": 17,
+   "elapsed_ms": 16232,
+   "type": "session.output_transcript.delta",
+   "delta": " hand",
+   "start_ms": 12800,
+   "end_ms": 13000
+  },
+  {
+   "seq": 18,
+   "elapsed_ms": 16453,
+   "type": "session.output_transcript.delta",
+   "delta": " it to",
+   "start_ms": 13000,
+   "end_ms": 13200
+  },
+  {
+   "seq": 19,
+   "elapsed_ms": 16616,
+   "type": "session.output_transcript.delta",
+   "delta": " Theo",
+   "start_ms": 13200,
+   "end_ms": 13400
+  },
+  {
+   "seq": 20,
+   "elapsed_ms": 17002,
+   "type": "session.output_transcript.delta",
+   "delta": " to",
+   "start_ms": 13600,
+   "end_ms": 13800
+  },
+  {
+   "seq": 21,
+   "elapsed_ms": 17457,
+   "type": "session.output_transcript.delta",
+   "delta": " connect",
+   "start_ms": 14000,
+   "end_ms": 14200
+  },
+  {
+   "seq": 22,
+   "elapsed_ms": 17628,
+   "type": "session.output_transcript.delta",
+   "delta": " you",
+   "start_ms": 14200,
+   "end_ms": 14400
+  },
+  {
+   "seq": 23,
+   "elapsed_ms": 17834,
+   "type": "session.output_transcript.delta",
+   "delta": " with",
+   "start_ms": 14400,
+   "end_ms": 14600
+  },
+  {
+   "seq": 24,
+   "elapsed_ms": 18027,
+   "type": "session.output_transcript.delta",
+   "delta": " Marcus.",
+   "start_ms": 14600,
+   "end_ms": 14800
+  }
+ ]
+}
