@@ -1553,15 +1553,16 @@ def test_lock_while_opening_turn_releases_claim_and_retry_runs(tmp_path, monkeyp
     import sqlite3
     backends = _CodexSteerable()
     service, agent_id = _codex_service(tmp_path, backends)
-    real = agents_db.open_turn
+    from lib import turn_lifecycle
+    real = turn_lifecycle.open_turn
     def locked(**kwargs):
         raise sqlite3.OperationalError('database is locked')
-    monkeypatch.setattr(agents_db, 'open_turn', locked)
+    monkeypatch.setattr(turn_lifecycle, 'open_turn', locked)
     with pytest.raises(sqlite3.OperationalError):
         service.dispatch(text='full control over the pipeline', requested_session='cipher',
                          trace_id='t-died', client_msg_id='u-lost')
     assert _td._INFLIGHT.get(agent_id) is None
-    monkeypatch.setattr(agents_db, 'open_turn', real)
+    monkeypatch.setattr(turn_lifecycle, 'open_turn', real)
     _assert_retry_delivers_once(service, backends, agent_id)
 
 
