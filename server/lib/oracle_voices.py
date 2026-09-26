@@ -127,54 +127,121 @@ to the Host.
 
 
 # Appended to Oracle's own instructions on the Host WebSocket engine, the one
-# engine that can switch voices.
+# engine that can switch voices. Call 7946a1a7: Oracle said "Sure, put you
+# through to Marcus" by itself, no switch came, and the user talked to
+# silence. Oracle may only say it is trying; the Host confirms the switch.
 SWITCH_NOTE = """
 The Host can put the user through to an agent so they talk to that agent
 directly, in the agent's own voice. When the user asks to be put through to an
 agent, to talk to one directly, or later to come back to you, hand that request
-to the Host; do not say it is done until the Host switches the call. Asking an
-agent to talk to someone else is ordinary work, not a switch.
+to the Host. Never say you have put them through, that they are connected or
+that the call has switched: at most say you are connecting them, then keep
+listening and answer the user yourself until the Host confirms the switch with
+a Host note. If the Host says it could not connect them, tell the user plainly
+that they are still talking to you. Asking an agent to talk to someone else is
+ordinary work, not a switch.
 """
 
 
 _MAX_WORDS = 12
+# A restarted request ("can you put me through to, can you put me through to
+# Marcus") may carry this many words of false starts before the real one.
+_MAX_TURN_WORDS = 32
 _TAIL = r"(?: please| now| thanks| thank you)*"
-_LEAD = r"(?:(?:can|could|would|will) you |please )?"
+_LEAD = r"(?:(?:can|could|would|will) you (?:please )?|please )?"
 _NAME = r"(?P<name>[a-z0-9][a-z0-9-]*)"
+_ASK = r"(?:(?:let me|can i|could i|may i|i want to|i'd like to|i would like to|i wanna|i need to) )?"
 _AGENT_PATTERNS = [
     re.compile(_LEAD + r"(?:put|patch|connect|transfer|send|get) me (?:straight |directly |back )?(?:through )?"
                r"(?:to|with) " + _NAME + r"(?: directly| direct)?(?: again)?" + _TAIL),
-    re.compile(r"(?:(?:let me|can i|could i|may i|i want to|i'd like to|i would like to|i wanna|i need to) )?"
-               r"(?:talk|speak) (?:directly )?(?:to|with) " + _NAME + r" (?:directly|direct)" + _TAIL),
-    re.compile(r"(?:(?:let me|can i|could i|may i|i want to|i'd like to|i would like to|i wanna|i need to) )?"
-               r"(?:talk|speak) directly (?:to|with) " + _NAME + _TAIL),
+    re.compile(_ASK + r"(?:talk|speak) (?:directly )?(?:to|with) " + _NAME + r" (?:directly|direct)" + _TAIL),
+    re.compile(_ASK + r"(?:talk|speak) directly (?:to|with) " + _NAME + _TAIL),
     re.compile(_LEAD + r"(?:switch|hand|pass) me (?:over )?to " + _NAME + _TAIL),
+]
+# Only a name on the roster makes these a switch: "switch to staging" is not.
+_ROSTER_PATTERNS = [
+    re.compile(_LEAD + r"(?:switch|transfer|go) (?:over )?to " + _NAME + _TAIL),
+    re.compile(_LEAD + r"(?:connect|get) me " + _NAME + _TAIL),
+    re.compile(_LEAD + r"connect " + _NAME + _TAIL),
+    re.compile(_ASK + r"(?:talk|speak) (?:to|with) " + _NAME + _TAIL),
 ]
 _ORACLE_PATTERNS = [
     re.compile(r"(?:(?:go|come|switch|take me|put me|get me|bring me|send me|hand me|switch me|patch me|connect me) )?"
                r"back(?: through)? to (?:the )?oracle" + _TAIL),
     re.compile(_LEAD + r"switch (?:me )?back" + _TAIL),
-    re.compile(r"(?:(?:let me|can i|could i|i want to|i'd like to|i wanna) )?(?:talk|speak) (?:to|with) (?:the )?oracle"
-               r"(?: again)?" + _TAIL),
+    re.compile(_ASK + r"(?:talk|speak) (?:to|with) (?:the )?oracle(?: again)?" + _TAIL),
     re.compile(r"(?:i want |give me |i'd like )(?:the )?oracle back" + _TAIL),
 ]
+# A switch phrase that stops before the name: the name may follow after a
+# pause or after Oracle's "go on".
+_DANGLING = re.compile(r"(?:.* )?(?:(?:put|patch|connect|transfer|send|get|switch|hand|pass) me"
+                       r"(?: straight| directly| back| over)?(?: through)? (?:to|with)"
+                       r"|(?:talk|speak)(?: directly)? (?:to|with)(?: directly)?|switch (?:over )?to)")
+# Words a false start of a switch request is made of. A prefix with any other
+# word ("ask Theo to", "tell Marcus to") is work, not a stumble.
+_RESTART_WORDS = frozenset(
+    "yeah yes okay ok so um uh er erm well sorry hey hi just like actually oh right "
+    "can could would will you please i me let may want wanna to talk speak with put patch connect "
+    "transfer send get switch hand pass through over directly straight back the oracle".split())
+_PRONOUNS = frozenset(("him", "her", "them", "me", "you", "it", "someone", "somebody", "the", "back"))
 
 
-def switch_request(text):
-    """("agent", name), ("oracle", None) or None for one user turn."""
-    value = _normalize(text)
-    if not value or len(value.split()) > _MAX_WORDS:
-        return None
+def _match(value, known):
     for pattern in _ORACLE_PATTERNS:
         if pattern.fullmatch(value):
             return "oracle", None
-    for pattern in _AGENT_PATTERNS:
-        match = pattern.fullmatch(value)
-        if match:
+    for patterns, needs_roster in ((_AGENT_PATTERNS, False), (_ROSTER_PATTERNS, True)):
+        for pattern in patterns:
+            match = pattern.fullmatch(value)
+            if not match:
+                continue
             name = match.group("name")
-            if name in ("oracle", "the"):
+            if name == "oracle":
                 return "oracle", None
-            if name in ("him", "her", "them", "me", "you", "it", "someone", "somebody"):
+            if name in _PRONOUNS:
                 return None
+            if known is not None and not known(name):
+                return None
+            if needs_roster and known is None:
+                continue
             return "agent", name
     return None
+
+
+def switch_request(text, known=None):
+    """("agent", name), ("oracle", None) or None for one user turn.
+
+    ``known(name)`` says whether a lowercased name is on the roster. With it,
+    a name must be known, and the looser forms ("switch to Marcus") count.
+    Leading fillers, polite wrappers and restarted false starts are allowed;
+    any other word before the request makes the turn work.
+    """
+    value = _normalize(text)
+    words = value.split()
+    if not words or len(words) > _MAX_TURN_WORDS:
+        return None
+    for start in range(len(words)):
+        if start and words[start - 1] not in _RESTART_WORDS:
+            return None
+        tail = words[start:]
+        if len(tail) > _MAX_WORDS:
+            continue
+        found = _match(" ".join(tail), known)
+        if found is not None:
+            return found
+    return None
+
+
+def dangling_switch(text):
+    """The turn ends in a switch phrase with no name yet ("put me through to")."""
+    value = _normalize(text)
+    words = value.split()
+    if not words or len(words) > _MAX_TURN_WORDS or not _DANGLING.fullmatch(value):
+        return False
+    return all(word in _RESTART_WORDS for word in words)
+
+
+def bare_name(text, known):
+    """A turn that is only a roster name, as after a dangling switch phrase."""
+    words = [w for w in _normalize(text).split() if w not in ("please", "now", "thanks")]
+    return words[0] if len(words) == 1 and known(words[0]) else None

@@ -184,6 +184,28 @@ def _current_user_requests(conversation, boundary):
     return current
 
 
+def _current_utterance(conversation, boundary):
+    """The user's current turn: unrouted user fragments since Oracle last spoke.
+
+    The provider splits one utterance into fragments at every pause, so
+    "can you put me through to" and, 1.8 s later, "Marcus" are two rows (call
+    7946a1a7). The turn is all of them, not the newest one. Speech before
+    Oracle's last words was already answered or ignored by Oracle.
+    """
+    rows = []
+    for row in conversation:
+        if row.get("role") == "assistant" and str(row.get("text") or "").strip():
+            rows = []
+        elif row.get("role") == "user":
+            rows.append(row)
+    wanted = {id(row) for row in _current_user_requests(conversation, boundary)}
+    return [row for row in rows if id(row) in wanted]
+
+
+def _turn_text(rows):
+    return " ".join(str(row.get("text") or "").strip() for row in rows if str(row.get("text") or "").strip())
+
+
 def router_tools():
     """The router's tools: everything the v1 session had, plus agent status.
 
@@ -324,6 +346,8 @@ class Conversation:
         # (socket, provider session id) is supplied by serve().
         self.contact = None
         self.pending_swap = None
+        # The last turn ended in "put me through to" with no name yet.
+        self.switch_dangling = False
         self.open_upstream = None
         self.voice_overrides = {}
         self.voice_context = None
@@ -587,7 +611,8 @@ class Conversation:
                             return
                         result = oracle_strategy.direct_proposal(conversation, self.tools,
                             "direct-" + self.direct_call_prefix + "-" + str(revision),
-                            target=contact["session"] if contact else None)
+                            target=contact["session"] if contact else None,
+                            current=_turn_text(_current_utterance(conversation, self.routed_revision)))
                     else:
                         request = Request("https://api.openai.com/v1/responses", json.dumps(body).encode(),
                                           {"Authorization": "Bearer "+self.api_key, "Content-Type": "application/json"})
@@ -875,8 +900,7 @@ class Conversation:
         # The whole unrouted turn, not just its newest fragment: the provider
         # split "read the transcript to" / "me" in call cedb186d, and a meta
         # tail must not hide earlier unrouted work ("ask Theo ...", "and read it").
-        current = _current_user_requests(conversation, self.routed_revision)
-        latest = " ".join(str(row.get("text") or "").strip() for row in current) or next(
+        latest = _turn_text(_current_utterance(conversation, self.routed_revision)) or next(
             (row["text"] for row in reversed(conversation)
              if row.get("role") == "user" and str(row.get("text") or "").strip()), "")
         meta = oracle_relay.classify(latest)
@@ -927,18 +951,52 @@ class Conversation:
                 return
             relay.done = max(relay.done, relay.next)
 
-    def serve_contact_switch(self, conversation, revision):
-        """Start a switch for an unrouted turn that is only a switch phrase."""
-        current = _current_user_requests(conversation, self.routed_revision)
-        latest = " ".join(str(row.get("text") or "").strip() for row in current)
-        wanted = oracle_voices.switch_request(latest)
-        if wanted is None:
+    def cue(self, name, **kwargs):
+        """Earcons land in the next step."""
+
+    def knows_agent(self, name):
+        try:
+            self.tools.resolve(name)
+        except ValueError:
             return False
+        return True
+
+    def serve_contact_switch(self, conversation, revision):
+        """Start a switch for an unrouted turn that is only a switch phrase.
+
+        A switch request is never also work: a phrase that stops before the
+        name waits for the name, and in direct mode a name that is not on the
+        roster is answered here instead of going to the primary.
+        """
+        text = _turn_text(_current_utterance(conversation, self.routed_revision))
+        wanted = oracle_voices.switch_request(text, known=self.knows_agent)
+        dangling, self.switch_dangling = self.switch_dangling, False
+        if wanted is None and dangling:
+            name = oracle_voices.bare_name(text, self.knows_agent)
+            wanted = ("agent", name) if name else None
+        if wanted is None:
+            if oracle_voices.dangling_switch(text):
+                self.switch_dangling = True
+                if self.journal:
+                    self.journal.record("route.contact_switch_dangling", {"revision": revision})
+                return True
+            unknown = oracle_voices.switch_request(text)
+            if unknown is None or self.delegation_strategy != "direct_contact" or self.contact is not None:
+                return False
+            name = unknown[1]
+            log("oracleV2SwitchUnknown", f"name={name}")
+            if self.journal:
+                self.journal.record("route.contact_switch_unknown", {"revision": revision, "target": name})
+            self.cue("switch_failed")
+            self.append("commentary", f"Host note: there is no agent called {name.title()} on the roster, so the "
+                        "Host did not switch the call. Tell the user so in one short sentence, say they are still "
+                        "talking to you, and ask who they meant.")
+            return True
         kind, name = wanted
         try:
             served = self.request_switch(name if kind == "agent" else "oracle")
         except ValueError:
-            return False  # not an agent we know: route the turn as usual
+            return False  # resolved a moment ago; the roster changed: route as usual
         if self.journal:
             self.journal.record("route.contact_switch", {"revision": revision, "target": name or "oracle"})
         return served
