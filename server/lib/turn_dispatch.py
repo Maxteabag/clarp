@@ -1,6 +1,8 @@
 """Application service for routing and spawning one agent turn."""
 from __future__ import annotations
 
+import contextlib
+import dataclasses
 import pathlib
 import json
 import re
@@ -15,6 +17,9 @@ from typing import Any, Callable
 from . import agents as agents_db
 from . import backend_usage, backends, config, db, error_classify, eventlog, origins
 from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
+from . import turn_lifecycle, turn_slots
+from .turn_lifecycle import TurnEvent
+from .turn_slots import OwnershipLock, defer_on
 from .log import log, log_exception
 from .protocol import AgentState, SSEType
 from .prompt_admissions import PromptAdmission
@@ -35,11 +40,21 @@ BACKOFF_BASE_SEC = 1.0
 # started, and abandoned the agent's work). Turns for one agent run strictly in
 # arrival order. Only an explicit stop / barge-in (backends.interrupt, a
 # separate path) preempts a running turn.
+# The slots live in lib.turn_slots.TurnSlots behind one OwnershipLock; the
+# module names below are views of that one object:
 #   _INFLIGHT: agent_id -> trace_id of the turn currently running
 #   _QUEUED:   agent_id -> list of _TurnSpec waiting to run, in order
-_TURN_LOCK = threading.RLock()
-_CLAUDE_FAILOVER = ClaudeFailover(_TURN_LOCK)
-_CODEX_FAILOVER = ClaudeFailover(_TURN_LOCK)
+# Under _TURN_LOCK only ownership is decided. SQLite writes, eventlog rows and
+# backend spawns that follow from a decision are deferred with
+# ``_TURN_LOCK.defer`` and run after the outermost release.
+_TURN_LOCK = OwnershipLock()
+_SLOTS = turn_slots.TurnSlots(lock=_TURN_LOCK)
+# Each account-failover coordinator has its own lock. Lock order is always
+# _TURN_LOCK -> coordinator: the coordinator never takes _TURN_LOCK while it
+# holds its own; the callbacks it runs (owned, pause, resume) read slots
+# without the lock or defer their work past the coordinator's release.
+_CLAUDE_FAILOVER = ClaudeFailover(OwnershipLock())
+_CODEX_FAILOVER = ClaudeFailover(OwnershipLock())
 # Account pool (backend.account_pool()) -> (coordinator, config field naming
 # the account switch command). Coordinators are read through thunks so a
 # monkeypatched module global is honoured. Backends without a pool of their
@@ -60,10 +75,11 @@ def account_failover(backend):
 def account_selector(backend):
     return getattr(config.load(), _account_pool(backend)[1])
 
-_INFLIGHT: dict[str, str] = {}
-_QUEUED: dict[str, list] = {}
-_CLAIMED_AT: dict[str, float] = {}
+_INFLIGHT: dict[str, str] = _SLOTS.inflight
+_QUEUED: dict[str, list] = _SLOTS.queued
+_CLAIMED_AT: dict[str, float] = _SLOTS.claimed_at
 _RECOVERY_LOCK = threading.Lock()
+_NO_LOCK = contextlib.nullcontext()
 _RUNTIME_CLIENT: Any | None = None
 # Weak values: a lock lives only while a caller holds it (`with` keeps a strong
 # reference for the duration), so the map cannot grow with every Janitor ever
@@ -74,8 +90,11 @@ _JANITOR_SPAWN_LOCKS: "weakref.WeakValueDictionary[str, Any]" = weakref.WeakValu
 # attached to an agent. A normal turn routed to that agent queues behind it
 # (two processes resuming one session would corrupt the transcript); the queue
 # drains via drain_after_terminal() when the terminal closes.
-_TERMINAL_SENTINEL = "terminal"
-_STOPPING_SENTINEL = "stopping"
+_TERMINAL_SENTINEL = turn_slots.TERMINAL_SENTINEL
+_STOPPING_SENTINEL = turn_slots.STOPPING_SENTINEL
+# Durable Stop-parked rows are reinstated once per process, at the first
+# queue recovery after boot (see TurnDispatchService.recover_queued).
+_REHYDRATED = False
 
 
 def configure_runtime_client(client: Any | None) -> None:
@@ -86,57 +105,42 @@ def configure_runtime_client(client: Any | None) -> None:
 def runtime_status() -> dict[str, Any]:
     """Serializable ownership snapshot served to replaceable HTTP processes."""
     from . import compaction
-    with _TURN_LOCK:
-        return {
-            "active": {
-                agent_id: trace_id
-                for agent_id, trace_id in _INFLIGHT.items()
-                if trace_id not in {_TERMINAL_SENTINEL, _STOPPING_SENTINEL}
-            },
-            "terminals": sorted(
-                agent_id for agent_id, trace_id in _INFLIGHT.items()
-                if trace_id == _TERMINAL_SENTINEL
-            ),
-            "spawning": sorted(_CLAIMED_AT),
-            "queued": {
-                agent_id: len(items) for agent_id, items in _QUEUED.items()
-                if items
-            },
-            "compactions": compaction.active_sessions(),
-            "claude_account_recovery": _CLAUDE_FAILOVER.status(),
-            "codex_account_recovery": _CODEX_FAILOVER.status(),
-        }
+    status = _SLOTS.snapshot()
+    status.update({
+        "compactions": compaction.active_sessions(),
+        "claude_account_recovery": _CLAUDE_FAILOVER.status(),
+        "codex_account_recovery": _CODEX_FAILOVER.status(),
+    })
+    return status
+
+
+def live_work(agent_id: str, *, session: str = "") -> turn_slots.LiveWork:
+    """Every busy fact for one agent: slot, queue, terminal, compaction."""
+    return _SLOTS.live_work(agent_id, session=session)
+
+
+def reset_for_tests() -> None:
+    global _REHYDRATED
+    _SLOTS.reset_for_tests()
+    _REHYDRATED = False
 
 
 def _terminal_live(agent_id: str) -> bool:
-    try:
-        from . import terminal_ws
-        return terminal_ws.has_live_terminal(agent_id)
-    except Exception:  # noqa: BLE001
-        return False
+    return turn_slots._terminal_live(agent_id)
 
 
 def _slot_is_spawning(agent_id: str) -> bool:
     if _RUNTIME_CLIENT is not None:
         return agent_id in set(
             _RUNTIME_CLIENT.status().get("spawning") or ())
-    return agent_id in _CLAIMED_AT
+    return _SLOTS.is_spawning(agent_id)
 
 
 def free_stale_slot(agent_id: str) -> str | None:
     """INV3 (lib.reconcile): free an in-flight slot that has no live turn and
     nothing queued behind it. Returns the dead trace id, or None if nothing
     was freed. Spawning slots and terminal sentinels are left alone."""
-    with _TURN_LOCK:
-        if agent_id in _CLAIMED_AT or agent_id not in _INFLIGHT:
-            return None
-        if _QUEUED.get(agent_id):
-            return None  # the next send / finish drains these; don't orphan them
-        trace = _INFLIGHT.get(agent_id)
-        if trace == _TERMINAL_SENTINEL:
-            return None
-        _INFLIGHT.pop(agent_id, None)
-        return trace or ""
+    return _SLOTS.free_stale(agent_id)
 
 
 def _reset_hint(message: str) -> str:
@@ -238,6 +242,26 @@ class _TurnSpec:
     recovery_attempted: bool = False
     # Private runtime capability; never sourced from an ordinary send payload.
     janitor_run_id: str = ""
+    # queued_turns row (status 'parked') holding a send admitted behind the
+    # Stop barrier, so it survives a runtime restart; "" when not parked.
+    park_id: str = ""
+
+
+def _park(spec: _TurnSpec) -> str:
+    """Persist a send that is about to wait behind the Stop barrier."""
+    park_id = f"stop-park-{spec.trace_id}"
+    try:
+        turn_queue.park(
+            queue_id=park_id, agent_id=spec.agent_id, session=spec.session,
+            text=spec.text, trace_id=spec.trace_id,
+            client_msg_id=spec.client_msg_id,
+            synthesize_audio=spec.synthesize_audio, origin=spec.origin,
+            sender_agent_id=spec.sender_agent_id,
+            prompt_admission_id=spec.prompt_admission_id)
+    except Exception as exc:  # noqa: BLE001 - memory still holds the send
+        log_exception("stopParkPersistFail", exc, detail=spec.agent_id)
+        return ""
+    return park_id
 
 
 class DispatchError(RuntimeError):
@@ -350,6 +374,76 @@ _REQUEST_LOCKS = weakref.WeakValueDictionary()
 _REQUEST_LOCKS_GUARD = threading.Lock()
 
 
+@dataclass(frozen=True)
+class DispatchCommand:
+    """One send, built once where it enters (``TurnDispatchService.dispatch``,
+    the HTTP send handler, a scheduler adapter) and serialized once across the
+    runtime RPC. Admission — the Janitor-demand authority check, the
+    leader-tick gate, the durable write — runs on the side that owns turns,
+    exactly once per command."""
+    text: str
+    requested_session: str = ""
+    trace_id: str = ""
+    synthesize_audio: bool = True
+    forced_session: str = ""
+    routed_by_orchestrator: bool = False
+    client_msg_id: str = ""
+    origin: str = "user"
+    sender_agent_id: str = ""
+    prompt_admission: PromptAdmission | None = None
+    prompt_admission_id: str = ""
+    queue_if_busy: bool = False
+    skip_admission: bool = False
+    durable_queue_id: str = ""
+    unheard_audio_sessions: tuple[str, ...] = ()
+    allow_paused_queue: bool = False
+    janitor_run_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.unheard_audio_sessions, tuple):
+            object.__setattr__(self, "unheard_audio_sessions",
+                               tuple(str(item) for item in self.unheard_audio_sessions))
+
+    def as_kwargs(self) -> dict[str, Any]:
+        """The historical ``dispatch(**kwargs)`` shape. ``janitor_run_id`` is
+        present only when set, so an older runtime keeps accepting ordinary
+        work from a newer HTTP server."""
+        values = {field.name: getattr(self, field.name)
+                  for field in dataclasses.fields(self)}
+        if not self.janitor_run_id:
+            values.pop("janitor_run_id")
+        return values
+
+    def to_wire(self) -> dict[str, Any]:
+        values = self.as_kwargs()
+        if self.prompt_admission is not None:
+            values["prompt_admission"] = dataclasses.asdict(self.prompt_admission)
+        values["unheard_audio_sessions"] = list(self.unheard_audio_sessions)
+        return values
+
+    @classmethod
+    def from_wire(cls, params: dict[str, Any]) -> "DispatchCommand":
+        """Parse an RPC payload; ValueError for anything this side cannot run."""
+        names = {field.name for field in dataclasses.fields(cls)}
+        unknown = sorted(set(params) - names)
+        if unknown:
+            raise ValueError(f"unknown dispatch fields: {', '.join(unknown)}")
+        values = dict(params)
+        admission = values.get("prompt_admission")
+        if isinstance(admission, (dict, str)):
+            raw = admission if isinstance(admission, str) else json.dumps(admission)
+            values["prompt_admission"] = PromptAdmission.from_json(raw)
+            if values["prompt_admission"] is None:
+                raise ValueError("invalid prompt admission")
+        elif admission is not None and not isinstance(admission, PromptAdmission):
+            raise ValueError("invalid prompt admission")
+        if "text" not in values:
+            raise ValueError("dispatch text is required")
+        values["unheard_audio_sessions"] = tuple(
+            str(item) for item in values.get("unheard_audio_sessions") or ())
+        return cls(**values)
+
+
 def _serialize_client_retry(method):
     """Keep one client's concurrent retries together through admission/launch.
 
@@ -357,22 +451,21 @@ def _serialize_client_retry(method):
     request must not reclaim that first request in the intervening gap.
     Weak entries disappear when the last waiting request finishes.
     """
+    # Applied to the owning half only; the forwarding half never holds this
+    # lock across the RPC (an embedded runtime can execute the same request
+    # on another thread).
     @functools.wraps(method)
-    def dispatch(self, **kwargs):
-        # The runtime owns admission. Never hold this lock across the RPC:
-        # an embedded runtime can execute the same request on another thread.
-        if getattr(self.ctx, "runtime_client", None) is not None:
-            return method(self, **kwargs)
-        key = kwargs.get("client_msg_id") or kwargs.get("trace_id")
+    def dispatch(self, command):
+        key = command.client_msg_id or command.trace_id
         if not key:
-            return method(self, **kwargs)
+            return method(self, command)
         with _REQUEST_LOCKS_GUARD:
             lock = _REQUEST_LOCKS.get(key)
             if lock is None:
                 lock = threading.RLock()
                 _REQUEST_LOCKS[key] = lock
         with lock:
-            return method(self, **kwargs)
+            return method(self, command)
     return dispatch
 
 
@@ -404,7 +497,38 @@ class TurnDispatchService:
         finally:
             _RECOVERY_LOCK.release()
 
+    def _rehydrate_once(self) -> None:
+        """First recovery after boot: rebuild the slot view from the durable
+        rows. An open turns row whose process this runtime can still see
+        owns its slot again; Stop-parked sends become queued work (the
+        barrier that parked them died with the previous process)."""
+        global _REHYDRATED
+        if _REHYDRATED:
+            return
+        _REHYDRATED = True
+
+        def live(agent_id: str, trace_id: str) -> bool:
+            agent = agents_db.get_by_agent_id(agent_id)
+            if not agent or agents_db.get_trace(agent_id) != trace_id:
+                return False
+            try:
+                return bool(self.backends.active_handles(
+                    self.backends.normalize(agent.get("backend")), agent_id))
+            except Exception:  # noqa: BLE001
+                return False
+
+        try:
+            result = _SLOTS.rehydrate(live=live)
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("turnSlotsRehydrateFail", exc)
+            return
+        if result["adopted"] or result["requeued_parked"]:
+            log("turnSlotsRehydrated",
+                f"adopted={len(result['adopted'])} "
+                f"requeued_parked={result['requeued_parked']}")
+
     def _recover_queued_locked(self) -> int:
+        self._rehydrate_once()
         turn_queue.reset_stale_claims()
         recovered = 0
         deferred = False
@@ -416,10 +540,9 @@ class TurnDispatchService:
                     self.backends.normalize(agent.get("backend")), row["agent_id"]):
                 deferred = True
                 continue
-            with _TURN_LOCK:
-                already_memory_queued = any(
-                    spec.queue_id == row["queue_id"]
-                    for spec in _QUEUED.get(row["agent_id"], []))
+            already_memory_queued = _SLOTS.has_queued(
+                row["agent_id"],
+                lambda spec, queue_id=row["queue_id"]: spec.queue_id == queue_id)
             if already_memory_queued:
                 continue
             try:
@@ -445,7 +568,6 @@ class TurnDispatchService:
             self.retry_scheduler(1.0, self.recover_queued)
         return recovered
 
-    @_serialize_client_retry
     def dispatch(self, *, text: str, requested_session: str,
                  trace_id: str, synthesize_audio: bool = True,
                  forced_session: str = "",
@@ -461,43 +583,68 @@ class TurnDispatchService:
                  unheard_audio_sessions: tuple[str, ...] = (),
                  allow_paused_queue: bool = False,
                  janitor_run_id: str = "") -> DispatchResult:
+        # TODO(integration): the send handler and dispatch_adapters build the
+        # DispatchCommand themselves and call submit().
+        return self.submit(DispatchCommand(
+            text=text, requested_session=requested_session,
+            trace_id=trace_id, synthesize_audio=synthesize_audio,
+            forced_session=forced_session,
+            routed_by_orchestrator=routed_by_orchestrator,
+            client_msg_id=client_msg_id, origin=origin,
+            sender_agent_id=sender_agent_id,
+            prompt_admission=prompt_admission,
+            prompt_admission_id=prompt_admission_id,
+            queue_if_busy=queue_if_busy, skip_admission=skip_admission,
+            durable_queue_id=durable_queue_id,
+            unheard_audio_sessions=tuple(unheard_audio_sessions),
+            allow_paused_queue=allow_paused_queue,
+            janitor_run_id=janitor_run_id))
+
+    def submit(self, command: DispatchCommand) -> DispatchResult:
+        """Run ``command`` where turns are owned: forward it unchanged over the
+        runtime RPC, or admit and launch it here."""
+        runtime = getattr(self.ctx, "runtime_client", None)
+        if runtime is None:
+            return self._dispatch_owned(command)
+        try:
+            send = getattr(runtime, "dispatch_command", None)
+            result = (send(command) if send is not None
+                      else runtime.dispatch(**command.as_kwargs()))
+        except Exception as exc:
+            from .runtime_bridge import RuntimeUnavailable
+            if isinstance(exc, RuntimeUnavailable):
+                raise DispatchError(503, str(exc)) from exc
+            raise
+        # The runtime's active map just changed; do not let a shared
+        # status window older than this dispatch answer for it.
+        invalidate = getattr(self.backends, "invalidate_runtime_status", None)
+        if invalidate is not None:
+            invalidate()
+        return result
+
+    @_serialize_client_retry
+    def _dispatch_owned(self, command: DispatchCommand) -> DispatchResult:
+        text = command.text
+        requested_session = command.requested_session
+        trace_id = command.trace_id
+        synthesize_audio = command.synthesize_audio
+        forced_session = command.forced_session
+        routed_by_orchestrator = command.routed_by_orchestrator
+        client_msg_id = command.client_msg_id
+        origin = command.origin
+        sender_agent_id = command.sender_agent_id
+        prompt_admission = command.prompt_admission
+        prompt_admission_id = command.prompt_admission_id
+        queue_if_busy = command.queue_if_busy
+        skip_admission = command.skip_admission
+        durable_queue_id = command.durable_queue_id
+        unheard_audio_sessions = command.unheard_audio_sessions
+        allow_paused_queue = command.allow_paused_queue
+        janitor_run_id = command.janitor_run_id
         if origin == "heartbeat" and client_msg_id.startswith("janitor-demand-"):
             from .janitor_autonomy import validate_dispatch
             if not validate_dispatch(requested_session, client_msg_id):
                 raise DispatchError(409, "Heartbeat decision authority changed")
-        runtime = getattr(self.ctx, "runtime_client", None)
-        if runtime is not None:
-            try:
-                result = runtime.dispatch(
-                    text=text,
-                    requested_session=requested_session,
-                    trace_id=trace_id,
-                    synthesize_audio=synthesize_audio,
-                    forced_session=forced_session,
-                    routed_by_orchestrator=routed_by_orchestrator,
-                    client_msg_id=client_msg_id,
-                    origin=origin,
-                    sender_agent_id=sender_agent_id,
-                    prompt_admission=prompt_admission,
-                    prompt_admission_id=prompt_admission_id,
-                    queue_if_busy=queue_if_busy,
-                    skip_admission=skip_admission,
-                    durable_queue_id=durable_queue_id,
-                    unheard_audio_sessions=unheard_audio_sessions,
-                    allow_paused_queue=allow_paused_queue,
-                    **({"janitor_run_id": janitor_run_id} if janitor_run_id else {}),
-                )
-            except Exception as exc:
-                from .runtime_bridge import RuntimeUnavailable
-                if isinstance(exc, RuntimeUnavailable):
-                    raise DispatchError(503, str(exc)) from exc
-                raise
-            # The runtime's active map just changed; do not let a shared
-            # status window older than this dispatch answer for it.
-            invalidate = getattr(self.backends, "invalidate_runtime_status", None)
-            if invalidate is not None:
-                invalidate()
-            return result
         # NB: the live session->trace mapping is set only when a turn actually
         # spawns (see below / _finish_turn), NOT here — a message that merely
         # queues behind a busy agent must not move the trace, or the running
@@ -760,10 +907,7 @@ class TurnDispatchService:
                 # The durable queue receipt remains authoritative. Release the
                 # claimed slot and retry recovery instead of leaving a phantom
                 # in-flight owner or requiring a client restart.
-                with _TURN_LOCK:
-                    if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
-                        _INFLIGHT.pop(spec.agent_id, None)
-                        _CLAIMED_AT.pop(spec.agent_id, None)
+                _SLOTS.release(spec.agent_id, spec.trace_id)
                 self.retry_scheduler(1.0, self.recover_queued)
                 queue_state = turn_queue.state(spec.agent_id)
                 return DispatchResult(
@@ -772,7 +916,7 @@ class TurnDispatchService:
                     queue_revision=queue_state["revision"])
         turn_id = 0
         try:
-            turn_id = agents_db.open_turn(
+            turn_id = turn_lifecycle.open_turn(
                 agent_id=agent_id, source="pwa", trace_id=trace_id,
                 synthesize_audio=synthesize_audio)
             # This turn owns the agent's live trace.
@@ -789,10 +933,7 @@ class TurnDispatchService:
                 # Spawn never started: release the in-flight slot (and drain any
                 # message that queued behind it) so the agent isn't wedged.
                 if turn_queue.contains(spec.queue_id):
-                    with _TURN_LOCK:
-                        if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
-                            _INFLIGHT.pop(spec.agent_id, None)
-                            _CLAIMED_AT.pop(spec.agent_id, None)
+                    _SLOTS.release(spec.agent_id, spec.trace_id)
                     self.retry_scheduler(1.0, self.recover_queued)
                 else:
                     self._finish_turn(spec)
@@ -814,17 +955,14 @@ class TurnDispatchService:
 
     def _abandon_unlaunched(self, spec: _TurnSpec, turn_id: int, error: BaseException) -> None:
         """A turn that was admitted and claimed but never reached the backend."""
-        with _TURN_LOCK:
-            if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
-                _INFLIGHT.pop(spec.agent_id, None)
-                _CLAIMED_AT.pop(spec.agent_id, None)
+        _SLOTS.release(spec.agent_id, spec.trace_id)
         log_exception("spawnAbandonedUnlaunched", error, detail=spec.session)
         eventlog.emit("server", "spawnAbandonedUnlaunched", context=spec.context,
                       detail={"error": str(error)[:200]})
         try:
-            agents_db.record_unlaunched_trace(spec.agent_id, spec.trace_id)
+            turn_lifecycle.record_unlaunched(spec.agent_id, spec.trace_id)
             if turn_id:
-                agents_db.close_turn(turn_id)
+                turn_lifecycle.close_turn(turn_id)
         except Exception as close_error:  # noqa: BLE001
             log_exception("spawnAbandonedCloseFail", close_error, detail=spec.session)
 
@@ -902,104 +1040,115 @@ class TurnDispatchService:
 
     def _enqueue_if_busy(self, spec: _TurnSpec, *, queue_if_busy: bool = False) -> bool:
         """Decide how to handle a new send for this agent:
+        - Stop barrier up → park behind it, return True;
         - terminal attached → queue behind it, return True (caller doesn't spawn);
         - in-flight turn running → PREEMPT it (legacy non-steerable backend);
         - stale slot (no live process) → take it over, return False;
         - idle → claim the slot, return False.
-        Returns True only in the terminal-queue case."""
-        with _TURN_LOCK:
-            if _INFLIGHT.get(spec.agent_id) == _STOPPING_SENTINEL:
-                # This send was admitted just as Stop acquired the barrier.
-                # It is newer than the stopped work, so hold it in memory and
-                # start it only after the backend-wide interrupt returns.
-                _QUEUED.setdefault(spec.agent_id, []).append(spec)
-                return True
-            # An interactive terminal is attached to this agent — queue behind
-            # it so we never run a -p turn against a session another process is
-            # holding open. drain_after_terminal() spawns this when it closes.
-            # Other agents are unaffected; this only serializes the same agent.
-            if _terminal_live(spec.agent_id):
-                if queue_if_busy:
-                    turn_queue.enqueue(
-                        queue_id=spec.queue_id, agent_id=spec.agent_id,
-                        session=spec.session, text=spec.text,
-                        trace_id=spec.trace_id, client_msg_id=spec.client_msg_id,
-                        synthesize_audio=spec.synthesize_audio, origin=spec.origin,
-                        sender_agent_id=spec.sender_agent_id,
-                    )
-                _QUEUED.setdefault(spec.agent_id, []).append(spec)
-                _INFLIGHT.setdefault(spec.agent_id, _TERMINAL_SENTINEL)
-                depth = len(_QUEUED[spec.agent_id])
+        Returns True when the send waits instead of spawning.
+
+        Only the decision is taken under _TURN_LOCK. The durable queue row is
+        written before it (a no-op when admission already wrote it, as it does
+        for every queue request), the Stop-park row is written before it and
+        withdrawn after it if the barrier had gone, and eventlog rows and the
+        preempting interrupt are deferred past the release."""
+        if queue_if_busy:
+            turn_queue.enqueue(
+                queue_id=spec.queue_id, agent_id=spec.agent_id,
+                session=spec.session, text=spec.text,
+                trace_id=spec.trace_id, client_msg_id=spec.client_msg_id,
+                synthesize_audio=spec.synthesize_audio, origin=spec.origin,
+                sender_agent_id=spec.sender_agent_id,
+            )
+        park_id = ""
+        if not spec.queue_id and _SLOTS.get(spec.agent_id) == _STOPPING_SENTINEL:
+            park_id = _park(spec)
+        parked = False
+        try:
+            with _TURN_LOCK:
+                parked, decision = self._claim_or_queue(
+                    spec, queue_if_busy=queue_if_busy, park_id=park_id)
+        finally:
+            if park_id and not parked:
+                turn_queue.unpark(park_id)
+        return decision
+
+    def _claim_or_queue(self, spec: _TurnSpec, *, queue_if_busy: bool,
+                        park_id: str) -> tuple[bool, bool]:
+        """The decision half of _enqueue_if_busy; the caller holds _TURN_LOCK.
+        Returns (parked behind Stop, send waits)."""
+        agent_id = spec.agent_id
+        if _SLOTS.get(agent_id) == _STOPPING_SENTINEL:
+            # This send was admitted just as Stop acquired the barrier. It is
+            # newer than the stopped work, so hold it and start it only after
+            # the backend-wide interrupt returns. Its parked row keeps it
+            # across a runtime restart.
+            if park_id:
+                spec = replace(spec, park_id=park_id)
+            _SLOTS.enqueue(agent_id, spec)
+            return bool(park_id), True
+        # An interactive terminal is attached to this agent — queue behind
+        # it so we never run a -p turn against a session another process is
+        # holding open. drain_after_terminal() spawns this when it closes.
+        # Other agents are unaffected; this only serializes the same agent.
+        if _terminal_live(agent_id):
+            depth = _SLOTS.hold_for_terminal(agent_id, spec)
+            defer_on(_TURN_LOCK, lambda: (
                 eventlog.emit("server", "turnQueuedBehindTerminal",
-                              context=spec.context, detail={"depth": depth})
+                              context=spec.context, detail={"depth": depth}),
                 log("turnQueuedBehindTerminal",
-                    f"agent={spec.agent_id} depth={depth} "
-                    f"trace={spec.trace_id or '∅'} — terminal live, queued")
-                return True
-            if spec.agent_id in _INFLIGHT:
-                if _slot_is_spawning(spec.agent_id):
-                    if queue_if_busy:
-                        turn_queue.enqueue(
-                            queue_id=spec.queue_id, agent_id=spec.agent_id,
-                            session=spec.session, text=spec.text,
-                            trace_id=spec.trace_id,
-                            client_msg_id=spec.client_msg_id,
-                            synthesize_audio=spec.synthesize_audio,
-                            origin=spec.origin,
-                            sender_agent_id=spec.sender_agent_id,
-                        )
-                    _QUEUED.setdefault(spec.agent_id, []).append(spec)
-                    return True
-                # Self-heal a leaked slot: if the in-flight turn has no live
-                # process (it died without firing its terminal callback — e.g.
-                # killed mid-flight by a restart), the slot is stale. Free it
-                # and take it over now instead of queuing behind a phantom
-                # forever. Checked here, on every send — no timer/interval.
-                if not self._has_live_turn(spec):
-                    stale = _INFLIGHT.get(spec.agent_id)
+                    f"agent={agent_id} depth={depth} "
+                    f"trace={spec.trace_id or '∅'} — terminal live, queued")))
+            return False, True
+        current = _SLOTS.get(agent_id)
+        if agent_id in _INFLIGHT:
+            if _slot_is_spawning(agent_id):
+                _SLOTS.enqueue(agent_id, spec)
+                return False, True
+            # Self-heal a leaked slot: if the in-flight turn has no live
+            # process (it died without firing its terminal callback — e.g.
+            # killed mid-flight by a restart), the slot is stale. Free it
+            # and take it over now instead of queuing behind a phantom
+            # forever. Checked here, on every send — no timer/interval.
+            if not self._has_live_turn(spec):
+                defer_on(_TURN_LOCK, lambda: (
                     eventlog.emit("server", "staleInflightCleared",
                                   context=spec.context,
-                                  detail={"dead_trace": stale})
+                                  detail={"dead_trace": current}),
                     log("staleInflightCleared",
-                        f"agent={spec.agent_id} dead_trace={stale or '∅'} "
-                        f"— in-flight turn has no live process; freeing slot")
-                    # Surviving queued specs (if any) still drain when this
-                    # turn finishes; nothing is dropped.
-                    _INFLIGHT[spec.agent_id] = spec.trace_id
-                    _CLAIMED_AT[spec.agent_id] = time.monotonic()
-                    return False
-                if queue_if_busy:
-                    turn_queue.enqueue(
-                        queue_id=spec.queue_id, agent_id=spec.agent_id,
-                        session=spec.session, text=spec.text,
-                        trace_id=spec.trace_id, client_msg_id=spec.client_msg_id,
-                        synthesize_audio=spec.synthesize_audio, origin=spec.origin,
-                        sender_agent_id=spec.sender_agent_id,
-                    )
-                    _QUEUED.setdefault(spec.agent_id, []).append(spec)
-                    depth = len(_QUEUED[spec.agent_id])
+                        f"agent={agent_id} dead_trace={current or '∅'} "
+                        f"— in-flight turn has no live process; freeing slot")))
+                # Surviving queued specs (if any) still drain when this
+                # turn finishes; nothing is dropped.
+                _SLOTS.claim(agent_id, spec.trace_id)
+                return False, False
+            if queue_if_busy:
+                depth = _SLOTS.enqueue(agent_id, spec)
+                defer_on(_TURN_LOCK, lambda: (
                     eventlog.emit("server", "turnQueued", context=spec.context,
-                                  detail={"depth": depth})
+                                  detail={"depth": depth}),
                     log("turnQueued",
-                        f"agent={spec.agent_id} depth={depth} "
-                        f"trace={spec.trace_id or '∅'}")
-                    return True
-                killed = _INFLIGHT.get(spec.agent_id)
-                try:
-                    self.backends.interrupt(spec.backend, spec.agent_id)
-                except Exception as e:  # noqa: BLE001
-                    log_exception("preemptInterruptFail", e, detail=spec.agent_id)
-                eventlog.emit("server", "turnPreempted", context=spec.context,
-                              detail={"killed_trace": killed})
-                log("turnPreempted",
-                    f"agent={spec.agent_id} killed={killed or '∅'} "
-                    f"new={spec.trace_id or '∅'} — busy, preempting and resuming")
-                _INFLIGHT[spec.agent_id] = spec.trace_id
-                _CLAIMED_AT[spec.agent_id] = time.monotonic()
-                return False
-            _INFLIGHT[spec.agent_id] = spec.trace_id
-            _CLAIMED_AT[spec.agent_id] = time.monotonic()
-            return False
+                        f"agent={agent_id} depth={depth} "
+                        f"trace={spec.trace_id or '∅'}")))
+                return False, True
+            # Take the slot first so the preempted turn's dying callback is
+            # already superseded, then interrupt once the lock is released.
+            _SLOTS.claim(agent_id, spec.trace_id)
+            defer_on(_TURN_LOCK, lambda: self._preempt_for(spec, current))
+            return False, False
+        _SLOTS.claim(agent_id, spec.trace_id)
+        return False, False
+
+    def _preempt_for(self, spec: _TurnSpec, killed: str) -> None:
+        try:
+            self.backends.interrupt(spec.backend, spec.agent_id)
+        except Exception as e:  # noqa: BLE001
+            log_exception("preemptInterruptFail", e, detail=spec.agent_id)
+        eventlog.emit("server", "turnPreempted", context=spec.context,
+                      detail={"killed_trace": killed})
+        log("turnPreempted",
+            f"agent={spec.agent_id} killed={killed or '∅'} "
+            f"new={spec.trace_id or '∅'} — busy, preempting and resuming")
 
     def _steer_if_supported(self, spec: _TurnSpec) -> bool:
         """Append a follow-up to an active steerable turn without replacing it."""
@@ -1080,8 +1229,9 @@ class TurnDispatchService:
     def _discard_fenced_janitor(self, spec: _TurnSpec) -> None:
         _remove_queued_run(spec.queue_id)
         with _TURN_LOCK:
-            if _INFLIGHT.get(spec.agent_id) == spec.trace_id:
-                _record_janitor_cancelled(self.ctx, spec.agent_id, spec.session, spec.trace_id)
+            if _SLOTS.owns(spec.agent_id, spec.trace_id):
+                defer_on(_TURN_LOCK, lambda: _record_janitor_cancelled(
+                    self.ctx, spec.agent_id, spec.session, spec.trace_id))
         self._finish_turn(spec)
 
     def _finish_turn(self, spec: _TurnSpec) -> None:
@@ -1091,24 +1241,30 @@ class TurnDispatchService:
         no-op."""
         agent_id = spec.agent_id
         with _TURN_LOCK:
-            if _INFLIGHT.get(agent_id) != spec.trace_id:
+            if _SLOTS.get(agent_id) != spec.trace_id:
                 return  # not the current turn — already drained / superseded
             account_failover(spec.backend).discard(agent_id, spec.trace_id)
-            queue = _QUEUED.get(agent_id)
-            next_spec = queue.pop(0) if queue else None
+            next_spec = _SLOTS.pop_next(agent_id, expected=spec.trace_id)
             if next_spec is None:
-                _INFLIGHT.pop(agent_id, None)
-                _CLAIMED_AT.pop(agent_id, None)
-                _QUEUED.pop(agent_id, None)
                 return
-            _INFLIGHT[agent_id] = next_spec.trace_id
-            _CLAIMED_AT[agent_id] = time.monotonic()
-        self._resume_and_spawn(agent_id, next_spec)
+            # The handover is decided; the spawn runs once no thread waits on
+            # this lock (a terminal callback may hold it around this call).
+            defer_on(_TURN_LOCK, 
+                lambda: self._spawn_next(agent_id, next_spec))
+
+    def _spawn_next(self, agent_id: str, next_spec: _TurnSpec) -> None:
+        try:
+            self._resume_and_spawn(agent_id, next_spec)
+        except Exception as exc:  # noqa: BLE001 - never fail the releasing caller
+            log_exception("queuedSpawnFail", exc, detail=next_spec.session)
 
     def _resume_and_spawn(self, agent_id: str, next_spec: _TurnSpec) -> None:
         """Spawn a queued spec that just took over the in-flight slot. The prior
         owner (a finished turn, or a closed terminal) may have created/advanced
         the backend session, so re-resolve it before spawning."""
+        if next_spec.park_id:
+            # It launches now; the durable park row has done its job.
+            turn_queue.unpark(next_spec.park_id)
         if next_spec.queue_id:
             durable = turn_queue.get(next_spec.queue_id)
             if durable is None:
@@ -1143,7 +1299,7 @@ class TurnDispatchService:
                 # Queue admission is intentionally invisible. Materialize the
                 # ordinary user turn only at the moment execution begins.
                 self._record_user_message(next_spec)
-            agents_db.open_turn(
+            turn_lifecycle.open_turn(
                 agent_id=next_spec.agent_id, source="pwa",
                 trace_id=next_spec.trace_id,
                 synthesize_audio=next_spec.synthesize_audio)
@@ -1162,10 +1318,7 @@ class TurnDispatchService:
             # Keep the durable head and retry it before later queue entries.
             # The client already received queued=true, so dropping it here
             # would silently lose acknowledged work.
-            with _TURN_LOCK:
-                if _INFLIGHT.get(agent_id) == next_spec.trace_id:
-                    _INFLIGHT.pop(agent_id, None)
-                    _CLAIMED_AT.pop(agent_id, None)
+            _SLOTS.release(agent_id, next_spec.trace_id)
             self.retry_scheduler(1.0, self.recover_queued)
 
     def _mark_spawned(self, spec: _TurnSpec) -> None:
@@ -1194,15 +1347,14 @@ class TurnDispatchService:
             # A very fast backend may complete before spawn_turn returns. Do
             # not overwrite its terminal state with a late THINKING record.
             latest = agents_db.latest_state(spec.agent_id)
-            if (latest and latest.get("kind") in {
-                    AgentState.DONE, AgentState.IDLE, AgentState.INTERRUPTED}):
+            if latest and latest.get("kind") in turn_lifecycle.TERMINAL:
                 detail = latest.get("detail") or {}
                 if (detail.get("trace_id") == spec.trace_id
                         or agents_db.get_trace(spec.agent_id) != spec.trace_id):
                     return
-            agents_db.record_state(
+            turn_lifecycle.try_transition(
                 spec.agent_id,
-                AgentState.THINKING,
+                TurnEvent.SPAWN_STARTED,
                 {
                     "source": "pwa",
                     "dispatch": spec.backend,
@@ -1345,6 +1497,16 @@ class TurnDispatchService:
             self._mark_interrupted(resume_spec, error_classify.RUNNER_EXIT,
                                    str(exc), attempts=attempt)
 
+    def _pause_for_account(self, spec: _TurnSpec) -> None:
+        with _TURN_LOCK:
+            if _SLOTS.owns(spec.agent_id, spec.trace_id):
+                _SLOTS.touch_claim(spec.agent_id)
+            defer_on(_TURN_LOCK, lambda: turn_lifecycle.try_transition(
+                spec.agent_id, TurnEvent.ACCOUNT_RECOVERY_WAIT,
+                {"dispatch": spec.backend, "trace_id": spec.trace_id,
+                 "account_recovery": "waiting",
+                 "message": f"Waiting for a {spec.backend} account with available usage"}))
+
     def _spawn_attempt_claimed(self, spec: _TurnSpec, *, attempt: int) -> None:
         """Spawn one attempt of a turn. Attempt 1 surfaces spawn failures as
         a DispatchError (so /send returns 500); later attempts run from a
@@ -1375,21 +1537,25 @@ class TurnDispatchService:
         account_attempt = None
         if (backend.account_pool()
                 and (account_selector(spec.backend) or account_failover(spec.backend).recovering)):
+            coordinator = account_failover(spec.backend)
+
             def pause():
-                _CLAIMED_AT[spec.agent_id] = time.monotonic()
-                agents_db.record_state(
-                    spec.agent_id, AgentState.THINKING,
-                    {"dispatch": spec.backend, "trace_id": spec.trace_id,
-                     "account_recovery": "waiting",
-                     "message": f"Waiting for a {spec.backend} account with available usage"})
+                # Called with the coordinator's lock held (and maybe
+                # _TURN_LOCK): mark the slot spawning and record the wait
+                # only once both are released.
+                defer_on(coordinator.lock, lambda: self._pause_for_account(spec))
 
             account_attempt = ClaudeAttempt(
                 agent_id=spec.agent_id, trace_id=spec.trace_id, model=spec.model,
                 state=state, owned=lambda: (
+                    # Lock-free: the coordinator calls this under its own lock
+                    # and must never wait for _TURN_LOCK there.
                     _INFLIGHT.get(spec.agent_id) == spec.trace_id
-                    and not self._superseded(spec)), pause=pause,
-                resume=lambda: self._resume_after_account_switch(spec, attempt, state))
-            if account_failover(spec.backend).register(account_attempt):
+                    and not self._superseded(spec, locked=False)), pause=pause,
+                resume=lambda: defer_on(
+                    coordinator.lock,
+                    lambda: self._resume_after_account_switch(spec, attempt, state)))
+            if coordinator.register(account_attempt):
                 return
         on_init, on_result, on_error = self._attempt_callbacks(spec, attempt, state)
         def run_if_owned(action) -> bool:
@@ -1527,7 +1693,8 @@ class TurnDispatchService:
                 # DONE is the durable completion signal consumed by the
                 # user-facing push and unread/badge policy. It is non-busy,
                 # just like IDLE, but preserves the completion edge.
-                agents_db.record_state(agent_id, AgentState.DONE, detail)
+                turn_lifecycle.try_transition(
+                    agent_id, TurnEvent.PROCESS_EXITED_OK, detail)
                 # Local usage accounting. The CLI's own numbers, for every
                 # dispatch mode — this is what feeds /backend-usage now that
                 # the statusline source is gone (it never ran under `-p`).
@@ -1666,8 +1833,8 @@ class TurnDispatchService:
             return
         # Unrecognised failure: keep the old behaviour — flip to IDLE so the
         # UI doesn't hang on THINKING, and log the turn as failed.
-        agents_db.record_state(
-            spec.agent_id, AgentState.IDLE,
+        turn_lifecycle.try_transition(
+            spec.agent_id, TurnEvent.TURN_FAILED_UNCLASSIFIED,
             {"dispatch": spec.backend, "error": msg[:200]},
         )
         eventlog.emit("server", "clarpTurnFail", context=spec.context,
@@ -1717,7 +1884,7 @@ class TurnDispatchService:
             result(event)
         def failed(error):
             self._mark_interrupted(spec, error_classify.RUNNER_EXIT, error, attempts=len(snapshot["models"])+1)
-        agents_db.record_state(spec.agent_id, AgentState.THINKING,
+        turn_lifecycle.try_transition(spec.agent_id, TurnEvent.MODEL_FALLBACK_STARTED,
             {"trace_id": spec.trace_id, "fallback": True, "reason": category})
         threading.Thread(target=turn_model_fallback.run,
             args=(self,spec,state,snapshot,owned,succeeded,failed),daemon=True,
@@ -1730,8 +1897,8 @@ class TurnDispatchService:
         delay = BACKOFF_BASE_SEC * (2 ** (attempt - 1))
         # Keep the agent visibly busy across the gap rather than flicking to
         # idle and back; detail marks it as a reconnect, not fresh work.
-        agents_db.record_state(
-            spec.agent_id, AgentState.THINKING,
+        turn_lifecycle.try_transition(
+            spec.agent_id, TurnEvent.RETRY_SCHEDULED,
             {"dispatch": spec.backend, "reconnect": next_attempt,
              "of": MAX_ATTEMPTS, "after_ms": int(delay * 1000),
              "summary": "Reconnecting… Your message is saved.",
@@ -1756,16 +1923,17 @@ class TurnDispatchService:
         def _retry_spawn() -> None:
             # If a newer send preempted this turn during the backoff, abandon the
             # retry — the new turn owns the slot now.
+            # The ownership check is atomic with account recovery (which
+            # marks state under the coordinator lock before pausing); the
+            # spawn itself runs outside _TURN_LOCK. A recovery that starts in
+            # between finds the new attempt at register() and parks it.
             with _TURN_LOCK:
                 if state.get("account_recovery"):
                     return  # account recovery already owns this continuation
-                if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
+                if not _SLOTS.owns(spec.agent_id, spec.trace_id):
                     log("retryAbandoned",
                         f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
                         f"preempted during backoff")
-                    return
-                if not next_spec.janitor_run_id:
-                    self._spawn_attempt(next_spec, attempt=next_attempt)
                     return
             try:
                 self._spawn_attempt(next_spec, attempt=next_attempt)
@@ -1811,10 +1979,8 @@ class TurnDispatchService:
         if limit_event:
             state_detail["provider_limit_event_id"] = limit_event[
                 "provider_limit_event_id"]
-        agents_db.record_state(
-            spec.agent_id, AgentState.INTERRUPTED,
-            state_detail,
-        )
+        turn_lifecycle.try_transition(
+            spec.agent_id, TurnEvent.PROCESS_EXITED_FAILED, state_detail)
         self._speak_interruption(spec, category, human, message)
         eventlog.emit("server", "turnInterrupted", context=spec.context,
                       detail={"reason": category, "attempts": attempts,
@@ -1885,7 +2051,7 @@ class TurnDispatchService:
         except Exception:
             return ""
 
-    def _superseded(self, spec: _TurnSpec) -> bool:
+    def _superseded(self, spec: _TurnSpec, *, locked: bool = True) -> bool:
         """True if a newer turn has taken over this agent since `spec` was
         dispatched. A preempted/old turn's drain thread fires its terminal
         callback asynchronously — if we let it record INTERRUPTED/IDLE it would
@@ -1896,7 +2062,7 @@ class TurnDispatchService:
         try:
             if spec.janitor_run_id:
                 from . import janitors
-                with _TURN_LOCK:
+                with (_TURN_LOCK if locked else _NO_LOCK):
                     if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
                         return True
                     if not janitors.validate_dispatch(spec.session, spec.janitor_run_id, spec.trace_id):
@@ -1984,14 +2150,13 @@ def clear_for_agent(
         # Stop needs pause + in-memory detachment to be atomic with
         # _finish_turn(), otherwise the interrupted callback can drain the
         # next item in between those two operations.
+        # TODO(integration): the pause flag is the one SQLite write left
+        # under _TURN_LOCK; moving it out needs _finish_turn to read it.
         if pause_queue:
             turn_queue.set_paused(agent_id, True)
-        if pause_queue:
-            _INFLIGHT[agent_id] = _STOPPING_SENTINEL
-        else:
-            _INFLIGHT.pop(agent_id, None)
-        _CLAIMED_AT.pop(agent_id, None)
-        dropped = len(_QUEUED.pop(agent_id, []) or [])
+        dropped = _SLOTS.clear(agent_id, stopping=pause_queue)
+    if preserve_queue:
+        turn_queue.discard_parked(agent_id)
     durable_dropped = 0 if preserve_queue else turn_queue.remove_for_agent(agent_id)
     return max(dropped, durable_dropped)
 
@@ -2005,19 +2170,17 @@ def owns_inflight_trace(agent_id: str, trace_id: str) -> bool:
         except Exception:
             return bool(trace_id) and agents_db.is_busy(agent_id) and \
                 agents_db.get_trace(agent_id) == trace_id
-    with _TURN_LOCK:
-        return bool(trace_id) and _INFLIGHT.get(agent_id) == trace_id
+    return _SLOTS.owns(agent_id, trace_id)
 
 
 def _record_janitor_cancelled(ctx, agent_id: str, session: str, trace_id: str) -> None:
     """Publish a truthful terminal state only for this agent's current trace."""
     if agents_db.get_trace(agent_id) != trace_id:
         return
-    agents_db.record_state(agent_id, AgentState.INTERRUPTED, {
+    turn_lifecycle.try_transition(agent_id, TurnEvent.STOP_REQUESTED, {
         "source": "janitor_pause", "origin": "janitor", "trace_id": trace_id,
         "message": "Maintenance run cancelled"})
-    db.conn().execute("UPDATE turns SET ended_at=? WHERE agent_id=? AND trace_id=? AND ended_at IS NULL",
-                      (db.now_ms(), agent_id, trace_id))
+    turn_lifecycle.close_turns_for_trace(agent_id, trace_id)
     if getattr(ctx, "stream", None) is not None:
         ctx.stream.broadcast({"type": SSEType.AGENT_STATE, "session": session,
             "agent_id": agent_id, "kind": AgentState.INTERRUPTED, "origin": "janitor"})
@@ -2053,15 +2216,13 @@ def _cancel_fenced_janitor_run(ctx, run: dict, agent: dict, backend_registry) ->
     # A queued run may sit behind unrelated work. Remove its own queue copy
     # without installing a stop barrier or touching that other backend turn.
     with _TURN_LOCK:
-        matching = _INFLIGHT.get(agent_id) == run_id
+        matching = _SLOTS.owns(agent_id, run_id)
         if not matching:
-            _QUEUED[agent_id] = [spec for spec in _QUEUED.get(agent_id, [])
-                                 if spec.trace_id != run_id]
-            if not _QUEUED[agent_id]:
-                _QUEUED.pop(agent_id, None)
-            _remove_queued_run(run_id)
-            return {"cancelled": True, "interrupted": False, "run_id": run_id}
-        snapshot, _dropped, queue_was_paused = begin_stop(agent_id)
+            _SLOTS.drop_queued(agent_id, lambda spec: spec.trace_id == run_id)
+    if not matching:
+        _remove_queued_run(run_id)
+        return {"cancelled": True, "interrupted": False, "run_id": run_id}
+    snapshot, _dropped, queue_was_paused = begin_stop(agent_id)
     try:
         backend = backend_registry.normalize(agent.get("backend"))
         terminated = int(backend_registry.interrupt(backend, agent_id) or 0)
@@ -2075,67 +2236,45 @@ def _cancel_fenced_janitor_run(ctx, run: dict, agent: dict, backend_registry) ->
     try:
         _remove_queued_run(run_id)
         turn_queue.set_paused(agent_id, queue_was_paused)
-        with _TURN_LOCK:
-            _CLAUDE_FAILOVER.discard(agent_id, run_id)
-            _CODEX_FAILOVER.discard(agent_id, run_id)
-            _record_janitor_cancelled(ctx, agent_id, run["session"], run_id)
+        _CLAUDE_FAILOVER.discard(agent_id, run_id)
+        _CODEX_FAILOVER.discard(agent_id, run_id)
+        _record_janitor_cancelled(ctx, agent_id, run["session"], run_id)
     finally:
         complete_stop(ctx, agent_id, snapshot, {run_id}, backend_registry=backend_registry)
     return {"cancelled": True, "interrupted": bool(terminated), "run_id": run_id}
 
 
+def _recovery_parked(agent_id: str, trace_id: str | None) -> bool:
+    return bool(_CLAUDE_FAILOVER.parked(agent_id, trace_id)
+                or _CODEX_FAILOVER.parked(agent_id, trace_id))
+
+
 def snapshot_stop_state(agent_id: str) -> dict:
     with _TURN_LOCK:
-        value = _INFLIGHT.get(agent_id)
-        return {
-            "trace_id": value if value not in {None, _STOPPING_SENTINEL} else "",
-            "claimed_at": _CLAIMED_AT.get(agent_id),
-            "queued": list(_QUEUED.get(agent_id) or []),
-            "account_recovery_parked": (_CLAUDE_FAILOVER.parked(agent_id, value) or _CODEX_FAILOVER.parked(agent_id, value)),
-        }
+        snapshot = _SLOTS.stop_snapshot(agent_id).as_dict()
+        snapshot["account_recovery_parked"] = _recovery_parked(
+            agent_id, _SLOTS.get(agent_id) or None)
+        return snapshot
 
 
 def begin_stop(agent_id: str) -> tuple[dict, int, bool]:
     """Atomically install the Stop barrier in the process that owns turns."""
     with _TURN_LOCK:
-        value = _INFLIGHT.get(agent_id)
-        snapshot = {
-            "trace_id": value if value not in {None, _STOPPING_SENTINEL} else "",
-            "claimed_at": _CLAIMED_AT.get(agent_id),
-            "queued": list(_QUEUED.get(agent_id) or []),
-            "account_recovery_parked": (_CLAUDE_FAILOVER.parked(agent_id, value) or _CODEX_FAILOVER.parked(agent_id, value)),
-        }
+        value = _SLOTS.get(agent_id) or None
+        recovery_parked = _recovery_parked(agent_id, value)
         queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
+        # TODO(integration): like clear_for_agent, the pause flag is written
+        # under the lock so that Stop is atomic with _finish_turn().
         turn_queue.set_paused(agent_id, True)
-        _INFLIGHT[agent_id] = _STOPPING_SENTINEL
-        _CLAIMED_AT.pop(agent_id, None)
-        dropped = len(_QUEUED.pop(agent_id, []) or [])
+        stop, dropped = _SLOTS.begin_stop(agent_id)
+    snapshot = stop.as_dict()
+    snapshot["account_recovery_parked"] = recovery_parked
     return snapshot, dropped, queue_was_paused
 
 
 def restore_stop_state(agent_id: str, snapshot: dict) -> None:
     """Roll back every process-local Stop mutation after interrupt failure."""
-    with _TURN_LOCK:
-        if _INFLIGHT.get(agent_id) != _STOPPING_SENTINEL:
-            return
-        trace_id = str(snapshot.get("trace_id") or "")
-        if trace_id:
-            _INFLIGHT[agent_id] = trace_id
-        else:
-            _INFLIGHT.pop(agent_id, None)
-        claimed_at = snapshot.get("claimed_at")
-        if claimed_at is None:
-            _CLAIMED_AT.pop(agent_id, None)
-        else:
-            _CLAIMED_AT[agent_id] = float(claimed_at)
-        # Sends admitted while the Stop barrier was active were appended after
-        # the snapshot. Preserve them behind the restored pre-Stop queue.
-        queued = list(snapshot.get("queued") or []) + list(
-            _QUEUED.get(agent_id) or [])
-        if queued:
-            _QUEUED[agent_id] = queued
-        else:
-            _QUEUED.pop(agent_id, None)
+    _SLOTS.restore_stop(agent_id, snapshot)
 
 
 def prepare_queued_for_finish(
@@ -2143,16 +2282,14 @@ def prepare_queued_for_finish(
 ) -> None:
     """Restore preserved/new specs except cancelled ones under the barrier."""
     with _TURN_LOCK:
-        queue = list(snapshot.get("queued") or []) + list(
-            _QUEUED.get(agent_id) or [])
-        remaining = [
-            spec for spec in queue
-            if spec.trace_id not in cancelled_trace_ids
-        ]
-        if remaining:
-            _QUEUED[agent_id] = remaining
-        else:
-            _QUEUED.pop(agent_id, None)
+        cancelled = [
+            spec for spec in list(snapshot.get("queued") or [])
+            + list(_QUEUED.get(agent_id) or [])
+            if spec.trace_id in cancelled_trace_ids]
+        _SLOTS.restore_queue(agent_id, snapshot, cancelled_trace_ids)
+    for spec in cancelled:
+        if getattr(spec, "park_id", ""):
+            turn_queue.unpark(spec.park_id)
 
 
 def complete_stop(
@@ -2165,17 +2302,9 @@ def complete_stop(
 
 def finish_stop(ctx, agent_id: str, *, backend_registry=backends) -> None:
     """Release the barrier and run a normal send admitted during Stop."""
-    with _TURN_LOCK:
-        if _INFLIGHT.get(agent_id) != _STOPPING_SENTINEL:
-            return
-        queue = _QUEUED.get(agent_id)
-        next_spec = queue.pop(0) if queue else None
-        if next_spec is None:
-            _INFLIGHT.pop(agent_id, None)
-            _QUEUED.pop(agent_id, None)
-            return
-        _INFLIGHT[agent_id] = next_spec.trace_id
-        _CLAIMED_AT[agent_id] = time.monotonic()
+    next_spec = _SLOTS.pop_next(agent_id, expected=_STOPPING_SENTINEL)
+    if next_spec is None:
+        return
     TurnDispatchService(ctx, backend_registry=backend_registry)._resume_and_spawn(
         agent_id, next_spec)
 
@@ -2187,14 +2316,13 @@ def drain_after_terminal(ctx, agent_id: str) -> None:
     with _TURN_LOCK:
         if _terminal_live(agent_id):
             return  # another terminal still attached — keep holding
-        queue = _QUEUED.get(agent_id)
-        next_spec = queue.pop(0) if queue else None
-        if next_spec is None:
-            if _INFLIGHT.get(agent_id) == _TERMINAL_SENTINEL:
+        if not _QUEUED.get(agent_id):
+            if _SLOTS.get(agent_id) == _TERMINAL_SENTINEL:
                 _INFLIGHT.pop(agent_id, None)
             _CLAIMED_AT.pop(agent_id, None)
             _QUEUED.pop(agent_id, None)
             return
-        _INFLIGHT[agent_id] = next_spec.trace_id
-        _CLAIMED_AT[agent_id] = time.monotonic()
+        next_spec = _SLOTS.pop_next(agent_id)
+    if next_spec is None:
+        return
     TurnDispatchService(ctx)._resume_and_spawn(agent_id, next_spec)

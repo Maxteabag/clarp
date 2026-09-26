@@ -21,10 +21,11 @@ from dataclasses import dataclass
 import _clarp_lib  # noqa: F401  — puts Clarp's `lib` on sys.path
 try:
     from lib import agents as _agents                # noqa: E402
+    from lib import turn_lifecycle                   # noqa: E402
     from lib.transcript_cursor import CursorStoreError, reset_spoken_first_all  # noqa: E402
     from lib.hook_runtime import app_session  # noqa: E402
     from lib.paths import RuntimePaths                # noqa: E402
-    from lib.protocol import AgentState, TurnSource   # noqa: E402
+    from lib.protocol import TurnSource               # noqa: E402
     from lib.timing import HOOK_TIMING                # noqa: E402
 except ImportError:
     # claude-pwa not installed on this machine — hook is a no-op.
@@ -151,13 +152,13 @@ def main() -> int:
             or f"{source}-{int(time.time()*1000):x}"
         )
         _agents.set_trace(agent_id, trace_id)
-        _agents.open_turn(agent_id=agent_id,
-                          source=source,
-                          trace_id=trace_id,
-                          synthesize_audio=marker_info.synthesize_audio)
-        _agents.record_state(agent_id, AgentState.THINKING,
-                             {"source": source,
-                              "backend_session_id": backend_session_id})
+        turn_lifecycle.open_turn(agent_id=agent_id,
+                                 source=source,
+                                 trace_id=trace_id,
+                                 synthesize_audio=marker_info.synthesize_audio)
+        turn_lifecycle.hook_transition(
+            agent_id, turn_lifecycle.TurnEvent.PROMPT_ADMITTED,
+            {"source": source, "backend_session_id": backend_session_id})
     except Exception as e:
         try: _emit_event("userprompt_hook", "dbStateFail",
                          session=session or None,
