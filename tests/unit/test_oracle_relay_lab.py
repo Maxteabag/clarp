@@ -433,18 +433,20 @@ def test_put_me_through_opens_theo_in_his_own_voice_on_the_same_phone_line(lab):
                         "voice": "meridian"}]
 
     # The retired session's close never reaches the phone or ends the call.
+    before = len(lab.down)
     lab.conv.receive({"type": "session.closed", "reason": "close_requested"}, source=lab.upstreams[0])
     lab.conv.receive({"type": "session.output_audio.delta", "delta": _audio(3000)}, source=lab.upstreams[0])
+    assert lab.down[before:] == []
     assert "session.closed" not in lab.down_types()
-    assert "session.output_audio.delta" not in lab.down_types()
     assert not lab.conv.closed.is_set() and not lab.conv.stop.is_set()
 
     # From now on substantive turns go to Theo, and the receipt goes to his session.
+    admissions_before = sum("Work admission" in e["content"] for e in lab.appends(0))
     lab.user("What is the status of the deploy?")
     [work] = lab.tools.dispatched
     assert work["agent"] == "theo-97e5" and "What is the status of the deploy?" in work["request"]
     assert any("Work admission" in e["content"] for e in lab.appends(1))
-    assert not any("Work admission" in e["content"] for e in lab.appends(0))
+    assert sum("Work admission" in e["content"] for e in lab.appends(0)) == admissions_before
 
 
 def test_back_to_oracle_restores_marin_and_oracles_instructions(lab):
