@@ -214,16 +214,16 @@ def router_tools():
 
 
 def live_config(*, roster=None, delegation_strategy="operator", voice_context=None, history=(),
-                voice=VOICE, contact=None):
+                voice=VOICE, speak_as=None):
     """Session config; the roster and contact ride in the instructions.
 
     The voice model holds no tools, so unless it is told who the agents are it
     cannot know that "Omar" is someone it can reach. `roster` is the output of
-    the list_agents tool. `contact` names the agent the user is talking to
+    the list_agents tool. `speak_as` names the agent the user is talking to
     directly; that session speaks as the agent, in `voice`.
     """
-    if contact:
-        instructions = oracle_voices.contact_instructions(contact)
+    if speak_as:
+        instructions = oracle_voices.contact_instructions(speak_as)
     else:
         instructions = oracle_strategy.DIRECT_INSTRUCTIONS if delegation_strategy == "direct_contact" else PROMPT
         instructions += oracle_voices.SWITCH_NOTE
@@ -1007,7 +1007,7 @@ class Conversation:
         return live_config(roster=roster, delegation_strategy=self.delegation_strategy,
             voice_context=self.voice_context, history=self.swap_history(roster),
             voice=contact["voice"] if contact else VOICE,
-            contact=contact["persona"] if contact else None)
+            speak_as=contact["persona"] if contact else None)
 
     def swap_upstream(self, contact, now=None):
         """Replace the GPT-Live session, keeping the phone's socket open.
