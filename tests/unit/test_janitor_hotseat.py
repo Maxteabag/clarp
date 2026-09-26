@@ -205,13 +205,14 @@ def test_exhaustion_notifies_once_until_the_situation_changes(switcher):
     assert len(sent) == 2
 
 
-def test_codex_switch_recycles_idle_connections(switcher):
+def test_codex_switch_recycles_idle_connections(switcher, monkeypatch):
     owner, worker, readings, calls, sent = switcher
     readings["codex"] = {"accounts": [
         {"alias": "p", "is_active": True, "usage": {"usable": True, "blocked": False, "error": None, "worst_used": 0.95}},
         {"alias": "q", "is_active": False, "usage": {"usable": True, "blocked": False, "error": None, "worst_used": 0.2}}]}
     recycled = []
-    worker.recycle_runner = lambda: recycled.append(True)
+    # The Codex backend owns the runner recycle; Claude's is a no-op.
+    monkeypatch.setattr(service.backends.by_id("codex"), "on_credential_change", lambda: recycled.append(True))
     worker.hotseat_once()
     assert ("switch", "hotseat", "codex", "q") in calls and recycled == [True]
     assert any(p["preview"].startswith("Codex: switched to q") for p in sent)
