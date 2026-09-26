@@ -147,6 +147,62 @@ TestCase {
                "Async explanation growth above the reader must preserve the message offset");
     }
 
+    ListModel { id: tallTail }
+    Component {
+        id: reusingViewComponent
+        Clarp.TranscriptList {
+            width: testCase.width
+            height: 900
+            clip: true
+            reuseItems: true
+            bottomMargin: 6
+            section.property: "day"
+            section.delegate: Item {
+                required property string section
+                width: ListView.view.width
+                height: 26
+            }
+            footer: Item { width: 10; height: 6 }
+            delegate: Rectangle {
+                required property string messageId
+                required property int rowHeight
+                width: ListView.view.width
+                height: rowHeight
+                color: "#202330"
+            }
+        }
+    }
+    function test_followSettlesBelowTheFooterAfterSwitchingToTallRows() {
+        // Following aims at the real bottom of the last row and footer, not at
+        // originY + contentHeight, which ListView estimates from the average
+        // loaded row. With very tall rows (a wide table) chasing that estimate
+        // looped in the app; here the view must land once and stay put.
+        for (let i = 0; i < 100; i++)
+            tallTail.append({messageId: "t" + i, rowHeight: [30, 90, 364, 113, 67][i % 5], day: "d" + Math.floor(i / 20)});
+        tallTail.append({messageId: "table", rowHeight: 1906, day: "today"});
+        tallTail.append({messageId: "table-live", rowHeight: 1906, day: "today"});
+        const view = createTemporaryObject(reusingViewComponent, testCase);
+        // Arrive from another conversation, as a switch does: its pooled
+        // delegates are rebound to the tall rows.
+        rows.clear();
+        for (let i = 0; i < 80; i++) rows.append({messageId: "o" + i, rowHeight: [48, 160, 30][i % 3], day: "x"});
+        view.model = rows;
+        tryVerify(() => view.atYEnd);
+        view.model = tallTail;
+        tryVerify(() => view.itemAtIndex(tallTail.count - 1) !== null, 2000);
+        wait(300);
+        let moves = 0;
+        const counter = () => ++moves;
+        view.contentYChanged.connect(counter);
+        wait(500);
+        view.contentYChanged.disconnect(counter);
+        compare(moves, 0, "The view must settle, not keep moving");
+        const last = view.itemAtIndex(tallTail.count - 1);
+        verify(last !== null);
+        fuzzyCompare(view.contentY, last.y + last.height + 6 + view.bottomMargin - view.height, 1);
+        tallTail.clear();
+        rows.clear();
+    }
     function test_jumpAccountsForBottomMargin() {
         const view = createTemporaryObject(viewComponent, testCase, {topMargin: 10, bottomMargin: 10});
         verify(view !== null);

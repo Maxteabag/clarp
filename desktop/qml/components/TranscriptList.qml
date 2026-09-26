@@ -38,21 +38,67 @@ ListView {
         positionViewAtEnd();
         forceLayout();
         // positionViewAtEnd aligns the last item, but does not include the
-        // trailing margin. Finish at the Flickable's actual bottom extent.
-        contentY = Math.max(originY - topMargin,
-            originY + contentHeight + bottomMargin - height);
+        // trailing margin. Finish below the last item itself.
+        settleAtEnd();
+        followedCount = count;
+    }
+    // The bottom of the last delegate, never originY + contentHeight: those are
+    // estimates from the average loaded row height. One very tall row (a wide
+    // table) swings that estimate, and chasing it moves the viewport onto
+    // unloaded rows, which reloads the tall row and swings it back. Inside a
+    // layout pass that loop never ended: the GUI froze while regenerated
+    // delegates piled up until the process was killed for memory.
+    // An explicit follow (open, append, resize) may run before the last row is
+    // created; then the estimate is all there is, and one jump to it is fine.
+    // followContentHeight never takes that path, so estimates cannot loop.
+    function endContentY(last) {
+        // The footer sits directly below the last row; its own y can lag a
+        // layout pass behind, so add its height to the row instead.
+        const bottom = !last ? originY + contentHeight
+            : last.y + last.height + (footerItem ? footerItem.height : 0);
+        return Math.max(originY - topMargin, bottom + bottomMargin - height);
+    }
+    function settleAtEnd() {
+        const target = endContentY(count > 0 ? itemAtIndex(count - 1) : null);
+        if (Math.abs(contentY - target) > 0.5) contentY = target;
     }
     // Cheap, re-entrancy safe follow for the frame about to be rendered. A
     // deferred follow alone lets one frame paint at the old position first,
     // which reads as a flicker whenever the view grows, shrinks or resets.
     function followNow() {
         if (!followLatest || userInteracting || !visible) return;
-        contentY = Math.max(originY - topMargin,
-            originY + contentHeight + bottomMargin - height);
+        settleAtEnd();
     }
     function scheduleFollow() {
         if (!followLatest || userInteracting) return;
         followNow();
+        followTicket = scrollEpoch;
+        Qt.callLater(root.applyFollow);
+    }
+    // Row height estimates change contentHeight without any content moving.
+    // Only a real change at the end (the last row growing while it streams)
+    // should move the view; when the last row is already in place this is a
+    // no-op, so estimate churn cannot drive scrolling.
+    // Even a small contentY write restarts ListView's re-estimation. In that
+    // churn the loaded rows move with the viewport and the gap below the last
+    // row only flickers by the margin; real growth (a streamed line, a row
+    // finishing layout) opens a larger gap. Answer only the larger gap, and
+    // schedule a full follow only when rows were actually added.
+    property int followedCount: -1
+    function followContentHeight() {
+        if (!followLatest || userInteracting || !visible) return;
+        const last = count > 0 ? itemAtIndex(count - 1) : null;
+        if (!last) {
+            if (count === followedCount) return;
+            followedCount = count;
+            scheduleDeferredFollow();
+            return;
+        }
+        followedCount = count;
+        if (Math.abs(contentY - endContentY(last)) > bottomMargin + 2) settleAtEnd();
+    }
+    function scheduleDeferredFollow() {
+        if (!followLatest || userInteracting) return;
         followTicket = scrollEpoch;
         Qt.callLater(root.applyFollow);
     }
@@ -138,7 +184,7 @@ ListView {
     }
     onMovementStarted: beginUserScroll()
     onMovementEnded: endUserScroll()
-    onContentHeightChanged: scheduleFollow()
+    onContentHeightChanged: followContentHeight()
     onHeightChanged: scheduleFollow()
     onVisibleChanged: { if (visible) scheduleFollow(); }
     onModelChanged: { savedAnchor = null; scrollToLatest(); }
