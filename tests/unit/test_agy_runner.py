@@ -207,9 +207,7 @@ def _write_agy_transcript(agy_home: pathlib.Path, rows: list[dict]) -> None:
 
 
 def _load_agy_conversation(session: str) -> dict:
-    return load_conversation(
-        session=session, claude_finder=lambda _sid: None,
-        claude_parser=lambda _path: [])
+    return load_conversation(session=session)
 
 
 def test_spawn_turn_binds_conversation_speaks_and_results(fake_agy, tmp_path):

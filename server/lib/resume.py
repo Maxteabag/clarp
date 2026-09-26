@@ -15,7 +15,6 @@ import pathlib
 
 from .log import log, log_exception
 from . import backends
-from .protocol import AgentBackend
 
 
 def _encoded_project_dir(cwd: str, projects_root: pathlib.Path) -> pathlib.Path:
@@ -57,7 +56,6 @@ def _cwd_from_project_dir(proj_dir: pathlib.Path) -> str:
 def resume_missing_sessions(
     agents: dict,
     home: pathlib.Path,
-    projects_root: pathlib.Path | None = None,
     backend_sessions_by_session: dict[str, str] | None = None,
 ) -> list[dict]:
     """Resolve each agent's backend_session_id UUID at boot.
@@ -72,7 +70,6 @@ def resume_missing_sessions(
     Returns: list[{sid, persona, action, ok, detail, backend_session_id}]
       action ∈ {"resumed", "fresh"}.
     """
-    projects_root = projects_root or (pathlib.Path.home() / ".claude" / "projects")
     results: list[dict] = []
     for sid, info in agents.items():
         info = info or {}
@@ -84,28 +81,25 @@ def resume_missing_sessions(
 
         action = "fresh"
         claude_id = ""
-        backend = (info.get("backend") or AgentBackend.CLAUDE).strip().lower()
+        backend = backends.normalize(info.get("backend"))
         mapped = (backend_sessions_by_session or {}).get(sid, "")
         if mapped:
+            runner = backends.by_id(backend)
             try:
-                jsonl = backends.find_resume_transcript(
-                    backend, mapped, cwd=cwd, projects_root=projects_root,
-                )
+                jsonl = runner.find_transcript(mapped, home, cwd=cwd)
             except OSError as e:
                 log_exception("resumeFindJsonlFail", e, detail=sid)
                 jsonl = None
             if jsonl is not None:
                 claude_id = mapped
                 action = "resumed"
-                # cwd realignment only applies where the transcript's
-                # directory encodes the cwd (Claude's project dirs); Codex
-                # rollout filenames encode the date, not the cwd.
-                adapter = backends.get(backend)
-                if adapter is not None and adapter.transcript_dir_encodes_cwd:
-                    derived = _cwd_from_project_dir(jsonl.parent)
-                    if derived and derived != cwd:
-                        log("resumeCwdRealign", f"{sid} {cwd} → {derived}")
-                        cwd = derived
+                # cwd realignment: a transcript whose location encodes the
+                # cwd (Claude's project dirs) wins over the saved one; the
+                # backend says "" when its layout carries no cwd.
+                derived = runner.transcript_cwd(jsonl)
+                if derived and derived != cwd:
+                    log("resumeCwdRealign", f"{sid} {cwd} → {derived}")
+                    cwd = derived
             else:
                 log("resumeMappedMissing", f"{sid} id={mapped} not on disk")
 

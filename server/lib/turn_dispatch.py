@@ -20,13 +20,7 @@ from .protocol import AgentState, SSEType
 from .prompt_admissions import PromptAdmission
 from .claude_failover import Attempt as ClaudeAttempt, ClaudeFailover
 from . import prompt_admissions
-from .transcript_log import find_latest_jsonl
-from .send_service import (
-    SendTarget,
-    resolve_send_target,
-    source_marker_path,
-    source_marker_text,
-)
+from .send_service import SendTarget, resolve_send_target
 
 # A turn gets this many attempts total before we give up and flip the agent
 # to INTERRUPTED. Only connection-class failures consume retries; transient
@@ -46,8 +40,8 @@ BACKOFF_BASE_SEC = 1.0
 _TURN_LOCK = threading.RLock()
 _CLAUDE_FAILOVER = ClaudeFailover(_TURN_LOCK)
 _CODEX_FAILOVER = ClaudeFailover(_TURN_LOCK)
-# Account pool (adapter.account_pool) -> (coordinator, config field naming the
-# account switch command). Coordinators are read through thunks so a
+# Account pool (backend.account_pool()) -> (coordinator, config field naming
+# the account switch command). Coordinators are read through thunks so a
 # monkeypatched module global is honoured. Backends without a pool of their
 # own book-keep in Claude's coordinator, as they always have.
 _ACCOUNT_POOLS = {
@@ -57,7 +51,7 @@ _ACCOUNT_POOLS = {
 _DEFAULT_ACCOUNT_POOL = "claude"
 
 def _account_pool(backend):
-    pool = backends.adapter_for(backend).account_pool or _DEFAULT_ACCOUNT_POOL
+    pool = backends.by_id(backend).account_pool() or _DEFAULT_ACCOUNT_POOL
     return _ACCOUNT_POOLS[pool]
 
 def account_failover(backend):
@@ -241,7 +235,7 @@ class _TurnSpec:
     # Provider-only continuation; the admitted user message keeps its original
     # text and client ID across an account change.
     recovery_text: str = ""
-    codex_recovery_attempted: bool = False
+    recovery_attempted: bool = False
     # Private runtime capability; never sourced from an ordinary send payload.
     janitor_run_id: str = ""
 
@@ -583,14 +577,12 @@ class TurnDispatchService:
         # Ghost-session guard: a turn that crashed before its session was
         # created leaves the agent bound to a backend_session_id with no
         # transcript on disk. Resuming it exits instantly (rc=0, no output) and
-        # wedges the agent on every turn forever. If the resume target doesn't
-        # exist, drop the binding and start fresh. (Only for a CLI whose
-        # --resume is transcript-file based; the others resume by session id.)
-        adapter = backends.adapter_for(backend)
-        if (backend_session_id and adapter.resumes_by_transcript_file
-                and find_latest_jsonl(
-                    backend_session_id,
-                    projects_root=self.home / ".claude" / "projects") is None):
+        # wedges the agent on every turn forever. If the backend has no
+        # resume target for the binding, drop it and start fresh. (A CLI that
+        # resumes by session id always has one; only a transcript-file CLI
+        # checks the disk.)
+        if (backend_session_id and backends.by_id(backend).resume_target(
+                backend_session_id, str(cwd), self.home) is None):
             log("ghostSessionReset",
                 f"agent={agent_id} bsid={backend_session_id} — resume target "
                 f"has no transcript on disk; starting a fresh session")
@@ -600,8 +592,8 @@ class TurnDispatchService:
             backend_session_id = ""
         is_new_session = not backend_session_id
 
-        if is_new_session and adapter.preassigns_session_id:
-            backend_session_id = self._bind_new_claude_session(agent_id, session)
+        if is_new_session:
+            backend_session_id = self._bind_new_session(backend, agent_id, session)
 
         context = eventlog.EventContext(
             trace_id=trace_id,
@@ -1286,17 +1278,6 @@ class TurnDispatchService:
             # admitted. The client's outbox will retry the same id safely.
             raise DispatchError(503, "could not durably queue message") from e
 
-    def _write_source_marker(self, *, session: str, trace_id: str,
-                             synthesize_audio: bool) -> None:
-        try:
-            path = source_marker_path(self.home, session)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(source_marker_text(
-                session=session, trace_id=trace_id, now=self.now(),
-                synthesize_audio=synthesize_audio))
-        except OSError as e:
-            log_exception("sendLastSourceWriteFail", e)
-
     def _notify_herald(self, session: str) -> None:
         herald = getattr(self.ctx, "herald", None)
         if herald is None:
@@ -1306,18 +1287,15 @@ class TurnDispatchService:
         except Exception as e:
             log_exception("heraldSetAwaitingFail", e, detail=session)
 
-    def _bind_new_claude_session(self, agent_id: str, session: str) -> str:
-        backend_session_id = self.uuid_factory()
+    def _bind_new_session(self, backend: str, agent_id: str, session: str) -> str:
+        """The backend session id pre-minted for a new session, or "" when
+        the CLI binds the id it reports. A binding failure is a 500."""
         try:
-            agents_db.bind_backend_session(agent_id, backend_session_id)
-        except agents_db.SessionAlreadyBound as e:
-            log_exception("sendPreStampCollision", e, detail=session)
-            backend_session_id = self.uuid_factory()
-            agents_db.bind_backend_session(agent_id, backend_session_id)
+            return backends.by_id(backend).bind_new_session(
+                agent_id, session, uuid_factory=self.uuid_factory) or ""
         except Exception as e:
             log_exception("sendPreStampSessionFail", e, detail=session)
             raise DispatchError(500, "could not bind backend session") from e
-        return backend_session_id
 
     def _spawn_attempt(self, spec: _TurnSpec, *, attempt: int) -> bool:
         """Reject a stale attempt; AGY rechecks around state/Popen itself."""
@@ -1342,11 +1320,8 @@ class TurnDispatchService:
                 or self._superseded(spec)):
             return
         bsid = state.get("backend_session_id") or spec.backend_session_id
-        if backends.adapter_for(spec.backend).resumes_by_transcript_file:
-            transcript = (find_latest_jsonl(
-                bsid, projects_root=self.home / ".claude" / "projects") if bsid else None)
-        else:
-            transcript = bool(bsid)
+        transcript = backends.by_id(spec.backend).resume_target(
+            bsid, str(spec.cwd), self.home)
         interrupted = (state.get("spawn_started") or attempt > 1
                        or bool(spec.recovery_text))
         resume_spec = replace(
@@ -1391,16 +1366,14 @@ class TurnDispatchService:
         # consumes it), so without re-writing here a retry — or a redispatch
         # after preempting an in-flight turn — would fire its hook with no
         # marker, tag the turn `local`, and the Stop hook would skip TTS.
-        adapter = backends.adapter_for(spec.backend)
-        if adapter.hook_source_marker:
-            self._write_source_marker(
-                session=spec.session, trace_id=spec.trace_id,
-                synthesize_audio=spec.synthesize_audio)
+        backend = backends.by_id(spec.backend)
+        backend.arm_source_marker(spec.session, spec.trace_id, spec.synthesize_audio,
+                                  home=self.home, now=self.now)
         # Mutable across this attempt's callbacks: did system.init land?
         # A retry of a never-initialised new session must keep --session-id.
         state = {"saw_init": False, "backend_session_id": spec.backend_session_id, "spawn_ready": threading.Event()}
         account_attempt = None
-        if (adapter.supports_account_failover
+        if (backend.account_pool()
                 and (account_selector(spec.backend) or account_failover(spec.backend).recovering)):
             def pause():
                 _CLAIMED_AT[spec.agent_id] = time.monotonic()
@@ -1612,14 +1585,16 @@ class TurnDispatchService:
             except Exception as e:
                 log_exception("clarpOnErrorFail", e, detail=trace_id)
 
-        if backends.adapter_for(spec.backend).locks_turn_callbacks or spec.janitor_run_id:
+        if spec.janitor_run_id:
             def guarded(callback):
                 def invoke(*args):
                     with _TURN_LOCK:
                         return callback(*args)
                 return invoke
             return guarded(on_init), guarded(on_result), guarded(on_error)
-        return on_init, on_result, on_error
+        wrap = backends.by_id(spec.backend).wrap_turn_callback
+        return (wrap(on_init, _TURN_LOCK), wrap(on_result, _TURN_LOCK),
+                wrap(on_error, _TURN_LOCK))
 
     def _handle_failure(self, spec: _TurnSpec, attempt: int, state: dict,
                         category: str, message: str | None) -> None:
@@ -1637,26 +1612,24 @@ class TurnDispatchService:
                 f"superseded by a newer turn; ignoring its outcome")
             return
         msg = (message or "")[:300]
-        adapter = backends.adapter_for(spec.backend)
-        if (category == error_classify.USAGE_LIMIT
-                and adapter.usage_limit_recovery is not None
-                and not spec.codex_recovery_attempted):
+        backend = backends.by_id(spec.backend)
+        if category == error_classify.USAGE_LIMIT and not spec.recovery_attempted:
             try:
-                recovered = adapter.usage_limit_recovery(message)
+                recovered = backend.recover_usage_limit(message)
             except Exception as exc:
-                log_exception("codexConnectionRecoveryFail", exc, detail=spec.trace_id)
+                log_exception("usageLimitRecoveryFail", exc, detail=spec.trace_id)
                 recovered = False
             with _TURN_LOCK:
                 if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
                     return  # stop/new message during the quota request
                 if recovered:
                     self._schedule_retry(
-                        replace(spec, codex_recovery_attempted=True), attempt, state, msg)
+                        replace(spec, recovery_attempted=True), attempt, state, msg)
                     return
         if self._start_model_fallback(spec, state, category, msg):
             return
         if (category in (error_classify.USAGE_LIMIT, error_classify.AUTH)
-                and adapter.supports_account_failover
+                and backend.account_pool()
                 and account_failover(spec.backend).request(
                     spec.agent_id, spec.trace_id, account_selector(spec.backend))):
             eventlog.emit("server", "claudeAccountRecovery", context=spec.context,
@@ -1733,7 +1706,7 @@ class TurnDispatchService:
                 message_store.finalize_live_assistant_message(agent_id=spec.agent_id,
                     backend_session_id=conversation_id, trace_id=spec.trace_id, text=text)
             if spec.synthesize_audio:
-                from .codex_runner import spoken_for_tts
+                from .voice_markup import spoken_for_tts
                 spoken = spoken_for_tts(text)
                 if spoken:
                     agent = agents_db.get_by_agent_id(spec.agent_id) or {}
@@ -1816,12 +1789,10 @@ class TurnDispatchService:
         limit_event = None
         if category == error_classify.USAGE_LIMIT and quota_confirmed is False:
             human = "Codex could not complete this request. Try again"
-        if (category == error_classify.USAGE_LIMIT
-                and backends.adapter_for(spec.backend).records_classified_usage_limit
-                and quota_confirmed is not False):
+        if category == error_classify.USAGE_LIMIT:
             try:
-                limit_event = backend_usage.record_classified_usage_limit(
-                    backends.normalize(spec.backend))
+                limit_event = backends.by_id(spec.backend).classify_usage_limit(
+                    message or "", quota_confirmed=quota_confirmed)
                 if limit_event:
                     for related in limit_event.get("_additional_events") or []:
                         self.ctx.stream.broadcast(related)

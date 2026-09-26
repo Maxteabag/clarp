@@ -102,12 +102,13 @@ def reconcile_agent(agent_id: str, backend: str | None = None, *,
             log("reconcileStuckBusy", f"agent={agent_id} was={kind} → idle")
             repaired["state"] = kind
 
-    # INV2 — bound Claude session ⇔ transcript exists
-    if backend == backends.CLAUDE and not live:
+    # INV2 — bound session ⇔ something to resume. A CLI that resumes by
+    # transcript file answers None for a session whose file is gone (a ghost
+    # binding); one that resumes by id always has a target.
+    if not live:
         bsid = bound_session if bound_session is not None else agents_db.live_backend_session(agent_id)
         if bsid:
-            from .transcript_log import find_latest_jsonl
-            if (find_latest_jsonl(bsid, projects_root=_projects_root(home)) is None
+            if (backends.by_id(backend).resume_target(bsid, "", home) is None
                     and agents_db.live_backend_session(agent_id) == bsid
                     and not has_live_work(agent_id, backend)):
                 agents_db.end_current_runtime(agent_id)

@@ -78,25 +78,37 @@ def agent(monkeypatch, tmp_path):
 # ---- launch tables --------------------------------------------------------
 
 
-def test_launch_argv_is_declared_per_adapter():
-    """Every registered backend either declares both terminal argvs or neither."""
-    for adapter in backends._BY_ID.values():
-        assert (adapter.terminal_resume_argv is None) == (adapter.terminal_fresh_argv is None)
-    declared = {a.id for a in backends._BY_ID.values() if a.terminal_resume_argv is not None}
+def test_launch_argv_is_declared_per_backend(monkeypatch):
+    """Every registered backend either answers terminal_argv for both a
+    resumed and a fresh session or raises Unsupported for both."""
+    from lib.backend.base import Unsupported
+    monkeypatch.setattr("lib.deployment.plugin_dir", lambda: None)
+    declared = set()
+    for backend in backends.all_backends():
+        answers = []
+        for sid in ("s-1", ""):
+            try:
+                backend.terminal_argv(sid)
+                answers.append(True)
+            except Unsupported:
+                answers.append(False)
+        assert answers[0] == answers[1], backend.id
+        if answers[0]:
+            declared.add(backend.id)
     assert declared == {backends.CLAUDE, backends.CODEX, backends.AGY}
 
 
 @pytest.mark.parametrize("backend,resume,fresh", [
-    (backends.CLAUDE, ("claude", "--dangerously-skip-permissions", "--resume"),
-     ("claude", "--dangerously-skip-permissions")),
-    (backends.CODEX, ("codex", "resume"), ("codex",)),
-    (backends.AGY, ("agy", "--dangerously-skip-permissions", "--conversation"),
-     ("agy", "--dangerously-skip-permissions")),
+    (backends.CLAUDE, ["claude", "--dangerously-skip-permissions", "--resume", "sid"],
+     ["claude", "--dangerously-skip-permissions"]),
+    (backends.CODEX, ["codex", "resume", "sid"], ["codex"]),
+    (backends.AGY, ["agy", "--dangerously-skip-permissions", "--conversation", "sid"],
+     ["agy", "--dangerously-skip-permissions"]),
 ])
-def test_launch_argv_per_backend(backend, resume, fresh):
-    adapter = backends.adapter_for(backend)
-    assert adapter.terminal_resume_argv == resume
-    assert adapter.terminal_fresh_argv == fresh
+def test_launch_argv_per_backend(monkeypatch, backend, resume, fresh):
+    monkeypatch.setattr("lib.deployment.plugin_dir", lambda: None)
+    assert backends.by_id(backend).terminal_argv("sid") == resume
+    assert backends.by_id(backend).terminal_argv("") == fresh
 
 
 # ---- live-terminal counter -------------------------------------------------

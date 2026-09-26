@@ -8,16 +8,12 @@ from __future__ import annotations
 
 import pathlib
 import time
-from typing import Any, Callable
+from typing import Any
 
 from . import agents as agents_db
 from . import backends
 from . import transcript_import_cache
 from . import eventlog
-
-
-FindTranscript = Callable[[str], pathlib.Path | None]
-ParseTranscript = Callable[[pathlib.Path], list[dict[str, Any]]]
 
 
 def _compact_text(value: Any, limit: int = 240) -> Any:
@@ -63,9 +59,7 @@ def load_conversation(*, session: str, after_revision: int = 0,
                       include_tool_details: bool = True,
                       before_message_id: str = "",
                       interaction_id: str = "",
-                      background_import: bool = False,
-                      claude_finder: FindTranscript,
-                      claude_parser: ParseTranscript) -> dict[str, Any]:
+                      background_import: bool = False) -> dict[str, Any]:
     # The message store caps reads at 5,000 rows. Reserve one row for the
     # pagination lookahead so `has_more` remains truthful at the public maximum.
     limit = max(1, min(int(limit or 100), 4999))
@@ -97,18 +91,14 @@ def load_conversation(*, session: str, after_revision: int = 0,
                 "has_more": False,
                 "includes_automated": include_automated}
 
-    reader_injected = backends.adapter_for(backend).transcript_reader_injected
-    if reader_injected:
-        latest = claude_finder(backend_session_id)
-    else:
-        latest = backends.find_session_jsonl(backend, backend_session_id)
+    # The backend locates and parses its own transcript.
+    latest = backends.find_session_jsonl(backend, backend_session_id)
 
     if latest is not None:
         def import_latest() -> None:
             import_started = time.perf_counter()
             parse_started = import_started
-            imported = (claude_parser(latest) if reader_injected
-                        else backends.parse_turns(backend, latest))
+            imported = backends.parse_turns(backend, latest)
             parsed_at = time.perf_counter()
             agents_db.store_transcript_turns(
                 agent_id=agent_id,

@@ -1,88 +1,57 @@
-"""Grok Build (``grok -p``) stream-json runtime adapter."""
+"""``lib.grok_runner``: delegator for the Grok Build runner.
+
+The bodies live on ``lib.backend.grok.GrokBackend`` (slice 3 of
+docs/architecture/backend-strategy.md). This module keeps the names the
+tests reach and monkeypatch: the public runner API, ``GROK_BIN``,
+``LIVE_TEXT_INTERVAL_SEC`` and the private helpers.
+"""
 from __future__ import annotations
 
-import json
-import os
 import pathlib
-import shutil
-import subprocess
-import uuid
-from dataclasses import dataclass, field
+import shutil  # noqa: F401 — tests patch ``grok_runner.shutil.which``
 from typing import Any, Callable, Optional
 
-from . import agents as agents_db
-from . import tts_queue
-from .log import log, log_exception
-from .proc_util import stderr_text
-from .process_registry import ProcessRegistry, TurnHandle
-from .protocol import AgentState
-from .runner_common import (
-    SPEAK_RE,
-    bind_session,
-    broadcast_transcript,
-    iter_json_dicts,
-    launch,
-    persist_live_text,
-    record_state,
-    register_handle,
-    speak,
-    start_drain,
+from .backend.grok import (  # noqa: F401 — re-exported for existing importers
+    GrokBackend,
+    _TOOL_DONE_STATUSES,
+    _TOOL_START_TYPES,
+    _TOOL_UPDATE_TYPES,
+    _TurnState,
+    _assistant_delta,
+    _session_id_from,
+    _text_from,
+    _tool_name_from,
+    _usage_from,
 )
-from .voice_preamble import apply_voice_preamble
+from .backend.registry import by_id as _by_id
+from .backend.stream_json import SPEAK_RE
+from .process_registry import TurnHandle
 
 
 GROK_BIN = "grok"
-LIVE_TEXT_INTERVAL_SEC = 0.25
+LIVE_TEXT_INTERVAL_SEC = GrokBackend.live_text_interval
 _SPEAK_RE = SPEAK_RE
-_REGISTRY = ProcessRegistry(log_exception=log_exception)
 
 
-def active_handles(agent_id: str) -> list["TurnHandle"]:
-    return _REGISTRY.active_handles(agent_id)
+def _backend() -> GrokBackend:
+    return _by_id("grok")
+
+
+_REGISTRY = _backend()._registry
+
+
+def active_handles(agent_id: str) -> list[TurnHandle]:
+    return _backend().active_handles(agent_id)
 
 
 def interrupt(agent_id: str) -> int:
-    return _REGISTRY.interrupt(agent_id, event="grokInterruptFail")
+    return _backend().interrupt(agent_id)
 
 
 def build_cmd(session_id: str = "", *, is_new_session: bool = False,
               model: str = "", effort: str = "") -> list[str]:
-    """argv for one headless Grok Build turn (prompt appended as ``-p``)."""
-    cmd = [
-        GROK_BIN, "--always-approve", "--no-alt-screen",
-        "--output-format", "streaming-json",
-    ]
-    if model:
-        cmd += ["--model", model]
-    if effort:
-        cmd += ["--reasoning-effort", effort]
-    if session_id and not is_new_session:
-        cmd += ["--resume", session_id]
-    elif session_id:
-        cmd += ["--session-id", session_id]
-    return cmd
-
-
-@dataclass
-class _TurnState:
-    """Accumulators for one turn's drainer thread.
-
-    ``live_text`` is the assistant text of the current model call (Grok
-    writes one ``assistant`` row per model call to chat_history.jsonl, so a
-    tool call ends the segment); ``turn_text`` is every segment of the turn.
-    """
-    session_id: str = ""
-    last_agent_message: str = ""
-    live_text: str = ""
-    turn_text: str = ""
-    failed_error: str = ""
-    saw_session: bool = False
-    phase: str = ""
-    tokens_in: int = 0
-    tokens_out: int = 0
-    seen_speak: set[str] = field(default_factory=set)
-    persisted_live_text: str = ""
-    last_live_write_at: float = 0.0
+    return _backend().build_cmd(
+        session_id, is_new_session=is_new_session, model=model, effort=effort)
 
 
 def spawn_turn(
@@ -105,317 +74,48 @@ def spawn_turn(
     isolated: bool = False,
     **_kwargs: Any,
 ) -> TurnHandle:
-    if shutil.which(GROK_BIN) is None:
-        raise FileNotFoundError(
-            f"`{GROK_BIN}` not on PATH — install Grok Build "
-            f"(https://x.ai/cli) to run Grok-backed agents")
-    cwd = pathlib.Path(os.path.expanduser(str(cwd)))
-    minted = ""
-    if not backend_session_id or is_new_session:
-        minted = str(uuid.uuid4())
-        backend_session_id = minted
-        is_new_session = True
-    agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
-    persona = (agent or {}).get("persona") or ""
-    prompt = apply_voice_preamble(
-        text, voice=voice_preamble, persona=persona, session=session)
-    cmd = build_cmd(
-        backend_session_id, is_new_session=is_new_session,
-        model=model, effort=effort)
-    cmd += ["-p", prompt]
-    flag = "resume" if not is_new_session else "new"
-    log("grokSpawn", f"cwd={cwd} {flag}={backend_session_id or '∅'} "
-                     f"text_len={len(text)} trace={trace_id or '∅'} "
-                     f"agent={agent_id or '∅'}")
-    proc, handle = launch(cmd, cwd=cwd, session=session)
-    runtime_agent_id = "" if isolated else agent_id
-    register_handle(_REGISTRY, runtime_agent_id, handle)
-    start_drain(
-        handle, _drain_stdout, backend="grok",
-        proc=proc, agent_id=runtime_agent_id, session=session,
-        trace_id=trace_id, handle=handle,
-        backend_session_id=backend_session_id,
-        minted=bool(minted),
+    return _backend().start_turn(
+        text=text, cwd=cwd, backend_session_id=backend_session_id,
+        is_new_session=is_new_session, session=session, agent_id=agent_id,
         on_session_init=on_session_init, on_result=on_result,
-        on_error=on_error, stream=stream,
-        enqueue=enqueue or tts_queue.enqueue,
-    )
-    return handle
+        on_error=on_error, trace_id=trace_id, stream=stream, enqueue=enqueue,
+        voice_preamble=voice_preamble, model=model, effort=effort,
+        isolated=isolated, **_kwargs)
 
 
-def _text_from(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, dict):
-        if isinstance(value.get("text"), str):
-            return value["text"]
-        content = value.get("content")
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            return "\n".join(filter(None, (_text_from(part) for part in content)))
-    if isinstance(value, list):
-        return "\n".join(filter(None, (_text_from(part) for part in value)))
-    return ""
+def _drain_stdout(**kwargs: Any) -> None:
+    _backend()._drain_stdout(**kwargs)
 
 
-def _session_id_from(ev: dict) -> str:
-    params = ev.get("params") if isinstance(ev.get("params"), dict) else {}
-    update = params.get("update") if isinstance(params.get("update"), dict) else {}
-    for src in (ev, params, update, ev.get("result") if isinstance(ev.get("result"), dict) else {}):
-        if not isinstance(src, dict):
-            continue
-        for key in ("session_id", "sessionId", "id"):
-            value = src.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return ""
+def _handle_event(ev: dict, st: _TurnState, **kwargs: Any) -> None:
+    _backend()._handle_event(ev, st, **kwargs)
 
 
-def _assistant_delta(ev: dict) -> str:
-    if ev.get("method") == "session/update":
-        params = ev.get("params") if isinstance(ev.get("params"), dict) else {}
-        update = params.get("update") if isinstance(params.get("update"), dict) else {}
-        kind = str(update.get("sessionUpdate") or "")
-        if kind in {"agent_message_chunk", "agent_message"}:
-            return _text_from(update.get("content"))
-        return ""
-    etype = str(ev.get("type") or ev.get("event") or "")
-    if etype == "text" and isinstance(ev.get("data"), str):
-        # grok >= 1.0.30 ``--output-format streaming-json``: one ACP session
-        # update per line; assistant text arrives as ``text`` deltas in
-        # ``data`` (``thought`` carries reasoning the same way).
-        return ev["data"]
-    if etype in {"assistant", "agent_message", "message", "text", "output_text"}:
-        role = str(ev.get("role") or "")
-        if role and role not in {"assistant", "model"}:
-            return ""
-        return (_text_from(ev.get("content"))
-                or _text_from(ev.get("text"))
-                or _text_from(ev.get("message"))
-                or _text_from(ev.get("delta")))
-    return ""
+def _persist_live_text(st: _TurnState, **kwargs: Any) -> None:
+    _backend()._persist_live_text(st, **kwargs)
 
 
-# ACP tool-call lifecycle events (grok >= 1.0.30) plus the older spellings.
-_TOOL_START_TYPES = {"tool_call", "tool_started", "tool_start", "tool_use",
-                     "item.started"}
-_TOOL_UPDATE_TYPES = {"tool_call_update"}
-_TOOL_DONE_STATUSES = {"completed", "failed", "error", "cancelled"}
+def _bind(st: _TurnState, session_id: str, **kwargs: Any) -> None:
+    _backend()._bind(st, session_id, **kwargs)
 
 
-def _tool_name_from(ev: dict) -> str:
-    return str(ev.get("toolName") or ev.get("title") or ev.get("name")
-               or ev.get("tool") or "tool")[:80]
-
-
-def _usage_from(ev: dict) -> tuple[int, int]:
-    usage = ev.get("usage") if isinstance(ev.get("usage"), dict) else {}
-    try:
-        return (int(usage.get("input_tokens") or 0),
-                int(usage.get("output_tokens") or 0))
-    except (TypeError, ValueError):
-        return (0, 0)
-
-
-def _drain_stdout(
-    *, proc: subprocess.Popen, agent_id: str, session: str, trace_id: str,
-    handle: "TurnHandle", backend_session_id: str, minted: bool,
-    on_session_init, on_result, on_error, stream, enqueue,
-) -> None:
-    st = _TurnState(session_id=backend_session_id)
-    try:
-        if minted:
-            _bind(st, backend_session_id, on_session_init=on_session_init,
-                  on_error=on_error, trace_id=trace_id)
-            _record_state(agent_id, AgentState.THINKING,
-                          {"dispatch": "grok", "trace_id": trace_id})
-        if proc.stdout is not None:
-            for raw in proc.stdout:
-                line = raw.strip()
-                if not line or st.failed_error:
-                    continue
-                try:
-                    ev = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(ev, dict):
-                    continue
-                sid = _session_id_from(ev)
-                if sid:
-                    _bind(st, sid, on_session_init=on_session_init,
-                          on_error=on_error, trace_id=trace_id)
-                _handle_event(
-                    ev, st, agent_id=agent_id, session=session,
-                    trace_id=trace_id, on_error=on_error, stream=stream,
-                    enqueue=enqueue)
-        rc = proc.wait()
-        if rc != 0 and not st.failed_error:
-            err = stderr_text(proc) or f"grok exited rc={rc}"
-            log("grokExitErr", f"rc={rc} trace={trace_id or '∅'} "
-                               f"stderr={(err or '')[:500]!r}")
-            if on_error is not None:
-                on_error(err)
-        elif on_result is not None and not st.failed_error:
-            if not st.saw_session and backend_session_id:
-                _bind(st, backend_session_id, on_session_init=on_session_init,
-                      on_error=on_error, trace_id=trace_id)
-            _persist_live_text(st, agent_id=agent_id, session=session,
-                               trace_id=trace_id, stream=stream, force=True)
-            _broadcast(stream, agent_id, session)
-            usage = ({"input_tokens": st.tokens_in, "output_tokens": st.tokens_out}
-                     if (st.tokens_in or st.tokens_out) else {})
-            on_result({"last_agent_message": st.last_agent_message or st.turn_text,
-                       "usage": usage})
-    except Exception as error:  # noqa: BLE001
-        log_exception("grokDrainFail", error, detail=trace_id)
-        if on_error is not None and not st.failed_error:
-            try:
-                on_error(str(error)[:300])
-            except Exception:  # noqa: BLE001
-                pass
-    finally:
-        if agent_id:
-            _REGISTRY.unregister(agent_id, handle)
-
-
-def _handle_event(
-    ev: dict, st: _TurnState, *, agent_id: str, session: str, trace_id: str,
-    on_error, stream, enqueue,
-) -> None:
-    etype = str(ev.get("type") or ev.get("event") or "")
-    if etype in {"available_commands", "usage_update", "plan"}:
-        if etype == "usage_update":
-            st.tokens_in, st.tokens_out = _usage_from(ev)
-        return
-    if etype == "usage":
-        st.tokens_in, st.tokens_out = _usage_from(ev)
-        return
-    if etype == "thought":
-        # Reasoning delta: nothing to show, but the agent is visibly busy.
-        if st.phase != "thinking":
-            st.phase = "thinking"
-            _record_state(agent_id, AgentState.THINKING,
-                          {"dispatch": "grok", "trace_id": trace_id})
-        return
-    if etype in _TOOL_START_TYPES:
-        # Grok has written the assistant row that carries this call to
-        # chat_history.jsonl by now, so the live segment is about to be
-        # covered by a durable row: flush it, refresh the pane, and start a
-        # fresh segment for the text that follows the tool result.
-        _persist_live_text(st, agent_id=agent_id, session=session,
-                           trace_id=trace_id, stream=stream, force=True)
-        st.live_text = ""
-        st.persisted_live_text = ""
-        st.phase = "tool"
-        _record_state(agent_id, AgentState.TOOL, {
-            "dispatch": "grok", "trace_id": trace_id,
-            "tool": _tool_name_from(ev),
-        })
-        _broadcast(stream, agent_id, session)
-        return
-    if etype in _TOOL_UPDATE_TYPES:
-        status = str(ev.get("status") or "")
-        if status in _TOOL_DONE_STATUSES:
-            # The tool_result row has landed; refresh the pane so the card
-            # picks up its output and status.
-            st.phase = "thinking"
-            _record_state(agent_id, AgentState.THINKING,
-                          {"dispatch": "grok", "trace_id": trace_id})
-            _broadcast(stream, agent_id, session)
-        return
-    if etype in {"turn_started", "turn.started"}:
-        st.phase = "thinking"
-        _record_state(agent_id, AgentState.THINKING,
-                      {"dispatch": "grok", "trace_id": trace_id})
-        return
-    if etype in {"error", "turn.failed", "turn_failed"}:
-        err = ev.get("error") or ev.get("message") or "grok error"
-        if isinstance(err, dict):
-            err = str(err.get("message") or err)
-        st.failed_error = str(err)
-        if on_error is not None:
-            on_error(st.failed_error)
-        return
-    if etype == "end":
-        usage_in, usage_out = _usage_from(ev)
-        if usage_in or usage_out:
-            st.tokens_in, st.tokens_out = usage_in, usage_out
-        stop = str(ev.get("stopReason") or "")
-        if stop and stop not in {"end_turn", "endTurn", "stop"}:
-            log("grokStop", f"reason={stop} trace={trace_id or '∅'}")
-        _persist_live_text(st, agent_id=agent_id, session=session,
-                           trace_id=trace_id, stream=stream, force=True)
-        _broadcast(stream, agent_id, session)
-        return
-    delta = _assistant_delta(ev)
-    if not delta:
-        return
-    if st.phase != "speaking":
-        st.phase = "speaking"
-        _record_state(agent_id, AgentState.THINKING,
-                      {"dispatch": "grok", "trace_id": trace_id})
-    st.live_text += delta
-    st.turn_text += delta
-    st.last_agent_message = st.live_text
-    _speak(st.live_text, st, agent_id=agent_id, session=session,
-           trace_id=trace_id, enqueue=enqueue)
-    _persist_live_text(st, agent_id=agent_id, session=session,
-                       trace_id=trace_id, stream=stream)
-
-
-def _persist_live_text(st: _TurnState, *, agent_id: str, session: str,
-                       trace_id: str, stream: Any, force: bool = False) -> None:
-    """Write one mutable assistant row at a bounded visual cadence.
-
-    Same contract as the Codex and AGY runners: the row is keyed by the
-    turn's trace, so a later transcript import replaces it with the durable
-    assistant text once chat_history.jsonl catches up.
-    """
-    persist_live_text(
-        st, text=st.live_text, backend_session_id=st.session_id,
-        agent_id=agent_id, session=session, trace_id=trace_id, stream=stream,
-        force=force, interval=LIVE_TEXT_INTERVAL_SEC, backend="grok")
-
-
-def _bind(st: _TurnState, session_id: str, *, on_session_init, on_error,
-          trace_id: str) -> None:
-    bind_session(st, session_id, backend="grok", on_session_init=on_session_init,
-                 on_error=on_error, trace_id=trace_id)
-
-
-def _speak(text: str, st: _TurnState, *, agent_id: str, session: str,
-           trace_id: str, enqueue) -> None:
-    """Enqueue each completed <speak>…</speak> block of ``text`` once.
-
-    ``text`` is the accumulated segment, so a block only matches once its
-    closing tag has streamed in; ``seen_speak`` keeps a later pass over the
-    same segment from re-speaking it. Untagged prose stays silent, as with
-    the Codex and Claude runners.
-    """
-    speak(text, st, agent_id=agent_id, session=session, trace_id=trace_id,
-          enqueue=enqueue, backend="grok", fail_event="grokSpeakFail",
-          fail_detail=trace_id)
+def _speak(text: str, st: _TurnState, **kwargs: Any) -> None:
+    _backend()._speak(text, st, **kwargs)
 
 
 def _record_state(agent_id: str, kind: str, detail: dict[str, Any]) -> None:
-    record_state(agent_id, kind, detail, backend="grok", event="grokStateFail")
+    _backend()._record_state(agent_id, kind, detail)
 
 
 def _broadcast(stream: Any, agent_id: str, session: str) -> None:
-    broadcast_transcript(stream, agent_id, session, backend="grok")
+    _backend()._broadcast(stream, agent_id, session)
 
 
 # ---- orchestrator routing -------------------------------------------------
 
 def routing_cmd(prompt: str, *, model: str = "", effort: str = "") -> list[str]:
-    """argv for one headless Grok Build request with no session (orchestrator)."""
-    return build_cmd(model=model, effort=effort) + ["-p", prompt]
+    return _backend().routing_cmd(prompt, model=model, effort=effort)
 
 
 def routing_text(stdout: str) -> str:
-    """Concatenated assistant text of a streaming-json run."""
-    text = ""
-    for ev in iter_json_dicts(stdout):
-        text += _assistant_delta(ev)
-    return text
+    return _backend().routing_text(stdout)

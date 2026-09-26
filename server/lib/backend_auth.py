@@ -218,10 +218,9 @@ def _driver(backend: str) -> _AuthDriver | None:
 
 
 def _executable(backend: str) -> str | None:
-    adapter = backends.get(backend)
-    if adapter is None:
+    if backends.get(backend) is None:
         return None
-    return shutil.which(adapter.executable())
+    return shutil.which(backends.by_id(backend).executable())
 
 
 def _credential_metadata(backend: str) -> tuple[bool, int]:
@@ -378,8 +377,8 @@ def start_login(backend: str) -> dict[str, Any]:
                 backend, state, output, started_at=started_at,
                 error="" if state == "complete" else _failure_summary(output))
             _validation_cache.pop(backend, None)
-        if state == "complete" and backends.adapter_for(backend).restarts_runner_on_credential_change:
-            _recycle_codex_writers()
+        if state == "complete":
+            backends.by_id(backend).on_credential_change()
 
     threading.Thread(target=worker, daemon=True,
                      name=f"backend-login-{backend}").start()
@@ -440,22 +439,5 @@ def logout(backend: str) -> dict[str, Any]:
         _tasks.pop(backend, None)
         _code_submitted.pop(backend, None)
         _validation_cache.pop(backend, None)
-    if backends.adapter_for(backend).restarts_runner_on_credential_change:
-        _recycle_codex_writers()
+    backends.by_id(backend).on_credential_change()
     return next(row for row in status(validate=False) if row["id"] == backend)
-
-
-def _recycle_codex_writers() -> None:
-    """Drop leftover Codex app-servers after credentials change.
-
-    ``codex login`` rewrites ``~/.codex/auth.json`` in another process. The
-    per-agent app-server still holds thread writer locks and the previous
-    token. The next ``thread/resume`` then fails with ``already has an
-    active writer``. Closing stdin lets flock drop; the next turn starts a
-    fresh app-server that re-reads auth.
-    """
-    from . import codex_app_server
-    try:
-        codex_app_server.recycle_clients()
-    except Exception as exc:  # noqa: BLE001
-        log_exception("codexAppServerRecycleFail", exc)

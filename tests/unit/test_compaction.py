@@ -57,11 +57,17 @@ def test_valid_claude_starts(monkeypatch):
     assert compaction.is_compacting("sammy") is True
 
 
-def test_compact_command_map_per_backend():
-    assert compaction._COMPACT[backends.CLAUDE][1] == "/compact"
-    assert compaction._COMPACT[backends.CODEX][1] == "/compact"
-    assert compaction._COMPACT[backends.AGY][1] == "/compress"
-    assert compaction._COMPACT[backends.GROK][1] == "/compact"
+def test_compact_command_per_backend():
+    assert backends.by_id(backends.CLAUDE).compaction("s").command == "/compact"
+    assert backends.by_id(backends.CODEX).compaction("s").command == "/compact"
+    assert backends.by_id(backends.AGY).compaction("s").command == "/compress"
+    assert backends.by_id(backends.GROK).compaction("s").command == "/compact"
+
+
+def test_unsupported_backend_refused(monkeypatch):
+    _patch(monkeypatch, agent={"agent_id": "a", "backend": "opencode"})
+    out = compaction.compact_session("x")
+    assert out["ok"] is False and out["error"] == "compaction unsupported for opencode"
 
 
 def test_server_process_delegates_compaction_to_runtime_owner():

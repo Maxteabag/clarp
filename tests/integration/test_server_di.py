@@ -2979,10 +2979,13 @@ def test_post_agents_resume_exposes_history_immediately(running_server, monkeypa
         "timestamp": "2026-05-31T10:00:00Z",
         "message": {"role": "user", "content": "Existing context"},
     }) + "\n")
+    # The Claude backend resolves the transcript finder at call time, so the
+    # patch goes on transcript_log rather than on the server module.
+    from lib import transcript_log
     monkeypatch.setattr(
-        server_module,
+        transcript_log,
         "find_latest_jsonl",
-        lambda session_id: transcript if session_id == "session-existing" else None,
+        lambda session_id, *a, **k: transcript if session_id == "session-existing" else None,
     )
 
     status, _ = _post(base + "/agents", {

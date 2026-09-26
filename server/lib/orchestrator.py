@@ -169,7 +169,7 @@ def provider_options() -> list[dict[str, Any]]:
     """
     rows: list[dict[str, Any]] = []
     for adapter in backends.routing_adapters():
-        binary = adapter.executable()
+        binary = backends.by_id(adapter.id).executable()
         rows.append({
             "id": adapter.id,
             "label": adapter.label,
@@ -1395,10 +1395,9 @@ def call_model(packet: dict[str, Any], settings: OrchestratorSettings) -> dict[s
         return _call_typesafe(packet, settings, prompt)
     if provider == OPENAI_PROVIDER:
         return _call_openai(prompt, settings)
-    adapter = backends.get(provider)
-    if adapter is None or not adapter.supports_routing:
+    runner = backends.get(provider)
+    if runner is None or not runner.supports_routing:
         raise RuntimeError(f"unsupported orchestrator provider: {settings.provider}")
-    runner = importlib.import_module(f"lib.{adapter.routing_module}")
     cmd = runner.routing_cmd(prompt, model=settings.model, effort=settings.effort)
     binary = cmd[0]
     if shutil.which(binary) is None:

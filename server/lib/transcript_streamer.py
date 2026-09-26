@@ -26,7 +26,6 @@ from . import transcript_import_cache
 from . import tts_queue
 from .log import log_exception
 from .protocol import SSEType, TurnSource
-from .transcript_log import find_latest_jsonl, parse_turns as parse_claude_turns
 from .transcript_watcher import (
     InotifyDispatcher, TranscriptWatcher, WatcherPool,
 )
@@ -103,7 +102,7 @@ class TranscriptStreamer:
 
     def _bind(self, agent: dict, backend_session_id: str) -> None:
         agent_id = agent["agent_id"]
-        path = find_latest_jsonl(backend_session_id)
+        path = backends.by_id(agent.get("backend")).find_transcript(backend_session_id)
         if path is None:
             # Transcript file doesn't exist yet — try again next reconcile.
             return
@@ -181,20 +180,12 @@ class TranscriptStreamer:
         to import the final assistant prose after DONE.
         """
         try:
-            backend = backends.normalize(agent.get("backend"))
-            latest = (
-                find_latest_jsonl(backend_session_id)
-                if backend == backends.CLAUDE
-                else backends.find_session_jsonl(backend, backend_session_id)
-            )
+            backend = backends.by_id(agent.get("backend"))
+            latest = backend.find_transcript(backend_session_id)
             if latest is None:
                 return
             def import_latest() -> None:
-                turns = (
-                    parse_claude_turns(latest)
-                    if backend == backends.CLAUDE
-                    else backends.parse_turns(backend, latest)
-                )
+                turns = backend.parse_transcript(latest)
                 agents_db.store_transcript_turns(
                     agent_id=agent["agent_id"],
                     backend_session_id=backend_session_id,
