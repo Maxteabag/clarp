@@ -145,7 +145,8 @@ class AgentLifecycleService:
             avatar_dir.mkdir(parents=True, exist_ok=True)
             handle = tempfile.NamedTemporaryFile(
                 dir=avatar_dir, prefix=".avatar-", suffix=".jpg", delete=False)
-            handle.write(spec.avatar_raw); handle.close()
+            handle.write(spec.avatar_raw)
+            handle.close()
             avatar_temp = pathlib.Path(handle.name)
         agents[session] = {
             "name": spec.persona, "voice_id": spec.voice_id, "cwd": spec.cwd,
