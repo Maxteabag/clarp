@@ -20,8 +20,9 @@ import threading
 import time
 
 from .activity import state_activity_event
+from . import events
 from .log import log, log_exception
-from .protocol import AgentState, SSEType
+from .protocol import AgentState
 from .timing import SERVER_TIMING
 
 
@@ -116,8 +117,8 @@ class StateLogWatcher:
             trace_id=str(detail_map.get("trace_id") or ""),
         )
         if notification.get("notify"):
-            self.stream.broadcast(
-                user_notifications.event_payload(notification))
+            events.broadcast(self.stream, events.as_event(
+                user_notifications.event_payload(notification)))
             apns.on_user_notification(notification)
 
     def _loop(self) -> None:
@@ -157,25 +158,23 @@ class StateLogWatcher:
                     detail = json.loads(r["detail"])
                 except json.JSONDecodeError:
                     detail = None
-            state_event = {
-                "type":         SSEType.AGENT_STATE,
-                "agent_id":     r["agent_id"],
-                "session": r["session"],
-                "persona":      r["persona"],
-                "kind":         r["kind"],
-                "ts":           int(r["ts"]),
-                "detail":       detail,
-                "status_text":  r["custom_status"] or "",
-            }
-            self.stream.broadcast(state_event)
-            self.stream.broadcast(state_activity_event(
+            events.broadcast(self.stream, events.agent_state(
                 agent_id=r["agent_id"],
                 session=r["session"],
                 persona=r["persona"],
                 kind=r["kind"],
                 ts=int(r["ts"]),
                 detail=detail,
+                status_text=r["custom_status"] or "",
             ))
+            events.broadcast(self.stream, events.as_event(state_activity_event(
+                agent_id=r["agent_id"],
+                session=r["session"],
+                persona=r["persona"],
+                kind=r["kind"],
+                ts=int(r["ts"]),
+                detail=detail,
+            )))
             if r["kind"] == AgentState.DONE:
                 self._ensure_notify_worker()
                 self._notify_queue.put({

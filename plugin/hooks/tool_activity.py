@@ -9,9 +9,10 @@ import sys
 import _clarp_lib  # noqa: F401  — puts Clarp's `lib` on sys.path
 try:
     from lib import agents as agents_db  # noqa: E402
+    from lib import turn_lifecycle  # noqa: E402
     from lib.activity import summarize_tool_activity, tool_input_from_hook_payload  # noqa: E402
     from lib.hook_runtime import app_session  # noqa: E402
-    from lib.protocol import ActivityStatus, AgentState  # noqa: E402
+    from lib.protocol import ActivityStatus  # noqa: E402
 except ImportError:
     # claude-pwa not installed on this machine — hook is a no-op.
     sys.exit(0)
@@ -44,7 +45,8 @@ def main() -> int:
 
     summary = summarize_tool_activity(tool_name, tool_input)
     try:
-        agents_db.record_state(agent["agent_id"], AgentState.TOOL, {
+        turn_lifecycle.hook_transition(
+            agent["agent_id"], turn_lifecycle.TurnEvent.TOOL_STARTED, {
             "phase": "tool_started",
             "call_id": payload.get("tool_use_id"),
             "cwd": payload.get("cwd"),

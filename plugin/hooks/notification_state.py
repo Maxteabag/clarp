@@ -15,8 +15,8 @@ import sys
 import _clarp_lib  # noqa: F401  — puts Clarp's `lib` on sys.path
 try:
     from lib import agents as _agents             # noqa: E402
+    from lib import turn_lifecycle                # noqa: E402
     from lib.hook_runtime import app_session  # noqa: E402
-    from lib.protocol import AgentState           # noqa: E402
 except ImportError:
     # claude-pwa not installed on this machine — hook is a no-op.
     sys.exit(0)
@@ -50,8 +50,8 @@ def main() -> int:
         return 0
 
     try:
-        _agents.record_state(
-            agent["agent_id"], AgentState.WAITING,
+        turn_lifecycle.hook_transition(
+            agent["agent_id"], turn_lifecycle.TurnEvent.NOTIFICATION,
             {"message": message, "title": title,
              "backend_session_id": backend_session_id},
         )

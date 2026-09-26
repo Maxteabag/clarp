@@ -21,6 +21,9 @@ class FakeService:
             raise self.result
         return self.result
 
+    def submit(self, command):
+        return self.dispatch(**command.as_kwargs())
+
 
 @pytest.fixture
 def adapters():

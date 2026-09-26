@@ -104,11 +104,42 @@ def test_load_reloads_when_asked_for_a_different_path(tmp_path):
     second.write_text('[server]\nport = 7002\n')
     config.reset_cache()
     assert config.load(first).port == 7001
-    # Same path: served from the cache without touching the file again.
+    # Same path inside the stat interval: served from the cache without
+    # touching the file again.
     first.write_text('[server]\nport = 7999\n')
     assert config.load(first).port == 7001
     # A different path is a different answer, not the stale cache.
     assert config.load(second).port == 7002
+    config.reset_cache()
+
+
+def test_rewritten_config_reloads_after_the_stat_interval(tmp_path, monkeypatch):
+    path = tmp_path / "live.toml"
+    path.write_text('[server]\nport = 7101\n')
+    clock = [1000.0]
+    monkeypatch.setattr(config.time, "monotonic", lambda: clock[0])
+    config.reset_cache()
+    assert config.load(path).port == 7101
+    stats = []
+    real_stat = config._file_signature
+    monkeypatch.setattr(config, "_file_signature", lambda p: stats.append(1) or real_stat(p))
+    path.write_text('[server]\nport = 7102\n')
+    import os
+    os.utime(path, ns=(2_000_000_000_000_000_000, 2_000_000_000_000_000_000))
+    clock[0] += 0.5
+    assert config.load().port == 7101 and stats == []      # inside the interval: no stat
+    clock[0] += 1.0
+    assert config.load().port == 7102 and len(stats) == 2  # one check, one reload
+    clock[0] += 1.0
+    assert config.load(path).port == 7102 and len(stats) == 3  # unchanged: check only
+    # A malformed rewrite keeps the last good Config instead of taking the Host down.
+    path.write_text('[server\nport = ')
+    os.utime(path, ns=(3_000_000_000_000_000_000, 3_000_000_000_000_000_000))
+    clock[0] += 1.0
+    assert config.load().port == 7102
+    config.reset_cache()
+    with pytest.raises(config.ConfigError):
+        config.load(path)
     config.reset_cache()
 
 

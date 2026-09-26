@@ -13,6 +13,7 @@ sys.path.insert(0, str(_SERVER_DIR))
 
 from lib import opencode_runner  # noqa: E402
 from lib import opencode_transcript  # noqa: E402
+from lib import turn_lifecycle  # noqa: E402
 
 
 def test_build_cmd_fresh_and_resume():
@@ -329,8 +330,9 @@ def test_step_start_is_thinking_not_a_tool(tmp_path, monkeypatch):
     _install_fake_opencode(
         bin_dir, "".join(json.dumps(row) + "\n" for row in events))
     states: list[str] = []
-    monkeypatch.setattr(opencode_runner, "_record_state",
-                        lambda _agent_id, kind, _detail: states.append(kind))
+    monkeypatch.setattr(opencode_runner, "_transition",
+                        lambda _agent_id, event, _detail: states.append(
+                            turn_lifecycle.target(event)))
     monkeypatch.setattr(opencode_runner.agents_db, "get_by_agent_id", lambda _id: None)
     monkeypatch.setattr(opencode_runner.agents_db,
                         "latest_turn_synthesize_audio", lambda _id: False)

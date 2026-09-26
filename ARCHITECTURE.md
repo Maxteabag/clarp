@@ -14,7 +14,7 @@ wire contract the clients follow is in [docs/protocol.md](docs/protocol.md).
   POST /send ────────► Unix socket ──────► turn_dispatch.py ──spawn──► claude -p … --plugin-dir plugin/
                                                                              │
                        hooks (plugin/hooks/*.py) ◄── UserPromptSubmit/Pre/PostToolUse/Stop/…
-                       write state_log + messages rows into state.sqlite
+                       report turn events (turn_lifecycle) + messages rows into state.sqlite
                                 │
   SSE /events ◄───── audio_stream.py broadcasts agent-state / agent-activity / transcript-updated
   GET /log ◄──────── conversation.py reads message_store.py (SQLite is the read model)
@@ -52,23 +52,34 @@ should hold no business logic; handlers delegate to `server/lib/`. Its
 `build_server` is the composition root: it seeds startup invariants, starts
 the ordered worker catalog (`_server_workers`, one `lib.workers.Worker` per
 background thread), runs restart recovery, then starts the listeners that
-accept outside requests.
+accept outside requests. Library routes get the request's `Principal` and a
+`Responder` from the handler (`handler.principal()`, `handler.responder()`,
+both in `http_utils.py`) instead of reading its private fields.
+
+The rules for state, ownership and boundaries are in
+[docs/architecture/state-and-boundaries.md](docs/architecture/state-and-boundaries.md):
+one writer per table, turn state only through the state machine, typed
+identity and events, pure policies. Guard tests enforce each one
+(`test_table_writers.py`, `test_module_state_guard.py`,
+`test_turn_lifecycle.py`, `test_identity.py`, `test_events_schema.py`,
+`test_policies_pure.py`).
 
 | Area | Modules |
 |---|---|
-| Persistence | `db.py` (connections, per-request query metrics, lock reporting; facade over `db_schema.py` (DDL, `_SCHEMA_VERSION`) and `db_migrations.py` (`_migrate`, `_migrate_to_vN`)), `settings_store.py`, `maintenance.py` (pruning), `instance_backup.py` |
-| Agents and turns | `agents.py`, `focus.py` (which agent is open; the DB is the only reader-facing source), `agent_lifecycle.py` (create/relaunch/fork/delete), `send_request.py` (parsing and policy for `/send`), `turn_dispatch.py` (queue, preemption, retries), `turn_queue.py`, `reconcile.py` (repairs drifted state on read), `snapshot.py` (`/agents/snapshot`) |
+| Persistence | `db.py` (connections, per-request query metrics, lock reporting, `change_stamp()` for cross-process invalidation; facade over `db_schema.py` (DDL, `_SCHEMA_VERSION`) and `db_migrations.py` (`_migrate`, `_migrate_to_vN`)), `revisioned_cache.py` (bounded caches keyed by `change_stamp()` or a table revision), `settings_store.py` (the `settings` table's only writer), `janitor_store.py` (the `janitor_*` tables' only writer), `maintenance.py` (pruning), `instance_backup.py` |
+| Agents and turns | `agents.py` (the `agents` table's only writer), `identity.py` (`AgentRef`, `TurnRef`; the one place session, agent id, backend session id and trace id are translated), `focus.py` (which agent is open; the DB is the only reader-facing source), `agent_lifecycle.py` (create/relaunch/fork/delete), `send_request.py` (parsing and policy for `/send`), `turn_lifecycle.py` (the turn state machine: events, legal transitions, `BUSY`/`TERMINAL`; the only writer of `state_log` and `turns`), `turn_slots.py` (in-flight, queued and spawning slots behind one ownership lock, rebuilt from the durable rows after a restart; `live_work()` answers "is anything happening for this agent"), `turn_dispatch.py` (admission, `DispatchCommand`, queue, preemption, retries), `turn_queue.py` (the `queued_turns` table's only writer), `reconcile.py` (repairs drifted state on read), `snapshot.py` (`/agents/snapshot`) |
+| Policies | `policies/` holds pure decisions, values in and a decision out, with no IO: `admission.py` (which origin may wake an agent and how), `notifications.py` (whether a finished turn notifies), `failover.py` (what an account failover does with pending work), `agent_spec.py` (validating and defaulting an agent create/update). The IO modules gather facts, call them and act on the result |
 | Runtime boundary | `runtime.py`, `runtime_bridge.py` (versioned private RPC), `runtime_events.py` (durable cross-process SSE relay), `runtime_release.py` (idle rolling handoff), `runtime_startup.py` (crash-only recovery) |
 | Backends | `backend/` (one `Backend` strategy class per CLI: `base.py`, `stream_json.py`, `claude.py`, `codex.py`, `agy.py`, `grok.py`, `opencode.py`, `deepseek.py`, `registry.py`; contract in [docs/architecture/backend-strategy.md](docs/architecture/backend-strategy.md)), `backends.py` (facade: id constants, `normalize()`, `by_id()` / `for_agent()`, `adapter_for()` as an alias, and the `BackendAdapter` catalogue rows the classes are built from), the `*_runner.py` modules (thin delegators kept for their tests), `codex_app_server.py` (Codex's connection pool), `provider_capabilities.py` (model catalogue), `backend_auth.py`, `backend_usage.py` |
 | Conversation read model | `message_store.py` (facade over `message_writes.py` (client-message idempotency, markers, transcript import), `message_live.py` (live row protocol, agy turn authority), `message_previews.py` (`/log`, previews, dashboard projection), `message_context.py` (display cleaning, injected-context stripping)), `conversation.py`, `transcript_log.py`, `codex_transcript.py`, `agy_transcript.py`, `transcript_watcher.py` + `transcript_streamer.py` (live text while a turn runs), `activity.py` |
-| Events | `audio_stream.py` (SSE hub + clip janitor), `state_watcher.py`, `eventlog.py` + `telemetry.py` (diagnostics into `telemetry.sqlite`) |
+| Events | `events.py` (one constructor per SSE type; `broadcast()` takes only those, and the hub re-validates every payload against the documented fields), `audio_stream.py` (SSE hub + clip janitor), `state_watcher.py`, `eventlog.py` + `telemetry.py` (diagnostics into `telemetry.sqlite`) |
 | Startup and workers | `workers.py` (ordered worker registry: start, `on_close` stop, diagnostics), `dispatch_adapters.py` (the silent forced-session turns every scheduler dispatches, with their origins and idle checks), `decision_delivery.py` (polls answered decisions and HTML forms and wakes the agent) |
 | Voice in | `transcription_pipeline.py` (the uncached `/transcribe` path: engine choice, biasing, error mapping, event rows), `stt.py`, `whispercpp.py`, `transcription_models.py`, `vocab.py` + `vocab_budget.py` + `vocab_generators.py` + `vocab_compile.py` + `vocab_store.py` + `workspace_vocab.py` (budget-fitted context packs for the transcription prompt, every compile recorded in `vocab_runs`), `stt_providers.py` + `deepgram_stt.py` + `eleven_stt.py` + `cartesia_stt.py` (cloud engines and the engine / turn-taking switches), `hallucinations.py`, `custom_stt_adapters.py` |
 | Voice out | `tts_worker.py`, `tts_queue.py`, `tts_engine.py`, `tts_providers.py`, `cartesia_*.py`, `eleven_*.py`, `deepgram_*.py`, `custom_tts_adapters.py`, `voice_markup.py`, `clip_delivery/` (HLS, chunked HTTP, raw PCM), `clip_store.py`, `audio_growing.py` |
 | Routing of spoken input | `routing.py` (name matching), `orchestrator.py` (LLM router for hands-free), `herald.py` (which agent's clip plays when several reply) |
 | Autonomy | `heartbeat.py`, `dreaming.py`, `team_store.py` + `team_leader.py` + `leader_memory.py`, `background_jobs.py`, `task_plans.py` |
 | Native-app surfaces | `device_pairing.py`, `apns.py`, `user_notifications.py`, `artifacts.py`, `media_store.py`, `agent_portraits.py` + `portrait_generation.py`, `personas.py`, `location.py`, `calendar_request.py`, `prompt_history.py` |
-| Install and ops | `config.py`, `paths.py`, `xdg.py`, `deployment.py`, `service_manager.py`, `server_update.py`, `managed_skills.py`, `personal_skills.py`, `bonjour.py`, `server_identity.py` |
+| Install and ops | `context.py` (the frozen `ServerContext`; services swap only through `replace_service`), `vocab_service.py`, `config.py` (reloads on change without a restart), `paths.py`, `xdg.py`, `deployment.py`, `service_manager.py`, `server_update.py`, `managed_skills.py`, `personal_skills.py`, `bonjour.py`, `server_identity.py` |
 
 `bin/clarp-admin.py` is the install, update, pairing, and diagnostics CLI;
 `bin/clarp-tui.py` is the setup wizard. `skills/` are Claude Code skills the

@@ -37,6 +37,15 @@ server_module.BIND_ADDR = "127.0.0.1"
 build_server = server_module.build_server
 
 
+
+class _SttCtx(SimpleNamespace):
+    """A handler context stub with the one ServerContext method the STT
+    switch calls."""
+
+    def replace_stt(self, stt):
+        previous, self.stt = self.stt, stt
+        return previous
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -181,10 +190,10 @@ def test_server_restart_does_not_interrupt_healthy_external_runtime(
     from lib import heartbeat, interrupted_turns
 
     calls: list[str] = []
-    fake_ctx.runtime_client = SimpleNamespace(
+    fake_ctx.replace_service("runtime_client", SimpleNamespace(
         ping=lambda: True,
         recover_queued=lambda: 0,
-    )
+    ))
     monkeypatch.setattr(
         server_module, "resume_persisted_agents",
         lambda _ctx: calls.append("resume"))
@@ -205,7 +214,7 @@ def test_server_restart_does_not_interrupt_healthy_external_runtime(
 
 
 def test_status_reports_external_runtime_health(fake_ctx):
-    fake_ctx.runtime_client = SimpleNamespace(
+    fake_ctx.replace_service("runtime_client", SimpleNamespace(
         ping=lambda: True,
         recover_queued=lambda: 0,
         status=lambda: {
@@ -214,7 +223,7 @@ def test_status_reports_external_runtime_health(fake_ctx):
             "draining": False,
             "active": {"agent-1": "trace-1"},
         },
-    )
+    ))
     port = _free_port()
     srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -243,6 +252,9 @@ def test_http_server_can_be_replaced_while_runtime_keeps_active_turn(
     active = {}
 
     class PersistentDispatch:
+        def submit(self, command):
+            return self.dispatch(**command.as_kwargs())
+
         def dispatch(self, **kwargs):
             agent = __import__("lib.agents", fromlist=["get_by_session"]).get_by_session(
                 kwargs["forced_session"])
@@ -267,7 +279,7 @@ def test_http_server_can_be_replaced_while_runtime_keeps_active_turn(
     )
     runtime_thread = threading.Thread(target=runtime.serve_forever, daemon=True)
     runtime_thread.start()
-    fake_ctx.runtime_client = RuntimeClient(runtime_socket)
+    fake_ctx.replace_service("runtime_client", RuntimeClient(runtime_socket))
 
     def start_http_server():
         port = _free_port()
@@ -353,7 +365,7 @@ def test_runtime_owned_turn_completes_after_http_server_is_gone(
         runtime_socket, dispatch_service=runtime_dispatch)
     runtime_thread = threading.Thread(target=runtime.serve_forever, daemon=True)
     runtime_thread.start()
-    fake_ctx.runtime_client = RuntimeClient(runtime_socket)
+    fake_ctx.replace_service("runtime_client", RuntimeClient(runtime_socket))
 
     port = _free_port()
     first = build_server(fake_ctx, port, bind_addr="127.0.0.1")
@@ -417,6 +429,9 @@ def test_background_job_snapshot_and_idempotent_cancel_http(
     class FakeDispatch:
         def __init__(self, _ctx):
             pass
+
+        def submit(self, command):
+            return self.dispatch(**command.as_kwargs())
 
         def dispatch(self, **kwargs):
             dispatched.append(kwargs)
@@ -539,7 +554,7 @@ def test_host_file_browsing_requires_full_device_scope(
     from lib import device_pairing
 
     base, ctx, _srv = running_server
-    ctx.auth_token = "administrator-secret"
+    ctx = _srv.ctx = ctx.with_(auth_token="administrator-secret")
     if scope == "administrator":
         token = ctx.auth_token
     else:
@@ -576,7 +591,7 @@ def test_host_file_browsing_requires_full_device_scope(
 def test_one_time_pairing_issues_revocable_device_credential(fake_ctx):
     from lib import device_pairing
 
-    fake_ctx.auth_token = "administrator-token"
+    fake_ctx = fake_ctx.with_(auth_token="administrator-token")
     port = _free_port()
     srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -764,7 +779,7 @@ def test_prompt_history_ingests_authenticated_send_and_excludes_legacy(
         agent_id=agent["agent_id"], backend_session_id="legacy-conversation",
         client_msg_id="decision-synthetic", text="decision payload", origin="user",
     )
-    fake_ctx.auth_token = "secret-token"
+    fake_ctx = fake_ctx.with_(auth_token="secret-token")
     port = _free_port()
     srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -867,7 +882,7 @@ def test_prompt_history_excludes_send_admitted_without_auth(
         "force_session": True,
     })
     assert status == 200
-    ctx.auth_token = "later-token"
+    ctx = _srv.ctx = ctx.with_(auth_token="later-token")
 
     from lib.server_identity import get_server_info
     computer_id = get_server_info()["server_id"]
@@ -904,7 +919,7 @@ def test_prompt_history_preserves_routed_voice_admission(
         "spawn_turn",
         lambda **_kwargs: type("_FakeHandle", (), {"pid": 99})(),
     )
-    fake_ctx.auth_token = "secret-token"
+    fake_ctx = fake_ctx.with_(auth_token="secret-token")
     port = _free_port()
     srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -1524,7 +1539,7 @@ def test_location_rejects_out_of_range_coordinates(running_server):
 
 
 def test_auth_accepts_cookie_for_headerless_transports(fake_ctx):
-    fake_ctx.auth_token = "secret-token"
+    fake_ctx = fake_ctx.with_(auth_token="secret-token")
     port = _free_port()
     srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
     t = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -1669,7 +1684,7 @@ def test_discard_waits_for_inflight_transcription_then_deletes(running_server):
             assert release.wait(timeout=2)
             return super().transcribe_bytes(*args, **kwargs)
 
-    ctx.stt = SlowSTT(text="discard me")
+    ctx.replace_service("stt", SlowSTT(text="discard me"))
     transcription_result = []
     discard_result = []
 
@@ -1968,7 +1983,7 @@ def test_post_send_defaults_user_origin_to_audio(running_server, monkeypatch):
 def test_oracle_status_and_delegation_endpoints(running_server, monkeypatch):
     base, ctx, _srv = running_server
     from lib import oracle_delegations, oracle_realtime
-    ctx.auth_token = "administrator-token"
+    ctx = _srv.ctx = ctx.with_(auth_token="administrator-token")
     headers = {"Authorization": "Bearer administrator-token"}
 
     monkeypatch.setattr(oracle_realtime, "capability", lambda: {
@@ -2009,7 +2024,7 @@ def test_oracle_status_and_delegation_endpoints(running_server, monkeypatch):
 def test_oracle_delegation_ack_rejects_nonterminal_work(running_server):
     base, ctx, _srv = running_server
     from lib import agents, oracle_delegations
-    ctx.auth_token = "administrator-token"
+    ctx = _srv.ctx = ctx.with_(auth_token="administrator-token")
     headers = {"Authorization": "Bearer administrator-token"}
     agent = agents.get_by_session("rachel")
     oracle_delegations.begin(
@@ -2028,7 +2043,7 @@ def test_oracle_delegation_ack_rejects_nonterminal_work(running_server):
 def test_oracle_cancel_agent_uses_all_durable_owner_rows(running_server):
     base, ctx, _srv = running_server
     from lib import agents, oracle_delegations
-    ctx.auth_token = "administrator-token"
+    ctx = _srv.ctx = ctx.with_(auth_token="administrator-token")
     headers = {"Authorization": "Bearer administrator-token"}
     agent = agents.get_by_session("rachel")
     for suffix in ("a", "b"):
@@ -2054,7 +2069,7 @@ def test_oracle_cancel_failure_restores_live_turn_ownership(
 ):
     base, ctx, _srv = running_server
     from lib import agents, backends, message_store, oracle_delegations, turn_dispatch
-    ctx.auth_token = "administrator-token"
+    ctx = _srv.ctx = ctx.with_(auth_token="administrator-token")
     headers = {"Authorization": "Bearer administrator-token"}
     agent = agents.get_by_session("rachel")
     trace_id = "oracle-cancel-stop-failure"
@@ -2100,7 +2115,7 @@ def test_oracle_cancel_survives_post_interrupt_bookkeeping_failure(
 ):
     base, ctx, _srv = running_server
     from lib import agents, oracle_delegations
-    ctx.auth_token = "administrator-token"
+    ctx = _srv.ctx = ctx.with_(auth_token="administrator-token")
     headers = {"Authorization": "Bearer administrator-token"}
     agent = agents.get_by_session("rachel")
     oracle_delegations.begin(
@@ -2109,8 +2124,9 @@ def test_oracle_cancel_survives_post_interrupt_bookkeeping_failure(
         client_msg_id="oracle-bookkeeping-failure",
         agent_id=agent["agent_id"], session="rachel",
         request_text="Cancel despite UI bookkeeping")
+    from lib import turn_lifecycle
     monkeypatch.setattr(
-        agents, "record_state",
+        turn_lifecycle, "try_transition",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             RuntimeError("state write failed")))
 
@@ -2127,7 +2143,7 @@ def test_oracle_cancel_zero_interrupt_restores_owned_turn(
 ):
     base, ctx, _srv = running_server
     from lib import agents, backends, oracle_delegations, turn_dispatch
-    ctx.auth_token = "administrator-token"
+    ctx = _srv.ctx = ctx.with_(auth_token="administrator-token")
     headers = {"Authorization": "Bearer administrator-token"}
     agent = agents.get_by_session("rachel")
     trace_id = "oracle-zero-interrupt"
@@ -2154,7 +2170,7 @@ def test_oracle_cancel_zero_interrupt_restores_owned_turn(
 def test_limited_device_cannot_read_or_stream_oracle(running_server, monkeypatch):
     base, ctx, _srv = running_server
     from lib import device_pairing
-    ctx.auth_token = "administrator-token"
+    ctx = _srv.ctx = ctx.with_(auth_token="administrator-token")
     monkeypatch.setattr(device_pairing, "authenticate", lambda token: (
         {"device_id": "limited-phone", "scope": "limited"}
         if token == "limited-token" else None))
@@ -2168,7 +2184,7 @@ def test_limited_device_cannot_read_or_stream_oracle(running_server, monkeypatch
 
 def test_auth_disabled_server_still_rejects_oracle_routes(running_server):
     base, ctx, _srv = running_server
-    ctx.auth_token = ""
+    ctx = _srv.ctx = ctx.with_(auth_token="")
 
     for method, path in (
         ("get", "/oracle/status"),
@@ -2192,7 +2208,7 @@ def test_oracle_results_cannot_cross_full_device_principals(
 ):
     base, ctx, _srv = running_server
     from lib import agents, device_pairing, oracle_delegations
-    ctx.auth_token = "administrator-token"
+    ctx = _srv.ctx = ctx.with_(auth_token="administrator-token")
     monkeypatch.setattr(device_pairing, "authenticate", lambda token: (
         {"device_id": token, "scope": "full"}
         if token in {"phone-a", "phone-b"} else None))
@@ -2362,7 +2378,7 @@ def test_concurrent_transcription_retry_coalesces_inflight_work(running_server):
             assert release.wait(timeout=2)
             return super().transcribe_bytes(*args, **kwargs)
 
-    ctx.stt = SlowSTT(text="computed once", ends_terminal=True)
+    ctx.replace_service("stt", SlowSTT(text="computed once", ends_terminal=True))
     headers = {
         "Content-Type": "audio/webm",
         "X-Transcription-ID": "durable-recording-inflight",
@@ -2442,7 +2458,7 @@ def test_disabled_transcription_keeps_server_health_ready(running_server, monkey
     from lib import stt as stt_module, transcription_models
     monkeypatch.setattr(transcription_models, "catalog_status", lambda: [])
     monkeypatch.setattr(stt_module, "installed_transcription_models", lambda: [])
-    ctx.stt = DisabledSTT()
+    ctx.replace_service("stt", DisabledSTT())
     with urllib.request.urlopen(base + "/diagnostics/health", timeout=2) as response:
         health_body = json.loads(response.read())
     with urllib.request.urlopen(base + "/transcription-capabilities", timeout=2) as response:
@@ -2466,7 +2482,7 @@ def test_post_transcribe_passes_selected_installed_model(running_server):
             return self.transcribe_bytes(
                 audio_bytes, content_type, vocab_prompt, wait=wait)
 
-    ctx.stt = SelectableSTT()
+    ctx.replace_service("stt", SelectableSTT())
     status, body = _post_raw(
         base + "/transcribe", b"\x00" * 100,
         {"Content-Type": "audio/webm", "X-Transcription-Model": "whisper:medium"},
@@ -2508,7 +2524,7 @@ else:
     manifest = custom_stt_adapters.get("custom.integration-stt")
     assert manifest is not None
     base, ctx, _srv = running_server
-    ctx.stt = CustomAdapterSTT(manifest, "general")
+    ctx.replace_service("stt", CustomAdapterSTT(manifest, "general"))
 
     status, body = _get(base + "/transcription-capabilities")
     assert status == 200
@@ -2613,7 +2629,7 @@ def test_transcription_activation_recovery_reuses_loading_default(monkeypatch):
 
     current = WhisperSTT("small.en", "int8")
     handler = object.__new__(server_module.Handler)
-    handler.server = SimpleNamespace(ctx=SimpleNamespace(stt=current))
+    handler.server = SimpleNamespace(ctx=_SttCtx(stt=current))
     monkeypatch.setattr(config, "load", lambda: SimpleNamespace(
         whisper_enabled=True, whisper_model="small.en",
         whisper_compute="int8", whisper_isolate=False,
@@ -2669,7 +2685,7 @@ def test_transcription_activation_timeout_reuses_same_loader(monkeypatch):
         whisper_compute="int8", whisper_isolate=False,
     ))
     handler = object.__new__(server_module.Handler)
-    handler.server = SimpleNamespace(ctx=SimpleNamespace(
+    handler.server = SimpleNamespace(ctx=_SttCtx(
         stt=FakeUnavailable("small.en", "int8")))
 
     with pytest.raises(RuntimeError, match="did not load"):
@@ -2725,7 +2741,7 @@ def test_transcription_activation_propagates_loader_error_before_retry(
     current = FakeWhisper("small.en", "int8")
     current.load_error = RuntimeError("first loader failed")
     handler = object.__new__(server_module.Handler)
-    handler.server = SimpleNamespace(ctx=SimpleNamespace(stt=current))
+    handler.server = SimpleNamespace(ctx=_SttCtx(stt=current))
 
     with pytest.raises(RuntimeError, match="first loader failed"):
         handler._activate_transcription_if_default("faster-whisper:small.en")
@@ -2771,7 +2787,7 @@ def test_transcription_activation_holds_the_swap_lock(monkeypatch):
         whisper_compute="int8", whisper_isolate=False,
     ))
     handler = object.__new__(server_module.Handler)
-    handler.server = SimpleNamespace(ctx=SimpleNamespace(
+    handler.server = SimpleNamespace(ctx=_SttCtx(
         stt=FakeUnavailable("small.en", "int8")))
     assert not server_module._STT_ACTIVATION_LOCK.locked()
     handler._activate_transcription_if_default("faster-whisper:small.en")
@@ -2887,7 +2903,7 @@ def test_signed_notification_avatar_serves_custom_agent_without_app_auth(
     avatar = tmp_path / "nova.jpg"
     avatar.write_bytes(b"custom-notification-avatar")
     agents_db.update_agent(agent_id, avatar_path=str(avatar))
-    ctx.auth_token = "server-secret"
+    ctx = _srv.ctx = ctx.with_(auth_token="server-secret")
     version = avatar_content_version(avatar)
     expires_at = int(time.time()) + 600
     signature = notification_avatar_signature(
@@ -3114,7 +3130,7 @@ def test_stop_barrier_is_executed_by_external_runtime(fake_ctx):
         def finish_stop(self, lease_id, cancelled_trace_ids=None):
             calls.append(("finish", lease_id, cancelled_trace_ids))
 
-    fake_ctx.runtime_client = RuntimeOwner()
+    fake_ctx.replace_service("runtime_client", RuntimeOwner())
     agent = agents_db.get_by_session("claude")
     turn_queue.enqueue(
         queue_id="queue-runtime-stop", agent_id=agent["agent_id"],
@@ -3165,6 +3181,9 @@ def test_decision_delivery_is_private_and_bypasses_user_queue(monkeypatch):
     class FakeDispatch:
         def __init__(self, _ctx):
             pass
+
+        def submit(self, command):
+            return self.dispatch(**command.as_kwargs())
 
         def dispatch(self, **kwargs):
             dispatched.append(kwargs)
@@ -3230,7 +3249,7 @@ def test_message_audio_lookup_is_authenticated_and_does_not_synthesize(running_s
     queue = tts_queue.enqueue(agent_id=agent['agent_id'], session='rachel', voice_id='V_RACHEL',
                               text='Rachel here. The saved answer.', source='pwa', trace_id='original-turn')
     tts_queue.mark_done(queue, clip_id=clip)
-    ctx.auth_token = 'replay-test-token'
+    ctx = _srv.ctx = ctx.with_(auth_token='replay-test-token')
     url = base + '/clips/message?session=rachel&message_id=replay-message'
     with pytest.raises(urllib.error.HTTPError) as denied:
         _get(url)
@@ -3319,7 +3338,7 @@ def test_oracle_v2_route_preserves_full_device_principal(running_server, monkeyp
     from lib import oracle_live, oracle_live_stable
     implementation = oracle_live if tinkered else oracle_live_stable
     base, ctx, _srv = running_server
-    ctx.auth_token = "administrator-token"
+    ctx = _srv.ctx = ctx.with_(auth_token="administrator-token")
     seen = []
     def serve(handler):
         seen.append((handler._request_principal, handler._request_device_scope))
@@ -3337,7 +3356,7 @@ def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch,
     import websocket
     from lib import config, oracle_realtime, artifacts, oracle_live, media_store, podcast_history
     base, ctx, _srv = running_server
-    ctx.auth_token = "administrator-token"
+    ctx = _srv.ctx = ctx.with_(auth_token="administrator-token")
     cfg = config.load()
     class KeyConfig:
         def openai_key(self): return "fixture-key"
@@ -3422,7 +3441,7 @@ def test_authentication_failure_budget_does_not_lock_out_a_paired_phone(running_
     from lib import device_pairing
     from lib.request_security import FailureLimiter
     base, ctx, srv = running_server
-    ctx.auth_token = 'local-administrator'
+    ctx = srv.ctx = ctx.with_(auth_token='local-administrator')
     srv.auth_failures = FailureLimiter(limit=2)
     device = device_pairing.exchange(device_pairing.issue()['code'])
     headers = {'X-Clarp-Transport': 'relay', 'X-Forwarded-For': '192.0.2.20'}
@@ -3440,7 +3459,7 @@ def test_pairing_failure_budget_keeps_valid_single_use_pairing_working(running_s
     from lib import device_pairing
     from lib.request_security import FailureLimiter
     base, ctx, srv = running_server
-    ctx.auth_token = 'local-administrator'
+    ctx = srv.ctx = ctx.with_(auth_token='local-administrator')
     srv.auth_failures = FailureLimiter(limit=2)
     headers = {'X-Clarp-Transport': 'relay', 'X-Forwarded-For': '192.0.2.10'}
     for expected in [409, 409, 429]:
@@ -3455,8 +3474,8 @@ def test_pairing_failure_budget_keeps_valid_single_use_pairing_working(running_s
 def test_revoking_a_device_closes_its_existing_event_stream(running_server):
     import http.client
     from lib import device_pairing
-    base, ctx, _ = running_server
-    ctx.auth_token = 'local-administrator'
+    base, ctx, srv = running_server
+    ctx = srv.ctx = ctx.with_(auth_token='local-administrator')
     device = device_pairing.exchange(device_pairing.issue()['code'])
     target = urlsplit(base)
     client = http.client.HTTPConnection(target.hostname, target.port, timeout=1)
@@ -3473,8 +3492,8 @@ def test_revoking_a_device_closes_its_existing_event_stream(running_server):
 
 def test_revocation_between_authentication_and_stream_registration_is_rejected(running_server, monkeypatch):
     from lib import device_pairing
-    base, ctx, _ = running_server
-    ctx.auth_token = 'local-administrator'
+    base, ctx, srv = running_server
+    ctx = srv.ctx = ctx.with_(auth_token='local-administrator')
     device = device_pairing.exchange(device_pairing.issue()['code'])
     authenticate = device_pairing.authenticate
     def race(token):
@@ -3496,7 +3515,7 @@ def test_device_http_auth_survives_database_write_contention(
     from lib import db, device_pairing
 
     base, ctx, _srv = running_server
-    ctx.auth_token = "test-administrator"
+    ctx = _srv.ctx = ctx.with_(auth_token="test-administrator")
     device = device_pairing.exchange(device_pairing.issue()["code"])
     db.conn().execute("UPDATE paired_devices SET last_seen_at = 0")
 

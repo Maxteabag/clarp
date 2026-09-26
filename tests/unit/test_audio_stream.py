@@ -11,17 +11,17 @@ from lib.audio_stream import AudioStream  # noqa: E402
 def test_subscribe_receives_broadcast(tmp_path):
     s = AudioStream(tmp_path)
     q = s.subscribe()
-    s.broadcast({"type": "test", "n": 1})
+    s.broadcast({"type": "agent-roster", "kind": "test"})
     payload = q.get(timeout=1)
-    assert "test" in payload
+    assert "agent-roster" in payload and "test" in payload
 
 
 def test_recent_replays_in_order(tmp_path):
     s = AudioStream(tmp_path)
-    s.broadcast({"type": "a"})
-    s.broadcast({"type": "b"})
-    types = [ev["type"] for ev in s.recent()]
-    assert types == ["a", "b"]
+    s.broadcast({"type": "agent-roster", "kind": "a"})
+    s.broadcast({"type": "agent-roster", "kind": "b"})
+    kinds = [ev["kind"] for ev in s.recent()]
+    assert kinds == ["a", "b"]
 
 
 def test_ephemeral_broadcast_reaches_live_subscriber_but_never_replays(tmp_path):
@@ -69,21 +69,22 @@ def test_transcript_update_bursts_are_throttled_per_session(tmp_path):
 def test_recent_purges_old_events(tmp_path):
     s = AudioStream(tmp_path)
     # Inject an old timestamp directly.
-    s._recent.append((time.time() - s.RECENT_WINDOW_SEC - 1, {"type": "old"}))
-    s.broadcast({"type": "fresh"})
-    types = [ev["type"] for ev in s.recent()]
-    assert types == ["fresh"]
+    s._recent.append((time.time() - s.RECENT_WINDOW_SEC - 1,
+                      {"type": "agent-roster", "kind": "old"}))
+    s.broadcast({"type": "agent-roster", "kind": "fresh"})
+    kinds = [ev["kind"] for ev in s.recent()]
+    assert kinds == ["fresh"]
 
 
 def test_full_subscriber_is_evicted_with_log(tmp_path, capsys):
     s = AudioStream(tmp_path)
     q = s.subscribe(maxsize=1)
     q.put_nowait("dummy")          # now full
-    s.broadcast({"type": "x"})
+    s.broadcast({"type": "agent-roster", "kind": "x"})
     err = capsys.readouterr().err
     assert "sseSubFull" in err
     # Subscriber should have been removed; another broadcast must not raise.
-    s.broadcast({"type": "y"})
+    s.broadcast({"type": "agent-roster", "kind": "y"})
 
 
 def test_unsubscribe_silent_when_absent(tmp_path):
@@ -124,3 +125,12 @@ def test_audio_broadcast_marks_clip_broadcast(tmp_path):
     ).fetchone()
     assert row["status"] == "broadcast"
     assert row["broadcast_at"] is not None
+
+
+def test_hub_refuses_undocumented_types_and_fields(tmp_path):
+    import pytest
+    s = AudioStream(tmp_path)
+    with pytest.raises(ValueError, match="unknown SSE event type"):
+        s.broadcast({"type": "made-up"})
+    with pytest.raises(ValueError, match="unknown field"):
+        s.broadcast_ephemeral({"type": "agent-roster", "kind": "x", "extra": 1})

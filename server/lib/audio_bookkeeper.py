@@ -47,9 +47,9 @@ def drain(limit=32):
     stage, not a playback-attempt counter; repeated plays cannot invent new facts.
     Gate, run, result and outbox completion commit atomically under one write lock.
     """
-    from . import db, janitors, janitor_builtins
+    from . import db, janitor_builtins, janitor_store
     done = 0
-    with janitors._write() as c:
+    with janitor_store.write() as c:
         # Filter paused/out-of-scope targets before LIMIT: their older pending
         # observations must not starve an eligible target's bookkeeping.
         rows = c.execute("""SELECT e.* FROM audio_bookkeeping_events e
@@ -78,15 +78,13 @@ def drain(limit=32):
                                  'target_agent_id':row['agent_id'],'turn_id':row['turn_id'],'runtime_id':row['runtime_id']}}
             result = {'summary':'Audio lifecycle fact recorded','status':row['stage'],'item_count':1,
                       'target_agent_id':row['agent_id']}
-            c.execute("""INSERT OR IGNORE INTO janitor_runs(run_id,agent_id,session,attachment_id,generation,trace_id,status,
-                candidates_json,configuration_json,created_at,started_at,finished_at,outcome)
-                VALUES(?,?,?,?,?,?,'completed','[]',?,?,?,?,'completed')""",
-                (run_id,config['agent_id'],config['session'],attachment['attachment_id'],config['generation'],run_id,
-                 janitors._json(frozen),now,now,now))
-            c.execute('INSERT OR IGNORE INTO janitor_demand_results(run_id,result_json,created_at) VALUES(?,?,?)',
-                      (run_id,janitors._json(result),now))
+            janitor_store.insert_run(c,run_id=run_id,agent_id=config['agent_id'],session=config['session'],
+                attachment_id=attachment['attachment_id'],generation=config['generation'],trace_id=run_id,
+                status='completed',outcome='completed',candidates=[],configuration=frozen,
+                created_at=now,started_at=now,finished_at=now,ignore_existing=True)
+            janitor_store.insert_demand_result(c,run_id,result,now,ignore_existing=True)
             c.execute('UPDATE audio_bookkeeping_events SET run_id=?,completed_at=? WHERE event_id=? AND completed_at IS NULL',
                       (run_id,now,row['event_id']))
-            c.execute('UPDATE janitor_configs SET last_run_at=?,last_error=\'\' WHERE agent_id=?',(now,config['agent_id']))
+            janitor_store.record_config_run(c,config['agent_id'],now,touch_updated=False)
             done += 1
     return done

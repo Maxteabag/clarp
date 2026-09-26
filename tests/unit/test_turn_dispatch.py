@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from lib import agents as agents_db
 from lib import heartbeat, team_leader, team_store
-from lib import tts_queue
+from lib import tts_queue, turn_queue
 from lib.protocol import AgentState
 from lib.turn_dispatch import (
     MAX_ATTEMPTS,
@@ -1098,7 +1098,7 @@ def _enable_account_failover(monkeypatch, *, available=True):
     monkeypatch.setattr(_td.config, "load", lambda *args, **kwargs: cfg)
     scheduled = []
     coordinator = ClaudeFailover(
-        _td._TURN_LOCK, switch=Mock(return_value=available),
+        _td.OwnershipLock(), switch=Mock(return_value=available),
         schedule=lambda delay, callback: scheduled.append((delay, callback)),
         now=lambda: 100)
     monkeypatch.setattr(_td, "_CLAUDE_FAILOVER", coordinator)
@@ -1553,15 +1553,16 @@ def test_lock_while_opening_turn_releases_claim_and_retry_runs(tmp_path, monkeyp
     import sqlite3
     backends = _CodexSteerable()
     service, agent_id = _codex_service(tmp_path, backends)
-    real = agents_db.open_turn
+    from lib import turn_lifecycle
+    real = turn_lifecycle.open_turn
     def locked(**kwargs):
         raise sqlite3.OperationalError('database is locked')
-    monkeypatch.setattr(agents_db, 'open_turn', locked)
+    monkeypatch.setattr(turn_lifecycle, 'open_turn', locked)
     with pytest.raises(sqlite3.OperationalError):
         service.dispatch(text='full control over the pipeline', requested_session='cipher',
                          trace_id='t-died', client_msg_id='u-lost')
     assert _td._INFLIGHT.get(agent_id) is None
-    monkeypatch.setattr(agents_db, 'open_turn', real)
+    monkeypatch.setattr(turn_lifecycle, 'open_turn', real)
     _assert_retry_delivers_once(service, backends, agent_id)
 
 
@@ -1815,3 +1816,212 @@ def test_janitor_spawn_locks_do_not_accumulate():
     del held
     gc.collect()
     assert len(_td._JANITOR_SPAWN_LOCKS) == 0
+
+
+# --- Stream A: durable slots, no writes under _TURN_LOCK, one dispatch -------
+
+def test_send_parked_behind_stop_survives_a_runtime_restart(tmp_path):
+    from lib import turn_queue
+    service, backends, agent_id = _make_service(tmp_path)
+    _td.begin_stop(agent_id)
+    result = service.dispatch(text="after stop", requested_session="mike",
+                              trace_id="parked", client_msg_id="parked")
+    assert result.queued and backends.spawned == []
+    [row] = turn_queue.parked(agent_id)
+    assert (row["trace_id"], row["text"]) == ("parked", "after stop")
+    assert turn_queue.pending(agent_id) == []  # invisible to the queue UI
+
+    # Restart: memory is gone, the row is not. The user lifts the Stop pause.
+    _td.reset_for_tests()
+    turn_queue.set_paused(agent_id, False)
+    backends.live = False
+    assert service.recover_queued() == 1
+    [(_, call)] = backends.spawned
+    assert call["trace_id"] == "parked"
+    assert turn_queue.parked(agent_id) == []
+    assert turn_queue.status("stop-park-parked") == "started"
+
+
+def test_parked_send_is_unparked_when_the_stop_finishes(tmp_path):
+    from lib import turn_queue
+    service, backends, agent_id = _make_service(tmp_path)
+    snapshot, _, _ = _td.begin_stop(agent_id)
+    service.dispatch(text="after stop", requested_session="mike",
+                     trace_id="parked", client_msg_id="parked")
+    _td.complete_stop(service.ctx, agent_id, snapshot, set(),
+                      backend_registry=backends)
+    assert [call["trace_id"] for _, call in backends.spawned] == ["parked"]
+    assert turn_queue.parked(agent_id) == []
+
+
+def test_restart_rehydrates_an_open_turn_whose_process_is_alive(tmp_path):
+    from lib import turn_lifecycle
+    service, backends, agent_id = _make_service(tmp_path)
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="alive")
+    agents_db.set_trace_for_session("mike", "alive")
+    _td.reset_for_tests()
+    service.recover_queued()
+    assert _td._INFLIGHT[agent_id] == "alive"
+    assert _td.live_work(agent_id).active_trace == "alive"
+
+
+class _WritesUnderTurnLock:
+    """sqlite authorizer that records every write compiled while this thread
+    holds _TURN_LOCK."""
+    WRITES = {9: "DELETE", 18: "INSERT", 23: "UPDATE"}
+
+    def __init__(self):
+        self.seen = []
+
+    def __call__(self, action, arg1, *_rest):
+        if action in self.WRITES and _td._TURN_LOCK.held():
+            self.seen.append((self.WRITES[action], arg1))
+        return 0  # SQLITE_OK
+
+    def __enter__(self):
+        from lib import db
+        db.conn().set_authorizer(self)
+        return self
+
+    def __exit__(self, *exc):
+        from lib import db
+        db.conn().set_authorizer(None)
+
+
+def test_enqueue_paths_write_nothing_under_the_turn_lock(tmp_path, monkeypatch):
+    service, backends, agent_id = _make_service(tmp_path)
+    with _WritesUnderTurnLock() as writes:
+        service.dispatch(text="first", requested_session="mike", trace_id="t-1")
+        # Spawning slot: queues. Live slot: queues. Terminal: holds.
+        _td._CLAIMED_AT[agent_id] = 1.0
+        service.dispatch(text="q1", requested_session="mike", trace_id="t-2",
+                         client_msg_id="q1", queue_if_busy=True)
+        _td._CLAIMED_AT.pop(agent_id, None)
+        service.dispatch(text="q2", requested_session="mike", trace_id="t-3",
+                         client_msg_id="q2", queue_if_busy=True)
+        monkeypatch.setattr(_td, "_terminal_live", lambda _agent: True)
+        service.dispatch(text="q3", requested_session="mike", trace_id="t-4",
+                         client_msg_id="q3", queue_if_busy=True)
+        monkeypatch.setattr(_td, "_terminal_live", lambda _agent: False)
+        # Stop barrier: parks durably.
+        _td.clear_for_agent(agent_id, preserve_queue=True)
+        _td._INFLIGHT[agent_id] = _td._STOPPING_SENTINEL
+        service.dispatch(text="p", requested_session="mike", trace_id="t-5")
+    assert writes.seen == []
+    assert [spec.trace_id for spec in _td._QUEUED[agent_id]] == ["t-5"]
+
+
+def test_stop_paths_pause_the_queue_after_the_turn_lock(tmp_path):
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="t-1")
+    with _WritesUnderTurnLock() as writes:
+        _snapshot, _dropped, was_paused = _td.begin_stop(agent_id)
+    assert writes.seen == []
+    assert was_paused is False
+    assert turn_queue.is_paused(agent_id)
+    assert _td._INFLIGHT[agent_id] == _td._STOPPING_SENTINEL
+    turn_queue.set_paused(agent_id, False)
+    with _WritesUnderTurnLock() as writes:
+        _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)
+    assert [w for w in writes.seen if w[1] == "queue_state_revisions"] == []
+    assert turn_queue.is_paused(agent_id)
+
+
+def test_account_recovery_pause_writes_its_state_after_the_locks(tmp_path, monkeypatch):
+    coordinator, _scheduled = _enable_account_failover(monkeypatch)
+    service, backends, agent_id = _make_service(tmp_path)
+    coordinator.recovering = True  # a recovery for another agent is under way
+    with _WritesUnderTurnLock() as writes:
+        service.dispatch(text="work", requested_session="mike", trace_id="waits")
+    assert writes.seen == []
+    assert backends.spawned == []
+    latest = agents_db.latest_state(agent_id)
+    assert (latest["kind"], latest["detail"]["account_recovery"]) == (
+        AgentState.THINKING, "waiting")
+    assert agent_id in _td._CLAIMED_AT
+    assert coordinator.lock is not _td._TURN_LOCK
+
+
+def test_queued_spawn_after_a_callback_runs_outside_the_turn_lock(tmp_path):
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="t-1")
+    service.dispatch(text="next", requested_session="mike", trace_id="t-2",
+                     client_msg_id="next", queue_if_busy=True)
+    held = []
+    original = backends.spawn_turn
+    backends.spawn_turn = lambda backend, **kw: (
+        held.append(_td._TURN_LOCK.held()), original(backend, **kw))
+    backends.spawned[0][1]["on_result"]({"result": "done"})
+    assert [call["trace_id"] for _, call in backends.spawned] == ["t-1", "t-2"]
+    assert held == [False]
+
+
+def _wire_runtime(server):
+    """A RuntimeClient stand-in that crosses the real wire encoder, no socket."""
+    from lib.runtime_bridge import RuntimeClient, decode_request, encode_request
+
+    class Client:
+        sent = []
+
+        def dispatch_command(self, command):
+            request = decode_request(encode_request("dispatch", command.to_wire()))
+            self.sent.append(request["params"])
+            return RuntimeClient._dispatch_result(
+                server.dispatch_request("dispatch", request["params"]))
+
+    return Client()
+
+
+def test_rpc_round_trip_admits_the_command_once_on_the_owning_side(tmp_path, monkeypatch):
+    from lib.prompt_admissions import PromptAdmission
+    from lib.runtime_bridge import RuntimeRPCServer
+    owner, backends, agent_id = _make_service(tmp_path)
+    runtime = RuntimeRPCServer(tmp_path / "rt.sock", dispatch_service=owner)
+    try:
+        client = _wire_runtime(runtime)
+        http = TurnDispatchService(
+            SimpleNamespace(runtime_client=client), backend_registry=backends)
+        owned = []
+        real = TurnDispatchService._dispatch_owned
+        monkeypatch.setattr(TurnDispatchService, "_dispatch_owned",
+                            lambda self, command: (owned.append(self), real(self, command))[1])
+        admission = PromptAdmission(
+            admission_id="padm-1", admission_version=1,
+            authenticated_at_admission=True, cooperative_principal="user",
+            principal_id="user", origin="user", sender_agent_id="",
+            channel="chat", observed_at=1, client_admission_id="c-1",
+            trace_id="t-rpc", original_text="hello")
+        result = http.dispatch(text="hello", requested_session="mike",
+                               trace_id="t-rpc", client_msg_id="c-1",
+                               prompt_admission=admission,
+                               unheard_audio_sessions=("mike",))
+    finally:
+        runtime.server_close()
+    assert result.session == "mike"
+    assert owned == [owner]
+    [wire] = client.sent
+    assert wire["prompt_admission"]["admission_id"] == "padm-1"
+    assert "janitor_run_id" not in wire
+    [(_, call)] = backends.spawned
+    assert call["trace_id"] == "t-rpc"
+
+
+def test_rpc_runs_the_janitor_demand_authority_check_once(tmp_path, monkeypatch):
+    from lib import janitor_autonomy
+    from lib.runtime_bridge import RuntimeRPCServer
+    owner, backends, _agent_id = _make_service(tmp_path)
+    runtime = RuntimeRPCServer(tmp_path / "rt.sock", dispatch_service=owner)
+    checks = []
+    monkeypatch.setattr(janitor_autonomy, "validate_dispatch",
+                        lambda *args: checks.append(args) or False)
+    try:
+        http = TurnDispatchService(
+            SimpleNamespace(runtime_client=_wire_runtime(runtime)),
+            backend_registry=backends)
+        with pytest.raises(DispatchError) as error:
+            http.dispatch(text="tidy", requested_session="mike", trace_id="t-j",
+                          origin="heartbeat", client_msg_id="janitor-demand-1")
+    finally:
+        runtime.server_close()
+    assert error.value.status == 409
+    assert checks == [("mike", "janitor-demand-1")]

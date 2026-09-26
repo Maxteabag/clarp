@@ -21,7 +21,7 @@ def test_runtime_events_cross_process_boundary_without_duplicate_persistence():
         "type": "transcript-updated",
         "session": "theo",
         "agent_id": "agent-1",
-        "trace_id": "trace-1",
+        "backend_session_id": "backend-1",
     })
     assert len(agents_db.events_after(0)) == 1
 
@@ -31,7 +31,7 @@ def test_runtime_events_cross_process_boundary_without_duplicate_persistence():
     assert event["type"] == "transcript-updated"
     assert event["session"] == "theo"
     assert event["agent_id"] == "agent-1"
-    assert event["trace_id"] == "trace-1"
+    assert event["backend_session_id"] == "backend-1"
     assert event["event_id"] > 0
     assert event["ts"] > 0
     assert "_clarp_runtime_event" not in event

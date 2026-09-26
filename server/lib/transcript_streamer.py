@@ -20,12 +20,12 @@ import threading
 from typing import Callable
 
 from . import agents as agents_db
-from . import backends
+from . import backends, events
 from . import health
 from . import transcript_import_cache
 from . import tts_queue
 from .log import log_exception
-from .protocol import SSEType, TurnSource
+from .protocol import TurnSource
 from .transcript_watcher import (
     InotifyDispatcher, TranscriptWatcher, WatcherPool,
 )
@@ -152,12 +152,11 @@ class TranscriptStreamer:
         if self._stream is None:
             return
         try:
-            self._stream.broadcast({
-                "type":           SSEType.TRANSCRIPT_UPDATED,
-                "agent_id":       agent["agent_id"],
-                "session":   agent.get("session"),
-                "backend_session_id": backend_session_id,
-            })
+            events.broadcast(self._stream, events.transcript_updated(
+                agent_id=agent["agent_id"],
+                session=agent.get("session"),
+                backend_session_id=backend_session_id,
+            ))
         except Exception as e:
             log_exception("transcriptStreamerBroadcastFail", e,
                           detail=agent.get("agent_id"))
@@ -167,7 +166,8 @@ class TranscriptStreamer:
                 agent_id=agent["agent_id"],
                 backend_session_id=backend_session_id,
             ):
-                self._stream.broadcast(user_notifications.event_payload(notification))
+                events.broadcast(self._stream, events.as_event(
+                    user_notifications.event_payload(notification)))
                 apns.on_user_notification(notification)
         except Exception as e:
             log_exception("transcriptStreamerNotificationRetryFail", e,

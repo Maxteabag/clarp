@@ -133,8 +133,8 @@ def _speak(text: str, st: _TurnState, **kwargs: Any) -> None:
     _backend()._speak(text, st, **kwargs)
 
 
-def _record_state(agent_id: str, kind: str, detail: dict | None = None) -> None:
-    _backend()._record_state(agent_id, kind, detail)
+def _transition(agent_id: str, turn_event: str, detail: dict | None = None) -> None:
+    _backend()._transition(agent_id, turn_event, detail)
 
 
 def _broadcast_transcript(stream: Any, agent_id: str, session: str) -> None:
