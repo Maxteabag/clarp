@@ -661,6 +661,7 @@ class AppController : public QObject {
     bool m_profilePromptsHaveMore = false;
     bool m_profilePromptsLoading = false;
     bool m_cacheEnabled = true;
+    bool m_restoringSnapshotCache = false;
 };
 
 } // namespace clarp

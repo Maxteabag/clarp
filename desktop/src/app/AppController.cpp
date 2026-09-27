@@ -26,6 +26,7 @@
 #include <QSettings>
 #include <QFontDatabase>
 #include <QSaveFile>
+#include <QScopedValueRollback>
 #include <QtConcurrent/QtConcurrent>
 #include <QFutureWatcher>
 #include <QStandardPaths>
@@ -2651,6 +2652,9 @@ void AppController::restoreAgentSnapshotCache() {
     if (!file.open(QIODevice::ReadOnly)) return;
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
     if (!document.isObject() || m_agents.rowCount() > 0) return;
+    // The first network request cost 36-50 ms of GUI thread time, so a
+    // portrait missing from the disk cache held back the first frame.
+    const QScopedValueRollback restoring(m_restoringSnapshotCache, true);
     applyAgentSnapshot(document.object());
 }
 
@@ -2721,6 +2725,9 @@ void AppController::requestAvatars() {
             m_avatarSources.insert(session, QUrl::fromLocalFile(cached));
             continue;
         }
+        // The cached roster is applied before the first frame; the live
+        // snapshot that follows fetches what the disk cache lacks.
+        if (m_restoringSnapshotCache) continue;
         const QString tag = QStringLiteral("avatar:%1").arg(++m_nextAvatarRequest);
         m_avatarRequests.insert(tag, {session, url});
         m_api.getBytes(tag, url);
@@ -2757,6 +2764,7 @@ void AppController::requestContactAvatars() {
             m_contactAvatarSources.insert(name, QUrl::fromLocalFile(cached));
             continue;
         }
+        if (m_restoringSnapshotCache) continue;
         const QString tag = QStringLiteral("contact-avatar:%1").arg(++m_nextAvatarRequest);
         m_contactAvatarRequests.insert(tag, name);
         m_api.getBytes(tag, url);
