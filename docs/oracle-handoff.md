@@ -283,8 +283,9 @@ Two more rules keep a retired offer from retargeting a newer local session:
 ## Call identity on the Oracle socket
 
 On a socket that opened with `handoff=hands_free`, the Host sends one frame
-right after it registers the call, before `session.start` goes upstream and
-before any offer can name the call:
+while registering the call, under the same lock `connect` uses to find a live
+call. No offer can therefore name the call before the phone holds this frame;
+it also precedes `session.start` upstream:
 
 ```json
 {"type": "oracle_v2.session", "host_id": "…", "principal": "device_…",
