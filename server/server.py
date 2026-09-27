@@ -4608,14 +4608,55 @@ class Handler(BaseHTTPRequestHandler):
  "queue_revision": result.queue_revision,
         })
 
+    def _expected_generation(self) -> tuple[bool, int | None]:
+        """`expected_generation` from the query, else the JSON body: (valid, value).
+
+        Absent means the legacy unfenced cancel. The query parameter wins over
+        the body. It must be a positive integer up to 2**53 - 1: in the query a
+        decimal string of digits, in JSON an integer (never a boolean).
+        """
+        from lib.background_jobs import MAX_GENERATION
+        values = self._query().get("expected_generation")
+        if values is not None:
+            raw = values[0].strip()
+            if not raw.isdigit():
+                return False, None
+            value = int(raw)
+            return (True, value) if 1 <= value <= MAX_GENERATION else (False, None)
+        if int(self.headers.get("Content-Length") or 0) <= 0:
+            return True, None
+        body = self._read_json()
+        if body is None:
+            return False, None
+        if "expected_generation" not in body:
+            return True, None
+        raw = body["expected_generation"]
+        if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= MAX_GENERATION:
+            return False, None
+        return True, raw
+
     def _handle_background_job_cancel(self, job_id: str):
         from lib import background_jobs
-        job, cancellation_changed = background_jobs.cancel_with_result(unquote(job_id))
+        valid, expected = self._expected_generation()
+        if not valid:
+            return self._json(400, {"ok": False, "error": "invalid expected_generation"})
+        outcome = background_jobs.cancel_run(unquote(job_id), expected_generation=expected)
+        job, cancellation_changed = outcome["job"], outcome["changed"]
         if not job:
             return self._json_error(404, "job not found")
+        receipt = {
+            "changed": cancellation_changed,
+            "job": job,
+            "job_handle": background_jobs.job_handle(job),
+        }
+        if outcome["mismatch"] == "generation":
+            return self._json(409, {
+                "ok": False, "error": "generation_mismatch", "expected_generation": expected,
+                "current_generation": int(job.get("generation") or 1), **receipt,
+            })
         if job["status"] != "cancelled":
             return self._json(409, {
-                    "error": f"job already {job['status']}", "job": job,
+                    "ok": False, "error": f"job already {job['status']}", **receipt,
                 })
         # Cancellation immediately closes the durable gate checked by workers
         # before each delivery/action. The prompt is cleanup: it lets the owner
@@ -4649,9 +4690,7 @@ class Handler(BaseHTTPRequestHandler):
                 ))
             except Exception as exc:
                 log_exception("backgroundJobCancelPromptFail", exc, detail=job_id)
-        return self._json_ok({
-            "ok": True, "changed": cancellation_changed, "job": job,
-        })
+        return self._json_ok({"ok": True, **receipt})
 
     def _handle_create_agent(self):
         data = self._read_json()

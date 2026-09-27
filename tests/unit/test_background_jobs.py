@@ -462,3 +462,19 @@ def test_stable_job_id_cannot_be_taken_over_by_another_agent():
 
     job = background_jobs.get("shared-name")
     assert job["session"] == "nadia-test"
+
+
+def test_cancel_run_fences_generation_and_owner_atomically():
+    _agent("rachel")
+    background_jobs.upsert(session="rachel", job_id="gen-watch", kind="watch", title="Watch")
+    background_jobs.cancel_with_result("gen-watch")
+    background_jobs.upsert(session="rachel", job_id="gen-watch", kind="watch", title="Watch",
+                           restart_cancelled=True)
+    stale = background_jobs.cancel_run("gen-watch", expected_generation=1)
+    assert stale["mismatch"] == "generation" and stale["changed"] is False
+    assert stale["job"]["generation"] == 2 and stale["job"]["status"] == "running"
+    other = background_jobs.cancel_run("gen-watch", expected_generation=2, expected_session="mallory")
+    assert other["mismatch"] == "session" and other["job"]["status"] == "running"
+    assert background_jobs.cancel_owned("gen-watch", session="rachel", generation=1) is None
+    done = background_jobs.cancel_owned("gen-watch", session="rachel", generation=2)
+    assert done["status"] == "cancelled" and done["generation"] == 2
