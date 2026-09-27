@@ -138,7 +138,7 @@ def wall_ms():
 
 
 from .oracle_prompt import PROMPT  # one voice prompt for every engine
-from . import oracle_attention, oracle_earcons, oracle_relay, oracle_strategy, oracle_voice_context, oracle_memory
+from . import oracle_attention, oracle_earcons, oracle_handoffs, oracle_relay, oracle_strategy, oracle_voice_context, oracle_memory
 ROUTING = """Route every actionable request in current_user_requests using the
 actual roster and authoritative task records. These are the new unadmitted
 user fragments; conversation is historical reference for resolving their
@@ -276,7 +276,15 @@ def client_event(raw):
         if not data or len(data) % 2:
             return None
         return {"type": kind, "audio": text}
-    if kind in ("session.close", "oracle_v2.interrupt"):
+    if kind == "session.close":
+        # An intended close after a handoff names it (docs/oracle-handoff.md).
+        handoff_id = value.get("handoff_id")
+        if handoff_id is None:
+            return {"type": kind}
+        if not isinstance(handoff_id, str) or not oracle_handoffs.ID_PATTERN.fullmatch(handoff_id):
+            return None
+        return {"type": kind, "handoff_id": handoff_id}
+    if kind == "oracle_v2.interrupt":
         return {"type": kind}
     if kind == "oracle_v2.preferences":
         # The iOS app sends progress_interval_seconds (0 or 10-120); narration
@@ -339,6 +347,16 @@ class Conversation:
         self.earcons = True
         self.cue_queue = []
         self.voice_context = None
+        # Oracle handoff (docs/oracle-handoff.md): who this call belongs to,
+        # whether the phone advertised handoff=hands_free, the return this call
+        # completes (handoff_id), and whether a handoff holds Oracle: from
+        # "preparing" on the Host sends Oracle nothing new.
+        self.principal = ""
+        self.voice_session_id = self.provider_session
+        self.thread_id = getattr(memory, "thread_id", "") or ""
+        self.handoff_capable = False
+        self.handoff_id = ""
+        self.held_for_handoff = False
         self.direct_call_prefix = __import__("uuid").uuid4().hex
         self.stop = threading.Event()
         self.closed = threading.Event()
@@ -469,7 +487,8 @@ class Conversation:
             narration = event.get("narration")
             if narration and narration != self.narration:
                 self.narration = narration
-                self.append("instructions", NARRATION_OFF if narration == "off" else NARRATION_ON)
+                if not self.held_for_handoff:
+                    self.append("instructions", NARRATION_OFF if narration == "off" else NARRATION_ON)
                 self.checkpoint()
             if "earcons" in event and event["earcons"] != self.earcons:
                 with self.lock:
@@ -487,7 +506,8 @@ class Conversation:
             with self.lock:
                 if self.active_relay is not None:
                     self.active_relay.held = True
-            self.append("instructions", "Stop speaking now and listen. Do not cancel agent work.")
+            if not self.held_for_handoff:
+                self.append("instructions", "Stop speaking now and listen. Do not cancel agent work.")
         else:
             if event["type"] == "session.input_audio.append":
                 self.counts["in_chunks"] += 1
@@ -565,6 +585,13 @@ class Conversation:
                     "items":self.memory.contexts(), "revision":self.revision})
 
     def route(self, ident):
+        if self.held_for_handoff:
+            # A handoff is in progress: later turns are not routed.
+            if self.journal:
+                self.journal.record("route.held_for_handoff", {"delegation_id": ident})
+            with self.lock:
+                self.routing -= 1
+            return
         try:
             with self.route_lock:
                 routed_revision = None
@@ -709,6 +736,8 @@ class Conversation:
             self.journal_event("host", {"type": "oracle_v2.quiet"})
             self.downstream({"type": "oracle_v2.quiet"})
         self.flush_cues(now)
+        if self.held_for_handoff:
+            return
         self.notify_pending_context()
         for row in self.tools.results():
             ident = row["delegation_id"]
@@ -916,6 +945,37 @@ class Conversation:
             self.journal_event("host", {"type": "oracle_v2.quiet"})
             self.downstream({"type": "oracle_v2.quiet"})
 
+    # ---- Oracle handoff hooks (oracle_handoffs) -----------------------------
+
+    def handoff_offer(self, persona):
+        """A handoff to ``persona`` was offered: its tinted cue goes first."""
+        self.cue("connected", persona)
+
+    def handoff_mirror(self, record):
+        """The Oracle-socket mirror of an oracle-handoff event."""
+        event = {"type": "oracle_v2.handoff", **record}
+        self.journal_event("host", event)
+        self.downstream(event)
+
+    def handoff_hold(self):
+        self.held_for_handoff = True
+
+    def handoff_resume(self):
+        self.held_for_handoff = False
+
+    def handoff_failed(self, persona, reason, *, note):
+        self.cue("switch_failed")
+        if note:
+            self.host_event({"host_event": "handoff_failed", "agent": persona, "reason": reason})
+
+    def handoff_returned(self, persona):
+        self.cue("back_to_oracle")
+        self.host_event({"host_event": "returned_from_agent", "agent": persona})
+
+    def host_event(self, fact):
+        """One neutral fact for Oracle; it decides whether and how to mention it."""
+        self.append("thinking", "Host event, reference data: " + json.dumps(fact, ensure_ascii=False))
+
     def deliver_tool_output(self, name, output):
         """Router tool results: transcripts and long outputs arrive in parts."""
         if name in ("read_agent_transcript", "read_agent_messages") and isinstance(output.get("messages"), list):
@@ -1082,6 +1142,14 @@ def serve(handler):
             return _send_http_error(handler, 400, "Use one Oracle context selection")
     if "new_conversation" in query and query["new_conversation"][0] not in ("0", "1"):
         return _send_http_error(handler, 400, "new_conversation must be 0 or 1")
+    for name in ("handoff", "handoff_id"):
+        if name in query and len(query[name]) != 1:
+            return _send_http_error(handler, 400, "Use one " + name)
+    if query.get("handoff", ["hands_free"])[0] != "hands_free":
+        return _send_http_error(handler, 400, "handoff must be hands_free")
+    returning_handoff = query.get("handoff_id", [""])[0]
+    if returning_handoff and not oracle_handoffs.ID_PATTERN.fullmatch(returning_handoff):
+        return _send_http_error(handler, 400, "Invalid handoff_id")
     if "podcast_artifact" in query and ("thread_id" in query or query.get("new_conversation") == ["1"]):
         return _send_http_error(handler, 400, "Oracle conversation reset does not apply to podcast detours")
     podcast_context = None
@@ -1149,6 +1217,12 @@ def serve(handler):
             if not getattr(cfg, "oracle_earcons", True):
                 conversation.earcons = False
             conversation.voice_context = voice_context
+            conversation.principal = principal
+            conversation.voice_session_id = token
+            conversation.handoff_capable = query.get("handoff") == ["hands_free"]
+            conversation.handoff_id = returning_handoff
+            oracle_handoffs.bind(handler.ctx)
+            oracle_handoffs.register(conversation)
         if getattr(cfg, "oracle_diagnostics", False):
             from .oracle_diagnostics import OracleJournal
             conversation.journal = OracleJournal()
@@ -1214,6 +1288,11 @@ def serve(handler):
                 if event is not None:
                     if event["type"] == "session.close":
                         mark_closing(principal)
+                        if event.get("handoff_id"):
+                            # The phone's intended end of this call after a handoff; the
+                            # handoff record is unaffected. GPT-Live gets a plain close.
+                            log("oracleV2HandoffClose", f"handoff={event['handoff_id']}")
+                            event = {"type": "session.close"}
                     conversation.input(event)
                 else:
                     downstream({"type": "oracle_v2.notice", "message": "Unsupported Oracle v2 command"})
@@ -1222,6 +1301,8 @@ def serve(handler):
             _send_http_error(handler, 502, "Oracle v2 upstream unavailable")
     finally:
         mark_closing(principal)
+        if isinstance(conversation, Conversation):
+            oracle_handoffs.unregister(conversation)
         if conversation:
             if not conversation.taken_over.is_set():
                 try:

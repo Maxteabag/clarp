@@ -481,6 +481,7 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-helper-state": "_handle_agent_helper_state_get",
         "/oracle/status": "_handle_oracle_status",
         "/oracle/contact": "_handle_oracle_contact_get",
+        "/oracle/handoff": "_handle_oracle_handoff_get",
         "/oracle/delegations": "_handle_oracle_delegations_get",
         "/oracle/realtime": "_handle_oracle_realtime",
         "/oracle/v2": "_handle_oracle_v2",
@@ -578,6 +579,8 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/calls/close": "_handle_oracle_call_close",
         "/oracle/v2/calls": "_handle_oracle_live_call_create",
         "/oracle/contact": "_handle_oracle_contact_post",
+        "/oracle/connect": "_handle_oracle_connect",
+        "/oracle/handoffs/ack": "_handle_oracle_handoff_ack",
         "/oracle/v2/calls/close": "_handle_oracle_live_call_close",
         "/oracle/v2/calls/control": "_handle_oracle_live_call_control",
         "/oracle/delegations": "_handle_oracle_delegation_create",
@@ -3860,6 +3863,58 @@ class Handler(BaseHTTPRequestHandler):
         from lib import oracle_contact
         return self._json_ok(oracle_contact.get())
 
+    def _oracle_handoff_principal(self):
+        """The full-scope caller, or None after answering 401."""
+        from lib.http_utils import principal_of, require_full_scope
+        who = principal_of(self)
+        denied = require_full_scope(who, message="Oracle handoffs require full-device authentication")
+        if denied:
+            self._json_error(401, denied)
+            return None
+        return who.principal
+
+    def _handle_oracle_connect(self):
+        """Put the caller's Oracle call through to an agent, or back to Oracle.
+        Body: {"agent": "<session|persona|oracle>", "principal"?}. See
+        docs/oracle-handoff.md; waits until the phone settles the handoff."""
+        from lib import oracle_handoffs
+        principal = self._oracle_handoff_principal()
+        if principal is None:
+            return
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        oracle_handoffs.bind(self.ctx)
+        try:
+            result = oracle_handoffs.connect(principal, str(data.get("agent") or ""),
+                                             principal=data.get("principal") or None)
+        except oracle_handoffs.HandoffError as exc:
+            return self._json(exc.status, exc.body())
+        return self._json_ok(result)
+
+    def _handle_oracle_handoff_get(self):
+        from lib import oracle_handoffs
+        principal = self._oracle_handoff_principal()
+        if principal is None:
+            return
+        if principal == oracle_handoffs.ADMINISTRATOR:
+            principal = (self._query().get("principal") or [principal])[0]
+        return self._json_ok(oracle_handoffs.snapshot(principal))
+
+    def _handle_oracle_handoff_ack(self):
+        from lib import oracle_handoffs
+        principal = self._oracle_handoff_principal()
+        if principal is None:
+            return
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        oracle_handoffs.bind(self.ctx)
+        try:
+            return self._json_ok(oracle_handoffs.ack(principal, data))
+        except oracle_handoffs.HandoffError as exc:
+            return self._json(exc.status, exc.body())
+
     def _handle_oracle_contact_post(self):
         """Set or clear the Oracle contact. Body: {"session": "<session|persona|''>"}."""
         from lib import oracle_contact
@@ -5579,6 +5634,9 @@ def build_server(ctx: ServerContext, port: int,
     _seed_startup_invariants(ctx)
     if herald is not None:
         ctx.install_herald(herald)
+    from lib import oracle_handoffs
+    oracle_handoffs.bind(ctx)
+    oracle_handoffs.recover()
     listener_addr = bind_addr or BIND_ADDR
     if listener_addr not in {"127.0.0.1", "::1", "localhost"} and not ctx.auth_token:
         raise ValueError("a non-loopback listener requires authentication")

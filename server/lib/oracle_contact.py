@@ -46,6 +46,29 @@ def resolve(name: str | None) -> dict[str, Any] | None:
     return found[0] if len(found) == 1 else None
 
 
+def resolve_visible(name: str | None) -> dict[str, Any]:
+    """The one agent ``name`` means, among the contacts the app shows.
+
+    A session id resolves among live agents (not deleted, not archived, not
+    Janitors). A persona name resolves only among those that are not helper
+    sub-agents: a persona can have many soft-deleted, archived or helper rows
+    ("Mike") and still be one contact. Raises ValueError("unknown agent") or
+    ValueError("ambiguous agent").
+    """
+    wanted = str(name or "").strip().casefold()
+    agents = roster()
+    by_session = [a for a in agents if str(a["session"]).casefold() == wanted]
+    if by_session:
+        return by_session[0]
+    found = [a for a in agents if str(a["persona"]).casefold() == wanted
+             and str(a.get("role") or "") != "helper" and not a.get("parent_agent_id")]
+    if not wanted or not found:
+        raise ValueError("unknown agent")
+    if len(found) > 1:
+        raise ValueError("ambiguous agent")
+    return found[0]
+
+
 def _stored() -> str:
     return settings_store.get_text(KEY).strip()
 

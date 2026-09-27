@@ -207,11 +207,17 @@ def clarp_version() -> str:
     return ""
 
 
+def server_id() -> str:
+    """This Host's stable instance id, minted on first use."""
+    value = get_text(_ID_KEY).strip()
+    if not value:
+        value = str(uuid.uuid4())
+        set_text(_ID_KEY, value)
+    return value
+
+
 def get_server_info() -> dict[str, object]:
-    server_id = get_text(_ID_KEY).strip()
-    if not server_id:
-        server_id = str(uuid.uuid4())
-        set_text(_ID_KEY, server_id)
+    server_id_value = server_id()
     name = (get_text(_NAME_KEY).strip()
             or os.environ.get("CLARP_SERVER_NAME", "").strip()
             or socket.gethostname())
@@ -229,7 +235,7 @@ def get_server_info() -> dict[str, object]:
     default_cwd = (os.environ.get("CLARP_WORKSPACE_ROOT", "/data/workspace")
                    if mode == "container" else str(pathlib.Path.home()))
     return {
-        "server_id": server_id,
+        "server_id": server_id_value,
         "name": name,
         "deployment_mode": "container" if mode == "container" else "native",
         "version": version,
