@@ -27,15 +27,15 @@ def test_hierarchical_plan_progress_and_auto_finish(tmp_path, monkeypatch):
         task_plans.item_key(plan_id, "server"), "completed")
     assert updated["items"][0]["subtasks"][0]["elapsed_ms"] == 300
     clock[0] = 1600
-    task_plans.update_item(task_plans.item_key(plan_id, "ios"), "skipped")
+    task_plans.update_item(task_plans.item_key(plan_id, "ios"), "skipped", "Still required; awaiting implementation")
     clock[0] = 1700
     done = task_plans.update_item(task_plans.item_key(plan_id, "build"), "completed")
-    assert done["completed_count"] == 3
-    assert done["status"] == "completed"
-    assert task_plans.active_for_session("mike") is None
+    assert done["completed_count"] == 2
+    assert done["status"] == "active"
+    assert task_plans.active_for_session("mike") is not None
 
 
-def test_new_plan_cancels_previous_active_plan(tmp_path):
+def test_new_plan_preserves_previous_active_plan(tmp_path):
     _agent(tmp_path)
     old = task_plans.create(
         session="mike", plan_id="old", title="Old", items=[
@@ -43,7 +43,7 @@ def test_new_plan_cancels_previous_active_plan(tmp_path):
     new = task_plans.create(
         session="mike", plan_id="old", title="New", items=[
             {"id": "new-item", "title": "New item"}])
-    assert task_plans.get(old["plan_id"])["status"] == "cancelled"
+    assert task_plans.get(old["plan_id"])["status"] == "active"
     assert task_plans.active_for_session("mike")["plan_id"] == new["plan_id"]
 
 
@@ -95,6 +95,7 @@ def test_stale_updates_cannot_rewrite_cancelled_plan(tmp_path):
     task_plans.create(
         session="mike", plan_id="new", title="New", items=[
             {"id": "step", "title": "Step"}])
+    task_plans.finish(old["plan_id"], "cancelled")
     with pytest.raises(ValueError, match="no longer active"):
         task_plans.finish(old["plan_id"])
     with pytest.raises(ValueError, match="no longer active"):

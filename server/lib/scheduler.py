@@ -326,7 +326,9 @@ class AgentScheduleRunner:
         dispatch_turn: Callable[[str, str], None],
         *,
         check_interval_sec: float = 15.0,
+        dispatch_goal: Callable | None = None,
     ):
+        self._dispatch_goal = dispatch_goal
         self._dispatch_turn = dispatch_turn
         self._check_interval = check_interval_sec
         self._stop_event = threading.Event()
@@ -354,7 +356,8 @@ class AgentScheduleRunner:
     def tick(self) -> int:
         now = now_ms()
         due = due_schedules(now)
-        dispatched_count = 0
+        from . import task_goal_recovery
+        dispatched_count = task_goal_recovery.tick(self._dispatch_goal, now=now) if self._dispatch_goal else 0
         for item in due:
             sid = item["schedule_id"]
             session = item["session"]

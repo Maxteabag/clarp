@@ -46,3 +46,19 @@ artifacts remain readable during a rolling update.
   compile and inspected isolated UI screenshot. All repository gates.
 - Both remote main branches contain the resulting commits; deployment, upload
   and device installation are separate proof and outside this endpoint.
+
+## Agency and adaptation
+
+A durable goal commits to an outcome, not a frozen execution script. Agents may
+add, split, reorder, replace or retire working steps after discoveries, select
+fresh actions and write new self-prompts without routine approval. Meaningful
+changes retain their reasons. Replaced/no-longer-needed work is never counted
+as accomplished; retiring a method does not retire an acceptance criterion.
+Completion may therefore resolve all original criteria with evidence while
+obsolete methods remain visibly retired. Skipped or deferred required work
+still needs resolution. The Host supplies ownership, boundaries and recovery,
+not tactics, a fixed cadence, or a universal sequence of phases. A wake carries
+the current revision/checkpoint and agent-authored intent as provisional context
+and explicitly asks the agent to reassess the current situation. Replanning
+supersedes older wakes. Verification includes a mid-goal discovery with revised
+steps, changed prompt and a fenced-out old continuation.

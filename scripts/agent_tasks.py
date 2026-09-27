@@ -15,13 +15,30 @@ from lib import task_plans  # noqa: E402
 def main(argv: list[str]) -> int:
     usage = ("usage: agent_tasks.py create SESSION PLAN_ID TITLE JSON_ITEMS | "
              "update RETURNED_PLAN_ID ITEM_ID STATUS [DETAIL] | "
-             "finish RETURNED_PLAN_ID [STATUS] | show SESSION")
+             "finish RETURNED_PLAN_ID [STATUS] | show SESSION | list SESSION | "
+             "goal SESSION ALIAS TITLE JSON_ITEMS JSON_GOAL | "
+             "act PLAN_ID REVISION ACTION JSON_DATA | step PLAN_ID REVISION ITEM STATUS [DETAIL]")
     if len(argv) < 2:
         print(usage, file=sys.stderr)
         return 2
     try:
         command = argv[1]
-        if command == "create" and len(argv) == 6:
+        if command == "goal" and len(argv) == 7:
+            result = task_plans.create(session=argv[2], plan_id=argv[3], title=argv[4],
+                items=json.loads(argv[5]), goal=json.loads(argv[6]))
+        elif command == "act" and len(argv) == 6:
+            from lib import task_goal_state
+            result = task_goal_state.mutate(argv[2], revision=int(argv[3]), action=argv[4], data=json.loads(argv[5]))
+        elif command == "step" and len(argv) in {6, 7}:
+            result = task_plans.update_item(task_plans.item_key(argv[2], argv[4]), argv[5],
+                argv[6] if len(argv)==7 else None, revision=int(argv[3]))
+        elif command == "complete" and len(argv) == 4:
+            result = task_plans.finish(argv[2], revision=int(argv[3]))
+        elif command == "list" and len(argv)==3:
+            result = task_plans.list_for_session(argv[2])
+        elif command == "get" and len(argv)==3:
+            result = task_plans.get(argv[2])
+        elif command == "create" and len(argv) == 6:
             items = json.loads(argv[5])
             result = task_plans.create(
                 session=argv[2], plan_id=argv[3], title=argv[4], items=items)
