@@ -88,9 +88,12 @@ def validate_decision(value):
     return value
 
 class AutonomyJanitors:
-    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=janitor_hotseat.read_accounts,hotseat_switch=janitor_hotseat.switch_account):
+    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=janitor_hotseat.read_accounts,hotseat_switch=janitor_hotseat.switch_account,label_judge=None):
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
         self.hotseat_read=hotseat_read;self.hotseat_switch=hotseat_switch
+        if label_judge is None:
+            from .judgment_sites import audit_work_labels as label_judge
+        self.label_judge=label_judge
     def start(self):
         setup();self.thread=threading.Thread(target=self.loop,name='janitor-autonomy',daemon=True);self.thread.start()
     def stop(self):self.stop_event.set()
@@ -100,7 +103,7 @@ class AutonomyJanitors:
             try:self.run_once()
             except Exception as exc:log_exception('janitorAutonomyFail',exc)
     def run_once(self):
-        setup();self.heartbeat_once();self.quota_once();self.hotseat_once()
+        setup();self.heartbeat_once();self.quota_once();self.hotseat_once();self.label_audit_once()
     def heartbeat_once(self):
         if not any(c['template_id']=='heartbeat-decider' and c['enabled'] for c in janitors.list_janitors(include_runtime=False)):return
         now=db.now_ms()
@@ -232,6 +235,39 @@ class AutonomyJanitors:
             summary=text or f"{provider}: {decision.get('active','?')} keeps {decision.get('remaining','?')}% of the {janitor_hotseat.WINDOW_LABEL[provider]} window"
             janitor_builtins.complete_run(run['run_id'],outcome,result={'summary':summary[:500],'status':decision['action'],'reason':decision.get('reason','')[:500]},error=error)
         self.deliver_notifications(owner)
+
+    def label_audit_once(self):
+        """Label checker: one Jev request per interval, report only.
+
+        Admission is the Janitor (enabled, interval, run fence) plus the
+        `labels` judgment site; quiet hours follow the heartbeat's. Nothing
+        shown as working means no call and no run."""
+        from . import judgments,label_audit
+        from .heartbeat import outside_active_hours
+        owner=janitor_builtins.resolve(label_audit.ROLE)
+        if not owner or self.stop_event.is_set():return
+        now=db.now_ms();key='label-auditor.last-check'
+        if now-settings_store.get_int(key,default=0)<owner['options']['interval_seconds']*1000:return
+        if not judgments.site_enabled('labels') or outside_active_hours(now/1000):return
+        settings_store.set_int(key,now)
+        evidence=label_audit.candidates(now)
+        if not evidence:return
+        packets=label_audit.packets(evidence)
+        run=janitor_builtins.begin_run(label_audit.ROLE,digest([owner['agent_id'],now]),context={'input_hash':digest(packets),'target_count':len(packets)})
+        if not run or not janitor_builtins.claim_run(run['run_id']):return
+        try:verdicts=self.label_judge(packets)
+        except Exception as exc:
+            janitor_builtins.complete_run(run['run_id'],'failed',error=f'Label check failed ({type(exc).__name__}); nothing reported');return
+        if verdicts is None:
+            janitor_builtins.complete_run(run['run_id'],'failed',error='Jev did not answer; nothing reported');return
+        if self.stop_event.is_set() or not janitor_builtins.is_current(run['run_id']):
+            janitor_builtins.complete_run(run['run_id'],'cancelled',result={'reason':'Configuration changed'});return
+        found=label_audit.mismatches(evidence,verdicts)
+        marker='label-auditor.last-report'
+        artifact,fingerprint=label_audit.report(owner,run['run_id'],found,checked=len(packets),last_fingerprint=settings_store.get_text(marker,default=''))
+        settings_store.set_text(marker,fingerprint)
+        summary=f"Checked {len(packets)} working labels; {len(found)} look wrong"+('' if artifact or not found else ' (already reported)')
+        janitor_builtins.complete_run(run['run_id'],result={'summary':summary,'item_count':len(found),'target_count':len(packets)})
 
     def deliver_notifications(self,owner):
         rows=janitor_store.undelivered_quota_receipts()
