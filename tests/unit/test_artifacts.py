@@ -117,13 +117,13 @@ def test_plan_creation_gets_single_artifact_wrapper(tmp_path):
     assert artifact["plan"]["items"][0]["title"] == "Build"
 
 
-def test_replaced_plan_artifact_is_cancelled(tmp_path):
+def test_unrelated_plan_preserves_existing_plan_artifact(tmp_path):
     _agent(tmp_path)
     first = task_plans.create(session="mike", title="First", items=[{"title": "One"}])
     task_plans.create(session="mike", title="Second", items=[{"title": "Two"}])
     old = next(row for row in artifacts.list_artifacts(session="mike", type="plan")
                if row["reference_id"] == first["plan_id"])
-    assert old["status"] == "cancelled"
+    assert old["status"] == "active"
 
 
 def test_plan_sync_repairs_missing_wrapper(tmp_path):
