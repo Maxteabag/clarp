@@ -17,6 +17,8 @@ namespace clarp {
 // Empty when this launch must run on its own (no runtime dir, screenshot or
 // version-manager runs, update relaunches, CLARP_SEPARATE_PROCESS=1).
 [[nodiscard]] QString instanceSocketPath(const QStringList& arguments);
+[[nodiscard]] QString instanceSocketPathForExecutable(const QString& executablePath,
+                                                      const QStringList& arguments);
 
 // Hands `arguments` to a running instance. Plain POSIX, safe before any
 // QCoreApplication exists. True only when the instance accepted them.

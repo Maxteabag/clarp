@@ -48,9 +48,9 @@ qt_standard_project_setup(REQUIRES 6.11)
 
 include(cmake/ClarpQuality.cmake)
 
-add_executable(clarp-desktop)
+add_executable(clarp-desktop-real)
 
-target_sources(clarp-desktop PRIVATE
+target_sources(clarp-desktop-real PRIVATE
     src/platform/DesktopPresence.cpp
     src/platform/DesktopPresence.h
     src/main.cpp
@@ -63,6 +63,8 @@ target_sources(clarp-desktop PRIVATE
     src/app/MemoryDiagnostics.h
     src/app/StallMonitor.cpp
     src/app/InstanceServer.cpp
+    src/launcher/InstanceForward.cpp
+    src/launcher/InstanceForward.h
     src/app/StallMonitor.h
     src/app/MarkdownStyle.cpp
     src/app/MarkdownStyle.h
@@ -121,7 +123,7 @@ target_sources(clarp-desktop PRIVATE
 )
 
 set_source_files_properties(qml/components/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
-qt_add_qml_module(clarp-desktop
+qt_add_qml_module(clarp-desktop-real
     URI Clarp.Desktop
     VERSION 1.0
     QML_FILES
@@ -211,23 +213,23 @@ qt_add_qml_module(clarp-desktop
         resources/backends/deepseek.png
 )
 
-target_include_directories(clarp-desktop PRIVATE src src/app src/models)
-target_compile_definitions(clarp-desktop PRIVATE
+target_include_directories(clarp-desktop-real PRIVATE src src/app src/models)
+target_compile_definitions(clarp-desktop-real PRIVATE
     CLARP_DESKTOP_VERSION="${PROJECT_VERSION}"
 )
 
 # Export the executable's symbols so stall stacks name our own functions,
 # not just the Qt libraries around them.
-set_target_properties(clarp-desktop PROPERTIES ENABLE_EXPORTS ON)
+set_target_properties(clarp-desktop-real PROPERTIES ENABLE_EXPORTS ON)
 
 # Opt-in QML profiling for performance work: enables the QML debugger
 # services so `qmlprofiler` can attach. Never set in shipped builds.
 option(CLARP_QML_PROFILE "Build with the QML debugger/profiler services" OFF)
 if(CLARP_QML_PROFILE)
-    target_compile_definitions(clarp-desktop PRIVATE QT_QML_DEBUG)
+    target_compile_definitions(clarp-desktop-real PRIVATE QT_QML_DEBUG)
 endif()
 
-target_link_libraries(clarp-desktop PRIVATE
+target_link_libraries(clarp-desktop-real PRIVATE
     Qt6::Concurrent
     Qt6::Core
     Qt6::DBus
@@ -241,10 +243,18 @@ target_link_libraries(clarp-desktop PRIVATE
     Qt6::Widgets
 )
 
+clarp_apply_quality_settings(clarp-desktop-real)
+
+add_executable(clarp-desktop
+    src/launcher/main.cpp
+    src/launcher/InstanceForward.cpp
+    src/launcher/InstanceForward.h
+)
+target_include_directories(clarp-desktop PRIVATE src)
 clarp_apply_quality_settings(clarp-desktop)
 
 include(GNUInstallDirs)
-install(TARGETS clarp-desktop
+install(TARGETS clarp-desktop clarp-desktop-real
     BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )

@@ -10,6 +10,7 @@
 #include <QStandardItemModel>
 #include "app/AppController.h"
 #include "app/InstanceServer.h"
+#include "launcher/InstanceForward.h"
 #include <atomic>
 #include <thread>
 #include "app/CredentialStore.h"
@@ -711,6 +712,7 @@ class NativeCoreTest final : public QObject {
     void clipFailsFastWithoutMediaBackend();
     void narrationClipWithoutMediaBackendStaysBounded();
     void sharedPlaybackDoesNotDuplicateDownloads();
+    void launcherAndServerUseTheSameSocketIdentity();
     void markdownParagraphsBecomeVisibleDisplayBlocks();
     void agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent();
     void pairConversationRoomsAreReadOnlyProjections();
@@ -743,6 +745,35 @@ void NativeCoreTest::secondLaunchIsForwardedToTheRunningInstance() {
     qputenv("CLARP_SCREENSHOT_PATH", "/tmp/x.png");
     QVERIFY(clarp::instanceSocketPath({}).isEmpty());
     qunsetenv("CLARP_SCREENSHOT_PATH");
+}
+
+void NativeCoreTest::launcherAndServerUseTheSameSocketIdentity() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString realBinary = directory.filePath(QStringLiteral("clarp-desktop-real"));
+    QFile file(realBinary);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("identity");
+    file.close();
+    QVERIFY(QFile::setPermissions(realBinary, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+        | QFileDevice::ExeOwner));
+    qputenv("XDG_RUNTIME_DIR", directory.path().toLocal8Bit());
+    qputenv("CLARP_INSTANCE_NAME", "identity-test");
+    qputenv("CLARP_BASE_URL", "http://127.0.0.1:9");
+    qputenv("CLARP_TOKEN", "token");
+    const QStringList arguments{QStringLiteral("--backend"), QStringLiteral("codex"),
+                                QStringLiteral("--cwd"), QStringLiteral("/tmp/work tree")};
+    const QString serverPath = clarp::instanceSocketPathForExecutable(realBinary, arguments);
+    const std::vector<std::string> launcherArgs{"--backend", "codex", "--cwd", "/tmp/work tree"};
+    const QString launcherPath = QString::fromStdString(
+        clarp::launcher::instanceSocketPathForExecutable(realBinary.toLocal8Bit().toStdString(),
+                                                         launcherArgs));
+    QCOMPARE(serverPath, launcherPath);
+    QVERIFY(serverPath.startsWith(directory.path() + QStringLiteral("/clarp-desktop-")));
+    QVERIFY(clarp::instanceSocketPathForExecutable(realBinary, {QStringLiteral("--version")}).isEmpty());
+    qunsetenv("CLARP_INSTANCE_NAME");
+    qunsetenv("CLARP_BASE_URL");
+    qunsetenv("CLARP_TOKEN");
 }
 
 void NativeCoreTest::logMergeRefreshesExplanationsOncePerBatch() {
