@@ -143,11 +143,19 @@ def main(argv: list[str]) -> int:
         # the worker that registered it is dead or unreachable.
         from lib import background_jobs
         job_id, generation = parse_job_handle(argv[3])
-        job = background_jobs.cancel_owned(
-            job_id, session=argv[1], generation=generation)
-        if not job:
-            print(f"agent_bg: {argv[1]!r} has no active job {argv[3]!r}", file=sys.stderr)
-        return 0 if job and job["status"] == "cancelled" else 1
+        outcome = background_jobs.cancel_run(
+            job_id, expected_session=argv[1], expected_generation=generation,
+            reason="owner_cancelled")
+        job = outcome["job"]
+        if outcome["mismatch"]:
+            print(f"agent_bg: {outcome['mismatch']} mismatch for {argv[3]!r}; "
+                  "nothing cancelled", file=sys.stderr)
+            return 1
+        if not job or job["status"] != "cancelled":
+            print(f"agent_bg: {argv[1]!r} has no cancellable job {argv[3]!r}", file=sys.stderr)
+            return 1
+        # Repeating an accepted cancellation of this exact owner/run is safe.
+        return 0
     if len(argv) >= 5 and argv[2] == "job-progress":
         from lib import background_jobs
         job_id, generation = parse_job_handle(argv[3])
