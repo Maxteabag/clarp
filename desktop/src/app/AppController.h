@@ -163,8 +163,8 @@ class AppController : public QObject {
     [[nodiscard]] QString lastBackend() const;
     [[nodiscard]] bool hasStoredCredential() const;
     Q_INVOKABLE [[nodiscard]] ConversationModel* conversationForSession(const QString& session);
-    Q_INVOKABLE [[nodiscard]] QUrl avatarSource(const QString& session) const;
-    Q_INVOKABLE [[nodiscard]] QUrl contactAvatarSource(const QString& name) const;
+    Q_INVOKABLE [[nodiscard]] QUrl avatarSource(const QString& session);
+    Q_INVOKABLE [[nodiscard]] QUrl contactAvatarSource(const QString& name);
     // Counters for the periodic memory log: what the process holds on to.
     Q_INVOKABLE [[nodiscard]] QVariantMap memoryCounters() const;
     // Restyle a TextEdit's imported Markdown (headings, code, quotes, tables).
@@ -485,6 +485,8 @@ class AppController : public QObject {
     bool retryCreatedAgent();
     void requestAvatars();
     void clearAvatarCache();
+    [[nodiscard]] QUrl requestAvatarForSession(const QString& session);
+    [[nodiscard]] QUrl requestContactAvatarForName(const QString& name);
     void requestRecoverableClips(const QString& session);
     void requestTail(const QString& session = {}, bool replace = false);
     void requestDelta(const QString& session = {});

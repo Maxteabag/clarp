@@ -101,6 +101,9 @@ Rectangle {
                     required property real contextWindow
                     required property var schedules
                     required property string avatarSymbol
+                    readonly property bool portraitInViewport:
+                        card.y + card.height >= overviewList.contentY
+                        && card.y <= overviewList.contentY + overviewList.height
 
                     width: ListView.view.width
                     implicitHeight: cardColumn.implicitHeight + 18
@@ -128,6 +131,7 @@ Rectangle {
                                 controller: root.controller
                                 session: card.session
                                 showPortrait: true
+                                loadPortrait: card.portraitInViewport
                                 name: card.name
                                 symbol: card.avatarSymbol
                                 avatarSize: 34

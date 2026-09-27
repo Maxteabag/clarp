@@ -7,23 +7,41 @@ Item {
     required property string session
     required property string name
     property bool showPortrait: false
+    // Rows off screen pass loadPortrait: false so they do no portrait work.
+    // Once a row has been on screen its portrait stays, so scrolling back
+    // does not flash the letter placeholder while the image reloads.
+    property bool loadPortrait: true
+    property bool portraitWanted: false
+    onLoadPortraitChanged: if (loadPortrait) portraitWanted = true
+    Component.onCompleted: if (loadPortrait) portraitWanted = true
     // An explicit portrait (a contact's persona avatar) wins over the
     // session lookup; an empty value keeps the agent-avatar path.
     property url portraitSource: ""
+    property string contactName: ""
     property string symbol: ""
     property real avatarSize: 40
     property real cornerRadius: 2
     property color fallbackColor: Theme.faint
+    property bool firstFramePassed: false
     readonly property url resolvedSource: {
         root.controller.avatarRevision;
-        if (!root.showPortrait) return "";
+        if (!root.showPortrait || !root.portraitWanted || !root.firstFramePassed) return "";
         if (String(root.portraitSource).length > 0) return root.portraitSource;
+        if (root.contactName.length > 0 && typeof root.controller.contactAvatarSource === "function")
+            return root.controller.contactAvatarSource(root.contactName);
         return root.session.length > 0 ? root.controller.avatarSource(root.session) : "";
     }
 
     implicitWidth: avatarSize
     implicitHeight: avatarSize
     clip: true
+
+    Timer {
+        interval: 0
+        running: true
+        repeat: false
+        onTriggered: root.firstFramePassed = true
+    }
 
     Rectangle {
         anchors.fill: parent

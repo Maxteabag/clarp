@@ -269,6 +269,9 @@ Rectangle {
                     id: resultRow
                     required property var modelData
                     required property int index
+                    readonly property bool portraitInViewport:
+                        resultRow.y + resultRow.height >= resultList.contentY
+                        && resultRow.y <= resultList.contentY + resultList.height
                     width: ListView.view.width
                     height: String(modelData.kind) === "command" ? 36 : 50
                     highlighted: ListView.isCurrentItem
@@ -307,6 +310,7 @@ Rectangle {
                                 avatarSize: 24
                                 cornerRadius: 6
                                 showPortrait: true
+                                loadPortrait: resultRow.portraitInViewport
                                 fallbackColor: Theme.border
                             }
                             TuiText {

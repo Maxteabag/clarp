@@ -13,6 +13,7 @@ Item {
     property color fallbackColor: Theme.faint
     property string symbol: ""
     property bool showPortrait: false
+    property bool loadPortrait: true
     readonly property var motionClock: controller.avatarMotion
     readonly property bool authoritativeWorking: { motionClock.workingRevision; return motionClock.working(session); }
     // Only working avatars follow the frame clock; idle ones stay at rest.
@@ -29,7 +30,7 @@ Item {
     implicitHeight: avatarSize
     AgentAvatar { anchors.fill: parent; controller: root.controller; session: root.session; name: root.name
         avatarSize: root.avatarSize; cornerRadius: root.cornerRadius; fallbackColor: root.fallbackColor
-        symbol: root.symbol; showPortrait: root.showPortrait }
+        symbol: root.symbol; showPortrait: root.showPortrait; loadPortrait: root.loadPortrait }
     Rectangle { anchors.fill: parent; anchors.margins: -3; color: "transparent"; border.width: 2
         border.color: Theme.success; radius: root.cornerRadius + 3; visible: root.working && root.authoritativeWorking
         opacity: root.reducedMotion ? 0.6 : 0.35 + 0.65 * (1 + Math.cos(root.phase * Math.PI * 2)) / 2

@@ -16,6 +16,7 @@ ItemDelegate {
     readonly property var latest: room.latest_message || ({})
     readonly property bool unread: Boolean(room.unread)
     readonly property bool current: controller.selectedSession === row.conversationId
+    property bool loadPortrait: true
     readonly property string preview: {
         const text = String(row.latest.text || "");
         const sender = String(row.latest.sender_name || "");
@@ -59,6 +60,7 @@ ItemDelegate {
                     session: String(modelData.session || "")
                     name: String(modelData.name || "Agent")
                     showPortrait: true
+                    loadPortrait: row.loadPortrait
                     avatarSize: 32
                     cornerRadius: 16
                     fallbackColor: index === 0 ? Theme.faint : Theme.border
