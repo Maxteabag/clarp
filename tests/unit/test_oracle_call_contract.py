@@ -16,7 +16,7 @@ def test_webrtc_contract_has_no_pcm_pipeline_or_literal_agent_examples():
     for fixture in ('Sage', 'Mira', 'blue', 'purple', 'Quiet Harbor', 'preview.html'):
         assert fixture not in cfg['instructions']
     assert 'oracle_contact' in cfg['instructions']
-    assert 'failures and uncertainty' in cfg['instructions']
+    assert 'untrusted data' in cfg['instructions']
     assert 'request' in next(t for t in cfg['tools'] if t['name'] == 'cancel_agent')['parameters']['properties']
 
 

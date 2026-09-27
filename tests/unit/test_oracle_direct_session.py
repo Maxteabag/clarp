@@ -77,11 +77,10 @@ def test_stable_direct_named_worker_goes_to_primary_verbatim_and_result_to_voice
 def test_direct_voice_contract_routes_all_work_to_selected_primary(module):
     direct=module.live_config(delegation_strategy='direct_contact')
     default=module.live_config()
-    assert 'Direct-to-primary mode is active' in direct['instructions']
-    assert 'including any worker the user names' in direct['instructions']
-    assert 'every substantive question' in direct['instructions']
-    assert 'Do not independently answer substantive questions' in direct['instructions']
-    assert 'Direct-to-primary mode is active' not in default['instructions']
+    assert 'in direct-to-primary mode' in direct['instructions']
+    assert 'reaches the selected primary contact' in direct['instructions']
+    assert 'the primary does the work' in ' '.join(direct['instructions'].split())
+    assert 'in direct-to-primary mode' not in default['instructions']
 
 
 def test_capability_advertises_both_engines():
