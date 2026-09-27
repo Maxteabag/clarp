@@ -179,7 +179,20 @@ Reasons: `no_ack`, `prepare_timeout`, `activation_timeout`, `client_failed`,
   phase is always `200`, even when a newer handoff has since raised the
   principal's generation. `409 {"error": "stale_generation", "handoff": record}`
   is only for a phase that was **not** applied before and whose generation is
-  older than the principal's newest. `404` for an unknown id.
+  older than the principal's newest. One exception: `abandon` of the current
+  active `oracle_to_agent` parent at that parent's own generation is always
+  accepted (bookkeeping only, `active -> ended`). A failed return raises the
+  principal's generation while the parent stays active, and the phone must still
+  be able to end the parent on a local Stop. Every audio transition keeps the
+  stale-generation fence. `404 {"error": "unknown_handoff"}` for
+  an id the Host holds no record of. That is not a rejection: it never means the
+  command was unaccepted and never authorises replaying it. The phone reconciles
+  with `GET /oracle/handoff` instead.
+- Retention: the Host keeps every non-terminal record, every terminal record that
+  still accepts a late ack (`failed/prepare_timeout`, `broken/activation_timeout`),
+  and every parent such a record refers to. Only terminal, unreferenced history
+  is pruned, to the newest 20 per principal. The principal's highest generation
+  is stored separately and never decreases when records are pruned.
 - A phase that is not legal from the current state answers
   `409 {"error": "illegal_transition", "handoff": record}`.
 - A phone must not start the next local step until the Host has confirmed the

@@ -622,3 +622,72 @@ def test_speech_about_switching_starts_nothing(host):
     assert len(call.conv.tools.dispatched) == 1
     assert stream.handoffs() == [] and call.mirrored() == []
     assert call.cues() == ["handed_off"]
+
+
+def _rec(n, state, reason="", parent=None, direction="agent_to_oracle"):
+    return {"handoff_id": f"hof_{n:032x}", "parent_handoff_id": parent, "state": state,
+            "reason": reason, "direction": direction, "generation": n}
+
+
+def test_retention_never_prunes_an_active_parent_behind_many_failed_returns():
+    parent = _rec(1, "active", direction="oracle_to_agent")
+    returns = [_rec(n, "failed", "client_failed", parent=parent["handoff_id"]) for n in range(2, 40)]
+    kept = handoffs._retain([parent] + returns)
+    assert kept[0] is parent
+    assert len(kept) == 1 + handoffs.KEEP_RECORDS
+    assert kept[1:] == returns[-handoffs.KEEP_RECORDS:]
+
+
+def test_retention_pins_in_flight_late_eligible_and_their_referenced_parents():
+    old_parent = _rec(1, "ended", "returned", direction="oracle_to_agent")
+    in_flight = _rec(2, "preparing", parent=old_parent["handoff_id"])
+    late_prepare = _rec(3, "failed", "prepare_timeout", direction="oracle_to_agent")
+    late_activate = _rec(4, "broken", "activation_timeout", direction="oracle_to_agent")
+    history = [_rec(n, "cancelled", "local_stop") for n in range(5, 60)]
+    kept = handoffs._retain([old_parent, in_flight, late_prepare, late_activate] + history)
+    ids = {r["handoff_id"] for r in kept}
+    for pinned in (old_parent, in_flight, late_prepare, late_activate):
+        assert pinned["handoff_id"] in ids
+    assert [r for r in kept if r in history] == history[-handoffs.KEEP_RECORDS:]
+
+
+def test_pruning_never_lowers_the_generation(host):
+    data = {"generation": 99, "records": [_rec(n, "cancelled", "local_stop") for n in range(1, 50)]}
+    handoffs._save("device-retention", data)
+    assert handoffs._load("device-retention")["generation"] == 99
+    assert len(handoffs._load("device-retention")["records"]) == handoffs.KEEP_RECORDS
+
+
+def test_a_local_stop_ends_the_active_parent_after_a_failed_return(host):
+    stream, open_call = host
+    _through(open_call)
+    parent = handoffs.snapshot(PHONE)["active"]
+    back = _offer("oracle")
+    _ack(back, "preparing")
+    assert _ack(back, "rolled_back")["state"] == "failed"
+    assert back["generation"] > parent["generation"]
+    ended = _ack(parent, "abandon", "local_stop")
+    assert ended["state"] == "ended" and handoffs.snapshot(PHONE)["active"] is None
+    assert _ack(parent, "abandon", "local_stop")["state"] == "ended"
+
+
+def test_an_obsolete_parent_audio_phase_is_still_stale_after_a_failed_return(host):
+    stream, open_call = host
+    _through(open_call)
+    parent = handoffs.snapshot(PHONE)["active"]
+    back = _offer("oracle")
+    _ack(back, "preparing"); _ack(back, "rolled_back")
+    with pytest.raises(handoffs.HandoffError) as err:
+        _ack(parent, "rollback_failed")
+    assert err.value.error == "stale_generation"
+
+
+def test_the_active_parent_survives_many_failed_returns_in_storage(host):
+    stream, open_call = host
+    _through(open_call)
+    parent = handoffs.snapshot(PHONE)["active"]
+    for _ in range(handoffs.KEEP_RECORDS + 5):
+        back = _offer("oracle")
+        _ack(back, "preparing"); _ack(back, "rolled_back")
+    assert handoffs.snapshot(PHONE)["active"]["handoff_id"] == parent["handoff_id"]
+    assert _ack(parent, "abandon", "local_stop")["state"] == "ended"

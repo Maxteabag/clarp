@@ -33,6 +33,8 @@ ABANDON_REASONS = frozenset({"local_stop", "client_restarted", "local_intent_cha
 ID_PATTERN = re.compile(r"hof_[0-9a-f]{32}")
 KEY = "oracle.handoff."
 KEEP_RECORDS = 20
+# Terminal states that still accept a late acknowledgement (docs/oracle-handoff.md).
+LATE_ELIGIBLE = frozenset({("failed", "prepare_timeout"), ("broken", "activation_timeout")})
 # connect() waits for the handoff to settle: every phase deadline, plus slack.
 CONNECT_WAIT_SECONDS = sum(TTL_MS.values()) / 1000 + 5
 ADMINISTRATOR = "administrator"
@@ -95,8 +97,27 @@ def _load(principal: str) -> dict:
     return data
 
 
+def _pinned(record: dict) -> bool:
+    """A record that live ownership or a legal late acknowledgement still needs."""
+    return record["state"] not in TERMINAL or (record["state"], record["reason"]) in LATE_ELIGIBLE
+
+
+def _retain(records: list[dict]) -> list[dict]:
+    """Prune only expendable history; never a record ownership still depends on.
+
+    Pinned records, and every parent a pinned record refers to, are always kept.
+    KEEP_RECORDS bounds only the terminal, unreferenced rest. The principal's
+    highest generation lives beside the records, so pruning never lowers it.
+    """
+    keep = {r["handoff_id"] for r in records if _pinned(r)}
+    keep |= {r["parent_handoff_id"] for r in records if r["handoff_id"] in keep and r.get("parent_handoff_id")}
+    history = [r["handoff_id"] for r in records if r["handoff_id"] not in keep]
+    keep |= set(history[-KEEP_RECORDS:]) if KEEP_RECORDS else set()
+    return [r for r in records if r["handoff_id"] in keep]
+
+
 def _save(principal: str, data: dict) -> None:
-    data["records"] = data["records"][-KEEP_RECORDS:]
+    data["records"] = _retain(data["records"])
     settings_store.set_text(KEY + principal, json.dumps(data, ensure_ascii=False, separators=(",", ":")))
 
 
@@ -407,13 +428,24 @@ def ack(caller: str, body: dict) -> dict:
         principal, data, record = _locate(caller, ident)
         if [generation, phase] in record["_acks"]:
             return {"handoff": public(record)}
-        if generation != record["generation"] or record["generation"] < data["generation"]:
+        if generation != record["generation"] or (
+                record["generation"] < data["generation"] and not _finalizes_parent(data, record, phase)):
             raise HandoffError(409, "stale_generation", public(record))
         if not _apply(principal, data, record, phase, reason):
             raise HandoffError(409, "illegal_transition", public(record))
         record["_acks"].append([generation, phase])
         _save(principal, data)
         return {"handoff": public(record)}
+
+
+def _finalizes_parent(data: dict, record: dict, phase: str) -> bool:
+    """Bookkeeping-only abandon of the current active parent, at its own generation.
+
+    A failed return leaves the parent active while the newest (failed) return
+    holds a higher generation; the phone is back in parent-owned hands-free and
+    must still be able to end it. Audio transitions stay fenced by generation.
+    """
+    return phase == "abandon" and record["state"] == "active" and _active(data) is record
 
 
 def _locate(caller: str, ident: str):
@@ -423,7 +455,7 @@ def _locate(caller: str, ident: str):
         record = _find(data, ident)
         if record is not None:
             return principal, data, record
-    raise HandoffError(404, "unknown handoff")
+    raise HandoffError(404, "unknown_handoff")
 
 
 def _apply(principal: str, data: dict, record: dict, phase: str, reason: str) -> bool:
