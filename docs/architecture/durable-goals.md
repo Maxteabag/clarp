@@ -100,3 +100,11 @@ Goal pause/cancel fences future continuation and subsequent plan writes. It does
 not kill arbitrary processes already running for an agent with several goals.
 The native controls explain this distinction; the conversation's explicit Stop
 interrupts the active turn and persists pauses for its durable commitments.
+
+Deadlines are absolute UTC milliseconds in SQLite, not relative systemd timers.
+Restarting the Host does not rearm the chosen delay. Completion and explicit
+controls retire stale wake metadata as well as preventing admission. A pending
+approval always blocks recovery; optional nonblocking questions do not prevent
+otherwise authorized independent work. `completion_verified` means the recorded
+criteria/evidence completion gate passed, not independent certification of an
+agent's evidence or a deployment/device result.

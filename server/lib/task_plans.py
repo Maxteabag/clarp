@@ -256,7 +256,12 @@ def _close_running_items(con, plan_id: str, plan_status: str, now: int) -> None:
         con.execute(
             "UPDATE task_items SET status=?,active_ms=?,started_at=NULL,completed_at=? "
             "WHERE item_id=?",
-            (terminal, elapsed, now, row["item_id"]),
+            (
+                terminal,
+                elapsed,
+                now if terminal in TERMINAL_ITEM_STATUSES else None,
+                row["item_id"],
+            ),
         )
 
 
@@ -400,7 +405,9 @@ def _goal_initialize(con, plan_id, agent, title, raw, now):
     if any(not c for c in texts):
         raise ValueError("completion criteria must not be empty")
     native = agents.live_backend_session(agent["agent_id"]) or ""
-    enroll = bool(raw.get("enroll", False))
+    enroll = raw.get("enroll", False)
+    if not isinstance(enroll, bool):
+        raise ValueError("enroll must be a boolean")
     if enroll and not native:
         raise ValueError("recovery enrollment requires a bound native conversation")
     goal = dict(
@@ -445,6 +452,24 @@ def _goal_record(con, plan, kind, detail, now):
             (json.dumps(history), plan["plan_id"]),
         )
         return
+    if kind in {"completed", "cancelled", "blocked"}:
+        wake = goal["continuation"]
+        reason = detail.get("reason") or (
+            "Completion criteria have recorded evidence"
+            if kind == "completed"
+            else "Goal " + kind
+        )
+        wake.update(
+            state=kind,
+            reason=reason,
+            due_at=None,
+            request_id="",
+            lease_until=None,
+            generation=wake["generation"] + 1,
+            observed_state=kind,
+            observed_reason=reason,
+            observed_at=now,
+        )
     goal["history"].append(
         dict(at=now, kind=kind, revision=plan["revision"] + 1, detail=detail)
     )
@@ -458,6 +483,8 @@ def _goal_require_completion(con, plan):
     ).fetchall()
     if any(r["required"] and r["status"] not in {"completed", "removed"} for r in rows):
         raise ValueError("required work remains unresolved")
+    if any(r["status"] == "in_progress" for r in rows):
+        raise ValueError("running work must be resolved or deferred before completion")
     if goal and any(not c["evidence"].strip() for c in goal["criteria"]):
         raise ValueError("completion requires evidence for every acceptance criterion")
     if not goal and any(r["status"] != "completed" for r in rows):
@@ -480,6 +507,7 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
             raise ValueError("task plan not found")
         _goal_check_revision(plan, revision)
         goal = json.loads(plan["goal_json"] or "{}")
+        was_legacy = not goal
         if action == "enroll" and not goal:
             if plan["status"] != "active":
                 raise ValueError("only active legacy work can enroll")
@@ -496,7 +524,33 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
             raise ValueError("goal is closed")
         reason = str(data.get("reason") or "").strip()
         state = goal["continuation"]
-        if action == "enroll":
+        if action == "enroll" and not was_legacy:
+            if data.get("enroll") is not True or not reason:
+                raise ValueError(
+                    "explicit enrollment requires enroll:true and a reason"
+                )
+            native = agents.live_backend_session(plan["agent_id"])
+            if not native or goal["native_session_id"] not in {"", native}:
+                raise ValueError(
+                    "verify and rebind the owner conversation before enrollment"
+                )
+            goal["native_session_id"] = native
+            con.execute(
+                "UPDATE task_plans SET recovery_enabled=1 WHERE plan_id=?", (plan_id,)
+            )
+            state.update(
+                generation=state["generation"] + 1, request_id="", lease_until=None
+            )
+            if plan["status"] == "active":
+                state.update(
+                    state="ready",
+                    due_at=now + 15000,
+                    reason=reason,
+                    observed_state="ready",
+                    observed_reason=reason,
+                    observed_at=now,
+                )
+        elif action == "enroll":
             pass
         elif action in {"pause", "cancel", "supersede", "block", "resume"}:
             if not reason:
@@ -532,6 +586,9 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 generation=state["generation"] + 1,
                 state="ready" if action == "resume" else status,
                 reason=reason,
+                observed_state="ready" if action == "resume" else status,
+                observed_reason=reason,
+                observed_at=now,
                 due_at=now + 15000 if action == "resume" else None,
                 lease_until=None,
                 request_id="",
@@ -725,6 +782,24 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
             task_plans._insert_item(con, plan_id, key, None, position, data, now)
         else:
             raise ValueError("unknown goal action")
+        enabled = con.execute(
+            "SELECT recovery_enabled FROM task_plans WHERE plan_id=?", (plan_id,)
+        ).fetchone()[0]
+        if not enabled:
+            state["due_at"] = None
+            if state["state"] in {
+                "ready",
+                "dispatching",
+                "admitted",
+                "queued",
+                "retry",
+            }:
+                state.update(
+                    state="not_enrolled",
+                    reason="Automatic continuation is not enrolled",
+                    observed_state="not_enrolled",
+                    observed_reason="Automatic continuation is not enrolled",
+                )
         # Content lives in its versioned document rows, not duplicated in the event log.
         detail = {k: v for k, v in data.items() if k not in {"content", "documents"}}
         if data.get("documents"):

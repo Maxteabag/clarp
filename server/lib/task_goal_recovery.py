@@ -59,7 +59,7 @@ def boundary(plan, goal, *, check_live=True):
         return "capacity", (
             detail.get("message") or "Capacity unavailable"
         ) + "; retry is backed off"
-    if artifacts.has_pending_decision(agent["agent_id"]):
+    if artifacts.has_blocking_decision(agent["agent_id"]):
         return "approval", "Waiting for an answer or approval"
     native_goal = agent_goals.get(agent["agent_id"])
     if (
@@ -337,7 +337,7 @@ def _result(plan_id, request, now, state, reason):
         plan = con.execute(
             "SELECT * FROM task_plans WHERE plan_id=?", (plan_id,)
         ).fetchone()
-        if not plan:
+        if not plan or plan["status"] != "active":
             return
         goal = json.loads(plan["goal_json"])
         wake = goal["continuation"]

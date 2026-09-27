@@ -122,3 +122,14 @@ the new binding with `clarp-sessions`, pause the goal, then explicitly use
 `rebind PLAN_ID REVISION '{"native_session_id":"VERIFIED_ID","reason":"Why the conversation changed"}'`.
 This retains the outcome/criteria/history and leaves the goal paused; resume only
 within current authorization. A stale wake can never silently choose a new owner.
+
+`next_work` can carry your dynamically composed continuation instructions,
+including what changed, current constraints, and work that must not be repeated.
+It remains provisional context on the next wake. Optional nonblocking questions
+may coexist with authorized independent work; approvals and questions explicitly
+marked as blocking still prevent automatic continuation.
+
+A manually tracked goal (`enroll:false`) never claims an automatic wake. To opt
+it in later, verify its owner binding and use
+`enroll PLAN_ID REVISION '{"enroll":true,"reason":"Owner opted into recovery"}'`.
+Existing outcome, criteria, evidence and documents stay intact.
