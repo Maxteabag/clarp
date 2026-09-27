@@ -4231,6 +4231,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(400, "JSON object required")
         try:
             receipt = html_forms.submit(artifact_id, data)
+        except html_forms.ReadOnlyForm as exc:
+            return self._json_error(400, str(exc))
         except ValueError as exc:
             return self._json_error(409, str(exc))
         return self._json_ok(receipt)

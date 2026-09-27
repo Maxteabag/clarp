@@ -729,3 +729,18 @@ def test_attention_poll_without_expiries_is_read_only(tmp_path):
     finally:
         db.conn().set_trace_callback(None)
     assert not any(s.startswith("BEGIN") for s in statements)
+
+
+def test_markdown_upload_is_accepted_and_utf8_checked(tmp_path):
+    _agent(tmp_path)
+    for ctype in ("text/markdown", "text/x-markdown", "application/octet-stream", ""):
+        row = media_store.publish(session="mike", blob="## Findings\n\n**ø**".encode(),
+                                  source_name="findings.md", content_type=ctype,
+                                  media_dir=tmp_path / "media")
+        assert row["mime_type"] == "text/markdown", ctype
+    assert media_store.publish(session="mike", blob=b"# Notes", source_name="notes.markdown",
+                               content_type="application/octet-stream",
+                               media_dir=tmp_path / "media")["mime_type"] == "text/markdown"
+    with pytest.raises(media_store.MediaError, match="unsupported"):
+        media_store.publish(session="mike", blob=b"\xff\xfe\x00bad", source_name="bad.md",
+                            content_type="text/markdown", media_dir=tmp_path / "media")
