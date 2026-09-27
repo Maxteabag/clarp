@@ -76,6 +76,10 @@ def prune_database(*, now_ms: int | None = None,
         "DELETE FROM judgment_decisions WHERE created_at < ?",
         (now_ms - policy.judgment_decisions_max_age_ms,),
     ).rowcount
+    from . import tool_explanation_learning, tool_explanation_templates
+    from .tool_explanations import PROMPT_VERSION
+    counts.update(tool_explanation_learning.prune(
+        c, now_ms, PROMPT_VERSION, tool_explanation_templates.VERSION))
     return counts
 
 
