@@ -32,9 +32,14 @@ ColumnLayout {
         if (!search.text.trim() && selectedIndex === 0) { chosen("~", "~"); return; }
         if (queryTimer.running) { confirmWhenReady = true; queryTimer.stop(); reload(); return; }
         if (controller.launchDirectoriesLoading || !controller.connected) { confirmWhenReady = true; return; }
-        if (!choices.length) return;
-        const choice = choices[Math.min(selectedIndex, choices.length - 1)];
-        confirmWhenReady = false; chosen(choice.path, choice.label);
+        confirmWhenReady = false;
+        if (choices.length) {
+            const choice = choices[Math.min(selectedIndex, choices.length - 1)];
+            chosen(choice.path, choice.label);
+            return;
+        }
+        const typed = search.text.trim();
+        if (typed.length) chosen(typed, typed);
     }
     function move(delta) {
         selectedIndex = Math.max(0, Math.min(selectedIndex + delta,
@@ -51,6 +56,10 @@ ColumnLayout {
         onAccepted: root.confirm()
         Keys.onPressed: event => {
             switch (event.key) {
+            case Qt.Key_Return:
+            case Qt.Key_Enter:
+                root.confirm();
+                break;
             case Qt.Key_Down: root.move(1); break;
             case Qt.Key_Up: root.move(-1); break;
             case Qt.Key_Tab:

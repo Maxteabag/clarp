@@ -711,6 +711,9 @@ class NativeCoreTest final : public QObject {
     void secondLaunchIsForwardedToTheRunningInstance();
     void readyModePreservesActivityAndHidesOnlyProvisionalBody();
     void idleContactStartsFreshWithSavedDefaults();
+    void idleContactUsesDialogLaunchValues();
+    void hostDefaultDirectoryReplacesHomePlaceholder();
+    void contactCreateShowsHostMessageWithoutHttpSuffix();
     void newAgentWaitsForOwnRosterAndRejectsLateSnapshots();
     void fastLaunchOpensWithoutWaitingForFleet();
     void resumeLaunchOpensExactSessionWithoutFleet();
@@ -1711,6 +1714,85 @@ void NativeCoreTest::idleContactStartsFreshWithSavedDefaults() {
     QTRY_VERIFY_WITH_TIMEOUT(controller.startingContact().isEmpty(), 3000);
     QVERIFY(!controller.errorMessage().isEmpty());
     QCOMPARE(controller.selectedSession(), freshSession);
+}
+
+void NativeCoreTest::idleContactUsesDialogLaunchValues() {
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
+    const auto restore = qScopeGuard([&] {
+        qputenv("CLARP_BASE_URL", oldBase);
+        qputenv("CLARP_TOKEN", oldToken);
+    });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
+    qputenv("CLARP_TOKEN", "test-token");
+    AppController controller;
+    QTRY_VERIFY_WITH_TIMEOUT(controller.connected(), 3000);
+    controller.contacts()->applySnapshot({{QStringLiteral("personas"), QJsonArray{
+        QJsonObject{{QStringLiteral("name"), QStringLiteral("Ada")}}
+    }}}, {});
+    server.setJsonResponse(QStringLiteral("POST"), QStringLiteral("/agents"), 201,
+        {{QStringLiteral("session"), QStringLiteral("ada-dialog")}});
+    controller.setLaunchDirectory(QStringLiteral("/data/workspace/dialog choice"));
+    QVERIFY(controller.quickStartContact(QStringLiteral("Ada"), QStringLiteral("grok"),
+                                         QStringLiteral("grok-4"), QStringLiteral("high")));
+    QTRY_VERIFY_WITH_TIMEOUT(server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/agents")), 3000);
+    const QJsonObject request = server.requestJson(QStringLiteral("POST"), QStringLiteral("/agents"));
+    QCOMPARE(request.value(QStringLiteral("name")).toString(), QStringLiteral("Ada"));
+    QCOMPARE(request.value(QStringLiteral("cwd")).toString(), QStringLiteral("/data/workspace/dialog choice"));
+    QCOMPARE(request.value(QStringLiteral("backend")).toString(), QStringLiteral("grok"));
+    QCOMPARE(request.value(QStringLiteral("model")).toString(), QStringLiteral("grok-4"));
+    QCOMPARE(request.value(QStringLiteral("effort")).toString(), QStringLiteral("high"));
+}
+
+void NativeCoreTest::hostDefaultDirectoryReplacesHomePlaceholder() {
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
+    QSettings settings;
+    const QVariant oldFolder = settings.value(QStringLiteral("launch/workingDirectory"));
+    const auto restore = qScopeGuard([&] {
+        qputenv("CLARP_BASE_URL", oldBase);
+        qputenv("CLARP_TOKEN", oldToken);
+        if (oldFolder.isValid()) settings.setValue(QStringLiteral("launch/workingDirectory"), oldFolder);
+        else settings.remove(QStringLiteral("launch/workingDirectory"));
+    });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
+    qputenv("CLARP_TOKEN", "test-token");
+    settings.setValue(QStringLiteral("launch/workingDirectory"), QStringLiteral("~"));
+    AppController controller;
+    QTRY_VERIFY_WITH_TIMEOUT(controller.connected(), 3000);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.lastWorkingDirectory(), QStringLiteral("/tmp"), 3000);
+    QCOMPARE(controller.launchDirectory(), QStringLiteral("/tmp"));
+}
+
+void NativeCoreTest::contactCreateShowsHostMessageWithoutHttpSuffix() {
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
+    const auto restore = qScopeGuard([&] {
+        qputenv("CLARP_BASE_URL", oldBase);
+        qputenv("CLARP_TOKEN", oldToken);
+    });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
+    qputenv("CLARP_TOKEN", "test-token");
+    AppController controller;
+    QTRY_VERIFY_WITH_TIMEOUT(controller.connected(), 3000);
+    controller.contacts()->applySnapshot({{QStringLiteral("personas"), QJsonArray{
+        QJsonObject{{QStringLiteral("name"), QStringLiteral("Cleo")}}
+    }}}, {});
+    const QString hostMessage =
+        QStringLiteral("path /home/clarp is outside the Clarp workspace root /data/workspace");
+    server.setJsonResponse(QStringLiteral("POST"), QStringLiteral("/agents"), 403,
+        {{QStringLiteral("error"), QStringLiteral("workspace_path_forbidden")},
+         {QStringLiteral("message"), hostMessage}});
+    controller.setLaunchDirectory(QStringLiteral("/home/clarp"));
+    QVERIFY(controller.quickStartContact(QStringLiteral("Cleo"), QStringLiteral("codex"), {}, {}));
+    QTRY_COMPARE_WITH_TIMEOUT(controller.errorMessage(), hostMessage, 3000);
+    QVERIFY(controller.startingContact().isEmpty());
 }
 
 void NativeCoreTest::newAgentWaitsForOwnRosterAndRejectsLateSnapshots() {

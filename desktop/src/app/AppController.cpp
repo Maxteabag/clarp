@@ -526,14 +526,15 @@ bool AppController::quickStartContact(const QString& name, const QString& backen
     }
     setErrorMessage({});
     m_startingContact = contactName;
-    m_startingBackend = backend.isEmpty() ? quickStartBackend() : backend;
+    const QString chosenBackend = backend.trimmed().isEmpty() ? quickStartBackend() : backend.trimmed();
+    m_startingBackend = chosenBackend;
     emit contactLaunchChanged();
     QJsonObject body{{QStringLiteral("name"), contactName},
-         {QStringLiteral("cwd"), QStringLiteral("~")},
-         {QStringLiteral("backend"), backend.isEmpty() ? quickStartBackend() : backend},
+         {QStringLiteral("cwd"), launchDirectory().isEmpty() ? QStringLiteral("~") : launchDirectory()},
+         {QStringLiteral("backend"), chosenBackend},
          {QStringLiteral("synthesize_audio"), !m_muted}};
-    if (!model.isEmpty()) body.insert(QStringLiteral("model"), model);
-    if (!effort.isEmpty()) body.insert(QStringLiteral("effort"), effort);
+    if (!model.trimmed().isEmpty()) body.insert(QStringLiteral("model"), model.trimmed());
+    if (!effort.trimmed().isEmpty()) body.insert(QStringLiteral("effort"), effort.trimmed());
     m_api.postJson(QStringLiteral("contact-create"), QStringLiteral("/agents"), body);
     return true;
 }
@@ -1713,6 +1714,20 @@ void AppController::loadLaunchDirectories(const QString& query) {
     parameters.addQueryItem(QStringLiteral("q"), query);
     m_api.get(QStringLiteral("launch-directories:%1").arg(++m_launchDirectoryGeneration),
               QStringLiteral("/launch-directories"), parameters);
+}
+
+void AppController::applyHostLaunchDirectoryDefault(const QString& directory) {
+    const QString trimmed = directory.trimmed();
+    if (trimmed.isEmpty()) return;
+    if (!m_lastWorkingDirectory.trimmed().isEmpty() && m_lastWorkingDirectory != QStringLiteral("~")) {
+        return;
+    }
+    const bool changed = m_lastWorkingDirectory != trimmed || m_launchDirectory != trimmed;
+    m_lastWorkingDirectory = trimmed;
+    m_launchDirectory = trimmed;
+    if (changed) {
+        emit launchDefaultsChanged();
+    }
 }
 
 void AppController::loadDirectorySuggestions(const QString& path) {
@@ -3127,6 +3142,7 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
     if (tag == QStringLiteral("server-info")) {
         m_serverName = object.value(QStringLiteral("name")).toString(QStringLiteral("Clarp"));
         m_serverVersion = object.value(QStringLiteral("clarp_version")).toString();
+        applyHostLaunchDirectoryDefault(object.value(QStringLiteral("default_cwd")).toString());
         emit serverInfoChanged();
         if (m_bearerToken.startsWith(QStringLiteral("cld_"))) {
             m_credentials.store(m_baseUrl, m_bearerToken);
@@ -3166,6 +3182,7 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
     if (tag.startsWith(QStringLiteral("launch-directories:"))) {
         if (tag.sliced(19).toULongLong() != m_launchDirectoryGeneration) return;
         m_launchDirectories = object.value(QStringLiteral("matches")).toArray().toVariantList();
+        applyHostLaunchDirectoryDefault(object.value(QStringLiteral("home")).toString());
         m_launchDirectoriesLoading = false;
         emit launchDirectoriesChanged();
         return;
@@ -3619,11 +3636,14 @@ void AppController::handleRequestFailure(const QString& tag, const QString& mess
     if (tag == QStringLiteral("contact-create")) {
         m_startingBackend.clear();
         m_startingContact.clear();
-        emit contactLaunchChanged();
         if (message == QStringLiteral("contact_pool_empty")) {
             emit launchPoolEmpty();
+            emit contactLaunchChanged();
             return;
         }
+        setErrorMessage(message);
+        emit contactLaunchChanged();
+        return;
     }
     if (tag == QStringLiteral("settings-action:tts")) {
         m_settingsStatusPending = std::max(0, m_settingsStatusPending - 1);

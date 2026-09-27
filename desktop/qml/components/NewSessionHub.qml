@@ -82,6 +82,7 @@ Rectangle {
         query = ""; selectedKey = ""; modelId = ""; effort = "";
         nameField.text = "";
         directory = String(root.controller.lastWorkingDirectory || "~");
+        syncHostDefaultDirectory();
         const saved = String(root.controller.lastBackend || "");
         backend = providers.some(provider => provider.id === saved) ? saved : providers[0].id;
         root.controller.clearError();
@@ -126,6 +127,13 @@ Rectangle {
         const next = root.providers[(index + root.providers.length) % root.providers.length].id;
         if (root.backend !== next) { root.backend = next; root.modelId = ""; root.effort = ""; }
     }
+    function syncHostDefaultDirectory() {
+        const value = String(root.controller.lastWorkingDirectory || "~");
+        if ((root.directory.length === 0 || root.directory === "~") && value.length > 0 && value !== "~") {
+            root.directory = value;
+            root.controller.setLaunchDirectory(value);
+        }
+    }
     function confirm() {
         if (!root.canConfirm) return;
         root.controller.clearError();
@@ -167,6 +175,7 @@ Rectangle {
             root.submitting = false; root.newContact = true;
             Qt.callLater(() => nameField.forceActiveFocus());
         }
+        function onLaunchDefaultsChanged() { if (root.visible) root.syncHostDefaultDirectory(); }
         function onAgentMutationSucceeded() { if (root.visible && root.submitting) root.close(); }
         function onContactLaunchChanged() {
             if (root.visible && root.submitting && String(root.controller.startingContact || "").length === 0
