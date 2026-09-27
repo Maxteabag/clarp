@@ -1,7 +1,9 @@
 #include "app/StallMonitor.h"
 #include <QFile>
+#include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTimer>
 #include <chrono>
 #include <thread>
 
@@ -37,6 +39,46 @@ class StallMonitorTest : public QObject {
         clarpStallTestBusyGuiThread(60);
         QTest::qWait(300);
         QCOMPARE(monitor.stallCount(), 0);
+    }
+    void postedBlockDurationsUseWakeTime_data() {
+        QTest::addColumn<int>("delayMs");
+        QTest::addColumn<int>("blockMs");
+        QTest::addColumn<bool>("expectStall");
+
+        QTest::newRow("short-after-beat") << 5 << 100 << false;
+        QTest::newRow("short-before-beat") << 70 << 100 << false;
+        QTest::newRow("long-after-beat") << 5 << 250 << true;
+        QTest::newRow("long-before-beat") << 70 << 250 << true;
+    }
+    void postedBlockDurationsUseWakeTime() {
+        QFETCH(int, delayMs);
+        QFETCH(int, blockMs);
+        QFETCH(bool, expectStall);
+
+        QTemporaryDir dir;
+        const QString log = dir.filePath(QStringLiteral("stalls.log"));
+        clarp::StallMonitor monitor(150, log, nullptr, 0);
+        QTest::qWait(100);
+        QTimer::singleShot(delayMs, qApp, [blockMs] { clarpStallTestBusyGuiThread(blockMs); });
+        if (!expectStall) {
+            QTest::qWait(delayMs + blockMs + 300);
+            QCOMPARE(monitor.stallCount(), 0);
+            QVERIFY(!QFile::exists(log));
+            return;
+        }
+
+        QTRY_COMPARE_WITH_TIMEOUT(monitor.stallCount(), 1, 2000);
+        QVERIFY2(monitor.longestStallMs() >= 230, qPrintable(QString::number(monitor.longestStallMs())));
+        QVERIFY2(monitor.longestStallMs() <= 280, qPrintable(QString::number(monitor.longestStallMs())));
+        QFile file(log);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QString text = QString::fromUtf8(file.readAll());
+        const QRegularExpressionMatch match =
+            QRegularExpression(QStringLiteral("-- stall ended after (\\d+) ms")).match(text);
+        QVERIFY2(match.hasMatch(), qPrintable(text));
+        const int total = match.captured(1).toInt();
+        QVERIFY2(total >= 230, qPrintable(QString::number(total)));
+        QVERIFY2(total <= 280, qPrintable(QString::number(total)));
     }
     void memoryThresholdCapturesTheGuiStack() {
         QTemporaryDir dir;
