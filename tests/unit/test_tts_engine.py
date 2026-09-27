@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import pathlib
 import pytest
 
 from lib.tts_engine import (
@@ -99,3 +100,21 @@ def test_client_or_disabled_provider_never_generates_paid_server_audio(
         engine.synthesize("hello", "voice", session="agent")
 
     assert not temporary.exists()
+
+
+def test_elevenlabs_fallback_gets_its_own_id_from_a_provider_map(tmp_path, monkeypatch):
+    """A {provider: id} voice must reach ElevenLabs as the bare ElevenLabs id."""
+    from lib import config, tts_engine
+    monkeypatch.setattr(config, "_CACHED", config.Config(tts_provider="elevenlabs"))
+    sent = []
+
+    def fake_synthesize(text, voice_id, out_path, **_kwargs):
+        sent.append(voice_id)
+        pathlib.Path(out_path).write_bytes(b"mp3")
+
+    monkeypatch.setattr(tts_engine, "synthesize_to_file", fake_synthesize)
+    engine = tts_engine.ElevenLabsEngine(tmp_path / "audio", api_key="configured")
+    engine.synthesize("hello", '{"cartesia":"c-uuid","elevenlabs":"elevenId123"}')
+    engine.synthesize("hello", "plainElevenId")
+
+    assert sent == ["elevenId123", "plainElevenId"]
