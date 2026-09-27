@@ -63,6 +63,9 @@ class ToolNarrator : public QObject {
   private:
     static QByteArray payload(const QVariantMap& activity, const QString& workingDirectory = {}, bool localFilesAllowed = false);
     static QString key(const QByteArray& bytes);
+    // key(payload(...)) memoized on the raw fields payload() reads.
+    [[nodiscard]] QString cacheKey(const QVariantMap& activity, const QString& workingDirectory, bool localFilesAllowed) const;
+    mutable QHash<QString, QString> m_keyMemo;
     void startBatch();
     void startRemoteBatch();
     void pollRemote();

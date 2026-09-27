@@ -14,6 +14,7 @@
 #include <QStandardPaths>
 #include <QUuid>
 #include <algorithm>
+#include <array>
 #include <utility>
 #ifdef Q_OS_UNIX
 #include <csignal>
@@ -87,6 +88,20 @@ QJsonArray scriptReferences(const QJsonObject& activity, const QString& workingD
             {QStringLiteral("modified_ms"), info.lastModified().toMSecsSinceEpoch()}});
     }
     return refs;
+}
+
+// The extensions scriptReferences() looks for, found without a regex: this
+// runs for every lookup of every activity.
+bool mayNameScript(QStringView text) {
+    static constexpr std::array<QStringView, 8> extensions{u"js", u"mjs", u"cjs", u"py", u"sh", u"bash", u"ts", u"rb"};
+    for (qsizetype dot = text.indexOf(u'.'); dot >= 0; dot = text.indexOf(u'.', dot + 1)) {
+        const QStringView rest = text.mid(dot + 1);
+        for (const QStringView extension : extensions) {
+            if (!rest.startsWith(extension)) continue;
+            if (rest.size() == extension.size() || !rest.at(extension.size()).isLetterOrNumber()) return true;
+        }
+    }
+    return false;
 }
 
 QJsonObject withScriptEvidence(QJsonObject activity) {
@@ -434,13 +449,62 @@ QString ToolNarrator::key(const QByteArray& bytes) {
     return QString::fromLatin1(hasher.result().toHex());
 }
 
+// Explanation rebuilds look up every activity in the conversation, and
+// payload() redacts with regexes, serializes JSON and stats files each time:
+// 200-700 ms GUI stalls in long chats. The memo is keyed on the raw fields
+// payload() reads, which only takes appending them. A command that may name a
+// local script is never memoized: its payload carries the script's size and
+// mtime, so an edited or newly created script must change the key at once.
+QString ToolNarrator::cacheKey(const QVariantMap& activity, const QString& workingDirectory, bool localFilesAllowed) const {
+    // Static keys: a QLatin1String key is converted to a new QString on every
+    // map lookup, which cost more than the rest of the memo.
+    static const std::array<QString, 9> fields{QStringLiteral("_session"), QStringLiteral("id"), QStringLiteral("kind"),
+        QStringLiteral("name"), QStringLiteral("summary"), QStringLiteral("description"), QStringLiteral("command"),
+        QStringLiteral("file_path"), QStringLiteral("title")};
+    static const std::array<QString, 9> inputFields{QStringLiteral("command"), QStringLiteral("cmd"), QStringLiteral("code"),
+        QStringLiteral("file_path"), QStringLiteral("path"), QStringLiteral("pattern"), QStringLiteral("query"),
+        QStringLiteral("description"), QStringLiteral("cwd")};
+    static const QString inputKey = QStringLiteral("input");
+    static const QString linesKey = QStringLiteral("lines");
+    static const QString labelKey = QStringLiteral("label");
+    static const QString kindKey = QStringLiteral("kind");
+    static const QString textKey = QStringLiteral("text");
+    constexpr QChar separator(0x1f);
+    QString raw;
+    raw.reserve(256);
+    raw += workingDirectory; raw += separator; raw += localFilesAllowed ? u'1' : u'0';
+    const auto add = [&raw, separator](const QVariant& value) { raw += separator; raw += value.toString(); };
+    for (const QString& field : fields) add(activity.value(field));
+    const QVariant input = activity.value(inputKey);
+    if (input.metaType().id() == QMetaType::QString) {
+        raw += separator; raw += u's'; add(input);
+    } else if (input.canConvert<QVariantMap>()) {
+        const QVariantMap arguments = input.toMap();
+        raw += separator; raw += u'm';
+        for (const QString& field : inputFields) {
+            const QVariant value = arguments.value(field);
+            raw += separator;
+            if (value.metaType().id() == QMetaType::QString) { raw += u'='; raw += value.toString(); }
+        }
+    }
+    for (const QVariant& value : activity.value(linesKey).toList()) {
+        const QVariantMap line = value.toMap();
+        add(line.value(labelKey)); add(line.value(kindKey)); add(line.value(textKey));
+    }
+    if (localFilesAllowed && mayNameScript(raw)) return key(payload(activity, workingDirectory, localFilesAllowed));
+    const auto found = m_keyMemo.constFind(raw);
+    if (found != m_keyMemo.cend()) return *found;
+    if (m_keyMemo.size() >= 8'192) m_keyMemo.clear();
+    return *m_keyMemo.insert(raw, key(payload(activity, workingDirectory, localFilesAllowed)));
+}
+
 QString ToolNarrator::explanation(const QVariantMap& activity, const QString& workingDirectory, bool localFilesAllowed) const {
     if (!m_enabled) return {};
-    const auto value = m_cache.value(key(payload(activity, workingDirectory, localFilesAllowed && m_api == nullptr)));
+    const auto value = m_cache.value(cacheKey(activity, workingDirectory, localFilesAllowed && m_api == nullptr));
     return value == FailureMarker ? QString{} : value;
 }
 bool ToolNarrator::failed(const QVariantMap& activity, const QString& workingDirectory, bool localFilesAllowed) const {
-    return m_enabled && m_cache.value(key(payload(activity, workingDirectory, localFilesAllowed && m_api == nullptr))) == FailureMarker;
+    return m_enabled && m_cache.value(cacheKey(activity, workingDirectory, localFilesAllowed && m_api == nullptr)) == FailureMarker;
 }
 
 void ToolNarrator::request(const QVariantMap& activity, const QString& workingDirectory, bool localFilesAllowed) {

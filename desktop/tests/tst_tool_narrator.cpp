@@ -73,6 +73,7 @@ class ToolNarratorTest : public QObject {
     void failureFallsBackWithoutRetryStorm_data();
     void failureFallsBackWithoutRetryStorm();
     void scriptContextIsOptInBoundedAndInvalidatesCache();
+    void memoizedLookupsFollowEveryFieldThatIsSent();
     void detailLevelsChangeInstructionsAndDiscardPreviousTranslations();
 };
 
@@ -281,6 +282,39 @@ void ToolNarratorTest::scriptContextIsOptInBoundedAndInvalidatesCache() {
     script.write("// Compare the delivery fees instead.\n");
     script.close();
     QVERIFY(narrator.explanation(activity, directory.path(), true).isEmpty());
+}
+
+void ToolNarratorTest::memoizedLookupsFollowEveryFieldThatIsSent() {
+    // Lookups are memoized on the raw activity; any field the request would
+    // send must still lead to a different explanation.
+    QTemporaryDir directory;
+    const QString capture = directory.filePath(QStringLiteral("capture"));
+    ToolNarrator narrator(nullptr, QCoreApplication::applicationFilePath(),
+        {QStringLiteral("--fake-codex"), capture, QStringLiteral("ok")});
+    narrator.setEnabled(true);
+    const QVariantMap activity{{QStringLiteral("name"), QStringLiteral("Bash")},
+        {QStringLiteral("input"), QVariantMap{{QStringLiteral("command"), QStringLiteral("cmake --build desktop/build/dev")}}}};
+    QVERIFY(narrator.explanation(activity).isEmpty());
+    narrator.request(activity);
+    QTRY_VERIFY_WITH_TIMEOUT(!narrator.explanation(activity).isEmpty(), 3'000);
+    QVariantMap otherInput = activity;
+    otherInput.insert(QStringLiteral("input"), QVariantMap{{QStringLiteral("command"), QStringLiteral("ctest --preset dev")}});
+    QVERIFY(narrator.explanation(otherInput).isEmpty());
+    QVariantMap asText = activity;
+    asText.insert(QStringLiteral("input"), QStringLiteral("cmake --build desktop/build/dev"));
+    QVERIFY(narrator.explanation(asText).isEmpty());
+    QVariantMap withLines = activity;
+    withLines.insert(QStringLiteral("lines"), QVariantList{QVariantMap{{QStringLiteral("label"), QStringLiteral("Read")},
+        {QStringLiteral("text"), QStringLiteral("CMakeLists.txt")}}});
+    QVERIFY(narrator.explanation(withLines).isEmpty());
+    QVariantMap otherSession = activity;
+    otherSession.insert(QStringLiteral("_session"), QStringLiteral("other"));
+    QVERIFY(narrator.explanation(otherSession).isEmpty());
+    // Fields that are never sent share the explanation.
+    QVariantMap withResult = activity;
+    withResult.insert(QStringLiteral("result"), QStringLiteral("PRIVATE OUTPUT"));
+    QCOMPARE(narrator.explanation(withResult), narrator.explanation(activity));
+    QVERIFY(!narrator.explanation(activity).isEmpty());
 }
 
 void ToolNarratorTest::failureFallsBackWithoutRetryStorm_data() {
