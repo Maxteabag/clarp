@@ -68,7 +68,7 @@ def boundary(plan, goal, *, check_live=True):
         and native_goal["status"] != "complete"
     ):
         # Codex owns native continuation. Never run a competing Host goal loop.
-        return "native_owned", "Native goal controls continuation: " + native_goal[
+        return "native_owned", "Waiting for the agent's existing autonomous objective: " + native_goal[
             "status"
         ]
     if check_live:
