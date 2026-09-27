@@ -86,9 +86,11 @@ void AgentFilterModel::setQuery(const QString& query) {
     if (m_query == query) {
         return;
     }
+    const Tree before = m_tree;
+    beginFilterChange();
     m_query = query;
     rebuildTree();
-    invalidate();
+    applyTree(before, true);
     emit queryChanged();
     emit countChanged();
 }
@@ -97,9 +99,11 @@ void AgentFilterModel::setUnreadOnly(bool unreadOnly) {
     if (m_unreadOnly == unreadOnly) {
         return;
     }
+    const Tree before = m_tree;
+    beginFilterChange();
     m_unreadOnly = unreadOnly;
     rebuildTree();
-    invalidate();
+    applyTree(before, true);
     emit unreadOnlyChanged();
     emit countChanged();
 }
@@ -204,9 +208,25 @@ void AgentFilterModel::rebuildTree() {
 
 void AgentFilterModel::refreshTree() {
     const Tree before = m_tree;
+    beginFilterChange();
     rebuildTree();
+    applyTree(before, before.hidden != m_tree.hidden);
+}
+
+// Applies a rebuilt tree without invalidate(): that resets the model, and the
+// sidebar then destroys and recreates every row (about 20 ms each with
+// portraits; 490 ms when the live agent list arrived). Filtering inserts and
+// removes only the rows that changed, and a re-sort is a layout change that
+// keeps the rows' delegates.
+void AgentFilterModel::applyTree(const Tree& before, bool filterChanged) {
+    endFilterChange(filterChanged ? Direction::Rows : Directions{});
     if (before == m_tree) return;
-    invalidate();
+    if (before.position != m_tree.position) {
+        // sort() skips an unchanged column and order; sorting away and back
+        // makes it use the new positions.
+        sort(-1);
+        sort(0);
+    }
     if (rowCount() > 0) {
         emit dataChanged(index(0, 0), index(rowCount() - 1, 0), {TreeDepthRole, DoneHelpersRole});
     }
