@@ -93,7 +93,7 @@ inline void startTranscriptScrollSmokeCheck(QGuiApplication& application, QQuick
         if (!require(transcript != nullptr, "no visible transcript")) return;
         const qreal contentY = transcript->property("contentY").toReal();
         const qreal distance = transcript->property("distanceFromBottom").toReal();
-        const bool atEnd = transcript->property("atYEnd").toBool();
+        const bool atEnd = transcript->property("atLatest").toBool();
         const bool following = transcript->property("followLatest").toBool();
         qInfo("transcript-scroll step=%d contentY=%.1f contentHeight=%.1f distance=%.1f atYEnd=%d follow=%d interacting=%d count=%d",
               step, contentY, transcript->property("contentHeight").toReal(), distance, atEnd, following,
