@@ -60,7 +60,7 @@ Item {
     signal toggleActivityGroup()
     function loadInlineDetails() {
         if ((root.forceActivityInline || root.showTools) && root.toolDetailsAvailable
-            && root.displayCells.length === 0 && root.tools.length === 0)
+            && root.safeLength(root.displayCells) === 0 && root.safeLength(root.tools) === 0)
             root.controller.loadMessageToolDetails(root.session, root.messageId);
     }
     onForceActivityInlineChanged: Qt.callLater(root.loadInlineDetails)
@@ -77,6 +77,9 @@ Item {
         const value = style ? style[key] : undefined;
         return value === undefined || value === null || value === "" ? fallback : value;
     }
+    function safeLength(value) {
+        return value && value.length !== undefined ? value.length : 0;
+    }
     readonly property string readingFont: String(styled("fontFamily", "JetBrains Mono"))
     readonly property int readingSize: Number(styled("fontPixelSize", 15))
     readonly property int readingMeasure: Number(styled("measure", 840))
@@ -88,7 +91,7 @@ Item {
         return narrationEnabled && localFilesAllowed ? controller.agentWorkingDirectory(session) : "";
     }
     readonly property int presentedActivityCount: Math.max(
-        root.activityCount, root.displayCells.length + root.tools.length)
+        root.activityCount, root.safeLength(root.displayCells) + root.safeLength(root.tools))
     readonly property bool showActivityCards: root.groupSummary.length > 0 ? root.groupedExpanded
         : root.showTools || root.forceActivityInline || root.activityExpanded
     readonly property bool userAuthored: !root.groupView && root.authorRole === "user"
@@ -104,9 +107,10 @@ Item {
 
     width: ListView.view ? ListView.view.width - ListView.view.leftMargin
         - ListView.view.rightMargin : 600
-    visible: activity || body.length > 0 || displayCells.length > 0
-        || presentedActivityCount > 0 || (showTools && tools.length > 0)
+    visible: activity || body.length > 0 || root.safeLength(displayCells) > 0
+        || presentedActivityCount > 0 || (showTools && root.safeLength(tools) > 0)
     implicitHeight: visible ? content.implicitHeight + (activity || body.length === 0 ? 1 : 3) : 0
+    objectName: "messageDelegate"
 
     TextMetrics {
         id: bubbleMetrics
@@ -145,7 +149,7 @@ Item {
                 font.pixelSize: 12
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
-                Layout.maximumWidth: parent.width * 0.5
+                Layout.maximumWidth: Math.max(80, root.width * 0.45)
             }
             TuiText {
                 objectName: "groupReplyMarker"
@@ -387,7 +391,7 @@ Item {
 
             TuiButton {
                 visible: root.toolDetailsAvailable
-                    && root.displayCells.length === 0 && root.tools.length === 0
+                    && root.safeLength(root.displayCells) === 0 && root.safeLength(root.tools) === 0
                 text: "Load activity details"
                 implicitHeight: 26
                 onClicked: root.controller.loadMessageToolDetails(
@@ -415,7 +419,7 @@ Item {
                     session: root.session
                     required property var modelData
                     visible: Number(modelData._explanationRepeat ?? 1) !== 0
-                        && (root.groupSummary.length > 0 || root.displayCells.length === 0
+                        && (root.groupSummary.length > 0 || root.safeLength(root.displayCells) === 0
                         || ["Edit", "MultiEdit", "Write"].includes(
                             String(modelData.name || "")))
                     Layout.preferredHeight: visible ? implicitHeight : 0
