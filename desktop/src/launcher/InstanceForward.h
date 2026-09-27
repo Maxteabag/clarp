@@ -2,6 +2,7 @@
 
 #include <string>
 #include <string_view>
+#include <span>
 #include <vector>
 
 namespace clarp::launcher {
@@ -19,6 +20,6 @@ enum class ForwardResult {
     const std::string& executablePath, const std::vector<std::string>& arguments);
 [[nodiscard]] ForwardResult forwardToRunningInstance(
     const std::string& socketPath, const std::vector<std::string>& arguments);
-[[nodiscard]] int runLauncher(int argc, char* argv[]);
+[[nodiscard]] int runLauncher(std::span<char*> argv);
 
 } // namespace clarp::launcher

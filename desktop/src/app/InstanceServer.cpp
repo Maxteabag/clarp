@@ -15,7 +15,6 @@
 namespace clarp {
 namespace {
 
-constexpr int ReplyTimeoutMs = 2'000;
 constexpr quint32 MaxMessageBytes = 64 * 1024;
 
 QString executablePath() {

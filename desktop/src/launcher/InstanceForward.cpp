@@ -9,13 +9,12 @@
 #include <poll.h>
 #include <span>
 #include <string>
+#include <string_view>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <vector>
-
-extern char** environ;
 
 namespace clarp::launcher {
 namespace {
@@ -39,9 +38,9 @@ void appendHash(uint32_t& hash, std::string_view value) {
 
 std::string hexHash(uint32_t hash) {
     std::array<char, 8> buffer{};
-    constexpr char digits[] = "0123456789abcdef";
+    constexpr std::string_view digits = "0123456789abcdef";
     for (int index = 7; index >= 0; --index) {
-        buffer[static_cast<size_t>(index)] = digits[hash & 0x0fU];
+        buffer.at(static_cast<size_t>(index)) = digits.at(hash & 0x0fU);
         hash >>= 4U;
     }
     return {buffer.data(), buffer.size()};
@@ -79,8 +78,8 @@ bool runsAlone(const std::vector<std::string>& arguments) {
             if (argument == flag) return true;
         }
     }
-    return getenvString("CLARP_SEPARATE_PROCESS").empty() == false
-        || getenvString("CLARP_SCREENSHOT_PATH").empty() == false
+    return !getenvString("CLARP_SEPARATE_PROCESS").empty()
+        || !getenvString("CLARP_SCREENSHOT_PATH").empty()
         || getenvString("CLARP_RESTORE_DESKTOP") == "1";
 }
 
@@ -134,7 +133,9 @@ ForwardResult forwardToRunningInstance(
     payload += body;
     size_t written = 0;
     while (written < payload.size()) {
-        const ssize_t sent = send(fd, payload.data() + written, payload.size() - written, MSG_NOSIGNAL);
+        const std::span remaining(payload.data(), payload.size());
+        const auto unwritten = remaining.subspan(written);
+        const ssize_t sent = send(fd, unwritten.data(), unwritten.size(), MSG_NOSIGNAL);
         if (sent < 0 && errno == EINTR) continue;
         if (sent <= 0) return closeAndReturn(ForwardResult::FailedAfterConnect);
         written += static_cast<size_t>(sent);
@@ -148,9 +149,9 @@ ForwardResult forwardToRunningInstance(
         : ForwardResult::FailedAfterConnect);
 }
 
-int runLauncher(int argc, char* argv[]) {
+int runLauncher(std::span<char*> argv) {
     std::vector<std::string> arguments;
-    for (char* argument : std::span(argv, static_cast<size_t>(argc)).subspan(1))
+    for (char* argument : argv.subspan(1))
         arguments.emplace_back(argument);
     const std::string realBinary = realExecutablePath(currentExecutablePath());
     if (!runsAlone(arguments)) {
@@ -159,11 +160,15 @@ int runLauncher(int argc, char* argv[]) {
         if (forwarded == ForwardResult::Accepted) return 0;
         if (forwarded == ForwardResult::FailedAfterConnect) return 1;
     }
+    std::vector<std::string> execStorage;
+    execStorage.reserve(arguments.size() + 1U);
+    execStorage.push_back(realBinary);
+    for (const std::string& argument : arguments)
+        execStorage.push_back(argument);
     std::vector<char*> execArguments;
-    execArguments.reserve(static_cast<size_t>(argc) + 1U);
-    execArguments.push_back(const_cast<char*>(realBinary.c_str()));
-    for (char* argument : std::span(argv, static_cast<size_t>(argc)).subspan(1))
-        execArguments.push_back(argument);
+    execArguments.reserve(execStorage.size() + 1U);
+    for (std::string& argument : execStorage)
+        execArguments.push_back(argument.data());
     execArguments.push_back(nullptr);
     execve(realBinary.c_str(), execArguments.data(), environ);
     return 127;
