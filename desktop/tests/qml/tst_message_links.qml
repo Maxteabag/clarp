@@ -108,6 +108,25 @@ TestCase {
         return null;
     }
 
+    function test_hugeMessageShowsItsStartAndCopiesInFull() {
+        // An agent once returned a 3.4 MB saved web page; laying it all out
+        // froze the window for 46 s when the conversation opened.
+        const body = "<html lang=\"en\">" + "x".repeat(3000000);
+        const started = Date.now();
+        const row = createTemporaryObject(linkMessage, testCase, {body: body});
+        verify(row !== null);
+        const block = findChild(row, "messageTextBlock");
+        verify(block !== null);
+        verify(Date.now() - started < 3000, "a huge message must not block the window");
+        verify(block.text.length <= row.oversizedPreview, "only the start is laid out");
+        compare(block.textFormat, Text.PlainText);
+        const note = findChild(row, "oversizedMessageNote");
+        verify(note !== null && note.visible);
+        stubController.copied = [];
+        mouseClick(findChild(row, "copyFullMessage"));
+        compare(stubController.copied.length, 1);
+        compare(stubController.copied[0].length, body.length);
+    }
     function test_linkRetainsOriginAcrossHostSwitch() {
         stubController.baseUrl = "http://origin.example";
         stubController.opened = [];
