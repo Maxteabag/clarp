@@ -111,13 +111,15 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     assert "clarp-issue-reporting" in selected
     assert (home / ".claude/skills/clarp-tasks").is_symlink()
     assert (home / ".codex/skills/clarp-tasks").is_symlink()
+    assert (home / ".claude/skills/clarp-goal").is_symlink()
+    assert (home / ".codex/skills/clarp-goal").is_symlink()
     assert (home / ".claude/skills/clarp-issue-reporting").is_symlink()
     assert (home / ".codex/skills/clarp-issue-reporting").is_symlink()
     assert (share / "server.py").resolve() == (current / "server.py").resolve()
     assert (share / "runtime.py").resolve() == (current / "runtime.py").resolve()
     assert (home / ".config/systemd/user/clarp-runtime.service").is_file()
     for name in (
-        "clarp-admin", "clarp-tui", "clarp-agent-tasks", "clarp-agent-artifacts",
+        "clarp-admin", "clarp-tui", "clarp-goal", "clarp-agent-tasks", "clarp-agent-artifacts",
         "clarp-podcast-history",
         "clarp-media-publish", "clarp-agent-bg", "clarp-adopt",
         "clarp-runtime-service",

@@ -2039,7 +2039,7 @@ def cmd_uninstall(args) -> int:
     for skill_id in selected_skills(): unlink_skill(skill_id)
     # Clarp installs exactly one thing outside its own directories.
     for root, names in ((HOME / ".local/bin", [
-            "clarp-admin", "clarp-tui", "clarp-agent-tasks", "clarp-agent-artifacts",
+            "clarp-admin", "clarp-tui", "clarp-goal", "clarp-agent-tasks", "clarp-agent-artifacts",
             "clarp-podcast-history",
             "clarp-media-publish", "clarp-agent-bg", "clarp-sub-agent", "clarp-message-watch",
             "clarp-adopt",

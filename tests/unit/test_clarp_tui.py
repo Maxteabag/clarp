@@ -38,8 +38,9 @@ def test_tui_exposes_setup_pairing_and_provider_choices():
                 "#optional-skills", SelectionList).selected) == {
                     "clarp-calendar", "clarp-location"}
             included_skills = app.query_one("#included-skills", SelectionList).selected
-            assert len(included_skills) == 30
+            assert len(included_skills) == 31
             assert "clarp-oracle-contact" in included_skills
+            assert "clarp-goal" in included_skills
             assert "clarp-podcast-history" in included_skills
             assert "clarp-avatar-generation" in included_skills
             assert "clarp-countdown" in included_skills
