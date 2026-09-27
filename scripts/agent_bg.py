@@ -103,16 +103,36 @@ def main(argv: list[str]) -> int:
             job_id, generation=generation, status="failed", reason=reason,
             worker_pid=worker_pid, worker_start_token=worker_token) else 1
     if len(argv) >= 4 and argv[2] == "job-active":
-        from lib import background_jobs
-        job_id, generation = parse_job_handle(argv[3])
-        worker_pid, worker_token = background_jobs.current_worker_identity()
-        job = background_jobs.heartbeat(
-            job_id, worker_pid=worker_pid, worker_start_token=worker_token,
-            generation=generation)
-        return 0 if (
-            job and job["status"] in background_jobs.ACTIVE_STATUSES
-            and int(job.get("generation") or 1) == generation
-        ) else 1
+        # 0: positively active; 1: positively fenced/terminal; 2: unknown.
+        # An exception used to exit Python with 1, indistinguishable from cancel.
+        try:
+            from lib import background_jobs
+            job_id, generation = parse_job_handle(argv[3])
+            worker_pid, worker_token = background_jobs.current_worker_identity()
+            job = background_jobs.heartbeat(
+                job_id, worker_pid=worker_pid, worker_start_token=worker_token,
+                generation=generation)
+            if job and job["status"] in background_jobs.ACTIVE_STATUSES:
+                return 0 if int(job.get("generation") or 1) == generation else 1
+            if job and job["status"] in background_jobs.TERMINAL_STATUSES:
+                return 1
+            # heartbeat returns None for a rejected fence as well as a missing
+            # row. Confirm the fence; absence is uncertainty, not cancellation.
+            current = background_jobs.get(job_id, reconcile=False)
+            if current and (
+                int(current.get("generation") or 1) != generation
+                or current["status"] in background_jobs.TERMINAL_STATUSES
+                or (current.get("worker_pid") and current["worker_pid"] != worker_pid)
+                or (current.get("worker_start_token")
+                    and current["worker_start_token"] != worker_token)
+            ):
+                return 1
+            print("agent_bg: job state unknown; delivery must wait", file=sys.stderr)
+            return 2
+        except Exception as exc:
+            print(f"agent_bg: job state unavailable: {type(exc).__name__}: {exc}",
+                  file=sys.stderr)
+            return 2
     if len(argv) >= 4 and argv[2] == "job-cancelled":
         from lib import background_jobs
         job_id, generation = parse_job_handle(argv[3])
