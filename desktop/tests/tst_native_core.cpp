@@ -4114,7 +4114,10 @@ void NativeCoreTest::restoredSessionDoesNotFallBackToAnotherAgent() {
     controller.restoreDesktopSession("missing-restored-target");
     QTRY_VERIFY_WITH_TIMEOUT(controller.agents()->rowCount() > 0, 3000);
     QCOMPARE(controller.selectedSession(), QString("missing-restored-target"));
-    QVERIFY(controller.errorMessage().contains("before updating"));
+    // Rows can already come from the agent cache; the notice is set only
+    // when the live snapshot is applied, so wait for it instead of assuming
+    // the rows mean it has arrived.
+    QTRY_VERIFY_WITH_TIMEOUT(controller.errorMessage().contains("before updating"), 3000);
     controller.selectSession("rachel");
     QCOMPARE(controller.selectedSession(), QString("rachel"));
 }
