@@ -253,7 +253,7 @@ inline void startTranscriptSwitchSmokeCheck(QGuiApplication& application, QQuick
     if (QGuiApplication::platformName() != QStringLiteral("offscreen") || window == nullptr || controller == nullptr) {
         application.exit(EXIT_FAILURE); return;
     }
-    struct Frame { int step; QString session; qreal contentY; qreal height; bool atEnd; bool follow; int count; qreal sceneY; };
+    struct Frame { int step; QString session; qreal contentY; qreal height; bool atEnd; bool follow; int count; qreal sceneY; qreal distance; };
     auto frames = std::make_shared<QList<Frame>>();
     auto step = std::make_shared<int>(-1);
     const auto transcripts = [window] {
@@ -274,7 +274,8 @@ inline void startTranscriptSwitchSmokeCheck(QGuiApplication& application, QQuick
             frames->append(Frame{.step = *step, .session = session, .contentY = item->property("contentY").toReal(),
                                  .height = item->height(), .atEnd = item->property("atYEnd").toBool(),
                                  .follow = item->property("followLatest").toBool(), .count = item->property("count").toInt(),
-                                 .sceneY = item->mapToScene(QPointF(0, 0)).y()});
+                                 .sceneY = item->mapToScene(QPointF(0, 0)).y(),
+                                 .distance = item->property("distanceFromBottom").toReal()});
     });
     auto* timer = new QTimer(&application);
     timer->setInterval(300);
@@ -293,8 +294,8 @@ inline void startTranscriptSwitchSmokeCheck(QGuiApplication& application, QQuick
             for (const auto& f : *frames) {
                 if (f.step != forStep) continue;
                 ++total;
-                const QString line = QStringLiteral("%1 y=%2 h=%3 end=%4 follow=%5 n=%6 sceneY=%7")
-                    .arg(f.session).arg(f.contentY, 0, 'f', 1).arg(f.height, 0, 'f', 1).arg(f.atEnd).arg(f.follow).arg(f.count).arg(f.sceneY, 0, 'f', 1);
+                const QString line = QStringLiteral("%1 y=%2 h=%3 end=%4 follow=%5 n=%6 sceneY=%7 dist=%8")
+                    .arg(f.session).arg(f.contentY, 0, 'f', 1).arg(f.height, 0, 'f', 1).arg(f.atEnd).arg(f.follow).arg(f.count).arg(f.sceneY, 0, 'f', 1).arg(f.distance, 0, 'f', 1);
                 if (line != last) qInfo("switch-frames step=%d %s", forStep, qPrintable(line));
                 last = line;
             }

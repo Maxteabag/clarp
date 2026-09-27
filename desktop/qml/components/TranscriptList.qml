@@ -133,13 +133,30 @@ ListView {
         if (!followLatest || userInteracting || !visible) return;
         const last = count > 0 ? itemAtIndex(count - 1) : null;
         if (!last) {
-            if (count === followedCount) return;
+            // ListView re-estimating can shift the rows just after a follow
+            // landed, dropping the last row out of the loaded set with the
+            // count unchanged. A few full follows a second bring it back; the
+            // cap keeps estimate churn from driving a loop.
+            if (count === followedCount) {
+                if (followRescues.count >= 3) return;
+                if (followRescues.count++ === 0) followRescues.start();
+                // Before this frame paints: the last row is created again at
+                // the end, then the view settles on its real bottom.
+                positionViewAtEnd();
+                settleAtEnd();
+            }
             followedCount = count;
             scheduleDeferredFollow();
             return;
         }
         followedCount = count;
         if (Math.abs(contentY - endContentY(last)) > bottomMargin + 2) settleAtEnd();
+    }
+    Timer {
+        id: followRescues
+        property int count: 0
+        interval: 1000
+        onTriggered: count = 0
     }
     function scheduleDeferredFollow() {
         if (!followLatest || userInteracting) return;
@@ -275,6 +292,10 @@ ListView {
     onMovementEnded: { endUserScroll(); rememberAnchor(); }
     onContentHeightChanged: followContentHeight()
     onHeightChanged: scheduleFollow()
+    // A narrower view wraps every row taller (a new split pane is laid out
+    // once, then narrowed). The last row can leave the loaded set, and with it
+    // the only follow path that a height estimate may not drive.
+    onWidthChanged: scheduleFollow()
     onVisibleChanged: { if (visible) scheduleFollow(); }
     onModelChanged: { savedAnchor = null; scrollToLatest(); }
     Component.onCompleted: scrollToLatest()
