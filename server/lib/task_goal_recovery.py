@@ -11,7 +11,6 @@ from contextlib import contextmanager
 from . import agents, db, task_goal_state
 
 PREFIX = "task-goal-"
-_SCAN_AFTER = ""
 
 
 def boundary(plan, goal, *, check_live=True):
@@ -136,20 +135,21 @@ def _prompt(plan, goal):
     )
 
 
-def tick(dispatch, *, now=None):
+def tick(dispatch, *, now=None, cursor=None):
     now = db.now_ms() if now is None else now
     count = 0
-    global _SCAN_AFTER
+    after = cursor[0] if cursor else ""
     # Keyset batches visit every enrolled commitment, including when the first
     # batch is permanently waiting. A fixed oldest-100 slice would starve others.
     query = (
         "SELECT plan_id FROM task_plans WHERE recovery_enabled=1 AND status='active' "
         "AND plan_id>? ORDER BY plan_id LIMIT 100"
     )
-    ids = [r[0] for r in db.conn().execute(query, (_SCAN_AFTER,))]
-    if not ids and _SCAN_AFTER:
+    ids = [r[0] for r in db.conn().execute(query, (after,))]
+    if not ids and after:
         ids = [r[0] for r in db.conn().execute(query, ("",))]
-    _SCAN_AFTER = ids[-1] if ids else ""
+    if cursor is not None:
+        cursor[:] = [ids[-1] if ids else ""]
     for plan_id in ids:
         claim = _claim(plan_id, now)
         if not claim:
