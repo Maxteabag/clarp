@@ -212,17 +212,41 @@ ListView {
             if (item) root.contentY = item.y - anchor.offset;
         });
     }
+    // Moves the view by a user scroll. The limits come from rows that exist,
+    // not from ListView's estimates: while the rows above the viewport have
+    // not been created (one very tall reply is enough), originY equals the
+    // current position, so clamping to it turned a wheel-up into no movement.
+    // Past an edge whose row is not created yet the view moves freely;
+    // ListView creates the rows it reaches, and the result is clamped again
+    // once they exist.
+    function scrollBy(delta) {
+        const clamp = () => {
+            const first = count > 0 ? itemAtIndex(0) : null;
+            const last = count > 0 ? itemAtIndex(count - 1) : null;
+            const minimum = first ? originY - topMargin : -Infinity;
+            const maximum = last ? Math.max(minimum, endContentY(last)) : Infinity;
+            return {minimum, maximum};
+        };
+        let bounds = clamp();
+        contentY = Math.max(bounds.minimum, Math.min(bounds.maximum, contentY + delta));
+        forceLayout();
+        bounds = clamp();
+        if (contentY < bounds.minimum) contentY = bounds.minimum;
+        else if (contentY > bounds.maximum) contentY = bounds.maximum;
+    }
     function handleScrollKey(event) {
         if (![Qt.Key_Up, Qt.Key_Down, Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Home, Qt.Key_End].includes(event.key)
             || (event.modifiers & (Qt.AltModifier | Qt.MetaModifier))) { event.accepted = false; return; }
         if (event.key === Qt.Key_End) scrollToLatest();
         else {
             beginUserScroll();
-            const minimum = originY - topMargin;
-            const maximum = Math.max(minimum, originY + contentHeight + bottomMargin - height);
-            const delta = event.key === Qt.Key_Up ? -40 : event.key === Qt.Key_Down ? 40
-                : event.key === Qt.Key_PageUp ? -height * 0.9 : height * 0.9;
-            contentY = event.key === Qt.Key_Home ? minimum : Math.max(minimum, Math.min(maximum, contentY + delta));
+            if (event.key === Qt.Key_Home) {
+                positionViewAtBeginning();
+                contentY = originY - topMargin;
+            } else {
+                scrollBy(event.key === Qt.Key_Up ? -40 : event.key === Qt.Key_Down ? 40
+                    : event.key === Qt.Key_PageUp ? -height * 0.9 : height * 0.9);
+            }
             wheelSettle.restart();
         }
         event.accepted = true;
@@ -243,9 +267,7 @@ ListView {
             if (delta === 0) { event.accepted = false; return; }
             root.cancelFlick();
             root.beginUserScroll();
-            const minimum = root.originY - root.topMargin;
-            const maximum = Math.max(minimum, root.originY + root.contentHeight + root.bottomMargin - root.height);
-            root.contentY = Math.max(minimum, Math.min(maximum, root.contentY - delta));
+            root.scrollBy(-delta);
             root.rememberAnchor();
             wheelSettle.restart();
             event.accepted = true;
