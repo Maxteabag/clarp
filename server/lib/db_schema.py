@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 97
+_SCHEMA_VERSION = 98
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -700,6 +700,7 @@ CREATE INDEX idx_personas_live_name ON personas(name) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX idx_personas_unique_live_name ON personas(name) WHERE deleted_at IS NULL;
 
 CREATE TABLE task_plans (
+    history_json TEXT NOT NULL DEFAULT '[]',
     revision INTEGER NOT NULL DEFAULT 0,
     goal_json TEXT NOT NULL DEFAULT '{}',
     recovery_enabled INTEGER NOT NULL DEFAULT 0,
@@ -713,6 +714,7 @@ CREATE TABLE task_plans (
     completed_at INTEGER
 );
 CREATE INDEX idx_task_plans_agent_updated ON task_plans(agent_id, updated_at DESC);
+CREATE INDEX idx_task_plans_recovery ON task_plans(recovery_enabled,status,updated_at);
 
 
 CREATE TABLE task_items (
@@ -730,6 +732,18 @@ CREATE TABLE task_items (
     active_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_task_items_plan_position ON task_items(plan_id, parent_id, position);
+
+CREATE TABLE task_goal_documents (
+    plan_id TEXT NOT NULL REFERENCES task_plans(plan_id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    format TEXT NOT NULL,
+    content_json TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(plan_id, name, revision)
+);
+CREATE INDEX idx_goal_documents_latest ON task_goal_documents(plan_id, name, revision DESC);
 
 CREATE TABLE artifacts (
     artifact_id TEXT PRIMARY KEY,

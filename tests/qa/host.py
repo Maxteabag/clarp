@@ -88,9 +88,9 @@ def main():
     # unavailable, even if another CLI is authenticated on the developer's Mac.
     allowed_get = {'/status', '/agents/snapshot', '/artifacts', '/attention',
         '/automation-settings', '/clips/recoverable', '/events', '/log', '/server-info',
-        '/task-plan', '/teams', '/transcription-capabilities', '/transcription-providers',
+        '/task-plan', '/task-plans', '/task-plan/document', '/teams', '/transcription-capabilities', '/transcription-providers',
         '/voice-catalog', '/turn-queue'}
-    allowed_post = {'/send', '/select', '/focus', '/clog', '/clips/ack', '/devices', '/stop'}
+    allowed_post = {'/send', '/select', '/focus', '/clog', '/clips/ack', '/devices', '/stop', '/task-plan/action'}
     for method, allowed in [('GET', allowed_get), ('POST', allowed_post), ('PUT', set()), ('DELETE', set())]:
         original = getattr(module.Handler, 'do_' + method)
         def scoped(self, original=original, allowed=allowed):
@@ -98,6 +98,9 @@ def main():
                 return self._send(403, b'QA route is outside the deterministic turn lane')
             return original(self)
         setattr(module.Handler, 'do_' + method, scoped)
+    # Exercise the production goal reconciler promptly in disposable tests.
+    schedule_runner = module.AgentScheduleRunner
+    module.AgentScheduleRunner = lambda **kwargs: schedule_runner(check_interval_sec=.05, **kwargs)
     server = module.build_server(ctx, args.port, bind_addr='127.0.0.1')
     metadata = {'url': f'http://127.0.0.1:{server.server_address[1]}', 'pid': os.getpid(),
                 'state_dir': str(root), 'provider': 'deterministic-codex-process'}

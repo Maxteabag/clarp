@@ -1,0 +1,276 @@
+"""Real isolated Host, SQLite, scheduler, dispatcher and provider subprocesses.
+
+No paid inference: the existing QA Host refuses real provider backends.
+"""
+
+import json
+import os
+from pathlib import Path
+import sqlite3
+import subprocess
+import sys
+import time
+import urllib.error
+import pytest
+from tests.integration.test_qa_turns import QAHost
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def helper(host, *args):
+    env = {
+        **os.environ,
+        "CLAUDE_PWA_DB": str(host.root / "state.sqlite"),
+        "CLARP_CODE_ROOT": str(ROOT / "server"),
+    }
+    return json.loads(
+        subprocess.check_output(
+            [sys.executable, str(ROOT / "scripts/agent_tasks.py"), *args],
+            env=env,
+            text=True,
+        )
+    )
+
+
+def create(host):
+    host.request(
+        "/send",
+        {
+            "session": "rachel",
+            "text": "Status interview: explain current progress, then end this turn",
+            "client_msg_id": "interview",
+            "synthesize_audio": False,
+        },
+    )
+    host.wait_reply("rachel", "Status interview")
+    return helper(
+        host,
+        "goal",
+        "rachel",
+        "outcome",
+        "Deliver the unchanged outcome",
+        json.dumps([{"id": "probe", "title": "Probe outcome"}]),
+        json.dumps(
+            {
+                "outcome": "Deliver the unchanged outcome",
+                "criteria": ["Observable result"],
+                "limits": "No paid inference",
+                "enroll": True,
+            }
+        ),
+    )
+
+
+def action(host, p, kind, data):
+    return host.request(
+        "/task-plan/action",
+        {
+            "plan_id": p["plan_id"],
+            "revision": p["revision"],
+            "action": kind,
+            "data": data,
+        },
+    )["plan"]
+
+
+def arm(host, p, **continuation):
+    return action(
+        host,
+        p,
+        "checkpoint",
+        {
+            "progress": "Interview answered; outcome is unfinished",
+            "next_work": "Reassess the new evidence and choose useful work",
+            "continuation": {"due_at": int(time.time() * 1000), **continuation},
+        },
+    )
+
+
+def wait_wake(host, count=1):
+    for _ in range(200):
+        with sqlite3.connect(host.root / "state.sqlite") as con:
+            rows = con.execute(
+                "SELECT message_id,text FROM messages WHERE message_id LIKE 'u-task-goal-%'"
+            ).fetchall()
+        if len(rows) >= count:
+            host.wait_reply("rachel", "Continue your durable outcome commitment")
+            return rows
+        time.sleep(0.05)
+    raise AssertionError("No durable goal wake reached real dispatcher/provider")
+
+
+@pytest.fixture
+def host(tmp_path):
+    h = QAHost(tmp_path / "goal-host")
+    try:
+        yield h.start()
+    finally:
+        h.stop()
+
+
+def test_early_final_interview_then_recovery_and_host_restart(host):
+    p = create(host)
+    p = arm(host, p)
+    rows = wait_wake(host)
+    assert len(rows) == 1 and "Reassess current conditions" in rows[0][1]
+    p = host.request("/task-plans?session=rachel")["plans"][0]
+    assert p["status"] == "active" and p["completed_count"] == 0
+    # A new checkpoint schedules real persistent work; stop the Host before due.
+    p = arm(host, p, due_at=int(time.time() * 1000) + 1500)
+    host.stop()
+    host.start()
+    rows = wait_wake(host, 2)
+    assert len({r[0] for r in rows}) == 2
+    assert (
+        host.request("/task-plans?session=rachel")["plans"][0]["goal"]["outcome"]
+        == "Deliver the unchanged outcome"
+    )
+
+
+def test_external_failure_and_user_pause_cancel_boundaries(host):
+    p = create(host)
+    p = arm(
+        host,
+        p,
+        kind="dependency",
+        key="external-build",
+        reason="Build worker pending",
+        due_at=int(time.time() * 1000) + 60000,
+    )
+    p = action(
+        host,
+        p,
+        "dependency",
+        {
+            "key": "external-build",
+            "outcome": "failed",
+            "evidence": "Worker exited 2; inspect build.log",
+        },
+    )
+    wait_wake(host)
+    p = host.request("/task-plans?session=rachel")["plans"][0]
+    assert p["goal"]["continuation"]["dependency_result"]["outcome"] == "failed"
+    p = action(host, p, "pause", {"reason": "User paused this outcome"})
+    with pytest.raises(urllib.error.HTTPError) as error:
+        action(
+            host,
+            p,
+            "checkpoint",
+            {"progress": "Must not resume silently", "next_work": "Do work"},
+        )
+    assert error.value.code == 409
+    p = action(host, p, "cancel", {"reason": "User cancelled this outcome"})
+    assert p["status"] == "cancelled"
+    with sqlite3.connect(host.root / "state.sqlite") as con:
+        assert (
+            con.execute(
+                "SELECT count(*) FROM messages WHERE message_id LIKE 'u-task-goal-%'"
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_lost_worker_timeout_replans_and_stale_wake_is_rejected(host):
+    p = create(host)
+    p = arm(
+        host,
+        p,
+        kind="dependency",
+        key="lost-worker",
+        reason="Worker should report",
+        due_at=int(time.time() * 1000) + 300,
+    )
+    rows = wait_wake(host)
+    assert "deadline passed" in rows[0][1]
+    old_id = rows[0][0][2:]
+    p = host.request("/task-plans?session=rachel")["plans"][0]
+    p = action(
+        host,
+        p,
+        "replan",
+        {
+            "reason": "The dependency vanished; a different method is appropriate",
+            "steps": [
+                {
+                    "id": "replacement",
+                    "title": "Probe current state and select a new approach",
+                }
+            ],
+        },
+    )
+    with pytest.raises(urllib.error.HTTPError) as error:
+        host.request(
+            "/send",
+            {
+                "session": "rachel",
+                "text": "Stale wake must not execute",
+                "client_msg_id": old_id,
+                "synthesize_audio": False,
+            },
+        )
+    assert error.value.code == 409
+    assert p["counts"]["removed"] == 1 and p["completed_count"] == 0
+
+
+def test_named_context_checkpoint_is_atomic_and_retrievable_over_http(host):
+    p = create(host)
+    p = action(
+        host,
+        p,
+        "checkpoint",
+        {
+            "progress": "Saved flexible working context",
+            "next_work": "Read current notes and reassess",
+            "documents": [
+                {
+                    "name": "architecture.md",
+                    "format": "markdown",
+                    "content": "# Strategy\nUse the proven path. Do not redo the completed probe.",
+                    "document_revision": 0,
+                    "reason": "Probe established the boundary",
+                },
+                {
+                    "name": "active-state",
+                    "format": "json",
+                    "content": {
+                        "next_slice": {"hypothesis": "reuse", "avoid": ["redo-probe"]}
+                    },
+                    "document_revision": 0,
+                    "reason": "Persist current findings",
+                },
+            ],
+            "continuation": {"kind": "blocked", "reason": "Waiting for manual review"},
+        },
+    )
+    document = host.request(
+        "/task-plan/document?plan_id=" + p["plan_id"] + "&name=active-state"
+    )["document"]
+    assert document["content"]["next_slice"]["avoid"] == ["redo-probe"]
+    assert len(p["goal"]["documents"]) == 2
+    with pytest.raises(urllib.error.HTTPError) as error:
+        action(
+            host,
+            p,
+            "checkpoint",
+            {
+                "progress": "Must rollback",
+                "next_work": "Never scheduled",
+                "documents": [
+                    {
+                        "name": "active-state",
+                        "format": "json",
+                        "content": {},
+                        "document_revision": 0,
+                        "reason": "stale copy",
+                    }
+                ],
+                "continuation": {"due_at": int(time.time() * 1000)},
+            },
+        )
+    assert error.value.code == 409
+    assert (
+        host.request("/task-plans?session=rachel")["plans"][0]["goal"]["checkpoint"][
+            "progress"
+        ]
+        == "Saved flexible working context"
+    )

@@ -62,3 +62,36 @@ the current revision/checkpoint and agent-authored intent as provisional context
 and explicitly asks the agent to reassess the current situation. Replanning
 supersedes older wakes. Verification includes a mid-goal discovery with revised
 steps, changed prompt and a fenced-out old continuation.
+
+## Goal-scoped working context
+
+Named Markdown documents and JSON records attach to the same plan identity.
+Their content shape belongs to the agent; only name, format, revision, reason
+and timestamp are standardized. Every version is retained. A checkpoint can
+write several documents, criteria evidence and a continuation in one transaction;
+a stale plan or document revision aborts all changes. Wake context includes the
+current document index, not a frozen replay of earlier notes. `clarp-goal read`
+and the native document reader retrieve current or historical versions.
+
+The database remains authoritative. Exports are explicitly versioned working
+copies, never a second silently synchronized store. Each document is capped at
+64 KiB; large logs/media remain managed evidence references. This persistence
+survives process/restart boundaries, not loss of the Host disk. Replication,
+distributed execution and account/credential failover are outside this feature.
+
+## Rollout and proof boundaries
+
+Host contract 21 advertises `durable_task_goals`; native controls are feature
+gated and old plan payloads still decode. Schema 98 removes the one-active-plan
+constraint and adds goal metadata, observed-change history and document versions.
+Existing statuses and missing evidence are preserved, with `legacy=true` and
+`completion_verified=false`. Recovery enrollment defaults to false, including
+all migrated records. Opt in one current commitment at a time after verifying
+its owner/native binding and acceptance criteria. Do not launch a fleet-wide
+migration wake.
+
+A provider-native goal remains provider-owned. The Host commitment never
+silently turns on a second native goal or supersedes its provider objective.
+While that loop owns continuation, the UI reports its ownership or blocked
+state; Host wakes resume only after it no longer owns continuation. Generic
+prompts remain available for independent reminders.

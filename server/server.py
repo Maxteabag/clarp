@@ -440,6 +440,7 @@ class Handler(BaseHTTPRequestHandler):
         "/background-jobs": "_handle_background_jobs",
         "/task-plan": "_handle_task_plan",
         "/task-plans": "_handle_task_plans",
+        "/task-plan/document": "_handle_task_goal_document",
         "/artifacts": "_handle_artifacts_list",
         "/attention": "_handle_attention",
         "/attention/inbox": "_handle_attention_inbox",
@@ -2469,6 +2470,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(400, str(exc))
         self._json_ok(payload)
 
+    def _handle_task_goal_document(self):
+        from lib import task_plans
+        query=self._query()
+        try:
+            raw=query.get("revision", [None])[0]
+            document=task_plans.goal_document(query.get("plan_id", [""])[0],
+                query.get("name", [""])[0], int(raw) if raw is not None else None)
+            self._json_ok({"document": document})
+        except ValueError as exc:
+            self._json_error(404, str(exc))
+
     def _handle_task_plans(self):
         from lib import task_plans
         session = (self._query().get("session", [""])[0] or "").strip()
@@ -4124,6 +4136,8 @@ class Handler(BaseHTTPRequestHandler):
             # Durable user-requested queue entries remain visible and paused;
             # stopping work must never silently delete acknowledged messages.
             try:
+                from lib import task_plans
+                task_plans.pause_recovery_for_agent(agent_id, "User stopped this agent")
                 turn_lifecycle.try_transition(
                     agent_id, TurnEvent.STOP_REQUESTED,
                     {"source": "user_stop", "message": "Turn stopped"})

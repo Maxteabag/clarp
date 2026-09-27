@@ -121,8 +121,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             for statement in db_schema._EXPLANATION_LEARNING_SCHEMA.split(";"):
                 if statement.strip(): con.execute(statement)
 
-        if version < 97:
-            _migrate_to_v97(con)
+        if version < 98:
+            _migrate_to_v98(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -682,10 +682,10 @@ def _migrate_to_v76(con: sqlite3.Connection) -> None:
     assert not statement.strip()
 
 
-def _migrate_to_v97(con: sqlite3.Connection) -> None:
+def _migrate_to_v98(con: sqlite3.Connection) -> None:
     """Historical plans keep status and are never automatically enrolled."""
     for table, definitions in {
-        "task_plans": ["revision INTEGER NOT NULL DEFAULT 0", "goal_json TEXT NOT NULL DEFAULT '{}'",
+        "task_plans": ["history_json TEXT NOT NULL DEFAULT '[]'", "revision INTEGER NOT NULL DEFAULT 0", "goal_json TEXT NOT NULL DEFAULT '{}'",
                        "recovery_enabled INTEGER NOT NULL DEFAULT 0"],
         "task_items": ["required INTEGER NOT NULL DEFAULT 1"],
     }.items():
@@ -694,3 +694,10 @@ def _migrate_to_v97(con: sqlite3.Connection) -> None:
             if definition.split()[0] not in columns:
                 con.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
     con.execute("DROP INDEX IF EXISTS idx_task_plans_one_active")
+    con.execute("""CREATE TABLE IF NOT EXISTS task_goal_documents (
+        plan_id TEXT NOT NULL REFERENCES task_plans(plan_id) ON DELETE CASCADE,
+        name TEXT NOT NULL, revision INTEGER NOT NULL, format TEXT NOT NULL,
+        content_json TEXT NOT NULL, reason TEXT NOT NULL, updated_at INTEGER NOT NULL,
+        PRIMARY KEY(plan_id,name,revision))""")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_goal_documents_latest ON task_goal_documents(plan_id,name,revision DESC)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_task_plans_recovery ON task_plans(recovery_enabled,status,updated_at)")

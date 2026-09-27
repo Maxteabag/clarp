@@ -675,7 +675,9 @@ class TurnDispatchService:
         agent = agents_db.get_by_session(session)
         if not agent:
             raise DispatchError(404, "unknown agent")
-        from . import task_goal_recovery
+        from . import task_goal_recovery, task_plans
+        if origin == "heartbeat" and task_plans.recovery_owns_agent(agent["agent_id"]):
+            raise DispatchError(409, "Durable goal owns continuation")
         try:
             task_goal_recovery.validate_dispatch(agent, client_msg_id)
         except ValueError as exc:
@@ -1506,7 +1508,9 @@ class TurnDispatchService:
         """Spawn one attempt of a turn. Attempt 1 surfaces spawn failures as
         a DispatchError (so /send returns 500); later attempts run from a
         timer thread and just mark the agent INTERRUPTED on failure."""
-        from . import task_goal_recovery
+        from . import task_goal_recovery, task_plans
+        if spec.origin == "heartbeat" and task_plans.recovery_owns_agent(spec.agent_id):
+            raise DispatchError(409, "Durable goal owns continuation")
         try:
             task_goal_recovery.validate_dispatch(
                 agents_db.get_by_agent_id(spec.agent_id) or {}, spec.client_msg_id)
