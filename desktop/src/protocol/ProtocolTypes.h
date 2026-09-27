@@ -55,6 +55,8 @@ struct Agent {
     bool dreamingEnabled = false;
     bool archived = false;
     bool unread = false;
+    // A Host maintenance agent: inspectable, but it refuses chat controls.
+    bool janitor = false;
 
     [[nodiscard]] static Agent fromJson(const QJsonObject& object);
     [[nodiscard]] bool isHelper() const;

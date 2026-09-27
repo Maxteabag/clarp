@@ -492,6 +492,11 @@ QString AgentListModel::nextAttentionSession(const QString& current, const QStri
 }
 
 QString AgentListModel::firstSession() const {
+    // A fresh Host lists only its janitors; opening on one made the first
+    // launch show its "inspection-only" refusal. Prefer a working agent.
+    for (const Agent& agent : m_agents) {
+        if (!agent.janitor) return agent.session;
+    }
     return m_agents.isEmpty() ? QString{} : m_agents.first().session;
 }
 
