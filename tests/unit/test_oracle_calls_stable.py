@@ -233,7 +233,7 @@ def test_dispatch_identity_is_derived_from_principal_and_call(tools, fake_dispat
     out = tools.execute(tool, args, "call-77")
     ident = _expected_id("phone-1", "call-77")
     assert out == {"status": "accepted", "operation_id": ident, "session": session,
-                   "note": "Handed off, not finished. Tell the user what you asked and who is doing it."}
+                   "note": "Handed off, not finished."}
     assert fake_dispatch[0]["delegation_id"] == ident
     assert fake_dispatch[0]["session"] == session
     assert fake_dispatch[0]["request_text"] == "run the tests"
