@@ -136,7 +136,8 @@ Rules:
 - `parent_agent_id` is the agent that created this one (a helper's parent,
   or a fork's source), else `null`. `role` is `agent`, `helper` or `janitor`.
   `helper_state` is `null` unless `role` is `helper`; then it is `running`,
-  `reported` (its report reached the parent), `done` (the parent or the user
+  `reported` (its report reached the parent, or its own session sat idle
+  past `[agents] helper_idle_after_minutes`, 30 by default), `done` (the parent or the user
   accepted it), `failed` or `abandoned` (the parent was deleted or archived;
   helpers are flagged, never deleted with it). `child_count` counts live
   agents whose parent is this one and `running_children` those still
@@ -346,7 +347,7 @@ Event types and payloads:
 | `transcript-updated` | `agent_id`, `session`, `backend_session_id` | The conversation changed. Fetch a delta for that session. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
 | `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. |
-| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name` | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
+| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name` | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). |
 | `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. |
@@ -605,6 +606,19 @@ Returns 404 for an unknown job, otherwise:
 - Progress written with `clarp-agent-bg SESSION job-progress HANDLE "text"`
   also arrives live as `background-job-updated`, whose `job` carries
   `progress_text`. Cancel stays `DELETE /background-jobs/<job_id>`.
+- The Host's stale-work reconcile writes its own notes, prefixed
+  `reconcile:`. An agent's running job with no worker PID to verify whose
+  heartbeat and progress have been silent for `[agents]
+  job_stale_after_minutes` (15) gets a `reconcile: heartbeat stale` note,
+  and after `job_heartbeat_grace_minutes` (15) more fails with
+  `terminal_reason: "heartbeat_lost"` (`worker_freshness: "stale"`,
+  `outcome_state: "unknown"`, like `heartbeat_expired`). A helper moved to
+  `reported` for idleness is noted on the job that mirrors it.
+- An agent that is idle with nothing counted has its own `status_text`
+  cleared once it is older than `[agents] custom_status_ttl_hours` (2); a
+  declared `background` state it left behind settles to `idle`, and
+  `agent-roster` with `kind: "stale-work"` asks for a refetch. Janitor
+  labels keep their own validity window.
 
 ## Compatibility policy
 
