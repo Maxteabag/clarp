@@ -291,7 +291,7 @@ def active_for_session(session: str) -> dict | None:
         db.conn()
         .execute(
             "SELECT plan_id FROM task_plans WHERE session=? AND status='active' "
-            "ORDER BY updated_at DESC LIMIT 1",
+            "ORDER BY updated_at DESC,rowid DESC LIMIT 1",
             (session,),
         )
         .fetchone()
@@ -371,7 +371,7 @@ def list_for_session(session: str) -> list[dict]:
     return [
         get(r["plan_id"])
         for r in db.conn().execute(
-            "SELECT plan_id FROM task_plans WHERE session=? ORDER BY updated_at DESC LIMIT 100",
+            "SELECT plan_id FROM task_plans WHERE session=? ORDER BY updated_at DESC,rowid DESC LIMIT 100",
             (session,),
         )
     ]

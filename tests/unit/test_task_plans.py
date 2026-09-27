@@ -35,8 +35,9 @@ def test_hierarchical_plan_progress_and_auto_finish(tmp_path, monkeypatch):
     assert task_plans.active_for_session("mike") is not None
 
 
-def test_new_plan_preserves_previous_active_plan(tmp_path):
+def test_new_plan_preserves_previous_active_plan(tmp_path, monkeypatch):
     _agent(tmp_path)
+    monkeypatch.setattr(db, "now_ms", lambda: 1000)
     old = task_plans.create(
         session="mike", plan_id="old", title="Old", items=[
             {"id": "old-item", "title": "Old item"}])
@@ -45,6 +46,7 @@ def test_new_plan_preserves_previous_active_plan(tmp_path):
             {"id": "new-item", "title": "New item"}])
     assert task_plans.get(old["plan_id"])["status"] == "active"
     assert task_plans.active_for_session("mike")["plan_id"] == new["plan_id"]
+    assert [p["plan_id"] for p in task_plans.list_for_session("mike")] == [new["plan_id"], old["plan_id"]]
 
 
 def test_finishing_plan_freezes_running_item_time(tmp_path, monkeypatch):
