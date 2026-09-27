@@ -234,6 +234,26 @@ ListView {
         if (contentY < bounds.minimum) contentY = bounds.minimum;
         else if (contentY > bounds.maximum) contentY = bounds.maximum;
     }
+    // A transcript with rows but none on screen was seen twice in an E2E run
+    // (after a resize, and a wheel burst that landed at the top) and could
+    // not be reproduced. Log the geometry once per episode so the next one,
+    // in a real session, says where the view was.
+    property bool blankReported: false
+    Timer {
+        interval: 1000
+        repeat: true
+        running: root.visible && root.count > 0
+        onTriggered: {
+            const blank = root.indexAt(root.width / 2, root.contentY + root.height / 2) < 0
+                && root.indexAt(root.width / 2, root.contentY + 1) < 0
+                && root.indexAt(root.width / 2, root.contentY + root.height - 1) < 0;
+            if (blank && !root.blankReported)
+                console.warn("transcript blank: contentY", root.contentY, "originY", root.originY,
+                    "contentHeight", root.contentHeight, "height", root.height, "count", root.count,
+                    "follow", root.followLatest, "anchor", root.anchorIndex, root.anchorOffset);
+            root.blankReported = blank;
+        }
+    }
     function handleScrollKey(event) {
         if (![Qt.Key_Up, Qt.Key_Down, Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Home, Qt.Key_End].includes(event.key)
             || (event.modifiers & (Qt.AltModifier | Qt.MetaModifier))) { event.accepted = false; return; }
