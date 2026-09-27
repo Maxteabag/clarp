@@ -324,6 +324,10 @@ Rectangle {
                 onChosen: (path, label) => { root.directory = path; root.controller.setLaunchDirectory(path); root.choosingDirectory = false; search.forceActiveFocus(); }
                 onCancelRequested: { root.choosingDirectory = false; search.forceActiveFocus(); }
             }
+            // The picker does not grow to the card's height. Without this the
+            // column spread the spare height over every row, moving the whole
+            // dialog ~10 px down on entering directory mode.
+            Item { visible: root.choosingDirectory; Layout.fillHeight: true }
 
             // Contacts.
             ColumnLayout {
