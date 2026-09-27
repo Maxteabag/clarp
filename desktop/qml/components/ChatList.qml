@@ -271,7 +271,7 @@ Rectangle {
                 spacing: 12
 
                 TuiText {
-                    text: root.showingPairs ? "‹" : "⇄"
+                    text: root.showingPairs ? "‹" : "↔"
                     color: Theme.muted
                     font.pixelSize: 14
                 }
@@ -367,7 +367,7 @@ Rectangle {
                 spacing: 12
 
                 TuiText {
-                    text: root.showingArchive ? "‹" : "▤"
+                    text: root.showingArchive ? "‹" : "≡"
                     color: Theme.muted
                     font.pixelSize: 14
                 }
