@@ -31,6 +31,9 @@ MAX_HELPERS = 4
 RECENT_MESSAGES = 3
 # A background state with no words of its own still reads as "working".
 UNNAMED_LABEL = "Working in the background"
+# A label that changed moments ago is not stale yet: the turn that set it
+# may only just have ended.
+FRESH_GRACE_MS = 15 * 60 * 1000
 
 _REASONS = {
     "finished": "the work it describes looks finished",
@@ -70,6 +73,8 @@ def candidates(now: int) -> list[dict[str, Any]]:
         agent_id = a["agent_id"]
         act = activity.get(agent_id)
         if a.get("is_janitor") or a.get("archived_at") or act is None or act.busy:
+            continue
+        if now - int(act.idle_since_ms or 0) < FRESH_GRACE_MS:
             continue
         state = states.get(agent_id, {})
         processes = background_jobs.background_processes(
