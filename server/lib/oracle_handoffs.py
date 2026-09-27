@@ -428,13 +428,24 @@ def ack(caller: str, body: dict) -> dict:
         principal, data, record = _locate(caller, ident)
         if [generation, phase] in record["_acks"]:
             return {"handoff": public(record)}
-        if generation != record["generation"] or record["generation"] < data["generation"]:
+        if generation != record["generation"] or (
+                record["generation"] < data["generation"] and not _finalizes_parent(data, record, phase)):
             raise HandoffError(409, "stale_generation", public(record))
         if not _apply(principal, data, record, phase, reason):
             raise HandoffError(409, "illegal_transition", public(record))
         record["_acks"].append([generation, phase])
         _save(principal, data)
         return {"handoff": public(record)}
+
+
+def _finalizes_parent(data: dict, record: dict, phase: str) -> bool:
+    """Bookkeeping-only abandon of the current active parent, at its own generation.
+
+    A failed return leaves the parent active while the newest (failed) return
+    holds a higher generation; the phone is back in parent-owned hands-free and
+    must still be able to end it. Audio transitions stay fenced by generation.
+    """
+    return phase == "abandon" and record["state"] == "active" and _active(data) is record
 
 
 def _locate(caller: str, ident: str):
