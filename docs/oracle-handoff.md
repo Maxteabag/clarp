@@ -2,7 +2,7 @@
 
 Status: **proposed wire contract, revision 4, agreed, not yet implemented.** Written
 so the iOS owner can agree the wire before either side changes behaviour.
-Host contract 21, feature `oracle_handoff`.
+Host contract 22, feature `oracle_handoff`.
 
 ## What it is
 
@@ -95,7 +95,7 @@ the phone first reads `GET /oracle/handoff` and uses that record's state,
 | `generation` | Per-principal integer, persisted, strictly increasing with each new handoff in either direction, across Host restarts. |
 | `revision` | Increases by one on every state change of this handoff. Events and records with a lower revision than one already seen for the same `handoff_id` are stale. |
 | `direction` | `oracle_to_agent` or `agent_to_oracle`. |
-| `mode` | `hands_free` (the only mode in contract 21). |
+| `mode` | `hands_free` (the only mode in contract 22). |
 | `state` | See the state machine. |
 | `reason` | Empty or why the state changed (table below). |
 | `oracle_call` | `running`, `closed` or `unknown`: the state of the **Oracle** session, never of the generic old side (derivation rule below). |
@@ -269,7 +269,7 @@ Two more rules keep a retired offer from retargeting a newer local session:
 
 ## Capability negotiation
 
-- The Host advertises feature `oracle_handoff` (contract 21) in `/server-info`.
+- The Host advertises feature `oracle_handoff` (contract 22) in `/server-info`.
 - A phone that implements this document opens Oracle v2 with
   `handoff=hands_free` on `/oracle/v2`. The Host offers a handoff only to a
   call that advertised it; `POST /oracle/connect` for any other call answers

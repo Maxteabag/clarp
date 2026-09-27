@@ -286,7 +286,7 @@ def sync_plan(plan_id: str) -> None:
         (plan_id,)).fetchone()
     if not plan: return
     ensure_plan(plan_id=plan_id, session=plan["session"], title=plan["title"])
-    status = {"active": "active", "completed": "completed", "blocked": "failed"}.get(
+    status = {"active": "active", "paused": "active", "completed": "completed", "blocked": "failed"}.get(
         plan["status"], "cancelled")
     db.conn().execute(
         "UPDATE artifacts SET status=?,updated_at=MAX(?,updated_at+1),completed_at=? WHERE type='plan' AND reference_id=?",
