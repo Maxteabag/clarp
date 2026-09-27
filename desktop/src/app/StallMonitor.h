@@ -46,6 +46,7 @@ class StallMonitor final : public QObject {
     QString m_logPath;
     QTimer m_beat;
     std::atomic<std::int64_t> m_lastBeatNs{0};
+    std::atomic<std::int64_t> m_lastAwakeNs{0};
     std::atomic<bool> m_running{false};
     std::atomic<int> m_stalls{0};
     std::atomic<int> m_longestMs{0};

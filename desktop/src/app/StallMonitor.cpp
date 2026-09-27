@@ -1,4 +1,5 @@
 #include "app/StallMonitor.h"
+#include <QAbstractEventDispatcher>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -76,6 +77,11 @@ StallMonitor::StallMonitor(int thresholdMs, QString logPath, QObject* parent, in
 
     m_guiThread = pthread_self();
     m_lastBeatNs.store(nowNs());
+    m_lastAwakeNs.store(m_lastBeatNs.load());
+    if (auto* dispatcher = QAbstractEventDispatcher::instance()) {
+        connect(dispatcher, &QAbstractEventDispatcher::awake, this,
+                [this] { m_lastAwakeNs.store(nowNs()); }, Qt::DirectConnection);
+    }
     m_pollIntervalMs = std::clamp(m_thresholdMs / 2, 75, 500);
     m_beat.setInterval(m_pollIntervalMs);
     connect(&m_beat, &QTimer::timeout, this, [this] { m_lastBeatNs.store(nowNs()); });
@@ -125,12 +131,14 @@ void StallMonitor::watch() {
             }
         }
         const std::int64_t beat = m_lastBeatNs.load();
-        const std::int64_t gapMs = (nowNs() - beat) / 1'000'000;
+        const std::int64_t awake = m_lastAwakeNs.load();
+        const std::int64_t start = std::max(beat, awake);
+        const std::int64_t gapMs = (nowNs() - start) / 1'000'000;
         if (!inStall && gapMs > m_thresholdMs) {
             inStall = true;
-            stallStartNs = beat;
+            stallStartNs = start;
             writeStall(gapMs, captureGuiStack() ? gFrameCount.load() : 0);
-        } else if (inStall && beat != stallStartNs) {
+        } else if (inStall && beat > stallStartNs) {
             // The GUI thread beat again: the stall is over.
             inStall = false;
             const std::int64_t totalMs = (beat - stallStartNs) / 1'000'000;
