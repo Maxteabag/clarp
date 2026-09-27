@@ -81,10 +81,9 @@ class FakeTools:
 
 
 class FakeUpstream:
-    """One GPT-Live session socket: what the Host sent it, and whether it was closed."""
+    """The GPT-Live session socket: what the Host sent it, and whether it was closed."""
 
-    def __init__(self, session=None):
-        self.session = session
+    def __init__(self):
         self.sent = []
         self.closed = False
 
@@ -111,7 +110,6 @@ class Lab:
         self.down = []
         self.upstreams = [FakeUpstream()]
         self.sent = self.upstreams[0].sent
-        self.open_error = None
         self.tools = FakeTools(prior_rows, transcript)
         self.conv = mod.Conversation(self.upstreams[0], self.down.append,
                                      self.tools, "key", clock=lambda: self.now[0],
@@ -119,20 +117,8 @@ class Lab:
         for row in rows:
             self.tools.rows.append(row)
             self.tools.delegations.add(row["delegation_id"])
-        self.conv.open_upstream = self.open_upstream
         self.ms = 0
         self.delegation = 0
-
-    def open_upstream(self, session):
-        """The fake GPT-Live: a new session per swap, or the scripted failure."""
-        if self.open_error is not None:
-            raise self.open_error
-        upstream = FakeUpstream(session)
-        self.upstreams.append(upstream)
-        return upstream, "live_" + str(len(self.upstreams))
-
-    def opened(self):
-        return [up.session for up in self.upstreams[1:]]
 
     def close(self):
         self.conv.stop.set()
@@ -238,11 +224,25 @@ def _theo_row():
                             "Validate or disqualify recursive goals", "result_text": THEO_REPLY}
 
 
-def test_cedb186d_full_reply_meta_turns_and_no_redelegation(lab):
-    """The 2026-09-26 call: a 3.4 KB reply, then "you stopped", "read the
-    transcript", "are you sure". Every word arrives in order across parts,
-    no meta turn becomes a new delegation, and completion is only claimed by
-    the last part."""
+class _Response(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _router_answers(monkeypatch, name, arguments):
+    """The operator router proposes one tool call."""
+    body = {"output": [{"type": "function_call", "name": name, "call_id": "c1",
+                        "arguments": json.dumps(arguments)}]}
+    monkeypatch.setattr(mod, "urlopen", lambda *a, **k: _Response(json.dumps(body).encode()))
+
+
+def test_cedb186d_full_reply_arrives_in_order_across_parts(lab):
+    """The 2026-09-26 call: a 3.4 KB reply. Every word arrives in order
+    across parts, each part fits one append, and only the last part says it
+    is the end."""
     lab = lab(rows=[_theo_row()])
     lab.wait(STEP)
     parts = lab.parts()
@@ -254,14 +254,6 @@ def test_cedb186d_full_reply_meta_turns_and_no_redelegation(lab):
     lab.oracle_speaks(8)
     lab.wait(2)
     assert len(lab.parts()) == 2 and f"part 2 of {total}" in lab.parts()[1]
-
-    # Oracle stops mid-part-2 and the user says so before the quiet gate.
-    lab.oracle_speaks(4)
-    lab.user("I think you stopped mid-sentence")
-    assert f"part 3 of {total}" in lab.parts()[-1]
-    assert "finish it first" in _header(lab.parts()[-1])
-
-    # The rest arrives part by part as Oracle finishes each one.
     for _ in range(total):
         lab.oracle_speaks(6)
         lab.wait(2)
@@ -274,36 +266,18 @@ def test_cedb186d_full_reply_meta_turns_and_no_redelegation(lab):
             assert "end of" not in _header(part) and "More remains" in _header(part)
         else:
             assert f"part {total} of {total}, end of" in _header(part)
-
-    # "read the transcript" replays the stored reply word for word from part 1.
-    lab.user("No, just read the transcript to me")
-    replay = lab.parts()[total:]
-    assert len(replay) == 1 and "part 1 of" in replay[0] and "word for word" in _header(replay[0])
-    for _ in range(total):
-        lab.oracle_speaks(6)
-        lab.wait(2)
-    replay = lab.parts()[total:]
-    assert "".join(_body(p) for p in replay) == THEO_REPLY
-    assert all("word for word" in _header(p) for p in replay)
-
-    # "are you sure" is answered from the cursor, not by asking Theo again.
-    lab.user("Are you sure")
-    status = lab.appends()[-1]["content"]
-    assert f"All {total} parts" in status and "was the end" in status
-
     assert lab.tools.dispatched == []
-    assert not any(name == "investigate_with_oracle" for name, _ in lab.tools.calls)
 
 
-def test_are_you_sure_with_parts_pending_never_claims_completion(lab):
+def test_the_user_taking_the_floor_pauses_the_relay(lab):
     lab = lab(rows=[_theo_row()])
     lab.wait(STEP)
     lab.oracle_speaks(3)
-    lab.user("Are you sure?")          # user took the floor during part 1
-    notes = [e["content"] for e in lab.appends()]
-    assert any("not complete" in note and "more remains" in note.casefold() for note in notes)
-    assert "part 2 of" in lab.parts()[-1]
-    assert lab.tools.dispatched == []
+    lab.ms += 5000
+    lab.conv.receive({"type": "session.input_transcript.delta", "delta": "wait a second",
+                      "start_ms": lab.ms, "end_ms": lab.ms + 800})
+    lab.wait(10)
+    assert len(lab.parts()) == 1, "no part is pushed over a user who took the floor"
 
 
 def test_result_waits_for_the_user_to_finish_a_monologue(lab):
@@ -320,25 +294,17 @@ def test_result_waits_for_the_user_to_finish_a_monologue(lab):
     assert len(lab.parts()) == 1
 
 
-def test_read_agent_transcript_reads_without_prompting_the_agent(lab):
-    transcript = [{"role": "user", "timestamp": "2026-09-26T10:00:00Z", "text": "Can you check the vault notes?"},
-                  {"role": "assistant", "timestamp": "2026-09-26T10:01:00Z", "text": "The vault has two relevant notes."}]
-    lab = lab(transcript=transcript)
-    lab.user("Read Theo's recent conversation")
-    assert ("read_agent_transcript", {"agent": "Theo", "limit": oracle_relay.TRANSCRIPT_LIMIT}) in lab.tools.calls
-    assert lab.tools.dispatched == []
-    [part] = lab.parts()
-    assert "Can you check the vault notes?" in part and "The vault has two relevant notes." in part
-    assert "end of" in _header(part) or "complete" in _header(part)
-
-
-@pytest.mark.parametrize("words", ["Ask Theo to check the deploy", "Tell Theo to continue the migration",
-                                   "Read the config file and tell me what port it uses"])
-def test_substantive_requests_still_go_to_the_primary(lab, words):
+@pytest.mark.parametrize("words", ["Ask Theo to check the deploy", "you stopped mid-sentence",
+                                   "read it again word for word", "Put me through to Mike",
+                                   "Any updates?", "What did Theo say?"])
+def test_direct_mode_hands_every_turn_to_the_primary_unread(lab, words):
+    """The Host never reads the user's words: whatever they say, a direct turn
+    goes to the primary, who decides (continue, replay, put through, ...)."""
     lab = lab(rows=[_theo_row()])
     lab.wait(STEP)
     lab.user(words)
-    assert len(lab.tools.dispatched) == 1
+    [work] = lab.tools.dispatched
+    assert work["request"].endswith("verbatim:\n" + words)
 
 
 def test_operator_router_can_continue_a_result_without_dispatch(lab, monkeypatch):
@@ -360,68 +326,15 @@ def test_operator_router_can_continue_a_result_without_dispatch(lab, monkeypatch
     assert lab.tools.dispatched == []
 
 
-@pytest.mark.parametrize("words,expected", [
-    ("I think you stopped mid-sentence", ("continue", None)),
-    ("Okay, you stopped again", ("continue", None)),
-    ("Oh yeah. Because in the text I'm reading, he has more", ("continue", None)),
-    ("keep going", ("continue", None)),
-    ("No, just read the transcript to me", ("replay", None)),
-    ("Okay, so you kinda summarized his idea. Can we have him say that in his own words", ("replay", None)),
-    ("No, you already have it. You already have his response. You don't need to prompt him", ("replay", None)),
-    ("read it again", ("replay", None)),
-    ("Are you sure", ("status", None)),
-    ("Is that all?", ("status", None)),
-    ("Read Theo's recent conversation", ("transcript", "theo")),
-    ("just look at what Omar said", ("transcript", "omar")),
-    ("Tell Theo to continue the migration", None),
-    ("Read the config file and tell me what port it uses", None),
-    ("What's going on with the deploy", None),
-    ("go ahead", None),
-    ("what did he say", None),
-    ("No, just read the transcript to me", ("replay", None)),
-    ("I think you stopped reading", ("continue", None)),
-    # Substantive work that merely contains a meta phrase must reach the primary:
-    # a missed meta turn only costs the old behaviour, a false one swallows work.
-    ("Tell Theo to rewrite the doc in his own words", None),
-    ("Ask Theo to summarise the report word for word", None),
-    ("Ask him to rewrite it in his own words", None),
-    ("Ask her to rewrite it word for word", None),
-    ("Can we have her read that word for word", ("replay", None)),
-    ("Ask Theo what else did he say in the meeting notes", None),
-    ("Have Theo read the transcript of the standup and summarise it", None),
-    ("Can Theo read me the full text of the README", None),
-    ("tell Theo there is more work on the migration", None),
-    ("Ask Omar to check what Theo said", None),
-    ("Tell Theo you stopped the build", None),
-    ("I think you stopped the server", None),
-    ("check what Theo said about the budget and fix it", None),
-    ("read the transcript of the standup", None),
-])
-def test_meta_turn_classifier(words, expected):
-    assert oracle_relay.classify(words) == expected
-
-
-def test_a_meta_turn_split_across_fragments_is_still_served(lab):
-    """cedb186d: "No, just read the transcript to" and "me" arrived as two fragments."""
-    lab = lab(rows=[_theo_row()])
-    lab.wait(STEP)
-    lab.oracle_speaks(8)
-    lab.wait(2)
-    before = len(lab.parts())
-    lab.user_fragments("No, just read the transcript to", "me")
+def test_operator_router_reads_a_transcript_without_prompting_the_agent(lab, monkeypatch):
+    transcript = [{"role": "user", "timestamp": "2026-09-26T10:00:00Z", "text": "Can you check the vault notes?"},
+                  {"role": "assistant", "timestamp": "2026-09-26T10:01:00Z", "text": "The vault has two relevant notes."}]
+    lab = lab(transcript=transcript, strategy="operator")
+    _router_answers(monkeypatch, "read_agent_transcript", {"agent": "Theo", "limit": 10})
+    lab.user("what has Theo been saying")
     assert lab.tools.dispatched == []
-    assert "part 1 of" in lab.parts()[before] and "word for word" in _header(lab.parts()[before])
-
-
-def test_a_meta_phrase_after_unrouted_work_does_not_swallow_the_work(lab):
-    lab = lab(rows=[_theo_row()])
-    lab.wait(STEP)
-    lab.user_fragments("Ask Theo to draft the goals page", "and read it back to me")
-    assert len(lab.tools.dispatched) == 1
-
-
-def test_long_utterances_are_never_meta_turns():
-    assert oracle_relay.classify("keep going " + "and then we talk about the roadmap " * 6) is None
+    [part] = lab.parts()
+    assert "Can you check the vault notes?" in part and "The vault has two relevant notes." in part
 
 
 def test_every_part_fits_one_append_even_for_multibyte_text():
@@ -433,244 +346,7 @@ def test_every_part_fits_one_append_even_for_multibyte_text():
 
 
 
-# ---- talking to an agent directly (per-agent voices) ------------------------
-
-def _session_voice(session):
-    return session["audio"]["output"]["voice"]
-
-
-def _history_text(session):
-    return json.dumps(session.get("input", []))
-
-
-def _switch_to_theo(lab):
-    lab.user("Put me through to Theo")
-    lab.oracle_speaks(1.5)   # "Putting you through to Theo."
-    lab.wait(2)
-
-
-def test_put_me_through_opens_theo_in_his_own_voice_on_the_same_phone_line(lab):
-    lab = lab()
-    lab.user("so the plan is recursive goals")
-    lab.tools.dispatched.clear()
-    lab.user("Put me through to Theo")
-    assert lab.tools.dispatched == [], "a switch is not work for the primary"
-    assert any("Connecting you to Theo" in e["content"] for e in lab.appends(0))
-    assert lab.opened() == [], "the swap waits for Oracle to say it is putting the user through"
-    old_session = lab.conv.provider_session
-    lab.oracle_speaks(1.5)
-    lab.wait(2)
-
-    [session] = lab.opened()
-    assert _session_voice(session) == "meridian"
-    assert "You are the voice of Theo" in session["instructions"]
-    assert "recursive goals" in _history_text(session)
-    assert lab.conv.upstream is lab.upstreams[1]
-    assert lab.upstreams[0].closed
-    assert lab.conv.provider_session not in (None, old_session)
-    contact = [e for e in lab.down if e["type"] == "oracle_v2.contact"]
-    assert contact == [{"type": "oracle_v2.contact", "agent": "Theo", "session": "theo-97e5",
-                        "voice": "meridian"}]
-    types = lab.down_types()
-    last_audio = max(i for i, kind in enumerate(types) if kind == "session.output_audio.delta")
-    assert "oracle_v2.quiet" in types[last_audio:], "the phone must not be left in a speaking state"
-
-    # The retired session's close never reaches the phone or ends the call.
-    before = len(lab.down)
-    lab.conv.receive({"type": "session.closed", "reason": "close_requested"}, source=lab.upstreams[0])
-    lab.conv.receive({"type": "session.output_audio.delta", "delta": _audio(3000)}, source=lab.upstreams[0])
-    assert lab.down[before:] == []
-    assert "session.closed" not in lab.down_types()
-    assert not lab.conv.closed.is_set() and not lab.conv.stop.is_set()
-
-    # From now on substantive turns go to Theo, and the receipt goes to his session.
-    admissions_before = sum("Work admission" in e["content"] for e in lab.appends(0))
-    lab.user("What is the status of the deploy?")
-    [work] = lab.tools.dispatched
-    assert work["agent"] == "theo-97e5" and "What is the status of the deploy?" in work["request"]
-    assert any("Work admission" in e["content"] for e in lab.appends(1))
-    assert sum("Work admission" in e["content"] for e in lab.appends(0)) == admissions_before
-
-
-def test_back_to_oracle_restores_marin_and_oracles_instructions(lab):
-    lab = lab()
-    _switch_to_theo(lab)
-    lab.user("Back to Oracle")
-    assert lab.tools.dispatched == []
-    lab.oracle_speaks(1)
-    lab.wait(2)
-    assert [_session_voice(s) for s in lab.opened()] == ["meridian", "marin"]
-    back = lab.opened()[1]
-    assert "You are the voice of" not in back["instructions"]
-    assert "Put me through to Theo" in _history_text(back)
-    assert lab.conv.upstream is lab.upstreams[2] and lab.upstreams[1].closed
-    assert [e for e in lab.down if e["type"] == "oracle_v2.contact"][-1] == {
-        "type": "oracle_v2.contact", "agent": None, "session": None, "voice": "marin"}
-    lab.user("Check the deploy")
-    assert lab.tools.dispatched and "agent" not in lab.tools.dispatched[-1]
-
-
-def test_a_second_agent_gets_a_different_voice_than_the_first(lab):
-    lab = lab()
-    _switch_to_theo(lab)
-    lab.user("Put me through to Nadia")
-    lab.oracle_speaks(1)
-    lab.wait(2)
-    assert [_session_voice(s) for s in lab.opened()] == ["meridian", "willow"]
-    assert "You are the voice of Nadia" in lab.opened()[1]["instructions"]
-
-
-def test_asking_for_the_agent_already_on_the_line_does_not_reopen(lab):
-    lab = lab()
-    _switch_to_theo(lab)
-    lab.user("Put me through to Theo")
-    lab.wait(8)
-    assert len(lab.opened()) == 1
-
-
-def test_relay_parts_pending_across_a_switch_continue_in_theos_session(lab):
-    lab = lab(rows=[_theo_row()])
-    lab.wait(STEP)
-    lab.oracle_speaks(8)            # part 1 spoken in full
-    lab.wait(2)
-    assert len(lab.parts(0)) == 2   # part 2 sent, not yet spoken
-    _switch_to_theo(lab)
-    old, new = lab.parts(0), lab.parts(1)
-    assert [p.split(" of ")[0].rsplit("part ", 1)[1] for p in old] == ["1", "2"]
-    assert new and "part 2 of" in new[0], "the unspoken part is resent to the new voice"
-    total = len(oracle_relay.Relay("k", "x", "y", THEO_REPLY).chunks)
-    for _ in range(total):
-        lab.oracle_speaks(6)
-        lab.wait(2)
-    new = lab.parts(1)
-    assert "".join(_body(p) for p in old[:1] + new) == THEO_REPLY
-    assert len(new) == total - 1
-    assert lab.tools.dispatched == []
-
-
-def test_a_reply_spoken_before_the_switch_is_not_repeated_after_it(lab):
-    lab = lab(rows=[_theo_row()])
-    lab.wait(STEP)
-    total = len(oracle_relay.Relay("k", "x", "y", THEO_REPLY).chunks)
-    for _ in range(total):
-        lab.oracle_speaks(6)
-        lab.wait(2)
-    assert len(lab.parts(0)) == total
-    _switch_to_theo(lab)
-    lab.wait(10)
-    assert len(lab.opened()) == 1 and lab.parts(1) == []
-
-
-def test_work_requests_that_mention_talking_to_someone_do_not_switch(lab):
-    lab = lab()
-    lab.user("Ask Theo to talk to Lena")
-    lab.oracle_speaks(1)
-    lab.wait(8)
-    assert lab.opened() == []
-    assert len(lab.tools.dispatched) == 1
-
-
-def test_a_failed_swap_keeps_the_call_on_the_current_session_and_says_so(lab):
-    lab = lab()
-    lab.open_error = OSError("upstream refused")
-    lab.user("Put me through to Theo")
-    lab.oracle_speaks(1.5)
-    lab.wait(2)
-    assert lab.opened() == []
-    assert lab.conv.upstream is lab.upstreams[0] and not lab.upstreams[0].closed
-    assert not lab.conv.stop.is_set()
-    assert any("could not put the user through to Theo" in e["content"] for e in lab.appends(0))
-    assert lab.conv.contact is None
-    lab.user("Check the deploy")            # the call still works as Oracle
-    assert len(lab.tools.dispatched) == 1 and "agent" not in lab.tools.dispatched[0]
-
-
-def test_narration_off_switches_without_an_announcement(lab):
-    lab = lab()
-    lab.conv.input({"type": "oracle_v2.preferences", "narration": "off"})
-    lab.user("Let me talk to Theo directly")
-    assert not any("Connecting you" in e["content"] for e in lab.appends(0))
-    lab.wait(STEP)
-    [session] = lab.opened()
-    assert _session_voice(session) == "meridian"
-    assert any(mod.NARRATION_OFF in e["content"] for e in lab.appends(1))
-
-
-def test_config_override_picks_the_agent_voice(lab):
-    lab = lab()
-    lab.conv.voice_overrides = {"theo": "ash"}
-    _switch_to_theo(lab)
-    assert _session_voice(lab.opened()[0]) == "ash"
-
-
-def test_operator_router_can_switch_contact(lab, monkeypatch):
-    lab = lab(strategy="operator")
-    body = {"output": [{"type": "function_call", "name": "switch_contact", "call_id": "c1",
-                        "arguments": json.dumps({"agent": "Theo"})}]}
-
-    class Response(io.BytesIO):
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-    monkeypatch.setattr(mod, "urlopen", lambda *a, **k: Response(json.dumps(body).encode()))
-    lab.user("could I have a word with Theo himself")
-    lab.oracle_speaks(1.5)
-    lab.wait(2)
-    assert [_session_voice(s) for s in lab.opened()] == ["meridian"]
-    assert lab.tools.dispatched == []
-    assert any(t["name"] == "switch_contact" for t in mod.router_tools())
-
-
-class _Socket:
-    """A scripted upstream for pump(): frames, then close."""
-
-    def __init__(self, frames, conversation=None, swap_to=None):
-        self.frames, self.conversation, self.swap_to = list(frames), conversation, swap_to
-
-    def recv(self):
-        if self.swap_to is not None and self.conversation.upstream is self:
-            self.conversation.upstream = self.swap_to
-            raise ConnectionError("socket closed by swap")
-        return self.frames.pop(0) if self.frames else ""
-
-
-def test_pump_follows_the_swapped_upstream_instead_of_ending_the_call():
-    events = []
-
-    class Conv:
-        stop, closed = threading.Event(), threading.Event()
-
-        def receive(self, event, source=None):
-            events.append((event["type"], source))
-            if event["type"] == "session.closed":
-                self.closed.set()
-    conv = Conv()
-    new = _Socket([json.dumps({"type": "session.output_transcript.delta", "delta": "Theo here"}),
-                   json.dumps({"type": "session.closed"})])
-    conv.upstream = _Socket([], conv, swap_to=new)
-    mod.pump_upstream(conv, TimeoutError)
-    assert events == [("session.output_transcript.delta", new), ("session.closed", new)]
-
-
-# ---- call 7946a1a7: "can you put me through to, can you put me through to Marcus"
-
-MARCUS_CALL = json.loads((FIXTURES / "7946a1a7_put_me_through_to_marcus.json").read_text())["events"]
-
-
-def test_7946a1a7_a_restarted_switch_request_split_by_a_pause_puts_the_user_through(lab):
-    lab = lab()
-    lab.replay(MARCUS_CALL, until_seq=62)
-    assert lab.tools.dispatched == [], "a switch request is never also sent to the primary as work"
-    assert lab.conv.pending_swap is not None and lab.conv.pending_swap["contact"]["persona"] == "Marcus"
-    lab.replay(MARCUS_CALL, until_seq=74)   # Oracle: "Sure, put you through to Marcus."
-    lab.wait(2)
-    [session] = lab.opened()
-    assert _session_voice(session) == "cedar"
-    assert "You are the voice of Marcus" in session["instructions"]
-    assert lab.conv.contact["session"] == "marcus-5b1a"
-
+# ---- the turn is the whole utterance (call 7946a1a7) -------------------------
 
 def test_the_turn_is_the_whole_utterance_since_oracle_last_spoke(lab):
     lab = lab()
@@ -694,106 +370,11 @@ def test_speech_before_oracle_last_spoke_is_not_part_of_the_turn(lab):
     assert work["request"].endswith("verbatim:\nCheck the deploy")
 
 
-def test_a_name_after_a_dangling_switch_phrase_and_oracles_go_on_switches(lab):
-    lab = lab()
-    lab.user_fragments("Can you put me through to")
-    lab.tools.dispatched.clear()
-    lab.conv.receive({"type": "session.output_transcript.delta", "delta": " Go on.",
-                      "start_ms": lab.ms, "end_ms": lab.ms + 400})
-    lab.user_fragments("Marcus")
-    assert lab.tools.dispatched == []
-    assert lab.conv.pending_swap["contact"]["persona"] == "Marcus"
-
-
-def test_a_switch_to_an_unknown_agent_is_not_sent_to_the_primary(lab):
-    lab = lab()
-    lab.user("Can you put me through to Zorblax")
-    assert lab.tools.dispatched == []
-    assert lab.opened() == [] and lab.conv.pending_swap is None
-    assert any("no agent called Zorblax" in e["content"] for e in lab.appends(0))
-
-
 def _oracle_says(lab, text, seconds=1.5):
     lab.ms += 1000
     lab.conv.receive({"type": "session.output_transcript.delta", "delta": text,
                       "start_ms": lab.ms, "end_ms": lab.ms + 400})
     lab.oracle_speaks(seconds)
-
-
-def _user_says(lab, text):
-    lab.ms += 1000
-    lab.conv.receive({"type": "session.input_transcript.delta", "delta": text,
-                      "start_ms": lab.ms, "end_ms": lab.ms + 400})
-
-
-def _host_notes(lab, needle, index=0):
-    return [e for e in lab.appends(index) if needle in e["content"]]
-
-
-def test_oracle_claiming_a_switch_the_host_never_started_is_corrected(lab):
-    lab = lab()
-    lab.user("Check the deploy")                     # routed as work, no switch
-    _oracle_says(lab, " Sure—put you through to Marcus.", seconds=1)
-    lab.wait(0.5)
-    assert _host_notes(lab, "could not connect") == [], "the Host gives the switch a moment to start"
-    lab.wait(2)
-    [note] = _host_notes(lab, "could not connect")
-    assert "still talking to Oracle" in note["content"]
-    lab.wait(10)
-    assert len(_host_notes(lab, "could not connect")) == 1
-
-
-def test_oracles_own_announcement_of_a_real_switch_is_not_corrected(lab):
-    lab = lab()
-    lab.user("Put me through to Theo")
-    _oracle_says(lab, " Connecting you to Theo.")
-    lab.wait(3)
-    assert len(lab.opened()) == 1
-    assert _host_notes(lab, "could not connect") == []
-
-
-def test_a_failed_swap_tells_the_user_they_are_still_with_oracle(lab):
-    lab = lab()
-    lab.open_error = OSError("upstream refused")
-    lab.user("Put me through to Theo")
-    lab.oracle_speaks(1.5)
-    lab.wait(2)
-    [note] = _host_notes(lab, "could not put the user through to Theo")
-    assert "still talking to Oracle" in note["content"]
-
-
-def test_a_user_talking_into_silence_gets_a_nudge_once(lab):
-    """7946a1a7: "Hey Marcus, how are you", "Marcus, are you there", "Hello"
-    for 35 s with no delegation and no reply."""
-    lab = lab()
-    _oracle_says(lab, " Sure.")
-    lab.wait(2)
-    _user_says(lab, " Hey Marcus, how are you")
-    lab.wait(5)
-    assert _host_notes(lab, "no reply") == []
-    lab.wait(4)
-    [note] = _host_notes(lab, "no reply")
-    _user_says(lab, " Marcus, are you there")
-    lab.wait(12)
-    assert len(_host_notes(lab, "no reply")) == 1, "one nudge until Oracle speaks again"
-    _oracle_says(lab, " Sorry, I'm here.")
-    _user_says(lab, " Hello")
-    lab.wait(10)
-    assert len(_host_notes(lab, "no reply")) == 2
-
-
-def test_a_delegated_turn_is_not_nudged(lab):
-    lab = lab()
-    lab.user("Check the deploy")
-    lab.wait(15)
-    assert _host_notes(lab, "no reply") == []
-
-
-def test_switch_announcement_says_connecting_not_done(lab):
-    lab = lab()
-    lab.user("Put me through to Theo")
-    [note] = _host_notes(lab, "Connecting you to Theo")
-    assert "Putting you through" not in note["content"]
 
 
 # ---- earcons ----------------------------------------------------------------
@@ -809,28 +390,6 @@ def _cue_audio_follows_each_cue(lab):
             assert audio["type"] == "session.output_audio.delta"
             assert base64.b64decode(audio["delta"]) == mod.oracle_earcons.pcm(
                 event["name"], event.get("agent"))
-
-
-def test_a_switch_plays_started_then_a_connected_chime_and_back_plays_falling(lab):
-    lab = lab()
-    _switch_to_theo(lab)
-    assert _cues(lab) == ["switch_started", "connected"]
-    connected = next(e for e in lab.down if e.get("name") == "connected")
-    assert connected["agent"] == "Theo"
-    lab.user("Back to Oracle")
-    lab.oracle_speaks(1)
-    lab.wait(2)
-    assert _cues(lab) == ["switch_started", "connected", "switch_started", "back_to_oracle"]
-    _cue_audio_follows_each_cue(lab)
-
-
-def test_a_failed_switch_plays_the_low_double_tone(lab):
-    lab = lab()
-    lab.open_error = OSError("upstream refused")
-    lab.user("Put me through to Theo")
-    lab.oracle_speaks(1.5)
-    lab.wait(2)
-    assert _cues(lab) == ["switch_started", "switch_failed"]
 
 
 def test_handed_off_work_ticks_and_a_result_rings_before_its_read_out(lab):
@@ -865,10 +424,8 @@ def test_earcons_off_by_preference_sends_nothing(lab):
     lab.conv.input({"type": "oracle_v2.preferences", "earcons": False})
     receipt = [e for e in lab.down if e["type"] == "oracle_v2.preferences"][-1]
     assert receipt["earcons"] is False
-    _switch_to_theo(lab)
     lab.user("Check the deploy")
     assert _cues(lab) == []
-    assert len(lab.opened()) == 1
 
 
 def test_earcons_off_by_config_sends_nothing(lab):
@@ -937,23 +494,17 @@ def test_bfd47723_the_last_calls_result_is_background_never_relayed(lab):
     assert lab.tools.dispatched == []
 
 
-@pytest.mark.parametrize("words", ["What did Theo say?", "Any updates?", "Hva sa Theo?"])
-def test_bfd47723_asking_about_it_serves_the_stored_reply(lab, words):
-    lab = _new_call(lab)
+def test_bfd47723_the_router_can_serve_the_earlier_reply_when_asked(lab, monkeypatch):
+    lab = _new_call(lab, strategy="operator")
     _answer_the_first_turn(lab)
-    lab.user(words)
+    [record] = [r for r in lab.conv.tools.rows]
+    assert lab.conv.task_record(record)["from_earlier_call"] is True
+    _router_answers(monkeypatch, "read_result", {"operation_id": NEW_CALL["prior_operation"]["delegation_id"]})
+    lab.user("Hva sa Theo?")
     [part] = lab.parts()
     assert _body(part) == PRIOR_REPLY
     assert NEW_CALL["prior_operation"]["delegation_id"] in _header(part)
     assert lab.tools.dispatched == []
-    assert not any(name == "read_agent_transcript" for name, _ in lab.tools.calls)
-
-
-def test_bfd47723_asking_before_anything_was_said_still_serves_it(lab):
-    lab = _new_call(lab)
-    lab.wait(2)
-    lab.user("What did Theo say")
-    assert _body(lab.parts()[0]) == PRIOR_REPLY
 
 
 def test_bfd47723_results_of_this_calls_work_still_relay_with_the_cue(lab):
@@ -1056,13 +607,3 @@ def test_a_reconnect_within_the_grace_continues_the_calls_relay(monkeypatch, aft
     finally:
         conv.stop.set(); conv.pool.shutdown(wait=True)
 
-
-@pytest.mark.parametrize("words,expected", [
-    ("Any updates?", True), ("Okay, anything new?", True), ("What's new", True),
-    ("Has anyone gotten back to me?", True), ("Noe nytt?", True),
-    ("Any updates on the deploy? Ask Theo to check it", False),
-    ("Tell Theo there is news", False), ("Update the config", False),
-    ("any new ideas for the roadmap", False),
-])
-def test_update_questions(words, expected):
-    assert oracle_relay.asks_for_updates(words) is expected
