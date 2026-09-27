@@ -256,19 +256,21 @@ ApplicationWindow {
         onClosed: app.requestComposerFocus(app.panes.activePaneId)
         onVisibleChanged: {
             if (visible) keymapEditorLoader.active = true;
-            if (keymapEditorLoader.item) keymapEditorLoader.item.visible = visible;
+            if (keymapEditorLoader.item) (keymapEditorLoader.item as Item).visible = visible;
         }
         Loader {
             id: keymapEditorLoader
             anchors.fill: parent
             active: false
-            sourceComponent: KeymapEditor {
-                objectName: "keymapEditor"
-                keymap: keyboard
-                onClosed: { keymapEditor.visible = false; keymapEditor.closed(); }
-            }
+            // By URL, like DeferredPanel, so the editor's type loads on first open.
+            onActiveChanged: if (active) setSource(Qt.resolvedUrl("components/KeymapEditor.qml"), { objectName: "keymapEditor", keymap: keyboard })
             // Shown after load so the editor's own onVisibleChanged fills and focuses it.
-            onLoaded: item.visible = keymapEditor.visible
+            onLoaded: {
+                const editor = item as QtObject;
+                const closedSignal = "closed";
+                editor[closedSignal].connect(() => { keymapEditor.visible = false; keymapEditor.closed(); });
+                (item as Item).visible = keymapEditor.visible;
+            }
         }
     }
     AppController {
@@ -491,48 +493,48 @@ ApplicationWindow {
                     objectName: "updatesPanel"
                     anchors.fill: parent
                     visible: root.selectedSurface === "updates"
-                    sourceComponent: UpdatesPanel {
-                        controller: app
-                        onOpenChat: session => {
+                    url: Qt.resolvedUrl("components/UpdatesPanel.qml")
+                    properties: ({ controller: app })
+                    handlers: ({
+                        openChat: session => {
                             app.selectSession(session);
                             root.selectedSurface = "chats";
-                        }
-                        onOpenReport: artifactId => reportView.open(artifactId)
-                    }
+                        },
+                        openReport: artifactId => reportView.open(artifactId)
+                    })
                 }
 
                 DeferredPanel {
                     objectName: "teamsPanel"
                     anchors.fill: parent
                     visible: root.selectedSurface === "teams"
-                    sourceComponent: TeamsPanel {
-                        controller: app
-                        onOpenChat: session => {
+                    url: Qt.resolvedUrl("components/TeamsPanel.qml")
+                    properties: ({ controller: app })
+                    handlers: ({
+                        openChat: session => {
                             app.selectSession(session);
                             root.selectedSurface = "chats";
                         }
-                    }
+                    })
                 }
 
                 DeferredPanel {
                     id: settingsPanel
                     objectName: "settingsPanel"
-                    readonly property bool dialogOpen: item !== null && item.dialogOpen
-                    function focusCurrent() {
-                        if (item !== null)
-                            item.focusCurrent();
-                    }
+                    readonly property bool dialogOpen: value("dialogOpen", false)
+                    function focusCurrent() { call("focusCurrent"); }
                     anchors.fill: parent
                     visible: root.selectedSurface === "settings"
-                    sourceComponent: SettingsPanel {
-                        controller: app
-                        onCloseRequested: root.runCommand("chats")
-                        onOpenConnection: connection.visible = true
-                        onOpenOrchestrator: {
+                    url: Qt.resolvedUrl("components/SettingsPanel.qml")
+                    properties: ({ controller: app })
+                    handlers: ({
+                        closeRequested: () => root.runCommand("chats"),
+                        openConnection: () => { connection.visible = true; },
+                        openOrchestrator: () => {
                             orchestrator.visible = true;
                             app.loadOrchestrator();
                         }
-                    }
+                    })
                 }
             }
 
@@ -564,9 +566,8 @@ ApplicationWindow {
         anchors.fill: parent
         visible: !newSessionHub.visible && app.agents.count === 0 && app.connectionState !== "live"
         z: 100
-        sourceComponent: ConnectionPage {
-            controller: app
-        }
+        url: Qt.resolvedUrl("components/ConnectionPage.qml")
+        properties: ({ controller: app })
     }
 
     DeferredPanel {
@@ -575,36 +576,37 @@ ApplicationWindow {
 
         anchors.fill: parent
         z: 80
-        sourceComponent: AgentOverview {
-        controller: app
-        onCloseRequested: overview.visible = false
-        onStartRequested: (name) => {
-            root.relaunchSession = "";
-            root.relaunchName = name;
-            startAgent.visible = true;
-        }
-        onQuickStartRequested: name => {
-            if (app.quickStartContact(name)) {
-                overview.visible = false;
-                root.selectedSurface = "chats";
+        url: Qt.resolvedUrl("components/AgentOverview.qml")
+        properties: ({ controller: app })
+        handlers: ({
+            closeRequested: () => { overview.visible = false; },
+            startRequested: name => {
+                root.relaunchSession = "";
+                root.relaunchName = name;
+                startAgent.visible = true;
+            },
+            quickStartRequested: name => {
+                if (app.quickStartContact(name)) {
+                    overview.visible = false;
+                    root.selectedSurface = "chats";
+                }
+            },
+            relaunchRequested: (session, name) => {
+                root.relaunchSession = session;
+                root.relaunchName = name;
+                startAgent.visible = true;
+            },
+            voiceRequested: (session, name) => {
+                root.voiceSession = session;
+                root.voiceName = name;
+                voiceDialog.visible = true;
+                app.loadVoices(session);
+            },
+            orchestratorRequested: () => {
+                orchestrator.visible = true;
+                app.loadOrchestrator();
             }
-        }
-        onRelaunchRequested: (session, name) => {
-            root.relaunchSession = session;
-            root.relaunchName = name;
-            startAgent.visible = true;
-        }
-        onVoiceRequested: (session, name) => {
-            root.voiceSession = session;
-            root.voiceName = name;
-            voiceDialog.visible = true;
-            app.loadVoices(session);
-        }
-        onOrchestratorRequested: {
-            orchestrator.visible = true;
-            app.loadOrchestrator();
-        }
-        }
+        })
     }
 
     Connections {
@@ -617,23 +619,23 @@ ApplicationWindow {
     DeferredPanel {
         id: assignAgent
         objectName: "assignAgent"
-        readonly property bool submitting: item !== null && item.submitting
+        readonly property bool submitting: value("submitting", false)
         function open(target, automatic, restoreComposer) {
             visible = true;
-            item.open(target, automatic, restoreComposer);
+            call("open", target, automatic, restoreComposer);
         }
-        function closeRequested() { item.closeRequested(); }
+        function closeRequested() { call("closeRequested"); }
         anchors.fill: parent
         z: 101
-        sourceComponent: AssignAgentDialog {
-            id: assignAgentDialog
-            controller: app
-            onCloseRequested: {
+        url: Qt.resolvedUrl("components/AssignAgentDialog.qml")
+        properties: ({ controller: app })
+        handlers: ({
+            closeRequested: () => {
                 assignAgent.visible = false;
-                if (assignAgentDialog.returnToComposer) app.requestComposerFocus(app.panes.activePaneId);
+                if (assignAgent.value("returnToComposer", false)) app.requestComposerFocus(app.panes.activePaneId);
                 else root.focusConversation();
             }
-        }
+        })
     }
 
     // Built on first open (72 text items and two combo boxes most starts never
@@ -641,30 +643,44 @@ ApplicationWindow {
     Loader {
         id: newSessionHub
         objectName: "newSessionHub"
-        readonly property bool submitting: item !== null && item.submitting
+        // Loaded by URL for the reason given in DeferredPanel.qml; the hub's
+        // type is unknown here, so its members are reached by name.
+        readonly property bool submitting: Boolean(member("submitting"))
+        function member(name) {
+            const loaded = item as QtObject;
+            return loaded === null ? undefined : loaded[name];
+        }
         function hub() {
-            active = true;
-            return item;
+            if (item === null) {
+                active = true;
+                setSource(Qt.resolvedUrl("components/NewSessionHub.qml"), { controller: app });
+                const handlers = {
+                    connectionRequested: () => { connection.visible = true; },
+                    closeRequested: () => {
+                        root.selectedSurface = "chats";
+                        root.restoreSurfaceFocus();
+                    }
+                };
+                for (const name in handlers)
+                    member(name).connect(handlers[name]);
+            }
+            return item as QtObject;
         }
-        function open(returnToComposer, contactMode) { hub().open(returnToComposer, contactMode); }
+        function invoke(method, ...args) { return hub()[method](...args); }
+        function open(returnToComposer, contactMode) { invoke("open", returnToComposer, contactMode); }
         function openLaunch(backend, model, effort, anonymousMode, directory) {
-            hub().openLaunch(backend, model, effort, anonymousMode, directory);
+            invoke("openLaunch", backend, model, effort, anonymousMode, directory);
         }
-        function stepBack() { if (item !== null) item.stepBack(); }
-        function chooseDirectory() { hub().choosingDirectory = true; }
+        function stepBack() { if (item !== null) invoke("stepBack"); }
+        function chooseDirectory() {
+            const property = "choosingDirectory";
+            hub()[property] = true;
+        }
         anchors.fill: parent
         z: 100
         active: false
-        visible: item !== null && item.shown
+        visible: Boolean(member("shown"))
         Component.onCompleted: if (root.launchOnStartup) newSessionHub.open(false, false)
-        sourceComponent: NewSessionHub {
-            controller: app
-            onConnectionRequested: connection.visible = true
-            onCloseRequested: {
-                root.selectedSurface = "chats";
-                root.restoreSurfaceFocus();
-            }
-        }
     }
 
     DeferredPanel {
@@ -678,18 +694,19 @@ ApplicationWindow {
             renameAgent.currentName = name;
             visible = true;
         }
-        function closeRequested() { item.closeRequested(); }
+        function closeRequested() { call("closeRequested"); }
         anchors.fill: parent
         z: 95
-        sourceComponent: RenameAgentDialog {
-            controller: app
-            session: renameAgent.session
-            currentName: renameAgent.currentName
-            onCloseRequested: {
+        url: Qt.resolvedUrl("components/RenameAgentDialog.qml")
+        properties: ({ controller: app, session: renameAgent.session, currentName: renameAgent.currentName })
+        handlers: ({
+            closeRequested: () => {
                 renameAgent.visible = false;
                 root.restoreSurfaceFocus();
             }
-        }
+        })
+        Binding { target: renameAgent.item; property: "session"; value: renameAgent.session; when: renameAgent.item !== null }
+        Binding { target: renameAgent.item; property: "currentName"; value: renameAgent.currentName; when: renameAgent.item !== null }
     }
 
     DeferredPanel {
@@ -697,12 +714,11 @@ ApplicationWindow {
         objectName: "startAgent"
         anchors.fill: parent
         z: 90
-        sourceComponent: StartAgentDialog {
-            controller: app
-            replaceSession: root.relaunchSession
-            initialName: root.relaunchName
-            onCloseRequested: startAgent.visible = false
-        }
+        url: Qt.resolvedUrl("components/StartAgentDialog.qml")
+        properties: ({ controller: app, replaceSession: root.relaunchSession, initialName: root.relaunchName })
+        handlers: ({ closeRequested: () => { startAgent.visible = false; } })
+        Binding { target: startAgent.item; property: "replaceSession"; value: root.relaunchSession; when: startAgent.item !== null }
+        Binding { target: startAgent.item; property: "initialName"; value: root.relaunchName; when: startAgent.item !== null }
     }
 
     DeferredPanel {
@@ -710,12 +726,11 @@ ApplicationWindow {
         objectName: "voiceDialog"
         anchors.fill: parent
         z: 95
-        sourceComponent: VoiceDialog {
-            controller: app
-            session: root.voiceSession
-            agentName: root.voiceName
-            onCloseRequested: voiceDialog.visible = false
-        }
+        url: Qt.resolvedUrl("components/VoiceDialog.qml")
+        properties: ({ controller: app, session: root.voiceSession, agentName: root.voiceName })
+        handlers: ({ closeRequested: () => { voiceDialog.visible = false; } })
+        Binding { target: voiceDialog.item; property: "session"; value: root.voiceSession; when: voiceDialog.item !== null }
+        Binding { target: voiceDialog.item; property: "agentName"; value: root.voiceName; when: voiceDialog.item !== null }
     }
 
     DeferredPanel {
@@ -723,23 +738,21 @@ ApplicationWindow {
         objectName: "orchestrator"
         anchors.fill: parent
         z: 95
-        sourceComponent: OrchestratorDialog {
-            controller: app
-            onCloseRequested: orchestrator.visible = false
-        }
+        url: Qt.resolvedUrl("components/OrchestratorDialog.qml")
+        properties: ({ controller: app })
+        handlers: ({ closeRequested: () => { orchestrator.visible = false; } })
     }
 
     DeferredPanel {
         id: previewVersionPanel
         objectName: "previewVersionPanel"
-        function close() { item.close(); }
+        function close() { call("close"); }
         anchors.fill: parent
         z: 200
-        sourceComponent: PreviewVersionPanel {
-            switcher: previewVersions
-            canRestart: root.previewCanRestart
-            onClosed: Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId))
-        }
+        url: Qt.resolvedUrl("components/PreviewVersionPanel.qml")
+        properties: ({ switcher: previewVersions, canRestart: root.previewCanRestart })
+        handlers: ({ closed: () => Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId)) })
+        Binding { target: previewVersionPanel.item; property: "canRestart"; value: root.previewCanRestart; when: previewVersionPanel.item !== null }
     }
 
     DeferredPanel {
@@ -747,33 +760,38 @@ ApplicationWindow {
         objectName: "quickSwitcher"
         // Screenshot runs set the query on the loader before showing it.
         property string query
-        onQueryChanged: if (item !== null) item.query = query
-        onLoaded: if (query.length > 0) item.query = query
+        onQueryChanged: if (item !== null) (item as QtObject)["query"] = query
         function open(returnToComposer) {
             visible = true;
-            item.open(returnToComposer);
+            call("open", returnToComposer);
         }
         function openContacts(returnToComposer) {
             visible = true;
-            item.openContacts(returnToComposer);
+            call("openContacts", returnToComposer);
         }
-        function close(restoreFocus) { item.close(restoreFocus); }
+        function close(restoreFocus) { call("close", restoreFocus); }
         anchors.fill: parent
         z: 110
-        sourceComponent: QuickSwitcher {
-            previewVersionsAvailable: previewVersions.enabled
-            controller: app
+        url: Qt.resolvedUrl("components/QuickSwitcher.qml")
+        properties: ({
+            controller: app,
+            query: quickSwitcher.query,
+            previewVersionsAvailable: previewVersions.enabled,
             sidebarVisible: root.sidebarVisible
-            onCommandRequested: action => root.runCommand(action)
-            onContactRequested: name => {
+        })
+        handlers: ({
+            commandRequested: action => root.runCommand(action),
+            contactRequested: name => {
                 root.selectedSurface = "chats";
                 app.quickStartContact(name);
-            }
-            onAgentRequested: session => {
+            },
+            agentRequested: session => {
                 app.selectSession(session);
                 root.selectedSurface = "chats";
             }
-        }
+        })
+        Binding { target: quickSwitcher.item; property: "previewVersionsAvailable"; value: previewVersions.enabled; when: quickSwitcher.item !== null }
+        Binding { target: quickSwitcher.item; property: "sidebarVisible"; value: root.sidebarVisible; when: quickSwitcher.item !== null }
     }
 
     DeferredPanel {
@@ -782,11 +800,10 @@ ApplicationWindow {
         property string session
         anchors.fill: parent
         z: 105
-        sourceComponent: QueueDialog {
-            controller: app
-            session: queueDialog.session
-            onCloseRequested: queueDialog.visible = false
-        }
+        url: Qt.resolvedUrl("components/QueueDialog.qml")
+        properties: ({ controller: app, session: queueDialog.session })
+        handlers: ({ closeRequested: () => { queueDialog.visible = false; } })
+        Binding { target: queueDialog.item; property: "session"; value: queueDialog.session; when: queueDialog.item !== null }
     }
 
     DeferredPanel {
@@ -794,14 +811,13 @@ ApplicationWindow {
         objectName: "reportView"
         function open(artifactId) {
             visible = true;
-            item.open(artifactId);
+            call("open", artifactId);
         }
         anchors.fill: parent
         z: 101
-        sourceComponent: ReportView {
-            controller: app
-            onCloseRequested: reportView.visible = false
-        }
+        url: Qt.resolvedUrl("components/ReportView.qml")
+        properties: ({ controller: app })
+        handlers: ({ closeRequested: () => { reportView.visible = false; } })
     }
 
     DeferredPanel {
@@ -810,27 +826,28 @@ ApplicationWindow {
         property string session
         anchors.fill: parent
         z: 100
-        sourceComponent: AgentProfilePanel {
-        controller: app
-        session: profilePanel.session
-        onCloseRequested: profilePanel.visible = false
-        onQueueRequested: session => {
-            queueDialog.session = session;
-            queueDialog.visible = true;
-            app.loadTurnQueue(session);
-        }
-        onVoiceRequested: (session, name) => {
-            root.voiceSession = session;
-            root.voiceName = name;
-            voiceDialog.visible = true;
-            app.loadVoices(session);
-        }
-        onRelaunchRequested: (session, name) => {
-            root.relaunchSession = session;
-            root.relaunchName = name;
-            startAgent.visible = true;
-        }
-        }
+        url: Qt.resolvedUrl("components/AgentProfilePanel.qml")
+        properties: ({ controller: app, session: profilePanel.session })
+        handlers: ({
+            closeRequested: () => { profilePanel.visible = false; },
+            queueRequested: session => {
+                queueDialog.session = session;
+                queueDialog.visible = true;
+                app.loadTurnQueue(session);
+            },
+            voiceRequested: (session, name) => {
+                root.voiceSession = session;
+                root.voiceName = name;
+                voiceDialog.visible = true;
+                app.loadVoices(session);
+            },
+            relaunchRequested: (session, name) => {
+                root.relaunchSession = session;
+                root.relaunchName = name;
+                startAgent.visible = true;
+            }
+        })
+        Binding { target: profilePanel.item; property: "session"; value: profilePanel.session; when: profilePanel.item !== null }
     }
 
     }
