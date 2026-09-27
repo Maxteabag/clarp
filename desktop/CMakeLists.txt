@@ -146,6 +146,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/ConversationPane.qml
         qml/components/HeaderContext.qml
         qml/components/TranscriptList.qml
+        qml/components/AttachFileDialog.qml
         qml/components/DeferredPanel.qml
         qml/components/DisplayCellCard.qml
         qml/components/MessageDelegate.qml

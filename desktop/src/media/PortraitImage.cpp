@@ -5,11 +5,25 @@
 #include <algorithm>
 
 namespace clarp {
+namespace {
+// A reader without a format asks every image plugin (Qt PDF, JPEG 2000,
+// TIFF, MNG, ...) whether it can read the bytes, for every portrait. They are
+// PNG in practice, which Qt decodes without a plugin, so name the common
+// formats from their magic bytes and only fall back to probing otherwise.
+QByteArray portraitFormat(const QByteArray& bytes) {
+    if (bytes.startsWith("\x89PNG\r\n\x1a\n")) return "png";
+    if (bytes.startsWith("\xff\xd8\xff")) return "jpeg";
+    if (bytes.startsWith("GIF8")) return "gif";
+    if (bytes.size() >= 12 && bytes.startsWith("RIFF") && bytes.mid(8, 4) == "WEBP") return "webp";
+    return {};
+}
+} // namespace
+
 QByteArray roundedPortrait(const QByteArray& bytes) {
     QBuffer input;
     input.setData(bytes);
     if (!input.open(QIODevice::ReadOnly)) return {};
-    QImageReader reader(&input);
+    QImageReader reader(&input, portraitFormat(bytes));
     const QSize size = reader.size();
     if (!size.isValid() || size.width() > 4096 || size.height() > 4096) return {};
     reader.setAutoTransform(true);

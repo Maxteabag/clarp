@@ -1541,6 +1541,15 @@ void NativeCoreTest::circularPortraitsAreBoundedAndAntialiased() {
     }
     QVERIFY(antialiased);
     QVERIFY(roundedPortrait(QByteArray("not an image")).isEmpty());
+    // Formats are named from their magic bytes; JPEG and BMP (no hint, probed)
+    // must still decode.
+    for (const char* format : {"JPEG", "BMP"}) {
+        QByteArray encoded;
+        QBuffer out(&encoded);
+        QVERIFY(out.open(QIODevice::WriteOnly));
+        QVERIFY(original.save(&out, format));
+        QCOMPARE(QImage::fromData(roundedPortrait(encoded)).size(), QSize(192, 192));
+    }
 }
 
 void NativeCoreTest::idleContactStartsFreshWithSavedDefaults() {
