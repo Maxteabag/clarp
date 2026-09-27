@@ -110,7 +110,25 @@ def host(tmp_path):
 
 def test_early_final_interview_then_recovery_and_host_restart(host):
     p = create(host)
-    p = arm(host, p)
+    host.request(
+        "/send",
+        {
+            "session": "rachel",
+            "text": "Status question during the unfinished goal; answer and finish this turn",
+            "client_msg_id": "status-during-goal",
+            "synthesize_audio": False,
+        },
+    )
+    host.wait_reply("rachel", "Status question during the unfinished goal")
+    current = host.request("/task-plans?session=rachel")["plans"][0]
+    assert current["goal"]["checkpoint"] is None and current["status"] == "active"
+    # Advance only the persisted idle-grace deadline, avoiding a two-minute
+    # wall-clock sleep. No checkpoint/rearm/status is fabricated by the owner.
+    with sqlite3.connect(host.root / "state.sqlite") as con:
+        con.execute(
+            "UPDATE task_plans SET goal_json=json_set(goal_json,'$.continuation.due_at',?) WHERE plan_id=?",
+            (int(time.time() * 1000) - 1, p["plan_id"]),
+        )
     rows = wait_wake(host)
     assert len(rows) == 1 and "Reassess current conditions" in rows[0][1]
     p = host.request("/task-plans?session=rachel")["plans"][0]
@@ -127,7 +145,8 @@ def test_early_final_interview_then_recovery_and_host_restart(host):
     )
 
 
-def test_external_failure_and_user_pause_cancel_boundaries(host):
+@pytest.mark.parametrize("outcome", ["succeeded", "failed"])
+def test_external_result_and_user_pause_cancel_boundaries(host, outcome):
     p = create(host)
     p = arm(
         host,
@@ -137,19 +156,26 @@ def test_external_failure_and_user_pause_cancel_boundaries(host):
         reason="Build worker pending",
         due_at=int(time.time() * 1000) + 60000,
     )
+    external = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.exit(" + ("0" if outcome == "succeeded" else "2") + ")",
+        ]
+    )
     p = action(
         host,
         p,
         "dependency",
         {
             "key": "external-build",
-            "outcome": "failed",
-            "evidence": "Worker exited 2; inspect build.log",
+            "outcome": outcome,
+            "evidence": "Actual isolated worker exited " + str(external.returncode),
         },
     )
     wait_wake(host)
     p = host.request("/task-plans?session=rachel")["plans"][0]
-    assert p["goal"]["continuation"]["dependency_result"]["outcome"] == "failed"
+    assert p["goal"]["continuation"]["dependency_result"]["outcome"] == outcome
     p = action(host, p, "pause", {"reason": "User paused this outcome"})
     with pytest.raises(urllib.error.HTTPError) as error:
         action(
