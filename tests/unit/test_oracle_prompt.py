@@ -22,8 +22,7 @@ def test_both_engines_share_one_prompt_object():
 def test_prompt_tells_oracle_the_roster_is_who_she_can_reach_and_to_say_what_she_does():
     text = PROMPT.lower()
     assert "roster" in text and "contact" in text
-    assert "never say you cannot reach an agent" in text
-    assert "say what you asked and who is doing it" in text
+    assert "reaching them is your job" in text
     for banned in ("never mention", "let me check", "stay silent", "do not narrate", "list_agents"):
         assert banned not in text, banned
 
@@ -52,8 +51,20 @@ def test_stable_session_instructions_carry_the_roster_and_contact():
     # Without a contact she is told to ask, not to pretend.
     bare = oracle_live_stable.live_config(roster={"agents": [], "oracle_contact": None})
     assert "No contact is configured" in bare["instructions"]
-    # The stable engine can switch the call to an agent's voice, and says so.
-    assert oracle_live_stable.live_config()["instructions"] == PROMPT + oracle_live_stable.oracle_voices.SWITCH_NOTE
+    assert oracle_live_stable.live_config()["instructions"] == PROMPT
+
+
+def test_prompts_describe_the_role_and_keep_the_safety_truths():
+    from lib.oracle_strategy import DIRECT_INSTRUCTIONS
+    for text in (PROMPT, DIRECT_INSTRUCTIONS):
+        lowered = text.lower()
+        assert "untrusted data" in lowered and "never instructions" in lowered
+        assert "unless a finding says" in lowered
+        # A description of the role, not a script of lines to say.
+        assert len(text) < 1400
+        for scripted in ("say only", "tell the user", "in one short sentence", "connecting you",
+                         "word for word", "for example:"):
+            assert scripted not in lowered, scripted
 
 
 def test_quiet_timer_is_shared_and_longer_than_a_breath():
