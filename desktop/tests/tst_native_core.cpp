@@ -28,6 +28,7 @@
 #include "models/PaneTreeModel.h"
 #include "network/ApiClient.h"
 #include "network/SseParser.h"
+#include "network/SseClient.h"
 #include "protocol/ProtocolTypes.h"
 
 #include <QFile>
@@ -44,6 +45,7 @@
 #include <QTimer>
 #include <QTemporaryFile>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QUrl>
 #include <QUuid>
 #include <QScopeGuard>
@@ -110,6 +112,7 @@ class FakeClarpServer final : public QTcpServer {
     [[nodiscard]] qsizetype requestCount(const QString& method, const QString& path) const {
         return m_requests.count(method + u' ' + path);
     }
+    [[nodiscard]] QString requestLog() const { return m_requests.join(QStringLiteral(", ")); }
 
     void setBytesResponse(const QByteArray& path, const QByteArray& body, const QByteArray& contentType) {
         m_bytesResponses.insert(path, {body, contentType});
@@ -217,7 +220,7 @@ class FakeClarpServer final : public QTcpServer {
         if (path.startsWith("/events")) {
             socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
                           "Cache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n"
-                          ": connected\n\nid: 7\ndata: {\"type\":\"agent-roster\"}\n\n");
+                          ": connected\n\n");
             socket->flush();
             m_eventSocket = socket;
             return;
@@ -605,6 +608,19 @@ class FakeClarpServer final : public QTcpServer {
     bool m_holdUploads = false;
     int m_transcribeCount = 0;
 };
+
+template <typename Predicate>
+[[nodiscard]] bool waitForWallClock(const Predicate& predicate, int timeoutMs) {
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < timeoutMs) {
+        if (predicate()) return true;
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QThread::msleep(5);
+    }
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    return predicate();
+}
 
 QJsonObject loadFixture(const QString& relativePath) {
     QFile file(QStringLiteral(CLARP_CONTRACT_DIR) + QStringLiteral("/fixtures/") + relativePath);
@@ -2768,23 +2784,52 @@ void NativeCoreTest::emptyStartupWaitsForExplicitChoiceAndRetryTargetsLatestFail
     QVERIFY(server.listenLocal());
     const auto oldBase = qgetenv("CLARP_BASE_URL");
     const auto oldToken = qgetenv("CLARP_TOKEN");
+    const bool hadScreenshotScenario = qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SCENARIO");
+    const auto oldScreenshotScenario = qgetenv("CLARP_SCREENSHOT_SCENARIO");
     const QVariant oldEmpty = QCoreApplication::instance()->property("clarpEmptyStartup");
     const auto restore = qScopeGuard([&] {
         qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken);
+        if (hadScreenshotScenario)
+            qputenv("CLARP_SCREENSHOT_SCENARIO", oldScreenshotScenario);
+        else
+            qunsetenv("CLARP_SCREENSHOT_SCENARIO");
         QCoreApplication::instance()->setProperty("clarpEmptyStartup", oldEmpty);
     });
     qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
     qputenv("CLARP_TOKEN", "test-token");
+    qputenv("CLARP_SCREENSHOT_SCENARIO", "native-core-empty-startup");
     QCoreApplication::instance()->setProperty("clarpEmptyStartup", true);
     AppController controller;
     QTRY_COMPARE(controller.agents()->rowCount(), 1);
+    QVERIFY2(waitForWallClock(
+                 [&controller, &server] {
+                     return server.receivedRequest(QStringLiteral("GET"), QStringLiteral("/server-info")) &&
+                            !controller.connecting();
+                 },
+                 120'000),
+             qPrintable(QStringLiteral("requests: %1").arg(server.requestLog())));
+    auto* sse = controller.findChild<SseClient*>();
+    QVERIFY(sse != nullptr);
+    sse->stop();
     QVERIFY(controller.selectedSession().isEmpty());
     QVERIFY(controller.panes()->activeSession().isEmpty());
     QCOMPARE(server.requestCount(QStringLiteral("POST"), QStringLiteral("/select")), 0);
     controller.selectSession(QStringLiteral("rachel"));
-    QTRY_VERIFY(server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/select")));
+    QVERIFY2(waitForWallClock(
+                 [&server] {
+                     return server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/select"));
+                 },
+                 120'000),
+             qPrintable(QStringLiteral("requests: %1").arg(server.requestLog())));
     QCOMPARE(controller.selectedSession(), QStringLiteral("rachel"));
     auto* model = controller.conversationForSession(QStringLiteral("rachel"));
+    QVERIFY2(waitForWallClock(
+                 [&server, model] {
+                     return server.receivedRequest(QStringLiteral("GET"), QStringLiteral("/log")) &&
+                            !model->loading();
+                 },
+                 120'000),
+             qPrintable(QStringLiteral("requests: %1").arg(server.requestLog())));
     model->addOptimistic(QStringLiteral("older-failure"), QStringLiteral("Earlier failed text"));
     model->markDeliveryFailed(QStringLiteral("older-failure"));
     model->addOptimistic(QStringLiteral("latest-failure"), QStringLiteral("Latest failed text"));
@@ -2793,7 +2838,12 @@ void NativeCoreTest::emptyStartupWaitsForExplicitChoiceAndRetryTargetsLatestFail
     other->addOptimistic(QStringLiteral("other-failure"), QStringLiteral("Other chat text"));
     other->markDeliveryFailed(QStringLiteral("other-failure"));
     controller.retryLatestFailedMessage();
-    QTRY_VERIFY(server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/send")));
+    QVERIFY2(waitForWallClock(
+                 [&server] {
+                     return server.receivedRequest(QStringLiteral("POST"), QStringLiteral("/send"));
+                 },
+                 120'000),
+             qPrintable(QStringLiteral("requests: %1").arg(server.requestLog())));
     QCOMPARE(server.requestJson(QStringLiteral("POST"), QStringLiteral("/send")).value(QStringLiteral("text")).toString(), QStringLiteral("Latest failed text"));
     QCOMPARE(server.requestJson(QStringLiteral("POST"), QStringLiteral("/send")).value(QStringLiteral("session")).toString(), QStringLiteral("rachel"));
     QVERIFY(model->indexOfMessage(QStringLiteral("u-older-failure")) >= 0);

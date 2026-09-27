@@ -137,7 +137,14 @@ inline void startVoiceViewportSmokeCheck(QGuiApplication& application, QQuickWin
             QSaveFile output(qEnvironmentVariable("CLARP_VOICE_VIEWPORT_TRACE"));
             if (output.open(QIODevice::WriteOnly)) { output.write(QJsonDocument(QJsonObject{{"passed", state->passed}, {"observations", state->observations}}).toJson()); output.commit(); }
             window->setProperty("voiceViewportVerified", state->passed); timer->stop();
-            if (!state->passed) { qCritical().noquote() << "Voice event changed the reader viewport or leaked another session error:" << QJsonDocument(state->observations).toJson(QJsonDocument::Compact); application.exit(EXIT_FAILURE); }
+            if (!state->passed) { qCritical().noquote() << "Voice event changed the reader viewport or leaked another session error:" << QJsonDocument(state->observations).toJson(QJsonDocument::Compact); application.exit(EXIT_FAILURE); return; }
+            const QString screenshotPath = qEnvironmentVariable("CLARP_SCREENSHOT_PATH");
+            if (!screenshotPath.isEmpty() && !window->grabWindow().save(screenshotPath)) {
+                qCritical("Voice viewport screenshot could not be written");
+                application.exit(EXIT_FAILURE);
+                return;
+            }
+            application.quit();
             break;
         }
         }
