@@ -54,7 +54,7 @@ import sqlite3
 db = sqlite3.connect("/data/clarp/state.sqlite")
 rows = db.execute("""SELECT b.role,a.is_janitor FROM janitor_builtins b
     JOIN agents a ON a.agent_id=b.agent_id""").fetchall()
-assert set(rows) == {("message-delegator",1),("tool-explainer",1),("audio-bookkeeper",1),("heartbeat-decider",1),("quota-monitor",1)}, rows
+assert set(rows) == {("message-delegator",1),("tool-explainer",1),("audio-bookkeeper",1),("heartbeat-decider",1),("quota-monitor",1),("label-auditor",1)}, rows
 assert db.execute("SELECT count(*) FROM agents WHERE is_janitor=0").fetchone()[0] == 0
 assert db.execute("SELECT count(*) FROM runtimes").fetchone()[0] == 0
 '
@@ -69,10 +69,21 @@ docker exec "$NAME" python3 -c 'import faster_whisper'
 docker exec "$NAME" sh -lc 'claude --version && codex --version'
 docker exec "$NAME" clarp-admin doctor >/dev/null
 docker exec "$NAME" sh -lc '
-  command -v clarp-tui clarp-agent-tasks clarp-agent-artifacts clarp-media-publish \
+  command -v clarp-tui clarp-goal clarp-agent-tasks clarp-agent-artifacts clarp-media-publish \
     clarp-agent-bg clarp-github-workflow-artifact clarp-message-watch clarp-adopt >/dev/null
   clarp-agent-tasks show mike >/dev/null
   python3 -c "from lib import service_manager; ok,error=service_manager.launch_detached([\"/bin/true\"],unit=\"clarp-smoke\"); assert ok, error"
+'
+# Exercise the installed goal alias and managed skill in this disposable node.
+docker exec "$NAME" python3 -c '
+import json,subprocess
+from lib import agents
+agents.create_agent(persona="Goal smoke",voice_id="",cwd="/data/workspace",session="goal-smoke")
+def call(*args): return json.loads(subprocess.check_output(["clarp-goal",*args],text=True))
+p=call("create","goal-smoke","smoke","Verify installed helper","[]",json.dumps({"criteria":["CLI and working context function"],"limits":"No execution or publication","enroll":False}))
+p=call("checkpoint",p["plan_id"],str(p["revision"]),json.dumps({"progress":"Installed goal helper works","next_work":"Complete verification","evidence":{"criterion-1":"This disposable CLI probe passed"},"documents":[{"name":"notes.md","format":"markdown","content":"# Verified installed helper","document_revision":0,"reason":"Smoke evidence"}]}))
+assert call("read",p["plan_id"],"notes.md")["revision"]==1
+assert call("complete",p["plan_id"],str(p["revision"]))["completion_verified"] is True
 '
 onboard="$(docker exec "$NAME" clarp-admin onboard --url "http://127.0.0.1:${PORT}")"
 [[ "$onboard" == clarp://pair* ]]

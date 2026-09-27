@@ -653,10 +653,9 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
             proposed = data.get("steps")
             if (
                 not isinstance(proposed, list)
-                or not proposed
                 or len(proposed) > task_plans.MAX_PLAN_ITEMS
             ):
-                raise ValueError("replan requires meaningful steps")
+                raise ValueError("replan requires a list of at most 500 steps")
             old = [
                 dict(r)
                 for r in con.execute(

@@ -488,6 +488,9 @@ def test_enrolled_goal_is_not_also_woken_by_generic_heartbeat(tmp_path):
     agent = agents.get_by_session(p["session"])
     agent["heartbeat_enabled"] = True
     assert not heartbeat.heartbeat_enabled(agent)
+    from lib import janitor_autonomy
+
+    assert janitor_autonomy.snapshot(agent) is None
     assert all(
         a["agent_id"] != p["agent_id"] for a in heartbeat.restart_heartbeat_agents()
     )
@@ -558,4 +561,34 @@ def test_replan_cannot_relabel_completed_work_as_a_different_accomplishment(tmp_
     assert (
         unchanged["items"][0]["title"] == "Initial method"
         and unchanged["completed_count"] == 1
+    )
+
+
+def test_all_methods_can_be_retired_but_original_evidence_is_still_required(tmp_path):
+    p = make_goal(tmp_path)
+    p = act(
+        p,
+        "replan",
+        {
+            "reason": "Probe proves the existing system already implements the outcome",
+            "steps": [],
+        },
+    )
+    assert p["completed_count"] == 0 and p["counts"]["removed"] == 1
+    with pytest.raises(ValueError, match="evidence"):
+        task_plans.finish(p["plan_id"], revision=p["revision"])
+    p = act(
+        p,
+        "checkpoint",
+        {
+            "progress": "Original criteria verified against existing implementation",
+            "next_work": "Close the verified outcome",
+            "evidence": {
+                "criterion-1": "Behavior probe passed",
+                "criterion-2": "Independent regression check passed",
+            },
+        },
+    )
+    assert (
+        task_plans.finish(p["plan_id"], revision=p["revision"])["status"] == "completed"
     )

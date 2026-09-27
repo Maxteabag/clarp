@@ -105,6 +105,7 @@ RUN mkdir -p /data /tmp/clarp-cache /home/clarp \
     && ln -s /opt/clarp/bin/clarp-admin.py /usr/local/bin/clarp-admin \
     && ln -s /opt/clarp/bin/clarp-tui.py /usr/local/bin/clarp-tui \
     && ln -s /opt/clarp/scripts/agent_tasks.py /usr/local/bin/clarp-agent-tasks \
+    && ln -s /opt/clarp/scripts/agent_tasks.py /usr/local/bin/clarp-goal \
     && ln -s /opt/clarp/scripts/agent_artifacts.py /usr/local/bin/clarp-agent-artifacts \
     && ln -s /opt/clarp/scripts/clarp-media-publish.py /usr/local/bin/clarp-media-publish \
     && ln -s /opt/clarp/scripts/agent_bg.py /usr/local/bin/clarp-agent-bg \

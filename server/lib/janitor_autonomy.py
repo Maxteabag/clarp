@@ -30,8 +30,8 @@ def setup():
         _SCHEMA_READY_FOR=path
 
 def snapshot(agent):
-    from . import heartbeat
-    if heartbeat.globally_disabled(): return None
+    from . import heartbeat,task_plans
+    if heartbeat.globally_disabled() or task_plans.recovery_owns_agent(agent["agent_id"]): return None
     state=agents.latest_state(agent['agent_id']) or {}
     if agent.get('archived_at') or agent.get('deleted_at') or agent.get('is_janitor') or not agent.get('heartbeat_enabled'):return None
     if agents.is_busy(agent['agent_id']) or backends.active_handles(agent['backend'],agent['agent_id']):return None
