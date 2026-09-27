@@ -1222,6 +1222,8 @@ def serve(handler):
             conversation.handoff_capable = query.get("handoff") == ["hands_free"]
             conversation.handoff_id = returning_handoff
             oracle_handoffs.bind(handler.ctx)
+            # Sends oracle_v2.session to an opted-in phone atomically with making the
+            # call available to connect() (docs/oracle-handoff.md, "Call identity").
             oracle_handoffs.register(conversation)
         if getattr(cfg, "oracle_diagnostics", False):
             from .oracle_diagnostics import OracleJournal

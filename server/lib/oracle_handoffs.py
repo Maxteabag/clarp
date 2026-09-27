@@ -137,6 +137,14 @@ def _active(data: dict) -> dict | None:
                  if r["direction"] == "oracle_to_agent" and r["state"] == "active"), None)
 
 
+def call_identity(call) -> dict:
+    """The oracle_v2.session frame: this socket's Oracle call, as offers name it."""
+    return {"type": "oracle_v2.session", "host_id": host_id(), "principal": call.principal,
+            "voice_session_id": call.voice_session_id, "provider_session": call.provider_session,
+            "thread_id": call.thread_id, "handoff_id": getattr(call, "handoff_id", None) or None,
+            "server_now": now_ms()}
+
+
 # ---- projection ----------------------------------------------------------
 
 def _oracle_call(record: dict) -> str:
@@ -276,6 +284,10 @@ def register(call) -> None:
     """A new Oracle v2 call for ``call.principal`` opened (docs: new-call rules)."""
     principal = call.principal
     with _lock:
+        if getattr(call, "handoff_capable", False):
+            # Atomic with availability: connect() takes the same lock and can only
+            # find this call after the phone already holds its identity frame.
+            call.downstream(call_identity(call))
         _LIVE[principal] = call
         data = _load(principal)
         for record in list(data["records"]):
