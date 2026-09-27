@@ -300,6 +300,7 @@ PY
 }
 backup_external "$BIN/clarp-admin"
 backup_external "$BIN/clarp-agent-tasks"
+backup_external "$BIN/clarp-goal"
 backup_external "$BIN/clarp-agent-artifacts"
 backup_external "$BIN/clarp-podcast-history"
 backup_external "$BIN/clarp-media-publish"
@@ -432,6 +433,7 @@ PY
 write_python_wrapper clarp-admin bin/clarp-admin.py
 write_python_wrapper clarp-tui bin/clarp-tui.py
 write_python_wrapper clarp-agent-tasks scripts/agent_tasks.py
+write_python_wrapper clarp-goal scripts/agent_tasks.py
 write_python_wrapper clarp-agent-artifacts scripts/agent_artifacts.py
 write_python_wrapper clarp-podcast-history scripts/podcast_history.py
 write_python_wrapper clarp-media-publish scripts/clarp-media-publish.py
@@ -442,7 +444,7 @@ write_python_wrapper clarp-message-watch skills/clarp-message-watch/scripts/watc
 write_python_wrapper clarp-adopt skills/clarp-adopt/scripts/adopt_session.py
 write_python_wrapper clarp-runtime-service runtime.py
 mkdir -p "$SHARE/bin"
-for _helper in clarp-admin clarp-tui clarp-agent-tasks clarp-agent-artifacts \
+for _helper in clarp-admin clarp-tui clarp-goal clarp-agent-tasks clarp-agent-artifacts \
         clarp-podcast-history \
         clarp-media-publish clarp-agent-bg clarp-sub-agent clarp-github-workflow-artifact \
         clarp-message-watch clarp-adopt clarp-runtime-service; do

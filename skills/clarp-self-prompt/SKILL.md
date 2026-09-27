@@ -14,3 +14,9 @@ clarp-admin prompt --to SESSION --text "Check again" --delay 30m
 
 Target the intended session explicitly. Scheduled prompts are automation
 messages, not messages authored by the user.
+
+For a durable outcome commitment, prefer `clarp-goal checkpoint` with an
+agent-authored timer/event continuation attached to the same goal. It atomically
+retains progress, evidence and next work, fences stale wakes and exposes delivery
+and recovery state. Generic scheduled prompts remain useful for reminders and
+older Hosts; do not create a competing recurring loop for an enrolled goal.

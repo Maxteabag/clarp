@@ -188,11 +188,17 @@ def restart_heartbeat_agents() -> list[dict]:
         agent for agent in agents_db.list_agents()
         if not agent.get("archived_at")
         and agents_db.current_runtime_id(agent["agent_id"]) is not None
+        and not _goal_recovery_owns(agent["agent_id"])
     ]
 
 
+def _goal_recovery_owns(agent_id: str) -> bool:
+    from . import task_plans
+    return task_plans.recovery_owns_agent(agent_id)
+
+
 def heartbeat_enabled(agent: dict) -> bool:
-    return not globally_disabled() and bool(agent.get("heartbeat_enabled"))
+    return not globally_disabled() and bool(agent.get("heartbeat_enabled")) and not _goal_recovery_owns(agent["agent_id"])
 
 
 def get_settings() -> HeartbeatSettings:
