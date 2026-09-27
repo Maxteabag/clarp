@@ -748,6 +748,7 @@ class NativeCoreTest final : public QObject {
     void clipSourcePrecedenceMatchesContract();
     void wavEncodingProducesAValidPcmHeader();
     void paneTreeSplitsClosesNavigatesAndZooms();
+    void paneWorkspacePersistenceIsAsyncAndConflictSafe();
     void apiClientRejectsCrossOriginAuthenticatedMedia();
     void apiClientDropsRepliesFromPreviousEndpointGeneration();
     void paneDraftAndFocusSurviveLayoutStateChanges();
@@ -2985,6 +2986,91 @@ void NativeCoreTest::paneTreeSplitsClosesNavigatesAndZooms() {
     QCOMPARE(irregular.activePaneId(), bottomId);
     irregular.navigate(QStringLiteral("left"));
     QCOMPARE(irregular.activePaneId(), bottomId);
+}
+
+void NativeCoreTest::paneWorkspacePersistenceIsAsyncAndConflictSafe() {
+    static auto* settingsRoot = new QTemporaryDir;
+    QVERIFY(settingsRoot->isValid());
+    const QString previousOrganization = QCoreApplication::organizationName();
+    const QString previousApplication = QCoreApplication::applicationName();
+    const auto restore = qScopeGuard([&] {
+        QCoreApplication::setOrganizationName(previousOrganization);
+        QCoreApplication::setApplicationName(previousApplication);
+    });
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsRoot->path());
+    QCoreApplication::setOrganizationName(QStringLiteral("MaxTeaBag"));
+    QCoreApplication::setApplicationName(QStringLiteral("Clarp"));
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+
+    const auto savedSession = [](const QByteArray& encoded) {
+        const QVariantMap document = QJsonDocument::fromJson(encoded).object().toVariantMap();
+        const QString active = document.value(QStringLiteral("active")).toString();
+        return document.value(QStringLiteral("states")).toMap()
+            .value(active).toMap()
+            .value(QStringLiteral("root")).toMap()
+            .value(QStringLiteral("session")).toString();
+    };
+    const auto collectionSession = [&] {
+        settings.sync();
+        return savedSession(settings.value(QStringLiteral("workspace/collectionV1")).toByteArray());
+    };
+
+    {
+        PaneTreeModel first;
+        first.setActiveSession(QStringLiteral("scoped-alpha"));
+        first.createWorkspace(QStringLiteral("Scoped review"));
+        const QString review = first.activeWorkspace();
+        first.setActiveSession(QStringLiteral("scoped-beta"));
+        Q_UNUSED(review);
+    }
+    settings.sync();
+    {
+        PaneTreeModel second;
+        QCOMPARE(second.workspaces().size(), 2);
+        QCOMPARE(collectionSession(), QStringLiteral("scoped-beta"));
+    }
+    settings.clear();
+    settings.sync();
+
+    PaneTreeModel panes;
+    panes.setActiveSession(QStringLiteral("alpha"));
+    QTRY_COMPARE_WITH_TIMEOUT(collectionSession(), QStringLiteral("alpha"), 3'000);
+    QVERIFY(panes.workspaceSaveWarning().isEmpty());
+
+    const QByteArray external = QJsonDocument::fromVariant(QVariantMap{
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("active"), QStringLiteral("workspace-1")},
+        {QStringLiteral("names"), QVariantMap{{QStringLiteral("workspace-1"), QStringLiteral("Other window")}}},
+        {QStringLiteral("states"), QVariantMap{{QStringLiteral("workspace-1"), QVariantMap{
+            {QStringLiteral("activePaneId"), QStringLiteral("pane-1")},
+            {QStringLiteral("root"), QVariantMap{{QStringLiteral("id"), QStringLiteral("pane-1")},
+                                                {QStringLiteral("kind"), QStringLiteral("leaf")},
+                                                {QStringLiteral("session"), QStringLiteral("external")}}}}}}}})
+        .toJson(QJsonDocument::Compact);
+    settings.setValue(QStringLiteral("workspace/collectionV1"), external);
+    settings.sync();
+
+    QSignalSpy warnings(&panes, &PaneTreeModel::workspaceSaveWarningChanged);
+    panes.setActiveSession(QStringLiteral("beta"));
+    QTRY_VERIFY_WITH_TIMEOUT(panes.workspaceSaveWarning().contains(QStringLiteral("recovery")), 3'000);
+    QVERIFY(warnings.count() > 0);
+    QCOMPARE(collectionSession(), QStringLiteral("external"));
+    QString recoveryKey;
+    for (const QString& key : settings.allKeys()) {
+        if (key.startsWith(QStringLiteral("workspace/recovery/"))) {
+            recoveryKey = key;
+            break;
+        }
+    }
+    QVERIFY(!recoveryKey.isEmpty());
+    QCOMPARE(savedSession(settings.value(recoveryKey).toByteArray()), QStringLiteral("beta"));
+
+    panes.saveWorkspaceLayoutInstead();
+    QTRY_COMPARE_WITH_TIMEOUT(collectionSession(), QStringLiteral("beta"), 3'000);
+    QTRY_VERIFY_WITH_TIMEOUT(panes.workspaceSaveWarning().isEmpty(), 3'000);
 }
 
 void NativeCoreTest::apiClientRejectsCrossOriginAuthenticatedMedia() {
