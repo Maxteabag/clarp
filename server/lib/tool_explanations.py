@@ -551,10 +551,12 @@ class ToolExplanations:
     def _select_templates(self, units, level, identity):
         """Jev's pick, for parts of unfamiliar programs, among known explanations.
 
-        The candidates are the read/list/search templates and the model's
-        parameterised explanations of other shapes of the same program. A
-        confident pick answers the part and is learned. Returns the reason
-        each part that remains falls through, by unit, for provenance.
+        Each part is offered only what could render from its own arguments
+        (see `templates.jev_offer`) plus the model's parameterised explanations
+        of other shapes of the same program. A part with nothing to offer is
+        not asked. A confident pick answers the part and is learned. Returns
+        the reason each part that remains falls through, by unit, for
+        provenance.
         """
         reasons = {id(unit): unit.route.get("reason", "") for unit in units}
         if not level or self._sources(identity) != SOURCES_ALL:
@@ -564,48 +566,53 @@ class ToolExplanations:
             return reasons
         if not judgments.site_enabled("explanations"):
             return {**reasons, **{id(unit): "jev_disabled" for unit in eligible.values()}}
-        criteria = {template_id: template["description"] for template_id, template in templates.TEMPLATES.items()
-                    if template["action"] in templates.LEARNABLE_ACTIONS}
-        offered = {}
+        entries, offered = {}, {}
         for key, unit in eligible.items():
+            offer = templates.jev_offer(unit.route, level)
+            if isinstance(offer, str):
+                reasons[id(unit)] = offer
+                continue
+            template_ids, candidates = offer
+            criteria = {template_id: templates.TEMPLATES[template_id]["description"] for template_id in template_ids}
             available = set(shapes.slot_values(unit.part.slots))
             offered[key] = {}
             for candidate in learning.candidates(unit.part.program, level, PROMPT_VERSION, templates.VERSION):
                 if candidate["signature"] != unit.part.signature and set(candidate["slot_names"]) <= available:
-                    choice = f"learned_{len(criteria)}"
+                    choice = f"learned_{len(offered[key]) + 1}"
                     criteria[choice] = f"A `{unit.part.program}` call that does this: {candidate['template_text']}"
                     offered[key][choice] = candidate
-        selected = judgment_sites.select_explanation_templates({key: {
-            "activity": {k: v for k, v in unit.part.activity.items() if k != "scripts"},
-            "candidates": unit.route.get("candidates", [])} for key, unit in eligible.items()}, criteria)
-        for key, unit in eligible.items():
+            entries[key] = {"activity": {k: v for k, v in unit.part.activity.items() if k != "scripts"},
+                            "criteria": criteria, "candidates": [value for _, value in candidates],
+                            "takes_argument": [t for t in template_ids if templates.primary(t)] if candidates else [],
+                            "indices": [index for index, _ in candidates]}
+        selected = judgment_sites.select_explanation_templates(
+            {key: {k: v for k, v in entry.items() if k != "indices"} for key, entry in entries.items()}) if entries else {}
+        for key, entry in entries.items():
+            unit = eligible[key]
             answer = (selected or {}).get(key) or {"reason": "jev_unavailable"}
             choice = answer.get("template_id")
             if not choice:
                 reasons[id(unit)] = answer["reason"]
                 continue
             if choice.startswith("learned_"):
-                candidate = offered[key].get(choice)
-                text = shapes.render(candidate["template_text"], unit.part.slots) if candidate else None
+                candidate = offered[key][choice]
+                text = shapes.render(candidate["template_text"], unit.part.slots)
                 text = templates.hedge(text) if text else None
                 if text is None:
                     reasons[id(unit)] = "jev_invalid_parameters"
                     continue
                 unit.picked(text, answer["confidence"], level, template_text=templates.hedge(candidate["template_text"]))
                 continue
-            primary = _primary(choice)
-            route = unit.route
-            if route.get("candidates") and not answer.get("argument") or answer.get("argument") and primary is None:
-                reasons[id(unit)] = "jev_invalid_parameters"
-                continue
+            primary = templates.primary(choice)
+            argument = answer.get("argument")
+            index = entry["indices"][entry["candidates"].index(argument)] if argument is not None else None
             activity = unit.part.template_activity()
-            parameters = templates.validate(choice, {primary: answer["argument"]} if answer.get("argument") else {}, activity)
+            parameters = templates.validate(choice, {primary: argument} if argument is not None else {}, activity)
             rendered = templates.render(choice, parameters, level) if parameters is not None else None
             text = templates.hedge(rendered) if rendered else None
             if text is None:
                 reasons[id(unit)] = "jev_invalid_parameters"
                 continue
-            index = route["candidates"].index(answer["argument"]) if answer.get("argument") else None
             unit.picked(text, answer["confidence"], level, template_id=choice, argument_index=index, primary=primary)
         return reasons
 
@@ -816,10 +823,6 @@ def _answers(value, requests):
     return result
 
 
-def _primary(template_id):
-    return next((name for name, kind in templates.TEMPLATES[template_id]["params"].items() if kind in {"directory", "path"}), None)
-
-
 def _allowed(row, sources):
     if row["producer"] == "jev":
         return sources == SOURCES_ALL
@@ -848,7 +851,7 @@ def _learned(part, route, rows, level, sources):
     candidates = route.get("candidates", [])
     index = row["argument_index"]
     if index is not None:
-        parameters = {_primary(template_id): candidates[index]} if 0 <= index < len(candidates) and _primary(template_id) else None
+        parameters = {templates.primary(template_id): candidates[index]} if 0 <= index < len(candidates) and templates.primary(template_id) else None
     else:
         parameters = templates.learned_parameters(template_id, candidates)
     activity = part.template_activity()

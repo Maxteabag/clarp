@@ -23,6 +23,8 @@ from pathlib import Path
 
 HARD_CAP = 24
 BATCH = 8
+# Audience the offers are built for; what can render depends on it.
+LEVEL = 2
 
 # expected: a read/list/search template Jev may pick, or "unknown" when the
 # synthetic program's effect is opaque or could change something.
@@ -71,7 +73,6 @@ def main():
         return 2
     settings_store.set_bool(judgments.KEY_ENABLED, True)
     settings_store.set_bool("judgments.explanations", True)
-    criteria = {tid: t["description"] for tid, t in templates.TEMPLATES.items() if t["action"] in templates.LEARNABLE_ACTIONS}
 
     rows, sent = [], 0
     for repetition in range(args.repetitions):
@@ -83,11 +84,19 @@ def main():
             for i, (command, _) in enumerate(chunk):
                 activity = normalize_activity({"name": "Bash", "command": command})
                 route = templates.classify(activity)
-                entries[str(i + 1)] = {"activity": activity, "candidates": route.get("candidates", []), "route": route}
-            eligible = {k: v for k, v in entries.items() if v["route"].get("reason") in templates.JEV_REASONS}
+                offer = templates.jev_offer(route, LEVEL) if route.get("reason") in templates.JEV_REASONS else None
+                if isinstance(offer, str):
+                    route = {**route, "reason": offer}
+                    offer = None
+                entries[str(i + 1)] = {"activity": activity, "route": route, "offer": offer}
+            eligible = {k: v for k, v in entries.items() if v["offer"]}
             started = time.perf_counter()
-            answer = judgment_sites.select_explanation_templates(
-                {k: {"activity": v["activity"], "candidates": v["candidates"]} for k, v in eligible.items()}, criteria)
+            answer = judgment_sites.select_explanation_templates({k: {
+                "activity": v["activity"],
+                "criteria": {t: templates.TEMPLATES[t]["description"] for t in v["offer"][0]},
+                "candidates": [value for _, value in v["offer"][1]],
+                "takes_argument": [t for t in v["offer"][0] if templates.primary(t)] if v["offer"][1] else []}
+                for k, v in eligible.items()}) if eligible else {}
             sent += 1
             latency = (time.perf_counter() - started) * 1000
             for key, (command, expected) in zip(entries, chunk):

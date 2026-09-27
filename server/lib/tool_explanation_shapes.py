@@ -442,6 +442,10 @@ def split(activity):
     command = templates._field(activity, "command", "cmd") or (activity.get("summary", "") if tool_kind == "command" else "")
     if (name in {"bash", "shell", "exec_command", "local_shell"} or tool_kind == "command") and command:
         return _shell_parts(command)
+    label = templates.shell_label(activity)
+    if label:
+        # A clipped label is not the whole command; it is only ever explained as itself.
+        return [_exact(activity, label, "truncated")] if len(label) >= templates.LABEL_CLIP else _shell_parts(label)
     return [_tool_part(activity)]
 
 

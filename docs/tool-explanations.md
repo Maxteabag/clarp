@@ -81,7 +81,26 @@ opaque part. Each part goes through the tiers, cheapest first:
    `explanations` judgment site is on: it picks one of the read/list/search
    templates or one of the model's parameterised explanations of other shapes
    of the same program. The answer starts with "Likely". A pick with at least
-   0.90 confidence is learned.
+   0.90 confidence is learned. Each part is offered only what could render
+   from its own arguments (`jev_offer` in `tool_explanation_templates`):
+   a template that acts on a file or folder needs a usable argument, and
+   without one only templates true of the current directory, or needing no
+   value, are offered; a search is never offered because the call cannot
+   supply its pattern. Candidate arguments exclude shell punctuation (`]`),
+   `$` expressions, flags, bare numbers and text with spaces. Learned options
+   are offered only to parts of their own program. A part with nothing to
+   offer is not sent to Jev, and its ledger reason says why:
+   `jev_no_target` (a tool with no argument, such as a `done`/`idle` status
+   row or a delegation), `jev_unsafe_arguments` (arguments, but none usable),
+   `shell_builtin` (`export`, `[`, `echo`, `cd`, …). A Codex row whose tool
+   name is a `/usr/bin/bash -lc "…"` display label is explained as that shell
+   command; clients clip that label at 80 characters, and a clipped one is
+   `truncated`, explained only by the model and exactly. A grouped exploration
+   row with a single `Read: path` is the `read_file` template; other
+   exploration rows go to the model as `exploration` or `multiple_targets`.
+   Jev's own abstentions are `jev_unknown`, `jev_low_confidence`,
+   `jev_no_argument` (it picked a file template but no argument), and
+   `jev_invalid_parameters` (the pick failed validation or rendering).
 4. **Model.** The language model gets each unanswered part with its `slots`
    and returns `text` and a `template` with placeholders. The template is
    learned for the shape only if it renders back to exactly `text`, uses only
