@@ -25,6 +25,7 @@
 #include <QKeyEvent>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
+#include <QSGRendererInterface>
 #include "app/StartupTrace.h"
 #include <QFontDatabase>
 #include <thread>
@@ -56,6 +57,15 @@ int main(int argc, char* argv[]) {
     QApplication::setOrganizationDomain(QStringLiteral("maxteabag.com"));
     QApplication::setApplicationVersion(QStringLiteral(CLARP_DESKTOP_VERSION));
     QQuickStyle::setStyle(QStringLiteral("Basic"));
+    // Qt Quick's software renderer paints the first frame ~60 ms sooner (no
+    // EGL/GL context setup) and keeps each instance ~60 MB smaller (no GPU
+    // driver mappings). Several instances run side by side, so that matters
+    // more than GPU compositing for a mostly static text UI. CLARP_RENDERER=gl
+    // or an explicit QT_QUICK_BACKEND restores the GPU path.
+    if (!qEnvironmentVariableIsSet("QT_QUICK_BACKEND")
+        && qEnvironmentVariable("CLARP_RENDERER") != QStringLiteral("gl")) {
+        QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
+    }
 
     QApplication application(argc, argv);
     clarp::StartupTrace::mark("application");
