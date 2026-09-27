@@ -700,6 +700,9 @@ CREATE INDEX idx_personas_live_name ON personas(name) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX idx_personas_unique_live_name ON personas(name) WHERE deleted_at IS NULL;
 
 CREATE TABLE task_plans (
+    revision INTEGER NOT NULL DEFAULT 0,
+    goal_json TEXT NOT NULL DEFAULT '{}',
+    recovery_enabled INTEGER NOT NULL DEFAULT 0,
     plan_id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL REFERENCES agents(agent_id),
     session TEXT NOT NULL,
@@ -710,9 +713,10 @@ CREATE TABLE task_plans (
     completed_at INTEGER
 );
 CREATE INDEX idx_task_plans_agent_updated ON task_plans(agent_id, updated_at DESC);
-CREATE UNIQUE INDEX idx_task_plans_one_active ON task_plans(agent_id) WHERE status = 'active';
+
 
 CREATE TABLE task_items (
+    required INTEGER NOT NULL DEFAULT 1,
     item_id TEXT PRIMARY KEY,
     plan_id TEXT NOT NULL REFERENCES task_plans(plan_id) ON DELETE CASCADE,
     parent_id TEXT REFERENCES task_items(item_id) ON DELETE CASCADE,

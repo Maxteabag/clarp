@@ -439,6 +439,7 @@ class Handler(BaseHTTPRequestHandler):
         "/identity/prompt-history": "_handle_prompt_history",
         "/background-jobs": "_handle_background_jobs",
         "/task-plan": "_handle_task_plan",
+        "/task-plans": "_handle_task_plans",
         "/artifacts": "_handle_artifacts_list",
         "/attention": "_handle_attention",
         "/attention/inbox": "_handle_attention_inbox",
@@ -539,6 +540,7 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-fallbacks": "_handle_agent_fallbacks_post",
         "/agent-mcp": "_handle_agent_mcp",
         "/agent-heartbeat": "_handle_agent_heartbeat",
+        "/task-plan/action": "_handle_task_plan_action",
         "/agent-goal": "_handle_agent_goal_start",
         "/agent-goal/pause": "_handle_agent_goal_pause",
         "/agent-goal/resume": "_handle_agent_goal_resume",
@@ -2466,6 +2468,29 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, RuntimeError) as exc:
             return self._json_error(400, str(exc))
         self._json_ok(payload)
+
+    def _handle_task_plans(self):
+        from lib import task_plans
+        session = (self._query().get("session", [""])[0] or "").strip()
+        if not session:
+            return self._json_error(400, "session required")
+        self._json_ok({"plans": task_plans.list_for_session(session)})
+
+    def _handle_task_plan_action(self):
+        from lib import task_goal_state, task_plans
+        body = self._read_json()
+        if body is None:
+            return
+        try:
+            plan_id = str(body.get("plan_id") or "")
+            revision = body.get("revision")
+            if not isinstance(revision, int):
+                raise ValueError("revision required")
+            result = task_goal_state.mutate(plan_id, revision=revision,
+                action=str(body.get("action") or ""), data=body.get("data") or {})
+            self._json_ok({"plan": result})
+        except (ValueError, TypeError) as exc:
+            self._json_error(409, str(exc))
 
     def _handle_task_plan(self):
         from lib import task_plans
@@ -5525,7 +5550,7 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         Worker("autonomy-janitors", start_autonomy_janitors),
         Worker("dreaming", lambda: started(DreamingScheduler(send_dream=adapters.dream))),
         Worker("agent-scheduler",
-               lambda: started(AgentScheduleRunner(dispatch_turn=adapters.scheduled_job))),
+               lambda: started(AgentScheduleRunner(dispatch_turn=adapters.scheduled_job, dispatch_goal=adapters.goal_continuation))),
         Worker("janitor-runner", start_janitor_runner),
         # Listeners that accept outside requests on their own thread start
         # only after restart recovery has repaired state.

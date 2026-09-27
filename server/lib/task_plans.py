@@ -1,14 +1,15 @@
 """Durable two-level agent work plans and server-owned timing."""
 from __future__ import annotations
 
+import json
 import secrets
 import hashlib
 from typing import Any
 
 from . import agents, db
 
-ITEM_STATUSES = {"pending", "in_progress", "completed", "blocked", "skipped"}
-TERMINAL_ITEM_STATUSES = {"completed", "skipped"}
+ITEM_STATUSES = {"pending", "in_progress", "completed", "blocked", "skipped", "deferred", "removed"}
+TERMINAL_ITEM_STATUSES = {"completed", "skipped", "deferred", "removed"}
 MAX_PLAN_ITEMS = 500
 
 
@@ -24,7 +25,7 @@ def item_key(plan_id: str, stable_id: str) -> str:
 
 
 def create(*, session: str, title: str, items: list[dict[str, Any]],
-           plan_id: str = "") -> dict:
+           plan_id: str = "", goal: dict | None = None) -> dict:
     agent = agents.get_by_session(session)
     if not agent:
         raise ValueError("agent session not found")
@@ -42,14 +43,6 @@ def create(*, session: str, title: str, items: list[dict[str, Any]],
     con = db.conn()
     con.execute("BEGIN IMMEDIATE")
     try:
-        old_plans = con.execute(
-            "SELECT plan_id FROM task_plans WHERE agent_id=? AND status='active'",
-            (agent["agent_id"],)).fetchall()
-        for old in old_plans:
-            _close_running_items(con, str(old["plan_id"]), "cancelled", now)
-        con.execute(
-            "UPDATE task_plans SET status='cancelled', completed_at=?, updated_at=? "
-            "WHERE agent_id=? AND status='active'", (now, now, agent["agent_id"]))
         con.execute(
             "INSERT INTO task_plans(plan_id,agent_id,session,title,status,created_at,updated_at) "
             "VALUES(?,?,?,?, 'active',?,?)",
@@ -69,8 +62,9 @@ def create(*, session: str, title: str, items: list[dict[str, Any]],
                 _insert_item(con, plan_id, child_id, item_id, child_position, child, now)
             position += 1
         from . import artifacts
-        for old in old_plans:
-            artifacts.sync_plan(str(old["plan_id"]))
+        if goal is not None:
+            from . import task_goal_state
+            task_goal_state.initialize(con, plan_id, agent, title, goal, now)
         artifacts.ensure_plan(plan_id=plan_id, session=session, title=title)
         con.execute("COMMIT")
     except Exception:
@@ -85,15 +79,18 @@ def _insert_item(con, plan_id: str, item_id: str, parent_id: str | None,
     if not title:
         raise ValueError("task title required")
     con.execute(
-        "INSERT INTO task_items(item_id,plan_id,parent_id,position,title,detail,status,created_at) "
-        "VALUES(?,?,?,?,?,?, 'pending',?)",
+        "INSERT INTO task_items(item_id,plan_id,parent_id,position,title,detail,status,created_at,required) "
+        "VALUES(?,?,?,?,?,?, 'pending',?,?)",
         (item_id, plan_id, parent_id, position, title[:500],
-         str(raw.get("detail") or "")[:2000], now))
+         str(raw.get("detail") or "")[:2000], now, int(raw.get("required", True))))
 
 
-def update_item(item_id: str, status: str, detail: str | None = None) -> dict:
+def update_item(item_id: str, status: str, detail: str | None = None, *,
+                revision: int | None = None) -> dict:
     if status not in ITEM_STATUSES:
         raise ValueError("invalid task status")
+    if status in {"skipped", "deferred", "removed"} and not (detail or "").strip():
+        raise ValueError("omitted work requires a reason")
     con = db.conn(); now = db.now_ms()
     con.execute("BEGIN IMMEDIATE")
     try:
@@ -101,9 +98,12 @@ def update_item(item_id: str, status: str, detail: str | None = None) -> dict:
         if not row:
             raise ValueError("task item not found")
         plan = con.execute(
-            "SELECT status FROM task_plans WHERE plan_id=?", (row["plan_id"],)).fetchone()
+            "SELECT * FROM task_plans WHERE plan_id=?", (row["plan_id"],)).fetchone()
         if not plan or plan["status"] != "active":
             raise ValueError("task plan is no longer active")
+        from . import task_goal_state
+        task_goal_state.check_revision(plan, revision)
+        task_goal_state.record(con, plan, "step", {"item_id": item_id, "from": row["status"], "status": status, "reason": detail or ""}, now)
         active_ms = int(row["active_ms"] or 0)
         started_at = row["started_at"]
         if row["status"] == "in_progress" and started_at:
@@ -115,7 +115,7 @@ def update_item(item_id: str, status: str, detail: str | None = None) -> dict:
             "completed_at=?, active_ms=? WHERE item_id=?",
             (status, detail[:2000] if detail is not None else None, next_started,
              completed_at, active_ms, item_id))
-        con.execute("UPDATE task_plans SET updated_at=? WHERE plan_id=?",
+        con.execute("UPDATE task_plans SET updated_at=?,revision=revision+1 WHERE plan_id=?",
                     (now, row["plan_id"]))
         _auto_finish(str(row["plan_id"]), now)
         from . import artifacts
@@ -127,19 +127,25 @@ def update_item(item_id: str, status: str, detail: str | None = None) -> dict:
     return get(str(row["plan_id"])) or {}
 
 
-def finish(plan_id: str, status: str = "completed") -> dict:
+def finish(plan_id: str, status: str = "completed", *, reason: str = "",
+           revision: int | None = None) -> dict:
     if status not in {"completed", "blocked", "cancelled"}:
         raise ValueError("invalid plan status")
     now = db.now_ms(); con = db.conn()
     con.execute("BEGIN IMMEDIATE")
     try:
         plan = con.execute(
-            "SELECT status FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()
+            "SELECT * FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()
         if not plan or plan["status"] != "active":
             raise ValueError("task plan is no longer active")
+        from . import task_goal_state
+        task_goal_state.check_revision(plan, revision)
+        if status == "completed":
+            task_goal_state.require_completion(con, plan)
+        task_goal_state.record(con, plan, status, {"reason": reason}, now)
         _close_running_items(con, plan_id, status, now)
         changed = con.execute(
-            "UPDATE task_plans SET status=?,updated_at=?,completed_at=? "
+            "UPDATE task_plans SET status=?,updated_at=?,completed_at=?,revision=revision+1 "
             "WHERE plan_id=? AND status='active'", (status, now, now, plan_id))
         if changed.rowcount != 1:
             raise ValueError("task plan is no longer active")
@@ -153,7 +159,7 @@ def finish(plan_id: str, status: str = "completed") -> dict:
 
 
 def _close_running_items(con, plan_id: str, plan_status: str, now: int) -> None:
-    terminal = {"cancelled": "skipped", "blocked": "blocked", "completed": "completed"}[
+    terminal = {"cancelled": "pending", "blocked": "blocked", "completed": "completed"}[
         plan_status]
     rows = con.execute(
         "SELECT item_id,active_ms,started_at FROM task_items "
@@ -170,7 +176,10 @@ def _close_running_items(con, plan_id: str, plan_status: str, now: int) -> None:
 def _auto_finish(plan_id: str, now: int) -> None:
     rows = db.conn().execute(
         "SELECT status FROM task_items WHERE plan_id=?", (plan_id,)).fetchall()
-    if rows and all(row["status"] in TERMINAL_ITEM_STATUSES for row in rows):
+    plan = db.conn().execute("SELECT goal_json FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()
+    if json.loads(plan["goal_json"] or "{}"):
+        return  # Durable goals require explicit criteria evidence and completion.
+    if rows and all(row["status"] == "completed" for row in rows):
         db.conn().execute(
             "UPDATE task_plans SET status='completed',updated_at=?,completed_at=? "
             "WHERE plan_id=? AND status='active'", (now, now, plan_id))
@@ -221,6 +230,16 @@ def get(plan_id: str) -> dict | None:
             roots.append(item)
     for root in roots:
         root["subtasks"] = by_parent.get(root["item_id"], [])
-    completed = sum(1 for item in items if item["status"] in TERMINAL_ITEM_STATUSES)
-    return {**dict(plan), "items": roots, "completed_count": completed,
+    completed = sum(1 for item in items if item["status"] == "completed")
+    data = dict(plan)
+    data["goal"] = json.loads(data.pop("goal_json") or "{}") or None
+    data["legacy"] = data["goal"] is None
+    counts = {status: sum(i["status"] == status for i in items) for status in ITEM_STATUSES}
+    data["counts"] = counts
+    return {**data, "items": roots, "completed_count": completed,
             "total_count": len(items), "server_now": now}
+
+
+def list_for_session(session: str) -> list[dict]:
+    return [get(r["plan_id"]) for r in db.conn().execute(
+        "SELECT plan_id FROM task_plans WHERE session=? ORDER BY updated_at DESC LIMIT 100", (session,))]

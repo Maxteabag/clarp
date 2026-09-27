@@ -105,6 +105,11 @@ class DispatchAdapters:
             return False
         return dreaming.dispatch_isolated_dream(agent, text)
 
+    def goal_continuation(self, session: str, text: str, request_id: str):
+        return self._dispatch(session, text, origin=ORIGIN_AUTOMATION,
+                              trace_id=request_id, client_msg_id=request_id,
+                              queue_if_busy=True)
+
     def scheduled_job(self, session: str, text: str) -> None:
         """AgentScheduleRunner: a due schedule for an agent that still exists."""
         if not agents_db.get_by_session(session):

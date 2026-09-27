@@ -121,6 +121,9 @@ def _migrate(con: sqlite3.Connection) -> None:
             for statement in db_schema._EXPLANATION_LEARNING_SCHEMA.split(";"):
                 if statement.strip(): con.execute(statement)
 
+        if version < 97:
+            _migrate_to_v97(con)
+
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -677,3 +680,17 @@ def _migrate_to_v76(con: sqlite3.Connection) -> None:
             con.execute(statement)
             statement = ""
     assert not statement.strip()
+
+
+def _migrate_to_v97(con: sqlite3.Connection) -> None:
+    """Historical plans keep status and are never automatically enrolled."""
+    for table, definitions in {
+        "task_plans": ["revision INTEGER NOT NULL DEFAULT 0", "goal_json TEXT NOT NULL DEFAULT '{}'",
+                       "recovery_enabled INTEGER NOT NULL DEFAULT 0"],
+        "task_items": ["required INTEGER NOT NULL DEFAULT 1"],
+    }.items():
+        columns = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+        for definition in definitions:
+            if definition.split()[0] not in columns:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+    con.execute("DROP INDEX IF EXISTS idx_task_plans_one_active")
