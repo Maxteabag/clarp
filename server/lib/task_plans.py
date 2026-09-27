@@ -47,6 +47,8 @@ def create(
     title = title.strip()
     if not title:
         raise ValueError("plan title required")
+    if not isinstance(items, list) or any(not isinstance(raw, dict) for raw in items):
+        raise ValueError("plan items must be objects in a list")
     now = db.now_ms()
     stable_key = plan_id.strip() or "work"
     # Caller IDs are human-stable aliases, not global database keys. Preserve
@@ -66,13 +68,17 @@ def create(
         )
         position = 0
         item_count = 0
-        for raw in items[:100]:
+        for raw in items:
             item_count += 1
             if item_count > MAX_PLAN_ITEMS:
                 raise ValueError(f"task plan exceeds {MAX_PLAN_ITEMS} items")
             item_id = item_key(plan_id, str(raw.get("id") or _id("task")))
             _insert_item(con, plan_id, item_id, None, position, raw, now)
-            for child_position, child in enumerate((raw.get("subtasks") or [])[:100]):
+            for child_position, child in enumerate(raw.get("subtasks") or []):
+                if not isinstance(child, dict) or child.get("subtasks"):
+                    raise ValueError(
+                        "subtasks must be objects with at most two plan levels"
+                    )
                 item_count += 1
                 if item_count > MAX_PLAN_ITEMS:
                     raise ValueError(f"task plan exceeds {MAX_PLAN_ITEMS} items")
