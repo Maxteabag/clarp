@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 95
+_SCHEMA_VERSION = 96
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -54,7 +54,8 @@ CREATE TABLE agents (
     parent_agent_id TEXT,
     role TEXT NOT NULL DEFAULT 'agent',
     helper_state TEXT,
-    helper_completed_at INTEGER
+    helper_completed_at INTEGER,
+    custom_status_at INTEGER
 );
 CREATE INDEX idx_agents_parent ON agents(parent_agent_id) WHERE parent_agent_id IS NOT NULL;
 

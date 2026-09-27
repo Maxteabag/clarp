@@ -32,6 +32,9 @@ CASES = [
     (S.FAILED, E.PARENT_GONE, None),
     (S.ABANDONED, E.PARENT_GONE, None),
     (S.DONE, E.REPORTED, None),
+    (S.RUNNING, E.WENT_IDLE, (S.REPORTED, False)),
+    (S.REPORTED, E.WENT_IDLE, None),
+    (S.DONE, E.WENT_IDLE, None),
 ]
 
 

@@ -6,6 +6,8 @@ result. This module connects the two to what happens on the Host:
 * an agent-origin message from a helper to its parent means it reported,
   and one from the parent to a reported helper means it has more work;
 * the parent or the user marks a helper done, failed or running again;
+* the stale-work reconcile moves a helper whose session went idle to
+  ``reported`` (``note_idle``);
 * the maintenance worker archives helpers that have been done for longer
   than the grace period.
 
@@ -56,6 +58,18 @@ def note_agent_message(stream, *, sender_agent_id: str, target_agent_id: str) ->
     state = agents_db.apply_helper_event(helper, event)
     if state:
         log("helperState", f"{helper} -> {state} ({event})")
+        _announce(stream, helper)
+    return state
+
+
+def note_idle(stream, helper: str, *, idle_ms: int) -> str | None:
+    """Move a running helper whose session went quiet to ``reported``.
+
+    The stale-work reconcile calls this; the parent still decides whether
+    the work is done. Returns the new state, or None when it did not apply."""
+    state = agents_db.apply_helper_event(helper, helper_policy.HelperEvent.WENT_IDLE)
+    if state:
+        log("helperState", f"{helper} -> {state} (idle {idle_ms // 60000} min)")
         _announce(stream, helper)
     return state
 
