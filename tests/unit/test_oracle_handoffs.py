@@ -691,3 +691,22 @@ def test_the_active_parent_survives_many_failed_returns_in_storage(host):
         _ack(back, "preparing"); _ack(back, "rolled_back")
     assert handoffs.snapshot(PHONE)["active"]["handoff_id"] == parent["handoff_id"]
     assert _ack(parent, "abandon", "local_stop")["state"] == "ended"
+
+
+def test_the_socket_identity_frame_names_the_call_an_offer_names(host):
+    stream, open_call = host
+    call = open_call("vs-identity")
+    identity = handoffs.call_identity(call.conv)
+    assert identity["type"] == "oracle_v2.session"
+    assert (identity["principal"], identity["voice_session_id"]) == (PHONE, "vs-identity")
+    assert identity["host_id"] == handoffs.host_id() and identity["handoff_id"] is None
+    offer = _offer()
+    assert offer["oracle"]["voice_session_id"] == identity["voice_session_id"]
+    assert offer["oracle"]["provider_session"] == identity["provider_session"]
+    assert offer["host_id"] == identity["host_id"]
+
+
+def test_a_return_leg_identity_carries_its_handoff_id(host):
+    stream, open_call = host
+    call = open_call("vs-return", handoff_id="hof_" + "a" * 32)
+    assert handoffs.call_identity(call.conv)["handoff_id"] == "hof_" + "a" * 32

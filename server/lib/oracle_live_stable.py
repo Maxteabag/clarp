@@ -1223,6 +1223,10 @@ def serve(handler):
             conversation.handoff_id = returning_handoff
             oracle_handoffs.bind(handler.ctx)
             oracle_handoffs.register(conversation)
+            if conversation.handoff_capable:
+                # The phone's independent record of which call this socket is, so it can
+                # fence a handoff offer against it (docs/oracle-handoff.md, "Call identity").
+                downstream(oracle_handoffs.call_identity(conversation))
         if getattr(cfg, "oracle_diagnostics", False):
             from .oracle_diagnostics import OracleJournal
             conversation.journal = OracleJournal()

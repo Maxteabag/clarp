@@ -280,6 +280,28 @@ Two more rules keep a retired offer from retargeting a newer local session:
    `local_intent_changed`; the Host marks the return `failed` and the parent
    `ended` (`local_intent_changed`).
 
+## Call identity on the Oracle socket
+
+On a socket that opened with `handoff=hands_free`, the Host sends one frame
+right after it registers the call, before `session.start` goes upstream and
+before any offer can name the call:
+
+```json
+{"type": "oracle_v2.session", "host_id": "…", "principal": "device_…",
+ "voice_session_id": "…", "provider_session": "…", "thread_id": "…",
+ "handoff_id": "hof_…" | null, "server_now": 1790000000000}
+```
+
+- It is bound to this socket: `voice_session_id` is the Host's per-socket call
+  token, and it is the value an `oracle_to_agent` offer carries in
+  `oracle.voice_session_id`. The phone keeps it as its own record of the current
+  call and executes an offer only when the two match. It never adopts an
+  offer's value as the current call.
+- `handoff_id` is set when this socket is the return leg of an
+  `agent_to_oracle` handoff (opened with `handoff_id=`), otherwise null.
+- A socket without `handoff=hands_free` never receives this frame, so older
+  clients are unchanged.
+
 ## Capability negotiation
 
 - The Host advertises feature `oracle_handoff` (contract 22) in `/server-info`.
