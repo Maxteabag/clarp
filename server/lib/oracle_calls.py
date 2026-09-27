@@ -160,7 +160,7 @@ class AgentTools:
                 with self.lock:
                     self.delegations.add(ident)
                 return {'status': row['status'], 'operation_id': ident,
-                        'note': 'Handed off, not finished. Tell the user what you asked and who is doing it.'}
+                        'note': 'Handed off, not finished.'}
             return {'cancelled': True, 'note': 'Confirm the cancellation in one sentence.'}
         if name not in ('delegate_to_agent', 'investigate_with_oracle'):
             raise ValueError('Unknown Oracle tool')
@@ -174,7 +174,7 @@ class AgentTools:
         with self.lock:
             self.delegations.add(ident)
         return {'status': row['status'], 'operation_id': ident,
-                'note': 'Handed off, not finished. Tell the user what you asked and who is doing it.'}
+                'note': 'Handed off, not finished.'}
 
     def results(self):
         with self.lock:
