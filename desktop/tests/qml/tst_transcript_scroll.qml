@@ -109,6 +109,64 @@ TestCase {
         verify(Math.abs(view.contentY - position) < 2,
             "content arriving below must not pull the reader back to the wheel position");
     }
+    Component {
+        id: reflowComponent
+        Clarp.TranscriptList {
+            width: testCase.width
+            height: testCase.height
+            model: tallRows
+            clip: true
+            // Heights follow the width like wrapped text does: a narrower
+            // view makes every row taller.
+            delegate: Rectangle {
+                required property string messageId
+                required property int rowHeight
+                width: ListView.view.width
+                height: Math.round(rowHeight * 500 / Math.max(100, width))
+                color: "#202330"
+            }
+        }
+    }
+    ListModel { id: tallRows }
+    function test_narrowingKeepsAPausedReaderOnContent() {
+        // A reply with a long table is one very tall row. Shrinking the window
+        // while reading it left the transcript blank until the chat was
+        // switched away and back.
+        tallRows.clear();
+        tallRows.append({messageId: "prompt", rowHeight: 80});
+        tallRows.append({messageId: "reply", rowHeight: 9000});
+        tallRows.append({messageId: "tools", rowHeight: 40});
+        const view = createTemporaryObject(reflowComponent, testCase);
+        tryVerify(() => view.atYEnd);
+        mouseWheel(view, 200, 200, 0, 1200);
+        tryVerify(() => !view.followLatest && !view.userInteracting);
+        view.width = 300;
+        wait(300);
+        verify(view.indexAt(view.width / 2, view.contentY + view.height / 2) >= 0,
+            "after narrowing, the viewport must still show a row");
+        view.width = 500;
+        wait(300);
+        verify(view.indexAt(view.width / 2, view.contentY + view.height / 2) >= 0,
+            "after widening again, the viewport must still show a row");
+    }
+    function test_narrowingAfterAPauseKeepsContentOnScreen() {
+        // The same reflow with the reader paused by position rather than by
+        // the wheel, so it tests the relayout on its own.
+        tallRows.clear();
+        tallRows.append({messageId: "prompt", rowHeight: 80});
+        tallRows.append({messageId: "reply", rowHeight: 9000});
+        tallRows.append({messageId: "tools", rowHeight: 40});
+        const view = createTemporaryObject(reflowComponent, testCase);
+        tryVerify(() => view.atYEnd);
+        view.beginUserScroll();
+        view.contentY = view.contentY - 600;
+        view.endUserScroll();
+        tryVerify(() => !view.followLatest);
+        view.width = 300;
+        wait(300);
+        verify(view.indexAt(view.width / 2, view.contentY + view.height / 2) >= 0,
+            "after narrowing, the viewport must still show a row");
+    }
     function test_refreshRestoresMessageIdentityAndPixelOffset() {
         const view = openView();
         view.pauseFollowing();
