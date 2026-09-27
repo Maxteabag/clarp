@@ -34,8 +34,9 @@ function(clarp_apply_quality_settings target)
 
     if(CLARP_ENABLE_CLANG_TIDY)
         find_program(CLARP_CLANG_TIDY clang-tidy REQUIRED)
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
         set_property(TARGET ${target} PROPERTY CXX_CLANG_TIDY
-            "${CLARP_CLANG_TIDY};--warnings-as-errors=*"
+            "${Python3_EXECUTABLE};${CMAKE_SOURCE_DIR}/tools/clang_tidy_gcc_filter.py;${CLARP_CLANG_TIDY};--warnings-as-errors=*"
         )
     endif()
 endfunction()
