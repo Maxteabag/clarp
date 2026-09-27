@@ -97,11 +97,25 @@ Item {
     readonly property bool userAuthored: !root.groupView && root.authorRole === "user"
         && root.origin !== "agent" && root.origin !== "automation"
     readonly property int mediaRevision: controller.mediaRevision
+    // A message can be megabytes: an agent once returned a whole saved web
+    // page (3.4 million characters). Parsing and laying that out on the GUI
+    // thread froze the window for 46 s when its conversation opened. Past
+    // the limit only the start is shown, as plain text; the full text can
+    // still be copied.
+    readonly property int displayLimit: 100000
+    readonly property int oversizedPreview: 16000
+    readonly property bool oversized: root.body.length > root.displayLimit
+    // What activity rows and tooltips show: the same cap, as one line.
+    readonly property string shownBody: root.oversized ? root.body.slice(0, root.oversizedPreview) + "…" : root.body
     readonly property string renderedBody: {
+        if (root.oversized)
+            return "";
         mediaRevision;
         return controller.resolveMediaMarkdown(body);
     }
-    readonly property var renderedBlocks: root.messageKind === "live"
+    readonly property var renderedBlocks: root.oversized
+        ? [root.body.slice(0, root.oversizedPreview)]
+        : root.messageKind === "live"
         ? [root.renderedBody]
         : root.controller.markdownDisplayBlocks(root.renderedBody)
 
@@ -126,7 +140,7 @@ Item {
         id: liveExplanation
         narrator: root.narrator
         active: root.visible && root.activity && root.toolName.length > 0
-        activity: ({name: root.toolName, summary: root.body})
+        activity: ({name: root.toolName, summary: root.shownBody})
         workingDirectory: root.workingDirectory
         localFilesAllowed: root.localFilesAllowed
     }
@@ -196,7 +210,7 @@ Item {
 
                 HoverHandler { id: liveActivityHover }
                 ToolTip.visible: liveActivityHover.hovered && liveExplanation.text.length > 0
-                ToolTip.text: root.toolName + " · " + root.body
+                ToolTip.text: root.toolName + " · " + root.shownBody
                 ToolTip.delay: 400
 
                 RowLayout {
@@ -219,7 +233,7 @@ Item {
                     TuiText {
                         Layout.fillWidth: true
                         text: (root.activityStatus === "error" ? "Error · " : "")
-                            + (liveExplanation.narrationShown ? liveExplanation.displayText + (root.explanationRepeat > 1 ? " (x" + root.explanationRepeat + ")" : "") : root.body)
+                            + (liveExplanation.narrationShown ? liveExplanation.displayText + (root.explanationRepeat > 1 ? " (x" + root.explanationRepeat + ")" : "") : root.shownBody)
                         textFormat: Text.PlainText
                         color: root.activityStatus === "error" ? Theme.danger
                             : liveExplanation.narrationShown ? root.styled("link", Theme.link)
@@ -272,7 +286,7 @@ Item {
                             // row is placed changes its height and makes the list
                             // jump while scrolling up.
                             readonly property string block: root.renderedBlocks[index] || ""
-                            text: root.messageKind === "live" || !root.controller.styledMarkdownHtml
+                            text: root.oversized || root.messageKind === "live" || !root.controller.styledMarkdownHtml
                                 ? block
                                 : root.controller.styledMarkdownHtml(block, {
                                     bodyPixelSize: root.readingSize, bodyFamily: root.readingFont,
@@ -282,7 +296,8 @@ Item {
                             readOnly: true
                             selectByMouse: true
                             persistentSelection: true
-                            textFormat: root.messageKind === "live" || !root.controller.styledMarkdownHtml
+                            textFormat: root.oversized ? Text.PlainText
+                                : root.messageKind === "live" || !root.controller.styledMarkdownHtml
                                 ? (root.messageKind === "live" ? Text.PlainText : Text.MarkdownText) : Text.RichText
                             wrapMode: Text.Wrap
                             color: root.styled("text", Theme.body)
@@ -334,6 +349,26 @@ Item {
                                     onTriggered: root.controller.copyToClipboard(linkMenu.link)
                                 }
                             }
+                        }
+                    }
+                    Row {
+                        objectName: "oversizedMessageNote"
+                        visible: root.oversized
+                        spacing: 10
+
+                        TuiText {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("Showing the first %1 of %2 characters.")
+                                .arg(root.oversizedPreview.toLocaleString(Qt.locale(), "f", 0))
+                                .arg(root.body.length.toLocaleString(Qt.locale(), "f", 0))
+                            color: Theme.muted
+                            font.pixelSize: 12
+                        }
+                        TuiButton {
+                            objectName: "copyFullMessage"
+                            text: qsTr("Copy full message")
+                            implicitHeight: 26
+                            onClicked: root.controller.copyToClipboard(root.body)
                         }
                     }
                 }
