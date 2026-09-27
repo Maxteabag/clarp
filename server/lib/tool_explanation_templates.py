@@ -47,6 +47,17 @@ _PROJECT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,40}$")
 _HOST = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 _UNSAFE = re.compile(r"[\x00-\x1f\x7f`$|;&<>]")
 _IDENTITY_KEY = "tool_explanations.identity_key"
+# Shell builtins set shell state, test a condition or print text. None of them
+# reads, lists or searches files, so Jev has no template to offer for one.
+_BUILTINS = {"export", "unset", "set", "source", ".", "[", "test", "echo", "printf", "read", "sleep", "wait",
+             "trap", "exit", "return", "local", "declare", "typeset", "readonly", "alias", "unalias", "shift",
+             "umask", "ulimit", "type", "command", "hash", "jobs", "fg", "bg", "disown", "builtin", "let",
+             "cd", "pushd", "popd", "dirs"}
+# A tool name that is really a shell invocation, as Codex rows arrive when the
+# client has only the display label: `/usr/bin/bash -lc "..."`.
+_SHELL_LABEL = re.compile(r"^(?:/\S*/)?(?:ba|z)?sh\s+-l?c\s")
+# Clients clip that label to 80 characters, so one this long is incomplete.
+LABEL_CLIP = 80
 
 
 class Route(dict):
@@ -272,6 +283,8 @@ def _classify_words(words, cwd):
         return _abstain("script_run", action="execute", signature=signature)
     if base in _MUTATING:
         return _abstain("mutating_program", action="execute", signature=signature)
+    if base in _BUILTINS:
+        return _abstain("shell_builtin", signature=signature)
     candidates = [a for a in args if 0 < len(a) <= 240]
     # Only a lone positional argument may vary between reuses; anything else,
     # including option values such as `--mode=list` versus `--mode=delete`,
@@ -324,6 +337,9 @@ def classify(activity):
     command = _field(activity, "command", "cmd") or (activity.get("summary", "") if kind == "command" else "")
     if tool in {"bash", "shell", "exec_command", "local_shell"} or kind == "command":
         return classify_shell(command) if command else _abstain("malformed", signature=signature)
+    label = shell_label(activity)
+    if label:
+        return _abstain("truncated", action="compound", signature="shell") if len(label) >= LABEL_CLIP else classify_shell(label)
     file_path = _field(activity, "file_path", "path")
     if tool == "read":
         return _match("read_file", {"file": file_path}, signature=signature) if file_path else _abstain("malformed", signature=signature)
@@ -341,6 +357,8 @@ def classify(activity):
     if tool == "websearch":
         query = _field(activity, "query")
         return _match("web_search", {"query": query}, signature=signature) if query else _abstain("malformed", signature=signature)
+    if kind == "exploration":
+        return _classify_exploration(activity.get("operations") or [])
     if kind == "patch":
         operations = activity.get("operations") or []
         if len(operations) == 1 and ": " in operations[0]:
@@ -355,6 +373,29 @@ def classify(activity):
     shape = [name, kind, sorted((k, v) for k, v in {**{k: v for k, v in activity.items() if isinstance(v, str)}, **inputs}.items()
                                 if isinstance(v, str) and v != file_path)]
     return _abstain("unknown_tool", signature=f"{signature} #{_identity('tool', shape)}", candidates=[file_path] if file_path else [])
+
+
+def shell_label(activity):
+    """The shell command a tool's display name spells out, or ""."""
+    name = str(activity.get("name") or "").strip()
+    if activity.get("kind") or _field(activity, "command", "cmd") or not _SHELL_LABEL.match(name):
+        return ""
+    return name
+
+
+def _classify_exploration(operations):
+    """A grouped read-only exploration row. Only a single `Read: path` names its target.
+
+    `List` and `Search` lines carry display text that may be a pattern or a
+    whole command, so they, and several operations, are left to the model.
+    """
+    operations = list(dict.fromkeys(operations))
+    if len(operations) == 1:
+        label, _, target = operations[0].partition(": ")
+        if label == "Read" and target and "," not in target and not re.search(r"\s", target) and (
+                "/" in target or target[:1] in ".~" or re.fullmatch(r"[^\s]+\.[A-Za-z0-9]{1,8}", target)):
+            return _match("read_file", {"file": target}, signature="exploration:Read")
+    return _abstain("multiple_targets" if len(operations) > 1 else "exploration", action="read", signature="exploration")
 
 
 # ---- parameters and rendering --------------------------------------------
@@ -461,8 +502,58 @@ def learned_parameters(template_id, candidates):
     """Fill the single primary parameter of a learned rule, or None if ambiguous."""
     params = TEMPLATES[template_id]["params"]
     primary = next((key for key, kind in params.items() if kind in {"directory", "path"}), None)
-    if not candidates:
+    if not candidates or primary is None:
         return {}
-    if primary is None or len(candidates) != 1:
+    if len(candidates) != 1:
         return None
     return {primary: candidates[0]}
+
+
+def primary(template_id):
+    """The one path or directory parameter a template acts on, or None."""
+    return next((name for name, kind in TEMPLATES[template_id]["params"].items() if kind in {"directory", "path"}), None)
+
+
+def jev_candidate(value):
+    """Whether a literal argument could be the file, folder or pattern a call acts on.
+
+    Shell punctuation (`]`), `$` expressions, flags, bare numbers (usually a
+    flag's value, as in `--depth 2`) and free text with spaces (a message, not
+    a file) are never offered.
+    """
+    return (valid_parameter("path", value) and not re.search(r"\s", value)
+            and not re.fullmatch(r"[+-]?\d+(?:\.\d+)?[smhdkKMG%]?", value)
+            and bool(re.search(r"[A-Za-z0-9._~/]", value)) and value not in {"[", "]", "[[", "]]", "{", "}"})
+
+
+def jev_offer(route, level):
+    """What Jev may choose from for one abstaining route, or why it is not asked.
+
+    Returns `(template_ids, candidates)`, where candidates are `(index, value)`
+    pairs into `route["candidates"]` so learned rows keep their indices, or a
+    `str` reason. A template that acts on a path is offered only when the call
+    names a usable one; without any argument only templates that are true of
+    the current directory, or need no parameter, are offered.
+    """
+    raw = route.get("candidates") or []
+    candidates = [(index, value) for index, value in enumerate(raw) if jev_candidate(value)]
+    if route.get("reason") == "unknown_tool" and not raw:
+        # A status row ("done", "idle") or a delegation: nothing a read, list
+        # or search template could name.
+        return "jev_no_target"
+    if raw and not candidates:
+        return "jev_unsafe_arguments"
+    offered = []
+    for template_id, template in TEMPLATES.items():
+        name = primary(template_id)
+        if template["action"] not in LEARNABLE_ACTIONS:
+            continue
+        # Only what can render from this call: a pick that needs a value the
+        # call does not have (a search pattern, a file name) is never valid.
+        if name and candidates:
+            renders = any(render(template_id, {name: value}, level) for _, value in candidates)
+        else:
+            renders = (name is None or template["params"][name] == "directory") and render(template_id, {}, level)
+        if renders:
+            offered.append(template_id)
+    return offered, candidates
