@@ -679,6 +679,13 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 keys.add(key)
                 existing = next((r for r in old if r["item_id"] == key), None)
                 if existing:
+                    if (
+                        existing["status"] == "completed"
+                        and str(raw.get("title") or "").strip() != existing["title"]
+                    ):
+                        raise ValueError(
+                            "completed step meaning is immutable; use a new step id for different work"
+                        )
                     if not str(raw.get("title") or "").strip():
                         raise ValueError("step title required")
                     con.execute(
