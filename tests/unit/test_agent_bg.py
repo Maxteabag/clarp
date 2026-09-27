@@ -120,3 +120,52 @@ def test_cancel_cleanup_handle_is_rejected_after_restart():
         "agent_bg.py", "_", "job-cancelled", old_handle,
     ]) == 1
     assert background_jobs.get("restartable", reconcile=False)["status"] == "running"
+
+
+def test_active_unavailable_is_not_cancellation(monkeypatch, capsys):
+    import sqlite3
+    def locked(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(background_jobs, "heartbeat", locked)
+    assert agent_bg.main(["bg", "fixture", "job-active", "bg1:1:fixture"]) == 2
+    assert "unavailable" in capsys.readouterr().err
+
+
+def test_active_missing_is_unknown():
+    assert agent_bg.main(["bg", "fixture", "job-active", "bg1:1:missing"]) == 2
+
+
+def test_active_recovers_then_stops_for_explicit_cancel(monkeypatch, capsys):
+    import sqlite3
+    agents.create_agent(persona="Probe", voice_id="voice", cwd="/tmp", session="probe")
+    monkeypatch.setattr(background_jobs, "current_worker_identity", lambda: (4242, "boot:probe"))
+    agent_bg.main(["bg", "probe", "job-upsert", "probe-job", "watcher", "Probe"])
+    handle = capsys.readouterr().out.strip()
+    real = background_jobs.heartbeat
+    with monkeypatch.context() as patch:
+        patch.setattr(background_jobs, "heartbeat", lambda *a, **kw: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")))
+        assert agent_bg.main(["bg", "probe", "job-active", handle]) == 2
+    assert agent_bg.main(["bg", "probe", "job-active", handle]) == 0
+    background_jobs.cancel("probe-job")
+    assert agent_bg.main(["bg", "probe", "job-active", handle]) == 1
+    assert agent_bg.main(["bg", "probe", "job-upsert", "probe-job", "watcher", "Probe"]) == 1
+
+
+def test_real_sqlite_contention_is_unknown_then_recovers(monkeypatch, capsys):
+    import sqlite3
+    from lib import db
+    agents.create_agent(persona="Probe", voice_id="voice", cwd="/tmp", session="probe")
+    monkeypatch.setattr(background_jobs, "current_worker_identity", lambda: (4242, "boot:probe"))
+    agent_bg.main(["bg", "probe", "job-upsert", "locked-job", "watcher", "Probe"])
+    handle = capsys.readouterr().out.strip()
+    lock = sqlite3.connect(str(db.DB_PATH))
+    lock.execute('BEGIN IMMEDIATE')
+    try:
+        with db.busy_timeout(10):
+            assert agent_bg.main(["bg", "probe", "job-active", handle]) == 2
+    finally:
+        lock.rollback()
+        lock.close()
+    assert agent_bg.main(["bg", "probe", "job-active", handle]) == 0
+    background_jobs.cancel("locked-job")
+    assert agent_bg.main(["bg", "probe", "job-active", handle]) == 1

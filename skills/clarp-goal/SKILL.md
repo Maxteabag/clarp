@@ -54,6 +54,10 @@ clarp-goal dependency PLAN_ID REVISION \
 # Use outcome "failed" for an actual failure; never invent success after timeout.
 ```
 
+Track detached workers (including systemd/nohup and watchers) with
+[clarp-background-jobs](../clarp-background-jobs/SKILL.md), so purpose, status,
+output and cancellation remain visible while this goal waits.
+
 A worker must retain the goal identity/revision and unique dependency key. A stale
 callback is rejected; reload to reconcile it rather than overriding a newer plan.
 A lost callback times out into owner reconciliation. Scheduling is not delivery:

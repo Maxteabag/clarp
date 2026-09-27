@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import math
 from pathlib import Path
 import plistlib
 import json
@@ -447,7 +448,11 @@ def launch_detached(
             and os.environ.get("CLARP_DEPLOYMENT_MODE") != "container"):
         args = ["systemd-run", "--user", "--collect", f"--unit={unit}"]
         if delay_seconds:
-            args.append(f"--on-active={int(delay_seconds)}s")
+            # OnActiveSec is rebased by daemon-reload on some systemd versions.
+            # Freeze the wall-clock deadline when scheduling, independent of TZ.
+            due = math.ceil(time.time() + int(delay_seconds))
+            deadline = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(due))
+            args.extend([f"--on-calendar={deadline}", "--timer-property=AccuracySec=1s"])
         else:
             args.append("--property=Type=exec")
         if environment:

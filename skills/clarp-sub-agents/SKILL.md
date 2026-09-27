@@ -32,6 +32,10 @@ only mirrors it and is not counted again; a systemd worker registers kind
 as a badge; your status line says what the work is doing ("stream-a:
 running tests", "3 working, 1 waiting", a worker's latest progress line).
 
+For non-agent watchers or detached systemd/nohup processes, use
+[clarp-background-jobs](../clarp-background-jobs/SKILL.md) directly for visible
+purpose, status, output and cancellation.
+
 ## When to use which
 
 | Situation | Use |

@@ -6,7 +6,7 @@
     {"id": "clarp-oracle-contact", "pack": "core", "description": "Put a live Oracle call through to an agent and back"},
     {"id": "clarp-adopt", "pack": "core", "description": "Resume a terminal CLI conversation as a Clarp agent"},
     {"id": "clarp-self-prompt", "pack": "core", "description": "Prompt an agent now or later"},
-    {"id": "clarp-background-jobs", "pack": "core", "description": "Register and cancel background jobs"},
+    {"id": "clarp-background-jobs", "pack": "core", "description": "Track watchers, detached/systemd/nohup workers with visible purpose, status, output and cancel"},
     {"id": "clarp-sub-agents", "pack": "core", "description": "Spawn sub-agents that survive session restarts and show as running jobs"},
     {"id": "clarp-janitors", "pack": "core", "description": "Configure maintenance agents and inspect guarded effects"},
     {"id": "clarp-artifacts", "pack": "core", "description": "Shared secure artifact transport used by enabled artifact skills"},

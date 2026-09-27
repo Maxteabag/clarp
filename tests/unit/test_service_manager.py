@@ -347,6 +347,7 @@ def test_wait_until_ready_uses_configured_token(tmp_path):
 
 
 def test_linux_detached_launcher_uses_transient_unit(monkeypatch):
+    monkeypatch.setattr(service_manager.time, "time", lambda: 1790500000.25)
     monkeypatch.setenv("CLARP_PLATFORM_OVERRIDE", "linux")
     recorder = Recorder()
     ok, error = service_manager.launch_detached(
@@ -356,7 +357,8 @@ def test_linux_detached_launcher_uses_transient_unit(monkeypatch):
     command = recorder.calls[0][0]
     assert command[:5] == [
         "systemd-run", "--user", "--collect", "--unit=clarp-worker",
-        "--on-active=30s"]
+        "--on-calendar=2026-09-27 09:07:11 UTC"]
+    assert "--timer-property=AccuracySec=1s" in command
     assert command[-2:] == ["/runtime/python", "/worker.py"]
 
 

@@ -1,9 +1,12 @@
 ---
 name: clarp-background-jobs
-description: Register, check, finish, and cancel durable Clarp background jobs. Use for watchers or work that continues after the current response.
+description: "Track background work that outlives a turn: watchers, detached workers, systemd services and nohup processes. Give the user visible purpose, status, output and cancellation through durable Clarp jobs."
 ---
 
 # Clarp Background Jobs
+
+A detached process needs a visible purpose, current status, inspectable output and
+a working cancel action. Service supervision alone does not provide this tracking.
 
 Use the installed helper at
 `clarp-agent-bg`.
@@ -53,3 +56,22 @@ close its own job, for example one whose worker was stopped or died, without
 the worker's PID. `job-finish` and `job-fail` stay fenced to the registered
 worker. A job whose recorded worker PID has exited is failed automatically
 (`worker_vanished`) without waiting for the heartbeat timeout.
+
+## Unavailable status is not cancellation
+
+`job-active` returns **0** for confirmed active ownership, **1** for a
+confirmed terminal job or superseded worker/generation, and **2** when state
+cannot be established (including a missing job or database error). Treat timeouts,
+missing executables and other unexpected exit codes as unknown too. Older helpers
+may return 1 on an exception; update the helper before depending on this contract.
+
+On unknown state, retain the same handle, log the uncertainty, pause consequential
+deliveries and retry with bounded backoff (for example 5, 10, 20, 40, then 60 seconds).
+Do not register a new generation to bypass an unreadable status. Resume delivery
+only after a fresh successful ownership check. Exit cleanly on confirmed terminal
+or superseded ownership so `Restart=on-failure` does not revive cancellation.
+
+Persist processed-item state only after confirmed delivery acceptance. Use a stable
+idempotency key across retries and restarts where the destination supports it;
+otherwise reconcile uncertain acceptance before retrying. Preserve a fixed watch
+boundary across restarts so items arriving during downtime remain eligible.
