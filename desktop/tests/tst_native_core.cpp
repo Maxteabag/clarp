@@ -697,6 +697,7 @@ class NativeCoreTest final : public QObject {
   private slots:
     void spawnedLifecycleNeverBecomesTranscriptTool();
     void voiceErrorsStayInTheirSession();
+    void sidebarPreviewIsPlainText();
     void clipboardImageBecomesAttachmentWithoutSending();
     void relaunchPreservesHostSessionAndDraft();
     void previewRestartCapturesContextAndRejectsBusy();
@@ -2766,6 +2767,16 @@ void NativeCoreTest::clipSourcePrecedenceMatchesContract() {
     QVERIFY(AudioClip::fromJson(steps.at(3).toObject().value(QStringLiteral("clip")).toObject())
                 .preferredSource()
                 .isEmpty());
+}
+
+void NativeCoreTest::sidebarPreviewIsPlainText() {
+    QCOMPARE(plainPreviewText(QStringLiteral("| # | City | Country |\n|---|---|---|\n| 1 | Tokyo | Japan |")),
+             QStringLiteral("# City Country 1 Tokyo Japan"));
+    QCOMPARE(plainPreviewText(QStringLiteral("## Cities\n| a | b |\n|---|--…")), QStringLiteral("Cities a b"));
+    QCOMPARE(plainPreviewText(QStringLiteral("**Done** — see `main.py` and [the docs](https://x.test).")),
+             QStringLiteral("Done — see main.py and the docs."));
+    QCOMPARE(plainPreviewText(QStringLiteral("- first *point*\n> quoted")), QStringLiteral("first point quoted"));
+    QCOMPARE(plainPreviewText(QStringLiteral("snake_case_name stays")), QStringLiteral("snake_case_name stays"));
 }
 
 void NativeCoreTest::wavEncodingProducesAValidPcmHeader() {

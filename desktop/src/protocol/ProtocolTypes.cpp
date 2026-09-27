@@ -242,6 +242,28 @@ QString AudioClip::preferredSource() const {
     return url;
 }
 
+QString plainPreviewText(const QString& markdown) {
+    // Also matches a separator the Host cut short with an ellipsis.
+    static const QRegularExpression tableSeparator(QStringLiteral(R"(^[|:\s…-]*--[|:\s…-]*$)"));
+    static const QRegularExpression linePrefix(QStringLiteral(R"(^(#{1,6}\s+|>\s*|[-*+]\s+))"));
+    static const QRegularExpression link(QStringLiteral(R"(!?\[([^\]]*)\]\([^)]*\))"));
+    static const QRegularExpression emphasis(QStringLiteral(R"((\*\*|__|~~|`))"));
+    static const QRegularExpression singleEmphasis(QStringLiteral(R"((^|\W)[*_](\S(?:[^*_]*\S)?)[*_](?=\W|$))"));
+    QStringList parts;
+    for (QString line : markdown.split(u'\n')) {
+        line = line.trimmed();
+        if (line.startsWith(QStringLiteral("```")) || tableSeparator.match(line).hasMatch()) continue;
+        line.remove(linePrefix);
+        if (line.startsWith(u'|') || line.endsWith(u'|')) line.replace(u'|', u' ');
+        if (!line.isEmpty()) parts.append(line);
+    }
+    QString text = parts.join(u' ');
+    text.replace(link, QStringLiteral("\\1"));
+    text.remove(emphasis);
+    text.replace(singleEmphasis, QStringLiteral("\\1\\2"));
+    return text.simplified();
+}
+
 bool isBusyState(const QString& state) {
     static const QSet<QString> busyStates{
         QStringLiteral("thinking"),

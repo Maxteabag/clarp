@@ -50,9 +50,9 @@ QVariant AgentListModel::data(const QModelIndex& index, int role) const {
     case LastActivityRole:
         return agent.lastActivity;
     case LastCompletedMessageRole:
-        return agent.lastCompletedMessage;
+        return plainPreviewText(agent.lastCompletedMessage);
     case LastMessageRole:
-        return agent.lastMessage;
+        return plainPreviewText(agent.lastMessage);
     case ConversationIdRole:
         return agent.conversationId;
     case HeadRevisionRole:

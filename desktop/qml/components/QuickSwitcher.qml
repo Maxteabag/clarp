@@ -326,6 +326,10 @@ Rectangle {
                             Layout.fillWidth: true
                             spacing: 1
                             TuiText {
+                                // Filling the column keeps names left-aligned;
+                                // unfilled they sat centred at uneven offsets.
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
                                 text: String(resultRow.modelData.kind) === "command"
                                     ? String(resultRow.modelData.label)
                                     : (String(resultRow.modelData.kind) === "contact" ? "Start " : "")
@@ -351,29 +355,37 @@ Rectangle {
                             status: String(resultRow.modelData.kind) === "agent"
                                 ? String(resultRow.modelData.state) : "idle"
                         }
+                        // Group and shortcut take fixed columns so every
+                        // command row lines up.
                         TuiText {
                             visible: String(resultRow.modelData.kind) === "command"
+                            Layout.preferredWidth: 104
                             text: String(resultRow.modelData.group || "").toUpperCase()
                             color: Theme.faint
                             font.family: "JetBrains Mono"
                             font.pixelSize: 11
                             font.letterSpacing: 0.6
                         }
-                        Rectangle {
+                        Item {
                             visible: String(resultRow.modelData.kind) === "command"
-                                && String(resultRow.modelData.key || "").length > 0
-                            Layout.preferredWidth: visible ? shortcutText.implicitWidth + 10 : 0
+                            Layout.preferredWidth: 132
                             Layout.preferredHeight: 19
-                            radius: Theme.radius
-                            color: Theme.hover
-                            border.color: Theme.border
-                            TuiText {
-                                id: shortcutText
-                                anchors.centerIn: parent
-                                text: String(resultRow.modelData.key || "")
-                                color: Theme.secondary
-                                font.family: "JetBrains Mono"
-                                font.pixelSize: 11
+                            Rectangle {
+                                visible: String(resultRow.modelData.key || "").length > 0
+                                anchors.right: parent.right
+                                width: shortcutText.implicitWidth + 10
+                                height: parent.height
+                                radius: Theme.radius
+                                color: Theme.hover
+                                border.color: Theme.border
+                                TuiText {
+                                    id: shortcutText
+                                    anchors.centerIn: parent
+                                    text: String(resultRow.modelData.key || "")
+                                    color: Theme.secondary
+                                    font.family: "JetBrains Mono"
+                                    font.pixelSize: 11
+                                }
                             }
                         }
                     }
