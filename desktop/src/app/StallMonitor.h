@@ -8,7 +8,7 @@
 
 namespace clarp {
 // Catches the moments the desktop feels laggy: a watchdog thread expects the
-// GUI thread to beat every 20 ms. When it misses for longer than the
+// GUI thread to beat periodically. When it misses for longer than the
 // threshold, the watchdog interrupts the GUI thread, captures its call stack
 // right there, and appends it to the stall log; when the GUI thread comes
 // back it logs how long the stall lasted. Symbol names come from the
@@ -42,6 +42,7 @@ class StallMonitor final : public QObject {
 
     int m_thresholdMs;
     int m_memoryMb;
+    int m_pollIntervalMs = 100;
     QString m_logPath;
     QTimer m_beat;
     std::atomic<std::int64_t> m_lastBeatNs{0};

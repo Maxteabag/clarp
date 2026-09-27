@@ -13,6 +13,7 @@
 #include <execinfo.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <algorithm>
 #include <unistd.h>
 
 namespace clarp {
@@ -75,7 +76,8 @@ StallMonitor::StallMonitor(int thresholdMs, QString logPath, QObject* parent, in
 
     m_guiThread = pthread_self();
     m_lastBeatNs.store(nowNs());
-    m_beat.setInterval(20);
+    m_pollIntervalMs = std::clamp(m_thresholdMs / 2, 75, 500);
+    m_beat.setInterval(m_pollIntervalMs);
     connect(&m_beat, &QTimer::timeout, this, [this] { m_lastBeatNs.store(nowNs()); });
     m_beat.start();
     m_running.store(true);
@@ -111,10 +113,11 @@ void StallMonitor::watch() {
     bool inStall = false;
     std::int64_t stallStartNs = 0;
     long nextMemoryMb = m_memoryMb;
+    const int memoryCheckTicks = std::max(1, 500 / m_pollIntervalMs);
     int tick = 0;
     while (m_running.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(25));
-        if (m_memoryMb > 0 && ++tick % 20 == 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(m_pollIntervalMs));
+        if (m_memoryMb > 0 && ++tick % memoryCheckTicks == 0) {
             const long rss = residentMb();
             if (rss >= nextMemoryMb) {
                 writeStall(rss, captureGuiStack() ? gFrameCount.load() : 0, "memory");
