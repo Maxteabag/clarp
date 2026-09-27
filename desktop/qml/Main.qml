@@ -487,15 +487,18 @@ ApplicationWindow {
                     }
                 }
 
-                UpdatesPanel {
+                DeferredPanel {
+                    objectName: "updatesPanel"
                     anchors.fill: parent
                     visible: root.selectedSurface === "updates"
-                    controller: app
-                    onOpenChat: session => {
-                        app.selectSession(session);
-                        root.selectedSurface = "chats";
+                    sourceComponent: UpdatesPanel {
+                        controller: app
+                        onOpenChat: session => {
+                            app.selectSession(session);
+                            root.selectedSurface = "chats";
+                        }
+                        onOpenReport: artifactId => reportView.open(artifactId)
                     }
-                    onOpenReport: artifactId => reportView.open(artifactId)
                 }
 
                 DeferredPanel {
@@ -554,13 +557,16 @@ ApplicationWindow {
         }
     }
 
-    ConnectionPage {
+    // Hidden whenever the cached roster has agents, so most starts never build it.
+    DeferredPanel {
         id: connection
 
         anchors.fill: parent
-        controller: app
         visible: !newSessionHub.visible && app.agents.count === 0 && app.connectionState !== "live"
         z: 100
+        sourceComponent: ConnectionPage {
+            controller: app
+        }
     }
 
     DeferredPanel {
@@ -608,17 +614,25 @@ ApplicationWindow {
         }
     }
 
-    AssignAgentDialog {
+    DeferredPanel {
         id: assignAgent
         objectName: "assignAgent"
+        readonly property bool submitting: item !== null && item.submitting
+        function open(target, automatic, restoreComposer) {
+            visible = true;
+            item.open(target, automatic, restoreComposer);
+        }
+        function closeRequested() { item.closeRequested(); }
         anchors.fill: parent
-        controller: app
-        visible: false
         z: 101
-        onCloseRequested: {
-            visible = false;
-            if (returnToComposer) app.requestComposerFocus(app.panes.activePaneId);
-            else root.focusConversation();
+        sourceComponent: AssignAgentDialog {
+            id: assignAgentDialog
+            controller: app
+            onCloseRequested: {
+                assignAgent.visible = false;
+                if (assignAgentDialog.returnToComposer) app.requestComposerFocus(app.panes.activePaneId);
+                else root.focusConversation();
+            }
         }
     }
 
@@ -653,16 +667,28 @@ ApplicationWindow {
         }
     }
 
-    RenameAgentDialog {
+    DeferredPanel {
         id: renameAgent
         objectName: "renameAgent"
+        // Screenshot runs set these on the loader before showing it.
+        property string session
+        property string currentName
+        function open(session, name) {
+            renameAgent.session = session;
+            renameAgent.currentName = name;
+            visible = true;
+        }
+        function closeRequested() { item.closeRequested(); }
         anchors.fill: parent
-        controller: app
-        visible: false
         z: 95
-        onCloseRequested: {
-            visible = false;
-            root.restoreSurfaceFocus();
+        sourceComponent: RenameAgentDialog {
+            controller: app
+            session: renameAgent.session
+            currentName: renameAgent.currentName
+            onCloseRequested: {
+                renameAgent.visible = false;
+                root.restoreSurfaceFocus();
+            }
         }
     }
 
@@ -703,34 +729,50 @@ ApplicationWindow {
         }
     }
 
-    PreviewVersionPanel {
+    DeferredPanel {
         id: previewVersionPanel
         objectName: "previewVersionPanel"
+        function close() { item.close(); }
         anchors.fill: parent
         z: 200
-        switcher: previewVersions
-        canRestart: root.previewCanRestart
-        onClosed: Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId))
+        sourceComponent: PreviewVersionPanel {
+            switcher: previewVersions
+            canRestart: root.previewCanRestart
+            onClosed: Qt.callLater(() => app.requestComposerFocus(app.panes.activePaneId))
+        }
     }
 
-    QuickSwitcher {
+    DeferredPanel {
         id: quickSwitcher
-        previewVersionsAvailable: previewVersions.enabled
-
         objectName: "quickSwitcher"
-        anchors.fill: parent
-        controller: app
-        sidebarVisible: root.sidebarVisible
-        visible: false
-        z: 110
-        onCommandRequested: action => root.runCommand(action)
-        onContactRequested: name => {
-            root.selectedSurface = "chats";
-            app.quickStartContact(name);
+        // Screenshot runs set the query on the loader before showing it.
+        property string query
+        onQueryChanged: if (item !== null) item.query = query
+        onLoaded: if (query.length > 0) item.query = query
+        function open(returnToComposer) {
+            visible = true;
+            item.open(returnToComposer);
         }
-        onAgentRequested: session => {
-            app.selectSession(session);
-            root.selectedSurface = "chats";
+        function openContacts(returnToComposer) {
+            visible = true;
+            item.openContacts(returnToComposer);
+        }
+        function close(restoreFocus) { item.close(restoreFocus); }
+        anchors.fill: parent
+        z: 110
+        sourceComponent: QuickSwitcher {
+            previewVersionsAvailable: previewVersions.enabled
+            controller: app
+            sidebarVisible: root.sidebarVisible
+            onCommandRequested: action => root.runCommand(action)
+            onContactRequested: name => {
+                root.selectedSurface = "chats";
+                app.quickStartContact(name);
+            }
+            onAgentRequested: session => {
+                app.selectSession(session);
+                root.selectedSurface = "chats";
+            }
         }
     }
 
