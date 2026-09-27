@@ -13,6 +13,16 @@ bool finishedHelperState(const QString& state) {
            state == QStringLiteral("abandoned");
 }
 
+bool rolesMayChangeTree(const QList<int>& roles) {
+    if (roles.isEmpty()) return true;
+    return std::ranges::any_of(roles, [](int role) {
+        return role == AgentListModel::AgentIdRole || role == AgentListModel::SessionRole ||
+               role == AgentListModel::AgentRoleRole ||
+               role == AgentListModel::ParentAgentIdRole ||
+               role == AgentListModel::HelperStateRole;
+    });
+}
+
 } // namespace
 
 AgentFilterModel::AgentFilterModel(QObject* parent) : QSortFilterProxyModel(parent) {
@@ -31,13 +41,17 @@ void AgentFilterModel::setSourceModel(QAbstractItemModel* source) {
         // Connected after the base class so its own bookkeeping has already
         // run; the tree is then recomputed and applied only if it changed.
         const auto refresh = [this] { refreshTree(); };
+        const auto refreshChangedRoles =
+            [this](const QModelIndex&, const QModelIndex&, const QList<int>& roles) {
+                if (rolesMayChangeTree(roles)) refreshTree();
+            };
         m_sourceConnections = {
             connect(source, &QAbstractItemModel::rowsInserted, this, refresh),
             connect(source, &QAbstractItemModel::rowsRemoved, this, refresh),
             connect(source, &QAbstractItemModel::rowsMoved, this, refresh),
             connect(source, &QAbstractItemModel::modelReset, this, refresh),
             connect(source, &QAbstractItemModel::layoutChanged, this, refresh),
-            connect(source, &QAbstractItemModel::dataChanged, this, refresh),
+            connect(source, &QAbstractItemModel::dataChanged, this, refreshChangedRoles),
         };
     }
     refreshTree();
