@@ -544,12 +544,12 @@ ConversationModel* AppController::conversationForSession(const QString& session)
     return ensureConversation(session);
 }
 
-QUrl AppController::avatarSource(const QString& session) const {
-    return m_avatarSources.value(session);
+QUrl AppController::avatarSource(const QString& session) {
+    return requestAvatarForSession(session);
 }
 
-QUrl AppController::contactAvatarSource(const QString& name) const {
-    return m_contactAvatarSources.value(name);
+QUrl AppController::contactAvatarSource(const QString& name) {
+    return requestContactAvatarForName(name);
 }
 
 QString AppController::styledMarkdownHtml(const QString& markdown, const QVariantMap& options) const {
@@ -2691,58 +2691,47 @@ void AppController::clearAvatarCache() {
 void AppController::requestAvatars() {
     const QStringList currentSessions = m_agents.sessions();
     const QSet<QString> sessions(currentSessions.cbegin(), currentSessions.cend());
+    bool changed = false;
     for (auto it = m_avatarUrls.begin(); it != m_avatarUrls.end();) {
         if (!sessions.contains(it.key())) {
             m_avatarSources.remove(it.key());
+            m_avatarFailures.remove(it.key());
             it = m_avatarUrls.erase(it);
+            changed = true;
         } else {
             ++it;
         }
     }
-
     for (const QString& session : sessions) {
         const Agent* agent = m_agents.find(session);
         const QString url = agent == nullptr ? QString{} : avatarUrlForAgent(*agent);
-        if (url.isEmpty()) {
-            m_avatarUrls.remove(session);
-            m_avatarSources.remove(session);
-            m_avatarFailures.remove(session);
-            continue;
+        if (url != m_avatarUrls.value(session)) {
+            if (m_avatarUrls.contains(session) || m_avatarSources.contains(session) ||
+                m_avatarFailures.contains(session)) {
+                m_avatarSources.remove(session);
+                m_avatarFailures.remove(session);
+                changed = true;
+            }
+            if (url.isEmpty()) {
+                m_avatarUrls.remove(session);
+            }
         }
-        const bool requestPending = std::ranges::any_of(
-            m_avatarRequests, [&session, &url](const QPair<QString, QString>& request) {
-                return request.first == session && request.second == url;
-            });
-        if (m_avatarUrls.value(session) == url &&
-            (m_avatarSources.contains(session) || requestPending ||
-             m_avatarFailures.value(session) == url)) {
-            continue;
-        }
-        m_avatarUrls.insert(session, url);
-        m_avatarSources.remove(session);
-        const QString cached = m_cacheEnabled ? portraitCachePath(m_baseUrl + url) : QString{};
-        if (!cached.isEmpty() && QFileInfo::exists(cached)) {
-            m_avatarSources.insert(session, QUrl::fromLocalFile(cached));
-            continue;
-        }
-        // The cached roster is applied before the first frame; the live
-        // snapshot that follows fetches what the disk cache lacks.
-        if (m_restoringSnapshotCache) continue;
-        const QString tag = QStringLiteral("avatar:%1").arg(++m_nextAvatarRequest);
-        m_avatarRequests.insert(tag, {session, url});
-        m_api.getBytes(tag, url);
     }
-    ++m_avatarRevision;
-    emit avatarRevisionChanged();
+    if (changed) {
+        ++m_avatarRevision;
+        emit avatarRevisionChanged();
+    }
 }
 
 void AppController::requestContactAvatars() {
     const QHash<QString, QString> urls = m_contacts.avatarUrlsByName();
+    bool changed = false;
     for (auto it = m_contactAvatarUrls.begin(); it != m_contactAvatarUrls.end();) {
         if (!urls.contains(it.key())) {
             m_contactAvatarSources.remove(it.key());
             m_contactAvatarFailures.remove(it.key());
             it = m_contactAvatarUrls.erase(it);
+            changed = true;
         } else {
             ++it;
         }
@@ -2750,27 +2739,101 @@ void AppController::requestContactAvatars() {
     for (auto it = urls.cbegin(); it != urls.cend(); ++it) {
         const QString& name = it.key();
         const QString& url = it.value();
-        const bool requestPending = std::ranges::any_of(
-            m_contactAvatarRequests, [&name](const QString& pending) { return pending == name; });
-        if (m_contactAvatarUrls.value(name) == url &&
-            (m_contactAvatarSources.contains(name) || requestPending ||
-             m_contactAvatarFailures.value(name) == url)) {
-            continue;
+        if (url != m_contactAvatarUrls.value(name)) {
+            if (m_contactAvatarUrls.contains(name) || m_contactAvatarSources.contains(name) ||
+                m_contactAvatarFailures.contains(name)) {
+                m_contactAvatarSources.remove(name);
+                m_contactAvatarFailures.remove(name);
+                changed = true;
+            }
+            if (url.isEmpty()) {
+                m_contactAvatarUrls.remove(name);
+            }
         }
+    }
+    if (changed) {
+        ++m_avatarRevision;
+        emit avatarRevisionChanged();
+    }
+}
+
+QUrl AppController::requestAvatarForSession(const QString& session) {
+    if (session.isEmpty()) {
+        return {};
+    }
+    const Agent* agent = m_agents.find(session);
+    const QString url = agent == nullptr ? QString{} : avatarUrlForAgent(*agent);
+    if (url.isEmpty()) {
+        m_avatarUrls.remove(session);
+        m_avatarSources.remove(session);
+        m_avatarFailures.remove(session);
+        return {};
+    }
+    if (m_avatarUrls.value(session) != url) {
+        m_avatarUrls.insert(session, url);
+        m_avatarSources.remove(session);
+        m_avatarFailures.remove(session);
+    }
+    if (const QUrl source = m_avatarSources.value(session); !source.isEmpty()) {
+        return source;
+    }
+    if (m_avatarFailures.value(session) == url) {
+        return {};
+    }
+    const QString cached = m_cacheEnabled ? portraitCachePath(m_baseUrl + url) : QString{};
+    if (!cached.isEmpty() && QFileInfo::exists(cached)) {
+        const QUrl source = QUrl::fromLocalFile(cached);
+        m_avatarSources.insert(session, source);
+        return source;
+    }
+    const bool requestPending = std::ranges::any_of(
+        m_avatarRequests, [&session, &url](const QPair<QString, QString>& request) {
+            return request.first == session && request.second == url;
+        });
+    if (!requestPending) {
+        const QString tag = QStringLiteral("avatar:%1").arg(++m_nextAvatarRequest);
+        m_avatarRequests.insert(tag, {session, url});
+        m_api.getBytes(tag, url);
+    }
+    return {};
+}
+
+QUrl AppController::requestContactAvatarForName(const QString& name) {
+    if (name.isEmpty()) {
+        return {};
+    }
+    const QString url = m_contacts.avatarUrlsByName().value(name);
+    if (url.isEmpty()) {
+        m_contactAvatarUrls.remove(name);
+        m_contactAvatarSources.remove(name);
+        m_contactAvatarFailures.remove(name);
+        return {};
+    }
+    if (m_contactAvatarUrls.value(name) != url) {
         m_contactAvatarUrls.insert(name, url);
         m_contactAvatarSources.remove(name);
-        const QString cached = m_cacheEnabled ? portraitCachePath(m_baseUrl + url) : QString{};
-        if (!cached.isEmpty() && QFileInfo::exists(cached)) {
-            m_contactAvatarSources.insert(name, QUrl::fromLocalFile(cached));
-            continue;
-        }
-        if (m_restoringSnapshotCache) continue;
+        m_contactAvatarFailures.remove(name);
+    }
+    if (const QUrl source = m_contactAvatarSources.value(name); !source.isEmpty()) {
+        return source;
+    }
+    if (m_contactAvatarFailures.value(name) == url) {
+        return {};
+    }
+    const QString cached = m_cacheEnabled ? portraitCachePath(m_baseUrl + url) : QString{};
+    if (!cached.isEmpty() && QFileInfo::exists(cached)) {
+        const QUrl source = QUrl::fromLocalFile(cached);
+        m_contactAvatarSources.insert(name, source);
+        return source;
+    }
+    const bool requestPending = std::ranges::any_of(
+        m_contactAvatarRequests, [&name](const QString& pending) { return pending == name; });
+    if (!requestPending) {
         const QString tag = QStringLiteral("contact-avatar:%1").arg(++m_nextAvatarRequest);
         m_contactAvatarRequests.insert(tag, name);
         m_api.getBytes(tag, url);
     }
-    ++m_avatarRevision;
-    emit avatarRevisionChanged();
+    return {};
 }
 
 void AppController::requestRecoverableClips(const QString& session) {

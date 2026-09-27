@@ -7,6 +7,7 @@ TestCase {
     when: windowShown
     visible: true
     width: 900; height: 720
+    property int hubHeight: 720
     QtObject {
         id: stub
         property bool connected: true
@@ -24,6 +25,8 @@ TestCase {
         property var avatarMotion: QtObject { property bool reducedMotion: true; property int revision: 0; function working(s) { return false; } function phase(s) { return 0; } function observe(o, v) {} }
         property int avatarRevision: 0
         property var calls: []
+        property var contactRows: [{name: "Nadia", description: "Calm planner", symbol: "N"}, {name: "Theo", description: "Builder", symbol: "T"}]
+        property var contactAvatarNames: []
         property string launchDirectory: ""
         property string selected: ""
         signal modelCatalogChanged()
@@ -33,10 +36,11 @@ TestCase {
         function clearError() { errorMessage = ""; }
         function requestComposerFocus(pane) {}
         function avatarSource(session) { return ""; }
+        function contactAvatarSource(name) { contactAvatarNames.push(name); return ""; }
         function modelsForBackend(backend) { return backend === "claude" ? [{id: "opus", label: "Opus"}, {id: "sonnet", label: "Sonnet"}] : []; }
         function effortsForModel(backend, model) { return model === "opus" ? [{id: "high", label: "High"}] : []; }
         function matchingContacts(query) {
-            return [{name: "Nadia", description: "Calm planner", symbol: "N"}, {name: "Theo", description: "Builder", symbol: "T"}]
+            return contactRows
                 .filter(c => c.name.toLowerCase().includes(String(query).trim().toLowerCase()));
         }
         function matchingAgents(query) {
@@ -51,8 +55,18 @@ TestCase {
         function startAvailableContact(b, m, e) { calls.push(["startAvailableContact", b, m, e]); return true; }
         function loadLaunchDirectories(q) {}
     }
-    Component { id: factory; Clarp.NewSessionHub { width: testCase.width; height: testCase.height; controller: stub } }
-    function init() { stub.calls = []; stub.startingContact = ""; stub.errorMessage = ""; stub.connected = true; stub.selected = ""; stub.lastBackend = "codex"; }
+    Component { id: factory; Clarp.NewSessionHub { width: testCase.width; height: testCase.hubHeight; controller: stub } }
+    function init() {
+        testCase.hubHeight = 720;
+        stub.calls = [];
+        stub.contactRows = [{name: "Nadia", description: "Calm planner", symbol: "N"}, {name: "Theo", description: "Builder", symbol: "T"}];
+        stub.contactAvatarNames = [];
+        stub.startingContact = "";
+        stub.errorMessage = "";
+        stub.connected = true;
+        stub.selected = "";
+        stub.lastBackend = "codex";
+    }
     function opened() {
         const hub = createTemporaryObject(factory, testCase);
         hub.open(false, false);
@@ -141,6 +155,22 @@ TestCase {
         compare(stub.calls.length, 1);
         compare(stub.calls[0], ["startAnonymousAgent", "claude", "opus", "high"]);
         compare(stub.launchDirectory, "/tmp/work");
+    }
+    function test_contactPortraitsWaitUntilCardsAreVisible() {
+        testCase.hubHeight = 260;
+        stub.contactRows = Array.from({length: 24}, (_, i) => ({
+            name: "Contact " + String(i).padStart(2, "0"), description: "Lazy contact", symbol: "C"
+        }));
+        const hub = opened();
+        wait(80);
+        verify(stub.contactAvatarNames.length > 0);
+        verify(stub.contactAvatarNames.length < stub.contactRows.length);
+        compare(stub.contactAvatarNames.indexOf("Contact 23"), -1);
+        const cards = findChild(hub, "contactCards");
+        verify(cards !== null);
+        cards.contentY = cards.contentHeight - cards.height;
+        wait(80);
+        verify(stub.contactAvatarNames.indexOf("Contact 23") >= 0);
     }
     function test_errorReenablesConfirm() {
         const hub = opened();

@@ -328,10 +328,15 @@ Rectangle {
             ScrollBar.vertical: ScrollBar {}
 
             delegate: PairRow {
+                id: pairRow
                 required property var modelData
+                readonly property bool portraitInViewport:
+                    pairRow.y + pairRow.height >= pairList.contentY
+                    && pairRow.y <= pairList.contentY + pairList.height
                 room: modelData
                 controller: root.controller
                 width: pairList.width
+                loadPortrait: pairRow.portraitInViewport
                 onChatSelected: root.chatSelected()
             }
 
@@ -412,9 +417,14 @@ Rectangle {
             boundsBehavior: Flickable.StopAtBounds
 
             delegate: ChatRow {
+                id: chatRow
+                readonly property bool portraitInViewport:
+                    chatRow.y + chatRow.height >= chats.contentY
+                    && chatRow.y <= chats.contentY + chats.height
                 controller: root.controller
                 collapsed: root.collapsed
                 archived: root.showingArchive
+                loadPortrait: chatRow.portraitInViewport
                 onChatSelected: root.chatSelected()
                 onProcessesRequested: (session, anchor) => processPopover.openFor(session, anchor)
                 onDoneHelpersToggled: parentAgentId => roster.toggleDoneHelpers(parentAgentId)

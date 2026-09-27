@@ -372,6 +372,9 @@ Rectangle {
                         required property var modelData
                         required property int index
                         readonly property bool selected: root.selectedKey === String(modelData.key)
+                        readonly property bool portraitInViewport:
+                            cardRow.y + cardRow.height >= cards.contentY
+                            && cardRow.y <= cards.contentY + cards.height
                         objectName: "contactCard-" + String(modelData.name)
                         width: ListView.view.width
                         height: 56
@@ -397,11 +400,8 @@ Rectangle {
                                 symbol: ""
                                 avatarSize: 36; cornerRadius: 18
                                 showPortrait: true
-                                portraitSource: {
-                                    root.controller.avatarRevision;
-                                    return !cardRow.modelData.inChat && root.controller.contactAvatarSource
-                                        ? root.controller.contactAvatarSource(String(cardRow.modelData.name)) : "";
-                                }
+                                loadPortrait: cardRow.portraitInViewport
+                                contactName: !cardRow.modelData.inChat ? String(cardRow.modelData.name) : ""
                             }
                             ColumnLayout {
                                 Layout.fillWidth: true

@@ -36,6 +36,7 @@ ItemDelegate {
     readonly property bool keyboardCurrent: ListView.isCurrentItem && ListView.view !== null && ListView.view.activeFocus
     property bool collapsed: false
     property bool archived: false
+    property bool loadPortrait: true
     signal chatSelected
     signal processesRequested(string session, Item anchor)
     signal doneHelpersToggled(string parentAgentId)
@@ -116,6 +117,7 @@ ItemDelegate {
             cornerRadius: 24
             avatarSize: row.collapsed ? 38 : (row.treeDepth > 0 ? 36 : 48)
             showPortrait: true
+            loadPortrait: row.loadPortrait
             opacity: row.archived || row.finishedHelper ? 0.65 : 1
 
             Loader {
