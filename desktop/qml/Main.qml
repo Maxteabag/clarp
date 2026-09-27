@@ -298,6 +298,16 @@ ApplicationWindow {
         property alias sidebarExpandedWidth: root.sidebarExpandedWidth
         property alias redesignedSidebarSized: root.redesignedSidebarSized
     }
+    // The sidebar starts shown on a first launch and then follows the last
+    // Ctrl+B choice. Not an alias: the launch can force it open
+    // (--no-new-agent), and that must not overwrite the saved choice.
+    Core.Settings {
+        id: sidebarSetting
+        category: "appearance"
+        property bool sidebarVisible: true
+    }
+    property bool sidebarRestored: false
+    onSidebarVisibleChanged: if (sidebarRestored) sidebarSetting.sidebarVisible = sidebarVisible
 
     onActiveChanged: {
         if (active && !root.overlayVisible())
@@ -305,6 +315,8 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        if (!root.sidebarVisible) root.sidebarVisible = sidebarSetting.sidebarVisible;
+        root.sidebarRestored = true;
         app.markStartup("main-qml-completed");
         if (!redesignedSidebarSized) {
             sidebarExpandedWidth = sidebarExpandedWidth === 232 ? 354 : Math.max(298, sidebarExpandedWidth);

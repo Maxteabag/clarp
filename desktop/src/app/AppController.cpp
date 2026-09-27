@@ -1220,8 +1220,11 @@ void AppController::selectSession(const QString& session) {
         requestTail(session);
         return;
     }
-    m_api.postJson(QStringLiteral("select:") + session, QStringLiteral("/select"),
-                   {{QStringLiteral("session"), session}});
+    // The Host refuses focus on a janitor (inspection-only); reading it is fine.
+    const Agent* selected = m_agents.find(session);
+    if (selected == nullptr || !selected->janitor)
+        m_api.postJson(QStringLiteral("select:") + session, QStringLiteral("/select"),
+                       {{QStringLiteral("session"), session}});
     requestTail(session);
     requestRecoverableClips(session);
 }

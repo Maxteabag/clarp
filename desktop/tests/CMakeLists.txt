@@ -174,11 +174,17 @@ set_tests_properties(clarp-desktop-settings-keyboard PROPERTIES
 )
 
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config/MaxTeaBag")
-# A saved expanded sidebar must not override the collapsed startup contract.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config/MaxTeaBag/ClarpScreenshot.conf"
-    "[appearance]\nsidebarVisible=true\n")
+# A sidebar hidden with Ctrl+B stays hidden on the next launch. The app saves
+# the choice again while the lane toggles it, so the seed is restored before
+# every run.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/seed.conf"
+    "[appearance]\nsidebarVisible=false\n")
+add_test(NAME clarp-desktop-context-keyboard-seed COMMAND ${CMAKE_COMMAND} -E copy
+    "${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/seed.conf"
+    "${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config/MaxTeaBag/ClarpScreenshot.conf")
+set_tests_properties(clarp-desktop-context-keyboard-seed PROPERTIES FIXTURES_SETUP context-keyboard-seed)
 add_test(NAME clarp-desktop-context-keyboard COMMAND clarp-desktop)
-set_tests_properties(clarp-desktop-context-keyboard PROPERTIES TIMEOUT 20
+set_tests_properties(clarp-desktop-context-keyboard PROPERTIES TIMEOUT 20 FIXTURES_REQUIRED context-keyboard-seed
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_IM_MODULE=compose;QT_FORCE_STDERR_LOGGING=1;CLARP_BASE_URL=http://127.0.0.1:1;CLARP_TOKEN=offline-fixture;CLARP_INSTANCE_NAME=context-${clarp_settings_keyboard_instance};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/config;CLARP_SCREENSHOT_SCENARIO=preview-versions;CLARP_SCREENSHOT_CONTEXT_KEYBOARD=1;CLARP_SCREENSHOT_DELAY_MS=12000;CLARP_SCREENSHOT_PATH=${CMAKE_CURRENT_BINARY_DIR}/context-keyboard/capture.png")
 
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/pair-sidebar/config")

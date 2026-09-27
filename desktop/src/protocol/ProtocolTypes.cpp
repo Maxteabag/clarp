@@ -121,6 +121,7 @@ Agent Agent::fromJson(const QJsonObject& object) {
     agent.busy = boolValue(object, "busy") || isBusyState(agent.latestState);
     agent.focused = boolValue(object, "focused");
     agent.muted = boolValue(object, "muted");
+    agent.janitor = boolValue(object, "is_janitor");
     agent.heartbeatEnabled = boolValue(object, "heartbeat_enabled");
     agent.dreamingEnabled = boolValue(object, "dreaming_enabled");
     agent.archived = !object.value(QStringLiteral("archived_at")).isNull() &&
