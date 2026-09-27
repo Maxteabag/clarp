@@ -16,6 +16,7 @@ import uuid
 from typing import Any, Callable
 
 from . import agents, db
+from .policies import stale_work as stale_work_policy
 
 
 ACTIVE_STATUSES = frozenset({"queued", "running"})
@@ -41,7 +42,8 @@ def active_by_agent() -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = {}
     for row in db.conn().execute(
             f"SELECT job_id, agent_id, kind, title, detail, metadata_json, "
-            f"progress_text, COALESCE(progress_at, started_at) AS active_at "
+            f"progress_text, COALESCE(progress_at, started_at) AS active_at, "
+            f"COALESCE(heartbeat_at, updated_at) AS heartbeat_at "
             f"FROM background_jobs WHERE status IN ({marks}) "
             "AND COALESCE(agent_id, '') != '' "
             "ORDER BY started_at", tuple(sorted(ACTIVE_STATUSES))):
@@ -56,6 +58,7 @@ def active_by_agent() -> dict[str, list[dict[str, Any]]]:
             "metadata": metadata if isinstance(metadata, dict) else {},
             "progress_text": str(row["progress_text"] or ""),
             "active_at": int(row["active_at"] or 0),
+            "heartbeat_at": int(row["heartbeat_at"] or 0),
         })
     return out
 
@@ -738,6 +741,24 @@ def set_log(
     return get(job_id, reconcile=False)
 
 
+def add_note(job_id: str, note: str) -> bool:
+    """Put a Host note on an active job's timeline without changing it."""
+    now = db.now_ms()
+    c = db.conn()
+    c.execute("BEGIN IMMEDIATE")
+    try:
+        row = c.execute(
+            "SELECT status FROM background_jobs WHERE job_id=?", (job_id,)).fetchone()
+        write = bool(row and row["status"] in ACTIVE_STATUSES)
+        if write:
+            _record_event(c, job_id, now, note=note)
+        c.execute("COMMIT")
+    except BaseException:
+        c.execute("ROLLBACK")
+        raise
+    return write
+
+
 def timeline(job_id: str, *, limit: int = TIMELINE_LIMIT) -> list[dict]:
     """The job's change feed, oldest first: status changes and progress."""
     rows = db.conn().execute(
@@ -995,19 +1016,28 @@ def run_terminal_generation_cleanup(
 def reconcile_stale(
     *, job_id: str | None = None, now_ms: int | None = None,
     process_probe: Callable[[int, str], bool] | None = None,
+    thresholds: stale_work_policy.Thresholds | None = None,
 ) -> list[str]:
     """Fail active jobs nobody is running any more.
 
-    Two independent reasons end a running job: its heartbeat is older than
+    Three independent reasons end a running job: its heartbeat is older than
     `heartbeat_timeout_ms` (whether or not a worker PID is recorded, since a
-    live but wedged worker is no better than a dead one), or its recorded
-    worker PID no longer matches the start token it registered with. The
-    second is checked on every pass, so a worker killed with `systemctl stop`
-    drops out at once instead of a heartbeat timeout later.
+    live but wedged worker is no better than a dead one), its recorded
+    worker PID no longer matches the start token it registered with, or its
+    heartbeat has been silent past the stale-work threshold plus a grace,
+    there is no worker PID to verify and an agent owns it (`heartbeat_lost`, see
+    `policies.stale_work`). The second is checked on every pass, so a worker
+    killed with `systemctl stop` drops out at once instead of a heartbeat
+    timeout later. The third notes the job on its timeline when it first goes
+    stale, so the failure that follows is not a surprise.
     """
     now = int(now_ms if now_ms is not None else db.now_ms())
     probe = process_probe or worker_is_alive
-    params: list[Any] = [now]
+    if thresholds is None:
+        from . import config
+        thresholds = stale_work_policy.from_config(config.load())
+    stale_ms = max(0, int(thresholds.job_stale_after_ms))
+    params: list[Any] = [now, stale_ms, now, stale_ms]
     job_clause = ""
     if job_id:
         job_clause = "AND job_id=?"
@@ -1017,7 +1047,10 @@ def reconcile_stale(
              WHERE status IN ('queued','running')
                AND ((? - COALESCE(heartbeat_at, updated_at)) > heartbeat_timeout_ms
                     OR (status='running' AND COALESCE(worker_pid, 0) > 0
-                        AND worker_start_token != ''))
+                        AND worker_start_token != '')
+                    OR (status='running' AND owner_kind='agent' AND ? > 0
+                        AND (? - MAX(COALESCE(heartbeat_at, updated_at),
+                                     COALESCE(progress_at, 0))) > ?))
                {job_clause}""",
         tuple(params),
     ).fetchall()
@@ -1039,7 +1072,25 @@ def reconcile_stale(
         pid = int(row["worker_pid"] or 0)
         token = str(row["worker_start_token"] or "")
         alive = bool(pid and token and probe(pid, token))
-        if not expired and (alive or not (pid and token)):
+        if not expired and not (pid and token):
+            if str(row["owner_kind"] or "agent") != "agent":
+                continue
+            # Nothing to probe: only the stale-work rule can see it is gone.
+            # Computer-owned jobs (updates, installs) keep their own timeout.
+            last_sign = max(int(row["heartbeat_at"] or row["updated_at"]),
+                            int(row["progress_at"] or 0))
+            verdict = stale_work_policy.job_heartbeat(
+                heartbeat_age_ms=now - last_sign, worker_verified=False,
+                thresholds=thresholds)
+            if verdict == stale_work_policy.JobVerdict.LOST:
+                if _fail_stale_observation(
+                        row, now=now, reason=stale_work_policy.HEARTBEAT_LOST,
+                        require_expired=False, note=stale_work_policy.LOST_NOTE):
+                    changed.append(row["job_id"])
+            elif verdict == stale_work_policy.JobVerdict.STALE:
+                _note_stale_once(row, now=now, since=last_sign)
+            continue
+        if not expired and alive:
             continue
         terminal_reason = (
             "heartbeat_expired" if alive or not (pid or token)
@@ -1052,6 +1103,7 @@ def reconcile_stale(
 
 def _fail_stale_observation(
     row: Any, *, now: int, reason: str, require_expired: bool = True,
+    note: str = "",
 ) -> bool:
     """Fail `row` only if nothing touched it since it was read."""
     observed_heartbeat = int(row["heartbeat_at"] or row["updated_at"])
@@ -1074,12 +1126,44 @@ def _fail_stale_observation(
             ),
         ).rowcount
         if changed:
-            _record_event(c, row["job_id"], now)
+            _record_event(c, row["job_id"], now, note=note)
         c.execute("COMMIT")
     except BaseException:
         c.execute("ROLLBACK")
         raise
     return bool(changed)
+
+
+def _note_stale_once(row: Any, *, now: int, since: int) -> bool:
+    """Leave one stale-heartbeat note per silence on a job's timeline.
+
+    Guarded by the revision read with the row, so a heartbeat or progress
+    line that lands meanwhile wins and no note is written.
+    """
+    c = db.conn()
+    noted_sql = """SELECT 1 FROM background_job_events
+                    WHERE job_id=? AND note=? AND observed_at>=? LIMIT 1"""
+    noted_args = (row["job_id"], stale_work_policy.STALE_NOTE, since)
+    # Read first: this runs on every watcher pass, and the write lock is only
+    # worth taking the one time the note is missing.
+    if c.execute(noted_sql, noted_args).fetchone():
+        return False
+    c.execute("BEGIN IMMEDIATE")
+    try:
+        current = c.execute(
+            "SELECT status,revision FROM background_jobs WHERE job_id=?",
+            (row["job_id"],)).fetchone()
+        noted = c.execute(noted_sql, noted_args).fetchone()
+        write = bool(current and current["status"] == "running"
+                     and int(current["revision"]) == int(row["revision"])
+                     and not noted)
+        if write:
+            _record_event(c, row["job_id"], now, note=stale_work_policy.STALE_NOTE)
+        c.execute("COMMIT")
+    except BaseException:
+        c.execute("ROLLBACK")
+        raise
+    return write
 
 
 def events_after(event_id: int, *, limit: int = 100) -> list[dict]:
@@ -1182,7 +1266,7 @@ def _public(row: Any, *, observed_at: int | None = None) -> dict:
     age = max(0, now - int(heartbeat_at)) if heartbeat_at is not None else None
     out["heartbeat_age_ms"] = age
     monitor_lost = out.get("terminal_reason") in {
-        "heartbeat_expired", "worker_vanished",
+        "heartbeat_expired", "worker_vanished", stale_work_policy.HEARTBEAT_LOST,
     }
     if monitor_lost:
         freshness = "stale"

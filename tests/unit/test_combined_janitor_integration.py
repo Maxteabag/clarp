@@ -1,9 +1,9 @@
 from lib import db,janitors,janitor_builtins,janitor_design_policy
 import pytest
 
-def test_all_five_roles_and_deterministic_exemption():
+def test_all_six_roles_and_deterministic_exemption():
     roles=janitor_builtins.ensure_builtins()
-    assert set(roles)=={'message-delegator','tool-explainer','audio-bookkeeper','heartbeat-decider','quota-monitor'}
+    assert set(roles)=={'message-delegator','tool-explainer','audio-bookkeeper','heartbeat-decider','quota-monitor','label-auditor'}
     audio=roles['audio-bookkeeper']
     assert audio['execution']=={'executor':'deterministic','provider':'local'}
     assert audio['model']==audio['effort']==''

@@ -40,6 +40,7 @@ open. `GET /judgments/decisions?site=junk&limit=50` reads the decision log.
 | `naming` | the exact/fuzzy name matchers in `routing.py` | picks the addressed agent, or nobody |
 | `router` | the OpenAI routing call in `orchestrator.py` | picks the action and the agent |
 | `watch` | reserved; the message watcher is a separate process | not wired yet |
+| `labels` | nothing — the Label checker Janitor asks only when this is on | lists working labels that look wrong in Updates; changes nothing |
 
 ## How "optional" works
 

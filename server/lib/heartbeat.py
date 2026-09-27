@@ -778,6 +778,15 @@ def _latest_promotion_signal_ms() -> int:
         return 0
 
 
+def outside_active_hours(now: float) -> bool:
+    """Whether ``now`` (epoch seconds) falls in the configured quiet hours.
+
+    Other background work that should stay quiet when heartbeats do (the
+    Label checker Janitor) asks this instead of reading the variable itself.
+    """
+    return _outside_active_hours(now)
+
+
 def _outside_active_hours(now: float) -> bool:
     """Optional OpenClaw-style quiet-hours gate.
 

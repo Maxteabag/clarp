@@ -18,7 +18,8 @@ from . import turn_lifecycle
 from .turn_lifecycle import TurnEvent
 
 
-ROLES = ("message-delegator", "tool-explainer", "audio-bookkeeper", "heartbeat-decider", "quota-monitor")
+ROLES = ("message-delegator", "tool-explainer", "audio-bookkeeper", "heartbeat-decider", "quota-monitor",
+         "label-auditor")
 # Optional demand workers are created from the catalog, never installed: the
 # Hotseat switcher needs the local `hotseat` CLI, which not every Host has.
 OPTIONAL_ROLES = ("account-hotseat",)
@@ -67,7 +68,7 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
     if not isinstance(initial, dict) or set(initial) - set(ROLES):
         raise janitors.JanitorError("Invalid built-in seed configuration")
     with janitors._write() as c:
-        for trigger, name in [("heartbeat-decision-requested", "When continuity needs review"), ("quota-check-requested", "When provider quota needs checking"), ("account-switch-requested", "When the account in use runs low")]:
+        for trigger, name in [("heartbeat-decision-requested", "When continuity needs review"), ("quota-check-requested", "When provider quota needs checking"), ("account-switch-requested", "When the account in use runs low"), ("label-audit-requested", "When working labels need checking")]:
             store.ensure_trigger_definition(c, trigger, name)
         for role in ROLES:
             if store.builtin_agent_id(role, c):
@@ -76,7 +77,8 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
             seed = initial.get(role, {})
             if not isinstance(seed, dict) or set(seed) - {"enabled", "backend", "model", "effort", "provider", "options"}:
                 raise janitors.JanitorError("Invalid built-in seed configuration")
-            enabled = seed.get("enabled", role in {"tool-explainer", "audio-bookkeeper"})
+            # The label checker costs nothing until its Jev judgment site is on.
+            enabled = seed.get("enabled", role in {"tool-explainer", "audio-bookkeeper", "label-auditor"})
             if not isinstance(enabled, bool):
                 raise janitors.JanitorError("Enabled must be a boolean")
             backend = seed.get("backend", defaults["recommended_backend"])

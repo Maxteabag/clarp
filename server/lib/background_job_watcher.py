@@ -2,19 +2,24 @@
 from __future__ import annotations
 
 import threading
+import time
 
-from . import background_jobs, events
+from . import background_jobs, events, stale_work
 from .log import log_exception
 from .timing import SERVER_TIMING
 
 
 class BackgroundJobWatcher:
     INTERVAL_SEC = SERVER_TIMING.state_watcher_poll_sec
+    # Helper and status staleness is measured in tens of minutes; once a
+    # minute is plenty and keeps the per-agent scan off the fast tick.
+    STALE_WORK_INTERVAL_SEC = 60.0
 
     def __init__(self, stream):
         self._statuses: dict[str, str] = {}
         self.stream = stream
         self._last_id = 0
+        self._stale_work_due = 0.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -37,6 +42,12 @@ class BackgroundJobWatcher:
                 self._poll_once()
             except Exception as exc:  # noqa: BLE001
                 log_exception("backgroundJobWatcherTickFail", exc)
+            if time.monotonic() >= self._stale_work_due:
+                self._stale_work_due = time.monotonic() + self.STALE_WORK_INTERVAL_SEC
+                try:
+                    stale_work.sweep(self.stream)
+                except Exception as exc:  # noqa: BLE001
+                    log_exception("staleWorkSweepFail", exc)
 
     def _poll_once(self) -> None:
         changes = background_jobs.events_after(self._last_id)

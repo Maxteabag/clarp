@@ -114,6 +114,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             _migrate_to_v94(con)
         if version < 95:
             _migrate_to_v95(con)
+        if version < 96:
+            _migrate_to_v96(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -399,6 +401,21 @@ def _migrate_to_v94(con: sqlite3.Connection) -> None:
     """Index release expiry: pruning and the 4096-row cap scanned the table."""
     con.execute("CREATE INDEX IF NOT EXISTS tool_explanation_releases_expiry "
                 "ON tool_explanation_releases(expires_at)")
+
+
+def _migrate_to_v96(con: sqlite3.Connection) -> None:
+    """When an agent's own status line was written.
+
+    Stale-work reconcile clears a status nobody refreshed, so it needs the
+    write time. A status that predates the column is stamped with the upgrade
+    time: its age is unknown, and this starts its clock rather than guessing.
+    """
+    columns = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if "custom_status_at" not in columns:
+        con.execute("ALTER TABLE agents ADD COLUMN custom_status_at INTEGER")
+    con.execute("UPDATE agents SET custom_status_at = ? "
+                "WHERE custom_status != '' AND custom_status_at IS NULL",
+                (db.now_ms(),))
 
 
 def _migrate_to_v95(con: sqlite3.Connection) -> None:

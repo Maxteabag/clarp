@@ -106,23 +106,11 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     exhausted = _exhausted_backends()
     fallback_chains = _fallback_chains() if exhausted else {}
     agent_rows = agents_db.list_agents()
-    # Helper tree counts come from the rows already read: no extra query.
-    child_count: dict[str, int] = {}
-    running_children: dict[str, int] = {}
-    helper_sessions: dict[str, set[str]] = {}
-    # What each running helper is doing, so the parent's status line can say
-    # it instead of repeating the count the badge already shows.
-    helper_activity: dict[str, list[dict[str, Any]]] = {}
-    for a in agent_rows:
-        parent_id = a.get("parent_agent_id")
-        if parent_id:
-            child_count[parent_id] = child_count.get(parent_id, 0) + 1
-            if (a.get("role") or "agent") == "helper":
-                helper_sessions.setdefault(parent_id, set()).add(str(a.get("session") or ""))
-            if a.get("helper_state") == "running":
-                running_children[parent_id] = running_children.get(parent_id, 0) + 1
-                helper_activity.setdefault(parent_id, []).append(
-                    _helper_activity(a, states.get(a["agent_id"], {}), visible_labels))
+    tree = helper_tree(agent_rows, states, visible_labels)
+    child_count = tree.child_count
+    running_children = tree.running_children
+    helper_sessions = tree.helper_sessions
+    helper_activity = tree.helper_activity
     for a in agent_rows:
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
@@ -149,15 +137,6 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         latest_state = state.get("kind")
         if active and latest_state not in {"thinking", "tool", "compacting", "background"}:
             latest_state = "thinking"
-        # Agent-authored free-text status persists separately from run state so
-        # it survives leader turn transitions. Older BACKGROUND rows may still
-        # carry a detail label, so keep that as a compatibility fallback.
-        _sdetail = state.get("detail")
-        if not isinstance(_sdetail, dict):
-            _sdetail = {}
-        status_text = str(visible_labels.get(agent_id, a.get("custom_status")) or "").strip() or None
-        if status_text is None and agent_id not in visible_labels and state.get("kind") == "background":
-            status_text = str(_sdetail.get("label") or "").strip() or None
         # Two different things keep an agent busy after its turn ends. A
         # SUB-AGENT is a Clarp helper agent it created (role helper), counted
         # from its running children. A BACKGROUND PROCESS is a durable job
@@ -169,8 +148,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         sub_agents = running_children.get(agent_id, 0)
         if (processes or sub_agents) and latest_state not in {"thinking", "tool", "compacting", "background"}:
             latest_state = "background"
-        if (processes or sub_agents) and status_text is None:
-            status_text = _work_summary(helper_activity.get(agent_id, []), processes)
+        status_text = shown_status(a, state, visible_labels,
+                                   helper_activity.get(agent_id, []), processes)
         turn_started_at = int(state.get('turn_started_at') or 0)
         if active and not turn_started_at:
             turn_started_at = int(rt.get('open_turn_started_at') or 0)
@@ -321,6 +300,55 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         # The menu of MCP servers an agent can be granted (from ~/.claude.json).
         "available_mcp_servers": sorted(config.read_global_mcp_servers().keys()),
     }
+
+
+class HelperTree:
+    """Helper counts per parent, from the agent rows already read."""
+
+    def __init__(self) -> None:
+        self.child_count: dict[str, int] = {}
+        self.running_children: dict[str, int] = {}
+        self.helper_sessions: dict[str, set[str]] = {}
+        # What each running helper is doing, so the parent's status line can
+        # say it instead of repeating the count the badge already shows.
+        self.helper_activity: dict[str, list[dict[str, Any]]] = {}
+
+
+def helper_tree(agent_rows: list[dict[str, Any]], states: dict[str, dict[str, Any]],
+                visible_labels: dict[str, Any]) -> HelperTree:
+    tree = HelperTree()
+    for a in agent_rows:
+        parent_id = a.get("parent_agent_id")
+        if parent_id:
+            tree.child_count[parent_id] = tree.child_count.get(parent_id, 0) + 1
+            if (a.get("role") or "agent") == "helper":
+                tree.helper_sessions.setdefault(parent_id, set()).add(str(a.get("session") or ""))
+            if a.get("helper_state") == "running":
+                tree.running_children[parent_id] = tree.running_children.get(parent_id, 0) + 1
+                tree.helper_activity.setdefault(parent_id, []).append(
+                    _helper_activity(a, states.get(a["agent_id"], {}), visible_labels))
+    return tree
+
+
+def shown_status(agent: dict[str, Any], state: dict[str, Any], visible_labels: dict[str, Any],
+                 helpers: list[dict[str, Any]], processes: list[dict[str, Any]]) -> str | None:
+    """The status line the apps show for ``agent``, or None.
+
+    Agent-authored free-text status persists separately from run state so it
+    survives leader turn transitions. Older BACKGROUND rows may still carry a
+    detail label, so keep that as a compatibility fallback. Without either,
+    running helpers or processes describe the activity.
+    """
+    agent_id = agent["agent_id"]
+    detail = state.get("detail")
+    if not isinstance(detail, dict):
+        detail = {}
+    text = str(visible_labels.get(agent_id, agent.get("custom_status")) or "").strip() or None
+    if text is None and agent_id not in visible_labels and state.get("kind") == "background":
+        text = str(detail.get("label") or "").strip() or None
+    if (processes or helpers) and text is None:
+        text = _work_summary(helpers, processes)
+    return text
 
 
 # How a running helper's latest state reads in its parent's roll-up.
