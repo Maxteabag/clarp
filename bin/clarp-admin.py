@@ -150,7 +150,7 @@ RETRY_DELAY_MAX = 16.0
 
 
 def api_request(method: str, path: str, body=None, *, retries: int = 0,
-                retry_delay: float = 1.0, sleep=time.sleep):
+                retry_delay: float = 1.0, sleep=time.sleep, timeout: float = 15):
     base, token = server_connection()
     data = json.dumps(body).encode() if body is not None else None
     attempt, delay = 0, retry_delay
@@ -160,7 +160,7 @@ def api_request(method: str, path: str, body=None, *, retries: int = 0,
             headers={"Content-Type": "application/json"})
         if token: request.add_header("Authorization", f"Bearer {token}")
         try:
-            with urllib.request.urlopen(request, timeout=15) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw = response.read()
             return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
@@ -993,6 +993,30 @@ def cmd_sessions(_args) -> int:
              FROM agents WHERE deleted_at IS NULL ORDER BY persona,session"""
     ).fetchall()
     print(json.dumps([dict(row) for row in rows], indent=2))
+    return 0
+
+
+# POST /oracle/connect waits for the phone to settle the handoff: every phase
+# deadline in docs/oracle-handoff.md (10 + 10 + 30 s) plus slack.
+ORACLE_CONNECT_TIMEOUT = 60
+
+
+def cmd_oracle(args) -> int:
+    """Put the user's live Oracle call through to an agent, or back to Oracle."""
+    body = {"agent": args.agent}
+    if args.principal:
+        body["principal"] = args.principal
+    try:
+        result = api_request("POST", "/oracle/connect", body, timeout=ORACLE_CONNECT_TIMEOUT)
+    except urllib.error.HTTPError as exc:
+        raw = exc.read()
+        try:
+            detail = json.loads(raw) if raw else {"error": f"HTTP {exc.code}"}
+        except ValueError:
+            detail = {"error": raw.decode("utf-8", "replace") or f"HTTP {exc.code}"}
+        print(json.dumps(detail, indent=2))
+        return 1
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -2302,6 +2326,15 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     explanations_revoke.add_argument("signature")
     explanations_revoke.set_defaults(func=cmd_explanations)
     sub.add_parser("sessions").set_defaults(func=cmd_sessions)
+    oracle = sub.add_parser(
+        "oracle", help="put the user's live Oracle call through to an agent").add_subparsers(
+        dest="oracle_command", required=True)
+    oracle_connect = oracle.add_parser(
+        "connect", help="hand the live Oracle call to an agent's hands-free session, or 'oracle' to return")
+    oracle_connect.add_argument("agent", help="agent session id or visible persona name, or 'oracle'")
+    oracle_connect.add_argument("--principal", default="",
+                                help="paired device id, when several calls are live")
+    oracle_connect.set_defaults(func=cmd_oracle)
     onboard = sub.add_parser("onboard")
     onboard.add_argument("--url", default="")
     onboard.add_argument("--name", default="")

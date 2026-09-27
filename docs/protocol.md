@@ -360,6 +360,7 @@ Event types and payloads:
 | `attention-updated` | `attention_count` | The number of items awaiting the user changed. Extension surface. |
 | `background-job-updated` | `change_revision`, `observed_at`, `job_id`, `session`, `agent_id`, `status`, `job` | A durable background job changed; `job` is the full row. Extension surface. |
 | `location-request` | `session` | An agent asked for the user's location; show the one-tap share prompt for that session. Extension surface. |
+| `oracle-handoff` | `handoff_id`, `parent_handoff_id`, `host_id`, `principal`, `generation`, `revision`, `direction`, `mode`, `state`, `reason`, `oracle_call`, `agent`, `oracle`, `issued_at`, `server_now`, `ttl_ms`, `expires_at` | An Oracle call is being put through to an agent's hands-free session or back to Oracle. Apply the fence and phase rules in [oracle-handoff.md](oracle-handoff.md); act only for your own `principal`. Extension surface. |
 | `calendar-request` | `request_id`, `session`, `title`, `start`, `end`, `time_zone`, `location`, `notes`, `url`, `all_day`, `calendar` | An agent asked the app to write an Apple Calendar event. Extension surface. |
 | `goal-updated` | `agent_id`, `session`, `goal` | The agent's standing objective changed; `goal` is the new goal or null. Extension surface. |
 | `orchestrator-decision` | `decision_id`, `trace_id`, `action`, `kind`, `target_session`, `confidence`, `reason` | Hands-free routing picked (or declined to pick) an agent for an utterance. Informational. |

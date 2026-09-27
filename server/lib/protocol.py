@@ -39,6 +39,9 @@ class SSEType:
     # The orchestrator routed (or declined to route) a hands-free utterance.
     # Carries the decision so a client can show why an agent was picked.
     ORCHESTRATOR_DECISION = "orchestrator-decision"
+    # An Oracle handoff changed state: the call is being put through to an
+    # agent's hands-free session or back to Oracle (docs/oracle-handoff.md).
+    ORACLE_HANDOFF = "oracle-handoff"
 
     @classmethod
     def valid(cls) -> set[str]:
