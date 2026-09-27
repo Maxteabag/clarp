@@ -10,6 +10,9 @@ ApplicationWindow {
     id: root
 
     property bool launchOnStartup: false
+    // Hidden panels are built after the first frame, not before it.
+    property bool panelsReady: false
+    onFrameSwapped: if (!panelsReady) panelsReady = true
     property string relaunchSession: ""
     property string relaunchName: ""
     property string voiceSession: ""
@@ -303,6 +306,7 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        app.markStartup("main-qml-completed");
         if (!redesignedSidebarSized) {
             sidebarExpandedWidth = sidebarExpandedWidth === 232 ? 354 : Math.max(298, sidebarExpandedWidth);
             redesignedSidebarSized = true;
@@ -497,26 +501,37 @@ ApplicationWindow {
                     onOpenReport: artifactId => reportView.open(artifactId)
                 }
 
-                TeamsPanel {
+                DeferredPanel {
                     anchors.fill: parent
+                    ready: root.panelsReady
                     visible: root.selectedSurface === "teams"
-                    controller: app
-                    onOpenChat: session => {
-                        app.selectSession(session);
-                        root.selectedSurface = "chats";
+                    sourceComponent: TeamsPanel {
+                        controller: app
+                        onOpenChat: session => {
+                            app.selectSession(session);
+                            root.selectedSurface = "chats";
+                        }
                     }
                 }
 
-                SettingsPanel {
+                DeferredPanel {
                     id: settingsPanel
+                    readonly property bool dialogOpen: item !== null && item.dialogOpen
+                    function focusCurrent() {
+                        if (item !== null)
+                            item.focusCurrent();
+                    }
                     anchors.fill: parent
+                    ready: root.panelsReady
                     visible: root.selectedSurface === "settings"
-                    controller: app
-                    onCloseRequested: root.runCommand("chats")
-                    onOpenConnection: connection.visible = true
-                    onOpenOrchestrator: {
-                        orchestrator.visible = true;
-                        app.loadOrchestrator();
+                    sourceComponent: SettingsPanel {
+                        controller: app
+                        onCloseRequested: root.runCommand("chats")
+                        onOpenConnection: connection.visible = true
+                        onOpenOrchestrator: {
+                            orchestrator.visible = true;
+                            app.loadOrchestrator();
+                        }
                     }
                 }
             }
@@ -551,15 +566,16 @@ ApplicationWindow {
         z: 100
     }
 
-    AgentOverview {
+    DeferredPanel {
         id: overview
 
-        objectName: "overview"
         anchors.fill: parent
-        controller: app
-        visible: false
+        ready: root.panelsReady
         z: 80
-        onCloseRequested: visible = false
+        sourceComponent: AgentOverview {
+        objectName: "overview"
+        controller: app
+        onCloseRequested: overview.visible = false
         onStartRequested: (name) => {
             root.relaunchSession = "";
             root.relaunchName = name;
@@ -585,6 +601,7 @@ ApplicationWindow {
         onOrchestratorRequested: {
             orchestrator.visible = true;
             app.loadOrchestrator();
+        }
         }
     }
 
@@ -637,41 +654,44 @@ ApplicationWindow {
         }
     }
 
-    StartAgentDialog {
+    DeferredPanel {
         id: startAgent
-
-        objectName: "startAgent"
         anchors.fill: parent
-        controller: app
-        replaceSession: root.relaunchSession
-        initialName: root.relaunchName
-        visible: false
+        ready: root.panelsReady
         z: 90
-        onCloseRequested: visible = false
+        sourceComponent: StartAgentDialog {
+            objectName: "startAgent"
+            controller: app
+            replaceSession: root.relaunchSession
+            initialName: root.relaunchName
+            onCloseRequested: startAgent.visible = false
+        }
     }
 
-    VoiceDialog {
+    DeferredPanel {
         id: voiceDialog
-
-        objectName: "voiceDialog"
         anchors.fill: parent
-        controller: app
-        session: root.voiceSession
-        agentName: root.voiceName
-        visible: false
+        ready: root.panelsReady
         z: 95
-        onCloseRequested: visible = false
+        sourceComponent: VoiceDialog {
+            objectName: "voiceDialog"
+            controller: app
+            session: root.voiceSession
+            agentName: root.voiceName
+            onCloseRequested: voiceDialog.visible = false
+        }
     }
 
-    OrchestratorDialog {
+    DeferredPanel {
         id: orchestrator
-
-        objectName: "orchestrator"
         anchors.fill: parent
-        controller: app
-        visible: false
+        ready: root.panelsReady
         z: 95
-        onCloseRequested: visible = false
+        sourceComponent: OrchestratorDialog {
+            objectName: "orchestrator"
+            controller: app
+            onCloseRequested: orchestrator.visible = false
+        }
     }
 
     PreviewVersionPanel {
@@ -705,33 +725,46 @@ ApplicationWindow {
         }
     }
 
-    QueueDialog {
+    DeferredPanel {
         id: queueDialog
-        objectName: "queueDialog"
+        property string session
         anchors.fill: parent
-        controller: app
-        visible: false
+        ready: root.panelsReady
         z: 105
-        onCloseRequested: visible = false
+        sourceComponent: QueueDialog {
+            objectName: "queueDialog"
+            controller: app
+            session: queueDialog.session
+            onCloseRequested: queueDialog.visible = false
+        }
     }
 
-    ReportView {
+    DeferredPanel {
         id: reportView
+        function open(artifactId) {
+            visible = true;
+            item.open(artifactId);
+        }
         anchors.fill: parent
-        controller: app
-        visible: false
+        ready: root.panelsReady
         z: 101
-        onCloseRequested: visible = false
+        sourceComponent: ReportView {
+            controller: app
+            onCloseRequested: reportView.visible = false
+        }
     }
 
-    AgentProfilePanel {
+    DeferredPanel {
         id: profilePanel
-        objectName: "agentProfilePanel"
+        property string session
         anchors.fill: parent
-        controller: app
-        visible: false
+        ready: root.panelsReady
         z: 100
-        onCloseRequested: visible = false
+        sourceComponent: AgentProfilePanel {
+        objectName: "agentProfilePanel"
+        controller: app
+        session: profilePanel.session
+        onCloseRequested: profilePanel.visible = false
         onQueueRequested: session => {
             queueDialog.session = session;
             queueDialog.visible = true;
@@ -747,6 +780,7 @@ ApplicationWindow {
             root.relaunchSession = session;
             root.relaunchName = name;
             startAgent.visible = true;
+        }
         }
     }
 
