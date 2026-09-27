@@ -710,3 +710,30 @@ def test_a_return_leg_identity_carries_its_handoff_id(host):
     stream, open_call = host
     call = open_call("vs-return", handoff_id="hof_" + "a" * 32)
     assert handoffs.call_identity(call.conv)["handoff_id"] == "hof_" + "a" * 32
+
+
+def test_identity_reaches_the_socket_before_the_call_is_offerable(host):
+    stream, open_call = host
+    seen_live_at_send = []
+
+    class Probe(list):
+        def append(self, event):
+            if event.get("type") == "oracle_v2.session":
+                seen_live_at_send.append(handoffs._LIVE.get(PHONE))
+            super().append(event)
+
+    call = open_call("vs-atomic")
+    handoffs.unregister(call.conv)
+    call.down = Probe()
+    call.conv.downstream = call.down.append
+    handoffs.register(call.conv)
+    assert [e["type"] for e in call.down][0] == "oracle_v2.session"
+    assert seen_live_at_send == [None]
+    offer = _offer()
+    assert offer["oracle"]["voice_session_id"] == call.down[0]["voice_session_id"] == "vs-atomic"
+
+
+def test_a_socket_that_did_not_opt_in_gets_no_identity_frame(host):
+    stream, open_call = host
+    call = open_call("vs-legacy", capable=False)
+    assert all(e.get("type") != "oracle_v2.session" for e in call.down)

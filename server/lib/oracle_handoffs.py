@@ -284,6 +284,10 @@ def register(call) -> None:
     """A new Oracle v2 call for ``call.principal`` opened (docs: new-call rules)."""
     principal = call.principal
     with _lock:
+        if getattr(call, "handoff_capable", False):
+            # Atomic with availability: connect() takes the same lock and can only
+            # find this call after the phone already holds its identity frame.
+            call.downstream(call_identity(call))
         _LIVE[principal] = call
         data = _load(principal)
         for record in list(data["records"]):
