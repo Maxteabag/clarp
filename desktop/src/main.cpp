@@ -29,6 +29,7 @@
 #include "app/StartupTrace.h"
 #include "app/InstanceServer.h"
 #include <QFontDatabase>
+#include <memory>
 #include <span>
 #include <thread>
 #include <QQmlError>
@@ -217,55 +218,73 @@ int main(int argc, char* argv[]) {
             };
             applyThemePalette();
             QObject::connect(controller, &clarp::AppController::readingThemeChanged, controller, applyThemePalette);
-            // Once a minute, log what the process holds so an out-of-memory kill
-            // leaves a trend in the journal: kernel RSS split, live Qt Quick
-            // items, and the controller's caches. CLARP_MEMORY_LOG_SECONDS=0 disables.
-            const int memoryLogSeconds = qEnvironmentVariableIsSet("CLARP_MEMORY_LOG_SECONDS")
-                ? qEnvironmentVariableIntValue("CLARP_MEMORY_LOG_SECONDS") : 60;
-            // GUI stall watchdog: any block longer than the threshold writes the
-            // GUI thread's stack to the stall log. CLARP_STALL_THRESHOLD_MS=0
-            // disables it.
-            // Screenshot and test runs (CLARP_SCREENSHOT_PATH) keep it off unless
-            // asked: they must not signal the GUI thread mid-test or write into
-            // the user's stall log.
-            const bool screenshotRun = qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH");
-            const int stallThresholdMs = qEnvironmentVariableIsSet("CLARP_STALL_THRESHOLD_MS")
-                ? qEnvironmentVariableIntValue("CLARP_STALL_THRESHOLD_MS") : (screenshotRun ? 0 : 150);
-            const int stallMemoryMb = qEnvironmentVariableIsSet("CLARP_STALL_MEMORY_MB")
-                ? qEnvironmentVariableIntValue("CLARP_STALL_MEMORY_MB") : (screenshotRun ? 0 : 1536);
-            stallMonitor = std::make_unique<clarp::StallMonitor>(
-                stallThresholdMs, qEnvironmentVariable("CLARP_STALL_LOG"), nullptr, stallMemoryMb);
-            clarp::StallMonitor* stalls = stallMonitor.get();
-            if (memoryLogSeconds > 0) {
-                auto* memoryLog = new QTimer(controller);
-                memoryLog->setInterval(memoryLogSeconds * 1000);
-                QObject::connect(memoryLog, &QTimer::timeout, controller, [rootWindow, controller, stalls] {
-                    QVariantMap report = clarp::processMemoryKb();
-                    report.insert(clarp::windowItemCounts(rootWindow));
-                    report.insert(controller->memoryCounters());
-                    report.insert(QStringLiteral("cpuMsPerSec"), clarp::processCpuMsPerSecond());
-                    report.insert(QStringLiteral("stalls"), stalls->stallCount());
-                    report.insert(QStringLiteral("longestStallMs"), stalls->takeLongestStallMs());
-                    qInfo().noquote() << "memory"
-                        << QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(report)).toJson(QJsonDocument::Compact));
-                });
-                memoryLog->start();
-            }
             if (restoreDesktop) controller->restoreDesktopSession(restoreSession);
-            desktopIntegration =
-                std::make_unique<clarp::DesktopIntegration>(rootWindow, controller, &application);
-            if (!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")) {
-                desktopPresence = std::make_unique<clarp::DesktopPresence>(rootWindow, &application);
-                auto* presence = desktopPresence.get();
-                QObject::connect(presence, &clarp::DesktopPresence::presenceReport, controller, &clarp::AppController::reportDesktopPresence);
-                QObject::connect(presence, &clarp::DesktopPresence::applicationActivity, controller, &clarp::AppController::reportApplicationActivity);
-                QObject::connect(controller, &clarp::AppController::pauseMobilePushChanged, presence,
-                    [presence, controller] { presence->setEnabled(controller->pauseMobilePush()); });
-                QObject::connect(controller, &clarp::AppController::connectedChanged, presence,
-                    [presence, controller] { presence->setConnected(controller->connected()); });
-                presence->setEnabled(controller->pauseMobilePush());
-                presence->setConnected(controller->connected());
-            }
+            // The watchdog, memory log, tray/MPRIS and login presence are not
+            // needed for the first frame, so they start right after it. A window
+            // that is not on screen yet may not render at all, so they also
+            // start after a second without a frame; whichever comes first wins.
+            auto* deferredServicesOwner = new QObject(&application);
+            auto deferredServicesStarted = std::make_shared<bool>(false);
+            const auto startDeferredServices = [&, rootWindow, controller, deferredServicesOwner, deferredServicesStarted] {
+                if (*deferredServicesStarted) return;
+                *deferredServicesStarted = true;
+                clarp::StartupTrace::mark("desktop-services-start");
+                // Once a minute, log what the process holds so an out-of-memory kill
+                // leaves a trend in the journal: kernel RSS split, live Qt Quick
+                // items, and the controller's caches. CLARP_MEMORY_LOG_SECONDS=0 disables.
+                const int memoryLogSeconds = qEnvironmentVariableIsSet("CLARP_MEMORY_LOG_SECONDS")
+                    ? qEnvironmentVariableIntValue("CLARP_MEMORY_LOG_SECONDS") : 60;
+                // GUI stall watchdog: any block longer than the threshold writes the
+                // GUI thread's stack to the stall log. CLARP_STALL_THRESHOLD_MS=0
+                // disables it.
+                // Screenshot and test runs (CLARP_SCREENSHOT_PATH) keep it off unless
+                // asked: they must not signal the GUI thread mid-test or write into
+                // the user's stall log.
+                const bool screenshotRun = qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH");
+                const int stallThresholdMs = qEnvironmentVariableIsSet("CLARP_STALL_THRESHOLD_MS")
+                    ? qEnvironmentVariableIntValue("CLARP_STALL_THRESHOLD_MS") : (screenshotRun ? 0 : 150);
+                const int stallMemoryMb = qEnvironmentVariableIsSet("CLARP_STALL_MEMORY_MB")
+                    ? qEnvironmentVariableIntValue("CLARP_STALL_MEMORY_MB") : (screenshotRun ? 0 : 1536);
+                stallMonitor = std::make_unique<clarp::StallMonitor>(
+                    stallThresholdMs, qEnvironmentVariable("CLARP_STALL_LOG"), nullptr, stallMemoryMb);
+                clarp::StallMonitor* stalls = stallMonitor.get();
+                if (memoryLogSeconds > 0) {
+                    auto* memoryLog = new QTimer(controller);
+                    memoryLog->setInterval(memoryLogSeconds * 1000);
+                    QObject::connect(memoryLog, &QTimer::timeout, controller, [rootWindow, controller, stalls] {
+                        QVariantMap report = clarp::processMemoryKb();
+                        report.insert(clarp::windowItemCounts(rootWindow));
+                        report.insert(controller->memoryCounters());
+                        report.insert(QStringLiteral("cpuMsPerSec"), clarp::processCpuMsPerSecond());
+                        report.insert(QStringLiteral("stalls"), stalls->stallCount());
+                        report.insert(QStringLiteral("longestStallMs"), stalls->takeLongestStallMs());
+                        qInfo().noquote() << "memory"
+                            << QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(report)).toJson(QJsonDocument::Compact));
+                    });
+                    memoryLog->start();
+                }
+                desktopIntegration =
+                    std::make_unique<clarp::DesktopIntegration>(rootWindow, controller, &application);
+                if (!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_PATH")) {
+                    desktopPresence = std::make_unique<clarp::DesktopPresence>(rootWindow, &application);
+                    auto* presence = desktopPresence.get();
+                    QObject::connect(presence, &clarp::DesktopPresence::presenceReport, controller, &clarp::AppController::reportDesktopPresence);
+                    QObject::connect(presence, &clarp::DesktopPresence::applicationActivity, controller, &clarp::AppController::reportApplicationActivity);
+                    QObject::connect(controller, &clarp::AppController::pauseMobilePushChanged, presence,
+                        [presence, controller] { presence->setEnabled(controller->pauseMobilePush()); });
+                    QObject::connect(controller, &clarp::AppController::connectedChanged, presence,
+                        [presence, controller] { presence->setConnected(controller->connected()); });
+                    presence->setEnabled(controller->pauseMobilePush());
+                    presence->setConnected(controller->connected());
+                }
+                clarp::StartupTrace::mark("desktop-services-ready");
+                deferredServicesOwner->deleteLater();
+            };
+            QObject::connect(rootWindow, &QQuickWindow::frameSwapped, deferredServicesOwner,
+                [deferredServicesOwner, startDeferredServices] {
+                    QTimer::singleShot(0, deferredServicesOwner, startDeferredServices);
+                }, Qt::SingleShotConnection);
+            QTimer::singleShot(1000, deferredServicesOwner, startDeferredServices);
         }
     }
     if (rootWindow != nullptr && controller != nullptr && launchOnStartup) {
