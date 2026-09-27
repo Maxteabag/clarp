@@ -71,6 +71,7 @@ class AgentFilterModel : public QSortFilterProxyModel {
     [[nodiscard]] bool treeActive() const;
     void rebuildTree();
     void refreshTree();
+    void applyTree(const Tree& before, bool filterChanged);
 
     QString m_query;
     bool m_unreadOnly = false;

@@ -724,6 +724,7 @@ class NativeCoreTest final : public QObject {
     void rosterPrefersLiveJobCountsAndCountsHelpers();
     void treeOrderMatchesTheTeamWalk();
     void sidebarNestsHelpersAndCollapsesFinishedOnes();
+    void sidebarUpdatesNeverResetTheRows();
     void sidebarStatusUpdatesDoNotRebuildTree();
     void subagentCellsDescribePhaseNameAndTask();
     void controllerTracksJobsFromListAndEvents();
@@ -1397,6 +1398,38 @@ void NativeCoreTest::treeOrderMatchesTheTeamWalk() {
                                    {.id = QStringLiteral("live"), .parentId = QStringLiteral("p"), .rank = 0}};
     const QVector<TreePlacement> rankedOrder = treeOrder(ranked);
     QCOMPARE(ranked.at(rankedOrder.at(1).index).id, QStringLiteral("live"));
+}
+
+void NativeCoreTest::sidebarUpdatesNeverResetTheRows() {
+    // A reset makes the sidebar destroy and recreate every row; the live
+    // agent list arriving over the cached one cost 490 ms that way.
+    AgentListModel source;
+    AgentFilterModel filtered;
+    filtered.setSourceModel(&source);
+    source.applySnapshot({{QStringLiteral("agents"), QJsonArray{
+        rosterRow(QStringLiteral("b"), QStringLiteral("b"), 300),
+        rosterRow(QStringLiteral("a"), QStringLiteral("a"), 200)}}});
+    QSignalSpy resets(&filtered, &QAbstractItemModel::modelReset);
+    source.applySnapshot({{QStringLiteral("agents"), QJsonArray{
+        helperRow(QStringLiteral("live"), QStringLiteral("p"), QStringLiteral("running"), 900),
+        rosterRow(QStringLiteral("b"), QStringLiteral("b"), 300),
+        rosterRow(QStringLiteral("a"), QStringLiteral("a"), 200),
+        helperRow(QStringLiteral("done"), QStringLiteral("p"), QStringLiteral("done"), 150),
+        rosterRow(QStringLiteral("parent"), QStringLiteral("p"), 100)}}});
+    QCOMPARE(proxySessions(filtered), (QStringList{QStringLiteral("b"), QStringLiteral("a"),
+                                                   QStringLiteral("parent"), QStringLiteral("live")}));
+    filtered.toggleDoneHelpers(QStringLiteral("p"));
+    QCOMPARE(proxySessions(filtered), (QStringList{QStringLiteral("b"), QStringLiteral("a"),
+                                                   QStringLiteral("parent"), QStringLiteral("live"),
+                                                   QStringLiteral("done")}));
+    filtered.setQuery(QStringLiteral("a"));
+    filtered.setQuery({});
+    filtered.setUnreadOnly(true);
+    filtered.setUnreadOnly(false);
+    QCOMPARE(proxySessions(filtered), (QStringList{QStringLiteral("b"), QStringLiteral("a"),
+                                                   QStringLiteral("parent"), QStringLiteral("live"),
+                                                   QStringLiteral("done")}));
+    QCOMPARE(resets.count(), 0);
 }
 
 void NativeCoreTest::sidebarNestsHelpersAndCollapsesFinishedOnes() {
