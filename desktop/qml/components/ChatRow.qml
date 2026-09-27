@@ -44,6 +44,9 @@ ItemDelegate {
         && ["done", "reported", "abandoned"].includes(helperState)
 
     readonly property bool current: !archived && controller.selectedSession === session
+    // Most rows have no background work. Their process indicators (a Canvas,
+    // a MouseArea and a ToolTip each, two per row) are built on first need.
+    readonly property bool hasProcesses: backgroundJobCount > 0 || subAgentCount > 0 || runningChildren > 0
     readonly property string activityLine: statusText.length > 0 ? statusText : busy ? "Working…" : ""
 
     width: ListView.view ? ListView.view.width : 280
@@ -115,19 +118,23 @@ ItemDelegate {
             showPortrait: true
             opacity: row.archived || row.finishedHelper ? 0.65 : 1
 
-            ProcessIndicator {
-                objectName: "collapsedProcessIndicator"
-                visible: row.collapsed && total > 0
+            Loader {
+                active: row.collapsed && row.hasProcesses
+                visible: active
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.rightMargin: -3
                 anchors.bottomMargin: -3
-                glyphSize: 12
-                jobCount: row.backgroundJobCount
-                subAgentCount: row.subAgentCount
-                runningChildren: row.runningChildren
-                reducedMotion: activityAvatar.reducedMotion
-                onClicked: row.processesRequested(row.session, this)
+                sourceComponent: ProcessIndicator {
+                    id: collapsedIndicator
+                    objectName: "collapsedProcessIndicator"
+                    glyphSize: 12
+                    jobCount: row.backgroundJobCount
+                    subAgentCount: row.subAgentCount
+                    runningChildren: row.runningChildren
+                    reducedMotion: activityAvatar.reducedMotion
+                    onClicked: row.processesRequested(row.session, collapsedIndicator)
+                }
             }
 
             Rectangle {
@@ -162,15 +169,22 @@ ItemDelegate {
                     elide: Text.ElideRight
                 }
 
-                ProcessIndicator {
-                    id: processIndicator
-                    objectName: "sidebarProcessIndicator"
+                // Kept once built so it can hide and reappear without rebuilding.
+                Loader {
+                    property bool used: false
+                    active: used || row.hasProcesses
+                    visible: row.hasProcesses
+                    onVisibleChanged: if (visible) used = true
                     Layout.alignment: Qt.AlignVCenter
-                    jobCount: row.backgroundJobCount
-                    subAgentCount: row.subAgentCount
-                    runningChildren: row.runningChildren
-                    reducedMotion: activityAvatar.reducedMotion
-                    onClicked: row.processesRequested(row.session, processIndicator)
+                    sourceComponent: ProcessIndicator {
+                        id: processIndicator
+                        objectName: "sidebarProcessIndicator"
+                        jobCount: row.backgroundJobCount
+                        subAgentCount: row.subAgentCount
+                        runningChildren: row.runningChildren
+                        reducedMotion: activityAvatar.reducedMotion
+                        onClicked: row.processesRequested(row.session, processIndicator)
+                    }
                 }
 
                 TuiText {
@@ -242,10 +256,13 @@ ItemDelegate {
             }
         }
 
-        TuiButton {
-            visible: row.archived && !row.collapsed
-            text: "Restore"
-            onClicked: row.controller.setAgentArchived(row.session, false)
+        Loader {
+            active: row.archived && !row.collapsed
+            visible: active
+            sourceComponent: TuiButton {
+                text: "Restore"
+                onClicked: row.controller.setAgentArchived(row.session, false)
+            }
         }
     }
 

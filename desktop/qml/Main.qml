@@ -410,25 +410,28 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
-        RowLayout {
-            visible: previewVersions.enabled && (root.previewUpdateLabel.length > 0
+        Loader {
+            active: previewVersions.enabled && (root.previewUpdateLabel.length > 0
                 || Boolean(previewVersions.catalog.pinned) || previewVersions.error.length > 0)
+            visible: active
             Layout.fillWidth: true
             Layout.leftMargin: 14
             Layout.rightMargin: 14
-            TuiLabel {
-                text: previewVersions.error || (root.previewUpdateLabel.length > 0 ? "New update available" : "Preview pinned · automatic updates paused")
-                color: previewVersions.error.length > 0 ? Theme.danger : Theme.secondary
-                Layout.fillWidth: true
-                elide: Text.ElideRight
+            sourceComponent: RowLayout {
+                TuiLabel {
+                    text: previewVersions.error || (root.previewUpdateLabel.length > 0 ? "New update available" : "Preview pinned · automatic updates paused")
+                    color: previewVersions.error.length > 0 ? Theme.danger : Theme.secondary
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                }
+                TuiButton {
+                    visible: root.previewUpdateLabel.length > 0
+                    text: "Update " + root.previewUpdateLabel + " · Ctrl+Alt+U"
+                    enabled: root.previewCanRestart && !previewVersions.busy
+                    onClicked: previewVersions.selectVersion(String(previewVersions.catalog.current))
+                }
+                TuiButton { text: "Versions…"; onClicked: previewVersionPanel.visible = true }
             }
-            TuiButton {
-                visible: root.previewUpdateLabel.length > 0
-                text: "Update " + root.previewUpdateLabel + " · Ctrl+Alt+U"
-                enabled: root.previewCanRestart && !previewVersions.busy
-                onClicked: previewVersions.selectVersion(String(previewVersions.catalog.current))
-            }
-            TuiButton { text: "Versions…"; onClicked: previewVersionPanel.visible = true }
         }
 
         SplitView {
@@ -552,10 +555,14 @@ ApplicationWindow {
             }
 
         }
-        ShortcutBar {
-            visible: root.shortcutsVisible
+        // Hidden bars are not built until shown (18 items when turned off).
+        Loader {
+            active: root.shortcutsVisible
+            visible: active
             Layout.fillWidth: true
-            keymap: keyboard
+            sourceComponent: ShortcutBar {
+                keymap: keyboard
+            }
         }
     }
 

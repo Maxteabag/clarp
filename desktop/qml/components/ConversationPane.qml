@@ -404,71 +404,78 @@ Rectangle {
     // Connection and load errors belong to the active pane, but as an overlay:
     // a banner in the column resized the transcript by 38px every time pane
     // focus moved, shifting both panes' content.
-    Rectangle {
+    // Built only while an error shows, like the voice overlay below.
+    Loader {
         id: connectionErrorOverlay
-        objectName: "connectionErrorOverlay"
-        visible: root.active && (root.controller.errorMessage.length > 0
+        active: root.active && (root.controller.errorMessage.length > 0
             || root.conversationModel.error.length > 0)
+        visible: active
         anchors.left: parent.left
         anchors.right: parent.right
         y: transcript.y
         height: 38
         z: 41
-        color: Theme.dangerSurface
+        sourceComponent: Rectangle {
+            objectName: "connectionErrorOverlay"
+            color: Theme.dangerSurface
 
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 16
-            anchors.rightMargin: 8
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 16
+                anchors.rightMargin: 8
 
-            TuiText {
-                Layout.fillWidth: true
-                text: root.controller.errorMessage || root.conversationModel.error
-                color: Theme.danger
-                font.family: "JetBrains Mono"
-                font.pixelSize: 11
-                elide: Text.ElideRight
-            }
-            TuiButton {
-                visible: root.conversationModel.error.length > 0
-                text: "Retry"
-                implicitHeight: 26
-                onClicked: root.controller.refreshSession(root.session)
-            }
-            TuiToolButton {
-                text: "Dismiss · Esc"
-                onClicked: {
-                    root.controller.clearError();
-                    root.conversationModel.error = "";
+                TuiText {
+                    Layout.fillWidth: true
+                    text: root.controller.errorMessage || root.conversationModel.error
+                    color: Theme.danger
+                    font.family: "JetBrains Mono"
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                }
+                TuiButton {
+                    visible: root.conversationModel.error.length > 0
+                    text: "Retry"
+                    implicitHeight: 26
+                    onClicked: root.controller.refreshSession(root.session)
+                }
+                TuiToolButton {
+                    text: "Dismiss · Esc"
+                    onClicked: {
+                        root.controller.clearError();
+                        root.conversationModel.error = "";
+                    }
                 }
             }
         }
     }
 
     // Voice failures belong to this session and must not resize the reader.
-    Rectangle {
-        objectName: "voiceErrorOverlay"
-        visible: (root.conversationModel.voiceError || "").length > 0
+    Loader {
+        active: (root.conversationModel.voiceError || "").length > 0
+        visible: active
         anchors.left: parent.left
         anchors.right: parent.right
         y: transcript.y + (connectionErrorOverlay.visible ? connectionErrorOverlay.height : 0)
         height: 38
         z: 40
-        color: Theme.dangerSurface
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 16
-            anchors.rightMargin: 8
-            TuiText {
-                Layout.fillWidth: true
-                text: root.conversationModel.voiceError || ""
-                color: Theme.danger
-                font.pixelSize: 11
-                elide: Text.ElideRight
-            }
-            TuiToolButton {
-                text: "Dismiss · Esc"
-                onClicked: root.conversationModel.voiceError = ""
+        sourceComponent: Rectangle {
+            objectName: "voiceErrorOverlay"
+            color: Theme.dangerSurface
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 16
+                anchors.rightMargin: 8
+                TuiText {
+                    Layout.fillWidth: true
+                    text: root.conversationModel.voiceError || ""
+                    color: Theme.danger
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                }
+                TuiToolButton {
+                    text: "Dismiss · Esc"
+                    onClicked: root.conversationModel.voiceError = ""
+                }
             }
         }
     }
