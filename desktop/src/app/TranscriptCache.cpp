@@ -1,11 +1,13 @@
 #include "app/TranscriptCache.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
-#include <QSaveFile>
 #include <QStandardPaths>
+#include <filesystem>
+#include <system_error>
 #include <utility>
 
 namespace clarp {
@@ -69,16 +71,26 @@ bool TranscriptCache::save(const QString& baseUrl, const QString& session,
     if (bytes.size() > MaxCacheBytes) {
         return false;
     }
-    QSaveFile file(pathFor(baseUrl, session));
-    if (!file.open(QIODevice::WriteOnly)) {
+    // Every entry is refetched from the Host when missing, so the cache needs
+    // an atomic replace, not durability. QSaveFile::commit calls fdatasync,
+    // which blocked the GUI thread for 160-700 ms per save on a busy disk.
+    const QString path = pathFor(baseUrl, session);
+    QFile file(path + QStringLiteral(".tmp.%1").arg(QCoreApplication::applicationPid()));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         return false;
     }
     file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    if (file.write(bytes) != bytes.size()) {
-        file.cancelWriting();
+    const bool written = file.write(bytes) == bytes.size();
+    file.close();
+    std::error_code error;
+    if (written)
+        std::filesystem::rename(QFile::encodeName(file.fileName()).toStdString(),
+                                QFile::encodeName(path).toStdString(), error);
+    if (!written || error) {
+        file.remove();
         return false;
     }
-    return file.commit();
+    return true;
 }
 
 void TranscriptCache::remove(const QString& baseUrl, const QString& session) const {
