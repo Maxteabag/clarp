@@ -78,9 +78,8 @@ resident process. The server-side new-window paint path is effectively neutral.
   `clarp-desktop-core`, `clarp-desktop-native-only`, and
   `clarp-desktop-launcher-exec-fallback`.
 - `qmllint`: not applicable; no QML files changed.
-- `cmake --build --preset analysis -j4`: running at report draft time under
-  SCHED_IDLE. It had not failed at the launcher code, but was still processing
-  Qt app clang-tidy work.
+- `cmake --build --preset analysis -j4`: passed under SCHED_IDLE. No
+  clang-tidy flag-filter block occurred on this branch.
 
 ## What to ship
 
