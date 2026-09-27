@@ -92,6 +92,7 @@ class TurnEvent:
     RESTART_INTERRUPTED = "restart_interrupted"  # boot recovery
     UNLAUNCHED = "unlaunched"                    # back-dated launch receipt
     RECONCILE_REPAIR = "reconcile_repair"        # busy with nothing running
+    BACKGROUND_EXPIRED = "background_expired"    # stale-work: declared work long over
     # An administrative note (a janitor ownership handoff) that repeats the
     # current state with new detail. Not an inferred change of state: the
     # target is whatever the agent is in now, and it needs a started agent.
@@ -133,6 +134,7 @@ TRANSITIONS: dict[str, tuple[str, frozenset[str]]] = {
     TurnEvent.RESTART_INTERRUPTED: (AgentState.INTERRUPTED, BUSY),
     TurnEvent.UNLAUNCHED: (AgentState.INTERRUPTED, ALL),
     TurnEvent.RECONCILE_REPAIR: (AgentState.IDLE, BUSY),
+    TurnEvent.BACKGROUND_EXPIRED: (AgentState.IDLE, frozenset({AgentState.BACKGROUND})),
 }
 
 # Kinds whose detail is enriched with the turn origin (see
