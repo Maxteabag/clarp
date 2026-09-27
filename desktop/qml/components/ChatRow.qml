@@ -195,9 +195,12 @@ ItemDelegate {
                     maximumLineCount: 1
                 }
 
+                // Every row lays this out, shown or not: a glyph outside
+                // JetBrains Mono sent the first frame through a ~100 ms
+                // fontconfig fallback search.
                 TuiText {
                     visible: row.muted
-                    text: "⃠"
+                    text: "⊘"
                     color: Theme.faint
                     font.pixelSize: 11
                 }
