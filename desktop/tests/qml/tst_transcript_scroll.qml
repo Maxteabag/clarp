@@ -94,6 +94,21 @@ TestCase {
         keyClick(Qt.Key_End);
         tryVerify(() => view.atYEnd && view.followLatest);
     }
+    function test_keyboardScrollAfterWheelIsNotPulledBack() {
+        // The reading anchor was remembered on wheel scrolls only, so a later
+        // content change snapped the view back to the last wheel position.
+        const view = openView();
+        mouseWheel(view, 200, 200, 0, 360);
+        tryVerify(() => !view.followLatest && !view.userInteracting);
+        view.forceActiveFocus();
+        keyClick(Qt.Key_PageUp);
+        wait(200);
+        const position = view.contentY;
+        rows.append({messageId: "streamed", rowHeight: 120});
+        wait(200);
+        verify(Math.abs(view.contentY - position) < 2,
+            "content arriving below must not pull the reader back to the wheel position");
+    }
     function test_refreshRestoresMessageIdentityAndPixelOffset() {
         const view = openView();
         view.pauseFollowing();

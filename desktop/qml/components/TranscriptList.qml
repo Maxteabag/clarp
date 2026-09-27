@@ -102,6 +102,12 @@ ListView {
     property int anchorIndex: -1
     property real anchorOffset: 0
     property int anchorCorrections: 0
+    property bool anchoring: false
+    // Every scroll moves the anchor with it (wheel, scrollbar, keys, touchpad,
+    // jumps to a message); only the anchoring's own corrections do not.
+    // Remembering it on the wheel alone snapped the view back to the last
+    // wheel position after scrolling any other way.
+    onContentYChanged: if (!anchoring && !followLatest) rememberAnchor()
     function rememberAnchor() {
         anchorIndex = -1;
         if (followLatest || count === 0) return;
@@ -118,7 +124,9 @@ ListView {
         const target = item.y - anchorOffset;
         if (Math.abs(contentY - target) <= 0.5 || anchorCorrections >= 3) return;
         if (anchorCorrections++ === 0) Qt.callLater(() => { root.anchorCorrections = 0; });
+        anchoring = true;
         contentY = target;
+        anchoring = false;
     }
     function followContentHeight() {
         if (!followLatest) Qt.callLater(root.keepAnchor);
