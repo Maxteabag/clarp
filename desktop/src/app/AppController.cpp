@@ -1,4 +1,5 @@
 #include "app/AppController.h"
+#include "app/StartupTrace.h"
 #include "app/LocalReport.h"
 #include "terminal/TerminalLaunch.h"
 #include "app/TimeFormat.h"
@@ -91,6 +92,15 @@ QString draftAttachmentsSettingsKey(const QString& baseUrl, const QString& sessi
     return draftScopeSettingsKey(baseUrl, session) + QStringLiteral("/attachments");
 }
 
+// The sidebar used to stay empty until /agents/snapshot answered, 1-3 s on a
+// cold start. The last snapshot is kept here and shown in the first frame.
+QString agentSnapshotCachePath(const QString& baseUrl) {
+    const QString digest = QString::fromLatin1(
+        QCryptographicHash::hash(baseUrl.toUtf8(), QCryptographicHash::Sha256).toHex().left(24));
+    return QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
+        .filePath(QStringLiteral("agent-snapshots/%1.json").arg(digest));
+}
+
 QString sharedFilesystemSettingsKey(const QString& baseUrl) {
     const QString digest = QString::fromLatin1(
         QCryptographicHash::hash(normalizedBaseUrl(baseUrl).toUtf8(), QCryptographicHash::Sha256)
@@ -106,6 +116,7 @@ AppController::AppController(QObject* parent)
       m_emptyConversation(this), m_conversation(&m_emptyConversation),
       m_composerFocusPane(m_panes.activePaneId()),
       m_cacheEnabled(!qEnvironmentVariableIsSet("CLARP_SCREENSHOT_SCENARIO")) {
+    StartupTrace::mark("controller-begin");
     if (auto* application = QCoreApplication::instance())
         m_launchMode = application->property("clarpLaunchMode").toBool();
     m_waitingForSessionChoice = QCoreApplication::instance()->property("clarpEmptyStartup").toBool();
@@ -293,6 +304,9 @@ AppController::AppController(QObject* parent)
                 const QString target = voiceDeliverySession(targetSession, m_selectedSession);
                 sendMessageInternal(target, text, false, traceId, transcriptionId, handsFree);
             });
+    StartupTrace::mark("controller-constructed");
+    restoreAgentSnapshotCache();
+    StartupTrace::mark("agent-cache-applied");
     QTimer::singleShot(0, this, [this] {
         if (m_bearerToken.isEmpty()) {
             m_credentials.lookup(m_baseUrl);
@@ -1093,6 +1107,9 @@ void AppController::reconnect() {
     setConnecting(true);
     setConnectionState(QStringLiteral("connecting"));
     m_api.get(QStringLiteral("server-info"), QStringLiteral("/server-info"));
+    // Fetch the sidebar alongside server-info instead of after the event
+    // stream connects: that chain cost two extra round trips on every start.
+    requestSnapshot();
 }
 
 void AppController::resetTransientRequestState() {
@@ -1914,6 +1931,10 @@ void AppController::setPaneDraft(const QString& paneId, const QString& session,
     emit draftChanged(session, text, paneId);
 }
 
+void AppController::markStartup(const QString& milestone) {
+    StartupTrace::mark(milestone.toUtf8().constData());
+}
+
 void AppController::flushPendingDrafts() {
     m_draftFlush.stop();
     if (m_pendingDrafts.isEmpty()) {
@@ -2609,6 +2630,45 @@ void AppController::requestSnapshot() {
     m_api.get(QStringLiteral("snapshot:%1").arg(++m_snapshotGeneration), QStringLiteral("/agents/snapshot"));
 }
 
+void AppController::applyAgentSnapshot(const QJsonObject& object) {
+    m_availableMcpServers =
+        object.value(QStringLiteral("available_mcp_servers")).toArray().toVariantList();
+    m_agents.applySnapshot(object);
+    m_archivedAgents.applySnapshot(object);
+    requestAvatars();
+    QSet<QString> activeNames;
+    for (const QString& session : m_agents.sessions()) {
+        if (const Agent* agent = m_agents.find(session)) {
+            activeNames.insert(displayName(*agent).toCaseFolded());
+        }
+    }
+    m_contacts.applySnapshot(object, activeNames);
+    requestContactAvatars();
+}
+
+void AppController::restoreAgentSnapshotCache() {
+    QFile file(agentSnapshotCachePath(m_baseUrl));
+    if (!file.open(QIODevice::ReadOnly)) return;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    if (!document.isObject() || m_agents.rowCount() > 0) return;
+    applyAgentSnapshot(document.object());
+}
+
+void AppController::saveAgentSnapshotCache(const QJsonObject& object) {
+    // A cache, not a record: skip fsync (it stalled the GUI thread for
+    // hundreds of ms elsewhere) and refresh it at most every 30 s.
+    if (m_snapshotCacheClock.isValid() && m_snapshotCacheClock.elapsed() < 30'000) return;
+    m_snapshotCacheClock.start();
+    const QString path = agentSnapshotCachePath(m_baseUrl);
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path + QStringLiteral(".tmp"));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
+    file.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
+    file.close();
+    QFile::remove(path);
+    QFile::rename(file.fileName(), path);
+}
+
 void AppController::completeSnapshotRequest() {
     m_snapshotInFlight = false;
     if (std::exchange(m_snapshotDirty, false))
@@ -3069,19 +3129,8 @@ void AppController::handleJson(const QString& tag, const QJsonObject& object) {
     if (tag.startsWith(QStringLiteral("snapshot:"))) {
         if (tag.sliced(9).toULongLong() != m_snapshotGeneration) return;
         completeSnapshotRequest();
-        m_availableMcpServers =
-            object.value(QStringLiteral("available_mcp_servers")).toArray().toVariantList();
-        m_agents.applySnapshot(object);
-        m_archivedAgents.applySnapshot(object);
-        requestAvatars();
-        QSet<QString> activeNames;
-        for (const QString& session : m_agents.sessions()) {
-            if (const Agent* agent = m_agents.find(session)) {
-                activeNames.insert(displayName(*agent).toCaseFolded());
-            }
-        }
-        m_contacts.applySnapshot(object, activeNames);
-        requestContactAvatars();
+        applyAgentSnapshot(object);
+        saveAgentSnapshotCache(object);
         m_agentConversationsRefresh.start();
         if (!m_pendingCreatedSession.isEmpty()) {
             if (m_agents.find(m_pendingCreatedSession) == nullptr) {

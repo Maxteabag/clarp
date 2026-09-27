@@ -368,6 +368,10 @@ class AppController : public QObject {
     Q_INVOKABLE void setPaneDraft(const QString& paneId, const QString& session,
                                   const QString& text);
     void flushPendingDrafts();
+    Q_INVOKABLE static void markStartup(const QString& milestone);
+    void applyAgentSnapshot(const QJsonObject& object);
+    void restoreAgentSnapshotCache();
+    void saveAgentSnapshotCache(const QJsonObject& object);
     Q_INVOKABLE [[nodiscard]] QVariantList composerAttachments(const QString& paneId,
                                                                const QString& session) const;
     Q_INVOKABLE [[nodiscard]] bool composerCanSend(const QString& paneId,
@@ -625,6 +629,7 @@ class AppController : public QObject {
     bool m_minimalUi = false;
     bool m_workspaceBarVisible = true;
     QElapsedTimer m_snapshotClock;
+    QElapsedTimer m_snapshotCacheClock;
     bool m_snapshotScheduled = false;
     QString m_readingTheme;
     bool m_sharedFilesystem = false;

@@ -25,6 +25,7 @@
 #include <QKeyEvent>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
+#include "app/StartupTrace.h"
 #include <QQmlError>
 #include <QQuickItem>
 #include <QQuickStyle>
@@ -35,6 +36,7 @@
 #include <algorithm>
 
 int main(int argc, char* argv[]) {
+    clarp::StartupTrace::mark("main");
     // The application owns its Qt Quick style. Host-only QWidget themes such
     // as Kvantum are often absent from Flatpak/AppImage runtimes and should not
     // make a portable launch noisy or fail plugin discovery.
@@ -54,6 +56,7 @@ int main(int argc, char* argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QApplication application(argc, argv);
+    clarp::StartupTrace::mark("application");
     QCommandLineParser launchParser;
     launchParser.setApplicationDescription(QStringLiteral("Clarp desktop and agent launcher"));
     launchParser.addHelpOption();
@@ -121,7 +124,9 @@ int main(int argc, char* argv[]) {
     if (!versionManager) engine.setInitialProperties({{QStringLiteral("launchOnStartup"), launchOnStartup},
         {QStringLiteral("sidebarVisible"), emptyStartup}});
     if (versionManager) application.setApplicationName(QStringLiteral("ClarpPreviewVersionManager"));
+    clarp::StartupTrace::mark("qml-load-start");
     engine.loadFromModule("Clarp.Desktop", versionManager ? "PreviewVersionWindow" : "Main");
+    clarp::StartupTrace::mark("qml-loaded");
 
     std::unique_ptr<clarp::StallMonitor> stallMonitor;
     std::unique_ptr<clarp::DesktopIntegration> desktopIntegration;
@@ -131,6 +136,30 @@ int main(int argc, char* argv[]) {
     if (!engine.rootObjects().isEmpty()) {
         rootWindow = qobject_cast<QQuickWindow*>(engine.rootObjects().constFirst());
         controller = engine.rootObjects().constFirst()->findChild<clarp::AppController*>();
+        if (clarp::StartupTrace::enabled() && rootWindow != nullptr) {
+            auto* traceContext = new QObject(&application);
+            QObject::connect(rootWindow, &QQuickWindow::frameSwapped, traceContext,
+                [rootWindow, controller, traceContext, first = true]() mutable {
+                    if (first) { first = false; clarp::StartupTrace::mark("first-frame"); }
+                    if (controller == nullptr || controller->agents()->rowCount() > 0) {
+                        clarp::StartupTrace::mark("first-frame-with-agents");
+                        traceContext->deleteLater();
+                        // Benchmarks and the QML profiler need a clean exit.
+                        if (qEnvironmentVariableIsSet("CLARP_STARTUP_TRACE_EXIT_MS"))
+                            QTimer::singleShot(qEnvironmentVariableIntValue("CLARP_STARTUP_TRACE_EXIT_MS"),
+                                               QCoreApplication::instance(), &QCoreApplication::quit);
+                    }
+                    Q_UNUSED(rootWindow)
+                });
+            if (controller != nullptr)
+                QObject::connect(controller->agents(), &clarp::AgentListModel::countChanged, traceContext,
+                    [controller, done = false]() mutable {
+                        if (!done && controller->agents()->rowCount() > 0) {
+                            done = true;
+                            clarp::StartupTrace::mark("agents-applied");
+                        }
+                    });
+        }
         if (rootWindow != nullptr && controller != nullptr) {
             // Qt Basic reads control colours from the application palette, so
             // the saved reading theme and every later change restyle it too.
