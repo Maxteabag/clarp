@@ -21,25 +21,8 @@ prunes them after 90 days and above 500,000 rows.
 """
 from __future__ import annotations
 
-import collections
-import json
-import threading
-
-from . import db as _db
-
-DECISION_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000
-DECISION_MAX_ROWS = 500_000
-# Exact-only rows can accumulate one per unique opaque command; parameterised
-# rows are the point of learning and are never capped.
-EXACT_MAX_ROWS = 100_000
-STALE_VERSION_GRACE_MS = 30 * 24 * 60 * 60 * 1000
-TIERS = ("template", "learned", "exact_cache", "jev", "llm", "failed", "miss", "disabled")
-HIT_TIERS = ("template", "learned", "exact_cache")
-# Tiers that are a lookup that wanted an explanation; `disabled` is not.
-COUNTED_TIERS = tuple(t for t in TIERS if t != "disabled")
-WINDOWS = {"24h": 24 * 60 * 60 * 1000, "7d": 7 * 24 * 60 * 60 * 1000, "30d": 30 * 24 * 60 * 60 * 1000}
-BUCKETS = {"hour": 60 * 60 * 1000, "day": 24 * 60 * 60 * 1000}
-
+# Defined before the local imports: db_schema imports SCHEMA while `db` is
+# still loading, so it must exist before this module imports `db`.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tool_explanation_learned (
     signature TEXT NOT NULL,
@@ -77,6 +60,26 @@ CREATE TABLE IF NOT EXISTS tool_explanation_decisions (
 );
 CREATE INDEX IF NOT EXISTS tool_explanation_decisions_at ON tool_explanation_decisions(at);
 """
+
+import collections
+import json
+import threading
+
+from . import db as _db
+
+DECISION_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000
+DECISION_MAX_ROWS = 500_000
+# Exact-only rows can accumulate one per unique opaque command; parameterised
+# rows are the point of learning and are never capped.
+EXACT_MAX_ROWS = 100_000
+STALE_VERSION_GRACE_MS = 30 * 24 * 60 * 60 * 1000
+TIERS = ("template", "learned", "exact_cache", "jev", "llm", "failed", "miss", "disabled")
+HIT_TIERS = ("template", "learned", "exact_cache")
+# Tiers that are a lookup that wanted an explanation; `disabled` is not.
+COUNTED_TIERS = tuple(t for t in TIERS if t != "disabled")
+WINDOWS = {"24h": 24 * 60 * 60 * 1000, "7d": 7 * 24 * 60 * 60 * 1000, "30d": 30 * 24 * 60 * 60 * 1000}
+BUCKETS = {"hour": 60 * 60 * 1000, "day": 24 * 60 * 60 * 1000}
+
 
 _COLUMNS = ("signature", "level", "template_text", "template_id", "argument_index", "slot_names", "program",
             "action", "producer", "parameterised", "confidence", "prompt_version", "templates_version",
