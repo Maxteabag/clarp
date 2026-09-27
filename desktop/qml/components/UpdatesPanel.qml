@@ -11,7 +11,6 @@ Rectangle {
     signal openChat(string session)
     signal openReport(string artifactId)
     color: Theme.window
-    objectName: "updatesPanel"
 
     function isActiveJob(job) {
         const status = String(job.status || "");

@@ -14,6 +14,7 @@ Rectangle {
     property bool submitting: false
     signal closeRequested
     color: Theme.scrim
+    visible: false
     function submit() {
         const value = nameField.text.trim();
         if (submitting || value.length === 0 || !controller.connected) return;
