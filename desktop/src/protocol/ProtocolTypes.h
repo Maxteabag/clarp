@@ -119,6 +119,11 @@ struct AudioClip {
 
 [[nodiscard]] bool isBusyState(const QString& state);
 
+// One line of plain text for a sidebar preview: markdown tables, headings,
+// quotes, list markers, emphasis, code fences and link syntax are removed so
+// a reply that opens with a table reads as words, not pipes and dashes.
+[[nodiscard]] QString plainPreviewText(const QString& markdown);
+
 // A Harness sub-agent display cell (`kind: "subagents"`) reduced to what the
 // transcript shows: `phase` is spawned, waiting, finished, failed or activity;
 // `running` is true while the call is in flight; `name` is the sub-agent's
