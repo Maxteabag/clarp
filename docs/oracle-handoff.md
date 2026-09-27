@@ -1,6 +1,6 @@
 # Oracle handoff: putting the user through to an agent
 
-Status: **proposed wire contract, revision 2, not yet implemented.** Written
+Status: **proposed wire contract, revision 3, not yet implemented.** Written
 so the iOS owner can agree the wire before either side changes behaviour.
 Host contract 21, feature `oracle_handoff`.
 
@@ -68,10 +68,12 @@ truth.
   puts in every handoff's `principal`. The app learns it here (it is also in
   the pairing response as `device_id`); it compares, never guesses.
 - `host_id` is this Host's `server_instance_id`, as in `/server-info`.
-- `handoff` is the newest record for this principal in any state; `active` is
-  the `oracle_to_agent` record currently in state `active`, or null. During a
-  failed or pending return, `active` still shows the handoff that put the user
-  through, so the app can see that the user is still meant to be with the
+- `handoff` is the newest record for this principal in any state.
+- `active` is the **parent hands-free record**: the `oracle_to_agent` handoff
+  currently in state `active`, or null. It is not a general "current mode"
+  indicator: an ordinary Oracle call, a manually started always-on session or a
+  completed return all leave it null. During a pending or failed return it
+  still shows the parent, because the user is still meant to be with the
   agent.
 
 Every event and record carries `server_now` (Host clock when sent) and
@@ -108,27 +110,35 @@ Both directions use the same states. "Old side" is Oracle for
 
 ```
              ack preparing            ack activating            ack ready
- offered ──────────────────▶ preparing ─────────────────▶ activating ─────────▶ active ──▶ ended
-   │                           │                            │                     (return, local stop,
-   │ ack failed / ttl          │ ack rolled_back / ttl      │ ack rolled_back      new call, restart)
-   ▼                           ▼                            ▼
+ offered ──────────────────▶ preparing ─────────────────▶ activating ───────────▶ active ──────▶ ended
+   │                           │                            │            (oracle_to_agent)   (return,
+   │ ack failed / ttl          │ ack rolled_back / ttl      │ ack rolled_back               abandon,
+   ▼                           ▼                            ▼                               new call)
  failed (old side running)   failed (old side running)    failed (old side running)
                                                             │ ack rollback_failed / ttl
                                                             ▼
                                                           broken (neither side confirmed)
- any non-terminal ── superseded by a newer handoff or a new call ──▶ cancelled
+
+ agent_to_oracle: activating ── ack ready ──▶ ended (returned); its parent ──▶ ended (returned)
+ offered / preparing / activating ── ack abandon ──▶ cancelled (bookkeeping only)
+ offered / preparing ── superseded by a newer handoff or a new Oracle call ──▶ cancelled
 ```
 
-| State | Meaning | Old side | New side | Host does on ttl |
-|---|---|---|---|---|
-| `offered` | Host asked the phone to switch. | running, untouched | not started | `failed` / `no_ack`, `oracle_call: running` (nothing was touched) |
-| `preparing` | Phone preflighted and claimed the offer. It is now pausing and draining the old side; it still owns the old side's audio and session. | paused, resumable | not started | `failed` / `prepare_timeout`; Host resumes feeding the old side; `oracle_call: unknown` until the phone acks `rolled_back` |
-| `activating` | Phone released the old side's audio and is starting capture on the new side. The old session stays open and resumable. | audio released, session open | starting | `broken` / `activation_timeout`, `oracle_call: unknown`. The Host does **not** resume the old side on its own. |
-| `active` | Phone confirmed the new side's capture is running. Only now does the phone close the old session. | closed by the phone | running | none |
-| `failed` | Transfer did not happen. `oracle_call` says whether the old side really runs again. | per `oracle_call` | stopped | terminal |
-| `broken` | The phone could not confirm either side (rollback failed, or it went silent after releasing audio). The Host never claims the call resumed. | unknown / closed | unknown | terminal |
-| `cancelled` | Superseded before completing. | per `oracle_call` | not started | terminal |
-| `ended` | A completed handoff is over. | — | — | terminal |
+| State | Meaning | Old side | New side | ttl_ms | Host does when the ttl runs out |
+|---|---|---|---|---|---|
+| `offered` | Host asked the phone to switch. | running, untouched | not started | 10 000 | `failed` / `no_ack`, `oracle_call: running` (nothing was touched) |
+| `preparing` | Phone preflighted and claimed the offer. It is now pausing and draining the old side; it still owns the old side's audio and session. | paused, resumable | not started | 10 000 (both directions) | `failed` / `prepare_timeout`; for `oracle_to_agent` the Host resumes feeding Oracle; `oracle_call: unknown` until the phone acks `rolled_back` |
+| `activating` | Phone released the old side's audio and is starting capture on the new side. The old session stays open and resumable. | audio released, session open | starting | 30 000 | `broken` / `activation_timeout`, `oracle_call: unknown`. The Host does **not** resume the old side on its own. |
+| `active` | `oracle_to_agent` only: the phone confirmed hands-free capture with the agent is running. Only now does it close the Oracle session. | closed by the phone | running | none | — |
+| `failed` | Transfer did not happen. `oracle_call` says whether the old side really runs again. | per `oracle_call` | stopped | terminal | — |
+| `broken` | The phone could not confirm either side (rollback failed, or it went silent after releasing audio). The Host never claims the call resumed. | unknown / closed | unknown | terminal | — |
+| `cancelled` | Superseded, or abandoned by the phone, before completing. Bookkeeping only. | per `oracle_call` | not started | terminal | — |
+| `ended` | A completed handoff is over: the user returned, stopped, or the return completed. | — | — | terminal | — |
+
+An `agent_to_oracle` handoff has no lasting `active` state: its `ready` ack
+means the Oracle session and audio run, so it goes straight to `ended`
+(`returned`) together with its parent. After that the user is simply in an
+Oracle call, and `GET` shows `active: null`.
 
 Reasons: `no_ack`, `prepare_timeout`, `activation_timeout`, `client_failed`,
 `rolled_back`, `rollback_failed`, `superseded`, `returned`, `return_failed`,
@@ -139,19 +149,25 @@ Reasons: `no_ack`, `prepare_timeout`, `activation_timeout`, `client_failed`,
 `POST /oracle/handoffs/ack`
 
 ```json
-{"handoff_id": "hof_…", "generation": 17, "phase": "preparing|activating|ready|rolled_back|rollback_failed|failed|ended",
+{"handoff_id": "hof_…", "generation": 17, "phase": "preparing|activating|ready|rolled_back|rollback_failed|failed|abandon",
  "reason": "…", "voice_session_id": "…"}
 ```
 
-- The Host answers `200 {"handoff": record}` when the phase is applied **or is
-  a repeat of the phase already applied**. Acks are idempotent per
-  `(handoff_id, generation, phase)`; a phone that lost a response retries the
-  same ack and gets the same record.
+- The Host answers `200 {"handoff": record}` with the **current** record
+  (current `state` and `revision`) when the phase is applied now, or when this
+  `(handoff_id, generation, phase)` was already applied earlier. A repeat
+  never repeats effects (no second focus change, cue, Oracle data item or
+  event) and never returns a historical record: a repeated `preparing` after
+  the handoff became `active` or `cancelled` answers with that `active` or
+  `cancelled` record. A phone that lost a response retries the same ack and
+  follows what comes back.
+- Precedence: the Host looks up `handoff_id` first. A repeat of an applied
+  phase is always `200`, even when a newer handoff has since raised the
+  principal's generation. `409 {"error": "stale_generation", "handoff": record}`
+  is only for a phase that was **not** applied before and whose generation is
+  older than the principal's newest. `404` for an unknown id.
 - A phase that is not legal from the current state answers
-  `409 {"error": "illegal_transition", "handoff": record}`. The phone then
-  follows the returned record (below). `404` for an unknown id; `409` with
-  `"error": "stale_generation"` for a generation older than the principal's
-  newest.
+  `409 {"error": "illegal_transition", "handoff": record}`.
 - A phone must not start the next local step until the Host has confirmed the
   previous ack. If a response is lost, it retries the same ack, or reads
   `GET /oracle/handoff`, before doing anything irreversible.
@@ -164,50 +180,69 @@ Legal transitions:
 | `offered` | `failed` | `failed` (`client_failed`, `oracle_call: running`) | Preflight failed; nothing was touched. |
 | `preparing` | `activating` | `activating` | |
 | `preparing` / `activating` | `rolled_back` | `failed` (`rolled_back`, `oracle_call: running`) | The phone has the old side capturing again. |
-| `activating` | `ready` | `active` | New side's capture is running. |
+| `activating` | `ready` | `active` (`oracle_to_agent`); `ended` / `returned`, parent `ended` / `returned` (`agent_to_oracle`) | New side's capture is running. |
 | `activating` | `rollback_failed` | `broken` (`rollback_failed`) | |
 | `failed` (`prepare_timeout`) | `rolled_back` | unchanged, `oracle_call` set to `running` | Late confirmation of the forced resume. |
-| `broken` (`activation_timeout`) | `ready` | `active` | The phone's late proof that the new side runs is accepted; only the phone knows. |
+| `broken` (`activation_timeout`) | `ready` | as `activating` + `ready` | The phone's late proof that the new side runs is accepted; only the phone knows. |
 | `broken` (`activation_timeout`) | `rolled_back` | `failed` (`rolled_back`, `oracle_call: running`) | Late proof that the old side runs. |
-| `active` | `ended` | `ended` (`local_stop`, `client_restarted`, `local_intent_changed`) | |
+| `offered` / `preparing` / `activating` | `abandon` | `cancelled` (`local_stop`, `client_restarted` or `local_intent_changed`), `oracle_call: unknown` | Bookkeeping only: local Stop or a restarted process. Neither side resumes or starts audio; for a return the parent becomes `ended` with the same reason. |
+| `active` | `abandon` | `ended` (same reasons) | Bookkeeping only. |
 | any | same phase again | unchanged | Idempotent repeat. |
 
 Every other combination is `409 illegal_transition`. In particular nothing
-leaves `ended` or `cancelled`, and a `failed` offer never becomes `preparing`
-again: a new attempt is a new handoff.
+leaves `ended` or `cancelled`, `rollback_failed` is only legal from
+`activating` (earlier phases still own the old side, so they roll back or
+abandon), and a `failed` offer never becomes `preparing` again: a new attempt
+is a new handoff. `abandon` never causes the Host to resume, feed or close
+anything; it only settles the record.
 
-What the phone does with a record it did not expect: if the record says
-`failed`, `cancelled` or `broken` while it is mid-transfer, it returns to (or
-stays on) the old side if it still can, then acks `rolled_back` or
-`rollback_failed` (the late transitions above). If the record says `active`,
-it completes the transfer.
+What the phone does with a record it did not expect depends on whether that
+handoff is still the **local owner** (next section). If it is, and the record
+says `failed`, `cancelled` or `broken` while the phone is mid-transfer, the
+phone returns to (or stays on) the old side if it still can, then acks
+`rolled_back` or, from `activating`, `rollback_failed`; if the record says
+`active`, it completes the transfer. If the handoff is not the local owner, the
+phone only updates its bookkeeping.
 
 ## Fencing duplicates and retired events
 
-A phone keeps, per `(host_id, principal)`, the highest `generation` seen and,
-per `handoff_id`, the highest `revision` seen and whether it has **executed**
-the offer. It drops an event when:
+The phone's handoff coordinator keeps a single **local owner**: the
+`(handoff_id, generation)` it is executing, or that established the current
+local mode, or none. Starting a mode manually (a new call, picking another
+session, Stop) clears it. Only the local owner may cause audio effects.
+
+Per `(host_id, principal)` the phone also keeps the highest `generation` seen
+and, per `handoff_id`, the highest `revision` seen and whether it has
+**executed** the offer. It drops an event when:
 
 1. `principal` or `host_id` is not its own;
 2. `generation` is lower than the highest seen **and** it is an `offered`
-   event (later-state events of an older handoff are still applied, see 4);
+   event;
 3. its `revision` is not higher than the one already seen for that
    `handoff_id` (the WS/SSE duplicate, or an SSE replay);
 4. it is `offered` and this phone already executed that `handoff_id`.
 
-Later events of the **same** `handoff_id` (`preparing`, `active`, `failed`,
-`cancelled`, `broken`) are always applied; only re-execution of an offer is
-suppressed. Two more rules keep a retired event from retargeting a newer
-local session:
+Events that pass are applied in two layers:
+
+- **Bookkeeping**, always: the stored state of that `handoff_id` is updated,
+  including later states of lower-generation handoffs.
+- **Effects** (pausing, resuming, starting or stopping audio or a mode), only
+  when the event's `handoff_id` is the current local owner **and** the local
+  mode is still the one that handoff set up or is transferring, in either
+  direction. An old `cancelled`, `failed` or `broken` never stops or restores
+  anything once a newer manual mode, call or handoff exists.
+
+Two more rules keep a retired offer from retargeting a newer local session:
 
 5. An `oracle_to_agent` offer is executed only when `oracle.voice_session_id`
-   is the Oracle call the phone has open now.
+   is the Oracle call the phone has open now, and no other handoff is the
+   local owner.
 6. An `agent_to_oracle` offer is executed only when the phone is in hands-free
    with `agent.session` **because of** the handoff named in
-   `parent_handoff_id`. If the user has since picked another session, started
-   a call or stopped, the phone acks `failed` with `local_intent_changed`; the
-   Host marks the return `failed` and the parent `ended`
-   (`local_intent_changed`).
+   `parent_handoff_id` (it is the local owner). If the user has since picked
+   another session, started a call or stopped, the phone acks `failed` with
+   `local_intent_changed`; the Host marks the return `failed` and the parent
+   `ended` (`local_intent_changed`).
 
 ## Capability negotiation
 
@@ -227,7 +262,7 @@ local session:
    (tinted for that agent) is sent on the Oracle socket first.
 2. Phone preflight, no side effects: the recipient session is known and
    usable, the microphone permission is granted, always-on can start. On
-   failure: ack `failed`. On success: ack `preparing`.
+   failure: ack `failed`. On success: ack `preparing` (`ttl_ms` 10 000).
 3. Once `preparing` is confirmed the Host sends Oracle nothing new (no routing
    of later turns, no relayed parts, no context) and keeps forwarding the audio
    Oracle is already producing. The phone stops sending microphone audio and
@@ -274,17 +309,21 @@ upgrade or an early POST.
 2. The phone applies fence rule 6, preflights (Oracle v2 still advertised, the
    thread id is known, microphone permission) and acks `preparing`, or
    `failed`.
-3. Once `preparing` is confirmed it stops hands-free capture and settles the
-   final utterance: an utterance already captured is finished, transcribed and
-   sent with its own `client_msg_id` (so a retry is deduplicated by `/send`);
-   speech already delivered is not sent again. Playback of the agent's current
-   clip may drain. It then acks `activating`.
+3. Once `preparing` is confirmed (`ttl_ms` 10 000) it stops hands-free
+   capture and settles the final utterance. Settling means **durable local
+   admission** of what was captured under the existing stable `client_msg_id`
+   and uncertainty rules of `/send`: the utterance is recorded as a send job
+   with its id. It does not require network transcription or delivery before
+   leaving, and it authorizes no blind retry; the job continues or is resolved
+   by the existing send rules, and the phone may keep a failed or uncertain
+   job for explicit review. Speech already delivered is never sent again.
+   Playback of the agent's current clip may drain. It then acks `activating`.
 4. Once `activating` is confirmed it releases the capture and opens
    `/oracle/v2?handoff=hands_free&thread_id=<thread>&handoff_id=<id>`. Opening
    the socket is not success. When the Oracle session has started
    (`session.started` received) and Oracle capture is running, it acks
-   `ready`. The return becomes `active` and its parent `ended` (`returned`);
-   the Host plays `back_to_oracle` on the new call and gives Oracle one
+   `ready`. The return and its parent both become `ended` (`returned`); the
+   Host plays `back_to_oracle` on the new call and gives Oracle one
    neutral data item: `{"host_event": "returned_from_agent", "agent": "Mike"}`.
    `connect("oracle")` returns ok.
 5. If the capability, the provider (e.g. `503`) or Oracle audio fails, the
@@ -297,23 +336,27 @@ upgrade or an early POST.
 
 ## Reconciliation, process death and local Stop
 
-- A Host record never restarts the microphone or replaces the phone's current
-  local intent on its own. On launch, after an SSE reconnect, or after an ack
-  timeout, the phone reads `GET /oracle/handoff` and only reconciles
-  bookkeeping:
-  - a record in `offered`, `preparing` or `activating` that this process did
-    not start (it died mid-transfer): ack `failed` with `client_restarted`
-    (`offered`) or `rollback_failed` with `client_restarted` (later phases),
-    and leave local audio as the user finds it;
-  - an `active` record while the phone is not in hands-free with that agent:
-    ack `ended` with `client_restarted` (or `local_intent_changed` if the user
-    is in another mode);
-  - an `active` record that matches the running local mode: nothing to do.
-- An explicit local Stop during an `active` handoff acks `ended` with
-  `local_stop`. `clarp-admin oracle connect oracle` then answers
-  `404 no active handoff`.
-- A Host restart keeps records; phase ttls run from the restart for records
-  that were mid-transfer.
+A Host record never restarts the microphone, resumes a side or replaces the
+phone's current local intent. On launch, after an SSE reconnect, or after an
+ack timeout, the phone reads `GET /oracle/handoff` and reconciles bookkeeping
+only, comparing each record with the local mode that record's direction
+expects:
+
+| Record | Expected local mode | Phone does |
+|---|---|---|
+| any direction in `offered`, `preparing` or `activating`, and this process is executing it (it is the local owner) | the transfer in progress | continue or roll back as usual |
+| any direction in `offered`, `preparing` or `activating`, not the local owner (the process died mid-transfer, or the user took over) | — | ack `abandon` with `client_restarted` or `local_intent_changed`; touch no audio |
+| `oracle_to_agent` in `active` (this is `GET.active`) | hands-free with `agent.session`, owned by this handoff | nothing when it matches; otherwise ack `abandon` with `client_restarted` (nothing running) or `local_intent_changed` (another mode runs) |
+| `agent_to_oracle` in `ended` / `returned` | an ordinary Oracle call; no handoff owns it anymore | nothing |
+| terminal records | — | nothing |
+
+An explicit local Stop during a handoff in any non-terminal state acks
+`abandon` with `local_stop` (`cancelled` before `active`, `ended` from
+`active`) and stops only what the user asked to stop. Afterwards
+`clarp-admin oracle connect oracle` answers `404 no active handoff`.
+
+A Host restart keeps records; phase ttls run again from the restart for
+records that were mid-transfer.
 
 ## Resolving the target
 
@@ -348,12 +391,16 @@ and returns the final record.
   recipient set explicitly to `agent.session` (not
   `toggleCarModeRecipient`, which toggles) → ack `ready` → `session.close`
   with `handoff_id`. Rollback: re-take Oracle audio → ack `rolled_back`
-  (or `rollback_failed`).
+  (from `activating`, `rollback_failed` if that fails).
 - `agent_to_oracle`: fence rule 6 → preflight → ack `preparing` → stop
-  hands-free capture, settle the final utterance → ack `activating` →
+  hands-free capture, durably admit the final utterance as a send job →
+  ack `activating` →
   `stopAlwaysOn`, `startOracleMode` opening `/oracle/v2` with `thread_id` and
   `handoff_id` → on `session.started` with capture running, ack `ready`.
   Rollback: restore always-on only if the same owner still intends it.
+- Local Stop or a restarted process mid-handoff: ack `abandon` and touch no
+  audio beyond what the user asked for.
+- Audio effects only for the local owner; bookkeeping for every event.
 - The handoff is transient: it must not write the saved Oracle, AfterISpeak,
   addressing or delegation preferences.
 - Wait for each ack's confirmation before the next irreversible step; on a
