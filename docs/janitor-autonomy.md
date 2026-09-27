@@ -1,7 +1,8 @@
-# Heartbeat keeper, Quota keeper, Hotseat switcher, and global Janitor models
+# Heartbeat keeper, Quota keeper, Hotseat switcher, Label checker, and global Janitor models
 
 The Host installs two paused, persisted Janitor identities: `heartbeat-decider`
-and `quota-monitor`. The Hotseat switcher (`account-hotseat`) is an optional
+and `quota-monitor`, and an enabled `label-auditor` that stays idle until its
+judgment site is on. The Hotseat switcher (`account-hotseat`) is an optional
 template in the same catalog: create it on a Host that has the `hotseat` CLI. Enable/configure them through the existing Janitors UI or
 `clarp-admin janitor`; their enabled state and options belong to the identity.
 The Host lifecycle owns one `AutonomyJanitors` service. No agent-created timer or
@@ -108,6 +109,38 @@ switch reaches running turns. A running Codex session reads credentials once at
 startup; after a Codex switch the Host retires idle Codex connections so the
 next turn starts on the new account, and busy ones refresh at their next idle
 admission.
+
+## Label checker
+
+`label-auditor` is installed enabled, and does nothing until the `labels`
+judgment site is on (see [judgments.md](judgments.md)). Once an interval
+(`interval_seconds`, default 3600) it collects every agent the apps show as
+working in the background: a declared `background` state, a status line, or
+running helpers and processes. An agent in a live turn is skipped, and with
+none to check no request is made. For each (at most 12, the longest unchanged
+first) it sends Jev a small packet: the label as shown, the state and its age,
+job titles, progress lines and heartbeat ages, helper names and states, and
+the last three messages, redacted and clipped. One request judges them all;
+agent ids are not sent.
+
+A label is reported when Jev gives it at most 0.30 chance of being accurate
+and names one reason (finished, waiting for the user, stalled, doing
+something else) with at least 0.50 (`judgment_sites.LABEL_MATCH_MAX`,
+`LABEL_REASON_MIN`). The run creates one `document` artifact on the Janitor
+(`attention_kind: "label_mismatch"`, status `completed`, so it lands in
+Updates for review), for example "Lena says 'Building', but it looks like it
+is waiting for your answer (no change for 2h)." The same set of wrong labels
+is not reported again while it stays the same.
+
+It is report only: no label, state, job or helper is changed. The
+`autocorrect` option (default false) is reserved for that and is not acted on.
+Heartbeat quiet hours (`CLAUDE_PWA_HEARTBEAT_ACTIVE_HOURS`) apply. A run
+where Jev does not answer fails with "Jev did not answer; nothing reported",
+so repeated failures surface through the usual Janitor attention alert.
+
+The deterministic half of the same problem, retiring labels whose work has
+provably ended, is the stale-work reconcile in
+[sub-agents.md](architecture/sub-agents.md).
 
 ## Global model chain
 

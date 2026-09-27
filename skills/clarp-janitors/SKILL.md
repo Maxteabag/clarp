@@ -111,6 +111,12 @@ the machine-wide default account when the one in use drops under its floor
 weekly window; the ladder then drops to 10% and 0%). Set `mode` to `notify` to
 see what it would do without switching. Details in `docs/janitor-autonomy.md`.
 
+The Label checker (`label-auditor`) is an installed built-in that stays idle
+until the `labels` judgment site is on. Hourly (`interval_seconds`) it asks Jev
+whether each working agent's label still matches its activity and lists the
+wrong ones in one Updates item. It is report only; `autocorrect` is reserved
+and does nothing yet. Do not change a label because it was reported.
+
 For the developer adapter contract, read the Host's
 `docs/janitor-demand-workers.md`. Do not ask task agents for bookkeeping or
 additional context reports. Scope comes from the authenticated request's

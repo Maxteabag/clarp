@@ -4,7 +4,8 @@ A helper is an agent created by another agent (its parent) to do one piece of
 work. ``agents.helper_state`` tracks that work:
 
     running   the helper is working
-    reported  its report reached the parent as an agent-origin message
+    reported  its report reached the parent as an agent-origin message, or
+              its session sat idle so long that it is waiting on the parent
     done      the parent or the user accepted the result
     failed    the work ended in a terminal failure
     abandoned the parent was deleted or archived before the work was done
@@ -42,6 +43,7 @@ class HelperEvent(StrEnum):
     MARKED_RUNNING = "marked_running"  # the parent or the user reopened it
     FAILED = "failed"                # terminal failure
     PARENT_GONE = "parent_gone"      # the parent was deleted or archived
+    WENT_IDLE = "went_idle"          # its session sat idle past the stale-work limit
 
 
 # Roles an ordinary create may ask for. Janitors have their own creation path.
@@ -71,6 +73,8 @@ TRANSITIONS: Mapping[tuple[HelperState, HelperEvent], HelperState] = {
     (_S.REPORTED, _E.FAILED): _S.FAILED,
     (_S.RUNNING, _E.PARENT_GONE): _S.ABANDONED,
     (_S.REPORTED, _E.PARENT_GONE): _S.ABANDONED,
+    # Reported, not done or failed: the parent still decides what came of it.
+    (_S.RUNNING, _E.WENT_IDLE): _S.REPORTED,
 }
 
 

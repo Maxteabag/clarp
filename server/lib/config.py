@@ -412,6 +412,17 @@ class Config:
     # Hours a helper agent marked done stays in the chat list before the
     # maintenance worker archives it. [agents] helper_archive_grace_hours.
     helper_archive_grace_hours: float = 24.0
+    # Stale work labels (lib.stale_work, background_jobs.reconcile_stale).
+    # A running job whose heartbeat is older than job_stale_after_minutes
+    # and whose worker PID cannot be verified gets a timeline note, and after
+    # job_heartbeat_grace_minutes more fails with `heartbeat_lost`. A running
+    # helper whose own session has been idle helper_idle_after_minutes moves
+    # to `reported`. An idle agent's own status older than
+    # custom_status_ttl_hours is cleared. 0 turns a rule off. All in [agents].
+    job_stale_after_minutes: float = 15.0
+    job_heartbeat_grace_minutes: float = 15.0
+    helper_idle_after_minutes: float = 30.0
+    custom_status_ttl_hours: float = 2.0
     codex_model: str = ""
     codex_reasoning_effort: str = ""     # "" | "low" | "medium" | "high"
     agy_model: str = ""
@@ -753,6 +764,14 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         claude_effort   = str(agents.get("claude_effort", "")),
         helper_archive_grace_hours=_non_negative_float(
             agents.get("helper_archive_grace_hours"), 24.0),
+        job_stale_after_minutes=_non_negative_float(
+            agents.get("job_stale_after_minutes"), 15.0),
+        job_heartbeat_grace_minutes=_non_negative_float(
+            agents.get("job_heartbeat_grace_minutes"), 15.0),
+        helper_idle_after_minutes=_non_negative_float(
+            agents.get("helper_idle_after_minutes"), 30.0),
+        custom_status_ttl_hours=_non_negative_float(
+            agents.get("custom_status_ttl_hours"), 2.0),
         codex_model     = str(agents.get("codex_model", "")),
         codex_reasoning_effort = str(agents.get("codex_reasoning_effort", "")),
         agy_model       = str(agents.get("agy_model", "")),

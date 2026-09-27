@@ -571,7 +571,8 @@ def test_get_snapshot_returns_seeded_data(running_server):
     data = json.loads(body)
     assert {a["session"] for a in data["agents"] if not a["is_janitor"]} == {"claude", "rachel"}
     assert {a["session"] for a in data["agents"] if a["is_janitor"]} == {
-        "clarp-message-delegator", "clarp-tool-explainer", "clarp-audio-bookkeeper", "clarp-heartbeat-decider", "clarp-quota-monitor"}
+        "clarp-message-delegator", "clarp-tool-explainer", "clarp-audio-bookkeeper", "clarp-heartbeat-decider", "clarp-quota-monitor",
+        "clarp-label-auditor"}
     assert next(a for a in data["agents"] if a["session"] == "claude")["persona"] == "Mike"
 
 

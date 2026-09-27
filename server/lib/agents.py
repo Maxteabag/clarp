@@ -35,7 +35,8 @@ def list_agents() -> list[dict[str, Any]]:
                dreaming_enabled, dreaming_last_local_date, muted,
                custom_status, avatar_symbol, avatar_path, personality,
                archived_at, is_janitor, voice_verbosity,
-               parent_agent_id, role, helper_state, helper_completed_at
+               parent_agent_id, role, helper_state, helper_completed_at,
+               custom_status_at
           FROM agents
          WHERE deleted_at IS NULL
          ORDER BY created_at
@@ -51,7 +52,8 @@ def get_by_session(session: str) -> dict[str, Any] | None:
                dreaming_enabled, dreaming_last_local_date, muted,
                custom_status, avatar_symbol, avatar_path, personality,
                archived_at, is_janitor, voice_verbosity,
-               parent_agent_id, role, helper_state, helper_completed_at
+               parent_agent_id, role, helper_state, helper_completed_at,
+               custom_status_at
           FROM agents
          WHERE session = ? AND deleted_at IS NULL
     """, (session,)).fetchone()
@@ -80,7 +82,7 @@ def get_by_backend_session(backend_session_id: str) -> dict[str, Any] | None:
                a.dreaming_last_local_date, a.muted, a.custom_status,
                a.avatar_symbol, a.avatar_path, a.personality, a.archived_at,
                a.is_janitor, a.voice_verbosity, a.parent_agent_id, a.role,
-               a.helper_state, a.helper_completed_at
+               a.helper_state, a.helper_completed_at, a.custom_status_at
           FROM agents a
           JOIN runtimes r ON r.agent_id = a.agent_id
          WHERE r.backend_session_id = ?
@@ -119,7 +121,8 @@ def get_by_agent_id(agent_id: str) -> dict[str, Any] | None:
                dreaming_enabled, dreaming_last_local_date, muted,
                custom_status, avatar_symbol, avatar_path, personality,
                archived_at, is_janitor, voice_verbosity,
-               parent_agent_id, role, helper_state, helper_completed_at
+               parent_agent_id, role, helper_state, helper_completed_at,
+               custom_status_at
           FROM agents
          WHERE agent_id = ? AND deleted_at IS NULL
     """, (agent_id,)).fetchone()
@@ -179,7 +182,8 @@ def create_agent(*, persona: str, voice_id: str, cwd: str,
         c.execute("""
             UPDATE agents SET deleted_at = NULL, persona = ?, voice_id = ?,
                    cwd = ?, backend = ?, created_at = ?, model = ?, effort = ?,
-                   custom_status = '', parent_agent_id = NULL,
+                   custom_status = '', custom_status_at = NULL,
+                   parent_agent_id = NULL,
                    role = CASE WHEN is_janitor = 1 THEN 'janitor' ELSE 'agent' END,
                    helper_state = NULL, helper_completed_at = NULL
              WHERE agent_id = ?
@@ -214,7 +218,8 @@ def update_voice(agent_id: str, voice_id: str) -> None:
 
 def set_janitor_status(c, agent_id: str, status: str) -> None:
     """A Janitor-owned label write (ownership is recorded by janitor_store)."""
-    c.execute("UPDATE agents SET custom_status=? WHERE agent_id=?", (status, agent_id))
+    c.execute("UPDATE agents SET custom_status=?, custom_status_at=? WHERE agent_id=?",
+              (status, now_ms() if status else None, agent_id))
 
 
 def convert_to_janitor(c, agent_id: str) -> None:
@@ -254,13 +259,27 @@ def set_custom_status(agent_id: str, status: str | None) -> None:
     c.execute("SAVEPOINT manual_custom_status")
     try:
         janitor_store.forget_label_ownership(c, agent_id)
-        c.execute("UPDATE agents SET custom_status = ? WHERE agent_id = ?",
-                  ((status or "").strip(), agent_id))
+        text = (status or "").strip()
+        c.execute("UPDATE agents SET custom_status = ?, custom_status_at = ? "
+                  "WHERE agent_id = ?", (text, now_ms() if text else None, agent_id))
         c.execute("RELEASE SAVEPOINT manual_custom_status")
     except BaseException:
         c.execute("ROLLBACK TO SAVEPOINT manual_custom_status")
         c.execute("RELEASE SAVEPOINT manual_custom_status")
         raise
+
+
+def clear_stale_custom_status(agent_id: str, *, status: str,
+                              status_at: int) -> bool:
+    """Clear a status the stale-work reconcile found expired.
+
+    A compare-and-set on the text and time it read: a status rewritten
+    meanwhile, even with the same words, is fresh and stays."""
+    cur = conn().execute(
+        "UPDATE agents SET custom_status = '', custom_status_at = NULL "
+        "WHERE agent_id = ? AND custom_status = ? AND custom_status_at = ?",
+        (agent_id, status, int(status_at)))
+    return cur.rowcount == 1
 
 
 def set_archived(agent_id: str, archived: bool) -> None:
