@@ -52,7 +52,12 @@ running tests", "3 working, 1 waiting", a worker's latest progress line).
    - scope and the files it owns;
    - a WIP commit after every meaningful step, since it may be killed and resumed;
    - the test gate, chunked with `timeout 500` per chunk;
-   - the final commit, a report written to a file, and "do not push".
+   - the final commit, a report written to a file, and "do not push";
+   - how to wait: never end a turn on a pending external result (a Mac QA
+     run, CI, a build). Wait inside the turn with a bounded watch, or
+     schedule a wake-up (`clarp-admin prompt --to SELF --delay 10m`) before
+     ending it. A turn that ends with "still running, I'll check" stalls:
+     nothing wakes the helper again.
 3. **Launch.**
 
    ```bash
@@ -90,7 +95,11 @@ running tests", "3 working, 1 waiting", a worker's latest progress line).
    model is at its limit, a sub-agent on the same model dies on its first
    call ("You've hit your session limit"). Pass `--model` explicitly when
    yours is close to the limit.
-5. **Resume.** To resume a killed sub-agent, start it again with the same
+5. **Resume.** A runtime restart (`clarp-runtime` / a Host update) ends
+   every helper's current turn. Afterwards, message each helper whose
+   `helper_state` is `running`, not only the ones that looked busy: a helper
+   waiting on a Mac or CI result looks idle and would otherwise never resume.
+   To resume a killed sub-agent, start it again with the same
    name and prompt. It reads its own WIP commits and continues. A Clarp
    helper survives restarts on its own; starting it again with the same name
    reuses the same helper agent and re-sends the prompt.
