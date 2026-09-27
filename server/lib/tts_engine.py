@@ -140,8 +140,11 @@ class ElevenLabsEngine(TTSEngine):
                     on_chunk=None, trace_id="",
                     delivery_fields={"delivery": "chunked-file"})
             elif not self._synthesize_cartesia(text, voice_id, tmp_path, session):
+                # A stored voice may be a {provider: id} map; ElevenLabs
+                # needs its own id, not the whole map.
+                from .voice import ELEVENLABS, resolve_voice
                 synthesize_to_file(
-                    text, voice_id, tmp_path,
+                    text, resolve_voice(voice_id, ELEVENLABS) or voice_id, tmp_path,
                     api_key=self.api_key,
                     model=self.model,
                     speed=self.speed,
