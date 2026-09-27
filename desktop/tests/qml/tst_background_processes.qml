@@ -16,7 +16,16 @@ TestCase {
         property int avatarRevision: 0
         property int agentRevision: 0
         property int processRevision: 0
-        property var avatarMotion: QtObject { property bool reducedMotion: true; property int revision: 0; function working(s) { return false; } function phase(s) { return 0; } function observe(o, v) {} }
+        property var avatarMotion: QtObject {
+            property bool reducedMotion: true
+            property int revision: 0
+            property int processRevision: 0
+            function working(s) { return false; }
+            function phase(s) { return 0; }
+            function processHop() { return 0; }
+            function observe(o, v) {}
+            function observeProcess(o, v) {}
+        }
         property var processes: ({
             jobs: [
                 { jobId: "j1", kind: "watch", subAgent: false, title: "Watch the deploy", detail: "prod", status: "running", elapsed: "12m", heartbeat: "4s ago" },

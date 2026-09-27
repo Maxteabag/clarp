@@ -406,6 +406,7 @@ Item {
                     required property var modelData
                     Layout.fillWidth: true
                     cell: modelData
+                    motionClock: root.controller.avatarMotion
                     narrator: root.narrator
                     workingDirectory: root.workingDirectory
                     localFilesAllowed: root.localFilesAllowed

@@ -136,6 +136,7 @@ Rectangle {
                     subAgentCount: Number(counts.subAgentCount || 0)
                     runningChildren: Number(counts.runningChildren || 0)
                     reducedMotion: headerAvatarActivity.reducedMotion
+                    motionClock: root.controller.avatarMotion
                     onClicked: headerProcessPopover.openFor(root.session, headerProcesses)
                     ProcessPopover {
                         id: headerProcessPopover

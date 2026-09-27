@@ -281,7 +281,7 @@ int main(int argc, char* argv[]) {
     clarp::InstanceServer instanceServer;
     if (rootWindow != nullptr && controller != nullptr && !versionManager && instanceServer.listen(instanceSocket)) {
         QObject::connect(&instanceServer, &clarp::InstanceServer::windowRequested, &application,
-            [&engine](const QStringList& arguments) {
+            [&engine, controller](const QStringList& arguments) {
                 QCommandLineParser parser;
                 addLaunchOptions(parser);
                 if (!parser.parse(QStringList{QCoreApplication::applicationFilePath()} + arguments)) return;
@@ -300,6 +300,7 @@ int main(int argc, char* argv[]) {
                 engine.loadFromModule("Clarp.Desktop", "Main");
                 auto* window = qobject_cast<QQuickWindow*>(engine.rootObjects().constLast());
                 if (window == nullptr) return;
+                controller->watchMotionWindow(window);
                 clarp::StartupTrace::mark("window-loaded");
                 if (clarp::StartupTrace::enabled())
                     QObject::connect(window, &QQuickWindow::frameSwapped, window,
