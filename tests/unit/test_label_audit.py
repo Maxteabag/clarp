@@ -14,6 +14,7 @@ from lib import janitor_autonomy as service
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
+    monkeypatch.setattr(label_audit, "FRESH_GRACE_MS", 0)
     judgments.reset_breaker()
     monkeypatch.setattr(service.backends, "active_handles", lambda *a: [])
     owners = janitor_builtins.ensure_builtins(cwd="/tmp")
@@ -183,3 +184,11 @@ def test_evidence_is_small_and_carries_job_progress():
     assert packet["jobs"][0]["heartbeat_age_min"] == 0
     assert set(packet) == {"label", "state", "state_detail", "state_age_min",
                            "turn_ended_min_ago", "jobs", "helpers", "recent_messages"}
+
+
+def test_a_label_that_just_changed_is_not_judged(monkeypatch):
+    monkeypatch.setattr(label_audit, "FRESH_GRACE_MS", 15 * 60 * 1000)
+    _lena(state="background")
+    now = db.now_ms()
+    assert label_audit.candidates(now) == []
+    assert len(label_audit.candidates(now + 16 * 60 * 1000)) == 1

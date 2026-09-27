@@ -133,7 +133,9 @@ the upgrade start their clock at the upgrade.
 **Label checker** (`label_audit.py`, Janitor `label-auditor`) is judgment,
 report only. Hourly, when the `labels` Jev site is on, it asks whether each
 working label still describes what the agent is doing and lists the ones
-that do not in one Updates item. It changes nothing; see
+that do not in one Updates item. A label that changed in the last 15
+minutes is skipped, since the turn that set it may only just have ended.
+It changes nothing; see
 [janitor-autonomy.md](../janitor-autonomy.md#label-checker).
 
 ## Until then
