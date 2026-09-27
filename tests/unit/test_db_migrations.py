@@ -65,6 +65,14 @@ def test_pre_release_databases_are_refused(tmp_path):
 def _shape_as_v61(con: sqlite3.Connection) -> None:
     """Rebuild the pre-v62 shape on top of a current database."""
     con.executescript("""
+        DROP INDEX idx_task_plans_recovery;
+        DROP TABLE task_goal_documents;
+        ALTER TABLE task_plans DROP COLUMN history_json;
+        ALTER TABLE task_plans DROP COLUMN revision;
+        ALTER TABLE task_plans DROP COLUMN goal_json;
+        ALTER TABLE task_plans DROP COLUMN recovery_enabled;
+        ALTER TABLE task_items DROP COLUMN required;
+        CREATE UNIQUE INDEX idx_task_plans_one_active ON task_plans(agent_id) WHERE status='active';
         DROP TABLE tool_explanation_demands;
         DROP TABLE tool_explanation_jobs;
         DROP TABLE tool_explanation_releases;

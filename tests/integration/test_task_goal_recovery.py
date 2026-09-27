@@ -277,19 +277,59 @@ def test_named_context_checkpoint_is_atomic_and_retrievable_over_http(host):
 
 
 def test_real_provider_capacity_failure_keeps_goal_unfinished_and_backed_off(host):
-    p=create(host)
+    p = create(host)
     host.stop()
-    (host.root/'provider'/'quota-mode').write_text('blocked')
+    (host.root / "provider" / "quota-mode").write_text("blocked")
     host.start()
-    p=arm(host,p)
+    p = arm(host, p)
     for _ in range(200):
-        plans=host.request('/task-plans?session=rachel')['plans']
-        p=next(row for row in plans if row['plan_id']==p['plan_id'])
-        if p['goal']['continuation'].get('observed_state')=='capacity': break
-        time.sleep(.05)
-    assert p['status']=='active' and p['completed_count']==0
-    assert p['goal']['continuation']['observed_state']=='capacity'
-    assert p['goal']['continuation']['due_at']>int(time.time()*1000)
-    assert all(not criterion['evidence'] for criterion in p['goal']['criteria'])
-    with sqlite3.connect(host.root/'state.sqlite') as con:
-        assert con.execute("SELECT count(*) FROM messages WHERE message_id LIKE 'u-task-goal-%'").fetchone()[0]==1
+        plans = host.request("/task-plans?session=rachel")["plans"]
+        p = next(row for row in plans if row["plan_id"] == p["plan_id"])
+        if p["goal"]["continuation"].get("observed_state") == "capacity":
+            break
+        time.sleep(0.05)
+    assert p["status"] == "active" and p["completed_count"] == 0
+    assert p["goal"]["continuation"]["observed_state"] == "capacity"
+    assert p["goal"]["continuation"]["due_at"] > int(time.time() * 1000)
+    assert all(not criterion["evidence"] for criterion in p["goal"]["criteria"])
+    with sqlite3.connect(host.root / "state.sqlite") as con:
+        assert (
+            con.execute(
+                "SELECT count(*) FROM messages WHERE message_id LIKE 'u-task-goal-%'"
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_concurrent_http_edits_commit_exactly_one_revision(host):
+    from concurrent.futures import ThreadPoolExecutor
+
+    p = create(host)
+
+    def edit(label):
+        try:
+            return action(
+                host,
+                p,
+                "document",
+                {
+                    "name": "strategy.md",
+                    "format": "markdown",
+                    "content": label,
+                    "document_revision": 0,
+                    "reason": "Concurrent finding " + label,
+                },
+            )
+        except urllib.error.HTTPError as error:
+            return error.code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(edit, ["first", "second"]))
+    assert sum(isinstance(r, dict) for r in results) == 1
+    assert results.count(409) == 1
+    current = host.request("/task-plans?session=rachel")["plans"][0]
+    assert current["revision"] == p["revision"] + 1
+    document = host.request(
+        "/task-plan/document?plan_id=" + p["plan_id"] + "&name=strategy.md"
+    )["document"]
+    assert document["revision"] == 1 and len(document["history"]) == 1
