@@ -105,6 +105,37 @@ A job whose worker PID has exited fails at
 once (`worker_vanished`), and the owning session can close its own job with
 `clarp-agent-bg SESSION job-cancel HANDLE` even when the worker is gone.
 
+## Keeping the working labels honest
+
+An agent looks busy while it has a running helper, an active process or a
+status line of its own, so any of those left behind keeps it blue for hours.
+Two mechanisms retire them.
+
+**Stale-work reconcile** (`policies/stale_work.py`, `stale_work.py`, and
+`background_jobs.reconcile_stale`) is deterministic. The background-job
+watcher applies the job rule on every pass and the other two once a minute.
+Thresholds live in `[agents]`; 0 turns a rule off.
+
+| Rule | Condition | Action |
+|---|---|---|
+| Job heartbeat | an agent's running job with no worker PID to verify, heartbeat and progress silent for `job_stale_after_minutes` (15) | timeline note `reconcile: heartbeat stale` |
+| | still silent `job_heartbeat_grace_minutes` (15) later | fails with `heartbeat_lost` |
+| Helper idle | `helper_state = running`, no turn running or queued, no process, no running helper of its own, for `helper_idle_after_minutes` (30) | moves to `reported` through `helper_agents.note_idle` (event `went_idle`); the parent still decides done or failed; noted on the mirror job |
+| Status TTL | an agent's own status older than `custom_status_ttl_hours` (2), nothing counted and no turn | cleared through `agents.clear_stale_custom_status`; a declared `background` state settles to `idle` (event `background_expired`) |
+
+It never touches a job whose worker PID is verified alive (the existing
+`heartbeat_timeout_ms` rule still owns a wedged live worker), a
+computer-owned job, an agent in a turn, or a Janitor-maintained label (that
+has its own validity window). A status needs a write time to expire;
+`agents.custom_status_at` (schema v96) records it, and statuses from before
+the upgrade start their clock at the upgrade.
+
+**Label checker** (`label_audit.py`, Janitor `label-auditor`) is judgment,
+report only. Hourly, when the `labels` Jev site is on, it asks whether each
+working label still describes what the agent is doing and lists the ones
+that do not in one Updates item. It changes nothing; see
+[janitor-autonomy.md](../janitor-autonomy.md#label-checker).
+
 ## Until then
 
 - The `clarp-sub-agents` skill without `--clarp-agent` runs a detached
