@@ -642,6 +642,53 @@ QStringList messageBodies(const ConversationModel& model) {
     return bodies;
 }
 
+class CountingAgentSourceModel final : public QAbstractListModel {
+  public:
+    explicit CountingAgentSourceModel(QObject* parent = nullptr) : QAbstractListModel(parent) {}
+
+    int rowCount(const QModelIndex& parent = {}) const override {
+        return parent.isValid() ? 0 : static_cast<int>(m_rows.size());
+    }
+
+    QVariant data(const QModelIndex& index, int role) const override {
+        if (!index.isValid() || index.row() < 0 || index.row() >= m_rows.size()) return {};
+        ++m_roleReads[role];
+        return m_rows.at(index.row()).value(role);
+    }
+
+    QHash<int, QByteArray> roleNames() const override {
+        return {
+            {AgentListModel::AgentIdRole, "agentId"},
+            {AgentListModel::SessionRole, "session"},
+            {AgentListModel::StateRole, "agentState"},
+            {AgentListModel::StatusTextRole, "statusText"},
+            {AgentListModel::BusyRole, "busy"},
+            {AgentListModel::AgentRoleRole, "agentRole"},
+            {AgentListModel::ParentAgentIdRole, "parentAgentId"},
+            {AgentListModel::HelperStateRole, "helperState"},
+        };
+    }
+
+    void setRows(const QVector<QHash<int, QVariant>>& rows) {
+        beginResetModel();
+        m_rows = rows;
+        endResetModel();
+    }
+
+    void setValue(int row, int role, const QVariant& value) { m_rows[row].insert(role, value); }
+
+    void emitChanged(int row, const QList<int>& roles) {
+        emit dataChanged(index(row, 0), index(row, 0), roles);
+    }
+
+    void resetCounts() const { m_roleReads.clear(); }
+    [[nodiscard]] int reads(int role) const { return m_roleReads.value(role); }
+
+  private:
+    QVector<QHash<int, QVariant>> m_rows;
+    mutable QHash<int, int> m_roleReads;
+};
+
 } // namespace
 
 class NativeCoreTest final : public QObject {
@@ -673,6 +720,7 @@ class NativeCoreTest final : public QObject {
     void rosterPrefersLiveJobCountsAndCountsHelpers();
     void treeOrderMatchesTheTeamWalk();
     void sidebarNestsHelpersAndCollapsesFinishedOnes();
+    void sidebarStatusUpdatesDoNotRebuildTree();
     void subagentCellsDescribePhaseNameAndTask();
     void controllerTracksJobsFromListAndEvents();
     void rosterLookupIsConsistentDuringStructuralSignals();
@@ -1410,6 +1458,46 @@ void NativeCoreTest::sidebarNestsHelpersAndCollapsesFinishedOnes() {
         rosterRow(QStringLiteral("parent"), QStringLiteral("p"), 500)}}});
     QCOMPARE(proxySessions(filtered), (QStringList{QStringLiteral("parent")}));
     footers = filtered.index(0, 0).data(AgentFilterModel::DoneHelpersRole).toList();
+    QCOMPARE(footers.at(0).toMap().value(QStringLiteral("count")).toInt(), 1);
+}
+
+void NativeCoreTest::sidebarStatusUpdatesDoNotRebuildTree() {
+    CountingAgentSourceModel source;
+    source.setRows({
+        {{AgentListModel::AgentIdRole, QStringLiteral("p")},
+         {AgentListModel::SessionRole, QStringLiteral("parent")},
+         {AgentListModel::AgentRoleRole, QStringLiteral("agent")},
+         {AgentListModel::HelperStateRole, QString{}}},
+        {{AgentListModel::AgentIdRole, QStringLiteral("h")},
+         {AgentListModel::SessionRole, QStringLiteral("helper")},
+         {AgentListModel::AgentRoleRole, QStringLiteral("helper")},
+         {AgentListModel::ParentAgentIdRole, QStringLiteral("p")},
+         {AgentListModel::HelperStateRole, QStringLiteral("running")}},
+    });
+    AgentFilterModel filtered;
+    filtered.setSourceModel(&source);
+    QCOMPARE(proxySessions(filtered),
+             (QStringList{QStringLiteral("parent"), QStringLiteral("helper")}));
+
+    source.resetCounts();
+    source.setValue(1, AgentListModel::StatusTextRole, QStringLiteral("Still running"));
+    source.emitChanged(1, {AgentListModel::StateRole, AgentListModel::StatusTextRole,
+                           AgentListModel::BusyRole});
+    QCOMPARE(source.reads(AgentListModel::AgentIdRole), 0);
+    QCOMPARE(source.reads(AgentListModel::AgentRoleRole), 0);
+    QCOMPARE(source.reads(AgentListModel::ParentAgentIdRole), 0);
+    QCOMPARE(source.reads(AgentListModel::HelperStateRole), 0);
+    QCOMPARE(proxySessions(filtered),
+             (QStringList{QStringLiteral("parent"), QStringLiteral("helper")}));
+
+    source.resetCounts();
+    source.setValue(1, AgentListModel::HelperStateRole, QStringLiteral("done"));
+    source.emitChanged(1, {AgentListModel::HelperStateRole});
+    QVERIFY(source.reads(AgentListModel::AgentIdRole) > 0);
+    QCOMPARE(proxySessions(filtered), (QStringList{QStringLiteral("parent")}));
+    const QVariantList footers =
+        filtered.index(0, 0).data(AgentFilterModel::DoneHelpersRole).toList();
+    QCOMPARE(footers.size(), 1);
     QCOMPARE(footers.at(0).toMap().value(QStringLiteral("count")).toInt(), 1);
 }
 
