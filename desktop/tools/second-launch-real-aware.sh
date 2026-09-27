@@ -31,6 +31,9 @@ envs=(
   CLARP_SHARED_FILESYSTEM_HOST=http://127.0.0.1:$PORT CLARP_STARTUP_TRACE=1 CLARP_STALL_LOG=$L/stalls.log
   DBUS_SESSION_BUS_ADDRESS=unix:path=$L/run/lab-bus
 )
+if [[ -n ${LAB_ENV:-} ]]; then
+  envs+=("$LAB_ENV")
+fi
 
 rm -f "$L/run/lab-bus"
 owned_start /dev/null dbus-daemon --session --address="unix:path=$L/run/lab-bus" --nofork --nopidfile \
