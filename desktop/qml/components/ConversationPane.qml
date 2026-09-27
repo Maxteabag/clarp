@@ -210,6 +210,7 @@ Rectangle {
         }
 
         Rectangle {
+            id: transcriptArea
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: root.styled("background", Theme.window)
@@ -384,6 +385,10 @@ Rectangle {
     }
 
     onSessionChanged: {
+        // A Host error is about what was just attempted; switching agents in
+        // the active pane leaves it behind instead of carrying it along.
+        if (root.active && root.controller.errorMessage.length > 0)
+            root.controller.clearError();
         presentation.refreshExplanations();
         presentation.beginVisit();
         if (session.length > 0 && controller.connected && !root.pairRoom)
@@ -413,7 +418,9 @@ Rectangle {
         visible: active
         anchors.left: parent.left
         anchors.right: parent.right
-        y: transcript.y
+        // transcript.y is relative to transcriptArea (0); the pane header sits
+        // above it, so a banner at transcript.y covered the header.
+        y: transcriptArea.y
         height: 38
         z: 41
         sourceComponent: Rectangle {
@@ -456,7 +463,7 @@ Rectangle {
         visible: active
         anchors.left: parent.left
         anchors.right: parent.right
-        y: transcript.y + (connectionErrorOverlay.visible ? connectionErrorOverlay.height : 0)
+        y: transcriptArea.y + (connectionErrorOverlay.visible ? connectionErrorOverlay.height : 0)
         height: 38
         z: 40
         sourceComponent: Rectangle {

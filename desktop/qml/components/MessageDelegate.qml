@@ -232,8 +232,12 @@ Item {
                     }
                     TuiText {
                         Layout.fillWidth: true
+                        // "thinking Thinking": a summary that only repeats the
+                        // label adds nothing.
+                        readonly property bool repeatsLabel: root.shownBody.toLowerCase() === String(root.toolName).toLowerCase()
                         text: (root.activityStatus === "error" ? "Error · " : "")
-                            + (liveExplanation.narrationShown ? liveExplanation.displayText + (root.explanationRepeat > 1 ? " (x" + root.explanationRepeat + ")" : "") : root.shownBody)
+                            + (liveExplanation.narrationShown ? liveExplanation.displayText + (root.explanationRepeat > 1 ? " (x" + root.explanationRepeat + ")" : "")
+                               : repeatsLabel ? "" : root.shownBody)
                         textFormat: Text.PlainText
                         color: root.activityStatus === "error" ? Theme.danger
                             : liveExplanation.narrationShown ? root.styled("link", Theme.link)
