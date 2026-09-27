@@ -32,6 +32,8 @@ add_executable(clarp-desktop-tests
     ../src/app/PreviewVersions.h
     ../src/app/InstanceServer.cpp
     ../src/app/InstanceServer.h
+    ../src/launcher/InstanceForward.cpp
+    ../src/launcher/InstanceForward.h
     tst_native_core.cpp
     ../src/terminal/TerminalLaunch.cpp
     ../src/app/CredentialStore.cpp
@@ -117,10 +119,18 @@ set_tests_properties(clarp-desktop-core PROPERTIES
 add_test(
     NAME clarp-desktop-native-only
     COMMAND ${CMAKE_COMMAND}
-        -DCLARP_DESKTOP_BINARY=$<TARGET_FILE:clarp-desktop>
+        -DCLARP_DESKTOP_BINARY=$<TARGET_FILE:clarp-desktop-real>
         -DCLARP_DESKTOP_SOURCE=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_SOURCE_DIR}/cmake/VerifyNativeOnly.cmake
 )
+
+add_executable(clarp-launcher-real-probe launcher_real_probe.cpp)
+clarp_apply_quality_settings(clarp-launcher-real-probe)
+add_test(NAME clarp-desktop-launcher-exec-fallback
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/launcher_exec_fallback.py
+        $<TARGET_FILE:clarp-desktop>
+        $<TARGET_FILE:clarp-launcher-real-probe>)
 
 # Exercise the actual window command and SplitView layout with an offline fixture.
 string(MD5 clarp_test_instance "${CMAKE_CURRENT_BINARY_DIR}")
