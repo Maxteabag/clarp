@@ -133,6 +133,7 @@ ItemDelegate {
                     subAgentCount: row.subAgentCount
                     runningChildren: row.runningChildren
                     reducedMotion: activityAvatar.reducedMotion
+                    motionClock: row.controller.avatarMotion
                     onClicked: row.processesRequested(row.session, collapsedIndicator)
                 }
             }
@@ -183,6 +184,7 @@ ItemDelegate {
                         subAgentCount: row.subAgentCount
                         runningChildren: row.runningChildren
                         reducedMotion: activityAvatar.reducedMotion
+                        motionClock: row.controller.avatarMotion
                         onClicked: row.processesRequested(row.session, processIndicator)
                     }
                 }

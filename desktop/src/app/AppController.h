@@ -22,6 +22,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVariantMap>
+#include <QWindow>
 #include <QtQmlIntegration>
 
 namespace clarp {
@@ -131,6 +132,7 @@ class AppController : public QObject {
 
   public:
     QObject* avatarMotion() { return &m_avatarMotion; }
+    void watchMotionWindow(QWindow* window) { m_avatarMotion.watchWindow(window); }
     explicit AppController(QObject* parent = nullptr);
     ~AppController() override;
 

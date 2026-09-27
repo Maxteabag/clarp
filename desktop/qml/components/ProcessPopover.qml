@@ -111,6 +111,7 @@ Popup {
                     kind: jobRow.modelData.subAgent ? "agent" : "hourglass"
                     running: Boolean(jobRow.modelData.subAgent)
                     reducedMotion: Boolean(root.controller.avatarMotion && root.controller.avatarMotion.reducedMotion)
+                    motionClock: root.controller.avatarMotion
                 }
                 ColumnLayout {
                     Layout.fillWidth: true
@@ -187,6 +188,7 @@ Popup {
                         kind: "agent"
                         running: true
                         reducedMotion: Boolean(root.controller.avatarMotion && root.controller.avatarMotion.reducedMotion)
+                        motionClock: root.controller.avatarMotion
                     }
                     ColumnLayout {
                         Layout.fillWidth: true

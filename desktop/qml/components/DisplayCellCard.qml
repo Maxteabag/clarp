@@ -8,6 +8,7 @@ Rectangle {
     objectName: "displayCellCard"
 
     required property var cell
+    property var motionClock: null
     property var narrator: null
     property string workingDirectory: ""
     property string session: ""
@@ -74,6 +75,7 @@ Rectangle {
                 color: root.subagentPhase === "failed" ? Theme.danger
                     : root.subagentPhase === "finished" ? Theme.muted : Theme.link
                 running: root.isSubagent && Boolean(root.subagent.running)
+                motionClock: root.motionClock
             }
             TuiText {
                 objectName: "subagentCellPhase"

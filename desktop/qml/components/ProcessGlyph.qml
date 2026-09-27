@@ -2,17 +2,28 @@ import QtQuick
 
 // The two background-work marks, drawn so they follow the reading theme:
 // "hourglass" is waiting on a background job, "agent" is a running sub-agent.
-// Only the agent glyph moves, and only while `running` and motion is allowed.
 Item {
     id: root
 
     property string kind: "hourglass"
     property color color: Theme.link
     property bool running: false
-    property bool reducedMotion: false
+    property var motionClock: null
+    property bool reducedMotion: motionClock !== null && motionClock.reducedMotion
     property real glyphSize: 14
     readonly property bool animating: root.kind === "agent" && root.running && !root.reducedMotion
-        && root.visible
+        && root.visible && root.motionClock !== null
+    readonly property int hop: {
+        if (!root.animating)
+            return 0;
+        root.motionClock.processRevision;
+        return root.motionClock.processHop();
+    }
+
+    function updateObservation() {
+        if (root.motionClock)
+            root.motionClock.observeProcess(root, root.animating);
+    }
 
     implicitWidth: glyphSize
     implicitHeight: glyphSize
@@ -23,7 +34,7 @@ Item {
         width: root.glyphSize
         height: root.glyphSize
         anchors.horizontalCenter: parent.horizontalCenter
-        y: 0
+        y: root.hop * root.glyphSize * 0.055
         renderStrategy: Canvas.Cooperative
         onPaint: {
             const ctx = getContext("2d");
@@ -92,17 +103,15 @@ Item {
                 ctx.fill();
             }
         }
-
-        SequentialAnimation on y {
-            running: root.animating
-            loops: Animation.Infinite
-            NumberAnimation { to: -root.glyphSize * 0.1; duration: 420; easing.type: Easing.OutQuad }
-            NumberAnimation { to: 0; duration: 420; easing.type: Easing.InQuad }
-            PauseAnimation { duration: 360 }
-        }
     }
 
-    onAnimatingChanged: if (!animating) canvas.y = 0
+    Component.onCompleted: root.updateObservation()
+    Component.onDestruction: if (root.motionClock) root.motionClock.observeProcess(root, false)
+    onAnimatingChanged: root.updateObservation()
+    onMotionClockChanged: root.updateObservation()
+    onVisibleChanged: root.updateObservation()
+    onRunningChanged: root.updateObservation()
+    onReducedMotionChanged: root.updateObservation()
     onKindChanged: canvas.requestPaint()
     onColorChanged: canvas.requestPaint()
     onGlyphSizeChanged: canvas.requestPaint()

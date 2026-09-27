@@ -13,6 +13,7 @@ Item {
     property int subAgentCount: 0
     property int runningChildren: 0
     property bool reducedMotion: false
+    property var motionClock: null
     property real glyphSize: 14
     readonly property int total: Math.max(0, jobCount - subAgentCount) + Math.max(subAgentCount, runningChildren, 0)
     readonly property bool subAgentMode: subAgentCount > 0 || runningChildren > 0
@@ -42,6 +43,7 @@ Item {
         kind: root.glyphKind
         running: root.subAgentMode
         reducedMotion: root.reducedMotion
+        motionClock: root.motionClock
     }
 
     Rectangle {
