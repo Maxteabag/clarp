@@ -6,10 +6,12 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSet>
+#include <QThread>
 #include <QLockFile>
 #include <QFileInfo>
 #include <QDir>
 #include <QUuid>
+#include <QtConcurrent/QtConcurrent>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -20,6 +22,12 @@ namespace {
 
 double clampedRatio(double ratio) { return std::clamp(ratio, 0.15, 0.85); }
 
+QByteArray readWorkspaceCollection() {
+    QSettings settings;
+    settings.sync();
+    return settings.value(QStringLiteral("workspace/collectionV1")).toByteArray();
+}
+
 } // namespace
 
 PaneTreeModel::PaneTreeModel(QObject* parent)
@@ -28,21 +36,15 @@ PaneTreeModel::PaneTreeModel(QObject* parent)
     m_root->id = m_activePaneId;
     m_persistenceEnabled = QCoreApplication::organizationName() == QStringLiteral("MaxTeaBag") &&
                            QCoreApplication::applicationName() == QStringLiteral("Clarp");
-    m_lastCollection = QSettings().value(QStringLiteral("workspace/collectionV1")).toByteArray();
+    m_lastCollection = readWorkspaceCollection();
     m_recoveryId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     if (!QCoreApplication::instance()->property("clarpEmptyStartup").toBool())
         restore();
-    connect(this, &PaneTreeModel::treeChanged, this, &PaneTreeModel::persist);
-    connect(this, &PaneTreeModel::activePaneChanged, this, &PaneTreeModel::persist);
-    connect(this, &PaneTreeModel::treeChanged, this, &PaneTreeModel::persistWorkspaces);
-    connect(this, &PaneTreeModel::activePaneChanged, this, &PaneTreeModel::persistWorkspaces);
+    connect(this, &PaneTreeModel::treeChanged, this, [this] { persistWorkspaces(); });
+    connect(this, &PaneTreeModel::activePaneChanged, this, [this] { persistWorkspaces(); });
     if (m_persistenceEnabled &&
         !QCoreApplication::instance()->property("clarpEmptyStartup").toBool()) {
-        const auto doc =
-            QJsonDocument::fromJson(
-                QSettings().value(QStringLiteral("workspace/collectionV1")).toByteArray())
-                .object()
-                .toVariantMap();
+        const auto doc = QJsonDocument::fromJson(m_lastCollection).object().toVariantMap();
         const auto states = doc.value(QStringLiteral("states")).toMap();
         const auto names = doc.value(QStringLiteral("names")).toMap();
         const QString active = doc.value(QStringLiteral("active")).toString();
@@ -85,7 +87,19 @@ PaneTreeModel::PaneTreeModel(QObject* parent)
     }
 }
 
-PaneTreeModel::~PaneTreeModel() = default;
+PaneTreeModel::~PaneTreeModel() {
+    if (m_workspaceWriteWatcher != nullptr) {
+        disconnect(m_workspaceWriteWatcher, nullptr, this, nullptr);
+        if (m_workspaceWriteWatcher->isRunning())
+            m_workspaceWriteWatcher->waitForFinished();
+        applyWorkspaceWriteResult(m_workspaceWriteWatcher->result());
+        delete m_workspaceWriteWatcher;
+        m_workspaceWriteWatcher = nullptr;
+    }
+    if (m_pendingWorkspaceWrite) {
+        applyWorkspaceWriteResult(writeWorkspaceCollection(*m_pendingWorkspaceWrite));
+    }
+}
 
 QVariantMap PaneTreeModel::saveState() const {
     return {{QStringLiteral("root"), rootNode()},
@@ -232,12 +246,10 @@ void PaneTreeModel::moveActiveToWorkspace(const QString& id) {
     emit activePaneChanged();
 }
 void PaneTreeModel::saveWorkspaceLayoutInstead() {
-    m_forceWorkspaceSave = true;
-    persistWorkspaces();
-    m_forceWorkspaceSave = false;
+    persistWorkspaces(true);
 }
 
-void PaneTreeModel::persistWorkspaces() {
+void PaneTreeModel::persistWorkspaces(bool force) {
     if (!m_persistenceEnabled)
         return;
     QVariantMap states;
@@ -253,6 +265,61 @@ void PaneTreeModel::persistWorkspaces() {
                                                {QStringLiteral("names"), names},
                                                {QStringLiteral("states"), states}})
             .toJson(QJsonDocument::Compact);
+    m_pendingWorkspaceWrite = WorkspaceWriteRequest{.encoded = encoded,
+                                                    .expectedCollection = m_lastCollection,
+                                                    .recoveryId = m_recoveryId,
+                                                    .force = force};
+    startWorkspaceWrite();
+}
+
+void PaneTreeModel::startWorkspaceWrite() {
+    if (!m_pendingWorkspaceWrite || m_workspaceWriteWatcher != nullptr)
+        return;
+    const WorkspaceWriteRequest request = *m_pendingWorkspaceWrite;
+    m_pendingWorkspaceWrite.reset();
+    if (QThread::currentThread()->loopLevel() == 0) {
+        applyWorkspaceWriteResult(writeWorkspaceCollection(request));
+        startWorkspaceWrite();
+        return;
+    }
+    auto* watcher = new QFutureWatcher<WorkspaceWriteResult>(this);
+    m_workspaceWriteWatcher = watcher;
+    connect(watcher, &QFutureWatcher<WorkspaceWriteResult>::finished, this,
+            &PaneTreeModel::finishWorkspaceWrite);
+    watcher->setFuture(QtConcurrent::run(&PaneTreeModel::writeWorkspaceCollection, request));
+}
+
+void PaneTreeModel::finishWorkspaceWrite() {
+    auto* watcher = dynamic_cast<QFutureWatcher<WorkspaceWriteResult>*>(sender());
+    if (watcher == nullptr)
+        return;
+    const WorkspaceWriteResult result = watcher->result();
+    watcher->deleteLater();
+    if (m_workspaceWriteWatcher == watcher)
+        m_workspaceWriteWatcher = nullptr;
+    applyWorkspaceWriteResult(result);
+    startWorkspaceWrite();
+}
+
+void PaneTreeModel::applyWorkspaceWriteResult(const WorkspaceWriteResult& result) {
+    if (result.savedCollection) {
+        m_lastCollection = result.encoded;
+        if (m_pendingWorkspaceWrite && !m_pendingWorkspaceWrite->force)
+            m_pendingWorkspaceWrite->expectedCollection = result.encoded;
+    }
+    const QString warning = result.settingsError
+        ? QStringLiteral("Workspace layout could not be saved. Check available storage.")
+        : result.conflict
+            ? QStringLiteral("Another window saved a newer layout. This window's layout is kept in recovery.")
+            : QString{};
+    if (warning != m_workspaceSaveWarning) {
+        m_workspaceSaveWarning = warning;
+        emit workspaceSaveWarningChanged();
+    }
+}
+
+PaneTreeModel::WorkspaceWriteResult PaneTreeModel::writeWorkspaceCollection(const WorkspaceWriteRequest& request) {
+    WorkspaceWriteResult result{.encoded = request.encoded};
     QSettings settings;
     QDir().mkpath(QFileInfo(settings.fileName()).absolutePath());
     QLockFile lock(settings.fileName() + QStringLiteral(".workspace-save.lock"));
@@ -260,29 +327,24 @@ void PaneTreeModel::persistWorkspaces() {
     settings.sync();
     const QByteArray latest =
         settings.value(QStringLiteral("workspace/collectionV1")).toByteArray();
-    if (!locked || (!m_forceWorkspaceSave && latest != m_lastCollection)) {
+    if (!locked || (!request.force && latest != request.expectedCollection)) {
         // Preserve the unsaved window independently; never overwrite a newer writer.
-        settings.setValue(QStringLiteral("workspace/recovery/") + m_recoveryId, encoded);
+        settings.setValue(QStringLiteral("workspace/recovery/") + request.recoveryId, request.encoded);
         settings.sync();
-        m_workspaceSaveWarning = QStringLiteral(
-            "Another window saved a newer layout. This window's layout is kept in recovery.");
-        emit workspaceSaveWarningChanged();
-        return;
+        result.conflict = true;
+        result.settingsError = settings.status() != QSettings::NoError;
+        return result;
     }
-    settings.setValue(QStringLiteral("workspace/collectionV1"), encoded);
+    settings.setValue(QStringLiteral("workspace/collectionV1"), request.encoded);
     settings.sync();
+    result.settingsError = settings.status() != QSettings::NoError;
     if (settings.status() != QSettings::NoError) {
-        m_workspaceSaveWarning =
-            QStringLiteral("Workspace layout could not be saved. Check available storage.");
-        emit workspaceSaveWarningChanged();
-        return;
+        return result;
     }
-    m_lastCollection = encoded;
-    settings.remove(QStringLiteral("workspace/recovery/") + m_recoveryId);
-    if (!m_workspaceSaveWarning.isEmpty()) {
-        m_workspaceSaveWarning.clear();
-        emit workspaceSaveWarningChanged();
-    }
+    result.savedCollection = true;
+    settings.remove(QStringLiteral("workspace/recovery/") + request.recoveryId);
+    settings.sync();
+    return result;
 }
 
 QVariantMap PaneTreeModel::rootNode() const { return serialize(m_root.get()); }

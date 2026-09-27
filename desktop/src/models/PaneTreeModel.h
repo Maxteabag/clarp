@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QByteArray>
+#include <QFutureWatcher>
 #include <QObject>
 #include <QMap>
 #include <QString>
@@ -7,6 +9,7 @@
 #include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace clarp {
@@ -97,6 +100,23 @@ class PaneTreeModel : public QObject {
                                                            int& leafCount, quint64& highestId);
     void restore();
     void persist() const;
+    struct WorkspaceWriteRequest {
+        QByteArray encoded;
+        QByteArray expectedCollection;
+        QString recoveryId;
+        bool force = false;
+    };
+    struct WorkspaceWriteResult {
+        QByteArray encoded;
+        bool savedCollection = false;
+        bool conflict = false;
+        bool settingsError = false;
+    };
+    void persistWorkspaces(bool force = false);
+    void startWorkspaceWrite();
+    void finishWorkspaceWrite();
+    void applyWorkspaceWriteResult(const WorkspaceWriteResult& result);
+    [[nodiscard]] static WorkspaceWriteResult writeWorkspaceCollection(const WorkspaceWriteRequest& request);
 
     std::unique_ptr<Node> m_root;
     QString m_activePaneId;
@@ -105,12 +125,12 @@ class PaneTreeModel : public QObject {
     QByteArray m_lastCollection;
     QString m_workspaceSaveWarning;
     QString m_recoveryId;
-    bool m_forceWorkspaceSave = false;
     bool m_persistenceEnabled = false;
     QString m_activeWorkspace = QStringLiteral("workspace-1");
     QMap<QString, QVariantMap> m_workspaceStates;
     QMap<QString, QString> m_workspaceNames{{QStringLiteral("workspace-1"), QStringLiteral("Main")}};
-    void persistWorkspaces();
+    std::optional<WorkspaceWriteRequest> m_pendingWorkspaceWrite;
+    QFutureWatcher<WorkspaceWriteResult>* m_workspaceWriteWatcher = nullptr;
 };
 
 } // namespace clarp
