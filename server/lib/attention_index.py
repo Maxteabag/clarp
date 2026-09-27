@@ -27,7 +27,8 @@ def bucket(row, now_ms):
     if status in {'ready','completed'}:return 'review'
     return None
 
-def page(*,limit=100,cursor=''):
+def page(*,limit=100,cursor='',representation=''):
+    if representation not in ('', 'flat-v1'): raise ValueError('unsupported artifact representation')
     limit=max(1,min(int(limit),200))
     if len(cursor)>2048: raise ValueError("invalid attention cursor")
     # One SQLite read snapshot includes serialization, not only the ID query.
@@ -66,7 +67,7 @@ def page(*,limit=100,cursor=''):
             offset=raw['offset']
         result=[]
         for r,b in selected[offset:offset+limit]:
-            public=artifacts._public(r);public['attention_bucket']=b;result.append(public)
+            public=artifacts.response_representation(artifacts._public(r),representation);public['attention_bucket']=b;result.append(public)
         end=offset+len(result)
         next_cursor=base64.urlsafe_b64encode(json.dumps({'revision':revision,'offset':end}).encode()).decode() if end<len(selected) else None
         return {'artifacts':result,'next_cursor':next_cursor,'snapshot_revision':revision,'total':len(selected),'index_version':1}

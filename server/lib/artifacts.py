@@ -316,6 +316,19 @@ def _public(row) -> dict:
     return item
 
 
+def response_representation(item: dict, representation: str = "") -> dict:
+    """Opt-in wire projection; canonical storage and default clients keep payload.
+
+    Flattening has already copied validated public fields, including large content,
+    rows and diff. Native clients consume those top-level fields, never payload.
+    """
+    if representation == "":
+        return item
+    if representation != "flat-v1":
+        raise ValueError("unsupported artifact representation")
+    return {key: value for key, value in item.items() if key != "payload"}
+
+
 def _public_field_valid(key: str, value: Any) -> bool:
     if key == "podcast":
         from .podcast_live import validate_episode
