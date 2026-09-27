@@ -91,6 +91,8 @@ FULL_SAMPLES = {
     SSEType.ORCHESTRATOR_DECISION: lambda: events.orchestrator_decision(
         decision_id="d", trace_id="t", action="route", kind="route",
         target_session="s", confidence=0.9, reason="r"),
+    SSEType.ORACLE_HANDOFF: lambda: events.oracle_handoff(**{
+        key: "x" for key in events.FIELDS[SSEType.ORACLE_HANDOFF]}),
 }
 
 

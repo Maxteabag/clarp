@@ -259,6 +259,7 @@ Default core:
 
 - `clarp-media`
 - `clarp-sessions`
+- `clarp-oracle-contact`
 - `clarp-adopt`
 - `clarp-self-prompt`
 - `clarp-background-jobs`

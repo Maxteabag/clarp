@@ -180,7 +180,7 @@ def test_release_only_clears_matching_stop_hook():
 
 def test_live_config_shape():
     cfg = mod.live_config()
-    assert cfg == {"model": mod.MODEL, "instructions": PROMPT + mod.oracle_voices.SWITCH_NOTE,
+    assert cfg == {"model": mod.MODEL, "instructions": PROMPT,
                    "audio": {"format": {"type": "audio/pcm", "rate": 24000},
                              "output": {"voice": mod.VOICE}},
                    "delegation": {"type": "client"}}
@@ -496,12 +496,11 @@ def test_router_tools_can_read_results_and_transcripts():
 
 
 @pytest.mark.parametrize("strategy", ["operator", "direct_contact"])
-def test_voice_contract_explains_parts_verbatim_and_transcripts(strategy):
+def test_voice_contract_explains_numbered_parts(strategy):
     text = mod.live_config(roster={"agents": [{"name": "Theo", "session": "theo"}], "oracle_contact": "theo"},
                            delegation_strategy=strategy)["instructions"]
-    assert "recent conversation" in text and "without prompting" in text
-    assert "word for word" in text and "part" in text
-    assert "Give the useful facts conversationally" not in text
+    assert "numbered parts" in text and "more remains" in text
+    assert "Theo (theo)" in text
 
 
 def test_result_release_threshold_is_named_and_above_old_value():

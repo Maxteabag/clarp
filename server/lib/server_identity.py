@@ -40,7 +40,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 21
+HOST_CONTRACT = 22
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
@@ -78,7 +78,6 @@ FEATURES: tuple[str, ...] = (
     "turn_queue_resume",
     "controller_narration",
     "tool_explanation_sources",
-    "oracle_agent_voices",
     "helper_agents",
     "claude_subagent_cells",
     "oracle_earcons",
@@ -87,6 +86,7 @@ FEATURES: tuple[str, ...] = (
     "durable_task_goals",
     "html_reports",
     "tool_explanation_stats",
+    "oracle_handoff",
 )
 
 
@@ -104,7 +104,6 @@ FEATURE_CONTRACTS["oracle_context_memory"] = 9
 FEATURE_CONTRACTS["turn_queue_resume"] = 7
 FEATURE_CONTRACTS["controller_narration"] = 8
 FEATURE_CONTRACTS["tool_explanation_sources"] = 10
-FEATURE_CONTRACTS["oracle_agent_voices"] = 12
 FEATURE_CONTRACTS["helper_agents"] = 13
 FEATURE_CONTRACTS["claude_subagent_cells"] = 14
 FEATURE_CONTRACTS["oracle_earcons"] = 15
@@ -113,6 +112,7 @@ FEATURE_CONTRACTS["stale_work_labels"] = 17
 FEATURE_CONTRACTS["html_reports"] = 19
 FEATURE_CONTRACTS["tool_explanation_stats"] = 20
 FEATURE_CONTRACTS["durable_task_goals"] = 21
+FEATURE_CONTRACTS["oracle_handoff"] = 22
 
 
 def capabilities() -> dict[str, object]:
@@ -209,11 +209,17 @@ def clarp_version() -> str:
     return ""
 
 
+def server_id() -> str:
+    """This Host's stable instance id, minted on first use."""
+    value = get_text(_ID_KEY).strip()
+    if not value:
+        value = str(uuid.uuid4())
+        set_text(_ID_KEY, value)
+    return value
+
+
 def get_server_info() -> dict[str, object]:
-    server_id = get_text(_ID_KEY).strip()
-    if not server_id:
-        server_id = str(uuid.uuid4())
-        set_text(_ID_KEY, server_id)
+    server_id_value = server_id()
     name = (get_text(_NAME_KEY).strip()
             or os.environ.get("CLARP_SERVER_NAME", "").strip()
             or socket.gethostname())
@@ -231,7 +237,7 @@ def get_server_info() -> dict[str, object]:
     default_cwd = (os.environ.get("CLARP_WORKSPACE_ROOT", "/data/workspace")
                    if mode == "container" else str(pathlib.Path.home()))
     return {
-        "server_id": server_id,
+        "server_id": server_id_value,
         "name": name,
         "deployment_mode": "container" if mode == "container" else "native",
         "version": version,

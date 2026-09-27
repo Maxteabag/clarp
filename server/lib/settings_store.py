@@ -109,6 +109,12 @@ def count_prefix(prefix: str) -> int:
         "SELECT COUNT(*) FROM settings WHERE key LIKE ?", (prefix + "%",)).fetchone()[0])
 
 
+def keys_with_prefix(prefix: str) -> list[str]:
+    """Keys under `prefix`, in key order."""
+    rows = conn().execute("SELECT key FROM settings WHERE key LIKE ? ORDER BY key", (prefix + "%",))
+    return [str(row["key"]) for row in rows]
+
+
 def values_with_prefix(prefix: str, *, updated_after: int | None = None,
                        updated_through: int | None = None) -> list[str]:
     """Values under `prefix`, optionally bounded by (updated_after, updated_through]."""
