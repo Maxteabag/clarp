@@ -274,3 +274,22 @@ def test_named_context_checkpoint_is_atomic_and_retrievable_over_http(host):
         ]
         == "Saved flexible working context"
     )
+
+
+def test_real_provider_capacity_failure_keeps_goal_unfinished_and_backed_off(host):
+    p=create(host)
+    host.stop()
+    (host.root/'provider'/'quota-mode').write_text('blocked')
+    host.start()
+    p=arm(host,p)
+    for _ in range(200):
+        plans=host.request('/task-plans?session=rachel')['plans']
+        p=next(row for row in plans if row['plan_id']==p['plan_id'])
+        if p['goal']['continuation'].get('observed_state')=='capacity': break
+        time.sleep(.05)
+    assert p['status']=='active' and p['completed_count']==0
+    assert p['goal']['continuation']['observed_state']=='capacity'
+    assert p['goal']['continuation']['due_at']>int(time.time()*1000)
+    assert all(not criterion['evidence'] for criterion in p['goal']['criteria'])
+    with sqlite3.connect(host.root/'state.sqlite') as con:
+        assert con.execute("SELECT count(*) FROM messages WHERE message_id LIKE 'u-task-goal-%'").fetchone()[0]==1
