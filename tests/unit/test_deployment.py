@@ -49,3 +49,23 @@ def test_explicit_container_paths_override_defaults(monkeypatch, tmp_path):
     layout = DeploymentLayout.from_environment()
     assert layout.media_dir == tmp_path / "special-media"
     assert layout.state_database == tmp_path / "state.db"
+
+
+def test_container_claude_json_is_valid_json_and_repairs_empty(monkeypatch, tmp_path):
+    import json
+    import stat
+    monkeypatch.setenv("CLARP_DEPLOYMENT_MODE", "container")
+    monkeypatch.setenv("CLARP_DATA_DIR", str(tmp_path / "data"))
+    layout = DeploymentLayout.from_environment()
+    path = layout.ensure_claude_json()
+    assert json.loads(path.read_text()) == {}
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    # Images before this fix created an empty file, which the CLI rejects.
+    path.write_text("")
+    layout.ensure_claude_json()
+    assert json.loads(path.read_text()) == {}
+
+    path.write_text('{"hasCompletedOnboarding": true}')
+    layout.ensure_claude_json()
+    assert json.loads(path.read_text()) == {"hasCompletedOnboarding": True}

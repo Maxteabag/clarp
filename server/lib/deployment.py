@@ -90,6 +90,26 @@ class DeploymentLayout:
         ):
             path.mkdir(parents=True, exist_ok=True)
 
+    def ensure_claude_json(self) -> pathlib.Path:
+        """Give the Claude CLI a parseable ~/.claude.json on the data volume.
+
+        The CLI refuses to start on an empty file ("configuration file is
+        corrupted: JSON Parse error"), and earlier images created exactly that,
+        so an empty or blank file from an upgrade is replaced too. A file with
+        content is the CLI's own state and is left alone.
+        """
+        path = self.claude_home / ".claude.json"
+        try:
+            blank = not path.read_bytes().strip()
+        except FileNotFoundError:
+            blank = True
+        if blank:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as handle:
+                handle.write("{}\n")
+        return path
+
 
 LAYOUT = DeploymentLayout.from_environment()
 
