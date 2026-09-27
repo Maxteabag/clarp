@@ -9,6 +9,9 @@
 #include "app/LocalReport.h"
 #include <QStandardItemModel>
 #include "app/AppController.h"
+#include "app/InstanceServer.h"
+#include <atomic>
+#include <thread>
 #include "app/CredentialStore.h"
 #include "app/TranscriptCache.h"
 #include "app/TimeFormat.h"
@@ -657,6 +660,7 @@ class NativeCoreTest final : public QObject {
     void consecutiveExplanationsCollapseWithoutChangingTranscript();
     void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
     void logMergeRefreshesExplanationsOncePerBatch();
+    void secondLaunchIsForwardedToTheRunningInstance();
     void readyModePreservesActivityAndHidesOnlyProvisionalBody();
     void idleContactStartsFreshWithSavedDefaults();
     void newAgentWaitsForOwnRosterAndRejectsLateSnapshots();
@@ -717,6 +721,29 @@ class NativeCoreTest final : public QObject {
     void reportForArtifactExposesSanitizedBody();
     void portedUrlsBecomeLinksWithoutChangingVisibleText();
 };
+
+void NativeCoreTest::secondLaunchIsForwardedToTheRunningInstance() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("instance.sock"));
+    QVERIFY(!clarp::forwardToRunningInstance(path, {}));  // nobody listening yet
+    clarp::InstanceServer server;
+    QVERIFY(server.listen(path));
+    QSignalSpy requested(&server, &clarp::InstanceServer::windowRequested);
+    const QStringList arguments{QStringLiteral("--backend"), QStringLiteral("claude"),
+                                QStringLiteral("--cwd"), QStringLiteral("/tmp/with space/ø")};
+    std::atomic<bool> accepted = false;
+    std::thread client([&] { accepted = clarp::forwardToRunningInstance(path, arguments); });
+    QTRY_COMPARE(requested.count(), 1);
+    client.join();
+    QVERIFY(accepted);
+    QCOMPARE(requested.first().first().toStringList(), arguments);
+    // Help, version and screenshot runs always run on their own.
+    QVERIFY(clarp::instanceSocketPath({QStringLiteral("--version")}).isEmpty());
+    qputenv("CLARP_SCREENSHOT_PATH", "/tmp/x.png");
+    QVERIFY(clarp::instanceSocketPath({}).isEmpty());
+    qunsetenv("CLARP_SCREENSHOT_PATH");
+}
 
 void NativeCoreTest::logMergeRefreshesExplanationsOncePerBatch() {
     // A tail reload merges every turn it returns. With tool narration on, each

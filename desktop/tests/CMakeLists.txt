@@ -30,6 +30,8 @@ add_test(NAME clarp-desktop-reading-theme COMMAND clarp-reading-theme-tests)
 add_executable(clarp-desktop-tests
     ../src/app/PreviewVersions.cpp
     ../src/app/PreviewVersions.h
+    ../src/app/InstanceServer.cpp
+    ../src/app/InstanceServer.h
     tst_native_core.cpp
     ../src/terminal/TerminalLaunch.cpp
     ../src/app/CredentialStore.cpp

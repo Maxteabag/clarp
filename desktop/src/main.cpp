@@ -27,7 +27,9 @@
 #include <QQmlApplicationEngine>
 #include <QSGRendererInterface>
 #include "app/StartupTrace.h"
+#include "app/InstanceServer.h"
 #include <QFontDatabase>
+#include <span>
 #include <thread>
 #include <QQmlError>
 #include <QQuickItem>
@@ -38,8 +40,32 @@
 #include <QTimer>
 #include <algorithm>
 
+namespace {
+void addLaunchOptions(QCommandLineParser& parser) {
+    parser.addOption({QStringLiteral("anonymous"), QStringLiteral("Start anonymously, overriding Settings")});
+    parser.addOption({QStringLiteral("contact"), QStringLiteral("Start with an available contact, overriding Settings")});
+    parser.addOption({QStringLiteral("new-agent"), QStringLiteral("Start an agent; prompt for backend if omitted")});
+    parser.addOption({QStringLiteral("no-new-agent"), QStringLiteral("Open the desktop without starting an agent, overriding Settings")});
+    parser.addOption({QStringLiteral("backend"), QStringLiteral("Start with claude, codex, grok, agy, opencode, or deepseek (implies --new-agent)"), QStringLiteral("backend")});
+    parser.addOption({QStringLiteral("cwd"), QStringLiteral("Workspace directory; skip directory selection"), QStringLiteral("directory")});
+    parser.addOption({QStringLiteral("model"), QStringLiteral("Use this backend model ID"), QStringLiteral("model")});
+    parser.addOption({QStringLiteral("effort"), QStringLiteral("Use this model reasoning effort"), QStringLiteral("effort")});
+    parser.addOption({QStringLiteral("preview-versions"), QStringLiteral("Manage saved preview versions")});
+}
+} // namespace
+
 int main(int argc, char* argv[]) {
     clarp::StartupTrace::mark("main");
+    // A later launch of the same Clarp opens a window in the running process
+    // (~57 ms) instead of starting another (~210 ms); see InstanceServer.h.
+    QStringList launchArguments;
+    for (const char* argument : std::span(argv, static_cast<size_t>(argc)).subspan(1))
+        launchArguments.append(QString::fromLocal8Bit(argument));
+    const QString instanceSocket = clarp::instanceSocketPath(launchArguments);
+    if (clarp::forwardToRunningInstance(instanceSocket, launchArguments)) {
+        clarp::StartupTrace::mark("forwarded-to-running-instance");
+        return EXIT_SUCCESS;
+    }
     // The application owns its Qt Quick style. Host-only QWidget themes such
     // as Kvantum are often absent from Flatpak/AppImage runtimes and should not
     // make a portable launch noisy or fail plugin discovery.
@@ -73,15 +99,7 @@ int main(int argc, char* argv[]) {
     launchParser.setApplicationDescription(QStringLiteral("Clarp desktop and agent launcher"));
     launchParser.addHelpOption();
     launchParser.addVersionOption();
-    launchParser.addOption({QStringLiteral("anonymous"), QStringLiteral("Start anonymously, overriding Settings")});
-    launchParser.addOption({QStringLiteral("contact"), QStringLiteral("Start with an available contact, overriding Settings")});
-    launchParser.addOption({QStringLiteral("new-agent"), QStringLiteral("Start an agent; prompt for backend if omitted")});
-    launchParser.addOption({QStringLiteral("no-new-agent"), QStringLiteral("Open the desktop without starting an agent, overriding Settings")});
-    launchParser.addOption({QStringLiteral("backend"), QStringLiteral("Start with claude, codex, grok, agy, opencode, or deepseek (implies --new-agent)"), QStringLiteral("backend")});
-    launchParser.addOption({QStringLiteral("cwd"), QStringLiteral("Workspace directory; skip directory selection"), QStringLiteral("directory")});
-    launchParser.addOption({QStringLiteral("model"), QStringLiteral("Use this backend model ID"), QStringLiteral("model")});
-    launchParser.addOption({QStringLiteral("effort"), QStringLiteral("Use this model reasoning effort"), QStringLiteral("effort")});
-    launchParser.addOption({QStringLiteral("preview-versions"), QStringLiteral("Manage saved preview versions")});
+    addLaunchOptions(launchParser);
     launchParser.process(application);
     // The first Text item paid ~50 ms on the GUI thread for fontconfig to
     // enumerate the system fonts. The font database is shared and thread-safe,
@@ -259,6 +277,53 @@ int main(int argc, char* argv[]) {
             QMetaObject::invokeMethod(rootWindow, "openLaunchAgent",
                 Q_ARG(QVariant, launchBackend), Q_ARG(QVariant, launchModel), Q_ARG(QVariant, launchEffort), Q_ARG(QVariant, anonymousMode), Q_ARG(QVariant, launchDirectory));
         });
+    }
+    clarp::InstanceServer instanceServer;
+    if (rootWindow != nullptr && controller != nullptr && !versionManager && instanceServer.listen(instanceSocket)) {
+        QObject::connect(&instanceServer, &clarp::InstanceServer::windowRequested, &application,
+            [&engine](const QStringList& arguments) {
+                QCommandLineParser parser;
+                addLaunchOptions(parser);
+                if (!parser.parse(QStringList{QCoreApplication::applicationFilePath()} + arguments)) return;
+                const QString backend = parser.value(QStringLiteral("backend")).trimmed().toLower();
+                const int anonymous = parser.isSet(QStringLiteral("anonymous")) ? 1
+                    : parser.isSet(QStringLiteral("contact")) ? 0 : -1;
+                const bool explicitLaunch = parser.isSet(QStringLiteral("cwd")) || anonymous >= 0
+                    || parser.isSet(QStringLiteral("new-agent")) || parser.isSet(QStringLiteral("backend"))
+                    || parser.isSet(QStringLiteral("model")) || parser.isSet(QStringLiteral("effort"));
+                const bool noNewAgent = parser.isSet(QStringLiteral("no-new-agent"));
+                const bool launch = !noNewAgent && (explicitLaunch
+                    || QSettings().value(QStringLiteral("launch/newAgentOnStartup"), true).toBool());
+                clarp::StartupTrace::mark("window-requested");
+                engine.setInitialProperties({{QStringLiteral("launchOnStartup"), launch},
+                                             {QStringLiteral("sidebarVisible"), noNewAgent}});
+                engine.loadFromModule("Clarp.Desktop", "Main");
+                auto* window = qobject_cast<QQuickWindow*>(engine.rootObjects().constLast());
+                if (window == nullptr) return;
+                clarp::StartupTrace::mark("window-loaded");
+                if (clarp::StartupTrace::enabled())
+                    QObject::connect(window, &QQuickWindow::frameSwapped, window,
+                        [window, first = true]() mutable {
+                            if (first) { first = false; clarp::StartupTrace::mark("window-first-frame"); }
+                            Q_UNUSED(window)
+                        });
+                // A closed extra window is destroyed with its controller, so it
+                // stops costing memory; the first window keeps the process state.
+                QObject::connect(window, &QWindow::visibleChanged, window, [window](bool visible) {
+                    if (!visible) window->deleteLater();
+                });
+                if (launch) {
+                    const QString directory = parser.value(QStringLiteral("cwd"));
+                    const QString model = parser.value(QStringLiteral("model"));
+                    const QString effort = parser.value(QStringLiteral("effort"));
+                    QTimer::singleShot(0, window, [window, backend, model, effort, anonymous, directory] {
+                        QMetaObject::invokeMethod(window, "openLaunchAgent", Q_ARG(QVariant, backend),
+                            Q_ARG(QVariant, model), Q_ARG(QVariant, effort), Q_ARG(QVariant, anonymous),
+                            Q_ARG(QVariant, directory));
+                    });
+                }
+                window->requestActivate();
+            });
     }
     const QString screenshotPath = qEnvironmentVariable("CLARP_SCREENSHOT_PATH");
     if (!screenshotPath.isEmpty() && rootWindow != nullptr && controller != nullptr) startDesktopResearch(application, rootWindow, controller);
