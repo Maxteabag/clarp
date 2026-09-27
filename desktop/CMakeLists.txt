@@ -62,6 +62,7 @@ target_sources(clarp-desktop PRIVATE
     src/app/ReadingTheme.h
     src/app/MemoryDiagnostics.h
     src/app/StallMonitor.cpp
+    src/app/InstanceServer.cpp
     src/app/StallMonitor.h
     src/app/MarkdownStyle.cpp
     src/app/MarkdownStyle.h
