@@ -10,9 +10,6 @@ ApplicationWindow {
     id: root
 
     property bool launchOnStartup: false
-    // Hidden panels are built after the first frame, not before it.
-    property bool panelsReady: false
-    onFrameSwapped: if (!panelsReady) panelsReady = true
     property string relaunchSession: ""
     property string relaunchName: ""
     property string voiceSession: ""
@@ -502,8 +499,8 @@ ApplicationWindow {
                 }
 
                 DeferredPanel {
+                    objectName: "teamsPanel"
                     anchors.fill: parent
-                    ready: root.panelsReady
                     visible: root.selectedSurface === "teams"
                     sourceComponent: TeamsPanel {
                         controller: app
@@ -516,13 +513,13 @@ ApplicationWindow {
 
                 DeferredPanel {
                     id: settingsPanel
+                    objectName: "settingsPanel"
                     readonly property bool dialogOpen: item !== null && item.dialogOpen
                     function focusCurrent() {
                         if (item !== null)
                             item.focusCurrent();
                     }
                     anchors.fill: parent
-                    ready: root.panelsReady
                     visible: root.selectedSurface === "settings"
                     sourceComponent: SettingsPanel {
                         controller: app
@@ -568,12 +565,11 @@ ApplicationWindow {
 
     DeferredPanel {
         id: overview
+        objectName: "overview"
 
         anchors.fill: parent
-        ready: root.panelsReady
         z: 80
         sourceComponent: AgentOverview {
-        objectName: "overview"
         controller: app
         onCloseRequested: overview.visible = false
         onStartRequested: (name) => {
@@ -656,11 +652,10 @@ ApplicationWindow {
 
     DeferredPanel {
         id: startAgent
+        objectName: "startAgent"
         anchors.fill: parent
-        ready: root.panelsReady
         z: 90
         sourceComponent: StartAgentDialog {
-            objectName: "startAgent"
             controller: app
             replaceSession: root.relaunchSession
             initialName: root.relaunchName
@@ -670,11 +665,10 @@ ApplicationWindow {
 
     DeferredPanel {
         id: voiceDialog
+        objectName: "voiceDialog"
         anchors.fill: parent
-        ready: root.panelsReady
         z: 95
         sourceComponent: VoiceDialog {
-            objectName: "voiceDialog"
             controller: app
             session: root.voiceSession
             agentName: root.voiceName
@@ -684,11 +678,10 @@ ApplicationWindow {
 
     DeferredPanel {
         id: orchestrator
+        objectName: "orchestrator"
         anchors.fill: parent
-        ready: root.panelsReady
         z: 95
         sourceComponent: OrchestratorDialog {
-            objectName: "orchestrator"
             controller: app
             onCloseRequested: orchestrator.visible = false
         }
@@ -727,12 +720,11 @@ ApplicationWindow {
 
     DeferredPanel {
         id: queueDialog
+        objectName: "queueDialog"
         property string session
         anchors.fill: parent
-        ready: root.panelsReady
         z: 105
         sourceComponent: QueueDialog {
-            objectName: "queueDialog"
             controller: app
             session: queueDialog.session
             onCloseRequested: queueDialog.visible = false
@@ -741,12 +733,12 @@ ApplicationWindow {
 
     DeferredPanel {
         id: reportView
+        objectName: "reportView"
         function open(artifactId) {
             visible = true;
             item.open(artifactId);
         }
         anchors.fill: parent
-        ready: root.panelsReady
         z: 101
         sourceComponent: ReportView {
             controller: app
@@ -756,12 +748,11 @@ ApplicationWindow {
 
     DeferredPanel {
         id: profilePanel
+        objectName: "agentProfilePanel"
         property string session
         anchors.fill: parent
-        ready: root.panelsReady
         z: 100
         sourceComponent: AgentProfilePanel {
-        objectName: "agentProfilePanel"
         controller: app
         session: profilePanel.session
         onCloseRequested: profilePanel.visible = false
