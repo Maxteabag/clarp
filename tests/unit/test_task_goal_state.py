@@ -507,3 +507,31 @@ def test_large_plan_is_never_silently_truncated(tmp_path):
             items=[{"id": str(i), "title": "Work"} for i in range(501)],
         )
     assert len(task_plans.list_for_session("planner")) == 1
+
+
+def test_recovery_batches_do_not_starve_later_commitments(tmp_path):
+    p = make_goal(tmp_path)
+    for i in range(105):
+        task_plans.create(
+            session=p["session"],
+            plan_id=f"work-{i:03}",
+            title="Independent outcome",
+            items=[],
+            goal={"criteria": ["Evidence"], "limits": "No publication", "enroll": True},
+        )
+    # Long future waits must not keep the same first 100 records at the head.
+    seen = set()
+    for _ in range(3):
+        recovery.tick(
+            lambda *args: pytest.fail("future goals must not dispatch"), now=db.now_ms()
+        )
+        for plan in task_plans.list_for_session(p["session"]):
+            if plan["goal"]["continuation"].get("observed_at"):
+                seen.add(plan["plan_id"])
+    # Query all rows because the UI listing itself is bounded to 100.
+    states = [
+        json.loads(r[0]) for r in db.conn().execute("SELECT goal_json FROM task_plans")
+    ]
+    assert len(states) == 106 and all(
+        s["continuation"].get("observed_at") for s in states
+    )

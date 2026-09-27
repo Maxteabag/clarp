@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from . import agents, db, task_goal_state
 
 PREFIX = "task-goal-"
+_SCAN_AFTER = ""
 
 
 def boundary(plan, goal, *, check_live=True):
@@ -68,9 +69,11 @@ def boundary(plan, goal, *, check_live=True):
         and native_goal["status"] != "complete"
     ):
         # Codex owns native continuation. Never run a competing Host goal loop.
-        return "native_owned", "Waiting for the agent's existing autonomous objective: " + native_goal[
-            "status"
-        ]
+        return (
+            "native_owned",
+            "Waiting for the agent's existing autonomous objective: "
+            + native_goal["status"],
+        )
     if check_live:
         live = turn_dispatch.live_work(agent["agent_id"], session=agent["session"])
         if (
@@ -136,12 +139,17 @@ def _prompt(plan, goal):
 def tick(dispatch, *, now=None):
     now = db.now_ms() if now is None else now
     count = 0
-    ids = [
-        r[0]
-        for r in db.conn().execute(
-            "SELECT plan_id FROM task_plans WHERE recovery_enabled=1 AND status='active' ORDER BY updated_at LIMIT 100"
-        )
-    ]
+    global _SCAN_AFTER
+    # Keyset batches visit every enrolled commitment, including when the first
+    # batch is permanently waiting. A fixed oldest-100 slice would starve others.
+    query = (
+        "SELECT plan_id FROM task_plans WHERE recovery_enabled=1 AND status='active' "
+        "AND plan_id>? ORDER BY plan_id LIMIT 100"
+    )
+    ids = [r[0] for r in db.conn().execute(query, (_SCAN_AFTER,))]
+    if not ids and _SCAN_AFTER:
+        ids = [r[0] for r in db.conn().execute(query, ("",))]
+    _SCAN_AFTER = ids[-1] if ids else ""
     for plan_id in ids:
         claim = _claim(plan_id, now)
         if not claim:
