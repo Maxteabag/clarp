@@ -153,3 +153,23 @@ When diagnosing or managing Clarp inside a Docker container:
 - Tailscale and phone connectivity:
   * Prefer the `compose.tailscale.yaml` sidecar mode for isolated Tailnet identity, auto-HTTPS, and zero host firewall conflicts.
   * If publishing ports on the host directly (`CLARP_PORT=...`), ensure host firewalls (`ufw` / `DOCKER-USER`) allow Tailscale CGNAT traffic (`100.64.0.0/10` / `tailscale0`) to forward to Docker bridge networks.
+
+## Vendor CLI version blocks a resumed agent
+
+A successful Host restart is not proof that a native agent resumed. Inspect its
+actual transcript for errors such as a model requiring a newer Claude Code CLI.
+Read the runtime process's PATH and resolve the executable using that PATH; a
+user-local version check can differ from the managed one, and an earlier Host
+`bin/claude` entry can shadow a hash-pinned toolchain wrapper. Run only `--version`
+for this check; it does not prove a successful model response.
+
+The canonical managed pins and upgrade procedure are in `toolchain/README.md`.
+Build a new hash-addressed toolchain with `scripts/install_agent_toolchain.py`;
+never run `npm ci` in an active prefix to repair one vendor, because it also
+replaces the other vendor's packages. Keep running processes, credentials and
+unrelated CLI versions intact. Coordinate ownership before switching executable
+routing, recheck its current target immediately before mutation, and retain a
+rollback receipt. A newer competing route is a reason to reconcile, not overwrite.
+A runtime restart is not needed merely to make a future child resolve a changed
+executable path, but existing child processes keep their current binary. Verify
+an actual resumed response/tool activity separately, in the exact conversation.
