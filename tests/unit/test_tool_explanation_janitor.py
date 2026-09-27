@@ -12,6 +12,9 @@ from lib import agents, backends, db, janitors, tool_explanations
 
 
 ITEM = {"id": "row", "demand_id": "view", "activity": {"command": "ls"}}
+# Another call: learned explanations are shared by call shape, so tests that
+# need a second model run use a second shape.
+OTHER = {"id": "other", "demand_id": "view-2", "activity": {"command": "ls -la"}}
 
 
 @pytest.fixture(autouse=True)
@@ -195,7 +198,9 @@ def test_reconfiguration_and_replacement_get_fresh_cache_and_frozen_model(change
             config = janitors.create("custom-explainer", template_id="tool-explainer")
             config = janitors.configure(config["session"], config["revision"], options={"detail_level": 3})
             config = janitors.set_enabled(config["session"], config["revision"], True)
-        assert ready(service)["text"] == "Explanation 2."
+        # The same call is already learned; a new one runs on the new model.
+        assert ready(service)["text"] == "Explanation 1."
+        assert ready(service, OTHER)["text"] == "Explanation 2."
         assert service.request(3, [ITEM])["model"] == "new-model"
     assert len(calls) == 2
     assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == 2
@@ -363,14 +368,14 @@ def test_scoped_owners_admit_correct_targets_and_freeze_separate_runs():
         calls.append(items)
         return translate(level, items)
     with tool_explanations.ToolExplanations(translate=capture, debounce=.1) as service:
-        for target, config in zip(targets, configs):
-            response = service.request(3, [ITEM], target_agent_id=target)
+        for target, config, item in zip(targets, configs, [ITEM, OTHER]):
+            response = service.request(3, [item], target_agent_id=target)
             assert response["items"][0]["status"] == "pending"
             assert response["model"] == config["model"]
         assert service.request(3, [ITEM], target_agent_id=targets[2])["items"][0]["status"] == "disabled"
         assert service.request(3, [ITEM])["items"][0]["status"] == "disabled"
-        for target in targets[:2]:
-            assert ready(service, target_agent_id=target)["text"] == "List the files."
+        for target, item in zip(targets[:2], [ITEM, OTHER]):
+            assert ready(service, item, target_agent_id=target)["text"] == "List the files."
     assert len(calls) == 2 and all(len(batch) == 1 for batch in calls)
     assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == 2
     for target, config in zip(targets, configs):
@@ -394,9 +399,12 @@ def test_same_scoped_owner_keeps_distinct_targets_out_of_shared_batches_and_cach
     with tool_explanations.ToolExplanations(translate=capture, debounce=.1) as first, tool_explanations.ToolExplanations(translate=capture, debounce=.1) as second:
         first.request(3, [ITEM], target_agent_id=targets[0])
         second.request(3, [ITEM], target_agent_id=targets[1])
-        for service, target in zip([first, second], targets):
-            assert ready(service, target_agent_id=target)["text"] == f"Explanation for {target}."
-    assert sorted(calls) == sorted((target, 1) for target in targets)
+        texts = [ready(service, target_agent_id=target)["text"] for service, target in zip([first, second], targets)]
+    # Each target keeps its own batch, run and cached answer. The explanation
+    # itself is learned per call shape for the whole Host, so the second target
+    # reuses the first answer instead of asking the model again.
+    assert len(calls) == 1 and calls[0][1] == 1
+    assert texts == [f"Explanation for {calls[0][0]}."] * 2
     assert db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == 2
     assert len(janitors.list_runs(config["session"])) == 2
 
