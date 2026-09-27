@@ -3846,7 +3846,7 @@ void AppController::handleSseEvent(const QJsonObject& event) {
                 model->showTransientThinking(agentName(session));
             } else if (state == QStringLiteral("tool") || state == QStringLiteral("waiting") ||
                        state == QStringLiteral("interrupted") || state == QStringLiteral("done") ||
-                       state == QStringLiteral("idle")) {
+                       state == QStringLiteral("idle") || state == QStringLiteral("stopped")) {
                 model->clearRunningActivity();
             }
         }
@@ -3855,7 +3855,15 @@ void AppController::handleSseEvent(const QJsonObject& event) {
         }
     } else if (type == QStringLiteral("agent-activity")) {
         if (ConversationModel* model = m_conversations.value(session, nullptr)) {
-            model->applyActivityEvent(event);
+            // A "running" step that arrives after the turn already ended would
+            // sit under the finished reply until the next turn clears it.
+            const Agent* agent = m_agents.find(session);
+            QString status = event.value(QStringLiteral("activity_status"))
+                                 .toString(event.value(QStringLiteral("status")).toString());
+            if (status.isEmpty() && isBusyState(event.value(QStringLiteral("state")).toString()))
+                status = QStringLiteral("running");
+            if (status != QStringLiteral("running") || agent == nullptr || agent->busy)
+                model->applyActivityEvent(event);
         }
     } else if (type == QStringLiteral("agent-focus")) {
         m_agents.applyFocusEvent(event);
