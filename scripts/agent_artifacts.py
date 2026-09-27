@@ -2,7 +2,7 @@
 """Create Clarp artifacts, approvals and native questions; inspect pending attention."""
 from __future__ import annotations
 import argparse
-import json, os, pathlib, sys, urllib.error, urllib.parse, urllib.request
+import hashlib, json, os, pathlib, re, sys, urllib.error, urllib.parse, urllib.request
 import tomllib
 
 share = pathlib.Path(os.environ.get(
@@ -149,8 +149,39 @@ def _create_form(args: list[str]) -> dict:
     return _request("POST", "/artifacts", body)["artifact"]
 
 
+def _report_id(title: str, content: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:48].strip("-") or "report"
+    digest = hashlib.sha256(f"{title}\0{content}".encode()).hexdigest()[:12]
+    return f"report-{slug}-{digest}"
+
+
+def _create_report(args: list[str]) -> dict:
+    parser = _Parser(prog="clarp-agent-artifacts create-report")
+    parser.add_argument("session")
+    parser.add_argument("title")
+    parser.add_argument("html_file", type=pathlib.Path)
+    parser.add_argument("--summary", default="")
+    parser.add_argument("--artifact-id", default="",
+                        help="stable identity; defaults to one derived from the title and HTML")
+    parser.add_argument("--version", default="1")
+    parser.add_argument("--dry-run", action="store_true")
+    parsed = parser.parse_args(args)
+    content = parsed.html_file.read_text()
+    if not content.strip():
+        raise ValueError("report HTML is empty")
+    body = {"session": parsed.session, "title": parsed.title, "type": "html_form",
+            "summary": parsed.summary,
+            "artifact_id": parsed.artifact_id or _report_id(parsed.title, content),
+            "payload": {"content": content, "version": parsed.version, "read_only": True}}
+    if parsed.dry_run:
+        return {"method": "POST", "path": "/artifacts", "body": body}
+    return _request("POST", "/artifacts", body)["artifact"]
+
+
 def main(argv: list[str]) -> int:
     usage = ("usage: agent_artifacts.py create SESSION TYPE TITLE [SUMMARY] [JSON_PAYLOAD] | "
+             "create-form SESSION TITLE HTML_FILE SCHEMA_FILE --version V --artifact-id ID | "
+             "create-report SESSION TITLE HTML_FILE [--summary S] [--artifact-id ID] [--version V] | "
              "decision SESSION TITLE QUESTION YES_LABEL NO_LABEL [JSON_PAYLOAD] [OPTIONS] | "
              "question SESSION TITLE QUESTION JSON_OPTIONS [OPTIONS] | "
              "attention [--session SESSION] [--include-archived] | "
@@ -159,6 +190,8 @@ def main(argv: list[str]) -> int:
         cmd = argv[1]
         if cmd == "create-form":
             result = _create_form(argv[2:])
+        elif cmd == "create-report":
+            result = _create_report(argv[2:])
         elif cmd == "create" and len(argv) in {5, 6, 7}:
             result = _request("POST", "/artifacts", {
                 "session": argv[2], "type": argv[3], "title": argv[4],

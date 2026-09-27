@@ -19,6 +19,20 @@ SCHEMA = '''CREATE TABLE IF NOT EXISTS form_submissions (
 );
 CREATE INDEX IF NOT EXISTS idx_form_submission_pending ON form_submissions(status,created_at);'''
 
+# A read-only form is an HTML report: the same sandboxed renderer, no answers.
+READ_ONLY_SCHEMA = {'type': 'object', 'properties': {}, 'additionalProperties': False}
+
+
+class ReadOnlyForm(ValueError):
+    """A submission addressed a read-only report."""
+
+
+def normalize(payload):
+    """Fill in the empty answer schema a read-only report may omit."""
+    if isinstance(payload, dict) and payload.get('read_only') is True and 'answer_schema' not in payload:
+        return {**payload, 'answer_schema': dict(READ_ONLY_SCHEMA)}
+    return payload
+
 
 def validate_contract(payload: dict) -> None:
     from jsonschema import Draft202012Validator
@@ -26,7 +40,12 @@ def validate_contract(payload: dict) -> None:
         raise ValueError('HTML form requires content')
     if not isinstance(payload.get('version'), str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,80}', payload['version']):
         raise ValueError('HTML form requires a stable version string')
+    read_only = payload.get('read_only', False)
+    if not isinstance(read_only, bool):
+        raise ValueError('read_only must be a boolean')
     schema = payload.get('answer_schema')
+    if read_only and schema != READ_ONLY_SCHEMA:
+        raise ValueError('a read-only report cannot declare answers; omit answer_schema')
     if not isinstance(schema, dict) or schema.get('type') != 'object':
         raise ValueError('answer_schema must describe an object')
     def check(value, depth=0):
@@ -65,6 +84,8 @@ def submit(artifact_id: str, data: dict) -> dict:
         else:
             form = artifacts.get(artifact_id)
             if not form or form['type'] != 'html_form': raise ValueError('HTML form not found')
+            if form['payload'].get('read_only') is True:
+                raise ReadOnlyForm('read-only report; it does not accept answers')
             if form['status'] not in {'ready', 'active'} or form.get('archived_at'):
                 raise ValueError('HTML form no longer accepts answers')
             if version != form['payload']['version']: raise ValueError('form version mismatch; reopen the form')

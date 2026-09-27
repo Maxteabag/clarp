@@ -25,8 +25,11 @@ SAFE_IMAGE_MIME = {
 SAFE_FILE_MIME = {
     "audio/mpeg", "audio/mp4", "audio/x-m4a", "audio/wav", "audio/x-wav",
     "video/mp4", "video/quicktime", "video/webm",
-    "application/pdf", "application/json", "text/plain", "text/csv",
+    "application/pdf", "application/json", "text/plain", "text/csv", "text/markdown",
 }
+TEXT_FILE_MIME = {"text/plain", "text/csv", "text/markdown"}
+# Hosts without a system mime table cannot guess these from the name.
+_MARKDOWN_EXTENSIONS = {".md", ".markdown"}
 SAFE_MEDIA_MIME = SAFE_IMAGE_MIME | SAFE_FILE_MIME
 
 
@@ -170,6 +173,9 @@ def _primary_type(content_type: str) -> str:
 
 def _detect_mime(blob: bytes, content_type: str, name: str) -> str:
     declared = _primary_type(content_type)
+    if declared in {"", "application/octet-stream", "text/x-markdown"} \
+            and pathlib.PurePath(name).suffix.lower() in _MARKDOWN_EXTENSIONS:
+        declared = "text/markdown"
     if blob.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
     if blob.startswith(b"\xff\xd8\xff"):
@@ -207,7 +213,7 @@ def _verified_file_mime(blob: bytes, declared: str) -> str:
     if declared in {"audio/mp4", "audio/x-m4a", "video/mp4", "video/quicktime"} \
             and len(blob) >= 12 and blob[4:8] == b"ftyp":
         return declared
-    if declared in {"text/plain", "text/csv"}:
+    if declared in TEXT_FILE_MIME:
         try: blob.decode("utf-8")
         except UnicodeDecodeError: return ""
         return declared

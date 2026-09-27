@@ -620,6 +620,29 @@ Returns 404 for an unknown job, otherwise:
   `agent-roster` with `kind: "stale-work"` asks for a refetch. Janitor
   labels keep their own validity window.
 
+### Read-only HTML reports: `html_form` with `read_only`
+
+An `html_form` artifact (see `docs/html-forms/README.md`) may be a read-only
+report. Create it with `POST /artifacts`:
+
+```json
+{"session": "solu", "type": "html_form", "title": "Audit findings",
+ "summary": "Three issues", "artifact_id": "report-audit-findings-1a2b3c4d5e6f",
+ "payload": {"content": "<!doctype html>…", "version": "1", "read_only": true}}
+```
+
+- `read_only` is an optional boolean; absent means `false`, and existing forms
+  are unchanged. When it is `true`, `answer_schema` may be omitted and is
+  stored as `{"type":"object","properties":{},"additionalProperties":false}`;
+  any other schema is rejected with 400.
+- The artifact carries `read_only: true` at the top level as well as in
+  `payload`, so `representation=flat-v1` clients see it too.
+- `POST /artifacts/<id>/submit` for a read-only report returns 400
+  `{"error": "read-only report; it does not accept answers"}`.
+- The HTML is self-contained and rendered by the same confined form viewer;
+  it is never served on the Host origin. Clients before contract 19 show it as
+  a form with an empty answer set. Feature `html_reports`.
+
 ## Compatibility policy
 
 The core conversation protocol is **additive-only**. Fields and event

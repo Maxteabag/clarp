@@ -96,7 +96,9 @@ def _publish_one(
     token: str,
 ) -> dict | None:
     data = path.read_bytes()
-    ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    ctype = mimetypes.guess_type(path.name)[0] or (
+        "text/markdown" if path.suffix.lower() in {".md", ".markdown"}
+        else "application/octet-stream")
     headers = {
         "Content-Type": ctype,
         "X-Session": _header_value(session),

@@ -134,3 +134,35 @@ def test_both_app_instructions_allow_native_questions_but_prohibit_cli_popups(mo
         assert "AskUserQuestion" in text and "request_user_input" in text
         assert "Never" in text and "self-resolve" in text
         assert "not blanket authorization" in text
+
+
+def test_create_report_dry_run_publishes_read_only_form(tmp_path, requests, capsys):
+    html = tmp_path / "report.html"
+    html.write_text("<main><h1>Findings</h1></main>")
+    assert cli.main(["cli", "create-report", "theo", "Audit findings", str(html),
+                     "--summary", "Three issues", "--dry-run"]) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert requests == []
+    assert first["method"] == "POST" and first["path"] == "/artifacts"
+    body = first["body"]
+    assert body["type"] == "html_form" and body["summary"] == "Three issues"
+    assert body["payload"] == {"content": "<main><h1>Findings</h1></main>", "version": "1",
+                               "read_only": True}
+    assert body["artifact_id"].startswith("report-audit-findings-")
+    assert cli.main(["cli", "create-report", "theo", "Audit findings", str(html), "--dry-run"]) == 0
+    assert json.loads(capsys.readouterr().out)["body"]["artifact_id"] == body["artifact_id"]
+    html.write_text("<main><h1>Findings v2</h1></main>")
+    assert cli.main(["cli", "create-report", "theo", "Audit findings", str(html), "--dry-run",
+                     "--artifact-id", "custom-id", "--version", "2"]) == 0
+    second = json.loads(capsys.readouterr().out)["body"]
+    assert second["artifact_id"] == "custom-id" and second["payload"]["version"] == "2"
+
+
+def test_create_report_posts_and_rejects_empty_html(tmp_path, requests, capsys):
+    html = tmp_path / "report.html"
+    html.write_text("<p>ok</p>")
+    assert cli.main(["cli", "create-report", "theo", "R", str(html)]) == 0
+    assert requests[0][0:2] == ("POST", "/artifacts")
+    html.write_text("  ")
+    assert cli.main(["cli", "create-report", "theo", "R", str(html)]) == 1
+    assert "empty" in capsys.readouterr().err
