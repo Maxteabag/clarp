@@ -37,3 +37,15 @@ def test_connected_chime_is_tinted_per_agent():
 def test_unknown_cue_is_an_error():
     with pytest.raises(ValueError):
         oracle_earcons.pcm("fanfare")
+
+
+def test_earcons_config_defaults_on_and_can_be_turned_off(tmp_path):
+    from lib import config
+    path = tmp_path / "config.toml"
+    path.write_text("[oracle]\nearcons = false\n")
+    config.reset_cache()
+    try:
+        assert config.load(path).oracle_earcons is False
+        assert config.load(tmp_path / "missing.toml").oracle_earcons is True
+    finally:
+        config.reset_cache()
