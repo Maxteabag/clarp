@@ -43,6 +43,7 @@ def main(argv: list[str]) -> int:
                 "enroll",
                 "add_step",
                 "document",
+                "rebind",
             }
             and len(argv) == 5
         ):

@@ -1513,7 +1513,8 @@ class TurnDispatchService:
             raise DispatchError(409, "Durable goal owns continuation")
         try:
             task_goal_recovery.validate_dispatch(
-                agents_db.get_by_agent_id(spec.agent_id) or {}, spec.client_msg_id)
+                agents_db.get_by_agent_id(spec.agent_id) or {}, spec.client_msg_id,
+                native_session_id=spec.backend_session_id)
         except ValueError as exc:
             raise DispatchError(409, str(exc)) from exc
         _validate_janitor_target(
@@ -1569,6 +1570,12 @@ class TurnDispatchService:
                         agents_db.get_by_agent_id(spec.agent_id) or {},
                         spec.janitor_run_id, spec.trace_id)
                 except JanitorDispatchError:
+                    return False
+                try:
+                    task_goal_recovery.validate_dispatch(
+                        agents_db.get_by_agent_id(spec.agent_id) or {}, spec.client_msg_id,
+                        native_session_id=spec.backend_session_id)
+                except ValueError:
                     return False
                 action()
                 return True
