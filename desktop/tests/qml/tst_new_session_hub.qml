@@ -30,6 +30,7 @@ TestCase {
         property string launchDirectory: ""
         property string selected: ""
         signal modelCatalogChanged()
+        signal launchDefaultsChanged()
         signal agentMutationSucceeded(string session)
         signal contactLaunchChanged()
         signal launchPoolEmpty()
@@ -66,6 +67,7 @@ TestCase {
         stub.connected = true;
         stub.selected = "";
         stub.lastBackend = "codex";
+        stub.lastWorkingDirectory = "/home/peter/GIT/clarp";
     }
     function opened() {
         const hub = createTemporaryObject(factory, testCase);
@@ -104,6 +106,60 @@ TestCase {
         verify(hub.submitting);
         stub.startingContact = ""; stub.contactLaunchChanged();
         tryCompare(hub, "visible", false);
+    }
+    function test_contactLaunchUsesDialogModelBackendAndDirectory() {
+        const hub = opened();
+        hub.selectProvider(0); // claude
+        hub.modelId = "opus";
+        hub.effort = "high";
+        hub.directory = "/data/workspace/dialog";
+        keyClick(Qt.Key_Return);
+        compare(stub.calls.length, 1);
+        compare(stub.calls[0], ["quickStartContact", "Nadia", "claude", "opus", "high"]);
+        compare(stub.launchDirectory, "/data/workspace/dialog");
+    }
+    function test_directoryEnterAppliesTypedPathWithoutSubmitting() {
+        const hub = opened();
+        hub.choosingDirectory = true;
+        wait(20);
+        const field = findChild(hub, "launchDirectorySearch");
+        verify(field !== null);
+        field.forceActiveFocus();
+        field.text = "/data/workspace/typed";
+        keyClick(Qt.Key_Return);
+        compare(hub.visible, true);
+        compare(hub.choosingDirectory, false);
+        compare(hub.directory, "/data/workspace/typed");
+        compare(stub.launchDirectory, "/data/workspace/typed");
+        compare(stub.calls.length, 0);
+    }
+    function test_openHubAdoptsHostDefaultDirectoryWhenItArrives() {
+        stub.lastWorkingDirectory = "~";
+        const hub = opened();
+        compare(hub.directory, "~");
+        stub.lastWorkingDirectory = "/data/workspace";
+        stub.launchDefaultsChanged();
+        compare(hub.directory, "/data/workspace");
+        compare(stub.launchDirectory, "/data/workspace");
+
+        hub.directory = "/data/workspace/custom";
+        stub.lastWorkingDirectory = "/data/workspace/other";
+        stub.launchDefaultsChanged();
+        compare(hub.directory, "/data/workspace/custom");
+    }
+    function test_failedCreateKeepsChosenModel() {
+        const hub = opened();
+        hub.selectProvider(0); // claude
+        hub.modelId = "opus";
+        hub.effort = "high";
+        keyClick(Qt.Key_Return);
+        verify(hub.submitting);
+        stub.errorMessage = "path /home/clarp is outside the Clarp workspace root /data/workspace";
+        compare(hub.visible, true);
+        compare(hub.backend, "claude");
+        compare(hub.modelId, "opus");
+        compare(hub.effort, "high");
+        compare(hub.modelSummary, "Opus · High");
     }
     function test_showAllListsChatsAndEnterOpensThem() {
         const hub = opened();

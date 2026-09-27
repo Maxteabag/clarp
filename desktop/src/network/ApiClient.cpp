@@ -120,10 +120,17 @@ void ApiClient::watchJson(const QString& tag, QNetworkReply* reply) {
             QJsonParseError parseError;
             const QJsonDocument errorDocument = QJsonDocument::fromJson(body, &parseError);
             if (parseError.error == QJsonParseError::NoError && errorDocument.isObject()) {
+                const QJsonObject errorObject = errorDocument.object();
                 const QString serverMessage =
-                    errorDocument.object().value(QStringLiteral("error")).toString();
+                    errorObject.value(QStringLiteral("message")).toString();
+                const QString detail = errorObject.value(QStringLiteral("detail")).toString();
+                const QString code = errorObject.value(QStringLiteral("error")).toString();
                 if (!serverMessage.isEmpty()) {
                     message = serverMessage;
+                } else if (!detail.isEmpty()) {
+                    message = detail;
+                } else if (!code.isEmpty()) {
+                    message = code;
                 }
             }
             emit requestFailed(tag, message, status);
