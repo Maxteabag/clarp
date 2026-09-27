@@ -57,7 +57,7 @@ def test_ensure_installs_real_stable_agents_once_and_preserves_existing_agents()
     for role, config in first.items():
         identity = agents.get_by_agent_id(config["agent_id"])
         assert identity["is_janitor"] == 1
-        assert identity["model"] == ("" if role == "audio-bookkeeper" else "gpt-5.3-codex-spark")
+        assert identity["model"] == ("" if role in {"audio-bookkeeper", "label-auditor"} else "gpt-5.3-codex-spark")
         assert not identity["heartbeat_enabled"] and not identity["dreaming_enabled"]
         assert config["builtin_role"] == role
         assert config["execution"] == ({"executor": "deterministic", "provider": "local"} if role == "audio-bookkeeper" else {"executor": "ephemeral", "provider": "codex"})
