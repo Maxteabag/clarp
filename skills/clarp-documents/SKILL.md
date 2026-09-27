@@ -1,6 +1,6 @@
 ---
 name: clarp-documents
-description: Deliver plans as interactive HTML forms by default; generate and publish searchable PDFs only when explicitly requested.
+description: Deliver plans as interactive HTML forms and reports as read-only HTML by default; generate and publish searchable PDFs only when explicitly requested.
 ---
 # Finished documents
 
@@ -18,6 +18,11 @@ state that direct submission and native navigation are not implemented.
 PDF is not the default planning deliverable or an automatic final step. Generate
 a PDF only when the user explicitly requests that format. Keep existing PDFs
 and their viewing/sharing support.
+
+Reports, findings, audits and write-ups longer than a chat reply are read-only
+HTML: publish them with `clarp-agent-artifacts create-report SESSION TITLE
+report.html --summary S` (see `clarp-html-forms`). A plan that asks questions
+stays a form.
 
 Keep `clarp-agent-tasks` checklists, runtime/job state, quick decisions and ordinary
 conversation replies in their native form. HTML planning does not replace them.
