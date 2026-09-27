@@ -607,7 +607,12 @@ Returns 404 for an unknown job, otherwise:
   "forbidden"` and no text.
 - Progress written with `clarp-agent-bg SESSION job-progress HANDLE "text"`
   also arrives live as `background-job-updated`, whose `job` carries
-  `progress_text`. Cancel stays `DELETE /background-jobs/<job_id>`.
+  `progress_text`. Cancel stays `DELETE /background-jobs/<job_id>`. Since Host
+  contract 23 (feature `background_job_cancel_generation`) it accepts
+  `?expected_generation=N` or a JSON body `{"expected_generation": N}` (the query wins): the cancel applies only if the job is still run N,
+  checked atomically with the update. A different run answers `409
+  generation_mismatch` with `expected_generation` and `current_generation` and
+  changes nothing; see docs/compatibility.md row 23 for every response.
 - The Host's stale-work reconcile writes its own notes, prefixed
   `reconcile:`. An agent's running job with no worker PID to verify whose
   heartbeat and progress have been silent for `[agents]
