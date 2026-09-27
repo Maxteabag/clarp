@@ -71,6 +71,10 @@ Rectangle {
         : root.selectedRow && root.selectedRow.inChat ? "Open chat" : "Create session"
     color: Theme.scrim
     objectName: "newSessionHub"
+    // Its own open state, separate from the effective `visible`, so the lazy
+    // loader in Main.qml can show and hide itself to match.
+    property bool shown: false
+    visible: shown
 
     function open(returnToComposer, contactMode) {
         restoreComposer = Boolean(returnToComposer);
@@ -81,7 +85,7 @@ Rectangle {
         const saved = String(root.controller.lastBackend || "");
         backend = providers.some(provider => provider.id === saved) ? saved : providers[0].id;
         root.controller.clearError();
-        visible = true;
+        shown = true;
         Qt.callLater(() => { root.selectFirst(); search.forceActiveFocus(); });
     }
     // Esc steps back through the inline editors before it closes the hub.
@@ -106,7 +110,7 @@ Rectangle {
     }
     property string pendingLaunch: ""
     function close() {
-        visible = false;
+        shown = false;
         if (restoreComposer) Qt.callLater(() => root.controller.requestComposerFocus(root.controller.panes.activePaneId));
         closeRequested();
     }

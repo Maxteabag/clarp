@@ -149,7 +149,7 @@ ApplicationWindow {
                 assignAgent.open(app.selectedSession, action === "auto-assign-agent", root.composerOwnsFocus());
         } else if (action === "change-directory") {
             newSessionHub.open(root.composerOwnsFocus(), false);
-            newSessionHub.choosingDirectory = true;
+            newSessionHub.chooseDirectory();
         } else if (action === "quick-new-agent") {
             newSessionHub.open(root.composerOwnsFocus(), false);
         } else if (action === "rename-agent") {
@@ -622,18 +622,34 @@ ApplicationWindow {
         }
     }
 
-    NewSessionHub {
+    // Built on first open (72 text items and two combo boxes most starts never
+    // use). The loader mirrors the hub's own open state as its visibility.
+    Loader {
         id: newSessionHub
         objectName: "newSessionHub"
+        readonly property bool submitting: item !== null && item.submitting
+        function hub() {
+            active = true;
+            return item;
+        }
+        function open(returnToComposer, contactMode) { hub().open(returnToComposer, contactMode); }
+        function openLaunch(backend, model, effort, anonymousMode, directory) {
+            hub().openLaunch(backend, model, effort, anonymousMode, directory);
+        }
+        function stepBack() { if (item !== null) item.stepBack(); }
+        function chooseDirectory() { hub().choosingDirectory = true; }
         anchors.fill: parent
-        controller: app
-        visible: false
         z: 100
+        active: false
+        visible: item !== null && item.shown
         Component.onCompleted: if (root.launchOnStartup) newSessionHub.open(false, false)
-        onConnectionRequested: connection.visible = true
-        onCloseRequested: {
-            root.selectedSurface = "chats";
-            root.restoreSurfaceFocus();
+        sourceComponent: NewSessionHub {
+            controller: app
+            onConnectionRequested: connection.visible = true
+            onCloseRequested: {
+                root.selectedSurface = "chats";
+                root.restoreSurfaceFocus();
+            }
         }
     }
 
