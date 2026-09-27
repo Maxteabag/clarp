@@ -40,7 +40,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 20
+HOST_CONTRACT = 21
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
@@ -78,7 +78,6 @@ FEATURES: tuple[str, ...] = (
     "turn_queue_resume",
     "controller_narration",
     "tool_explanation_sources",
-    "oracle_agent_voices",
     "helper_agents",
     "claude_subagent_cells",
     "oracle_earcons",
@@ -86,6 +85,7 @@ FEATURES: tuple[str, ...] = (
     "stale_work_labels",
     "html_reports",
     "tool_explanation_stats",
+    "oracle_handoff",
 )
 
 
@@ -103,7 +103,6 @@ FEATURE_CONTRACTS["oracle_context_memory"] = 9
 FEATURE_CONTRACTS["turn_queue_resume"] = 7
 FEATURE_CONTRACTS["controller_narration"] = 8
 FEATURE_CONTRACTS["tool_explanation_sources"] = 10
-FEATURE_CONTRACTS["oracle_agent_voices"] = 12
 FEATURE_CONTRACTS["helper_agents"] = 13
 FEATURE_CONTRACTS["claude_subagent_cells"] = 14
 FEATURE_CONTRACTS["oracle_earcons"] = 15
@@ -111,6 +110,7 @@ FEATURE_CONTRACTS["background_process_detail"] = 16
 FEATURE_CONTRACTS["stale_work_labels"] = 17
 FEATURE_CONTRACTS["html_reports"] = 19
 FEATURE_CONTRACTS["tool_explanation_stats"] = 20
+FEATURE_CONTRACTS["oracle_handoff"] = 21
 
 
 def capabilities() -> dict[str, object]:
