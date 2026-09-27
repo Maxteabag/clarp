@@ -472,6 +472,26 @@ def test_session_close_may_carry_its_handoff_id():
     assert mod.client_event(json.dumps({"type": "session.close", "handoff_id": "nope"})) is None
 
 
+_SERVER = []
+
+
+def _server():
+    """This checkout's server.py. Loading clarp-admin (here and in other tests)
+    puts the installed Host's share directory on sys.path, so a bare
+    ``import server`` can find a different server.py."""
+    import sys
+    module = sys.modules.get("server")
+    if module is not None and pathlib.Path(module.__file__).resolve() == ROOT / "server/server.py":
+        return module
+    if not _SERVER:
+        spec = importlib.util.spec_from_file_location("clarp_server_under_test", ROOT / "server/server.py")
+        assert spec and spec.loader
+        loaded = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loaded)
+        _SERVER.append(loaded)
+    return _SERVER[0]
+
+
 class _Handler:
     def __init__(self, body, principal=PHONE, scope="full"):
         self.body, self.sent = body, []
@@ -480,8 +500,7 @@ class _Handler:
         self.ctx = type("Ctx", (), {"stream": Stream(), "herald": None})()
 
     def _oracle_handoff_principal(self):
-        import server
-        return server.Handler._oracle_handoff_principal(self)
+        return _server().Handler._oracle_handoff_principal(self)
 
     def _read_json(self):
         return self.body
@@ -500,7 +519,7 @@ class _Handler:
 
 
 def test_the_route_needs_full_scope_and_reports_errors(host):
-    import server
+    server = _server()
     limited = _Handler({"agent": "Mike"}, scope="limited")
     server.Handler._handle_oracle_connect(limited)
     assert limited.sent[0][0] == 401
@@ -514,7 +533,7 @@ def test_the_route_needs_full_scope_and_reports_errors(host):
 
 
 def test_the_route_puts_the_live_call_through(host):
-    import server
+    server = _server()
     stream, open_call = host
     open_call()
     handler = _Handler({"agent": "Mike"})
