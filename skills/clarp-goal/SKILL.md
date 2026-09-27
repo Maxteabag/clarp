@@ -116,3 +116,9 @@ For an existing Clarp background job, include its generation-specific
 The Host verifies matching goal owner and job generation, then observes terminal
 success/failure directly. A replaced or missing worker prompts reconciliation;
 its status never automatically supplies criterion evidence or completes the goal.
+
+If the owner's native conversation intentionally changes, recovery stops. Verify
+the new binding with `clarp-sessions`, pause the goal, then explicitly use
+`rebind PLAN_ID REVISION '{"native_session_id":"VERIFIED_ID","reason":"Why the conversation changed"}'`.
+This retains the outcome/criteria/history and leaves the goal paused; resume only
+within current authorization. A stale wake can never silently choose a new owner.

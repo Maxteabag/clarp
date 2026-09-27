@@ -45,6 +45,20 @@ def boundary(plan, goal, *, check_live=True):
         and goal["continuation"].get("resume_queue_revision") != queue["revision"]
     ):
         return "paused", "Stopped by user; queue is paused"
+    latest = agents.latest_state(agent["agent_id"]) or {}
+    detail = latest.get("detail") or {}
+    if detail.get("account_recovery") == "waiting":
+        return "capacity", detail.get(
+            "message"
+        ) or "Waiting for available account capacity"
+    if (
+        detail.get("reason") in {"usage_limit", "auth"}
+        and (goal["continuation"].get("due_at") or 0) > db.now_ms()
+        and goal["continuation"].get("last_dispatch_at")
+    ):
+        return "capacity", (
+            detail.get("message") or "Capacity unavailable"
+        ) + "; retry is backed off"
     if artifacts.has_pending_decision(agent["agent_id"]):
         return "approval", "Waiting for an answer or approval"
     native_goal = agent_goals.get(agent["agent_id"])
@@ -69,7 +83,7 @@ def boundary(plan, goal, *, check_live=True):
     return None
 
 
-def validate_dispatch(agent, request_id):
+def validate_dispatch(agent, request_id, *, native_session_id=None):
     """Fence stale/paused/wrong-owner wakes at both admission and actual spawn."""
     if not request_id.startswith(PREFIX):
         return
@@ -87,6 +101,8 @@ def validate_dispatch(agent, request_id):
     goal = json.loads(row["goal_json"])
     if goal["continuation"].get("plan_revision") != row["revision"]:
         raise ValueError("goal wake revision was superseded")
+    if native_session_id is not None and native_session_id != goal["native_session_id"]:
+        raise ValueError("goal wake native target changed before spawn")
     gate = boundary(row, goal, check_live=False)
     if gate:
         raise ValueError(gate[1])
@@ -187,6 +203,31 @@ def _claim(plan_id, now):
             return None
         if plan["revision"] != snapshot["revision"]:
             return None
+        latest = agents.latest_state(plan["agent_id"]) or {}
+        if (
+            state.get("last_dispatch_at")
+            and latest.get("ts", 0) >= state["last_dispatch_at"]
+            and latest.get("kind") in {"done", "idle", "interrupted"}
+            and latest.get("ts") != state.get("execution_observed_at")
+        ):
+            detail = latest.get("detail") or {}
+            state["last_execution"] = {
+                "kind": latest["kind"],
+                "reason": detail.get("reason", ""),
+                "message": detail.get(
+                    "message", "Owner turn ended; outcome remains unfinished"
+                ),
+            }
+            state["execution_observed_at"] = latest["ts"]
+            goal["history"].append(
+                dict(
+                    at=latest["ts"],
+                    kind="execution_observed",
+                    revision=plan["revision"],
+                    detail=state["last_execution"],
+                )
+            )
+            task_goal_state._save(con, plan_id, goal)
         gate = boundary(plan, goal, check_live=False) or live_gate
         if gate:
             execution, reason = gate

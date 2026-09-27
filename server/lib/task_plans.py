@@ -539,6 +539,29 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 task_plans._close_running_items(
                     con, plan_id, "blocked" if action == "block" else "cancelled", now
                 )
+        elif action == "rebind":
+            agent = agents.get_by_agent_id(plan["agent_id"])
+            native = agents.live_backend_session(plan["agent_id"])
+            if (
+                plan["status"] != "paused"
+                or not reason
+                or not native
+                or data.get("native_session_id") != native
+            ):
+                raise ValueError(
+                    "pause first, then explicitly name the verified current native conversation and reason"
+                )
+            goal["native_session_id"] = native
+            con.execute(
+                "UPDATE task_plans SET session=? WHERE plan_id=?",
+                (agent["session"], plan_id),
+            )
+            state.update(
+                generation=state["generation"] + 1,
+                request_id="",
+                lease_until=None,
+                reason="Owner conversation rebound; explicitly resume when authorized",
+            )
         elif action == "document":
             _write_goal_documents(con, plan_id, [data], now)
         elif action == "checkpoint":
