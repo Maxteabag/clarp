@@ -11,13 +11,19 @@ ListView {
     property int scrollEpoch: 0
     property int followTicket: 0
     property var savedAnchor: null
+    // Measured to the same end that following settles on (endContentY): the
+    // estimated extent can sit tens of pixels past the real last row, and a
+    // reader who wheels back to that row would otherwise never count as
+    // having reached the end, so following would not resume.
     readonly property real distanceFromBottom: Math.max(0,
-        originY + contentHeight + bottomMargin - height - contentY)
+        endContentY(count > 0 ? itemAtIndex(count - 1) : null) - contentY)
+    readonly property bool atLatest: atYEnd || distanceFromBottom < 1
 
     function pauseFollowing() {
         scrollEpoch++;
         followLatest = false;
     }
+    onFollowLatestChanged: if (followLatest) anchorIndex = -1
     function beginUserScroll() {
         pauseFollowing();
         userInteracting = true;
@@ -27,7 +33,7 @@ ListView {
         userInteracting = false;
         // Only actual user arrival at the end resumes following. A layout
         // change or a message arriving near the viewport must not do so.
-        if (atYEnd) {
+        if (atLatest) {
             followLatest = true;
             newMessagesBelow = false;
         }
@@ -85,7 +91,37 @@ ListView {
     // finishing layout) opens a larger gap. Answer only the larger gap, and
     // schedule a full follow only when rows were actually added.
     property int followedCount: -1
+    // Scroll anchoring for a paused reader. After the view moves, ListView
+    // creates the rows coming into view and, in its next layout pass, can lay
+    // the loaded rows out again from its height estimates: every one of them
+    // shifts by tens of pixels under an unchanged contentY, so the text jumps
+    // and the real end moves away (wheeling back the same distance then stops
+    // short of it). Keep the row that was mid-screen where the reader left it.
+    // The target is a loaded row's own y, never an estimate, and corrections
+    // are capped per event-loop turn, so this cannot chase itself.
+    property int anchorIndex: -1
+    property real anchorOffset: 0
+    property int anchorCorrections: 0
+    function rememberAnchor() {
+        anchorIndex = -1;
+        if (followLatest || count === 0) return;
+        const index = indexAt(width / 2, contentY + height / 2);
+        const item = index < 0 ? null : itemAtIndex(index);
+        if (!item) return;
+        anchorIndex = index;
+        anchorOffset = item.y - contentY;
+    }
+    function keepAnchor() {
+        if (followLatest || anchorIndex < 0 || anchorIndex >= count || scrollBar.pressed || moving) return;
+        const item = itemAtIndex(anchorIndex);
+        if (!item) return;
+        const target = item.y - anchorOffset;
+        if (Math.abs(contentY - target) <= 0.5 || anchorCorrections >= 3) return;
+        if (anchorCorrections++ === 0) Qt.callLater(() => { root.anchorCorrections = 0; });
+        contentY = target;
+    }
     function followContentHeight() {
+        if (!followLatest) Qt.callLater(root.keepAnchor);
         if (!followLatest || userInteracting || !visible) return;
         const last = count > 0 ? itemAtIndex(count - 1) : null;
         if (!last) {
@@ -125,6 +161,7 @@ ListView {
         newMessagesBelow = false;
     }
     function beforeModelReset() {
+        anchorIndex = -1;
         savedAnchor = null;
         if (followLatest || count === 0) return;
         let index = -1;
@@ -183,7 +220,7 @@ ListView {
         event.accepted = true;
     }
     onMovementStarted: beginUserScroll()
-    onMovementEnded: endUserScroll()
+    onMovementEnded: { endUserScroll(); rememberAnchor(); }
     onContentHeightChanged: followContentHeight()
     onHeightChanged: scheduleFollow()
     onVisibleChanged: { if (visible) scheduleFollow(); }
@@ -201,6 +238,7 @@ ListView {
             const minimum = root.originY - root.topMargin;
             const maximum = Math.max(minimum, root.originY + root.contentHeight + root.bottomMargin - root.height);
             root.contentY = Math.max(minimum, Math.min(maximum, root.contentY - delta));
+            root.rememberAnchor();
             wheelSettle.restart();
             event.accepted = true;
         }
@@ -217,6 +255,14 @@ ListView {
         target: root.model
         ignoreUnknownSignals: true
         function onModelAboutToBeReset() { root.beforeModelReset(); }
+        // Older history arrives above the reader; keep the anchor on its row.
+        function onRowsInserted(parent, first, last) {
+            if (root.anchorIndex >= first) root.anchorIndex += last - first + 1;
+        }
+        function onRowsRemoved(parent, first, last) {
+            if (root.anchorIndex > last) root.anchorIndex -= last - first + 1;
+            else if (root.anchorIndex >= first) root.anchorIndex = -1;
+        }
         function onModelReset() { root.afterModelReset(); }
         function onConversationIdChanged() { root.savedAnchor = null; root.scrollToLatest(); }
     }
