@@ -521,9 +521,12 @@ def test_recovery_batches_do_not_starve_later_commitments(tmp_path):
         )
     # Long future waits must not keep the same first 100 records at the head.
     seen = set()
+    cursor = [""]
     for _ in range(3):
         recovery.tick(
-            lambda *args: pytest.fail("future goals must not dispatch"), now=db.now_ms()
+            lambda *args: pytest.fail("future goals must not dispatch"),
+            now=db.now_ms(),
+            cursor=cursor,
         )
         for plan in task_plans.list_for_session(p["session"]):
             if plan["goal"]["continuation"].get("observed_at"):
