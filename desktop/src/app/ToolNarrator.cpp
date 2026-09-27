@@ -424,7 +424,14 @@ QByteArray ToolNarrator::payload(const QVariantMap& activity, const QString& wor
 }
 
 QString ToolNarrator::key(const QByteArray& bytes) {
-    return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+    // Explanation rebuilds key every activity in the conversation. The one-shot
+    // QCryptographicHash::hash looks the algorithm up in OpenSSL on every call
+    // (~24 us, EVP_MD_fetch); a reused hasher costs ~0.1 us. With thousands of
+    // activities that was a 200-600 ms GUI stall every few seconds.
+    thread_local QCryptographicHash hasher(QCryptographicHash::Sha256);
+    hasher.reset();
+    hasher.addData(bytes);
+    return QString::fromLatin1(hasher.result().toHex());
 }
 
 QString ToolNarrator::explanation(const QVariantMap& activity, const QString& workingDirectory, bool localFilesAllowed) const {
