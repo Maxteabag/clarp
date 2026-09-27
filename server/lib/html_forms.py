@@ -3,8 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from . import db
-
+# Defined before `db`: db_schema imports SCHEMA while `db` is still loading.
 SCHEMA = '''CREATE TABLE IF NOT EXISTS form_submissions (
  submission_id TEXT PRIMARY KEY,
  artifact_id TEXT NOT NULL REFERENCES artifacts(artifact_id),
@@ -18,6 +17,8 @@ SCHEMA = '''CREATE TABLE IF NOT EXISTS form_submissions (
  delivered_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_form_submission_pending ON form_submissions(status,created_at);'''
+from . import db
+
 
 # A read-only form is an HTML report: the same sandboxed renderer, no answers.
 READ_ONLY_SCHEMA = {'type': 'object', 'properties': {}, 'additionalProperties': False}

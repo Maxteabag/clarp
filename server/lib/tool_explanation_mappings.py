@@ -14,18 +14,8 @@ against. Approval and rejection invalidate cached and learned explanations for i
 """
 from __future__ import annotations
 
-import hashlib
-import json
-
-from . import db as _db
-from .log import log
-from . import tool_explanation_learning as learning
-from . import tool_explanation_templates as templates
-
-MIN_EVIDENCE = 3
-LEARN_MIN = 0.90
-MAX_EVIDENCE = 16
-
+# Defined before the local imports: db_schema imports SCHEMA while `db` is
+# still loading, so it must exist before this module imports `db`.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tool_explanation_mappings (
     signature TEXT PRIMARY KEY,
@@ -41,6 +31,19 @@ CREATE TABLE IF NOT EXISTS tool_explanation_mappings (
 );
 CREATE INDEX IF NOT EXISTS tool_explanation_mappings_status ON tool_explanation_mappings(status, library_version);
 """
+
+import hashlib
+import json
+
+from . import db as _db
+from .log import log
+from . import tool_explanation_learning as learning
+from . import tool_explanation_templates as templates
+
+MIN_EVIDENCE = 3
+LEARN_MIN = 0.90
+MAX_EVIDENCE = 16
+
 
 
 def activity_hash(activity):
