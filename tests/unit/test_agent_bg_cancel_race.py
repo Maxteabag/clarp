@@ -14,11 +14,6 @@ def create():
     return background_jobs.upsert(session='owner', job_id='shared-id', kind='worker', title='Owned')
 
 
-def stored(job):
-    """The row's stored state, without fields derived from the current clock."""
-    return {k: v for k, v in job.items() if not k.endswith('_age_ms') and k != 'observed_at'}
-
-
 def cancel(handle, owner='owner'):
     return cli.main(['bg', owner, 'job-cancel', handle])
 
@@ -29,12 +24,12 @@ def test_cli_stale_handle_and_wrong_owner_never_cancel_successor(capsys):
     assert cancel(handle) == 0
     assert cancel(handle) == 0  # exact-run retry
     second = background_jobs.restart(session='owner', job_id='shared-id', kind='worker', title='Next')
-    before = background_jobs.get('shared-id', reconcile=False)
+    before = dict(db.conn().execute("SELECT * FROM background_jobs WHERE job_id='shared-id'").fetchone())
     assert cancel(handle) == 1
     assert 'generation mismatch' in capsys.readouterr().err
     assert cancel(background_jobs.job_handle(second), 'stranger') == 1
-    after = background_jobs.get('shared-id', reconcile=False)
-    assert stored(after) == stored(before)
+    after = dict(db.conn().execute("SELECT * FROM background_jobs WHERE job_id='shared-id'").fetchone())
+    assert after == before
     assert after['status'] == 'running'
     assert cancel(background_jobs.job_handle(second)) == 0
 
