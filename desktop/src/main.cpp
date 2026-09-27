@@ -26,6 +26,8 @@
 #include <QJSValue>
 #include <QQmlApplicationEngine>
 #include "app/StartupTrace.h"
+#include <QFontDatabase>
+#include <thread>
 #include <QQmlError>
 #include <QQuickItem>
 #include <QQuickStyle>
@@ -71,6 +73,24 @@ int main(int argc, char* argv[]) {
     launchParser.addOption({QStringLiteral("effort"), QStringLiteral("Use this model reasoning effort"), QStringLiteral("effort")});
     launchParser.addOption({QStringLiteral("preview-versions"), QStringLiteral("Manage saved preview versions")});
     launchParser.process(application);
+    // The first Text item paid ~50 ms on the GUI thread for fontconfig to
+    // enumerate the system fonts. The font database is shared and thread-safe,
+    // so populate it in parallel with QML engine setup instead. Started after
+    // --help/--version exit, and joined before the application is destroyed.
+    struct JoinOnExit {
+        std::thread thread;
+        explicit JoinOnExit(std::thread started) : thread(std::move(started)) {}
+        JoinOnExit(const JoinOnExit&) = delete;
+        JoinOnExit& operator=(const JoinOnExit&) = delete;
+        JoinOnExit(JoinOnExit&&) = delete;
+        JoinOnExit& operator=(JoinOnExit&&) = delete;
+        ~JoinOnExit() { if (thread.joinable()) thread.join(); }
+    } fontWarmup(std::thread([] {
+        const QStringList families = QFontDatabase::families();
+        for (const QString& family : {QStringLiteral("JetBrains Mono"), QStringLiteral("Literata")})
+            if (families.contains(family)) (void)QFontDatabase::styles(family);
+        clarp::StartupTrace::mark("fonts-warm");
+    }));
     const QString launchBackend = launchParser.value(QStringLiteral("backend")).trimmed().toLower();
     const int anonymousMode = launchParser.isSet(QStringLiteral("anonymous")) ? 1 : launchParser.isSet(QStringLiteral("contact")) ? 0 : -1;
     const bool explicitAgentLaunch = launchParser.isSet(QStringLiteral("cwd")) || anonymousMode >= 0 || launchParser.isSet(QStringLiteral("new-agent"))
