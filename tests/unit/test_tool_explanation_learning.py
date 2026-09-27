@@ -352,3 +352,14 @@ def test_stats_buckets_counts_and_hit_rate():
     with pytest.raises(ValueError):
         learning.stats("24h", "minute", prompt_version=3, templates_version=1)
 
+
+def test_cli_prints_stats_and_revokes(capsys):
+    spec = importlib.util.spec_from_file_location("explanations_admin", ROOT / "bin/clarp-admin.py")
+    admin = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(admin)
+    now = db.now_ms()
+    learning.write(conn(), [{"at": now, "tier": "learned"}, {"at": now, "tier": "llm"}], {}, now)
+    assert admin.cmd_explanations(admin.parser().parse_args(["explanations", "stats"])) == 0
+    out = capsys.readouterr().out
+    assert "hit rate 50.0% (1 of 2 lookups)" in out
+    assert admin.cmd_explanations(admin.parser().parse_args(["explanations", "revoke", "sh:nothing #0"])) == 1
