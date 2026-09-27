@@ -538,3 +538,24 @@ def test_recovery_batches_do_not_starve_later_commitments(tmp_path):
     assert len(states) == 106 and all(
         s["continuation"].get("observed_at") for s in states
     )
+
+
+def test_replan_cannot_relabel_completed_work_as_a_different_accomplishment(tmp_path):
+    p = make_goal(tmp_path)
+    p = task_plans.update_item(
+        p["items"][0]["item_id"], "completed", "Probe verified", revision=p["revision"]
+    )
+    with pytest.raises(ValueError, match="new step id"):
+        act(
+            p,
+            "replan",
+            {
+                "reason": "Different work is needed",
+                "steps": [{"id": "method", "title": "Unperformed different work"}],
+            },
+        )
+    unchanged = task_plans.get(p["plan_id"])
+    assert (
+        unchanged["items"][0]["title"] == "Initial method"
+        and unchanged["completed_count"] == 1
+    )
