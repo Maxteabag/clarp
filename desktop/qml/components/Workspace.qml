@@ -28,40 +28,51 @@ Rectangle {
     ListModel {id:placements}
     Connections {target:root.controller.panes; function onTreeChanged(){root.syncViews();}}
     Component.onCompleted: syncViews()
-    ScrollView {
-        visible: root.barVisible
+    // Built only while shown: most layouts hide the workspace bar.
+    Loader {
+        active: root.barVisible
+        visible: active
         width: root.width
         height: 36
         z: 50
-        clip: true
-        contentWidth: workspaceBar.implicitWidth
-        contentHeight: 36
-        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
-        Row {
-        id:workspaceBar; height:36; spacing:4; z:50
-        Repeater {model:root.controller.panes.workspaces
-            TuiButton {id:workspaceTab;required property var modelData; text:modelData.name; checkable:true
-                contentItem:TuiLabel {text:workspaceTab.text;color:Theme.body;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}
-                checked:root.controller.panes.activeWorkspace===modelData.id
-                onClicked:root.controller.panes.switchWorkspace(modelData.id)
+        sourceComponent: ScrollView {
+            clip: true
+            contentWidth: workspaceBar.implicitWidth
+            contentHeight: 36
+            ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+            Row {
+            id:workspaceBar; height:36; spacing:4; z:50
+            Repeater {model:root.controller.panes.workspaces
+                TuiButton {id:workspaceTab;required property var modelData; text:modelData.name; checkable:true
+                    contentItem:TuiLabel {text:workspaceTab.text;color:Theme.body;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}
+                    checked:root.controller.panes.activeWorkspace===modelData.id
+                    onClicked:root.controller.panes.switchWorkspace(modelData.id)
+                }
             }
-        }
-        TuiButton {text:"+ Workspace"; enabled:root.controller.panes.workspaces.length<8; onClicked:root.controller.panes.createWorkspace("Workspace "+(root.controller.panes.workspaces.length+1))}
-        TuiButton {text:"Move to workspace"; onClicked:moveMenu.open()
-            Menu {id:moveMenu
-                Repeater {model:root.controller.panes.workspaces
-                    MenuItem {required property var modelData;text:modelData.name;enabled:modelData.id!==root.controller.panes.activeWorkspace
-                        onTriggered:root.controller.panes.moveActiveToWorkspace(modelData.id)}
+            TuiButton {text:"+ Workspace"; enabled:root.controller.panes.workspaces.length<8; onClicked:root.controller.panes.createWorkspace("Workspace "+(root.controller.panes.workspaces.length+1))}
+            TuiButton {text:"Move to workspace"; onClicked:moveMenu.open()
+                Menu {id:moveMenu
+                    Repeater {model:root.controller.panes.workspaces
+                        MenuItem {required property var modelData;text:modelData.name;enabled:modelData.id!==root.controller.panes.activeWorkspace
+                            onTriggered:root.controller.panes.moveActiveToWorkspace(modelData.id)}
+                    }
                 }
             }
         }
+        }
     }
-    }
-    Row {
-        y: root.barHeight; height: 40; width: root.width; spacing: 8; z: 50
-        visible: !!root.controller.panes.workspaceSaveWarning
-        TuiLabel {width:Math.max(100,root.width-saveLayoutButton.width-8);text:root.controller.panes.workspaceSaveWarning;wrapMode:Text.Wrap;color:Theme.warning}
-        TuiButton {id:saveLayoutButton;text:"Save this layout instead";onClicked:root.controller.panes.saveWorkspaceLayoutInstead()}
+    Loader {
+        active: !!root.controller.panes.workspaceSaveWarning
+        visible: active
+        y: root.barHeight
+        width: root.width
+        height: 40
+        z: 50
+        sourceComponent: Row {
+            spacing: 8
+            TuiLabel {width:Math.max(100,root.width-saveLayoutButton.width-8);text:root.controller.panes.workspaceSaveWarning;wrapMode:Text.Wrap;color:Theme.warning}
+            TuiButton {id:saveLayoutButton;text:"Save this layout instead";onClicked:root.controller.panes.saveWorkspaceLayoutInstead()}
+        }
     }
     color: Theme.window
 
