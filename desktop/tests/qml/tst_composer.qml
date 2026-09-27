@@ -48,6 +48,12 @@ TestCase {
         active: true
     }
 
+    function test_attachDialogIsCreatedOnFirstUse() {
+        // The dialogs module is not a static dependency of the composer.
+        compare(composer.fileDialog, null);
+        verify(composer.attachDialog() !== null, "the attach dialog must be created on demand");
+        compare(composer.attachDialog(), composer.fileDialog);
+    }
     function test_assignmentOverridesTextEditingShortcuts() {
         const editor = findChild(composer, "paneComposerEditor");
         editor.text = "Keep this draft";

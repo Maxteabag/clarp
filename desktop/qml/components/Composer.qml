@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 
 Rectangle {
@@ -385,21 +384,35 @@ Rectangle {
         }
     }
 
-    FileDialog {
-        id: fileDialog
-        title: "Attach a file"
-        fileMode: FileDialog.OpenFiles
-        onAccepted: {
-            for (const file of selectedFiles)
-                root.controller.attachLocalFile(root.paneId, root.session, file);
+    // Created by name on first use so the dialogs module is not a static
+    // dependency of the composer (see AttachFileDialog.qml).
+    property var fileDialog: null
+    function attachDialog() {
+        if (root.fileDialog === null) {
+            const component = Qt.createComponent(Qt.resolvedUrl("AttachFileDialog.qml"));
+            root.fileDialog = component.createObject(root);
+            if (root.fileDialog === null) {
+                console.warn("Attach dialog failed:", component.errorString());
+                return null;
+            }
+            root.fileDialog.filesChosen.connect(files => {
+                for (const file of files)
+                    root.controller.attachLocalFile(root.paneId, root.session, file);
+            });
         }
+        return root.fileDialog;
+    }
+    function openFileDialog() {
+        const dialog = root.attachDialog();
+        if (dialog !== null)
+            dialog.open();
     }
 
     Shortcut {
         sequence: "Ctrl+Shift+O"
         context: Qt.ApplicationShortcut
         enabled: root.active && root.session.length > 0
-        onActivated: fileDialog.open()
+        onActivated: root.openFileDialog()
     }
 
     DropArea {
