@@ -62,3 +62,19 @@ def test_release_is_validated_and_fences_late_requests(running_server):
     with pytest.raises(urllib.error.HTTPError) as error:
         _post(running_server,"/tool-explanations",payload)
     assert error.value.code==400
+
+
+def test_stats_reports_hit_rate_and_validates_the_window(running_server):
+    from lib import db, tool_explanation_learning as learning
+    now = db.now_ms()
+    learning.write(db.conn(), [{"at": now, "tier": "template"}, {"at": now, "tier": "learned"},
+                               {"at": now, "tier": "llm"}, {"at": now, "tier": "disabled"}], {}, now)
+    _, info = _get(running_server, "/server-info")
+    assert "tool_explanation_stats" in info["capabilities"]["features"]
+    _, stats = _get(running_server, "/tool-explanations/stats?window=7d&bucket=day")
+    assert (stats["window"], stats["bucket"], len(stats["buckets"])) == ("7d", "day", 7)
+    assert stats["totals"]["counts"]["disabled"] == 1
+    assert (stats["totals"]["hits"], stats["totals"]["lookups"], stats["totals"]["hit_rate"]) == (2, 3, .6667)
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _get(running_server, "/tool-explanations/stats?window=1y")
+    assert error.value.code == 400

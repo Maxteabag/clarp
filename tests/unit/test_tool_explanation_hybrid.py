@@ -233,11 +233,15 @@ def test_jev_unavailable_disabled_or_invalid_parameters_fall_back(monkeypatch):
 
 def test_compound_destructive_and_script_runs_never_reach_jev(monkeypatch):
     seen = enable_jev(monkeypatch, pick("list_directory"))
-    commands = ["ls && rm -rf build", "shred -u secrets.txt", "python task_47.py", "sudo ls /root", "echo 'broken"]
+    commands = ["ls && shred -u build.log", "shred -u secrets.txt", "python task_47.py", "sudo ls /root", "echo 'broken"]
     with ToolExplanations(translate=lambda level, items: {i["id"]: "Model." for i in items}, debounce=.001) as service:
         result = settle(service, [item(bash(c), str(i)) for i, c in enumerate(commands)], include_provenance=True)
     assert seen == []
-    assert [r["provenance"]["fallback_reason"] for r in result] == ["compound", "mutating_program", "script_run", "privileged", "malformed"]
+    # A compound call is explained part by part; only the unknown part needs the model.
+    parts = result[0]["provenance"]["parts"]
+    assert [p["tier"] for p in parts] == ["template", "llm"] and parts[1]["fallback_reason"] == "mutating_program"
+    assert result[0]["text"] == "Lists files and subdirectories in the current directory. Then model."
+    assert [r["provenance"]["fallback_reason"] for r in result[1:]] == ["mutating_program", "script_run", "privileged", "malformed"]
 
 
 def test_scripted_only_configuration_skips_jev(monkeypatch):
@@ -296,16 +300,22 @@ def test_vetted_approval_makes_a_rule_for_one_exact_shape_and_invalidates(monkey
     with ToolExplanations(translate=lambda *_: pytest.fail("Jev answered"), debounce=.001) as service:
         for directory in ["src", "docs", "tests"]:
             settle(service, [item(bash(f"eza -la {directory}"))])
-        signature = route_for("eza -la src")["signature"]
-        assert conn().execute("SELECT count(*) FROM tool_explanation_cache WHERE signature=?", (signature,)).fetchone()[0] == 3
-        with pytest.raises(ValueError):
-            mappings.approve(signature, "list_directory", reviewer="")
-        with pytest.raises(ValueError):
-            mappings.approve(signature, "find_files", reviewer="peter")
-        mappings.approve(signature, "list_directory", reviewer="peter")
-        assert mappings.promoted() == {signature: "list_directory"}
-        assert conn().execute("SELECT count(*) FROM tool_explanation_cache WHERE signature=?", (signature,)).fetchone()[0] == 0
-        seen = enable_jev(monkeypatch, pick("unknown"))
+    # Leaving the service writes the buffered evidence of the learned hits.
+    signature = route_for("eza -la src")["signature"]
+    # Jev answered once; the later shapes were learned hits of that pick.
+    assert conn().execute("SELECT count(*) FROM tool_explanation_cache WHERE signature=?", (signature,)).fetchone()[0] == 1
+    assert [tuple(row) for row in conn().execute("SELECT producer, template_id FROM tool_explanation_learned "
+                                                 "WHERE signature=?", (signature,))] == [("jev", "list_directory")]
+    with pytest.raises(ValueError):
+        mappings.approve(signature, "list_directory", reviewer="")
+    with pytest.raises(ValueError):
+        mappings.approve(signature, "find_files", reviewer="peter")
+    mappings.approve(signature, "list_directory", reviewer="peter")
+    assert mappings.promoted() == {signature: "list_directory"}
+    assert conn().execute("SELECT count(*) FROM tool_explanation_cache WHERE signature=?", (signature,)).fetchone()[0] == 0
+    assert conn().execute("SELECT count(*) FROM tool_explanation_learned WHERE signature=?", (signature,)).fetchone()[0] == 0
+    seen = enable_jev(monkeypatch, pick("unknown"))
+    with ToolExplanations(translate=lambda *_: pytest.fail("Jev answered"), debounce=.001) as service:
         vetted = service.request(1, [item(bash("eza -la server"))], include_provenance=True)["items"][0]
         assert seen == []
         assert vetted["source"] == "scripted" and vetted["provenance"]["learned"] is True

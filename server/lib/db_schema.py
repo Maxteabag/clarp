@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 96
+_SCHEMA_VERSION = 97
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -1139,6 +1139,8 @@ CREATE INDEX tool_explanation_releases_expiry ON tool_explanation_releases(expir
 _SCHEMA_SQL += _EXPLANATION_CACHE_SCHEMA
 from .tool_explanation_mappings import SCHEMA as _EXPLANATION_MAPPINGS_SCHEMA
 _SCHEMA_SQL += _EXPLANATION_MAPPINGS_SCHEMA
+from .tool_explanation_learning import SCHEMA as _EXPLANATION_LEARNING_SCHEMA
+_SCHEMA_SQL += _EXPLANATION_LEARNING_SCHEMA
 from .html_forms import SCHEMA as _HTML_FORMS_SCHEMA
 _SCHEMA_SQL += _HTML_FORMS_SCHEMA
 from .model_fallbacks import SCHEMA as _MODEL_FALLBACK_SCHEMA

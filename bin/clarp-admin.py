@@ -996,6 +996,53 @@ def cmd_sessions(_args) -> int:
     return 0
 
 
+def cmd_explanations(args) -> int:
+    from lib import tool_explanation_learning as learning
+    from lib import tool_explanation_templates as templates
+    from lib.tool_explanations import PROMPT_VERSION
+
+    if args.explanations_command == "revoke":
+        removed = learning.revoke(args.signature)
+        print(f"removed {removed} learned explanation(s) for {args.signature}")
+        return 0 if removed else 1
+    if args.explanations_command == "learned":
+        print(json.dumps(learning.listing(args.limit), indent=2))
+        return 0
+    result = learning.stats(args.window, args.bucket, prompt_version=PROMPT_VERSION,
+                            templates_version=templates.VERSION)
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+    print(explanation_stats_text(result))
+    return 0
+
+
+def explanation_stats_text(result) -> str:
+    """The stats endpoint's payload as a short table of non-empty buckets."""
+    import datetime
+
+    def rate(value):
+        return "-" if value is None else f"{value * 100:.1f}%"
+    totals = result["totals"]
+    lines = [
+        f"Tool explanations, last {result['window']} by {result['bucket']}: hit rate "
+        f"{rate(totals['hit_rate'])} ({totals['hits']} of {totals['lookups']} lookups)",
+        f"learned entries {totals['learned_entries']} ({totals['learned_parameterised']} parameterised, "
+        f"{totals['learned_exact_only']} exact-only), learned hits {totals['learned_hits']}, "
+        f"Jev picks {totals['jev_picks']}, LLM calls {totals['llm_calls']}",
+        "",
+        "start (UTC)       " + "".join(f"{tier:>12}" for tier in result["tiers"]) + "    hit rate",
+    ]
+    for bucket in result["buckets"]:
+        if not any(bucket["counts"].values()):
+            continue
+        start = datetime.datetime.fromtimestamp(bucket["start"] / 1000, datetime.timezone.utc)
+        lines.append(start.strftime("%Y-%m-%d %H:%M  ")
+                     + "".join(f"{bucket['counts'][tier]:>12}" for tier in result["tiers"])
+                     + f"  {rate(bucket['hit_rate']):>10}")
+    return "\n".join(lines)
+
+
 def cmd_backup(args) -> int:
     server_root = SHARE
     if not (server_root / "lib").is_dir():
@@ -2240,6 +2287,20 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     url.add_argument("--json", action="store_true")
     url.set_defaults(func=cmd_url)
     sub.add_parser("paths").set_defaults(func=cmd_paths)
+    explanations = sub.add_parser(
+        "explanations", help="tool explanation hit rate and learned explanations").add_subparsers(
+        dest="explanations_command", required=True)
+    explanations_stats = explanations.add_parser("stats")
+    explanations_stats.add_argument("--window", choices=["24h", "7d", "30d"], default="24h")
+    explanations_stats.add_argument("--bucket", choices=["hour", "day"], default="hour")
+    explanations_stats.add_argument("--json", action="store_true")
+    explanations_stats.set_defaults(func=cmd_explanations)
+    explanations_learned = explanations.add_parser("learned")
+    explanations_learned.add_argument("--limit", type=int, default=50)
+    explanations_learned.set_defaults(func=cmd_explanations)
+    explanations_revoke = explanations.add_parser("revoke")
+    explanations_revoke.add_argument("signature")
+    explanations_revoke.set_defaults(func=cmd_explanations)
     sub.add_parser("sessions").set_defaults(func=cmd_sessions)
     onboard = sub.add_parser("onboard")
     onboard.add_argument("--url", default="")

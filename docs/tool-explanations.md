@@ -31,7 +31,8 @@ three-column Spark experiment (lab commit `ae97244`). The exact combined prompts
 are in `server/lib/tool_explanation_prompts.json`, with regression SHA-256 checks
 against the recorded experiment. Each audience has its own examples and wording
 rules; Developer remains raw and never starts inference. The model stays
-`gpt-5.3-codex-spark` with low reasoning, not medium. Cache prompt version is 2.
+`gpt-5.3-codex-spark` with low reasoning, not medium. Cache prompt version is 3:
+the model also returns a parameterised template (see Tiers and learning).
 This is a shared Host policy: desktop/iOS keep their existing per-device detail
 settings. Updating source on main does not itself update a running Host.
 
@@ -54,11 +55,83 @@ each ID with `status`: `disabled`, `pending`, `ready` (with `text`), `failed`
 every 600–700ms, with a bounded overall wait. Switching Host, activity or audience
 must cancel/ignore stale client responses. Never reveal raw activity while pending.
 
+## Tiers and learning
+
+Each call is split into parts: a compound shell command at top-level `&&`,
+`||`, `;`, `&`, `|` and newlines, anything else as one part. `cd DIR` becomes
+the directory of the parts after it, and `| head -n N`, `true` and `:` are
+dropped. Quotes are respected; command substitution, subshells, heredocs,
+process substitution, shell keywords, and pipelines into anything but a plain
+output filter (`grep`, `sort`, `wc`, `jq`, …) keep the whole command as one
+opaque part. Each part goes through the tiers, cheapest first:
+
+1. **Template.** The typed scripted templates (`tool_explanation_templates`),
+   including mappings a reviewer approved. Synchronous.
+2. **Learned.** The part's *shape* is its words with every dynamic value
+   replaced by a typed slot: numbers, commit IDs, URLs, paths, `$` expressions,
+   identifiers with digits or mixed case, and free text. Programs,
+   subcommands, flags and plain lowercase or upper-case words stay literal,
+   because they choose what a program does (`filectl list` versus `filectl
+   delete`). The signature is `sh:<program> #<keyed hash of the shape>`; the
+   rules are in the `tool_explanation_shapes` docstring. One indexed lookup in
+   `tool_explanation_learned` either renders a stored sentence with this
+   call's values (`{path1}`, `{path1_name}`, `{num1}`, …) or returns an
+   exact-only answer for identical text. Synchronous.
+3. **Jev**, for parts whose program or tool is unknown, when the
+   `explanations` judgment site is on: it picks one of the read/list/search
+   templates or one of the model's parameterised explanations of other shapes
+   of the same program. The answer starts with "Likely". A pick with at least
+   0.90 confidence is learned.
+4. **Model.** The language model gets each unanswered part with its `slots`
+   and returns `text` and a `template` with placeholders. The template is
+   learned for the shape only if it renders back to exactly `text`, uses only
+   known slots, and repeats none of this call's values (nor any number, when
+   the call has a numeric slot). Otherwise the text is learned exact-only for
+   that identical part, and the decision's reason says `exact:<why>`.
+
+A compound call is ready when all its parts are, and its text joins them in
+order with "Then". Learned rows have no expiry; they are ignored when
+`PROMPT_VERSION` or the template library version changes, and `clarp-admin
+explanations revoke SIGNATURE` deletes one (`clarp-admin explanations learned`
+lists them). Approving or rejecting a mapping also deletes a Jev pick learned
+for that shape. Learned rows are shared by every Janitor configuration and
+target on the Host; the 24-hour exact cache below stays per configuration.
+Maintenance deletes rows of dead versions after 30 days and keeps at most
+100,000 exact-only rows (least recently used go first). Only keyed hashes and
+placeholder text are stored for parameterised rows; exact-only rows hold the
+explanation a client was shown.
+
+## Decisions and hit rate
+
+Every explained call is one row in `tool_explanation_decisions`: time, agent,
+signature, `tier` (`template`, `learned`, `exact_cache`, `jev`, `llm`,
+`failed`, `miss`, `disabled`), audience, part count, Jev confidence, latency,
+model and a short reason. A compound call counts once, in its most expensive
+part's tier. Polls of queued work add nothing: the worker records the answer,
+and the poll that collects it is not counted again. A busy or disabled item
+is recorded at most once a minute per call. Work abandoned before the worker
+ran, and cancelled rows, are not decisions. Rows are buffered in memory and
+written with the worker's batch transaction, or once a second when idle; a
+crash can lose the last second. Maintenance deletes rows older than 90 days
+and beyond 500,000.
+
+`GET /tool-explanations/stats?window=24h|7d|30d&bucket=hour|day` (see
+`docs/protocol.md`) and `clarp-admin explanations stats [--window 7d]
+[--bucket day] [--json]` report counts per bucket and `hit_rate = (template +
+learned + exact_cache) / lookups`, where lookups exclude `disabled`. Read it
+as: `template` is the fixed floor from shipped templates; `learned` is what
+learning adds and should grow while `llm` shrinks as shapes repeat; a high
+`exact_cache` share would mean learning is not storing answers; `jev` and
+`llm` are the calls that still cost a request. `totals.learned_exact_only`
+against `learned_parameterised` shows how often the model's templates could be
+reused.
+
 ## SQLite state and retention
 
 SQLite is authoritative for the whole explanation system, in the Host database
 reported by `clarp-admin paths` (normally `~/.local/share/clarp/state.sqlite`).
-Schema v72 adds four tables:
+Schema v72 added four tables, and v97 adds `tool_explanation_learned` and
+`tool_explanation_decisions` (see above):
 
 - `tool_explanation_cache`: lookup hash, completed text, creation and expiry time.
 - `tool_explanation_jobs`: queued/running work, bounded normalized payload,
@@ -111,5 +184,6 @@ Headless regression gates:
 ```sh
 uv run --group dev pytest tests/unit/test_tool_explanations.py tests/integration/test_tool_explanations_endpoint.py
 uv run --group dev pytest tests/unit/test_tool_explanation_cache.py tests/unit/test_tool_explanation_queue.py
+uv run --group dev pytest tests/unit/test_tool_explanation_learning.py tests/unit/test_tool_explanation_hybrid.py
 ctest --test-dir desktop/build/release -R 'tool-narrator|activity-layout' --output-on-failure
 ```

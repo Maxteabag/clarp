@@ -116,6 +116,10 @@ def _migrate(con: sqlite3.Connection) -> None:
             _migrate_to_v95(con)
         if version < 96:
             _migrate_to_v96(con)
+        if version < 97:
+            # Permanent learned tool explanations and their decision ledger.
+            for statement in db_schema._EXPLANATION_LEARNING_SCHEMA.split(";"):
+                if statement.strip(): con.execute(statement)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")

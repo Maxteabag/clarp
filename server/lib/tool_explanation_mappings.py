@@ -10,7 +10,7 @@ explanation. Only `approve()`, an explicit vetting step, makes it a scripted
 rule. Every mapping keys on the keyed hash of one exact invocation shape (see
 `tool_explanation_templates._identity`), so `--mode=list` and `--mode=delete`
 never share a rule, and it is bound to the library version it was proposed
-against. Approval and rejection invalidate cached explanations for it.
+against. Approval and rejection invalidate cached and learned explanations for it.
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ import json
 
 from . import db as _db
 from .log import log
+from . import tool_explanation_learning as learning
 from . import tool_explanation_templates as templates
 
 MIN_EVIDENCE = 3
@@ -69,6 +70,8 @@ def regression_failures(signature, template_id):
 
 def _invalidate(db, signature):
     db.execute("DELETE FROM tool_explanation_cache WHERE signature=?", (signature,))
+    # A Jev pick learned for this shape is superseded by the decision.
+    learning.forget(db, signature)
 
 
 def record(route, template_id, confidence, activity):
