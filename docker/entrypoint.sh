@@ -46,9 +46,7 @@ from lib.instance_backup import apply_pending_restore
 apply_pending_restore()
 
 home = Path.home()
-claude_json = LAYOUT.claude_home / ".claude.json"
-if not claude_json.exists():
-    claude_json.touch(mode=0o600)
+claude_json = LAYOUT.ensure_claude_json()
 
 links = [
     (home / ".claude", LAYOUT.claude_home, True),
