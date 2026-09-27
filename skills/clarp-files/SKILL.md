@@ -1,6 +1,6 @@
 ---
 name: clarp-files
-description: Publish a previewable and downloadable file.
+description: Publish a previewable and downloadable file, or deliver a report, findings, audit or write-up as a read-only HTML report.
 ---
 # Files
 Publish with `clarp-agent-artifacts create "$CLAUDE_PWA_SESSION" file TITLE SUMMARY JSON_PAYLOAD`.
