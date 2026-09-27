@@ -463,6 +463,77 @@ def test_background_job_snapshot_and_idempotent_cancel_http(
     assert dispatched[0]["forced_session"] == "rachel"
 
 
+def _delete_status(url, body: bytes | None = None):
+    req = urllib.request.Request(url, data=body, method="DELETE",
+                                 headers={"Content-Type": "application/json"} if body else {})
+    try:
+        with urllib.request.urlopen(req, timeout=2) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
+
+
+def test_background_job_cancel_is_fenced_by_generation(running_server, monkeypatch):
+    from lib import background_jobs
+
+    base, _ctx, _srv = running_server
+    dispatched: list[dict] = []
+
+    class FakeDispatch:
+        def __init__(self, _ctx):
+            pass
+
+        def submit(self, command):
+            dispatched.append(command.as_kwargs())
+
+    monkeypatch.setattr(server_module, "TurnDispatchService", FakeDispatch)
+
+    def cancel(job_id, body=None):
+        return _delete_status(base + f"/background-jobs/{job_id}",
+                              None if body is None else json.dumps(body).encode())
+
+    background_jobs.upsert(session="rachel", job_id="portrait", kind="portrait", title="Portrait")
+    status, body = cancel("portrait", {"expected_generation": 1})
+    assert status == 200 and body["ok"] is True and body["changed"] is True
+    assert body["job"]["generation"] == 1 and body["job"]["status"] == "cancelled"
+    assert body["job_handle"] == "bg1:1:portrait"
+
+    # The same ID starts run 2; a late cancel confirmed for run 1 must not touch it.
+    background_jobs.upsert(session="rachel", job_id="portrait", kind="portrait", title="Portrait",
+                           restart_cancelled=True)
+    status, body = cancel("portrait", {"expected_generation": 1})
+    assert status == 409 and body["error"] == "generation_mismatch"
+    assert (body["expected_generation"], body["current_generation"]) == (1, 2)
+    assert body["changed"] is False and body["job"]["status"] == "running"
+    assert len(dispatched) == 1
+
+    status, body = cancel("portrait", {"expected_generation": 2})
+    assert status == 200 and body["changed"] is True and body["job"]["generation"] == 2
+    status, body = cancel("portrait", {"expected_generation": 2})
+    assert status == 200 and body["changed"] is False and body["job"]["generation"] == 2
+    assert len(dispatched) == 2
+
+    for bad in (0, -1, True, 1.5, "2", None, 2**53):
+        status, body = cancel("portrait", {"expected_generation": bad})
+        assert status == 400 and body["error"] == "invalid expected_generation", bad
+    assert cancel("nope", {"expected_generation": 1})[0] == 404
+
+    # The query parameter is accepted too and wins over the body.
+    background_jobs.upsert(session="rachel", job_id="portrait", kind="portrait", title="Portrait",
+                           restart_cancelled=True)
+    status, body = _delete_status(base + "/background-jobs/portrait?expected_generation=2",
+                                  json.dumps({"expected_generation": 3}).encode())
+    assert status == 409 and body["current_generation"] == 3 and body["expected_generation"] == 2
+    status, body = _delete_status(base + "/background-jobs/portrait?expected_generation=3")
+    assert status == 200 and body["changed"] is True and body["job"]["generation"] == 3
+    assert body["job_handle"] == "bg1:3:portrait"
+    for bad in ("0", "-1", "abc", "1.5", "true", str(2**53)):
+        status, body = _delete_status(base + f"/background-jobs/portrait?expected_generation={bad}")
+        assert status == 400 and "job" not in body, bad
+    status, body = _delete_status(base + "/background-jobs/nope?expected_generation=1")
+    assert status == 404 and "job" not in body
+
+
 def test_background_job_detail_http(running_server, tmp_path, monkeypatch):
     from lib import background_jobs
 
