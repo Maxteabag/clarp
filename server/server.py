@@ -455,6 +455,7 @@ class Handler(BaseHTTPRequestHandler):
         "/herald/settings": "_handle_herald_settings_get",
         "/judgments/settings": "_handle_judgments_settings_get",
         "/judgments/decisions": "_handle_judgments_decisions_get",
+        "/tool-explanations/stats": "_handle_tool_explanations_stats",
         "/personalities/settings": "_handle_personalities_settings_get",
         "/automation-settings": "_handle_automation_settings_get",
         "/avatar-settings": "_handle_avatar_settings_get",
@@ -2289,6 +2290,18 @@ class Handler(BaseHTTPRequestHandler):
             result = application_activity.report(self._request_principal,
                 data.get("instance_id"), data.get("sequence"), data.get("foreground"),
                 data.get("input_age_ms"), data.get("sent_at_ms"))
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        self._json_ok(result)
+
+    def _handle_tool_explanations_stats(self):
+        from lib import tool_explanation_learning, tool_explanation_templates
+        from lib.tool_explanations import PROMPT_VERSION
+        query = self._query()
+        try:
+            result = tool_explanation_learning.stats(
+                (query.get("window") or ["24h"])[0], (query.get("bucket") or ["hour"])[0],
+                prompt_version=PROMPT_VERSION, templates_version=tool_explanation_templates.VERSION)
         except ValueError as error:
             return self._json_error(400, str(error))
         self._json_ok(result)

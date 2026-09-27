@@ -565,6 +565,7 @@ any subset. Payload shapes are documented in the handler docstrings in
 | Prompt history | `/identity/prompt-history` | `prompt_history.py` |
 | Voice timeline | `POST /voice-events`, `GET /voice-events`, `GET /voice-events/utterances`; `/transcribe` headers `X-Utterance-ID`, `X-Client-Ts` | `voice_events.py`, `audio_metrics.py`, `docs/voice-tracing.md` |
 | Diagnostics | `/crash` (MetricKit), `/diagnostics/health` | `ios_diagnostics.py`, `health.py` |
+| Tool explanations | `POST /tool-explanations`, `GET /tool-explanations/stats` (see below) | `tool_explanations.py`, `tool_explanation_learning.py`, `docs/tool-explanations.md` |
 
 ### Inspecting a background process: `GET /background-jobs/<job_id>`
 
@@ -642,6 +643,43 @@ report. Create it with `POST /artifacts`:
 - The HTML is self-contained and rendered by the same confined form viewer;
   it is never served on the Host origin. Clients before contract 19 show it as
   a form with an empty answer set. Feature `html_reports`.
+
+### Tool explanation hit rate: `GET /tool-explanations/stats`
+
+How tool calls were explained over a window, for watching the learning cache
+work. Query `window` is `24h` (default), `7d` or `30d`; `bucket` is `hour`
+(default) or `day`. Anything else returns 400. Buckets start at UTC multiples
+of their size; the last one is the bucket containing `now`.
+
+```json
+{
+  "window": "24h", "bucket": "hour", "now": 1790000000000,
+  "tiers": ["template", "learned", "exact_cache", "jev", "llm", "failed", "miss", "disabled"],
+  "buckets": [
+    {"start": 1789916400000,
+     "counts": {"template": 40, "learned": 22, "exact_cache": 0, "jev": 1, "llm": 9,
+                "failed": 1, "miss": 0, "disabled": 3},
+     "lookups": 73, "hits": 62, "hit_rate": 0.8493, "mean_latency_ms": 180}
+  ],
+  "totals": {"counts": {"…": "per tier over the window"}, "lookups": 900, "hits": 700, "hit_rate": 0.7778,
+             "learned_entries": 412, "learned_parameterised": 380, "learned_exact_only": 32,
+             "learned_by_producer": {"llm": 405, "jev": 7}, "learned_hits": 5100,
+             "jev_picks": 12, "llm_calls": 150}
+}
+```
+
+- Each explained call is one decision, counted in the tier that answered it:
+  `template` (a scripted template), `learned` (the permanent learned table),
+  `exact_cache` (the 24-hour exact cache), `jev`, `llm`, `failed`, `miss`
+  (not admitted: queue full or too many views) or `disabled`. A call with
+  several parts counts once, in its most expensive part's tier.
+- `hits` is `template + learned + exact_cache`; `lookups` is every tier but
+  `disabled`; `hit_rate` is `hits / lookups`, or null without lookups.
+  A rising `hit_rate` is the cache learning.
+- `learned_*` totals describe the learned table at the current prompt and
+  template versions; `jev_picks` and `llm_calls` count decisions in the
+  window. `clarp-admin explanations stats` prints the same. Feature
+  `tool_explanation_stats`.
 
 ## Compatibility policy
 
