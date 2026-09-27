@@ -205,12 +205,12 @@ def test_jev_picks_the_argument_among_several_literals(monkeypatch):
     (pick("unknown"), "jev_unknown"),
     (pick("list_directory", p=.55), "jev_low_confidence"),
     (pick("delete_path"), "jev_low_confidence"),            # not an offered template
-    (pick("list_directory", argument="none"), "jev_invalid_parameters"),
+    (pick("list_directory", argument="none"), "jev_no_argument"),
 ])
 def test_jev_abstention_falls_back_to_the_model(monkeypatch, answers, reason):
     enable_jev(monkeypatch, answers)
     with ToolExplanations(translate=lambda level, items: {i["id"]: "Model explains it." for i in items}, debounce=.001) as service:
-        result = settle(service, [item(bash("lsd --depth 2 docs"))], include_provenance=True)[0]
+        result = settle(service, [item(bash("lsd --depth 2 docs notes"))], include_provenance=True)[0]
     assert result["source"] == "llm" and result["provenance"]["fallback_reason"] == reason
 
 
@@ -226,9 +226,10 @@ def test_jev_unavailable_disabled_or_invalid_parameters_fall_back(monkeypatch):
         down = settle(service, [item(bash("eza docs"))], include_provenance=True)[0]
         assert down["source"] == "llm" and down["provenance"]["fallback_reason"] == "jev_unavailable"
 
-        enable_jev(monkeypatch, pick("list_directory"))
+        # An argument that could never be a parameter is not offered, so Jev is not asked.
+        seen = enable_jev(monkeypatch, pick("list_directory"))
         unsafe = settle(service, [item(bash("eza 'a;b'"))], include_provenance=True)[0]
-        assert unsafe["provenance"]["fallback_reason"] == "jev_invalid_parameters"
+        assert unsafe["provenance"]["fallback_reason"] == "jev_unsafe_arguments" and seen == []
 
 
 def test_compound_destructive_and_script_runs_never_reach_jev(monkeypatch):
