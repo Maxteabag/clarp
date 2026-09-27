@@ -26,6 +26,13 @@ stripping. The native renderer confines scripts and assets; never serve this
 HTML directly on a credential-bearing Host origin. Existing artifact types,
 quick decisions and task plans retain their contracts.
 
+A read-only report is an `html_form` with `read_only: true` and no answers:
+the Host stores an empty closed `answer_schema` and refuses submissions with
+400. Publish with `clarp-agent-artifacts create-report SESSION TITLE HTML_FILE
+[--summary S] [--artifact-id ID] [--version V]`; the default ID is derived
+from the title and HTML, so an identical retry reconciles to the same artifact.
+See `docs/protocol.md`.
+
 See the managed `clarp-html-forms` skill for authoring, draft restoration,
 custom controls and publishing. Native implementation and testing live in the
 separate iOS repository.

@@ -33,6 +33,22 @@ blindly mint another ID. Payloads are immutable. Changed questions or HTML need
 a new artifact ID/version, leaving existing drafts and receipts attached to the
 original. Existing quick-decision and task APIs remain unchanged.
 
+## Read-only reports
+
+A report, findings, audit or write-up that asks nothing is a read-only form: the
+same self-contained HTML, no schema, no answers.
+
+```bash
+clarp-agent-artifacts create-report ACTUAL_SESSION "Report title" report.html \
+  --summary "What it found"
+```
+
+The default artifact ID comes from the title and HTML, so a retry of the same
+report reconciles to the same artifact; pass `--artifact-id` and `--version` to
+publish a revision. The Host refuses answers to a report. Keep it readable on a
+phone in light and dark mode (`prefers-color-scheme`). Plans with questions stay
+forms.
+
 ## Connect the HTML to Clarp
 
 Ordinary named inputs, selects and textareas are collected and restored by the
