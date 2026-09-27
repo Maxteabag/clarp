@@ -253,6 +253,9 @@ def _create(*, session: str, type: str, title: str, summary: str = "",
     if not title: raise ValueError("artifact title required")
     artifact_id = artifact_id.strip() or _new("artifact")
     if not _VALID_ID.fullmatch(artifact_id): raise ValueError("invalid artifact id")
+    if type == "html_form":
+        from .html_forms import normalize
+        payload = normalize(payload)
     payload = _payload(payload, preserve_html=type == "html_form")
     _require_payload(type, payload, artifact_id, str(agent["session"]))
     now = db.now_ms()
@@ -302,7 +305,8 @@ def _public(row) -> dict:
                 "version", "build", "environment", "files_changed", "additions",
                 "deletions", "diff", "path_label", "artifact_ids", "asset_id", "asset_ids",
                 "root", "relative_path", "provider", "run_id", "run_url", "workflow_name",
-                "current_step", "conclusion", "total_steps", "completed_steps", "podcast"):
+                "current_step", "conclusion", "total_steps", "completed_steps", "podcast",
+                "read_only"):
         if key in item["payload"] and _public_field_valid(key, item["payload"][key]):
             item[key] = item["payload"][key]
     if item["type"] in {"decision", "question"}:
@@ -351,7 +355,7 @@ def _public_field_valid(key: str, value: Any) -> bool:
     if key == "progress":
         return (isinstance(value, (int, float)) and not isinstance(value, bool)
                 and math.isfinite(float(value)) and 0 <= float(value) <= 1)
-    if key == "all_day": return isinstance(value, bool)
+    if key in {"all_day", "read_only"}: return isinstance(value, bool)
     if key in {"columns", "recipients", "artifact_ids", "asset_ids"}:
         return isinstance(value, list) and all(isinstance(item, str) for item in value)
     if key == "rows":

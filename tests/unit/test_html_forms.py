@@ -69,3 +69,46 @@ def test_upgrade_from_73_preserves_existing_artifacts(tmp_path):
     assert con.execute('PRAGMA user_version').fetchone()[0]==db._SCHEMA_VERSION
     assert tuple(con.execute('SELECT * FROM artifacts WHERE artifact_id=?',(f['artifact_id'],)).fetchone())==before
     assert con.execute('SELECT COUNT(*) FROM form_submissions').fetchone()[0]==0
+
+
+def test_read_only_report_stores_empty_schema_and_refuses_answers(tmp_path):
+    form(tmp_path)
+    row=artifacts.create(session='mike',type='html_form',title='Findings',payload={
+        'content':'<main><h1>Findings</h1></main>','version':'1','read_only':True})
+    assert row['payload']['answer_schema']==html_forms.READ_ONLY_SCHEMA
+    assert row['read_only'] is True
+    for answers in ({},{'x':1}):
+        with pytest.raises(html_forms.ReadOnlyForm,match='read-only report'):
+            html_forms.submit(row['artifact_id'],{'submission_id':'e'*32,'version':'1','answers':answers})
+    assert not html_forms.pending()
+    with pytest.raises(ValueError,match='immutable'):
+        artifacts.update(row['artifact_id'],{'payload_patch':{'content':'changed'}})
+
+
+def test_read_only_validation(tmp_path):
+    form(tmp_path)
+    base={'content':'<p>r</p>','version':'1'}
+    with pytest.raises(ValueError,match='boolean'):
+        artifacts.create(session='mike',type='html_form',title='R',payload={**base,'read_only':'yes',
+            'answer_schema':dict(html_forms.READ_ONLY_SCHEMA)})
+    with pytest.raises(ValueError,match='cannot declare answers'):
+        artifacts.create(session='mike',type='html_form',title='R',payload={**base,'read_only':True,
+            'answer_schema':{'type':'object','properties':{'a':{'type':'string'}}}})
+    explicit=artifacts.create(session='mike',type='html_form',title='R',payload={**base,'read_only':True,
+        'answer_schema':dict(html_forms.READ_ONLY_SCHEMA)})
+    assert explicit['read_only'] is True
+    with pytest.raises(ValueError,match='answer_schema'):
+        artifacts.create(session='mike',type='html_form',title='R',payload={**base,'read_only':False})
+
+
+def test_existing_forms_are_not_read_only(tmp_path):
+    f=form(tmp_path)
+    assert 'read_only' not in f and 'read_only' not in f['payload']
+
+
+def test_read_only_report_allows_large_self_contained_html(tmp_path):
+    form(tmp_path)
+    content='<img src="data:image/png;base64,'+'A'*(1024*1024)+'">'
+    row=artifacts.create(session='mike',type='html_form',title='Big',payload={
+        'content':content,'version':'1','read_only':True})
+    assert row['content']==content

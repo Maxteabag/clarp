@@ -28,3 +28,12 @@ def test_form_submit_requires_host_authentication(host):
     status,_=_request(host,'/artifacts/form-unknown/submit',{'submission_id':'a'*32,'version':'1','answers':{}},authenticated=False)
     assert status==401
     assert not html_forms.pending()
+
+
+def test_read_only_report_refuses_submission_with_400(host):
+    row = artifacts.create(session='theo',type='html_form',title='Findings',payload={
+        'content':'<main><h1>Findings</h1></main>','version':'1','read_only':True})
+    code, response = _request(host,'/artifacts/'+row['artifact_id']+'/submit',
+                              {'submission_id':'http-report-submission-1234','version':'1','answers':{}})
+    assert code == 400 and 'read-only report' in str(response)
+    assert not html_forms.pending()

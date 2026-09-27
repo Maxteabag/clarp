@@ -286,3 +286,23 @@ def test_portrait_generation_rejects_non_object_json(running_server):
         urllib.request.urlopen(request, timeout=3)
 
     assert error.value.code == 400
+
+
+def test_media_publisher_accepts_markdown_file(running_server, tmp_path):
+    base, _ = running_server
+    findings = tmp_path / "findings.md"
+    findings.write_text("## Findings\n\n**One** issue.\n")
+    script = pathlib.Path(__file__).resolve().parents[2] / "scripts/clarp-media-publish.py"
+    result = subprocess.run([
+        sys.executable, str(script), "--session", "lena-7b4b", "--base-url", base,
+        "--token", "portrait-test-token", "--json", str(findings),
+    ], text=True, capture_output=True, check=True)
+    asset = json.loads(result.stdout)["asset"]
+    assert asset["mime_type"] == "text/markdown"
+    assert asset["source_name"] == "findings.md"
+    with urllib.request.urlopen(urllib.request.Request(
+        base + asset["url"], headers=AUTH), timeout=3) as resp:
+        assert resp.headers["Content-Type"].startswith("text/markdown")
+        assert resp.headers["X-Content-Type-Options"] == "nosniff"
+        assert "sandbox" in resp.headers["Content-Security-Policy"]
+        assert resp.read() == findings.read_bytes()
