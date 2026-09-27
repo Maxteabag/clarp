@@ -95,3 +95,8 @@ silently turns on a second native goal or supersedes its provider objective.
 While that loop owns continuation, the UI reports its ownership or blocked
 state; Host wakes resume only after it no longer owns continuation. Generic
 prompts remain available for independent reminders.
+
+Goal pause/cancel fences future continuation and subsequent plan writes. It does
+not kill arbitrary processes already running for an agent with several goals.
+The native controls explain this distinction; the conversation's explicit Stop
+interrupts the active turn and persists pauses for its durable commitments.

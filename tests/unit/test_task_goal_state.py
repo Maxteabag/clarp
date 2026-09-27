@@ -491,3 +491,19 @@ def test_enrolled_goal_is_not_also_woken_by_generic_heartbeat(tmp_path):
     assert all(
         a["agent_id"] != p["agent_id"] for a in heartbeat.restart_heartbeat_agents()
     )
+
+
+def test_large_plan_is_never_silently_truncated(tmp_path):
+    agents.create_agent(
+        persona="Planner", voice_id="", cwd=str(tmp_path), session="planner"
+    )
+    items = [{"id": str(i), "title": "Work " + str(i)} for i in range(101)]
+    plan = task_plans.create(session="planner", title="Complete scope", items=items)
+    assert plan["total_count"] == 101
+    with pytest.raises(ValueError, match="exceeds"):
+        task_plans.create(
+            session="planner",
+            title="Oversized",
+            items=[{"id": str(i), "title": "Work"} for i in range(501)],
+        )
+    assert len(task_plans.list_for_session("planner")) == 1
