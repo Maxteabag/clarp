@@ -551,32 +551,69 @@ def cancel(job_id: str) -> dict | None:
 def cancel_with_result(
     job_id: str, *, reason: str = "user_cancelled",
 ) -> tuple[dict | None, bool]:
+    outcome = cancel_run(job_id, reason=reason)
+    return outcome["job"], outcome["changed"]
+
+
+# Largest generation a JSON client can round-trip exactly (2**53 - 1).
+MAX_GENERATION = 9_007_199_254_740_991
+
+
+def cancel_run(
+    job_id: str, *, expected_generation: int | None = None,
+    expected_session: str | None = None, reason: str = "user_cancelled",
+) -> dict:
+    """Cancel a job, optionally only if it is still a particular run.
+
+    Job IDs are reused (a portrait job, a watcher), so a cancel confirmed for
+    run N must not land on run N+1. Every check, the update and the returned
+    snapshot happen in one transaction on one row, so neither the change nor
+    the receipt can land on a successor run.
+
+    ``expected_generation`` fences the run; ``expected_session`` additionally
+    requires an agent-owned job of that session (the owner-cancel path).
+    Returns ``{"job", "changed", "mismatch"}`` where ``job`` is the row as this
+    transaction saw it and ``mismatch`` is ``None``, ``"generation"`` or
+    ``"session"``; on a mismatch nothing changed, whatever that row's status.
+    """
+    if expected_generation is not None and (
+            type(expected_generation) is not int or not 1 <= expected_generation <= MAX_GENERATION):
+        raise ValueError("expected_generation must be a positive integer")
     now = db.now_ms()
     c = db.conn()
     c.execute("BEGIN IMMEDIATE")
     try:
         row = c.execute(
-            "SELECT status FROM background_jobs WHERE job_id=?", (job_id,)
-        ).fetchone()
+            "SELECT status, generation, session, owner_kind FROM background_jobs WHERE job_id=?",
+            (job_id,)).fetchone()
+        mismatch = None
+        changed = False
         if row is None:
             c.execute("COMMIT")
-            return None, False
-        if row["status"] in TERMINAL_STATUSES:
-            c.execute("COMMIT")
-            return get(job_id, reconcile=False), False
-        c.execute(
-            """UPDATE background_jobs
-                  SET status='cancelled', cancelled_at=?, terminal_at=?,
-                      terminal_reason=?, updated_at=?
-                WHERE job_id=? AND status IN ('queued','running')""",
-            (now, now, reason[:1000], now, job_id),
-        )
-        _record_event(c, job_id, now)
+            return {"job": None, "changed": False, "mismatch": None}
+        if expected_session is not None and (
+                str(row["owner_kind"] or "agent") != "agent"
+                or str(row["session"] or "") != expected_session):
+            mismatch = "session"
+        elif expected_generation is not None and int(row["generation"] or 1) != expected_generation:
+            mismatch = "generation"
+        elif row["status"] not in TERMINAL_STATUSES:
+            c.execute(
+                """UPDATE background_jobs
+                      SET status='cancelled', cancelled_at=?, terminal_at=?,
+                          terminal_reason=?, updated_at=?
+                    WHERE job_id=? AND COALESCE(generation, 1)=?
+                      AND status IN ('queued','running')""",
+                (now, now, reason[:1000], now, job_id, int(row["generation"] or 1)),
+            )
+            _record_event(c, job_id, now)
+            changed = True
+        job = get(job_id, reconcile=False)  # snapshot inside the transaction
         c.execute("COMMIT")
     except BaseException:
         c.execute("ROLLBACK")
         raise
-    return get(job_id, reconcile=False), True
+    return {"job": job, "changed": changed, "mismatch": mismatch}
 
 
 def start(
@@ -675,20 +712,12 @@ def cancel_owned(job_id: str, *, session: str, generation: int) -> dict | None:
     cannot report another's outcome. Cancelling is different: the owner
     must be able to close a job whose worker is gone or unreachable, and a
     cancel reports no outcome. Returns None when `session` does not own
-    this active generation.
+    this active generation. Ownership, generation and the cancel are one
+    transaction, so a successor run can never be cancelled by mistake.
     """
-    c = db.conn()
-    c.execute("BEGIN IMMEDIATE")
-    try:
-        owned = _owned_active_row(c, job_id, session=session, generation=generation)
-        c.execute("COMMIT")
-    except BaseException:
-        c.execute("ROLLBACK")
-        raise
-    if owned is None:
-        return None
-    job, _changed = cancel_with_result(job_id, reason="owner_cancelled")
-    return job if job and int(job.get("generation") or 1) == int(generation) else None
+    outcome = cancel_run(job_id, expected_generation=int(generation),
+                         expected_session=session, reason="owner_cancelled")
+    return outcome["job"] if outcome["changed"] else None
 
 
 def set_progress(
