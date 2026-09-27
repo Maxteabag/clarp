@@ -715,6 +715,16 @@ def discard(artifact_id: str, *, expected_updated_at: int) -> tuple[dict, bool]:
         con.execute("ROLLBACK"); raise
 
 
+def has_blocking_decision(agent_id: str) -> bool:
+    """Approvals always gate continuation; optional questions do not freeze it."""
+    return db.conn().execute(
+        """SELECT 1 FROM artifact_decisions d JOIN artifacts a ON a.artifact_id=d.artifact_id
+           WHERE a.agent_id=? AND d.status='pending'
+             AND (d.expires_at IS NULL OR d.expires_at>?)
+             AND (d.response_type='approval' OR d.blocks_progress=1) LIMIT 1""",
+        (agent_id, db.now_ms())).fetchone() is not None
+
+
 def has_pending_decision(agent_id: str) -> bool:
     """Whether this agent currently holds any unanswered question or approval.
 

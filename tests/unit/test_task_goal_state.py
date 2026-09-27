@@ -592,3 +592,116 @@ def test_all_methods_can_be_retired_but_original_evidence_is_still_required(tmp_
     assert (
         task_plans.finish(p["plan_id"], revision=p["revision"])["status"] == "completed"
     )
+
+
+def test_completion_retires_wake_and_rejects_late_admission_receipt(tmp_path):
+    p = make_goal(tmp_path)
+    p = task_plans.update_item(
+        p["items"][0]["item_id"], "completed", "Verified", revision=p["revision"]
+    )
+    p = act(
+        p,
+        "checkpoint",
+        {
+            "progress": "All evidence verified",
+            "next_work": "Finish",
+            "evidence": {"criterion-1": "Probe", "criterion-2": "Tests"},
+        },
+    )
+    claim = recovery._claim(p["plan_id"], db.now_ms() + 130000)
+    request = claim[1]["continuation"]["request_id"]
+    p = task_plans.finish(p["plan_id"], revision=p["revision"])
+    recovery._result(p["plan_id"], request, db.now_ms(), "admitted", "Late response")
+    wake = task_plans.get(p["plan_id"])["goal"]["continuation"]
+    assert (
+        wake["state"] == "completed"
+        and wake["due_at"] is None
+        and not wake["request_id"]
+    )
+
+
+def test_goal_finish_does_not_auto_complete_optional_running_work(tmp_path):
+    p = make_goal(tmp_path)
+    p = task_plans.update_item(
+        p["items"][0]["item_id"], "completed", "Verified", revision=p["revision"]
+    )
+    p = act(
+        p,
+        "add_step",
+        {
+            "id": "optional",
+            "title": "Optional experiment",
+            "required": False,
+            "reason": "Useful follow-up",
+        },
+    )
+    p = task_plans.update_item(
+        task_plans.item_key(p["plan_id"], "optional"),
+        "in_progress",
+        revision=p["revision"],
+    )
+    p = act(
+        p,
+        "checkpoint",
+        {
+            "progress": "Required evidence verified",
+            "next_work": "Defer optional work",
+            "evidence": {"criterion-1": "Probe", "criterion-2": "Tests"},
+        },
+    )
+    with pytest.raises(ValueError, match="running work"):
+        task_plans.finish(p["plan_id"], revision=p["revision"])
+    assert task_plans.get(p["plan_id"])["completed_count"] == 1
+
+
+@pytest.mark.parametrize("blocking", [False, True])
+def test_optional_question_does_not_freeze_authorized_independent_work(
+    tmp_path, blocking
+):
+    from lib import artifacts
+
+    p = make_goal(tmp_path)
+    artifacts.create_decision(
+        session=p["session"],
+        title="Preference",
+        question="Which optional style?",
+        response_type="single_choice",
+        options=[{"id": "a", "label": "A"}, {"id": "b", "label": "B"}],
+        blocks_progress=blocking,
+        priority_reason="Answer needed before the next step" if blocking else "",
+    )
+    sent = []
+    recovery.tick(
+        lambda *args: sent.append(args) or {"queued": False}, now=db.now_ms() + 130000
+    )
+    assert len(sent) == (0 if blocking else 1)
+    assert artifacts.has_pending_decision(p["agent_id"]), (
+        "A wake must never answer or approve the question"
+    )
+
+
+def test_manual_goal_never_claims_a_scheduled_wake_until_explicitly_enrolled(tmp_path):
+    p = make_goal(tmp_path, enroll=False)
+    p = act(
+        p,
+        "checkpoint",
+        {
+            "progress": "Manual work recorded",
+            "next_work": "Owner will choose when to continue",
+        },
+    )
+    assert p["goal"]["continuation"]["state"] == "not_enrolled"
+    assert p["goal"]["continuation"]["due_at"] is None
+    p = act(
+        p, "enroll", {"enroll": True, "reason": "Owner opted into durable recovery"}
+    )
+    assert (
+        p["recovery_enabled"] == 1 and p["goal"]["continuation"]["due_at"] is not None
+    )
+    assert p["goal"]["criteria"][0]["text"] == "Outcome works"
+
+
+def test_enrollment_never_treats_the_string_false_as_authorization(tmp_path):
+    with pytest.raises(ValueError, match="boolean"):
+        make_goal(tmp_path, enroll="false")
+    assert task_plans.list_for_session("goal-owner") == []
