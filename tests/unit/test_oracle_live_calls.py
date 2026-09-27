@@ -238,7 +238,7 @@ def test_explicit_direct_mode_overrides_config_and_retry_cannot_change_it(manage
     agents.create_agent(persona='Primary',session='primary',voice_id='fixture',cwd=str(tmp_path))
     first=create(negotiate,oracle_session='primary',delegation_strategy='direct_contact')
     assert calls.get('owner','attempt-1').conversation.delegation_strategy=='direct_contact'
-    assert 'Direct-to-primary mode is active' in records[0][1]['session']['instructions']
+    assert 'in direct-to-primary mode' in records[0][1]['session']['instructions']
     assert create(negotiate,oracle_session='primary',delegation_strategy='direct_contact') == first
     with pytest.raises(calls.CallError,match='different context'):
         create(negotiate,oracle_session='primary',delegation_strategy='operator')

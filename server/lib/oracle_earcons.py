@@ -5,12 +5,14 @@ already plays from ``session.output_audio.delta``, so no client change is
 needed to hear them. They are sine tones with a soft attack and release,
 120-400 ms long, peaking near -18 dBFS (the tick and the bell sit lower).
 Nothing is stored on disk; each cue is generated once and cached.
+Every cue is fired by a Host event (a handoff offered, returned or failed,
+work admitted, a result about to be relayed), never by what anyone said.
 
 Cues:
-  switch_started   rising two-note chime: the Host is switching the call
-  connected        bright chime, pitched per agent: an agent is on the line
+  connected        bright chime, pitched per agent: the call is being handed
+                   to that agent (docs/oracle-handoff.md)
   back_to_oracle   falling two-note chime: the user is back with Oracle
-  switch_failed    low double tone: the switch did not happen
+  switch_failed    low double tone: a handoff did not happen
   handed_off       very soft tick: work was handed to an agent
   result           soft bell: an agent's result is about to be read out
 """
@@ -24,7 +26,7 @@ import math
 RATE = 24000
 PEAK = 10 ** (-18 / 20)          # -18 dBFS
 FADE_SECONDS = 0.012
-CUES = ("switch_started", "connected", "back_to_oracle", "switch_failed", "handed_off", "result")
+CUES = ("connected", "back_to_oracle", "switch_failed", "handed_off", "result")
 # Major pentatonic from C5: an agent's "connected" chime picks one as its root.
 _TINTS = (523.25, 587.33, 659.25, 783.99, 880.00)
 
@@ -72,10 +74,7 @@ def tint(persona):
 @functools.lru_cache(maxsize=64)
 def pcm(name, persona=None):
     """PCM16 bytes for cue ``name``; ``persona`` tints the "connected" chime."""
-    if name == "switch_started":
-        samples = (_tone(659.25, 0.12, partials=_SOFT) + _silence(0.03)
-                   + _tone(880.00, 0.15, partials=_SOFT))
-    elif name == "connected":
+    if name == "connected":
         root = tint(persona)
         samples = (_tone(root, 0.09, partials=_SOFT) + _tone(root * 1.5, 0.22, decay=0.12, partials=_BELL))
     elif name == "back_to_oracle":

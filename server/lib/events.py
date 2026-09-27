@@ -32,6 +32,12 @@ class Event(dict):
 
 # The closed key set (``type`` excluded) for each event type. Order is the
 # canonical documentation order; constructors decide the wire order.
+_ORACLE_HANDOFF_FIELDS = (
+    "handoff_id", "parent_handoff_id", "host_id", "principal", "generation", "revision",
+    "direction", "mode", "state", "reason", "oracle_call", "agent", "oracle",
+    "issued_at", "server_now", "ttl_ms", "expires_at",
+)
+
 FIELDS: dict[str, tuple[str, ...]] = {
     SSEType.AUDIO: (
         "clip_id", "url", "name", "session", "agent_id", "persona",
@@ -90,6 +96,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "decision_id", "trace_id", "action", "kind", "target_session",
         "confidence", "reason",
     ),
+    SSEType.ORACLE_HANDOFF: _ORACLE_HANDOFF_FIELDS,
 }
 
 # Keys the stream hub adds after construction (the durable row id and its
@@ -377,6 +384,11 @@ def orchestrator_decision(*, decision_id: str, trace_id: str, action: str,
     ])
 
 
+def oracle_handoff(**fields: Any) -> Event:
+    """One Oracle handoff record as the wire carries it (docs/oracle-handoff.md)."""
+    return _build(SSEType.ORACLE_HANDOFF, [(key, fields.get(key)) for key in _ORACLE_HANDOFF_FIELDS])
+
+
 CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.AUDIO: audio,
     SSEType.SERVER_VERSION: server_version,
@@ -397,6 +409,7 @@ CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.CALENDAR_REQUEST: calendar_request,
     SSEType.GOAL_UPDATED: goal_updated,
     SSEType.ORCHESTRATOR_DECISION: orchestrator_decision,
+    SSEType.ORACLE_HANDOFF: oracle_handoff,
 }
 
 

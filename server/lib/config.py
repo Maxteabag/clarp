@@ -352,9 +352,6 @@ class Config:
     oracle_voice_context_file: str = ""
     oracle_voice_backend: str = "api"
     oracle_live_webrtc: bool = False
-    # [oracle.agent_voices]: persona -> GPT-Live voice for "talk to X
-    # directly" (keys casefolded); see oracle_voices.voice_for.
-    oracle_agent_voices: dict[str, str] = field(default_factory=dict)
     # [oracle] earcons: short sound cues in Oracle v2 calls (oracle_earcons).
     oracle_earcons: bool = True
     openai_realtime_transcription_model: str = "gpt-4o-mini-transcribe"
@@ -579,14 +576,6 @@ def _non_negative_float(raw: Any, default: float) -> float:
     return value if value >= 0 else default
 
 
-def _agent_voices(section) -> dict[str, str]:
-    table = section.get("agent_voices") if isinstance(section, dict) else None
-    if not isinstance(table, dict):
-        return {}
-    return {str(k).strip().casefold(): str(v).strip().casefold()
-            for k, v in table.items() if isinstance(v, str) and v.strip()}
-
-
 def load(path: pathlib.Path | None = None) -> Config:
     """Read TOML config; return a Config with defaults filled in. Cached.
 
@@ -732,7 +721,6 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         oracle_voice_context_file = str(openai.get("oracle_voice_context_file", "")).strip(),
         oracle_voice_backend = str(openai.get("oracle_voice_backend", "api")).strip(),
         oracle_live_webrtc = bool(openai.get("oracle_live_webrtc", False)),
-        oracle_agent_voices = _agent_voices(data.get("oracle")),
         oracle_earcons = (data.get("oracle") or {}).get("earcons", True) is not False
             if isinstance(data.get("oracle"), dict) else True,
         openai_realtime_transcription_model = str(openai.get(
