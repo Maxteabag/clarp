@@ -4203,6 +4203,9 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_artifacts_list(self):
         from lib import artifacts
         qs = self._query()
+        representation = qs.get("representation", [""])[0]
+        if representation not in ("", "flat-v1"):
+            return self._json_error(400, "unsupported artifact representation")
         try:
             limit = int(qs.get("limit", ["100"])[0] or 100)
             offset = int(qs.get("offset", ["0"])[0] or 0)
@@ -4219,7 +4222,7 @@ class Handler(BaseHTTPRequestHandler):
             limit=limit, offset=offset,
             order=(qs.get("order", ["updated"])[0] or "updated").strip(),
         )
-        return self._json_ok({"artifacts": rows})
+        return self._json_ok({"artifacts": [artifacts.response_representation(row, representation) for row in rows]})
 
     def _handle_artifact_submit(self, artifact_id: str):
         from lib import html_forms
@@ -4375,7 +4378,8 @@ class Handler(BaseHTTPRequestHandler):
         query = self._query()
         try:
             result = attention_index.page(limit=int(query.get("limit", ["100"])[0]),
-                                          cursor=query.get("cursor", [""])[0])
+                                          cursor=query.get("cursor", [""])[0],
+                                          representation=query.get("representation", [""])[0])
         except attention_index.StaleCursor as exc:
             return self._json_error(409, str(exc))
         except (ValueError, TypeError):
