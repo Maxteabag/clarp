@@ -51,6 +51,7 @@ class ConversationPresentationModel : public QSortFilterProxyModel {
     void requestRefresh(bool rowsMoved = false);
     QVariant presentationData(const QModelIndex& source, int role) const;
     void rebuildExplanationRuns();
+    void refreshExplanationsAround(int first, int last);
     std::function<QString(const QVariantMap&)> m_explanationLookup;
     QHash<int, QHash<int, QVariant>> m_explanationRows;
     QSet<int> m_repeatedRows;

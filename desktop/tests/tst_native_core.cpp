@@ -706,6 +706,7 @@ class NativeCoreTest final : public QObject {
     void leadingDayTracksVisibleHistory();
     void oldActivityGroupsAreLazyAndVisitScoped();
     void consecutiveExplanationsCollapseWithoutChangingTranscript();
+    void streamedTokenAnnouncesOnlyItsRows();
     void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
     void logMergeRefreshesExplanationsOncePerBatch();
     void secondLaunchIsForwardedToTheRunningInstance();
@@ -887,6 +888,41 @@ void NativeCoreTest::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender(
     tools.insert(QStringLiteral("timestamp"), QStringLiteral("invalid"));
     load();
     QCOMPARE(view.index(0, 0).data(ConversationPresentationModel::ActivityLabelRole).toString(), QStringLiteral("21 tool calls"));
+}
+
+void NativeCoreTest::streamedTokenAnnouncesOnlyItsRows() {
+    // With tool narration on, every streamed token rebuilt the explanation
+    // runs and then announced every row of the transcript, so every delegate
+    // re-read every role once per token.
+    QStandardItemModel source;
+    for (int i = 0; i < 60; ++i) {
+        auto* row = new QStandardItem;
+        row->setData(QStringLiteral("m%1").arg(i), ConversationModel::MessageIdRole);
+        row->setData(QStringLiteral("assistant"), ConversationModel::AuthorRole);
+        if (i % 2 == 0) row->setData(QVariantList{QVariantMap{{QStringLiteral("name"), QStringLiteral("Bash")},
+            {QStringLiteral("summary"), QStringLiteral("step %1").arg(i)}}}, ConversationModel::ToolsRole);
+        else row->setData(QStringLiteral("Reply %1").arg(i), ConversationModel::BodyRole);
+        source.appendRow(row);
+    }
+    ConversationPresentationModel view;
+    view.setSourceModel(&source);
+    view.setExplanationLookup([](const QVariantMap& value) { return value.value(QStringLiteral("summary")).toString(); });
+    const int rows = view.rowCount();
+    QSignalSpy announced(&view, &QAbstractItemModel::dataChanged);
+    source.item(59)->setData(QStringLiteral("Reply 59, streaming more"), ConversationModel::BodyRole);
+    QVERIFY(!announced.isEmpty());
+    QSet<int> touched;
+    for (const auto& signal : announced)
+        for (int row = signal.at(0).value<QModelIndex>().row(); row <= signal.at(1).value<QModelIndex>().row(); ++row)
+            touched.insert(row);
+    QVERIFY2(touched.size() <= 3, qPrintable(QStringLiteral("%1 rows announced for one token").arg(touched.size())));
+    QCOMPARE(view.rowCount(), rows);
+    QCOMPARE(view.index(view.rowCount() - 1, 0).data(ConversationModel::BodyRole).toString(), QStringLiteral("Reply 59, streaming more"));
+    // A change that does alter a run still reaches the rows it moved.
+    announced.clear();
+    source.item(58)->setData(QVariantList{QVariantMap{{QStringLiteral("name"), QStringLiteral("Bash")},
+        {QStringLiteral("summary"), QStringLiteral("step 56")}}}, ConversationModel::ToolsRole);
+    QCOMPARE(view.rowCount(), rows);
 }
 
 void NativeCoreTest::consecutiveExplanationsCollapseWithoutChangingTranscript() {

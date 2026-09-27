@@ -188,6 +188,25 @@ void ConversationPresentationModel::refreshGroups() {
     endFilterChange(QSortFilterProxyModel::Direction::Rows);
     if (rowCount() > 0) emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
 }
+// Rebuilds the explanation runs after rows first..last changed and announces
+// only the rows whose annotations moved, plus the changed rows and the one
+// before them (a reply can close the preceding tool span's label).
+void ConversationPresentationModel::refreshExplanationsAround(int first, int last) {
+    const auto before = m_explanationRows;
+    beginFilterChange();
+    rebuildExplanationRuns();
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
+    QSet<int> rows;
+    for (auto it = m_explanationRows.cbegin(); it != m_explanationRows.cend(); ++it)
+        if (before.value(it.key()) != it.value()) rows.insert(it.key());
+    for (auto it = before.cbegin(); it != before.cend(); ++it)
+        if (!m_explanationRows.contains(it.key())) rows.insert(it.key());
+    for (int row = std::max(0, first - 1); row <= last; ++row) rows.insert(row);
+    for (const int row : std::as_const(rows)) {
+        const auto item = mapFromSource(sourceModel()->index(row, 0));
+        if (item.isValid()) emit dataChanged(item, item);
+    }
+}
 void ConversationPresentationModel::requestRefresh(bool rowsMoved) {
     if (m_batchDepth > 0) {
         // Annotations are keyed by source row; once rows shift, plain row data
@@ -296,7 +315,16 @@ void ConversationPresentationModel::setSourceModel(QAbstractItemModel* model) {
     QSortFilterProxyModel::setSourceModel(model);
     if (model != nullptr) {
         connect(model, &QAbstractItemModel::dataChanged, this, [this](const QModelIndex& first, const QModelIndex& last) {
-            if (m_explanationLookup) { requestRefresh(); return; }
+            if (m_explanationLookup) {
+                // A streamed token changes one row; re-announcing the whole
+                // transcript made every delegate re-read every role per token.
+                // A change inside a group moves its label, so that stays full.
+                for (int row = first.row(); row <= last.row(); ++row)
+                    if (groupedRow(row) || groupedRow(row - 1)) { requestRefresh(); return; }
+                if (m_batchDepth > 0) { m_refreshPending = true; return; }
+                refreshExplanationsAround(first.row(), last.row());
+                return;
+            }
             if (m_activityMode == 1) return;
             for (int row = first.row(); row <= last.row(); ++row)
                 if (groupedRow(row) || groupedRow(row - 1)) { refreshGroups(); return; }
