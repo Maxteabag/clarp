@@ -286,7 +286,13 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
         voice_id = ((persona_definition or {}).get("voice_id")
                     or roster_voice or roster.default_roster_voice)
     selected_cartesia = "" if janitor else resolve_voice(voice_id, CARTESIA)
-    if selected_cartesia:
+    # A relaunch that keeps the voice the agent already speaks with changes
+    # nobody's voice, so an older clash must not block restoring the agent.
+    own_cartesia = (
+        resolve_voice((current or {}).get("voice_id"), CARTESIA)
+        or roster.cartesia_voice_for(str((current or {}).get("name") or ""))
+    ) if replace_sid else ""
+    if selected_cartesia and selected_cartesia != own_cartesia:
         for sid, info in agents.items():
             if sid == replace_sid or (info or {}).get("is_janitor"):
                 continue

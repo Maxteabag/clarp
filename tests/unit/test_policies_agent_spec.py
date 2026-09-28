@@ -93,6 +93,23 @@ def test_refusals(data, view, status, message):
     assert (result.status, result.message) == (status, message)
 
 
+def test_relaunch_keeping_its_own_voice_is_not_a_clash():
+    """An archived anonymous agent's fallback voice can equal an existing
+    agent's. Relaunching that agent unchanged must not be refused, or its
+    conversation cannot be restored through the lifecycle API."""
+    view = replace(
+        VIEW,
+        agents={"adam": {"name": "Adam", "voice_id": '{"cartesia": "c1"}'},
+                "anon": {"name": "Claude-ea5a", "voice_id": "{}"}},
+        existing_agent=lambda s: {"backend": "claude"},
+        cartesia_voice_for=lambda name: "c1" if name == "Claude-ea5a" else None)
+    spec = parse({"name": "Adam", "replace_sid": "adam", "resume_session_id": "r"}, view)
+    assert isinstance(spec, AgentSpec) and spec.voice_id == '{"cartesia": "c1"}'
+    # Taking that voice for another agent is still a clash.
+    clash = parse({"name": "Bea", "voice_id": '{"cartesia": "c1"}'}, view)
+    assert isinstance(clash, SpecError) and clash.message == "voice_in_use"
+
+
 def test_backend_is_normalised_once():
     fake = FakeBackends()
     assert isinstance(parse({"name": "X", "backend": "Codex"}, backends=fake), AgentSpec)

@@ -252,6 +252,44 @@ def test_find_latest_jsonl_caches_misses_until_the_transcript_appears(tmp_path, 
     claude_transcript.reset_transcript_index()
 
 
+def test_find_latest_jsonl_follows_a_re_pointed_root(tmp_path):
+    """A dotfiles script briefly pointed the ~/.claude symlink at a scratch
+    worktree. The index rebuilt through it, kept watching the scratch
+    directory after the link was restored, heard nothing and answered every
+    real session as missing, so reconcile unbound the whole fleet."""
+    from lib import claude_transcript
+    claude_transcript.reset_transcript_index()
+    real = tmp_path / "real" / ".claude"
+    (real / "projects" / "-home").mkdir(parents=True)
+    (real / "projects" / "-home" / "sid-1.jsonl").write_text("")
+    scratch = tmp_path / "scratch" / ".claude"
+    (scratch / "projects" / "-lab").mkdir(parents=True)
+    link = tmp_path / "home" / ".claude"
+    link.parent.mkdir()
+    link.symlink_to(scratch)
+    root = link / "projects"
+    assert find_latest_jsonl("sid-1", projects_root=root) is None
+
+    link.unlink()
+    link.symlink_to(real)
+    assert find_latest_jsonl("sid-1", projects_root=root) == root / "-home" / "sid-1.jsonl"
+    (real / "projects" / "-home" / "sid-2.jsonl").write_text("")
+    assert find_latest_jsonl("sid-2", projects_root=root) == root / "-home" / "sid-2.jsonl"
+    claude_transcript.reset_transcript_index()
+
+
+def test_scan_for_jsonl_reads_the_disk_not_the_index(tmp_path, monkeypatch):
+    from lib import claude_transcript
+    root = tmp_path / "projects"
+    (root / "p").mkdir(parents=True)
+    (root / "p" / "x.jsonl").write_text("")
+    monkeypatch.setattr(claude_transcript, "_index_for",
+                        lambda *_: pytest.fail("the scan must not consult the index"))
+    assert claude_transcript.scan_for_jsonl("x", projects_root=root) == root / "p" / "x.jsonl"
+    assert claude_transcript.scan_for_jsonl("y", projects_root=root) is None
+    assert claude_transcript.scan_for_jsonl("", projects_root=root) is None
+
+
 def test_find_latest_jsonl_globs_when_inotify_is_unavailable(tmp_path, monkeypatch):
     import sys as _sys
     from lib import claude_transcript

@@ -590,10 +590,19 @@ class ClaudeBackend(Backend):
 
     def resume_target(self, session_id: str, cwd: str,
                       home: pathlib.Path | None = None):
-        """The transcript to resume from, or ``None`` for a ghost session."""
+        """The transcript to resume from, or ``None`` for a ghost session.
+
+        ``None`` unbinds the agent from its conversation, so without a ``cwd``
+        a miss from the transcript index is confirmed on disk first.
+        """
         if not session_id:
             return None
-        return self.find_transcript(session_id, home, cwd=cwd)
+        found = self.find_transcript(session_id, home, cwd=cwd)
+        if found is None and not cwd:
+            root = _projects_root(home)
+            scan = resolve("claude_transcript", "scan_for_jsonl")
+            found = scan(session_id, projects_root=root) if root is not None else scan(session_id)
+        return found
 
     def bind_new_session(self, agent_id: str, session: str, *,
                          uuid_factory: Callable[[], str] | None = None) -> str:

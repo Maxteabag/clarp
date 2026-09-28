@@ -507,6 +507,12 @@ class _TranscriptIndex:
     creates it. A positive hit is still verified with one stat so a file that
     vanished behind the queue's back is never handed out.
 
+    inotify watches inodes, not paths. When a directory above the root is
+    re-pointed (a dotfiles script swapping the ``~/.claude`` symlink), the
+    watches stay on the old directory, no event ever arrives and every lookup
+    would miss. Each lookup therefore also checks, with one stat, that the root
+    path still resolves to the directory that was scanned.
+
     Without inotify (another platform, or the watch budget is exhausted) the
     index stays off and lookups glob exactly as before.
     """
@@ -520,6 +526,7 @@ class _TranscriptIndex:
         self._inotify = None
         self._built = False
         self._retry_at = 0.0
+        self._root_id: tuple[int, int] | None = None
 
     def lookup(self, backend_session_id: str) -> pathlib.Path | None:
         with self._lock:
@@ -553,7 +560,7 @@ class _TranscriptIndex:
         if events is None:
             self._drop_watches()
             return False
-        return not events
+        return not events and _dir_identity(self.root) == self._root_id
 
     def _rebuild(self) -> None:
         self._drop_watches()
@@ -574,6 +581,8 @@ class _TranscriptIndex:
         except OSError:
             self._retry_at = time.monotonic() + self._RETRY_AFTER_FAILURE_SEC
             return
+        # Taken before the watches: a swap during the scan fails the next check.
+        self._root_id = _dir_identity(self.root)
         try:
             # Watch before scanning so nothing created in between is missed.
             inotify.add_watch(str(self.root), watch)
@@ -616,6 +625,15 @@ _INDEXES_LOCK = threading.Lock()
 _MAX_INDEXES = 4
 
 
+def _dir_identity(path: pathlib.Path) -> tuple[int, int] | None:
+    """The directory ``path`` resolves to now, following symlinks."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_dev, st.st_ino
+
+
 def _index_for(root: pathlib.Path) -> _TranscriptIndex:
     with _INDEXES_LOCK:
         index = _INDEXES.get(root)
@@ -639,6 +657,21 @@ def _glob_latest_jsonl(projects_root: pathlib.Path,
     for jsonl in projects_root.glob(f"*/{backend_session_id}.jsonl"):
         return jsonl
     return None
+
+
+def scan_for_jsonl(
+    backend_session_id: str,
+    projects_root: pathlib.Path | None = None,
+) -> pathlib.Path | None:
+    """find_latest_jsonl straight from disk, bypassing the index.
+
+    For decisions that must not rest on a cached miss, such as unbinding an
+    agent whose transcript looks missing.
+    """
+    if not backend_session_id:
+        return None
+    projects_root = projects_root or (pathlib.Path.home() / ".claude" / "projects")
+    return _glob_latest_jsonl(projects_root, backend_session_id)
 
 
 def find_latest_jsonl(
