@@ -14,12 +14,14 @@ class BackgroundJobWatcher:
     # Helper and status staleness is measured in tens of minutes; once a
     # minute is plenty and keeps the per-agent scan off the fast tick.
     STALE_WORK_INTERVAL_SEC = 60.0
+    PROVIDER_INTERVAL_SEC = 5.0
 
     def __init__(self, stream):
         self._statuses: dict[str, str] = {}
         self.stream = stream
         self._last_id = 0
         self._stale_work_due = 0.0
+        self._provider_due = 0.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -39,7 +41,12 @@ class BackgroundJobWatcher:
         while not self._stop.wait(self.INTERVAL_SEC):
             try:
                 from . import provider_background_jobs
-                provider_background_jobs.poll_once()
+                if time.monotonic() >= self._provider_due:
+                    self._provider_due = time.monotonic() + self.PROVIDER_INTERVAL_SEC
+                    provider_background_jobs.poll_once()
+            except Exception as exc:  # Provider observation must not block managed jobs.
+                log_exception("providerBackgroundWatcherTickFail", exc)
+            try:
                 background_jobs.reconcile_stale()
                 self._poll_once()
             except Exception as exc:  # noqa: BLE001

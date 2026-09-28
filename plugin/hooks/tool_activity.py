@@ -57,6 +57,13 @@ def main() -> int:
         })
     except Exception:
         pass
+    if tool_name == "Bash":
+        from lib.backend.claude_background_provenance import tool_input_with_origin
+        updated = tool_input_with_origin(agent, backend_session_id,
+                                         payload.get("tool_use_id"), tool_input)
+        if updated is not None:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse", "updatedInput": updated}}))
     return 0
 
 
