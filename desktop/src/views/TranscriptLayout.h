@@ -134,6 +134,7 @@ class TranscriptLayout : public QQuickItem {
     void updatePolish() override;
     void geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry) override;
     void componentComplete() override;
+    void itemChange(ItemChange change, const ItemChangeData& value) override;
 
   private:
     struct Row {
