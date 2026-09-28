@@ -147,14 +147,46 @@ def test_candidates_this_call_cannot_fill_are_never_offered(monkeypatch):
     assert decisions()[-1][:2] == ("llm", "mutating_program")
 
 
-def test_a_mutating_call_with_nothing_learned_for_its_program_skips_jev(monkeypatch):
+def test_any_program_in_the_table_may_be_offered_when_it_shares_words(monkeypatch):
+    learn("service restart web-1a2b", "Restarts the {id1} service.")
     learn("drivectl put docs/plan.pdf", "Uploads {path1_name} to the team drive.")
     seen = fake_jev(monkeypatch, first_learned)
-    translate, calls = templated("Restarts the {id1} unit.")
+    with ToolExplanations(translate=no_model, debounce=.001) as service:
+        [result] = settle(service, [item(bash("systemctl restart api-9f3c"))])
+    # A mutating call of another program: offered the closest learned rows of the
+    # whole table that it can fill, never a template.
+    offered = seen[0]["questions"]["t_1"]["criteria"]
+    assert offered == {"learned_1": "A call that does this: Restarts the api-9f3c service.",
+                       "unknown": "None of these states exactly what the call does, or its effect is unclear"}
+    assert result["text"] == "Likely restarts the api-9f3c service."
+    assert decisions()[-1][:2] == ("jev", "jev_learned:lexical")
+
+
+def test_exact_only_rows_are_offered_unless_they_state_values_the_call_lacks(monkeypatch):
+    learn("sqlite3 state.db 'select count(*) from agents' | tee /var/tmp/a", "Counts agents in the state database.")
+    learn("sqlite3 state.db 'select * from agents limit 100' | tee /var/tmp/b", "Shows the first 100 agents.")
+    seen = fake_jev(monkeypatch, first_learned)
+    with ToolExplanations(translate=no_model, debounce=.001) as service:
+        [result] = settle(service, [item(bash("sqlite3 state.db 'select count(*) from agents where x' | tee /var/tmp/c"))])
+    offered = list(seen[0]["questions"]["t_1"]["criteria"].values())
+    assert offered[0] == "A `sqlite3` call that does this: Counts agents in the state database."
+    assert not any("100" in text for text in offered)
+    assert result["text"] == "Likely counts agents in the state database."
+    # An exact part learns its one identical text, exactly.
+    [part] = shapes.split(bash("sqlite3 state.db 'select count(*) from agents where x' | tee /var/tmp/c"))
+    row = conn().execute("SELECT producer, parameterised, program FROM tool_explanation_learned WHERE signature=?",
+                         (part.signature,)).fetchone()
+    assert tuple(row) == ("jev", 0, "sqlite3")
+
+
+def test_learned_options_come_before_the_built_in_templates(monkeypatch):
+    learn("mycli show conf/config.yaml", "Shows the settings in {path1_name}.")
+    seen = fake_jev(monkeypatch, lambda criteria: "unknown")
+    translate, _ = templated("Shows {path1_name}.")
     with ToolExplanations(translate=translate, debounce=.001) as service:
-        settle(service, [item(bash("systemctl restart web-1a2b"))])
-    # Another program's explanation is never offered to a known program's call.
-    assert seen == [] and len(calls) == 1
+        settle(service, [item(bash("mycli show --raw conf/other.yaml"))])
+    keys = list(seen[0]["questions"]["t_1"]["criteria"])
+    assert keys[0] == "learned_1" and "read_file" in keys and keys[-1] == "unknown"
 
 
 def test_an_unfamiliar_program_with_no_template_or_learned_candidate_is_not_asked(monkeypatch):
@@ -243,6 +275,28 @@ def test_a_timeout_wrapped_call_is_its_programs_and_its_old_row_still_answers(mo
         (part.signature, "dotnet")]
 
 
+def test_old_programless_rows_are_recovered_once_from_the_hosts_own_tool_rows():
+    from lib import tool_explanations as module, tool_explanation_templates as templates
+    command = "cd /x && python3 - <<'EOF'\nprint(1)\nEOF"
+    [part] = shapes.split(bash(command))
+    [[legacy, current]] = part.legacy
+    learning.store(conn(), [{"signature": legacy, "level": 2, "template_text": "Prints a number.", "parameterised": 0,
+                             "producer": "llm", "prompt_version": module.PROMPT_VERSION,
+                             "templates_version": templates.VERSION},
+                            {"signature": "x:? #unmatched", "level": 2, "template_text": "Something.",
+                             "parameterised": 0, "producer": "llm", "prompt_version": module.PROMPT_VERSION,
+                             "templates_version": templates.VERSION}], 1)
+    import json
+    conn().execute("INSERT INTO messages(message_id, agent_id, seq, text, updated_at, tools_json) "
+                   "VALUES('m1', 'a1', 1, '', 5, ?)", (json.dumps([{"name": "Bash", "command": command}]),))
+    assert module.recover_programs() == 1
+    rows = {tuple(r) for r in conn().execute("SELECT signature, program FROM tool_explanation_learned")}
+    assert rows == {(current, "python3"), ("x:? #unmatched", "")}
+    # Only the key and program changed: no command text was written anywhere.
+    assert "print(1)" not in str(list(conn().execute("SELECT * FROM tool_explanation_learned")))
+    assert module.recover_programs() == 0
+
+
 def test_backfill_names_the_program_a_signature_carries():
     connection = sqlite3.connect(":memory:")
     connection.execute("CREATE TABLE tool_explanation_learned (signature TEXT, level INTEGER, template_text TEXT, "
@@ -266,9 +320,15 @@ def test_rank_orders_same_action_then_same_program_then_shared_words():
             row("d", "other", "execute", "Rebuilds widget cache indexes."),
             row("e", "other", "execute", "Prints the date."),
             row("f", "tool", "execute", "Rebuilds the widget cache.")]
-    ranked = learning.rank(rows, program="tool", action="execute", tokens=learning.words("tool rebuild widget cache"),
-                           cross_program=True)
+    ranked = learning.rank(rows, program="tool", action="execute", tokens=learning.words("tool rebuild widget cache"))
     assert [r["signature"] for r in ranked] == ["b", "a", "d"]
     assert [r["similarity"] for r in ranked] == ["same_action", "same_program", "lexical"]
     ranked = learning.rank(rows, program="tool", action="execute", exclude={"b"}, available={"path1_name"})
     assert [r["signature"] for r in ranked] == ["c", "f", "a"]
+
+
+def test_a_value_counts_as_present_only_as_a_whole_token():
+    assert learning.foreign("Merges pull request 6.", "gh pr merge 16")
+    assert not learning.foreign("Merges pull request 6.", "gh pr merge 6 --squash")
+    assert learning.foreign("Stops the sub-agent oracle-mike-call.", "clarp-sub-agent stop oracle-mike")
+    assert not learning.foreign("Shows machine-readable output of {path1_name}.", "tool --porcelain a/b")
