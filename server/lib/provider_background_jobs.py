@@ -141,7 +141,7 @@ def ingest(c, owner: dict, native: str, project: str, record: dict) -> None:
     apply_actions(c, owner, native, parse_actions(native, project, record))
 
 
-def observe(owner: dict, native: str, path: pathlib.Path, *, ended: bool = False) -> None:
+def observe(owner: dict, native: str, path: pathlib.Path, *, ended: bool = False) -> bool:
     """Read/parse outside the writer lock; atomically apply a bounded batch.
 
     A concurrent observer advancing the cursor wins. This batch is discarded
@@ -158,8 +158,7 @@ def observe(owner: dict, native: str, path: pathlib.Path, *, ended: bool = False
         identity = f'{stat.st_dev}:{stat.st_ino}'
         if (cursor and cursor['file_identity'] == identity and cursor['path'] == str(path)
                 and cursor['position'] == stat.st_size):
-            reconcile_if_needed(owner, native, ended=ended)
-            return
+            return reconcile_if_needed(owner, native, ended=ended)
         pos = int(cursor['position']) if cursor and cursor['file_identity'] == identity and cursor['path'] == str(path) else 0
         if pos > stat.st_size:
             pos = 0
@@ -219,6 +218,7 @@ def observe(owner: dict, native: str, path: pathlib.Path, *, ended: bool = False
     except BaseException:
         c.execute('ROLLBACK')
         raise
+    return pos < stat.st_size or bool(pending_reconciliation(c, owner, native, ended=ended, limit=1))
 
 
 def pending_reconciliation(c, owner: dict, native: str, *, ended: bool, limit: int):
@@ -237,11 +237,11 @@ def reconcile(c, owner: dict, native: str, *, ended: bool, limit: int = MAX_ACTI
         _write(c, owner, native, meta['tool_use_id'], meta['provider_observed_at'], state='unknown')
 
 
-def reconcile_if_needed(owner: dict, native: str, *, ended: bool) -> None:
+def reconcile_if_needed(owner: dict, native: str, *, ended: bool) -> bool:
     """An idle observer does not acquire a SQLite write lock or fake activity."""
     c = db.conn()
     if not pending_reconciliation(c, owner, native, ended=ended, limit=1):
-        return
+        return False
     c.execute('BEGIN IMMEDIATE')
     try:
         reconcile(c, owner, native, ended=ended)
@@ -249,6 +249,8 @@ def reconcile_if_needed(owner: dict, native: str, *, ended: bool) -> None:
     except BaseException:
         c.execute('ROLLBACK')
         raise
+
+    return bool(pending_reconciliation(c, owner, native, ended=ended, limit=1))
 
 
 class ProviderJobObserver:
@@ -258,6 +260,8 @@ class ProviderJobObserver:
 
     def __init__(self):
         self.after = ('', '')
+        self.continue_soon = False
+        self._sweep_backlog = False
 
     def poll_once(self) -> None:
         from . import backends
@@ -273,7 +277,8 @@ class ProviderJobObserver:
               AND j.kind='provider-task' AND j.terminal_at IS NULL))
             GROUP BY a.agent_id,r.backend_session_id ORDER BY a.agent_id,r.backend_session_id''', (db.now_ms() - 86_400_000,)).fetchall()
         ordered = [r for r in rows if (r['agent_id'], r['backend_session_id']) > self.after]
-        ordered += [r for r in rows if (r['agent_id'], r['backend_session_id']) <= self.after]
+        ordered = ordered or rows
+        self.continue_soon = False
         selected = ordered[:self.MAX_TRANSCRIPTS]
         deadline = time.monotonic() + self.BUDGET_SEC
         for row in selected:
@@ -285,11 +290,18 @@ class ProviderJobObserver:
             try:
                 path = backends.by_id('claude').find_transcript(native)
                 if path:
-                    observe(owner, native, pathlib.Path(path), ended=not row['live'])
+                    pending = observe(owner, native, pathlib.Path(path), ended=not row['live'])
+                    self._sweep_backlog |= bool(pending)
                 else:
-                    reconcile_if_needed(owner, native, ended=not row['live'])
+                    self._sweep_backlog |= reconcile_if_needed(owner, native, ended=not row['live'])
             except Exception as exc:
                 log_exception('providerBackgroundObservationFail', exc)
+
+        if rows:
+            round_complete = self.after == (rows[-1]['agent_id'], rows[-1]['backend_session_id'])
+            self.continue_soon = not round_complete or self._sweep_backlog
+            if round_complete:
+                self._sweep_backlog = False
 
 
 def poll_once() -> None:
