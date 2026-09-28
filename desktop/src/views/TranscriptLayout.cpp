@@ -83,6 +83,16 @@ void TranscriptLayout::setEstimateRole(const QString& role) {
     emit estimateRoleChanged();
 }
 
+void TranscriptLayout::setIdentityRole(const QString& role) {
+    if (m_identityRole == role) return;
+    m_identityRole = role;
+    emit identityRoleChanged();
+}
+
+int TranscriptLayout::identityRoleId() const {
+    return m_roleIds.value(m_identityRole.toUtf8(), m_roleIds.value("messageId", -1));
+}
+
 void TranscriptLayout::setHeader(QQuickItem* item) {
     if (m_header == item) return;
     if (m_header) disconnect(m_header, nullptr, this, nullptr);
@@ -379,13 +389,13 @@ void TranscriptLayout::resetRows() {
 void TranscriptLayout::rememberAnchorIdentity() {
     m_anchorIdentity.clear();
     if (m_following || m_anchorRow < 0 || m_anchorRow >= count() || !m_model) return;
-    m_anchorIdentity = m_model->data(m_model->index(m_anchorRow, 0), m_roleIds.value("messageId", -1)).toString();
+    m_anchorIdentity = m_model->data(m_model->index(m_anchorRow, 0), identityRoleId()).toString();
     m_anchorIdentityOffset = m_anchorOffset;
 }
 
 void TranscriptLayout::restoreAnchorIdentity() {
     if (m_anchorIdentity.isEmpty() || !m_model) return;
-    const int role = m_roleIds.value("messageId", -1);
+    const int role = identityRoleId();
     for (int i = 0; i < count(); ++i) {
         if (m_model->data(m_model->index(i, 0), role).toString() == m_anchorIdentity) {
             m_anchorRow = i;
@@ -411,7 +421,7 @@ void TranscriptLayout::onRowsInserted(const QModelIndex& parent, int first, int 
     // so what is on screen stays where it is.
     if (m_anchorRow >= first) m_anchorRow += added;
     if (!m_anchorIdentity.isEmpty()) {
-        const int role = m_roleIds.value("messageId", -1);
+        const int role = identityRoleId();
         for (int i = first; i <= last; ++i) {
             if (m_model->data(m_model->index(i, 0), role).toString() != m_anchorIdentity) continue;
             m_anchorRow = i;

@@ -82,6 +82,8 @@ target_sources(clarp-desktop PRIVATE
     src/models/AgentFilterModel.cpp
     src/views/TranscriptLayout.cpp
     src/views/TranscriptLayout.h
+    src/views/TranscriptRows.cpp
+    src/views/TranscriptRows.h
     src/models/BackgroundJobTracker.cpp
     src/models/BackgroundJobTracker.h
     src/models/TreeOrder.h
