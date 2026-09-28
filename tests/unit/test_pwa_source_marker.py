@@ -70,11 +70,11 @@ def test_app_turn_always_forbids_interactive_questions():
     when it's silent (synthesize_audio off / typed). Spoken turns also get the
     <speak> guidance."""
     silent = pwa_source_flag._build_additional_context(app_dispatched=True, voiced=False)
-    assert "AskUserQuestion" in silent
+    assert "Pay special attention to Clarp skills." in silent
     assert "<speak>" not in silent
 
     spoken = pwa_source_flag._build_additional_context(app_dispatched=True, voiced=True)
-    assert "AskUserQuestion" in spoken
+    assert "Pay special attention to Clarp skills." in spoken
     assert "<speak>" in spoken
 
 

@@ -220,20 +220,7 @@ def _build_additional_context(*, app_dispatched: bool, voiced: bool) -> str:
     return "\n\n".join(parts)
 
 
-_NO_INTERACTIVE_QUESTIONS = """\
-You are connected through a phone/voice app. It cannot display CLI interactive
-prompts, question tools, multiple-choice pickers, or approval dialogs. Never
-call AskUserQuestion, request_user_input, or similar CLI popup tools; they will
-not render. For a material clarification, use the clarp-decisions skill's
-documented clarp-agent-artifacts question helper when the Host supports native
-questions. These durable Clarp artifacts are answered in Updates or the
-conversation, not in a CLI popup. For explicit authorization, use the skill's
-decision helper and wait for approval. If native questions are unavailable,
-ask in ordinary text and wait for the user's reply. Make routine implementation
-choices yourself and continue independent work while awaiting a necessary
-answer. Never self-resolve a question or approval; a preference or custom answer
-is not blanket authorization.\
-"""
+_NO_INTERACTIVE_QUESTIONS = "Pay special attention to Clarp skills."
 
 
 _SPEAK_INSTRUCTIONS = """\

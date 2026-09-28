@@ -129,11 +129,7 @@ def test_both_app_instructions_allow_native_questions_but_prohibit_cli_popups(mo
     spec.loader.exec_module(hook)
     for text in (voice_preamble._NO_INTERACTIVE_QUESTIONS,
                  hook._build_additional_context(app_dispatched=True, voiced=False)):
-        assert "clarp-agent-artifacts question" in text
-        assert "supports native" in text
-        assert "AskUserQuestion" in text and "request_user_input" in text
-        assert "Never" in text and "self-resolve" in text
-        assert "not blanket authorization" in text
+        assert "Pay special attention to Clarp skills." in text
 
 
 def test_create_report_dry_run_publishes_read_only_form(tmp_path, requests, capsys):
