@@ -290,19 +290,34 @@ Item {
                             // row is placed changes its height and makes the list
                             // jump while scrolling up.
                             readonly property string block: root.renderedBlocks[index] || ""
-                            text: root.oversized || root.messageKind === "live" || !root.controller.styledMarkdownHtml
+                            readonly property string wantedText: root.oversized || root.messageKind === "live" || !root.controller.styledMarkdownHtml
                                 ? block
                                 : root.controller.styledMarkdownHtml(block, {
                                     bodyPixelSize: root.readingSize, bodyFamily: root.readingFont,
                                     monoFamily: "JetBrains Mono", codeBackground: String(Theme.control),
                                     quoteText: String(Theme.muted), link: String(Theme.link), rule: String(Theme.rule)
                                 })
+                            readonly property int wantedFormat: root.oversized ? Text.PlainText
+                                : root.messageKind === "live" || !root.controller.styledMarkdownHtml
+                                ? (root.messageKind === "live" ? Text.PlainText : Text.MarkdownText) : Text.RichText
+                            // Text and format are applied in this order, never by two
+                            // bindings: switching a TextEdit from rich to plain text
+                            // while the rich document is loaded turns that document's
+                            // HTML source into the plain text (a reused row showed a
+                            // message as '<!DOCTYPE HTML PUBLIC ...').
+                            function applyContent() {
+                                if (textFormat !== wantedFormat) {
+                                    text = "";
+                                    textFormat = wantedFormat;
+                                }
+                                if (text !== wantedText) text = wantedText;
+                            }
+                            onWantedTextChanged: applyContent()
+                            onWantedFormatChanged: applyContent()
+                            Component.onCompleted: applyContent()
                             readOnly: true
                             selectByMouse: true
                             persistentSelection: true
-                            textFormat: root.oversized ? Text.PlainText
-                                : root.messageKind === "live" || !root.controller.styledMarkdownHtml
-                                ? (root.messageKind === "live" ? Text.PlainText : Text.MarkdownText) : Text.RichText
                             wrapMode: Text.Wrap
                             color: root.styled("text", Theme.body)
                             selectedTextColor: root.styled("selectedText", Theme.selectedText)

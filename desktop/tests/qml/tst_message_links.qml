@@ -108,6 +108,23 @@ TestCase {
         return null;
     }
 
+    function test_rowRebindToAHugeMessageNeverShowsHtmlSource() {
+        // A reused row went from a styled message to an oversized one: its
+        // TextEdit switched from rich to plain text with the rich document
+        // still loaded and showed that document's HTML source.
+        const row = createTemporaryObject(linkMessage, testCase, {body: "A **styled** reply with a [link](https://example.org)."});
+        verify(row !== null);
+        waitForRendering(row);
+        const huge = "Tail dump " + "y".repeat(200000);
+        row.body = huge;
+        const block = findChild(row, "messageTextBlock");
+        verify(block !== null);
+        compare(block.textFormat, Text.PlainText);
+        verify(block.text.indexOf("<!DOCTYPE") < 0, "the plain text must be the message, not HTML source");
+        verify(block.text.startsWith("Tail dump"), "the plain text shows the start of the message");
+        row.body = "Back to a **styled** reply.";
+        verify(block.text.indexOf("Tail dump") < 0);
+    }
     function test_hugeMessageShowsItsStartAndCopiesInFull() {
         // An agent once returned a 3.4 MB saved web page; laying it all out
         // froze the window for 46 s when the conversation opened.
