@@ -558,18 +558,36 @@ QUrl AppController::contactAvatarSource(const QString& name) {
 }
 
 QString AppController::styledMarkdownHtml(const QString& markdown, const QVariantMap& options) const {
+    constexpr qsizetype maxCachedMarkdownChars = 16 * 1024;
+    constexpr qsizetype maxStyledMarkdownCacheBytes = 4 * 1024 * 1024;
+
     QStringList parts;
     for (auto it = options.cbegin(); it != options.cend(); ++it)
         parts.append(it.key() + QLatin1Char('=') + it.value().toString());
     const QString key = parts.join(QLatin1Char(';')) + QLatin1Char('|') + markdown;
     const auto found = m_styledMarkdown.constFind(key);
     if (found != m_styledMarkdown.cend()) return found.value();
-    // Transcripts are re-rendered as rows are recycled while scrolling; a
-    // bounded cache keeps that free without growing with the whole history.
-    if (m_styledMarkdown.size() > 2000) m_styledMarkdown.clear();
     const QString html = clarp::styledMarkdownHtml(markdown, markdownStyleOptions(options));
+    if (markdown.size() > maxCachedMarkdownChars || html.size() > maxCachedMarkdownChars) return html;
+    const qsizetype entryBytes =
+        (key.size() + html.size()) * static_cast<qsizetype>(sizeof(QChar));
+    // Transcripts are re-rendered as rows are recycled while scrolling; a
+    // byte-bounded cache keeps common rows free without retaining huge chats.
+    if (m_styledMarkdownBytes + entryBytes > maxStyledMarkdownCacheBytes) {
+        m_styledMarkdown.clear();
+        m_styledMarkdownBytes = 0;
+    }
     m_styledMarkdown.insert(key, html);
+    m_styledMarkdownBytes += entryBytes;
     return html;
+}
+
+qsizetype AppController::styledMarkdownCacheBytes() const {
+    if (m_styledMarkdownBytes > 0 || m_styledMarkdown.isEmpty()) return m_styledMarkdownBytes;
+    qsizetype bytes = 0;
+    for (auto it = m_styledMarkdown.cbegin(); it != m_styledMarkdown.cend(); ++it)
+        bytes += (it.key().size() + it.value().size()) * static_cast<qsizetype>(sizeof(QChar));
+    return bytes;
 }
 
 void AppController::styleMarkdown(QObject* textDocument, const QVariantMap& options) const {
@@ -587,6 +605,7 @@ QVariantMap AppController::memoryCounters() const {
             {QStringLiteral("avatarSources"), m_avatarSources.size()},
             {QStringLiteral("contactAvatarSources"), m_contactAvatarSources.size()},
             {QStringLiteral("avatarRequests"), m_avatarRequests.size() + m_contactAvatarRequests.size()},
+            {QStringLiteral("styledMarkdownCacheBytes"), styledMarkdownCacheBytes()},
             {QStringLiteral("narratorCache"), m_toolNarrator.cacheSize()},
             {QStringLiteral("logRequestsInFlight"), m_logRequestsInFlight.size()}};
 }
