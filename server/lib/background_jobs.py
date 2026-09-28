@@ -1354,7 +1354,7 @@ def _public(row: Any, *, observed_at: int | None = None) -> dict:
 
 def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
                         provider: str, at: int, state: str, title: str = '',
-                        task: str = '', project: str = '', exit_code=None) -> None:
+                        task: str = '', project: str = '', exit_code=None, evidence_stale: bool = False) -> None:
     """Apply already-correlated provider evidence within its cursor transaction.
 
     The registry owns every job write. The adapter owns parsing, redaction,
@@ -1369,7 +1369,7 @@ def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
         if task and meta.get('provider_task_id') not in ('', task):
             return
         # Replayed launch requests cannot undo a receipt, even at equal time.
-        if state == 'launching' or (state == 'running' and meta.get('provider_state') == 'unknown' and at <= meta['provider_observed_at']):
+        if state == 'launching' or (state == 'running' and meta.get('provider_state') == 'unknown' and meta.get('provider_task_id') and at <= meta['provider_observed_at']):
             return
     else:
         if state != 'launching' or at < int(owner.get('bound_at') or 0):
@@ -1381,6 +1381,8 @@ def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
         meta['provider_task_id'] = task
     if exit_code is not None:
         meta['exit_code'] = exit_code
+    if evidence_stale and state in {'launching', 'running'}:
+        state = 'unknown'
     meta.update(provider_state=state, provider_observed_at=at)
     # Preserve the existing wire statuses for older clients. The progress and
     # outcome fields explicitly distinguish launching/unknown from running.

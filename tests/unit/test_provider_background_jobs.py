@@ -431,3 +431,48 @@ def test_fair_sweep_catches_up_at_fast_ticks_then_returns_to_idle(tmp_path,monke
     assert positions=={n:p.stat().st_size for n,p in paths.items()}
     observer.poll_once()
     assert observer.continue_soon  # remaining idle members still get their turn
+
+
+def test_stale_receipt_is_unknown_before_long_backfill_reaches_eof(case, monkeypatch):
+    owner,path,ident=case
+    old=db.now_ms()-2*provider.STALE_MS
+    append(path,launch(old),receipt(old+1))
+    with path.open('a') as f:
+        f.write((json.dumps(record('assistant',message={'content':[{'type':'text','text':'history'}]}))+'\n')*10000)
+    monkeypatch.setattr(provider,'MAX_BYTES',1024)
+    provider.observe(owner,NATIVE,path)
+    assert db.conn().execute('SELECT position FROM provider_job_cursors').fetchone()[0] < path.stat().st_size
+    job=jobs.get(ident)
+    assert job['metadata']['provider_task_id']==TASK
+    assert job['metadata']['provider_state']=='unknown'
+    assert job['status']=='queued' and job['outcome_state']=='unknown'
+    assert job['heartbeat_at'] is None and job['worker_pid'] is None
+
+
+def test_already_recorded_stale_receipt_reconciles_before_more_backfill(case, monkeypatch):
+    owner,path,ident=case
+    old=db.now_ms()-2*provider.STALE_MS
+    append(path,launch(old),receipt(old+1))
+    with path.open('a') as f:
+        f.write((json.dumps(record('assistant',message={'content':[]}))+'\n')*10000)
+    monkeypatch.setattr(provider,'MAX_BYTES',1024)
+    with monkeypatch.context() as legacy:
+        legacy.setattr(provider,'STALE_MS',10**12)
+        provider.observe(owner,NATIVE,path)
+        assert jobs.get(ident)['status']=='running'
+    before=db.conn().execute('SELECT position FROM provider_job_cursors').fetchone()[0]
+    assert provider.observe(owner,NATIVE,path) is True
+    job=jobs.get(ident)
+    assert job['status']=='queued' and job['metadata']['provider_state']=='unknown'
+    assert db.conn().execute('SELECT position FROM provider_job_cursors').fetchone()[0]==before
+    assert before<path.stat().st_size
+
+
+def test_stale_launch_and_receipt_with_same_timestamp_keep_task_identity(case):
+    owner,path,ident=case
+    old=db.now_ms()-2*provider.STALE_MS
+    append(path,launch(old),receipt(old),notice('completed',at=old+1))
+    provider.observe(owner,NATIVE,path)
+    job=jobs.get(ident)
+    assert job['metadata']['provider_task_id']==TASK
+    assert job['status']=='succeeded'
