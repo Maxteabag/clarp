@@ -5518,6 +5518,9 @@ def _configure_runtime_client(ctx: ServerContext) -> None:
     _turn_dispatch_module.configure_runtime_client(runtime_client)
     from lib import compaction as _compaction_module
     _compaction_module.configure_runtime_client(runtime_client)
+    # Codex commands are remembered in the runtime; the explainer asks it.
+    from lib import tool_explanation_commands as _explanation_commands
+    _explanation_commands.configure(getattr(runtime_client, "explanation_command", None))
 
 
 def _seed_startup_invariants(ctx: ServerContext) -> None:
