@@ -26,6 +26,8 @@ class TranscriptLayout : public QQuickItem {
     Q_PROPERTY(QQmlComponent* sectionDelegate READ sectionDelegate WRITE setSectionDelegate NOTIFY sectionDelegateChanged)
     Q_PROPERTY(QString sectionRole READ sectionRole WRITE setSectionRole NOTIFY sectionRoleChanged)
     Q_PROPERTY(QString estimateRole READ estimateRole WRITE setEstimateRole NOTIFY estimateRoleChanged)
+    // The role that identifies a row across resets (rowKey, else messageId).
+    Q_PROPERTY(QString identityRole READ identityRole WRITE setIdentityRole NOTIFY identityRoleChanged)
     Q_PROPERTY(QQuickItem* header READ header WRITE setHeader NOTIFY headerChanged)
     Q_PROPERTY(QQuickItem* footer READ footer WRITE setFooter NOTIFY footerChanged)
     // The Flickable this layout is the content of: its contentY and height
@@ -62,6 +64,8 @@ class TranscriptLayout : public QQuickItem {
     void setSectionRole(const QString& role);
     QString estimateRole() const { return m_estimateRole; }
     void setEstimateRole(const QString& role);
+    QString identityRole() const { return m_identityRole; }
+    void setIdentityRole(const QString& role);
     QQuickItem* header() const { return m_header; }
     void setHeader(QQuickItem* item);
     QQuickItem* footer() const { return m_footer; }
@@ -114,6 +118,7 @@ class TranscriptLayout : public QQuickItem {
     void sectionDelegateChanged();
     void sectionRoleChanged();
     void estimateRoleChanged();
+    void identityRoleChanged();
     void headerChanged();
     void footerChanged();
     void flickableChanged();
@@ -177,6 +182,8 @@ class TranscriptLayout : public QQuickItem {
     QPointer<QQmlComponent> m_sectionDelegate;
     QString m_sectionRole;
     QString m_estimateRole = QStringLiteral("body");
+    QString m_identityRole = QStringLiteral("rowKey");
+    int identityRoleId() const;
     QPointer<QQuickItem> m_header;
     QPointer<QQuickItem> m_footer;
     QPointer<QQuickItem> m_flickable;

@@ -86,6 +86,12 @@ Rectangle {
         target: root.conversationModel
         function onConversationIdChanged() { transcript.scrollToLatest(); }
     }
+    // Large messages become several transcript rows, so only the parts on
+    // screen are laid out.
+    TranscriptRows {
+        id: transcriptRows
+        sourceModel: presentation
+    }
     ConversationPresentationModel {
         id: presentation
         showWhenReady: root.controller.showWhenReady
@@ -256,7 +262,7 @@ Rectangle {
 
                 anchors.fill: parent
                 readonly property string modelSession: root.boundConversationSession
-                model: presentation
+                model: transcriptRows
                 clip: true
                 spacing: 1
                 leftMargin: 14
@@ -317,6 +323,9 @@ Rectangle {
 
                 delegate: MessageDelegate {
                     required property var model
+                    partIndex: Number(model.partIndex || 0)
+                    partCount: Number(model.partCount || 1)
+                    fullBody: String(model.fullBody || body)
                     senderAgentId: String(model.senderAgentId || "")
                     senderSession: String(model.senderSession || "")
                     replyToAgentId: String(model.replyToAgentId || "")

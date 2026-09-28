@@ -36,6 +36,15 @@ target_compile_options(clarp-transcript-layout-tests PRIVATE -include QAbstractI
 target_link_libraries(clarp-transcript-layout-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test)
 clarp_apply_quality_settings(clarp-transcript-layout-tests)
 add_test(NAME clarp-desktop-transcript-layout COMMAND clarp-transcript-layout-tests)
+add_executable(clarp-transcript-rows-tests
+    tst_transcript_rows.cpp
+    ../src/views/TranscriptRows.cpp
+    ../src/views/TranscriptRows.h
+    ../src/protocol/ProtocolTypes.cpp)
+target_include_directories(clarp-transcript-rows-tests PRIVATE ../src)
+target_link_libraries(clarp-transcript-rows-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Test)
+clarp_apply_quality_settings(clarp-transcript-rows-tests)
+add_test(NAME clarp-desktop-transcript-rows COMMAND clarp-transcript-rows-tests)
 set_tests_properties(clarp-desktop-transcript-layout PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_FORCE_STDERR_LOGGING=1;QT_IM_MODULE=compose"
     TIMEOUT 20)

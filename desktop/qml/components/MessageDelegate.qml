@@ -32,7 +32,15 @@ Item {
     // Only an incoming prompt written by another agent is that agent's message.
     // The current agent's answer to it stays the current agent's own row.
     readonly property bool teamAuthored: root.origin === "agent" && root.authorRole === "user" && !root.groupView
-    readonly property bool replyMarkerVisible: !root.activity && root.body.length > 0
+    // A large message is shown as several transcript rows (TranscriptRows):
+    // the sender and reply marker go on the first part, the time, tools and
+    // delivery state on the last, and copying takes the whole message.
+    property int partIndex: 0
+    property int partCount: 1
+    property string fullBody: body
+    readonly property bool firstPart: partIndex === 0
+    readonly property bool lastPart: partIndex >= partCount - 1
+    readonly property bool replyMarkerVisible: root.firstPart && !root.activity && root.body.length > 0
         && root.replyToName.length > 0 && root.replyMarkerText.length > 0 && !root.teamAuthored
     readonly property string replyMarkerText: root.delivery === "private"
         ? "Not sent to " + root.replyToName
@@ -152,7 +160,7 @@ Item {
 
         RowLayout {
             objectName: "groupAuthorLine"
-            visible: (root.groupView || root.teamAuthored) && !root.activity && root.body.length > 0
+            visible: root.firstPart && (root.groupView || root.teamAuthored) && !root.activity && root.body.length > 0
             Layout.fillWidth: true
             Layout.leftMargin: 2
             spacing: 6
@@ -387,8 +395,15 @@ Item {
                             objectName: "copyFullMessage"
                             text: qsTr("Copy full message")
                             implicitHeight: 26
-                            onClicked: root.controller.copyToClipboard(root.body)
+                            onClicked: root.controller.copyToClipboard(root.fullBody)
                         }
+                    }
+                    TuiButton {
+                        objectName: "copySplitMessage"
+                        visible: root.partCount > 1 && root.lastPart
+                        text: qsTr("Copy full message")
+                        implicitHeight: 26
+                        onClicked: root.controller.copyToClipboard(root.fullBody)
                     }
                 }
             }
@@ -396,7 +411,7 @@ Item {
 
         Rectangle {
             id: groupToggle
-            visible: !root.activity && root.presentedActivityCount > 0 && !root.showTools && !root.forceActivityInline
+            visible: root.lastPart && !root.activity && root.presentedActivityCount > 0 && !root.showTools && !root.forceActivityInline
             activeFocusOnTab: visible
             Accessible.role: Accessible.Button
             Accessible.name: root.groupSummary || root.activitySummary || root.presentedActivityCount + " tool calls"
@@ -436,7 +451,7 @@ Item {
         }
 
         ColumnLayout {
-            visible: !root.activity && root.showActivityCards
+            visible: root.lastPart && !root.activity && root.showActivityCards
                 && root.presentedActivityCount > 0
             Layout.fillWidth: true
             Layout.leftMargin: 2
@@ -489,7 +504,7 @@ Item {
         }
 
         TuiText {
-            visible: root.showTimestamp && root.timestamp.length > 0
+            visible: root.lastPart && root.showTimestamp && root.timestamp.length > 0
                 && !root.activity
             Layout.alignment: root.rightAligned ? Qt.AlignRight : Qt.AlignLeft
             Layout.leftMargin: 12
@@ -501,7 +516,7 @@ Item {
         }
 
         RowLayout {
-            visible: root.pending || root.deliveryFailed
+            visible: root.lastPart && (root.pending || root.deliveryFailed)
             Layout.alignment: root.userAuthored ? Qt.AlignRight : Qt.AlignLeft
             Layout.leftMargin: 4
             Layout.rightMargin: 4
