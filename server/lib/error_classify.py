@@ -64,12 +64,16 @@ _TIMEOUT_RE = re.compile(
 )
 _INTERRUPTED_RE = re.compile(
     r"turn[_ ]aborted|deliberately interrupted|user interrupted|"
-    r"sigterm|sigint|killed by signal|aborted by user|interrupted the previous",
+    r"sigterm|sigint|killed by signal|aborted by user|interrupted the previous|"
+    # OpenCode's MessageAbortedError after a stop.
+    r"operation was aborted",
     re.I,
 )
 _CONNECTION_RE = re.compile(
     r"socket connection was closed|socket hang ?up|connection closed|"
     r"econnreset|epipe|etimedout|enetunreach|econnrefused|"
+    # A DNS lookup that timed out or failed (OpenCode: "getaddrinfo ETIMEOUT").
+    r"getaddrinfo|eai_again|enotfound|"
     r"fetch failed|network (error|timeout)|stream (disconnected|interrupted)|"
     r"connection error|connection reset|premature close|terminated unexpectedly",
     re.I,
@@ -90,6 +94,9 @@ _USAGE_LIMIT_RE = re.compile(
     r"(exceeded|exhausted|depleted|reached|used up)|"
     r"insufficient (quota|credits?|credit balance)|"
     r"exceeded your current quota|monthly limit|billing hard limit|"
+    # Fireworks through OpenCode: "Account … is suspended, possibly due to
+    # reaching the monthly spending limit".
+    r"monthly spending limit|monthly included credits|"
     # HTTP 402 is a billing terminal by definition, and is how Grok surfaces
     # an exhausted balance. Keep it anchored to the status word/number pair so
     # a stray "402" in unrelated output cannot trip it.
@@ -110,7 +117,7 @@ _AUTH_RE = re.compile(
     re.I,
 )
 _RUNNER_EXIT_RE = re.compile(
-    r"\b(codex|clarp|agy|claude|agent)\s+exited\s+rc=\d+|"
+    r"\b(codex|clarp|agy|claude|agent|opencode)\s+exited\s+rc=\d+|"
     r"\b(exit status|exited with code)\s+\d+|"
     r"\bprocess exited\b.*\b(rc|code)=?\s*\d+",
     re.I,
