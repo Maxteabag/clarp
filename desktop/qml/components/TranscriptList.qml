@@ -264,6 +264,9 @@ ListView {
         // stayed blank until the chat was switched.
         if (showsNoRow()) returnToRows(delta < 0);
     }
+    function recoverIfBlank() {
+        if (showsNoRow() && !moving && !userInteracting && !scrollBar.pressed) returnToRows(contentY < originY);
+    }
     function showsNoRow() {
         return count > 0 && indexAt(width / 2, contentY + height / 2) < 0
             && indexAt(width / 2, contentY + 1) < 0 && indexAt(width / 2, contentY + height - 1) < 0;
@@ -332,8 +335,7 @@ ListView {
             root.blankReported = blank;
             // Whatever left it there, a blank view that is not being moved
             // returns to the nearest end of the rows.
-            if (blank && !root.moving && !root.userInteracting && !scrollBar.pressed)
-                root.returnToRows(root.contentY < root.originY);
+            if (blank) root.recoverIfBlank();
         }
     }
     function handleScrollKey(event) {
@@ -395,6 +397,9 @@ ListView {
         function onRowsInserted(parent, first, last) {
             if (root.anchorIndex >= first) root.anchorIndex += last - first + 1;
             if (root.readIndex >= first) root.readIndex += last - first + 1;
+            // A page of older history can leave the view with no row; return
+            // to the reader's message now rather than at the next watchdog tick.
+            Qt.callLater(root.recoverIfBlank);
         }
         function onRowsRemoved(parent, first, last) {
             if (root.anchorIndex > last) root.anchorIndex -= last - first + 1;
