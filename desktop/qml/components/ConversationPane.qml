@@ -42,28 +42,46 @@ Rectangle {
     // painted the new chat at the top, then at the old logical offset, then
     // at the end: the brief unwanted movement when switching agents.
     property var pendingConversationModel: null
-    function queueConversationBind() {
+    property string pendingConversationSession: ""
+    property string boundConversationSession: ""
+    property bool conversationBindPending: false
+    property double lastConversationBindAt: 0
+    readonly property int conversationBindStormWindowMs: 120
+    function requestConversationBind() {
         pendingConversationModel = root.conversationModel;
+        pendingConversationSession = root.session;
+        const now = Date.now();
+        if (!conversationBindPending
+                && (lastConversationBindAt === 0
+                    || now - lastConversationBindAt >= conversationBindStormWindowMs)) {
+            bindConversationNow();
+            return;
+        }
+        conversationBindPending = true;
         conversationBindTimer.restart();
     }
     function bindConversationNow() {
-        if (pendingConversationModel !== root.conversationModel) {
-            queueConversationBind();
+        if (pendingConversationModel !== root.conversationModel
+                || pendingConversationSession !== root.session) {
+            requestConversationBind();
             return;
         }
+        conversationBindPending = false;
         transcript.resetForConversation();
         presentation.refreshExplanations();
         presentation.sourceModel = pendingConversationModel;
+        boundConversationSession = pendingConversationSession;
+        lastConversationBindAt = Date.now();
         transcript.scrollToLatest();
     }
 
     Timer {
         id: conversationBindTimer
-        interval: 0
+        interval: root.conversationBindStormWindowMs
         repeat: false
         onTriggered: root.bindConversationNow()
     }
-    onConversationModelChanged: queueConversationBind()
+    onConversationModelChanged: requestConversationBind()
     Connections {
         target: root.conversationModel
         function onConversationIdChanged() { transcript.scrollToLatest(); }
@@ -237,6 +255,7 @@ Rectangle {
                 id: transcript
 
                 anchors.fill: parent
+                readonly property string modelSession: root.boundConversationSession
                 model: presentation
                 clip: true
                 spacing: 1
@@ -369,6 +388,26 @@ Rectangle {
                     font.pixelSize: 11
                 }
             }
+
+            Rectangle {
+                anchors.fill: parent
+                visible: root.conversationBindPending
+                    && root.boundConversationSession.length > 0
+                    && root.pendingConversationSession !== root.boundConversationSession
+                color: Qt.rgba(0, 0, 0, 0.38)
+                z: transcript.z + 1
+
+                TuiText {
+                    anchors.centerIn: parent
+                    width: Math.min(parent.width - 48, 420)
+                    text: "Opening " + root.controller.agentName(root.pendingConversationSession) + "..."
+                    horizontalAlignment: Text.AlignHCenter
+                    color: Theme.accent
+                    font.family: "JetBrains Mono"
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                }
+            }
         }
 
         Composer {
@@ -410,7 +449,7 @@ Rectangle {
             controller.loadMedia(session);
     }
     Component.onCompleted: {
-        queueConversationBind();
+        requestConversationBind();
         if (session.length > 0 && controller.connected)
             controller.loadMedia(session);
     }
