@@ -43,12 +43,26 @@ def writer():
         latencies.append((time.monotonic()-start)*1000)
         stop.wait(.01)
 worker=threading.Thread(target=writer);worker.start();ready.wait()
-locks=[];begin=[None]
-def trace(sql):
-    if sql == 'BEGIN IMMEDIATE': begin[0]=time.monotonic()
-    elif sql in ('COMMIT','ROLLBACK') and begin[0] is not None:
-        locks.append((time.monotonic()-begin[0])*1000);begin[0]=None
-db.conn().set_trace_callback(trace)
+locks=[];begin_waits=[];begin=[None]
+original_conn=db.conn
+main_thread=threading.get_ident()
+class MeasuredConnection:
+    def __init__(self,connection): self.connection=connection
+    def __getattr__(self,name): return getattr(self.connection,name)
+    def execute(self,sql,*args,**kwargs):
+        started=time.monotonic()
+        result=self.connection.execute(sql,*args,**kwargs)
+        finished=time.monotonic()
+        if sql == 'BEGIN IMMEDIATE':
+            begin_waits.append((finished-started)*1000)
+            begin[0]=finished  # lock has been acquired, not just requested
+        elif sql in ('COMMIT','ROLLBACK') and begin[0] is not None:
+            locks.append((finished-begin[0])*1000);begin[0]=None
+        return result
+def measured_conn():
+    connection=original_conn()
+    return MeasuredConnection(connection) if threading.get_ident()==main_thread else connection
+db.conn=measured_conn
 events=[]
 class Stream:
     def broadcast(self,event):
@@ -66,5 +80,6 @@ print(json.dumps({'agents':n,'input_bytes':sum(p.stat().st_size for p in paths.v
  'processed_bytes':sum(r[0] for r in db.conn().execute('SELECT position FROM provider_job_cursors')),
  'poll_and_managed_event_ms':round(elapsed,3),
  'first_managed_event_ms':round((events[0]-start)*1000,3) if events else None,
+ 'measurement_version':2,'max_begin_wait_ms':round(max(begin_waits,default=0),3),
  'writer_transactions':len(locks),'max_writer_lock_ms':round(max(locks,default=0),3),
  'managed_registrations':len(latencies),'max_managed_registration_ms':round(max(latencies,default=0),3)},indent=2))

@@ -1,5 +1,7 @@
 # Provider-native background visibility: local candidate
 
+This initial report is retained as history. The [integration review](provider-background-visibility-integration-review.md) supersedes its SSE projection, polling cadence, batch bounds and final validation details; its original authorization and proof limits remain.
+
 ## Observed omission
 
 Read-only inspection of Bella's Claude 2.1.283 native transcript established:

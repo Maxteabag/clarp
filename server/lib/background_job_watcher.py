@@ -60,6 +60,8 @@ class BackgroundJobWatcher:
             if time.monotonic() >= self._provider_due:
                 self._provider_due = time.monotonic() + self.PROVIDER_INTERVAL_SEC
                 self._provider_observer.poll_once()
+                if self._provider_observer.continue_soon:
+                    self._provider_due = time.monotonic()
                 self._poll_once()
         except Exception as exc:
             log_exception("providerBackgroundWatcherTickFail", exc)

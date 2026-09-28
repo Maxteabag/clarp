@@ -406,3 +406,28 @@ def test_stale_reconciliation_shares_the_per_visit_mutation_budget(case):
         assert len(jobs.events_after(before,limit=500))<=provider.MAX_ACTIONS
     rows=db.conn().execute('SELECT metadata_json FROM background_jobs').fetchall()
     assert len(rows)==130 and all(json.loads(r[0])['provider_state']=='unknown' for r in rows)
+
+
+def test_fair_sweep_catches_up_at_fast_ticks_then_returns_to_idle(tmp_path,monkeypatch):
+    from lib import backends
+    paths={}
+    for i in range(5):
+        native=f'cadence-{i}'
+        aid=agents.create_agent(persona=native,voice_id='',cwd=str(tmp_path),session=native)
+        db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at) VALUES(?,?,?,?)',
+                         (aid,native,native,db.now_ms()))
+        path=tmp_path/f'{native}.jsonl'
+        path.write_text((json.dumps({'type':'noise'})+'\n')*20000)
+        paths[native]=path
+    monkeypatch.setattr(backends.by_id('claude'),'find_transcript',lambda native:paths[native])
+    observer=provider.ProviderJobObserver()
+    visits=0
+    while True:
+        observer.poll_once();visits+=1
+        if not observer.continue_soon:break
+        assert visits<20
+    assert visits>=6
+    positions=dict(db.conn().execute('SELECT native_id,position FROM provider_job_cursors'))
+    assert positions=={n:p.stat().st_size for n,p in paths.items()}
+    observer.poll_once()
+    assert observer.continue_soon  # remaining idle members still get their turn
