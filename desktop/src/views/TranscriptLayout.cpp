@@ -405,6 +405,16 @@ void TranscriptLayout::onRowsInserted(const QModelIndex& parent, int first, int 
     // Rows inserted above the reader push the anchor down by the same rows,
     // so what is on screen stays where it is.
     if (m_anchorRow >= first) m_anchorRow += added;
+    if (!m_anchorIdentity.isEmpty()) {
+        const int role = m_roleIds.value("messageId", -1);
+        for (int i = first; i <= last; ++i) {
+            if (m_model->data(m_model->index(i, 0), role).toString() != m_anchorIdentity) continue;
+            m_anchorRow = i;
+            m_anchorOffset = m_anchorIdentityOffset;
+            m_anchorIdentity.clear();
+            break;
+        }
+    }
     updateSectionFlags(first);
     m_prefixDirty = true;
     emit countChanged();
@@ -413,6 +423,10 @@ void TranscriptLayout::onRowsInserted(const QModelIndex& parent, int first, int 
 
 void TranscriptLayout::onRowsAboutToBeRemoved(const QModelIndex& parent, int first, int last) {
     if (parent.isValid()) return;
+    // The reader's row is going: remember which message it was, so that if
+    // the same message comes back (a clear and re-append), the reader does.
+    if (!m_following && m_anchorRow >= first && m_anchorRow <= last && m_anchorIdentity.isEmpty())
+        rememberAnchorIdentity();
     for (int i = first; i <= last && i < count(); ++i) releaseRow(m_rows[static_cast<size_t>(i)]);
 }
 

@@ -103,6 +103,10 @@ class TranscriptLayout : public QQuickItem {
     Q_INVOKABLE void positionAtRow(int row, bool atBottom);
     // Lay out now instead of before the next frame.
     Q_INVOKABLE void layoutNow();
+    // Around a refresh that rebuilds the rows (a reset, or a clear and
+    // re-append): keep the reader on the same message.
+    Q_INVOKABLE void rememberAnchorIdentity();
+    Q_INVOKABLE void restoreAnchorIdentity();
 
   signals:
     void modelChanged();
@@ -147,8 +151,6 @@ class TranscriptLayout : public QQuickItem {
     void onRowsAboutToBeRemoved(const QModelIndex& parent, int first, int last);
     void onRowsRemoved(const QModelIndex& parent, int first, int last);
     void onDataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight, const QList<int>& roles);
-    void rememberAnchorIdentity();
-    void restoreAnchorIdentity();
     void onItemHeightChanged();
     void scheduleLayout();
     void relayout();
