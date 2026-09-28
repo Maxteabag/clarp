@@ -323,26 +323,78 @@ def parse_grok_models(raw: str, *, observed_at: str) -> list[dict[str, Any]]:
     return out
 
 
-def parse_opencode_models(
-    raw: str, *, observed_at: str, source: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    """Parse ``opencode models`` provider/model lines."""
-    source = source or _source("cli_probe", "opencode models", observed_at, "fresh")
-    out: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    efforts = _static_efforts("opencode")
+# `opencode models --verbose`: the per-model detail Clarp needs (name and
+# reasoning variants) at the cost of a plain listing.
+OPENCODE_MODELS_ARGV = ("models", "--verbose")
+
+
+def _opencode_listing(raw: str) -> list[tuple[str, dict[str, Any] | None]]:
+    """``(model id, detail)`` pairs from ``opencode models`` output.
+
+    ``--verbose`` prints each id on its own line followed by a JSON object
+    (``{`` and ``}`` at column 0, its body indented); the plain listing is ids
+    only, and a listing remembered before the switch is still plain. A plain
+    id has ``None`` for detail.
+    """
+    out: list[tuple[str, dict[str, Any] | None]] = []
+    block: list[str] | None = None
     for line in (raw or "").splitlines():
+        if block is not None:
+            block.append(line)
+            if line.rstrip() == "}":
+                try:
+                    detail = json.loads("\n".join(block))
+                except json.JSONDecodeError:
+                    detail = None
+                if out and isinstance(detail, dict) and out[-1][1] is None:
+                    out[-1] = (out[-1][0], detail)
+                block = None
+            continue
+        if line.rstrip() == "{":
+            block = [line]
+            continue
         model_id = line.strip()
         if not model_id or model_id.startswith("-") or " " in model_id.split("/")[0]:
             continue
         if "/" not in model_id and not model_id.islower():
             continue
+        out.append((model_id, None))
+    return out
+
+
+def _opencode_efforts(provider_id: str, detail: dict[str, Any] | None) -> list[str] | None:
+    """The model's own reasoning variants in the CLI's effort order.
+
+    Without detail (a plain listing) every variant the CLI knows is offered,
+    as before. A model with no variants gets an empty list: it has no effort
+    to choose. Variants outside the vocabulary are left out rather than sent
+    to clients that could not name them.
+    """
+    efforts = _static_efforts(provider_id)
+    if detail is None:
+        return list(efforts) if efforts else None
+    variants = detail.get("variants")
+    if not isinstance(variants, dict):
+        return list(efforts) if efforts else None
+    return [effort for effort in efforts if effort in variants]
+
+
+def parse_opencode_models(
+    raw: str, *, observed_at: str, source: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Parse ``opencode models [--verbose]``: the model's name as its label
+    and its own variants as its efforts when the listing carries them."""
+    source = source or _source("cli_probe", "opencode models", observed_at, "fresh")
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for model_id, detail in _opencode_listing(raw):
         if model_id in seen:
             continue
         seen.add(model_id)
+        name = str((detail or {}).get("name") or "").strip()
         out.append(_model(
-            model_id, model_id, default_effort=None,
-            supported_efforts=list(efforts) if efforts else None,
+            model_id, name or model_id, default_effort=None,
+            supported_efforts=_opencode_efforts("opencode", detail),
             source=dict(source),
         ))
     return out
@@ -367,18 +419,18 @@ def parse_deepseek_models(
     ``<model tail> (<provider>)`` so the chooser reads as a model list.
     """
     source = source or _source("cli_probe", "opencode models (deepseek)", observed_at, "fresh")
-    efforts = _static_efforts("deepseek")
     out: list[dict[str, Any]] = []
-    for item in parse_opencode_models(raw, observed_at=observed_at):
-        model_id = item["id"]
-        if "deepseek" not in model_id.lower():
+    seen: set[str] = set()
+    for model_id, detail in _opencode_listing(raw):
+        if "deepseek" not in model_id.lower() or model_id in seen:
             continue
+        seen.add(model_id)
         provider, _, rest = model_id.partition("/")
         tail = rest.rsplit("/", 1)[-1] or model_id
         provider_label = _DEEPSEEK_PROVIDER_LABELS.get(provider, provider)
         out.append(_model(
             model_id, f"{tail} ({provider_label})", default_effort=None,
-            supported_efforts=list(efforts) if efforts else None,
+            supported_efforts=_opencode_efforts("deepseek", detail),
             source=dict(source),
         ))
     return out
@@ -420,7 +472,8 @@ def _refresh_opencode_models_in_background(executable: str) -> None:
     def work() -> None:
         global _opencode_refresh_thread
         try:
-            result = _run([executable, "models"], timeout=OPENCODE_BACKGROUND_TIMEOUT)
+            result = _run([executable, *OPENCODE_MODELS_ARGV],
+                          timeout=OPENCODE_BACKGROUND_TIMEOUT)
             if result.returncode == 0 and parse_opencode_models(result.stdout, observed_at=""):
                 _remember_opencode_models(result.stdout, _iso_now())
                 _expire_cache()
@@ -447,7 +500,7 @@ def _opencode_models_listing(
     remembered listing (marked stale) while a background probe refreshes it.
     """
     try:
-        result = run([executable, "models"], timeout=OPENCODE_PROBE_TIMEOUT)
+        result = run([executable, *OPENCODE_MODELS_ARGV], timeout=OPENCODE_PROBE_TIMEOUT)
     except subprocess.TimeoutExpired:
         _refresh_opencode_models_in_background(executable)
     except (OSError, subprocess.SubprocessError):

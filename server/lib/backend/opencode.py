@@ -148,14 +148,22 @@ class OpenCodeBackend(StreamJsonBackend):
     detail = 'Runs on OpenCode.'
     symbol = 'chevron.left.forwardslash.chevron.right'
     brand = BackendBrand('#16352b', '#0b1c16', '#5ee4b5', '#1f8a65')
-    efforts = ('low', 'medium', 'high', 'max')
+    # OpenCode's reasoning variants, least to most. Each model supports its
+    # own subset (``opencode models --verbose``), so the catalogue lists
+    # efforts per model; ``--variant`` / the prompt's ``variant`` take them.
+    efforts = ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')
+    effort_scope = 'model'
     runner = 'opencode'
     config_model_field = 'opencode_model'
     config_effort_field = 'opencode_effort'
+    # Shown only when ``opencode models`` cannot be read. OpenCode Zen's own
+    # model first (no provider key needed), then models the common providers
+    # listed on 2026-09-28.
     fallback_models = (
-        ('opencode/gpt-5.4', 'GPT-5.4'),
-        ('anthropic/claude-sonnet-4-5', 'Claude Sonnet 4.5'),
-        ('openai/gpt-5.4', 'GPT-5.4 (OpenAI)'),
+        ('opencode/big-pickle', 'Big Pickle'),
+        ('huggingface/deepseek-ai/DeepSeek-V4.1-Flash', 'DeepSeek V4.1 Flash (Hugging Face)'),
+        ('fireworks-ai/accounts/fireworks/models/kimi-k3', 'Kimi K3 (Fireworks)'),
+        ('huggingface/zai-org/GLM-5.3', 'GLM-5.3 (Hugging Face)'),
     )
 
 
