@@ -196,15 +196,15 @@ def test_output_is_exact_bounded_redacted_and_symlink_fenced(case, tmp_path, mon
 def test_cursor_rolls_back_with_projection_failure(case, monkeypatch):
     owner, path, ident = case
     append(path, launch(), receipt())
-    original = provider.ingest
-    def failure(c, owner, native, project, rec):
-        original(c, owner, native, project, rec)
+    original = provider.apply_actions
+    def failure(c, owner, native, actions):
+        original(c, owner, native, actions)
         raise RuntimeError('interrupted')
-    monkeypatch.setattr(provider, 'ingest', failure)
+    monkeypatch.setattr(provider, 'apply_actions', failure)
     with pytest.raises(RuntimeError):
         provider.observe(owner, NATIVE, path)
     assert jobs.get(ident) is None
-    monkeypatch.setattr(provider, 'ingest', original)
+    monkeypatch.setattr(provider, 'apply_actions', original)
     provider.observe(owner, NATIVE, path)
     assert jobs.get(ident)['status'] == 'running'
 
@@ -338,3 +338,58 @@ def test_origin_wrapper_is_scoped_and_idempotent(case):
     inputs = {'command':"printf '%s\\n' 'unchanged $content'",'run_in_background':True}
     updated = tool_input_with_origin(owner,NATIVE,TOOL,inputs)
     assert tool_input_with_origin(owner,NATIVE,TOOL,updated) == updated
+
+
+def test_parser_runs_outside_write_transaction_and_cursor_compare_and_swap(case, monkeypatch):
+    owner,path,ident=case
+    append(path,launch(),receipt())
+    original=provider.parse_actions
+    once=[False]
+    def concurrent(native,project,record):
+        assert not db.conn().in_transaction
+        actions=original(native,project,record)
+        if not once[0]:
+            once[0]=True
+            provider.observe(owner,native,path)
+        return actions
+    monkeypatch.setattr(provider,'parse_actions',concurrent)
+    provider.observe(owner,NATIVE,path)
+    assert jobs.get(ident)['status']=='running'
+    assert len(jobs.timeline(ident))==2
+    assert db.conn().execute('SELECT position FROM provider_job_cursors').fetchone()[0]==path.stat().st_size
+
+
+def test_bounded_poll_rotates_fairly_across_large_backlogs(tmp_path,monkeypatch):
+    from lib import backends
+    paths={}
+    line=json.dumps(record('assistant',message={'content':[]}))+'\n'
+    for i in range(9):
+        native=f'fair-{i}'
+        aid=agents.create_agent(persona=native,voice_id='',cwd=str(tmp_path),session=native)
+        db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at) VALUES(?,?,?,?)',
+                          (aid,native,native,db.now_ms()-1000))
+        path=tmp_path/f'{native}.jsonl';path.write_text(line*10000);paths[native]=path
+    monkeypatch.setattr(backends.by_id('claude'),'find_transcript',lambda native: paths[native])
+    observer=provider.ProviderJobObserver()
+    for _ in range(5):
+        before=dict(db.conn().execute('SELECT native_id,position FROM provider_job_cursors'))
+        observer.poll_once()
+        after=dict(db.conn().execute('SELECT native_id,position FROM provider_job_cursors'))
+        assert sum(before.get(k)!=v for k,v in after.items())<=2
+        assert all(v-before.get(k,0)<=provider.MAX_BYTES+len(line) for k,v in after.items())
+    assert set(after)==set(paths)
+    assert all(position>0 for position in after.values())
+
+
+def test_one_large_record_is_applied_in_bounded_resumable_action_batches(case):
+    owner,path,ident=case
+    blocks=[{'type':'tool_use','name':'Bash','id':f'toolu_batch_{i}',
+             'input':{'run_in_background':True,'description':f'Task {i}'}} for i in range(130)]
+    append(path,record('assistant',message={'content':blocks}))
+    for expected in (64,128,130):
+        provider.observe(owner,NATIVE,path)
+        assert db.conn().execute('SELECT count(*) FROM background_jobs').fetchone()[0]==expected
+    cursor=db.conn().execute('SELECT * FROM provider_job_cursors').fetchone()
+    assert cursor['position']==path.stat().st_size and cursor['action_offset']==0
+    provider.observe(owner,NATIVE,path)
+    assert db.conn().execute('SELECT count(*) FROM background_jobs').fetchone()[0]==130
