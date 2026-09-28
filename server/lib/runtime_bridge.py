@@ -285,6 +285,14 @@ class RuntimeClient:
         result = response.get("result") or {}
         return result if isinstance(result, dict) else {}
 
+    def explanation_command(self, agent_id: str, label: str) -> str:
+        """The whole command a clipped Codex label stands for, as the runtime
+        saw it, or "". Heredoc bodies stay in the runtime (`shapes.redact`)."""
+        response = RuntimeClient(self.socket_path, timeout=min(self.timeout, 0.5))._request(
+            "explanation_command", {"agent_id": agent_id, "label": label})
+        result = response.get("result") if response.get("ok") else ""
+        return result if isinstance(result, str) else ""
+
     def ping(self) -> bool:
         try:
             return self.status().get("protocol_version") == PROTOCOL_VERSION
@@ -415,6 +423,12 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         if method == "recover_queued":
             return {"ok": True,
                     "result": int(self.dispatch_service.recover_queued())}
+        if method == "explanation_command":
+            # Codex items are handled in this process; the explainer runs in
+            # the HTTP server (see tool_explanation_commands).
+            from . import tool_explanation_commands
+            return {"ok": True, "result": tool_explanation_commands.answer(
+                str(params.get("agent_id") or ""), str(params.get("label") or ""))}
         if method in {"interrupt", "interrupt_any", "steer"}:
             from . import backends
             agent_id = str(params.get("agent_id") or "")
