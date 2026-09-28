@@ -11,9 +11,11 @@ from typing import Any, Callable, Optional
 
 from .. import agents as agents_db
 from .. import opencode_transcript
+from .. import tool_explanation_commands
 from .. import tts_queue
 from ..log import log, log_exception
 from ..proc_util import stderr_text
+from ..text_util import truncate
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
@@ -29,6 +31,12 @@ class _TurnState:
     failed_error: str = ""
     saw_session: bool = False
     seen_speak: set[str] = field(default_factory=set)
+    # Text parts of the current step. OpenCode writes one step per model
+    # call; the reply is the last step that said anything, not every
+    # commentary line of the turn run together.
+    step_texts: list[str] = field(default_factory=list)
+    usage: dict[str, int] = field(default_factory=dict)
+    cost: float | None = None
 
 
 def _text_from(value: Any) -> str:
@@ -47,6 +55,33 @@ def _text_from(value: Any) -> str:
     if isinstance(value, list):
         return "\n".join(filter(None, (_text_from(item) for item in value)))
     return ""
+
+
+def _error_message(error: Any) -> str:
+    """OpenCode errors are ``{name, data: {message}}``; show the message."""
+    if not isinstance(error, dict):
+        return str(error or "")
+    data = error.get("data") if isinstance(error.get("data"), dict) else {}
+    message = str(data.get("message") or error.get("message") or "").strip()
+    name = str(error.get("name") or "").strip()
+    if message:
+        return message
+    return f"OpenCode {name}" if name else json.dumps(error)[:300]
+
+
+def _add_usage(st: _TurnState, part: dict) -> None:
+    """Sum one ``step_finish`` part's tokens and cost into the turn's totals,
+    in the field names ``turn_dispatch._result_detail`` reads."""
+    tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
+    cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+    for key, value in (("input_tokens", tokens.get("input")),
+                       ("output_tokens", tokens.get("output")),
+                       ("cache_read_input_tokens", cache.get("read")),
+                       ("cache_creation_input_tokens", cache.get("write"))):
+        if isinstance(value, (int, float)):
+            st.usage[key] = st.usage.get(key, 0) + int(value)
+    if isinstance(part.get("cost"), (int, float)):
+        st.cost = (st.cost or 0.0) + float(part["cost"])
 
 
 def _session_id_from(ev: dict) -> str:
@@ -86,6 +121,22 @@ class OpenCodeBackend(StreamJsonBackend):
 
 
     transcript = opencode_transcript
+
+    @staticmethod
+    def turn_env() -> dict[str, str]:
+        """Deny OpenCode's own ``question`` tool. ``opencode run`` has nobody to
+        answer it, so the call ends "dismissed" (or waits); agents ask through
+        Clarp's durable questions instead. ``OPENCODE_PERMISSION`` rules apply
+        after the user's config, so an allow-all ``permission`` stays as it is."""
+        rules: Any = {}
+        try:
+            rules = json.loads(os.environ.get("OPENCODE_PERMISSION") or "{}")
+        except json.JSONDecodeError:
+            rules = {}
+        if not isinstance(rules, dict):
+            rules = {}
+        rules.setdefault("question", "deny")
+        return {"OPENCODE_PERMISSION": json.dumps(rules)}
 
     def build_cmd(self, session_id: str = "", *, is_new_session: bool = False,
                   model: str = "", effort: str = "") -> list[str]:
@@ -138,7 +189,8 @@ class OpenCodeBackend(StreamJsonBackend):
         log("opencodeSpawn", f"cwd={cwd} {flag}={backend_session_id or '∅'} "
                              f"text_len={len(text)} trace={trace_id or '∅'} "
                              f"agent={agent_id or '∅'}")
-        proc, handle = self.launch(cmd, cwd=cwd, session=session)
+        proc, handle = self.launch(cmd, cwd=cwd, session=session,
+                                   env_extra=self.turn_env())
         runtime_agent_id = "" if isolated else agent_id
         self.register_handle(runtime_agent_id, handle)
         self.start_drain(
@@ -180,26 +232,42 @@ class OpenCodeBackend(StreamJsonBackend):
                         self._bind(st, sid, on_session_init=on_session_init,
                                    on_error=on_error, trace_id=trace_id)
                     etype = str(ev.get("type") or ev.get("event") or "")
+                    part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
+                    if etype == "step_finish":
+                        _add_usage(st, part)
+                        continue
                     if etype == "step_start":
+                        st.step_texts = []
                         self._transition(agent_id, TurnEvent.TEXT_STREAMED, {
                             "dispatch": self.runner, "trace_id": trace_id,
                         })
                         self._broadcast(stream, agent_id, session)
                         continue
                     if etype in {"tool_use", "tool_start", "tool.running"}:
-                        name = ""
-                        part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
-                        name = str(part.get("tool") or ev.get("tool")
-                                   or ev.get("name") or "tool")
+                        raw_name = str(part.get("tool") or ev.get("tool")
+                                       or ev.get("name") or "tool")
+                        state = part.get("state") if isinstance(part.get("state"), dict) else {}
+                        raw_input = state.get("input") if isinstance(state.get("input"), dict) else {}
+                        name = opencode_transcript._TOOL_NAMES.get(raw_name, raw_name)
+                        tool_input = {
+                            opencode_transcript._ARG_NAMES.get(str(k), str(k)):
+                                truncate(v, 400) if isinstance(v, str) else v
+                            for k, v in raw_input.items()
+                            if isinstance(v, (str, int, float, bool))}
+                        if name == "Bash" and tool_input.get("command"):
+                            # As Codex does: the apps clip the command; the
+                            # explainer completes it from here.
+                            tool_explanation_commands.remember(
+                                agent_id, str(tool_input["command"]))
                         self._transition(agent_id, TurnEvent.TOOL_STARTED, {
                             "dispatch": self.runner, "trace_id": trace_id, "tool": name,
+                            "input": tool_input,
                         })
                         self._broadcast(stream, agent_id, session)
                         continue
                     if etype in {"error", "session.error"}:
-                        err = str(ev.get("error") or ev.get("message") or "opencode error")
-                        if isinstance(ev.get("error"), dict):
-                            err = str(ev["error"].get("message") or err)
+                        err = (_error_message(ev.get("error"))
+                               or str(ev.get("message") or "opencode error"))
                         st.failed_error = err
                         if on_error is not None:
                             on_error(err)
@@ -215,7 +283,9 @@ class OpenCodeBackend(StreamJsonBackend):
                                  or _text_from(ev))
                         if delta:
                             st.live_text += delta
-                            st.last_agent_message = st.live_text
+                            st.step_texts.append(delta.strip())
+                            st.last_agent_message = "\n\n".join(
+                                filter(None, st.step_texts))
                             self._speak(delta, st, agent_id=agent_id, session=session,
                                         trace_id=trace_id, enqueue=enqueue)
                             self._broadcast(stream, agent_id, session)
@@ -227,7 +297,11 @@ class OpenCodeBackend(StreamJsonBackend):
                 if on_error is not None:
                     on_error(err)
             elif on_result is not None and not st.failed_error:
-                on_result({"last_agent_message": st.last_agent_message, "usage": {}})
+                result: dict[str, Any] = {"last_agent_message": st.last_agent_message,
+                                          "usage": dict(st.usage)}
+                if st.cost is not None:
+                    result["total_cost_usd"] = st.cost
+                on_result(result)
         except Exception as error:  # noqa: BLE001
             log_exception("opencodeDrainFail", error, detail=trace_id)
             if on_error is not None and not st.failed_error:
