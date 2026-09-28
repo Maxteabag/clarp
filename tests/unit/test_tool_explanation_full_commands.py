@@ -258,3 +258,85 @@ def test_an_opaque_command_names_the_first_program_it_really_runs():
     assert shapes.first_program("umask 077\n(cd x && make build)") == "make"
     assert shapes.first_program("python - <<'PY'\nimport os\nPY") == "python"
     assert shapes.first_program("nohup ./run.sh &") == "run.sh"
+
+
+# ---- across the runtime / server split ---------------------------------------------
+
+_RUNTIME = r"""
+import sys, threading
+sys.path.insert(0, sys.argv[2])
+from lib import tool_explanation_commands as commands
+from lib.runtime_bridge import RuntimeRPCServer
+server = RuntimeRPCServer(sys.argv[1], dispatch_service=None, status_provider=lambda: {})
+threading.Thread(target=server.serve_forever, daemon=True).start()
+for command in sys.argv[4:]:
+    commands.remember(sys.argv[3], command)
+print("ready", flush=True)
+sys.stdin.readline()
+server.shutdown()
+server.server_close()
+"""
+
+
+@pytest.fixture
+def runtime_process(tmp_path):
+    """A separate process that remembers commands and serves the runtime bridge, as clarp-runtime does."""
+    import pathlib
+    import subprocess
+    import sys
+    from lib.runtime_bridge import RuntimeClient
+    socket_path = tmp_path / "rt" / "runtime.sock"
+    started = []
+
+    def start(agent_id, *remembered):
+        process = subprocess.Popen(
+            [sys.executable, "-c", _RUNTIME, str(socket_path), str(pathlib.Path(commands.__file__).parents[1]),
+             agent_id, *remembered], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        started.append(process)
+        assert process.stdout.readline().strip() == "ready"
+        return RuntimeClient(socket_path)
+    yield start
+    for process in started:
+        process.communicate("\n", timeout=10)
+    commands.configure(None)
+
+
+def test_a_command_remembered_in_the_runtime_process_completes_the_servers_label(runtime_process):
+    agent_id = agents_db.create_agent(persona="Caleb", voice_id="v", cwd="/tmp", session="caleb", backend="codex")
+    client = runtime_process(agent_id, LABEL)
+    shown = LABEL[:templates.LABEL_CLIP]
+    activity = {"name": shown, "summary": f"Using {shown}"}
+    # This (server) process remembers nothing: without the bridge the label stays clipped.
+    assert commands.resolve(agent_id, shown) == "" and commands.expand(activity, agent_id) is activity
+    commands.configure(client.explanation_command)
+    assert commands.expand(activity, agent_id) == {"name": "Bash", "command": LABEL}
+    assert commands.expand(activity, "another-agent") is activity
+    translate, calls = recording("Creates a new git worktree on a new branch.")
+    with ToolExplanations(translate=translate, debounce=.001) as service:
+        [result] = settle(service, [{"id": "1", "activity": activity}], target_agent_id=agent_id)
+    assert result["status"] == "ready" and calls[0][0]["activity"]["command"] == INNER
+    assert "truncated" not in conn().execute("SELECT reason FROM tool_explanation_decisions").fetchone()[0]
+
+
+def test_the_runtime_sends_a_shaped_heredoc_without_its_body(runtime_process):
+    full = "/usr/bin/bash -lc \"python3 - <<'PY'\nimport secret_module_x\nprint('token-9f8e7d')\nPY\""
+    client = runtime_process("agent-1", full)
+    assert client.explanation_command("agent-1", full[:templates.LABEL_CLIP]) == "python3 - <<'EOF'\n…\nEOF"
+
+
+def test_an_unreachable_or_old_runtime_leaves_the_label_truncated_and_is_not_asked_every_poll():
+    asked = []
+
+    def old_runtime(agent_id, label):
+        asked.append(label)
+        raise RuntimeError("unknown runtime method: explanation_command")
+    commands.configure(old_runtime)
+    try:
+        activity = {"name": LABEL[:templates.LABEL_CLIP]}
+        assert commands.expand(activity, "agent-1") is activity
+        assert commands.expand(activity, "agent-1") is activity
+        assert len(asked) == 1
+        [part] = shapes.split(normalize_activity(activity))
+        assert part.reason == "truncated"
+    finally:
+        commands.configure(None)

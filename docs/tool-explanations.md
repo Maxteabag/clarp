@@ -136,12 +136,18 @@ command as one opaque part. Each part goes through the tiers, cheapest first:
    `jev_learned:<same_action|same_program|lexical>` or `jev_template:<id>`,
    with the confidence in `jev_confidence`. A Codex row whose tool name is a
    `/usr/bin/bash -lc "…"` display label is explained as that shell command.
-   That label is clipped at 80 characters, so the Codex backend remembers
-   each agent's recent whole commands in memory (`tool_explanation_commands`,
-   256 per agent) and the explainer uses the one the clipped label starts;
-   the apps' display and request are unchanged. A label the Host cannot
-   complete (after a restart, or two recent commands with that start that
-   differ in more than a withheld heredoc body) is `truncated` and exact. A grouped exploration row with a single
+   That label is clipped at 80 characters, so the Codex backend, in the
+   agent runtime process, remembers each agent's recent whole commands in
+   memory (`tool_explanation_commands`, 256 per agent). The explainer runs in
+   the HTTP server, so it asks the runtime over the runtime bridge
+   (`explanation_command`) for the one the clipped label starts; the answer
+   already has any withheld heredoc body taken out, and nothing is
+   persisted. The apps' display and request are unchanged. A label that
+   cannot be completed (after a runtime restart, an older runtime, or two
+   recent commands with that start that differ in more than a withheld
+   heredoc body) is `truncated` and exact, and is not asked about again for
+   10 seconds. The server logs `toolExplanationCommands resolved=N missed=N
+   failed=N` at most once a minute. A grouped exploration row with a single
    `Read: path` is the `read_file` template; other exploration rows are
    `exploration` or `multiple_targets`.
 4. **Model.** The language model gets each unanswered part with its `slots`
