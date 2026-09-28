@@ -19,7 +19,7 @@ TestCase {
 
     function test_missingModelNeverClaimsCurrentDefault() {
         header.metadata = {model:"", default_model:"a-different-model"};
-        compare(findChild(header, "headerModel").text, "Model unavailable");
+        compare(findChild(header, "headerModel").text, "model not reported");
         header.metadata = {model:"original-model", default_model:"a-different-model"};
         compare(findChild(header, "headerModel").text, "original-model");
     }
