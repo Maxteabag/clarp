@@ -123,6 +123,8 @@ def _migrate(con: sqlite3.Connection) -> None:
 
         if version < 98:
             _migrate_to_v98(con)
+        if version < 99:
+            _migrate_to_v99(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -680,6 +682,18 @@ def _migrate_to_v76(con: sqlite3.Connection) -> None:
             con.execute(statement)
             statement = ""
     assert not statement.strip()
+
+
+def _migrate_to_v99(con: sqlite3.Connection) -> None:
+    """Learned explanations link a Jev pick to its source row and name their program.
+
+    Rows learned without a program get it back where their signature names it.
+    """
+    from . import tool_explanation_learning
+    columns = {r[1] for r in con.execute("PRAGMA table_info(tool_explanation_learned)")}
+    if "source_signature" not in columns:
+        con.execute("ALTER TABLE tool_explanation_learned ADD COLUMN source_signature TEXT NOT NULL DEFAULT ''")
+    tool_explanation_learning.backfill_programs(con)
 
 
 def _migrate_to_v98(con: sqlite3.Connection) -> None:

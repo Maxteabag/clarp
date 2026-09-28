@@ -25,7 +25,10 @@ because it usually selects what a program does (`filectl list` versus
 
 Slots are numbered per kind in order of appearance (`path1`, `path2`,
 `num1`). The signature is `sh:<program> #<keyed hash of the shape>`, so it
-never stores a literal word, and it is stable for one Host.
+never stores a literal word, and it is stable for one Host. The program is
+the first word, looking through `timeout N` (`timeout 60 dotnet test` is
+`dotnet`); an exact whole command takes the program of its first real simple
+command (`first_program`).
 
 A part that cannot be shaped safely is exact: its signature hashes the whole
 part, and a learned explanation for it is only reused for the identical text.
@@ -89,6 +92,8 @@ class Part:
     learned-table key for its shape; `exact_key` keys an exact-only answer
     and equals `signature` when the part is exact. `slots` holds the literal
     dynamic values by slot name. `reason` says why a part is exact.
+    `legacy` pairs a key an earlier Host version learned this part under
+    with the key it has now, so those rows are still found and moved.
     """
     activity: dict
     signature: str
@@ -98,16 +103,17 @@ class Part:
     exact: bool = False
     reason: str = ""
     cwd: str = ""
+    legacy: list = field(default_factory=list)
 
     def to_json(self):
         return {"activity": self.activity, "signature": self.signature, "exact_key": self.exact_key,
                 "program": self.program, "slots": self.slots, "exact": self.exact, "reason": self.reason,
-                "cwd": self.cwd}
+                "cwd": self.cwd, "legacy": self.legacy}
 
     @classmethod
     def from_json(cls, value):
         return cls(**{key: value[key] for key in ("activity", "signature", "exact_key", "program", "slots",
-                                                   "exact", "reason", "cwd") if key in value})
+                                                   "exact", "reason", "cwd", "legacy") if key in value})
 
     def template_activity(self):
         """The part as the scripted templates classify it, with its `cd` context."""
@@ -122,10 +128,59 @@ def _key(kind, shape):
     return templates._identity(kind, shape)
 
 
-def _exact(activity, text, reason, program=""):
-    signature = f"x:{program or '?'} #{_key('exact', text)}"
+def _exact(activity, text, reason, program="", previous="?"):
+    """An exact part. `previous` is the program its key named before this version.
+
+    Whole commands used to be keyed `x:? #hash` with no program, and a
+    `timeout` part by `timeout`; rows learned so are still found (`legacy`).
+    """
+    digest = _key("exact", text)
+    signature = f"x:{program or '?'} #{digest}"
+    old = f"x:{previous or '?'} #{digest}"
     return Part(activity=activity, signature=signature, exact_key=signature, program=program, exact=True,
-                reason=reason)
+                reason=reason, legacy=[[old, signature]] if old != signature else [])
+
+
+def _program(words):
+    """The program a simple command runs: its first word, looking through `timeout`.
+
+    Returns (program, first word's name).
+    """
+    words = [w for w in words if not _ENV.fullmatch(w)]
+    first = PurePosixPath(words[0]).name if words else "?"
+    rest = words[1:] if first == "timeout" else []
+    while rest and rest[0].startswith("-"):
+        rest = rest[2:] if rest[0] in {"-s", "-k", "--signal", "--kill-after"} else rest[1:]
+    program = PurePosixPath(rest[1]).name if len(rest) > 1 and _NUMBER.fullmatch(rest[0]) else first
+    return (program if templates._NAME.fullmatch(program) else "?"), (first if templates._NAME.fullmatch(first) else "?")
+
+
+_SKIP_SEGMENT = frozenset({"for", "case", "select", "function"})
+_LEADING = frozenset({"do", "then", "else", "elif", "if", "while", "until", "!", "{", "(", "time", "exec", "nohup"})
+
+
+def first_program(command):
+    """The program a whole opaque or clipped command mostly runs, or "".
+
+    A heuristic over its first simple command: leading `cd`, env assignments,
+    no-ops, shell builtins and keywords are skipped. Only a program name is
+    ever kept, never an argument.
+    """
+    text = re.sub(r"^\s*(?:/\S*/)?(?:ba|z)?sh\s+-l?c\s+['\"]?", "", command)
+    for segment in re.split(r"&&|\|\||[;\n|&]", text):
+        words = segment.split()
+        while words and (words[0] in _LEADING or _ENV.fullmatch(words[0])):
+            if _ENV.fullmatch(words[0]) and ("$(" in words[0] or "`" in words[0]):
+                words = []
+                break
+            words = words[1:]
+        if not words or words[0] in _SKIP_SEGMENT:
+            continue
+        name = _program([word.strip("'\"") for word in words])[0]
+        if not name or name in templates._BUILTINS or name in _NOOP or name in _KEYWORDS:
+            continue
+        return name if _PROGRAM.fullmatch(name) else ""
+    return ""
 
 
 # ---- word typing ------------------------------------------------------------
@@ -337,24 +392,25 @@ def _shell_parts(command):
     try:
         command = templates._strip_wrapper(command)
     except ValueError:
-        return [_exact(_bash(command), command, "malformed")]
+        return [_exact(_bash(command), command, "malformed", first_program(command))]
+    whole = first_program(command)
     segments = split_shell(command)
     if segments is None:
-        return [_exact(_bash(command), command, "opaque")]
+        return [_exact(_bash(command), command, "opaque", whole)]
     parsed = []
     for text, operator, redirects in segments:
         try:
             words = shlex.split(text)
         except ValueError:
-            return [_exact(_bash(command), command, "malformed")]
+            return [_exact(_bash(command), command, "malformed", whole)]
         cleaned = _clean(words) if redirects else (words, [("word", w) for w in words])
         if cleaned is None or not cleaned[0]:
-            return [_exact(_bash(command), command, "opaque")]
+            return [_exact(_bash(command), command, "opaque", whole)]
         first = next((w for w in cleaned[0] if not _ENV.fullmatch(w)), "")
         if first in _KEYWORDS or cleaned[0][0] in _KEYWORDS:
-            return [_exact(_bash(command), command, "opaque")]
+            return [_exact(_bash(command), command, "opaque", whole)]
         if operator in {"|", "|&"} and PurePosixPath(first).name not in _FILTERS:
-            return [_exact(_bash(command), command, "opaque")]
+            return [_exact(_bash(command), command, "opaque", whole)]
         parsed.append((_unmark(text), operator, cleaned))
     parts, cwd = [], ""
     for text, operator, (plain, shaped) in parsed:
@@ -370,7 +426,7 @@ def _shell_parts(command):
     if not parts:
         return [_shell_part(parsed[0][0], parsed[0][2][1], "")]
     if len(parts) > MAX_PARTS:
-        return [_exact(_bash(command), command, "too_many_parts")]
+        return [_exact(_bash(command), command, "too_many_parts", whole)]
     return parts
 
 
@@ -381,19 +437,21 @@ def _bash(command):
 def _shell_part(text, shaped, cwd):
     activity = _bash(text)
     words = [entry[1] for entry in shaped if entry[0] == "word"]
-    program = PurePosixPath(next((w for w in words if not _ENV.fullmatch(w)), "?")).name
-    program = program if templates._NAME.fullmatch(program) else "?"
+    program, first = _program(words)
     shaper, reason = _shape_words(words)
     if shaper is None:
-        part = _exact(activity, text, reason, program)
+        part = _exact(activity, text, reason, program, previous=first)
         part.cwd = cwd
         return part
     for entry in shaped:
         if entry[0] == "redirect":
             shaper.slot("path", entry[2], prefix=entry[1] + " ")
-    exact_key = f"x:{program} #{_key('exact', text)}"
-    return Part(activity=activity, signature=f"sh:{program} #{_key('shape', shaper.shape)}", exact_key=exact_key,
+    shape, exact = _key("shape", shaper.shape), _key("exact", text)
+    part = Part(activity=activity, signature=f"sh:{program} #{shape}", exact_key=f"x:{program} #{exact}",
                 program=program, slots=shaper.slots, cwd=cwd)
+    if first != program:
+        part.legacy = [[f"sh:{first} #{shape}", part.signature], [f"x:{first} #{exact}", part.exact_key]]
+    return part
 
 
 # ---- other tools -------------------------------------------------------------
@@ -410,7 +468,7 @@ def _tool_part(activity):
         return _exact(activity, text, "malformed", "?")
     inputs = activity.get("input") if isinstance(activity.get("input"), dict) else {}
     if isinstance(activity.get("input"), str) or inputs.get("code") or inputs.get("command") or inputs.get("cmd"):
-        return _exact(activity, text, "opaque_input", program)
+        return _exact(activity, text, "opaque_input", program, previous=program)
     shaper = _Shaper()
     shaper.literal(name)
     shaper.literal(tool_kind)
@@ -418,7 +476,7 @@ def _tool_part(activity):
     for operation in operations:
         label, _, target = operation.partition(": ")
         if not target or not _WORD.fullmatch(label.lower()):
-            return _exact(activity, text, "opaque_input", program)
+            return _exact(activity, text, "opaque_input", program, previous=program)
         shaper.literal(label)
         shaper.slot("path", target)
     fields = {**{k: activity[k] for k in _TOOL_FIELDS if isinstance(activity.get(k), str)},
@@ -445,7 +503,7 @@ def split(activity):
     label = templates.shell_label(activity)
     if label:
         # A clipped label is not the whole command; it is only ever explained as itself.
-        return [_exact(activity, label, "truncated")] if len(label) >= templates.LABEL_CLIP else _shell_parts(label)
+        return [_exact(activity, label, "truncated", first_program(label))] if len(label) >= templates.LABEL_CLIP else _shell_parts(label)
     return [_tool_part(activity)]
 
 
@@ -461,6 +519,7 @@ def with_scripts(part, scripts):
     part.activity = {**part.activity, "scripts": scripts}
     part.signature += f"~{digest}"
     part.exact_key = part.signature if part.exact else part.exact_key + f"~{digest}"
+    part.legacy = [[old + f"~{digest}", new + f"~{digest}"] for old, new in part.legacy]
     return part
 
 

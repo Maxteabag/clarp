@@ -224,8 +224,9 @@ def test_jev_may_pick_a_learned_explanation_of_another_shape(monkeypatch):
         result = settle(service, [item(bash("drivectl put --quiet notes/todo.md"))])[0]
     assert result["text"] == "Likely uploads todo.md to the team drive." and result["source"] == "jev"
     offered = seen[0]["questions"]["t_1"]["criteria"]
-    assert any("Uploads {path1_name} to the team drive." in text for text in offered.values())
-    assert "notes/todo.md" not in str(offered) and len(calls) == 1
+    # Offered as it would read for this call, filled only from its own values.
+    assert any(text.endswith("does this: Uploads todo.md to the team drive.") for text in offered.values())
+    assert "plan.pdf" not in str(offered) and len(calls) == 1
 
 
 def test_every_outcome_writes_one_decision(monkeypatch):

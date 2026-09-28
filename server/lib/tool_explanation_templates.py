@@ -2,8 +2,9 @@
 
 A versioned library of typed templates explains common tool activity without a
 model. `classify()` either returns a validated match or abstains with a reason;
-only an unknown program or tool may be offered to Jev, which picks a bounded
-template ID or `unknown`. Compound, mutating, privileged, uploading and script
+only an unknown program or tool may be offered a template by Jev, which picks a
+bounded template ID or `unknown` (other abstentions may be offered only learned
+explanations; see `JEV_LEARNED_REASONS`). Compound, mutating, privileged, uploading and script
 runs always fall through to the configured language model, which sees script
 evidence. Parameters are literal values from the tool input and are validated
 by type before a template renders them.
@@ -28,6 +29,13 @@ REGRESSION = LIBRARY["regression"]
 # structurally uncertain or could change or send data, where a wrong template
 # would understate the effect.
 JEV_REASONS = frozenset({"unknown_program", "unknown_tool"})
+# These may be offered only the model's own explanations of other shapes of
+# the same program, never a template: such an explanation already says what
+# the program changes. Script runs (the model reads the script), privileged
+# calls and uploads always go to the model.
+JEV_LEARNED_REASONS = frozenset({"mutating_program", "unmapped_git", "multiple_targets", "uncertain", "compound",
+                                 "truncated", "malformed", "shell_builtin", "exploration", "find_action",
+                                 "invalid_parameters"})
 # Jev never learns a rule that describes a change, a network call or execution.
 LEARNABLE_ACTIONS = frozenset({"read", "list", "search"})
 
