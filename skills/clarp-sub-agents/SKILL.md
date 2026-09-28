@@ -119,7 +119,18 @@ purpose, status, output and cancellation.
 
    To give a reported helper more work, just message it
    (`clarp-admin prompt --to <helper> --from "$CLARP_SESSION"`); it goes back
-   to `running`. `clarp-sub-agent stop NAME` stops only the watcher in this
+   to `running`. A helper you already marked `done` does not: `done` means
+   accepted, and a message alone leaves it showing `done` while its new turn
+   runs. Reopen it explicitly first, then message it, and keep the same helper
+   and worktree rather than spawning a duplicate:
+
+   ```bash
+   clarp-admin agent helper-state stream-a-3f9c running --from "$CLARP_SESSION"
+   clarp-admin agent helper-state stream-a-3f9c        # reads back running
+   ```
+
+   A queued prompt is not proof the work started; check the helper's own new
+   activity. `clarp-sub-agent stop NAME` stops only the watcher in this
    mode; the helper agent stays until you mark it done or delete it.
 
 ## Notes
