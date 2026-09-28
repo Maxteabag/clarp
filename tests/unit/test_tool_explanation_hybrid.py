@@ -226,7 +226,9 @@ def test_jev_unavailable_disabled_or_invalid_parameters_fall_back(monkeypatch):
         down = settle(service, [item(bash("eza docs"))], include_provenance=True)[0]
         assert down["source"] == "llm" and down["provenance"]["fallback_reason"] == "jev_unavailable"
 
-        # An argument that could never be a parameter is not offered, so Jev is not asked.
+        # An argument that could never be a parameter is not offered, so with no
+        # learned explanation to choose from either, Jev is not asked.
+        conn().execute("DELETE FROM tool_explanation_learned")
         seen = enable_jev(monkeypatch, pick("list_directory"))
         unsafe = settle(service, [item(bash("eza 'a;b'"))], include_provenance=True)[0]
         assert unsafe["provenance"]["fallback_reason"] == "jev_unsafe_arguments" and seen == []
