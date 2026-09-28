@@ -170,7 +170,7 @@ class MaintenanceWorker:
             log_exception("helperArchiveFail", e)
         try:
             from . import telemetry
-            counts.update(telemetry.rollup_and_prune())
+            counts.update(telemetry.rollup_and_prune(checkpoint=checkpoint))
         except Exception as e:  # noqa: BLE001
             log_exception("telemetryMaintenanceFail", e)
         if any(counts.values()):
