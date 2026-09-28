@@ -550,6 +550,7 @@ class AppController : public QObject {
     bool m_roomsDirty = false;
     QString m_connectionState = QStringLiteral("offline");
     QString m_errorMessage;
+    bool m_errorIsTransport = false;
     QString m_serverName;
     QString m_serverVersion;
     QString m_voiceBio;

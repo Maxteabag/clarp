@@ -281,6 +281,8 @@ AppController::AppController(QObject* parent)
         setConnectionState(m_sse.connected() ? QStringLiteral("live")
                                              : QStringLiteral("reconnecting"));
         if (m_sse.connected()) {
+            // "Connection refused" from the outage must not outlive it.
+            if (m_errorIsTransport) setErrorMessage({});
             // The sidebar waits on the snapshot; attention, jobs and the
             // artifact library can follow once it has arrived instead of
             // competing with it for the Host on a cold start.
@@ -296,8 +298,10 @@ AppController::AppController(QObject* parent)
             }
         }
     });
-    connect(&m_sse, &SseClient::connectionError, this,
-            [this](const QString& message) { setErrorMessage(message); });
+    connect(&m_sse, &SseClient::connectionError, this, [this](const QString& message) {
+        setErrorMessage(message);
+        m_errorIsTransport = true;
+    });
     connect(&m_audio, &AudioController::mediaError, this, &AppController::setErrorMessage);
     connect(&m_audio, &AudioController::transcriptionReady, this,
             [this](const QString& text, const QString& traceId, const QString& transcriptionId,
@@ -2958,6 +2962,7 @@ void AppController::setConnectionState(const QString& state) {
 }
 
 void AppController::setErrorMessage(const QString& message) {
+    m_errorIsTransport = false;
     if (m_errorMessage == message) {
         return;
     }
@@ -3824,6 +3829,8 @@ void AppController::handleRequestFailure(const QString& tag, const QString& mess
     const QString detail =
         statusCode > 0 ? QStringLiteral("%1 (HTTP %2)").arg(message).arg(statusCode) : message;
     setErrorMessage(detail);
+    // No HTTP status: the Host was unreachable. Reconnecting answers it.
+    m_errorIsTransport = statusCode <= 0;
     if (tag == QStringLiteral("server-info")) {
         setConnecting(false);
         setConnectionState(statusCode == 401 ? QStringLiteral("unauthorized")

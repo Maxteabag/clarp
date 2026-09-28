@@ -162,6 +162,8 @@ class FakeClarpServer final : public QTcpServer {
         }
     }
 
+    void dropEvents() { if (m_eventSocket != nullptr) m_eventSocket->abort(); }
+
     void sendEvent(const QJsonObject& event) {
         if (m_eventSocket != nullptr) {
             const QByteArray data = QJsonDocument(event).toJson(QJsonDocument::Compact);
@@ -725,6 +727,7 @@ class NativeCoreTest final : public QObject {
     void streamedTokenAnnouncesOnlyItsRows();
     void spokenMarkupLeavesNoGapsInTheText();
     void quickSwitcherPutsTheExactNameFirst();
+    void unreachableHostErrorClearsWhenItIsBack();
     void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
     void logMergeRefreshesExplanationsOncePerBatch();
     void secondLaunchIsForwardedToTheRunningInstance();
@@ -906,6 +909,29 @@ void NativeCoreTest::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender(
     tools.insert(QStringLiteral("timestamp"), QStringLiteral("invalid"));
     load();
     QCOMPARE(view.index(0, 0).data(ConversationPresentationModel::ActivityLabelRole).toString(), QStringLiteral("21 tool calls"));
+}
+
+void NativeCoreTest::unreachableHostErrorClearsWhenItIsBack() {
+    // After a Host restart the desktop reconnected, but "Connection refused"
+    // from a request made during the outage stayed in the banner.
+    FakeClarpServer server;
+    QVERIFY(server.listenLocal());
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
+    const auto restore = qScopeGuard([&] { qputenv("CLARP_BASE_URL", oldBase); qputenv("CLARP_TOKEN", oldToken); });
+    qputenv("CLARP_BASE_URL", server.baseUrl().toUtf8());
+    qputenv("CLARP_TOKEN", "test-token");
+    AppController controller;
+    QTRY_VERIFY_WITH_TIMEOUT(controller.connected(), 3000);
+    const quint16 port = server.serverPort();
+    server.close();
+    server.dropEvents();
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.connected(), 3000);
+    controller.refreshAgents();
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.errorMessage().isEmpty(), 3000);
+    QVERIFY(server.listen(QHostAddress::LocalHost, port));
+    QTRY_VERIFY_WITH_TIMEOUT(controller.connected(), 15000);
+    QTRY_VERIFY_WITH_TIMEOUT(controller.errorMessage().isEmpty(), 1000);
 }
 
 void NativeCoreTest::quickSwitcherPutsTheExactNameFirst() {
