@@ -251,7 +251,7 @@ Rectangle {
             color: root.styled("background", Theme.window)
             Behavior on color { ColorAnimation { duration: 120 } }
 
-            TranscriptList {
+            TranscriptView {
                 id: transcript
 
                 anchors.fill: parent
@@ -263,9 +263,8 @@ Rectangle {
                 rightMargin: 14
                 topMargin: 6
                 bottomMargin: 6
-                reuseItems: true
-                section.property: "dayLabel"
-                section.delegate: Item {
+                sectionProperty: "dayLabel"
+                sectionDelegate: Component { Item {
                     required property string section
                     width: transcript.width
                     readonly property bool showHeading: section.length > 0
@@ -298,8 +297,7 @@ Rectangle {
                         height: 1
                         color: root.styled("rule", Theme.rule)
                     }
-                }
-                boundsBehavior: Flickable.StopAtBounds
+                } }
 
                 header: Item {
                     width: transcript.width

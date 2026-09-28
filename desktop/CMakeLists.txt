@@ -80,6 +80,8 @@ target_sources(clarp-desktop PRIVATE
     src/app/TimeFormat.cpp
     src/app/TimeFormat.h
     src/models/AgentFilterModel.cpp
+    src/views/TranscriptLayout.cpp
+    src/views/TranscriptLayout.h
     src/models/BackgroundJobTracker.cpp
     src/models/BackgroundJobTracker.h
     src/models/TreeOrder.h
@@ -146,6 +148,7 @@ qt_add_qml_module(clarp-desktop
         qml/components/ConversationPane.qml
         qml/components/HeaderContext.qml
         qml/components/TranscriptList.qml
+        qml/components/TranscriptView.qml
         qml/components/AttachFileDialog.qml
         qml/components/DeferredPanel.qml
         qml/components/DisplayCellCard.qml
@@ -211,7 +214,7 @@ qt_add_qml_module(clarp-desktop
         resources/backends/deepseek.png
 )
 
-target_include_directories(clarp-desktop PRIVATE src src/app src/models)
+target_include_directories(clarp-desktop PRIVATE src src/app src/models src/views)
 target_compile_definitions(clarp-desktop PRIVATE
     CLARP_DESKTOP_VERSION="${PROJECT_VERSION}"
 )
