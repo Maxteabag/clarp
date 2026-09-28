@@ -116,3 +116,14 @@ def test_expired_sign_in_is_auth_not_transient():
     # A usage limit that also mentions a token still counts as a usage limit.
     assert ec.classify_error("You've hit your usage limit; token expired") == ec.USAGE_LIMIT
     assert ec.AUTH in ec.NOTIFY
+
+
+def test_opencode_error_wordings():
+    assert ec.classify_error(
+        "Account peter-x is suspended, possibly due to reaching the monthly "
+        "spending limit or failure to pay past invoices.") == ec.USAGE_LIMIT
+    assert ec.classify_error("Payment Required: You have depleted your monthly "
+                          "included credits.") == ec.USAGE_LIMIT
+    assert ec.classify_error("getaddrinfo ETIMEOUT router.huggingface.co") == ec.CONNECTION
+    assert ec.classify_error("The operation was aborted.") == ec.INTERRUPTED
+    assert ec.classify_error("opencode exited rc=1") == ec.RUNNER_EXIT
