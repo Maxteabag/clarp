@@ -65,7 +65,8 @@ def _write(c, owner: dict, native: str, tool: str, at: int, *, state: str,
     ident = job_id(owner['agent_id'], native, tool)
     jobs.observe_native_task(c, owner, ident, native=native, tool=tool, at=at,
                              provider='claude', state=state, title=safe_text(title),
-                             task=task, project=project, exit_code=exit_code)
+                             task=task, project=project, exit_code=exit_code,
+                             evidence_stale=db.now_ms() - at > STALE_MS)
 
 
 def parse_actions(native: str, project: str, record: dict) -> list[dict]:
@@ -150,6 +151,9 @@ def observe(owner: dict, native: str, path: pathlib.Path, *, ended: bool = False
     if not _ID.fullmatch(native) or path.stem != native:
         return
     c = db.conn()
+    if pending_reconciliation(c, owner, native, ended=ended, limit=1):
+        reconcile_if_needed(owner, native, ended=ended)
+        return True  # Existing stale evidence takes this visit; replay resumes next tick.
     cursor = c.execute('SELECT * FROM provider_job_cursors WHERE agent_id=? AND native_id=?',
                        (owner['agent_id'], native)).fetchone()
     before = dict(cursor) if cursor else None
