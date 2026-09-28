@@ -32,7 +32,7 @@ def test_text_turn_has_only_the_question_restriction():
     body = vp.app_turn_instructions(voice=False)
     assert body == vp._NO_INTERACTIVE_QUESTIONS
     assert "<speak>" not in body and "<vox>" not in body
-    assert "Never call AskUserQuestion" in body
+    assert "Pay special attention to Clarp skills." in body
 
 
 def test_voice_turn_adds_speak_and_natural_speech_blocks():
@@ -116,3 +116,11 @@ def test_narration_lookup_failure_never_breaks_the_turn(monkeypatch):
     monkeypatch.setattr(agents, "get_by_session", boom)
     assert vp._narration_clause("any") == ""
     assert vp.app_turn_instructions(voice=True, session="any") == vp.app_turn_instructions(voice=True)
+
+
+def test_strip_handles_the_quoted_prompt_opencode_stores():
+    from lib.voice_preamble import apply_voice_preamble, strip_voice_preamble
+    wrapped = apply_voice_preamble("Hi there", voice=False)
+    assert strip_voice_preamble('"' + wrapped + '"') == "Hi there"
+    assert strip_voice_preamble(wrapped) == "Hi there"
+    assert strip_voice_preamble('"just a quoted message"') == '"just a quoted message"'

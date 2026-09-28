@@ -22,21 +22,7 @@ _VOICE_PREAMBLE_SPLIT = "\n\n--- user message ---\n"
 
 # Always-on for app-dispatched turns: CLI question UIs are unavailable,
 # while supporting Hosts can publish durable questions to the native inbox.
-_NO_INTERACTIVE_QUESTIONS = (
-    "You are connected through a phone/voice app. It cannot display CLI "
-    "interactive prompts, question tools, multiple-choice pickers, or approval "
-    "dialogs. Never call AskUserQuestion, request_user_input, or similar CLI "
-    "popup tools; they will not render. For a material clarification, use the "
-    "clarp-decisions skill's documented clarp-agent-artifacts question helper "
-    "when the Host supports native questions. These durable Clarp artifacts "
-    "are answered in Updates or the conversation, not in a CLI popup. For "
-    "explicit authorization, use the skill's decision helper and wait for "
-    "approval. If native questions are unavailable, ask in ordinary text and "
-    "wait for the user's reply. Make routine implementation choices yourself "
-    "and continue independent work while awaiting a necessary answer. Never "
-    "self-resolve a question or approval; a preference or custom answer is "
-    "not blanket authorization."
-)
+_NO_INTERACTIVE_QUESTIONS = "Pay special attention to Clarp skills."
 
 # Added only for spoken turns: how the <speak> voice gating works.
 _VOICE_INSTRUCTION = (
@@ -175,8 +161,13 @@ def apply_voice_preamble(text: str, *, voice: bool = True,
 def strip_voice_preamble(text: str) -> str:
     """Inverse of apply_voice_preamble — recover the user's original message
     for the history pane. A no-op if the preamble isn't present."""
-    if isinstance(text, str) and text.startswith(_VOICE_PREAMBLE_HEAD):
-        i = text.find(_VOICE_PREAMBLE_SPLIT)
+    if not isinstance(text, str):
+        return text
+    # OpenCode stores the prompt argument wrapped in double quotes.
+    quoted = text.startswith('"' + _VOICE_PREAMBLE_HEAD) and text.endswith('"')
+    body = text[1:-1] if quoted else text
+    if body.startswith(_VOICE_PREAMBLE_HEAD):
+        i = body.find(_VOICE_PREAMBLE_SPLIT)
         if i != -1:
-            return text[i + len(_VOICE_PREAMBLE_SPLIT):]
+            return body[i + len(_VOICE_PREAMBLE_SPLIT):]
     return text
