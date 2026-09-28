@@ -13,6 +13,7 @@ import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
+from . import error_classify
 from .voice_preamble import strip_voice_preamble
 from .log import log_exception
 from .claude_transcript import summarise_tool
@@ -328,6 +329,12 @@ def _kind_of(data: dict) -> str:
     return "commentary" if finish == "tool-calls" else "final_answer"
 
 
+def _is_abort(data: dict) -> bool:
+    """OpenCode's record of a stop (Clarp's abort, or its process ending)."""
+    error = data.get("error")
+    return isinstance(error, dict) and error.get("name") == "MessageAbortedError"
+
+
 def _error_text(data: dict) -> str:
     error = data.get("error")
     if not isinstance(error, dict):
@@ -335,6 +342,9 @@ def _error_text(data: dict) -> str:
     detail = error.get("data") if isinstance(error.get("data"), dict) else {}
     message = str(detail.get("message") or error.get("message") or "").strip()
     name = str(error.get("name") or "error")
+    reason = error_classify.explain(message)
+    if reason:
+        return f"{reason}. (OpenCode: {message})"
     return f"OpenCode {name}: {message}" if message else f"OpenCode {name}"
 
 
@@ -386,6 +396,10 @@ def _turns_from_messages(
         failed = False
         if role == "user":
             text = strip_voice_preamble(text)
+        elif not text and not tools and _is_abort(data):
+            # A stopped turn. The stop is already the agent's state, and
+            # Codex and Claude show no row for it either.
+            continue
         elif not text and not tools:
             # A turn that died (suspended account, provider outage) has an
             # error and no parts; without this the chat shows an unanswered

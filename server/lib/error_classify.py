@@ -97,6 +97,9 @@ _USAGE_LIMIT_RE = re.compile(
     # Fireworks through OpenCode: "Account … is suspended, possibly due to
     # reaching the monthly spending limit".
     r"monthly spending limit|monthly included credits|"
+    # OpenCode's free Zen models refuse clients other than OpenCode's own
+    # apps. A plan limit, not an outage: another model works.
+    r"free tier can only be used from within opencode|"
     # HTTP 402 is a billing terminal by definition, and is how Grok surfaces
     # an exhausted balance. Keep it anchored to the status word/number pair so
     # a stray "402" in unrelated output cannot trip it.
@@ -122,6 +125,25 @@ _RUNNER_EXIT_RE = re.compile(
     r"\bprocess exited\b.*\b(rc|code)=?\s*\d+",
     re.I,
 )
+
+
+# Refusals whose raw text does not tell the user what to do, and what to show
+# instead. The category still comes from classify_error.
+_EXPLANATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"free tier can only be used from within opencode", re.I),
+     "This free OpenCode model only runs in OpenCode's own apps. "
+     "Choose another model for this agent"),
+)
+
+
+def explain(message: str | None) -> str:
+    """A plain reason for a known refusal, or "" when the category's own
+    wording will do."""
+    text = message or ""
+    for pattern, reason in _EXPLANATIONS:
+        if pattern.search(text):
+            return reason
+    return ""
 
 
 def classify_error(message: str | None) -> str:

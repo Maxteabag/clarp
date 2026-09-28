@@ -8,6 +8,8 @@ import sqlite3
 import stat
 import sys
 
+import pytest
+
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
@@ -18,6 +20,12 @@ from lib import opencode_transcript  # noqa: E402
 from lib import turn_lifecycle  # noqa: E402
 
 OPENCODE = by_id("opencode")
+
+
+@pytest.fixture(autouse=True)
+def _run_path(monkeypatch):
+    """These cover the ``opencode run`` path; test_opencode_serve covers live."""
+    monkeypatch.setenv("CLARP_OPENCODE_LIVE", "0")
 
 
 def test_build_cmd_fresh_and_resume():
@@ -407,3 +415,31 @@ def test_error_event_shows_the_provider_message(tmp_path, monkeypatch):
                                  enqueue=lambda **_k: 1)
     handle.drain_thread.join(timeout=5)
     assert errors == ["Account is suspended"]
+
+
+def test_run_path_asks_for_reasoning_events_and_treats_them_as_busy(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv("OPENCODE_FAKE_ARGV_OUT", str(tmp_path / "argv.json"))
+    events = [
+        {"type": "tool_use", "sessionID": "ses_x", "part": {
+            "tool": "bash", "state": {"status": "completed", "input": {"command": "ls"}}}},
+        {"type": "reasoning", "sessionID": "ses_x", "part": {"text": "hidden thought"}},
+        {"type": "text", "sessionID": "ses_x", "part": {"text": "Done."}},
+    ]
+    _install_fake_opencode(bin_dir, "".join(json.dumps(e) + "\n" for e in events))
+    states: list[str] = []
+    monkeypatch.setattr(OPENCODE, "_transition",
+                        lambda _agent_id, event, _detail: states.append(event))
+    monkeypatch.setattr(agents_db, "get_by_agent_id", lambda _id: None)
+    monkeypatch.setattr(agents_db, "latest_turn_synthesize_audio", lambda _id: False)
+    results: list[dict] = []
+    handle = OPENCODE.start_turn(text="hi", cwd=tmp_path, agent_id="a1", session="s",
+                                 on_session_init=lambda _sid: True,
+                                 on_result=results.append, enqueue=lambda **_k: 1)
+    handle.drain_thread.join(timeout=5)
+    assert "--thinking" in json.loads((tmp_path / "argv.json").read_text())
+    assert states[states.index(turn_lifecycle.TurnEvent.TOOL_STARTED) + 1] == \
+        turn_lifecycle.TurnEvent.TEXT_STREAMED
+    assert results[0]["last_agent_message"] == "Done."

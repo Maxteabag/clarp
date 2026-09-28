@@ -191,7 +191,55 @@ def test_parse_deepseek_models_keeps_only_deepseek_rows_with_provider_labels():
     assert [item["label"] for item in rows] == [
         "deepseek-pro-latest (Fireworks)", "DeepSeek-V4-Pro (Hugging Face)"]
     assert rows[0]["source"]["detail"] == "opencode models (deepseek)"
-    assert rows[0]["supported_efforts"] == ["low", "medium", "high", "max"]
+    # A plain listing carries no variants: every effort the CLI knows.
+    assert rows[0]["supported_efforts"] == [
+        "none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+
+VERBOSE = """opencode/big-pickle
+{
+  "id": "big-pickle",
+  "name": "Big Pickle",
+  "limit": {
+    "context": 200000
+  },
+  "variants": {}
+}
+huggingface/deepseek-ai/DeepSeek-V4.1-Flash
+{
+  "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+  "name": "DeepSeek V4.1 Flash",
+  "variants": {
+    "none": {},
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "high": {},
+    "xhigh": {},
+    "max": {},
+    "turbo": {}
+  }
+}
+"""
+
+
+def test_verbose_opencode_listing_gives_names_and_per_model_efforts():
+    rows = capabilities.parse_opencode_models(VERBOSE, observed_at="2026-09-28T00:00:00Z")
+    assert [(r["id"], r["label"], r["supported_efforts"]) for r in rows] == [
+        ("opencode/big-pickle", "Big Pickle", []),
+        ("huggingface/deepseek-ai/DeepSeek-V4.1-Flash", "DeepSeek V4.1 Flash",
+         ["none", "low", "high", "xhigh", "max"]),
+    ]
+    deepseek = capabilities.parse_deepseek_models(VERBOSE, observed_at="2026-09-28T00:00:00Z")
+    assert [(r["label"], r["supported_efforts"]) for r in deepseek] == [
+        ("DeepSeek-V4.1-Flash (Hugging Face)", ["none", "low", "high", "xhigh", "max"])]
+
+
+def test_opencode_catalog_is_model_scoped():
+    from lib.backend.registry import by_id
+    for backend in ("opencode", "deepseek"):
+        assert by_id(backend).effort_scope == "model"
+        assert "xhigh" in by_id(backend).efforts and "none" in by_id(backend).efforts
 
 
 def test_claude_resolution_honors_configured_runtime_binary(monkeypatch):
@@ -290,7 +338,7 @@ def test_slow_opencode_probe_uses_remembered_listing_and_refreshes_in_background
         capabilities, "_refresh_opencode_models_in_background", scheduled.append)
 
     def slow_run(argv, *, timeout):
-        if argv[1:] == ["models"]:
+        if argv[1:] == ["models", "--verbose"]:
             raise subprocess.TimeoutExpired(argv, timeout)
         return subprocess.CompletedProcess(argv, 0, stdout="opencode 1.0\n", stderr="")
 
@@ -316,7 +364,7 @@ def test_quick_opencode_probe_is_remembered_for_the_next_slow_one(monkeypatch):
     settings_store.set_text(capabilities._OPENCODE_LAST_CATALOG_KEY, "")
 
     def quick_run(argv, *, timeout):
-        if argv[1:] == ["models"]:
+        if argv[1:] == ["models", "--verbose"]:
             return subprocess.CompletedProcess(
                 argv, 0, stdout="huggingface/deepseek-ai/DeepSeek-V4-Pro\n", stderr="")
         return subprocess.CompletedProcess(argv, 0, stdout="opencode 1.0\n", stderr="")
@@ -530,8 +578,13 @@ def test_catalog_rows_advertise_presentation_and_flags():
     assert row["brand"]["tint_dark"] == "#5ee4b5"
     assert row["supports_compact"] is False and row["supports_resume"] is True
     assert row["effort_ui"] == "picker" and row["login_kind"] == "none"
-    # Provider-wide efforts still surface for a provider-scoped CLI.
-    assert row["supported_efforts"] == ["low", "medium", "high", "max"]
+    # OpenCode's efforts are per model, so none at provider level...
+    assert row["supported_efforts"] is None
+    # ...while a provider-scoped CLI still lists them there.
+    grok = provider_capabilities._discover_provider(
+        "grok", observed, resolve=lambda _name: None,
+        run=lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    assert grok["supported_efforts"] == ["low", "medium", "high"]
 
     agy = provider_capabilities._discover_provider(
         "agy", observed, resolve=lambda _name: None,
