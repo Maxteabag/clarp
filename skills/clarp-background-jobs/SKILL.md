@@ -34,6 +34,15 @@ Cancellation is sticky for a stable ID; use explicit `job-restart` only when
 the user intentionally starts a new run of that previously cancelled target,
 then use the new handle it prints.
 
+Job ids are global across agents, not per session: registering an id another
+agent owns fails with `job id already belongs to another agent`. When you take
+over a service from another agent, give it a new, distinct stable id under
+your own session (e.g. prefix it with your service name) unless you are truly
+continuing that agent's ownership. Never register or heartbeat as the previous
+owner, and never edit the job database to move an id. Before switching traffic
+to the new instance, start it for real and confirm its `job-upsert` succeeded
+and its handle is active; if registration fails, keep the old instance serving.
+
 A job is a **background process**. A Clarp helper agent you created is a
 **sub-agent** and is counted separately (see `clarp-sub-agents`); do not
 register a job just to make a helper look busy.
