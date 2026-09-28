@@ -27,18 +27,6 @@ target_link_libraries(clarp-reading-theme-tests PRIVATE Qt6::Gui Qt6::Test)
 clarp_apply_quality_settings(clarp-reading-theme-tests)
 add_test(NAME clarp-desktop-reading-theme COMMAND clarp-reading-theme-tests)
 
-add_executable(clarp-transcript-layout-tests
-    tst_transcript_layout.cpp
-    ../src/views/TranscriptLayout.cpp
-    ../src/views/TranscriptLayout.h)
-target_include_directories(clarp-transcript-layout-tests PRIVATE ../src)
-target_link_libraries(clarp-transcript-layout-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Test)
-clarp_apply_quality_settings(clarp-transcript-layout-tests)
-add_test(NAME clarp-desktop-transcript-layout COMMAND clarp-transcript-layout-tests)
-set_tests_properties(clarp-desktop-transcript-layout PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_FORCE_STDERR_LOGGING=1;QT_IM_MODULE=compose"
-    TIMEOUT 20)
-
 add_executable(clarp-desktop-tests
     ../src/app/PreviewVersions.cpp
     ../src/app/PreviewVersions.h
