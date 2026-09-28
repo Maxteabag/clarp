@@ -1596,6 +1596,20 @@ QVariantList AppController::matchingAgents(const QString& query) const {
             {QStringLiteral("unread"), agent->unread},
         });
     }
+    if (needle.isEmpty()) return matches;
+    // Enter opens the first row: typing "Ada" must open Ada, not a more
+    // recently active Adam. Better matches first, recency within each.
+    const auto rank = [&needle](const QVariantMap& match) {
+        const QString name = match.value(QStringLiteral("name")).toString();
+        if (name.compare(needle, Qt::CaseInsensitive) == 0) return 0;
+        if (name.startsWith(needle, Qt::CaseInsensitive)) return 1;
+        for (qsizetype at = name.indexOf(needle, 0, Qt::CaseInsensitive); at > 0;
+             at = name.indexOf(needle, at + 1, Qt::CaseInsensitive))
+            if (!name.at(at - 1).isLetterOrNumber()) return 2;
+        if (name.contains(needle, Qt::CaseInsensitive)) return 3;
+        return match.value(QStringLiteral("session")).toString().contains(needle, Qt::CaseInsensitive) ? 4 : 5;
+    };
+    std::ranges::stable_sort(matches, {}, [&rank](const QVariant& match) { return rank(match.toMap()); });
     return matches;
 }
 

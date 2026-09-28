@@ -724,6 +724,7 @@ class NativeCoreTest final : public QObject {
     void consecutiveExplanationsCollapseWithoutChangingTranscript();
     void streamedTokenAnnouncesOnlyItsRows();
     void spokenMarkupLeavesNoGapsInTheText();
+    void quickSwitcherPutsTheExactNameFirst();
     void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
     void logMergeRefreshesExplanationsOncePerBatch();
     void secondLaunchIsForwardedToTheRunningInstance();
@@ -905,6 +906,26 @@ void NativeCoreTest::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender(
     tools.insert(QStringLiteral("timestamp"), QStringLiteral("invalid"));
     load();
     QCOMPARE(view.index(0, 0).data(ConversationPresentationModel::ActivityLabelRole).toString(), QStringLiteral("21 tool calls"));
+}
+
+void NativeCoreTest::quickSwitcherPutsTheExactNameFirst() {
+    // Enter opens the first match. "Ada" opened Adam, the more recently
+    // active agent, which runs on a much more expensive model.
+    AppController controller;
+    QJsonArray agents;
+    for (const auto& [session, persona] : {std::pair{"adam", "Adam"}, std::pair{"kada", "Kada"},
+                                           std::pair{"team-ada", "Team Ada"}, std::pair{"ada", "Ada"},
+                                           std::pair{"ada-helper", "Adaline"}})
+        agents.append(QJsonObject{{QStringLiteral("session"), QString::fromLatin1(session)},
+                                  {QStringLiteral("persona"), QString::fromLatin1(persona)}});
+    controller.agents()->applySnapshot({{QStringLiteral("agents"), agents}});
+    QStringList names;
+    for (const QVariant& match : controller.matchingAgents(QStringLiteral("ada")))
+        names.append(match.toMap().value(QStringLiteral("name")).toString());
+    QCOMPARE(names.size(), 5);
+    QCOMPARE(names.first(), QStringLiteral("Ada"));
+    QCOMPARE(names.indexOf(QStringLiteral("Team Ada")) > names.indexOf(QStringLiteral("Adaline")), true);
+    QCOMPARE(names.last(), QStringLiteral("Kada"));
 }
 
 void NativeCoreTest::spokenMarkupLeavesNoGapsInTheText() {
