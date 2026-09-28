@@ -88,9 +88,9 @@ Item {
         followLatest = true;
         newMessagesBelow = false;
     }
-    // The layout keeps the reader on the same message across resets itself.
-    function beforeModelReset() {}
-    function afterModelReset() {}
+    // Around a refresh that rebuilds the rows: stay on the same message.
+    function beforeModelReset() { layout.rememberAnchorIdentity(); }
+    function afterModelReset() { layout.restoreAnchorIdentity(); }
 
     function scrollBy(delta) {
         flick.contentY = Math.max(0, Math.min(layout.endY(), flick.contentY + delta));
