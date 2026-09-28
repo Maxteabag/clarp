@@ -311,7 +311,7 @@ Rectangle {
                         text: root.conversationModel.loading ? "Loading…" : "Load earlier messages"
                         enabled: !root.conversationModel.loading
                         onClicked: {
-                            transcript.pauseFollowing();
+                            transcript.stopFollowing("load earlier");
                             root.controller.loadOlderSession(root.session);
                         }
                     }
