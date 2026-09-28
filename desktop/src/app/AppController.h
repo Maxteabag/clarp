@@ -515,6 +515,7 @@ class AppController : public QObject {
     void connectConversationSignals(ConversationModel* model, const QString& session);
     void scheduleConversationCache(const QString& session);
     [[nodiscard]] QString defaultToken() const;
+    [[nodiscard]] qsizetype styledMarkdownCacheBytes() const;
 
     ApiClient m_api;
     SseClient m_sse;
@@ -583,6 +584,7 @@ class AppController : public QObject {
     QHash<QString, QPair<QString, QString>> m_avatarRequests;
     QHash<QString, QString> m_avatarFailures;
     mutable QHash<QString, QString> m_styledMarkdown;  // key: options|markdown
+    mutable qsizetype m_styledMarkdownBytes = 0;
     QHash<QString, QUrl> m_contactAvatarSources;      // contact name -> data URL
     QHash<QString, QString> m_contactAvatarUrls;      // contact name -> Host URL
     QHash<QString, QString> m_contactAvatarRequests;  // request tag -> contact name

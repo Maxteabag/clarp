@@ -788,6 +788,7 @@ class NativeCoreTest final : public QObject {
     void narrationClipWithoutMediaBackendStaysBounded();
     void sharedPlaybackDoesNotDuplicateDownloads();
     void markdownParagraphsBecomeVisibleDisplayBlocks();
+    void hugeMarkdownBlocksAreNotRetainedInTheStyleCache();
     void agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent();
     void pairConversationRoomsAreReadOnlyProjections();
     void onlyWebAndMailLinksAreOpenable();
@@ -2443,6 +2444,38 @@ void NativeCoreTest::markdownParagraphsBecomeVisibleDisplayBlocks() {
                  QStringLiteral("```text\nfirst line\n\nsecond line\n```\n\nAfter code.")),
              QStringList({QStringLiteral("```text\nfirst line\n\nsecond line\n```"),
                           QStringLiteral("After code.")}));
+}
+
+void NativeCoreTest::hugeMarkdownBlocksAreNotRetainedInTheStyleCache() {
+    AppController controller;
+    const QVariantMap style{{QStringLiteral("bodyPixelSize"), 15},
+                            {QStringLiteral("bodyFamily"), QStringLiteral("JetBrains Mono")},
+                            {QStringLiteral("monoFamily"), QStringLiteral("JetBrains Mono")}};
+
+    QVERIFY(controller.styledMarkdownHtml(QStringLiteral("hello **world**"), style).contains(QStringLiteral("world")));
+    const qlonglong cachedBytes =
+        controller.memoryCounters().value(QStringLiteral("styledMarkdownCacheBytes")).toLongLong();
+    QVERIFY(cachedBytes > 0);
+
+    const QString huge = QStringLiteral("# Huge\n\n") + QString(17 * 1024, u'x');
+    QVERIFY(controller.styledMarkdownHtml(huge, style).contains(QStringLiteral("Huge")));
+    QCOMPARE(controller.memoryCounters().value(QStringLiteral("styledMarkdownCacheBytes")).toLongLong(),
+             cachedBytes);
+
+    constexpr qlonglong maxCacheBytes = 4 * 1024 * 1024;
+    qlonglong previousBytes = cachedBytes;
+    bool sawBoundEnforced = false;
+    for (int i = 0; i < 900; ++i) {
+        const QString markdown = QStringLiteral("## Row %1\n\n").arg(i)
+            + QString(1800, QChar(u'a' + (i % 26)));
+        QVERIFY(controller.styledMarkdownHtml(markdown, style).contains(QStringLiteral("Row")));
+        const qlonglong currentBytes =
+            controller.memoryCounters().value(QStringLiteral("styledMarkdownCacheBytes")).toLongLong();
+        QVERIFY2(currentBytes <= maxCacheBytes, qPrintable(QStringLiteral("cache grew to %1").arg(currentBytes)));
+        if (currentBytes < previousBytes) sawBoundEnforced = true;
+        previousBytes = currentBytes;
+    }
+    QVERIFY(sawBoundEnforced);
 }
 
 void NativeCoreTest::sseCursorIsScopedToOneHost() {
