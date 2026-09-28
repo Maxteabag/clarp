@@ -300,7 +300,7 @@ void TranscriptLayout::updatePolish() { relayout(); }
 
 void TranscriptLayout::itemChange(ItemChange change, const ItemChangeData& value) {
     QQuickItem::itemChange(change, value);
-    if (change == ItemVisibleHasChanged && value.boolValue) scheduleLayout();
+    if (change == ItemVisibleHasChanged && isVisible()) scheduleLayout();
 }
 
 void TranscriptLayout::componentComplete() {

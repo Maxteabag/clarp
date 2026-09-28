@@ -105,7 +105,7 @@ int TranscriptRows::firstRowOf(int sourceRow) const {
 int TranscriptRows::rowsOf(int sourceRow) const {
     const int first = firstRowOf(sourceRow);
     int rows = 0;
-    while (first + rows < count() && m_rows[static_cast<size_t>(first + rows)].source == sourceRow) ++rows;
+    while (first + rows < count() && m_rows[static_cast<size_t>(first) + static_cast<size_t>(rows)].source == sourceRow) ++rows;
     return rows;
 }
 
@@ -211,7 +211,7 @@ void TranscriptRows::onDataChanged(const QModelIndex& topLeft, const QModelIndex
         const auto parts = partsFor(source);
         const int wanted = static_cast<int>(parts.size());
         if (wanted == existing) {
-            for (int part = 0; part < wanted; ++part) m_rows[static_cast<size_t>(first + part)] = parts[static_cast<size_t>(part)];
+            for (int part = 0; part < wanted; ++part) m_rows[static_cast<size_t>(first) + static_cast<size_t>(part)] = parts[static_cast<size_t>(part)];
             if (existing > 0) emit dataChanged(index(first), index(first + existing - 1), roles);
             continue;
         }
@@ -219,7 +219,7 @@ void TranscriptRows::onDataChanged(const QModelIndex& topLeft, const QModelIndex
         // past the threshold): keep the rows that stay and add or drop the rest,
         // so the view keeps its delegates and position for the first part.
         const int kept = std::min(existing, wanted);
-        for (int part = 0; part < kept; ++part) m_rows[static_cast<size_t>(first + part)] = parts[static_cast<size_t>(part)];
+        for (int part = 0; part < kept; ++part) m_rows[static_cast<size_t>(first) + static_cast<size_t>(part)] = parts[static_cast<size_t>(part)];
         if (kept > 0) emit dataChanged(index(first), index(first + kept - 1));
         if (wanted > existing) {
             beginInsertRows({}, first + existing, first + wanted - 1);
