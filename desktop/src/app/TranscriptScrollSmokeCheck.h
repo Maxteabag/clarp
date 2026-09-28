@@ -253,7 +253,18 @@ inline void startTranscriptSwitchSmokeCheck(QGuiApplication& application, QQuick
     if (QGuiApplication::platformName() != QStringLiteral("offscreen") || window == nullptr || controller == nullptr) {
         application.exit(EXIT_FAILURE); return;
     }
-    struct Frame { int step; QString session; qreal contentY; qreal height; bool atEnd; bool follow; int count; qreal sceneY; qreal distance; };
+    struct Frame {
+        int step;
+        QString session;
+        QString modelSession;
+        qreal contentY;
+        qreal height;
+        bool atEnd;
+        bool follow;
+        int count;
+        qreal sceneY;
+        qreal distance;
+    };
     auto frames = std::make_shared<QList<Frame>>();
     auto step = std::make_shared<int>(-1);
     const auto transcripts = [window] {
@@ -271,7 +282,9 @@ inline void startTranscriptSwitchSmokeCheck(QGuiApplication& application, QQuick
     QObject::connect(window, &QQuickWindow::afterAnimating, &application, [frames, step, transcripts] {
         if (*step < 0) return;
         for (const auto& [session, item] : transcripts())
-            frames->append(Frame{.step = *step, .session = session, .contentY = item->property("contentY").toReal(),
+            frames->append(Frame{.step = *step, .session = session,
+                                 .modelSession = item->property("modelSession").toString(),
+                                 .contentY = item->property("contentY").toReal(),
                                  .height = item->height(), .atEnd = item->property("atYEnd").toBool(),
                                  .follow = item->property("followLatest").toBool(), .count = item->property("count").toInt(),
                                  .sceneY = item->mapToScene(QPointF(0, 0)).y(),
@@ -294,12 +307,22 @@ inline void startTranscriptSwitchSmokeCheck(QGuiApplication& application, QQuick
             for (const auto& f : *frames) {
                 if (f.step != forStep) continue;
                 ++total;
-                const QString line = QStringLiteral("%1 y=%2 h=%3 end=%4 follow=%5 n=%6 sceneY=%7 dist=%8")
-                    .arg(f.session).arg(f.contentY, 0, 'f', 1).arg(f.height, 0, 'f', 1).arg(f.atEnd).arg(f.follow).arg(f.count).arg(f.sceneY, 0, 'f', 1).arg(f.distance, 0, 'f', 1);
+                const QString line = QStringLiteral("%1 model=%2 y=%3 h=%4 end=%5 follow=%6 n=%7 sceneY=%8 dist=%9")
+                    .arg(f.session, f.modelSession).arg(f.contentY, 0, 'f', 1).arg(f.height, 0, 'f', 1)
+                    .arg(f.atEnd).arg(f.follow).arg(f.count).arg(f.sceneY, 0, 'f', 1).arg(f.distance, 0, 'f', 1);
                 if (line != last) qInfo("switch-frames step=%d %s", forStep, qPrintable(line));
                 last = line;
             }
             return total;
+        };
+        const auto everyFrameShowsPaneSession = [frames](int forStep, const QString& session) {
+            bool any = false;
+            for (const auto& f : *frames) {
+                if (f.step != forStep || f.session != session) continue;
+                any = true;
+                if (f.modelSession != f.session) return false;
+            }
+            return any;
         };
         // Every frame painted for `session` during `forStep` must show the end.
         const auto everyFrameAtEnd = [frames](int forStep, const QString& session) {
@@ -359,6 +382,7 @@ inline void startTranscriptSwitchSmokeCheck(QGuiApplication& application, QQuick
             const int painted = report(2);
             auto* boreal = view(QStringLiteral("Boreal"));
             if (!require(boreal != nullptr && painted > 0, "Boreal must be shown after the switch")) return;
+            if (!require(everyFrameShowsPaneSession(2, QStringLiteral("Boreal")), "switching agents must never paint a transcript from the wrong chat")) return;
             if (!require(everyFrameAtEnd(2, QStringLiteral("Boreal")), "switching agents must never paint the new chat away from its end")) return;
             controller->selectSession(QStringLiteral("Aura"));
             break;
@@ -367,6 +391,7 @@ inline void startTranscriptSwitchSmokeCheck(QGuiApplication& application, QQuick
             report(3);
             auto* aura = view(QStringLiteral("Aura"));
             if (!require(aura != nullptr, "Aura must be shown after switching back")) return;
+            if (!require(everyFrameShowsPaneSession(3, QStringLiteral("Aura")), "switching back must never paint a transcript from the wrong chat")) return;
             if (!require(everyFrameAtEnd(3, QStringLiteral("Aura")), "switching back must never paint the chat away from its end")) return;
             controller->panes()->splitActive(QStringLiteral("vertical"), QStringLiteral("Cedar"));
             break;
@@ -376,6 +401,8 @@ inline void startTranscriptSwitchSmokeCheck(QGuiApplication& application, QQuick
             auto* cedar = view(QStringLiteral("Cedar"));
             auto* aura = view(QStringLiteral("Aura"));
             if (!require(cedar != nullptr && aura != nullptr, "both panes must be visible after the split")) return;
+            if (!require(everyFrameShowsPaneSession(4, QStringLiteral("Cedar"))
+                    && everyFrameShowsPaneSession(4, QStringLiteral("Aura")), "split panes must not paint a transcript from the wrong chat")) return;
             if (!require(everyFrameAtEnd(4, QStringLiteral("Cedar")), "a new pane must open at its end without an off-end frame")) return;
             if (!require(everyFrameAtEnd(4, QStringLiteral("Aura")), "the surviving pane must stay at its end through the split")) return;
             wheel(window, aura, 4);
