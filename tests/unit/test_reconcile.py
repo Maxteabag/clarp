@@ -106,6 +106,21 @@ def test_inv2_real_transcript_keeps_binding(tmp_path):
     assert agents_db.live_backend_session(agent_id) == "real-uuid-1"
 
 
+def test_inv2_stale_transcript_index_keeps_binding(tmp_path, monkeypatch):
+    """The index can miss a transcript that is on disk (its watches outlived a
+    re-pointed ~/.claude). Unbinding on that miss wiped the fleet's history."""
+    from lib import claude_transcript
+    agent_id = _agent(tmp_path)
+    agents_db.bind_backend_session(agent_id, "real-uuid-2")
+    proj = tmp_path / ".claude" / "projects" / "-tmp-proj"
+    proj.mkdir(parents=True)
+    (proj / "real-uuid-2.jsonl").write_text('{"type":"system","subtype":"init"}\n')
+    monkeypatch.setattr(claude_transcript, "find_latest_jsonl", lambda *_a, **_k: None)
+    repaired = reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    assert "ghost_session" not in repaired
+    assert agents_db.live_backend_session(agent_id) == "real-uuid-2"
+
+
 def test_inv3_dead_inflight_slot_is_freed(tmp_path):
     agent_id = _agent(tmp_path)
     turn_dispatch._INFLIGHT[agent_id] = "dead-trace"

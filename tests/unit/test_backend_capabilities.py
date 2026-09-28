@@ -288,6 +288,17 @@ def test_resume_target_drives_transcript_checks(tmp_path):
     assert claude.resume_target("ghost", "/w", home) is None
     for backend in ("codex", "agy", "grok", "opencode", "deepseek"):
         assert backends.by_id(backend).resume_target("ghost", "/w", home) == "ghost", backend
+    # Without a cwd the index answers; its miss is confirmed on disk because
+    # None unbinds the agent.
+    from lib import claude_transcript
+    real = home / ".claude" / "projects" / "-w" / "real.jsonl"
+    original = claude_transcript.find_latest_jsonl
+    claude_transcript.find_latest_jsonl = lambda *_a, **_k: None
+    try:
+        assert claude.resume_target("real", "", home) == real
+        assert claude.resume_target("ghost", "", home) is None
+    finally:
+        claude_transcript.find_latest_jsonl = original
     # Aliases and garbage resolve the way normalize() does.
     assert backends.by_id("antigravity").id == "agy"
     assert backends.by_id("nonsense").id == "claude"
