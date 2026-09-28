@@ -4,8 +4,9 @@ A call is split into parts (see tool_explanation_shapes: compound shell
 commands per part, anything else as one), and each part is answered by the
 cheapest tier that can: a scripted template; the permanent learned table,
 keyed by the part's shape and filled with this call's values; Jev picking a
-known template or learned explanation for an unfamiliar program, worded as what
-the call most likely does because Jev never saw the program; the configured
+known template or the learned explanation of a similar shape (see
+`_select_templates`), worded as what the call most likely does, and learned
+under this shape when confident; the configured
 language model, whose answer is learned for the next call with that shape. Each
 reply names its producer (`scripted`, `jev`, `llm`); a cached or learned answer
 keeps the original producer and adds `cached`. Every answered call is one
@@ -274,7 +275,8 @@ class ToolExplanations:
                         shapes.with_scripts(part, script_evidence(part.activity, cwd))
             entries.append((item["id"], demand, activity, route, parts))
         rows = learning.lookup([key for _, _, _, _, parts in entries for part, done, route in parts if done is None
-                                for key in (part.signature, part.exact_key, route.get("signature"))],
+                                for key in (part.signature, part.exact_key, route.get("signature"),
+                                            *(old for old, _ in part.legacy))],
                                level, PROMPT_VERSION, templates.VERSION) if enabled else {}
         prepared = []
         synchronous = {}
@@ -319,6 +321,8 @@ class ToolExplanations:
                     for part, done, _ in parts:
                         if done["tier"] == "learned":
                             self._ledger.hit(done["hit"], done["hit_level"])
+                            if done.get("move"):
+                                self._ledger.move(*done["move"])
                             if done.get("evidence"):
                                 self._ledger.evidence(*done["evidence"], part.template_activity())
         response = [answers[item["id"]] for item in items]
@@ -471,6 +475,8 @@ class ToolExplanations:
                     for unit in item.units:
                         if unit.value and unit.value["tier"] == "learned":
                             self._ledger.hit(unit.value["hit"], unit.value["hit_level"])
+                            if unit.value.get("move"):
+                                self._ledger.move(*unit.value["move"])
                 for entry, item, value in zip(batch, items, values):
                     self._ledger.record(item.tier(value), agent_id=identity.get("target_agent_id"), signature=item.signature(),
                                         level=level, parts=len(item.units), jev_confidence=item.jev_confidence(),
@@ -519,9 +525,9 @@ class ToolExplanations:
                                 reason="configuration_changed")
 
     def _write_ledger(self, connection, now):
-        decisions, hits, evidence = self._ledger.drain()
+        decisions, hits, evidence, moves = self._ledger.drain()
         self._evidence.extend(evidence)
-        learning.write(connection, decisions, hits, now)
+        learning.write(connection, decisions, hits, now, moves)
 
     def _flush(self, *, force=False):
         """Write buffered decisions at most once a second; Jev evidence after."""
@@ -529,17 +535,17 @@ class ToolExplanations:
             return
         self._flushed = time.monotonic()
         if self._ledger.pending():
-            decisions, hits, evidence = self._ledger.drain()
+            decisions, hits, evidence, moves = self._ledger.drain()
             self._evidence.extend(evidence)
             now = durable_queue.cache.now_ms()
 
             def write():
                 with durable_queue.transaction() as connection:
-                    learning.write(connection, decisions, hits, now)
+                    learning.write(connection, decisions, hits, now, moves)
             try:
                 db.retry_locked(write)
             except sqlite3.Error:
-                self._ledger.restore(decisions, hits)
+                self._ledger.restore(decisions, hits, moves)
                 log("toolExplanationLedgerRetry", "SQLite busy; decisions stay buffered")
         while self._evidence:
             route, template_id, confidence, activity = self._evidence.pop(0)
@@ -549,42 +555,55 @@ class ToolExplanations:
                 break
 
     def _select_templates(self, units, level, identity):
-        """Jev's pick, for parts of unfamiliar programs, among known explanations.
+        """Jev's pick, for parts no template or learned row answers, among similar known explanations.
 
-        Each part is offered only what could render from its own arguments
-        (see `templates.jev_offer`) plus the model's parameterised explanations
-        of other shapes of the same program. A part with nothing to offer is
-        not asked. A confident pick answers the part and is learned. Returns
-        the reason each part that remains falls through, by unit, for
-        provenance.
+        A part of an unfamiliar program or tool is offered the templates that
+        could render from its own arguments (see `templates.jev_offer`); any
+        other part Jev may answer (`templates.JEV_LEARNED_REASONS`) is offered
+        none. Both are offered the model's explanations of other shapes most
+        similar to it (`learning.candidates`): same program and action, same
+        program, and, for an unfamiliar program only, other programs sharing
+        words with it. A learned explanation is offered only as it renders
+        with this part's own values. A part with nothing to offer is not
+        asked. A confident pick answers the part and is learned. Returns the
+        reason each part that remains falls through, by unit, for provenance.
         """
         reasons = {id(unit): unit.route.get("reason", "") for unit in units}
         if not level or self._sources(identity) != SOURCES_ALL:
             return {key: reason or "scripted_disabled" for key, reason in reasons.items()}
-        eligible = {str(i + 1): unit for i, unit in enumerate(units) if unit.route.get("reason") in templates.JEV_REASONS}
+        eligible = {str(i + 1): unit for i, unit in enumerate(units) if _jev_eligible(unit)}
         if not eligible:
             return reasons
         if not judgments.site_enabled("explanations"):
-            return {**reasons, **{id(unit): "jev_disabled" for unit in eligible.values()}}
+            return {**reasons, **{id(unit): "jev_disabled" for unit in eligible.values()
+                                  if unit.route.get("reason") in templates.JEV_REASONS}}
         entries, offered = {}, {}
         for key, unit in eligible.items():
-            offer = templates.jev_offer(unit.route, level)
-            if isinstance(offer, str):
-                reasons[id(unit)] = offer
-                continue
-            template_ids, candidates = offer
+            scripted = unit.route.get("reason") in templates.JEV_REASONS
+            offer = templates.jev_offer(unit.route, level) if scripted else ([], [])
+            template_ids, candidates = offer if not isinstance(offer, str) else ([], [])
             criteria = {template_id: templates.TEMPLATES[template_id]["description"] for template_id in template_ids}
-            available = set(shapes.slot_values(unit.part.slots))
             offered[key] = {}
-            for candidate in learning.candidates(unit.part.program, level, PROMPT_VERSION, templates.VERSION):
-                if candidate["signature"] != unit.part.signature and set(candidate["slot_names"]) <= available:
-                    choice = f"learned_{len(offered[key]) + 1}"
-                    criteria[choice] = f"A `{unit.part.program}` call that does this: {candidate['template_text']}"
-                    offered[key][choice] = candidate
+            evidence = templates._evidence(unit.part.activity)
+            for candidate in learning.candidates(
+                    unit.part.program, level, PROMPT_VERSION, templates.VERSION, action=unit.route.get("action", ""),
+                    tokens=_tokens(unit.part), available=shapes.slot_values(unit.part.slots),
+                    exclude={unit.part.signature}, cross_program=scripted):
+                rendered = shapes.render(candidate["template_text"], unit.part.slots)
+                text = templates.hedge(rendered) if rendered else None
+                if not text or learning.foreign(candidate["template_text"], evidence):
+                    continue
+                choice = f"learned_{len(offered[key]) + 1}"
+                subject = f"A `{unit.part.program}` call" if candidate["program"] == unit.part.program else "A call"
+                criteria[choice] = f"{subject} that does this: {rendered}"
+                offered[key][choice] = {**candidate, "text": text}
+            if not criteria:
+                reasons[id(unit)] = offer if isinstance(offer, str) else "jev_no_candidates" if scripted else reasons[id(unit)]
+                continue
             entries[key] = {"activity": {k: v for k, v in unit.part.activity.items() if k != "scripts"},
                             "criteria": criteria, "candidates": [value for _, value in candidates],
                             "takes_argument": [t for t in template_ids if templates.primary(t)] if candidates else [],
-                            "indices": [index for index, _ in candidates]}
+                            "indices": [index for index, _ in candidates], "learned": bool(offered[key])}
         selected = judgment_sites.select_explanation_templates(
             {key: {k: v for k, v in entry.items() if k != "indices"} for key, entry in entries.items()}) if entries else {}
         for key, entry in entries.items():
@@ -596,12 +615,9 @@ class ToolExplanations:
                 continue
             if choice.startswith("learned_"):
                 candidate = offered[key][choice]
-                text = shapes.render(candidate["template_text"], unit.part.slots)
-                text = templates.hedge(text) if text else None
-                if text is None:
-                    reasons[id(unit)] = "jev_invalid_parameters"
-                    continue
-                unit.picked(text, answer["confidence"], level, template_text=templates.hedge(candidate["template_text"]))
+                unit.picked(candidate["text"], answer["confidence"], level,
+                            template_text=templates.hedge(candidate["template_text"]),
+                            source=candidate["signature"], similarity=candidate["similarity"])
                 continue
             primary = templates.primary(choice)
             argument = answer.get("argument")
@@ -696,10 +712,17 @@ class _Unit:
         self.part, self.route, self.value = part, route, value
         self.evidence = None
         self.exact_reason = ""
+        self.note = ""
         self._row = None
 
-    def picked(self, text, confidence, level, *, template_text=None, template_id=None, argument_index=None, primary=None):
-        """Jev answered this part. A pick confident enough to learn from is kept."""
+    def picked(self, text, confidence, level, *, template_text=None, template_id=None, argument_index=None, primary=None,
+               source="", similarity=""):
+        """Jev answered this part. A pick confident enough to learn from is kept.
+
+        A picked learned explanation is kept under this part's own shape, so
+        the next call with it is a learned hit, linked to the row it came from.
+        """
+        self.note = f"jev_template:{template_id}" if template_id else f"jev_learned:{similarity}"
         provenance = _provenance({"template_id": template_id} if template_id else {}, confidence=confidence,
                                  reason=self.route.get("reason", ""))
         if argument_index is not None:
@@ -718,11 +741,14 @@ class _Unit:
                              "argument_index": argument_index, "program": self.part.program,
                              "action": templates.TEMPLATES[template_id]["action"], "producer": "jev",
                              "confidence": confidence}
-        else:
+        elif template_text:
             self._row = {"signature": self.part.signature, "level": level, "template_text": template_text,
                          "slot_names": json.dumps(sorted(shapes.placeholders(template_text))),
                          "program": self.part.program, "action": self.route.get("action", ""), "producer": "jev",
-                         "confidence": confidence}
+                         "confidence": confidence, "source_signature": source}
+            if self.part.exact:
+                # An exact part has no slots, so this is its one identical text.
+                self._row.update(template_text=text, slot_names="[]", parameterised=0)
 
     def explained(self, answer, level, reason):
         """The model answered this part; learn it by shape, or exactly if it must be."""
@@ -791,6 +817,8 @@ class _Item:
             return value.get("reason", "")
         notes = []
         for unit in self.units:
+            if unit.value["tier"] == "jev":
+                notes.append(unit.note)
             if unit.value["tier"] == "llm":
                 notes.append(reasons.get(id(unit)) or unit.route.get("reason", ""))
                 if unit.exact_reason:
@@ -800,7 +828,8 @@ class _Item:
 
 def _lookup_learned(units, level, sources):
     rows = learning.lookup([key for unit in units for key in (unit.part.signature, unit.part.exact_key,
-                                                               unit.route.get("signature"))],
+                                                               unit.route.get("signature"),
+                                                               *(old for old, _ in unit.part.legacy))],
                            level, PROMPT_VERSION, templates.VERSION)
     for unit in units:
         unit.value = _learned(unit.part, unit.route, rows, level, sources)
@@ -823,6 +852,20 @@ def _answers(value, requests):
     return result
 
 
+def _jev_eligible(unit):
+    reason = unit.route.get("reason")
+    return reason in templates.JEV_REASONS or (
+        reason in templates.JEV_LEARNED_REASONS and unit.part.program not in {"", "?"})
+
+
+def _tokens(part):
+    """Word stems of a part's literal words, without its dynamic values."""
+    text = templates._evidence({k: v for k, v in part.activity.items() if k != "scripts"})
+    for value in sorted(part.slots.values(), key=len, reverse=True):
+        text = text.replace(value, " ")
+    return learning.words(text)
+
+
 def _allowed(row, sources):
     if row["producer"] == "jev":
         return sources == SOURCES_ALL
@@ -841,6 +884,13 @@ def _learned(part, route, rows, level, sources):
     row = rows.get(part.exact_key) if part.exact_key != part.signature else None
     if row and row["template_text"] and not row["parameterised"] and _allowed(row, sources):
         return _learned_value(row["template_text"], row, part.exact_key)
+    for old, new in part.legacy:
+        # Learned by an earlier version under another key; the next write moves it.
+        row = rows.get(old)
+        if row and row["template_text"] and not row["template_id"] and _allowed(row, sources):
+            text = shapes.render(row["template_text"], part.slots) if row["parameterised"] else row["template_text"]
+            if text and len(text) <= 240:
+                return {**_learned_value(text, row, old), "move": (old, new, part.program)}
     signature = route.get("signature")
     row = rows.get(signature) if route.get("reason") in templates.JEV_REASONS and signature else None
     if not row or not row["template_id"] or not _allowed(row, sources):
