@@ -34,9 +34,32 @@ QString cleanedDisplayText(QString text, bool streaming) {
     static const QRegularExpression audioTag(
         QStringLiteral(R"(</?(?:break|speed|volume|emotion)\b[^>]*/?>)"),
         QRegularExpression::CaseInsensitiveOption);
+    // Spoken-only parts leave gaps in the written text: a pause often
+    // stands in for a comma ("Sure <break/> here's") and a filler sits
+    // between two ("lines, <vox>um</vox>, comma"). Mark where they were,
+    // then close the gap there only; spacing elsewhere (code, tables) stays.
+    static const QRegularExpression pauseTag(QStringLiteral(R"([ \t]*<break\b[^>]*/?>[ \t]*)"),
+                                             QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression spokenBlock(QStringLiteral(R"([ \t]*<vox\b[^>]*>.*?</vox>[ \t]*)"),
+                                                QRegularExpression::CaseInsensitiveOption |
+                                                    QRegularExpression::DotMatchesEverythingOption);
+    constexpr QChar filler(0xE000);
+    constexpr QChar pause(0xE001);
+    text.replace(spokenBlock, QString(filler));
+    text.replace(pauseTag, QString(pause));
     text.remove(voxBlock);
     text.remove(speakTag);
     text.remove(audioTag);
+    static const QRegularExpression doubledMark(QStringLiteral(R"(([,;:])\x{E000}[,;:])"));
+    static const QRegularExpression beforeMark(QStringLiteral(R"((?<=\S)[\x{E000}\x{E001}]+(?=[,.;:!?)]))"));
+    static const QRegularExpression wordPause(QStringLiteral(R"((?<=[\p{L}\p{N}])[\x{E000}\x{E001}]*\x{E001}[\x{E000}\x{E001}]*(?=[\p{L}\p{N}]))"));
+    static const QRegularExpression between(QStringLiteral(R"((?<=\S)[\x{E000}\x{E001}]+(?=\S))"));
+    static const QRegularExpression leftover(QStringLiteral(R"([\x{E000}\x{E001}]+)"));
+    text.replace(doubledMark, QStringLiteral("\\1"));
+    text.replace(beforeMark, QString{});
+    text.replace(wordPause, QStringLiteral(", "));
+    text.replace(between, QStringLiteral(" "));
+    text.remove(leftover);
     if (streaming) {
         const qsizetype openVox = text.lastIndexOf(QStringLiteral("<vox"), -1, Qt::CaseInsensitive);
         const qsizetype closeVox =

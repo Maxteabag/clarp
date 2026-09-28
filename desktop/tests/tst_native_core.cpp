@@ -723,6 +723,7 @@ class NativeCoreTest final : public QObject {
     void oldActivityGroupsAreLazyAndVisitScoped();
     void consecutiveExplanationsCollapseWithoutChangingTranscript();
     void streamedTokenAnnouncesOnlyItsRows();
+    void spokenMarkupLeavesNoGapsInTheText();
     void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
     void logMergeRefreshesExplanationsOncePerBatch();
     void secondLaunchIsForwardedToTheRunningInstance();
@@ -904,6 +905,23 @@ void NativeCoreTest::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender(
     tools.insert(QStringLiteral("timestamp"), QStringLiteral("invalid"));
     load();
     QCOMPARE(view.index(0, 0).data(ConversationPresentationModel::ActivityLabelRole).toString(), QStringLiteral("21 tool calls"));
+}
+
+void NativeCoreTest::spokenMarkupLeavesNoGapsInTheText() {
+    // Voice replies use a pause where the written text has a comma and put
+    // fillers between commas; removing them showed "Sure  here's" and ", ,".
+    const auto shown = [](const QString& text) {
+        return clarp::Message::fromJson({{QStringLiteral("text"), text}}).displayText;
+    };
+    QCOMPARE(shown(QStringLiteral("<speak><speed ratio=\"0.85\"/>Sure <break time=\"300ms\"/> here's a table.</speak>")),
+             QStringLiteral("Sure, here's a table."));
+    QCOMPARE(shown(QStringLiteral("Twelve keyboard lines, <vox>um</vox>, comma-heavy as requested <break time=\"300ms\"/> they're on your screen now.")),
+             QStringLiteral("Twelve keyboard lines, comma-heavy as requested, they're on your screen now."));
+    QCOMPARE(shown(QStringLiteral("I <vox>um</vox> think so <vox>uh</vox>.")), QStringLiteral("I think so."));
+    QCOMPARE(shown(QStringLiteral("Done. <break time=\"1s\"/> Next step.")), QStringLiteral("Done. Next step."));
+    QCOMPARE(shown(QStringLiteral("Line one <break/>\nLine two")), QStringLiteral("Line one\nLine two"));
+    // Spacing that is not next to spoken markup is left alone.
+    QCOMPARE(shown(QStringLiteral("```\na  =  1\n```\n| a |  b |")), QStringLiteral("```\na  =  1\n```\n| a |  b |"));
 }
 
 void NativeCoreTest::streamedTokenAnnouncesOnlyItsRows() {
