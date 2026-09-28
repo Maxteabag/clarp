@@ -80,6 +80,8 @@ def prune_database(*, now_ms: int | None = None,
     from .tool_explanations import PROMPT_VERSION
     counts.update(tool_explanation_learning.prune(
         c, now_ms, PROMPT_VERSION, tool_explanation_templates.VERSION))
+    from .tool_explanations import recover_programs
+    counts["tool_explanation_programs"] = recover_programs(c)
     return counts
 
 
