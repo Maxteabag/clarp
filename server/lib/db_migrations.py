@@ -126,6 +126,10 @@ def _migrate(con: sqlite3.Connection) -> None:
         if version < 99:
             _migrate_to_v99(con)
 
+        if version < 100:
+            from .provider_background_jobs import SCHEMA
+            con.execute(SCHEMA)
+
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
