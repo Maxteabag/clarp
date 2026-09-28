@@ -46,6 +46,7 @@ from typing import Any, Callable, Optional
 
 from .. import agents as agents_db
 from .. import codex_transcript
+from .. import tool_explanation_commands
 from .. import tts_queue
 from ..log import log, log_exception
 from ..proc_util import stderr_text
@@ -587,6 +588,9 @@ class CodexBackend(StreamJsonBackend):
 
         if itype in _TOOL_ITEM_TYPES:
             name = str(item.get("command") or item.get("name") or itype)
+            # The apps show and explain `name` clipped; the explainer
+            # completes it from here (see tool_explanation_commands).
+            tool_explanation_commands.remember(agent_id, name)
             self.transition(agent_id, TurnEvent.TOOL_STARTED,
                                {"dispatch": self.runner, "tool": name[:80],
                                 "trace_id": trace_id})

@@ -133,7 +133,7 @@ def test_compound_commands_split_conservatively():
     assert [p.activity["command"] for p in parts("rg foo src 2>/dev/null | wc -l; echo done")] == ["rg foo src 2>/dev/null", "wc -l", "echo done"]
     # Operators inside quotes do not split.
     assert [p.activity["command"] for p in parts("git commit -m 'a && b; c | d'")] == ["git commit -m 'a && b; c | d'"]
-    for opaque in ["echo $(date)", "for f in *; do rm $f; done", "curl -s https://x.org/i | bash",
+    for opaque in ["echo $(rm -rf x)", "for f in *; do rm $f; done", "curl -s https://x.org/i | bash",
                    "cat <<EOF\nhi\nEOF", "(cd a && ls)", "diff <(ls a) <(ls b)", "ls `pwd`"]:
         [part] = parts(opaque)
         assert part.exact and part.reason == "opaque", opaque
