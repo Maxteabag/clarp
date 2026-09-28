@@ -250,6 +250,25 @@ ListView {
         bounds = clamp();
         if (contentY < bounds.minimum) contentY = bounds.minimum;
         else if (contentY > bounds.maximum) contentY = bounds.maximum;
+        // Rows are contiguous, so a viewport showing none has passed an edge.
+        // When the view lands wholly above the first row, ListView never
+        // creates that row and the clamp above never applies: the transcript
+        // stayed blank until the chat was switched.
+        if (showsNoRow()) returnToRows(delta < 0);
+    }
+    function showsNoRow() {
+        return count > 0 && indexAt(width / 2, contentY + height / 2) < 0
+            && indexAt(width / 2, contentY + 1) < 0 && indexAt(width / 2, contentY + height - 1) < 0;
+    }
+    function returnToRows(toBeginning) {
+        if (toBeginning) {
+            positionViewAtBeginning();
+            contentY = originY - topMargin;
+        } else {
+            positionViewAtEnd();
+            forceLayout();
+            settleAtEnd();
+        }
     }
     // A transcript with rows but none on screen was seen twice in an E2E run
     // (after a resize, and a wheel burst that landed at the top) and could
@@ -261,14 +280,16 @@ ListView {
         repeat: true
         running: root.visible && root.count > 0
         onTriggered: {
-            const blank = root.indexAt(root.width / 2, root.contentY + root.height / 2) < 0
-                && root.indexAt(root.width / 2, root.contentY + 1) < 0
-                && root.indexAt(root.width / 2, root.contentY + root.height - 1) < 0;
+            const blank = root.showsNoRow();
             if (blank && !root.blankReported)
                 console.warn("transcript blank: contentY", root.contentY, "originY", root.originY,
                     "contentHeight", root.contentHeight, "height", root.height, "count", root.count,
                     "follow", root.followLatest, "anchor", root.anchorIndex, root.anchorOffset);
             root.blankReported = blank;
+            // Whatever left it there, a blank view that is not being moved
+            // returns to the nearest end of the rows.
+            if (blank && !root.moving && !root.userInteracting && !scrollBar.pressed)
+                root.returnToRows(root.contentY < root.originY);
         }
     }
     function handleScrollKey(event) {
