@@ -41,12 +41,29 @@ Rectangle {
     // end of the new chat in the same frame. A binding plus a deferred jump
     // painted the new chat at the top, then at the old logical offset, then
     // at the end: the brief unwanted movement when switching agents.
-    function bindConversation() {
+    property var pendingConversationModel: null
+    function queueConversationBind() {
+        pendingConversationModel = root.conversationModel;
+        conversationBindTimer.restart();
+    }
+    function bindConversationNow() {
+        if (pendingConversationModel !== root.conversationModel) {
+            queueConversationBind();
+            return;
+        }
         transcript.resetForConversation();
-        presentation.sourceModel = root.conversationModel;
+        presentation.refreshExplanations();
+        presentation.sourceModel = pendingConversationModel;
         transcript.scrollToLatest();
     }
-    onConversationModelChanged: bindConversation()
+
+    Timer {
+        id: conversationBindTimer
+        interval: 0
+        repeat: false
+        onTriggered: root.bindConversationNow()
+    }
+    onConversationModelChanged: queueConversationBind()
     Connections {
         target: root.conversationModel
         function onConversationIdChanged() { transcript.scrollToLatest(); }
@@ -389,13 +406,11 @@ Rectangle {
         // the active pane leaves it behind instead of carrying it along.
         if (root.active && root.controller.errorMessage.length > 0)
             root.controller.clearError();
-        presentation.refreshExplanations();
-        presentation.beginVisit();
         if (session.length > 0 && controller.connected && !root.pairRoom)
             controller.loadMedia(session);
     }
     Component.onCompleted: {
-        bindConversation();
+        queueConversationBind();
         if (session.length > 0 && controller.connected)
             controller.loadMedia(session);
     }
