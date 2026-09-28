@@ -169,3 +169,27 @@ def test_session_picker_hides_sub_agent_child_sessions(tmp_path):
     con.close()
     listed = opencode_transcript.list_sessions("/p", home=tmp_path)
     assert [row["id"] for row in listed] == ["ses_parent"]
+
+
+def test_a_stopped_turn_leaves_no_error_row_but_keeps_what_it_did():
+    aborted = {"name": "MessageAbortedError", "data": {"message": "The operation was aborted."}}
+    rows = [("1", _row("user")), ("2", _row("assistant", error=aborted)),
+            ("3", _row("user")), ("4", _row("assistant", error=aborted))]
+    parts = {"u1": [_text("go")], "a1": [],
+             "u2": [_text("go on")],
+             "a2": [_text("Half an answer"), _tool("bash", status="error", call="b",
+                                                   input={"command": "sleep 60"},
+                                                   error="Tool execution aborted")]}
+    turns = opencode_transcript._turns_from_messages(rows, parts, ["u1", "a1", "u2", "a2"])
+    assert [(t["role"], t["text"]) for t in turns] == [
+        ("user", "go"), ("user", "go on"), ("assistant", "Half an answer")]
+    assert "MessageAbortedError" not in json.dumps(turns)
+
+
+def test_free_tier_refusal_row_says_what_to_do():
+    rows = [("1", _row("user")), ("2", _row("assistant", error={
+        "name": "APIError", "data": {"message": "Error from provider (Console): "
+                                     "OpenCode's free tier can only be used from within OpenCode"}}))]
+    turns = opencode_transcript._turns_from_messages(rows, {"u": [_text("hi")], "a": []}, ["u", "a"])
+    assert turns[1]["text"].startswith("This free OpenCode model only runs in OpenCode's own apps.")
+    assert "(OpenCode: Error from provider (Console)" in turns[1]["text"]

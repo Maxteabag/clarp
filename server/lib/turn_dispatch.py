@@ -1963,6 +1963,7 @@ class TurnDispatchService:
             error_classify.RUNNER_EXIT: "Agent process exited unexpectedly",
             error_classify.TIMEOUT: "Turn timed out — backend stopped responding",
         }.get(category, "Turn interrupted")
+        human = error_classify.explain(message) or human
         limit_event = None
         if category == error_classify.USAGE_LIMIT and quota_confirmed is False:
             human = "Codex could not complete this request. Try again"
