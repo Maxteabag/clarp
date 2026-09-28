@@ -1,12 +1,12 @@
 #pragma once
+#include <QAbstractItemModel>
 #include <QPointer>
+#include <QQmlComponent>
 #include <QQuickItem>
 #include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
 #include <vector>
 
-class QAbstractItemModel;
-class QQmlComponent;
 class QQmlPropertyMap;
 
 namespace clarp {
