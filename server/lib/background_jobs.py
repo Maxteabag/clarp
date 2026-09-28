@@ -41,7 +41,7 @@ def active_by_agent() -> dict[str, list[dict[str, Any]]]:
     marks = ",".join("?" for _ in ACTIVE_STATUSES)
     out: dict[str, list[dict[str, Any]]] = {}
     for row in db.conn().execute(
-            f"SELECT job_id, agent_id, kind, title, detail, metadata_json, "
+            f"SELECT job_id, agent_id, kind, title, detail, metadata_json, heartbeat_source, "
             f"progress_text, COALESCE(progress_at, started_at) AS active_at, "
             f"COALESCE(heartbeat_at, updated_at) AS heartbeat_at "
             f"FROM background_jobs WHERE status IN ({marks}) "
@@ -51,6 +51,9 @@ def active_by_agent() -> dict[str, list[dict[str, Any]]]:
             metadata = json.loads(row["metadata_json"] or "{}")
         except json.JSONDecodeError:
             metadata = {}
+        from .provider_background_jobs import mirrors_registered
+        if row["heartbeat_source"] == "provider_event" and mirrors_registered({"agent_id": row["agent_id"], "metadata": metadata}):
+            continue
         out.setdefault(row["agent_id"], []).append({
             "job_id": str(row["job_id"]),
             "kind": str(row["kind"] or ""), "title": str(row["title"] or ""),
@@ -312,6 +315,7 @@ def upsert(
     if not agent:
         raise ValueError(f"unknown session: {session}")
     from . import identity
+    metadata = {**(metadata or {}), **_native_origin(agent)}
     return _upsert_owned(
         owner_kind="agent", agent_id=agent["agent_id"], session=session,
         computer_id="", job_id=job_id, kind=kind, title=title, detail=detail,
@@ -353,6 +357,8 @@ def _upsert_owned(
         raise ValueError(f"background job must start queued or running: {status}")
     now = db.now_ms()
     job_id = job_id.strip() or uuid.uuid4().hex
+    if job_id.startswith("claude-task:"):
+        raise ValueError("provider task identity is reserved for native observation")
     timeout = max(30_000, min(int(heartbeat_timeout_ms), 24 * 60 * 60 * 1000))
     pid = int(worker_pid or 0) or None
     token = worker_start_token.strip()
@@ -453,6 +459,10 @@ def _upsert_owned(
                 next_log, next_cwd,
             ),
         )
+        # Exact-identity projection invalidations must precede the explicit
+        # registration event, including a native mirror already sent over SSE.
+        for linked in (metadata or {}, json.loads(existing["metadata_json"]) if existing else {}):
+            _invalidate_native_mirrors(c, agent_id, linked, now)
         _record_event(c, job_id, now)
         c.execute("COMMIT")
     except BaseException:
@@ -519,11 +529,11 @@ def snapshot(*, include_terminal: bool = True, now_ms: int | None = None) -> dic
     except BaseException:
         c.execute("ROLLBACK")
         raise
+    from .provider_background_jobs import mirrors_registered
+    public_jobs = [_public(row, observed_at=now) for row in [*active_rows, *terminal_rows]]
     return {
-        "jobs": [
-            _public(row, observed_at=now)
-            for row in [*active_rows, *terminal_rows]
-        ],
+        "jobs": [job for job in public_jobs
+                 if job.get("heartbeat_source") != "provider_event" or not mirrors_registered(job)],
         "snapshot_revision": revision,
         "observed_at": now,
     }
@@ -584,7 +594,7 @@ def cancel_run(
     c.execute("BEGIN IMMEDIATE")
     try:
         row = c.execute(
-            "SELECT status, generation, session, owner_kind FROM background_jobs WHERE job_id=?",
+            "SELECT status, generation, session, owner_kind, heartbeat_source FROM background_jobs WHERE job_id=?",
             (job_id,)).fetchone()
         mismatch = None
         changed = False
@@ -597,6 +607,8 @@ def cancel_run(
             mismatch = "session"
         elif expected_generation is not None and int(row["generation"] or 1) != expected_generation:
             mismatch = "generation"
+        elif row["heartbeat_source"] == "provider_event":
+            mismatch = "unsupported"
         elif row["status"] not in TERMINAL_STATUSES:
             c.execute(
                 """UPDATE background_jobs
@@ -667,6 +679,9 @@ def finish(
         if row is None:
             c.execute("COMMIT")
             return None
+        if row["heartbeat_source"] == "provider_event":
+            c.execute("COMMIT")
+            return None
         expected_pid = int(row["worker_pid"] or 0)
         expected_token = str(row["worker_start_token"] or "")
         if int(row["generation"] or 1) != int(generation):
@@ -697,7 +712,8 @@ def _owned_active_row(c, job_id: str, *, session: str, generation: int):
     """The job row when `session` owns this active generation, else None."""
     row = c.execute(
         "SELECT * FROM background_jobs WHERE job_id=?", (job_id,)).fetchone()
-    if (row is None or str(row["owner_kind"] or "agent") != "agent"
+    if (row is None or row["heartbeat_source"] == "provider_event"
+            or str(row["owner_kind"] or "agent") != "agent"
             or str(row["session"] or "") != session
             or int(row["generation"] or 1) != int(generation)
             or row["status"] not in ACTIVE_STATUSES):
@@ -910,6 +926,9 @@ def detail(job_id: str, *, include_log: bool = True) -> dict | None:
         "path": "", "available": False, "reason": "forbidden", "text": "",
         "size": 0, "truncated": False,
     }
+    if include_log and job.get("heartbeat_source") == "provider_event":
+        from .provider_background_jobs import output
+        log = output(job)
     return {
         "job": job,
         "handle": job_handle(job),
@@ -1085,6 +1104,8 @@ def reconcile_stale(
     ).fetchall()
     changed: list[str] = []
     for row in rows:
+        if row["heartbeat_source"] == "provider_event":
+            continue  # Provider silence is unknown, never a fabricated heartbeat failure.
         expired = now - int(row["heartbeat_at"] or row["updated_at"]) > int(
             row["heartbeat_timeout_ms"])
         if row["status"] == "queued":
@@ -1226,6 +1247,9 @@ def _active_update(
         if row is None or row["status"] not in ACTIVE_STATUSES:
             c.execute("COMMIT")
             return get(job_id, reconcile=False)
+        if row["heartbeat_source"] == "provider_event":
+            c.execute("COMMIT")
+            return None
         expected_pid = int(row["worker_pid"] or 0)
         expected_token = str(row["worker_start_token"] or "")
         now = max(now, int(row["heartbeat_at"] or row["updated_at"]) + 1)
@@ -1317,5 +1341,119 @@ def _public(row: Any, *, observed_at: int | None = None) -> dict:
         outcome_state = "pending"
     else:
         outcome_state = str(out.get("status") or "unknown")
+    if out.get("heartbeat_source") == "provider_event":
+        provider_state = out["metadata"].get("provider_state", "unknown")
+        out["can_cancel"] = False
+        out["worker_freshness"] = "unknown"
+        if provider_state in {"unknown", "stopped"}:
+            outcome_state = "unknown"
+    out["elapsed_ms"] = max(0, int(out.get("terminal_at") or now) - int(out["started_at"]))
     out["outcome_state"] = outcome_state
     return out
+
+
+def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
+                        provider: str, at: int, state: str, title: str = '',
+                        task: str = '', project: str = '', exit_code=None) -> None:
+    """Apply already-correlated provider evidence within its cursor transaction.
+
+    The registry owns every job write. The adapter owns parsing, redaction,
+    exact identity validation, and the transaction coupling to its cursor.
+    Unlike worker upsert, this never claims a process or refreshes a heartbeat.
+    """
+    row = c.execute('SELECT * FROM background_jobs WHERE job_id=?', (ident,)).fetchone()
+    if row:
+        meta = json.loads(row['metadata_json'])
+        if row['terminal_at'] is not None or at < meta['provider_observed_at']:
+            return
+        if task and meta.get('provider_task_id') not in ('', task):
+            return
+        # Replayed launch requests cannot undo a receipt, even at equal time.
+        if state == 'launching' or (state == 'running' and meta.get('provider_state') == 'unknown' and at <= meta['provider_observed_at']):
+            return
+    else:
+        if state != 'launching' or at < int(owner.get('bound_at') or 0):
+            return  # Never infer an owned Bash task from an uncorrelated notice.
+        meta = {'provider': provider, 'native_session_id': native,
+                'tool_use_id': tool, 'provider_task_id': '', 'provider_observed_at': at,
+                'provider_project': project}
+    if task:
+        meta['provider_task_id'] = task
+    if exit_code is not None:
+        meta['exit_code'] = exit_code
+    meta.update(provider_state=state, provider_observed_at=at)
+    # Preserve the existing wire statuses for older clients. The progress and
+    # outcome fields explicitly distinguish launching/unknown from running.
+    status = {'launching': 'queued', 'unknown': 'queued', 'running': 'running',
+              'completed': 'succeeded', 'failed': 'failed', 'stopped': 'failed'}[state]
+    terminal = state in {'completed', 'failed', 'stopped'}
+    reason = 'provider_session_ended_without_result' if state == 'stopped' else ('provider_' + state if terminal else '')
+    progress = {'launching': 'Launching; awaiting provider receipt',
+                'running': 'Provider reported running; no process ownership claimed',
+                'unknown': 'Unknown: no recent provider task evidence',
+                'stopped': 'Session ended without a completion record; outcome unknown',
+                'completed': 'Provider task completed', 'failed': 'Provider task failed'}[state]
+    if row and meta == json.loads(row['metadata_json']):
+        return
+    observed = db.now_ms() if state == 'unknown' else at
+    if row is None:
+        c.execute('''INSERT INTO background_jobs
+            (job_id,agent_id,session,kind,title,status,started_at,updated_at,
+             heartbeat_source,heartbeat_at,metadata_json)
+             VALUES (?,?,?,?,?,'queued',?,?,'provider_event',NULL,?)''',
+            (ident, owner['agent_id'], owner['session'], 'provider-task',
+             title[:120] or 'Claude background command', at, at, json.dumps(meta)))
+    c.execute('''UPDATE background_jobs SET status=?,updated_at=?,metadata_json=?,
+        progress_text=?,progress_at=?,terminal_at=?,terminal_reason=? WHERE job_id=?''',
+        (status, observed, json.dumps(meta), progress, observed, at if terminal else None, reason, ident))
+    _record_event(c, ident, observed, note=progress)
+
+
+def _native_origin(agent: dict) -> dict:
+    """Use inherited provenance only for its recorded agent/native binding.
+
+    This does not claim that a process is alive or grant cancellation. It only
+    links a real explicit registration to the native invocation that made it.
+    """
+    raw = os.environ.get("CLARP_BACKGROUND_ORIGIN", "")
+    if len(raw) > 2000:
+        return {}
+    try:
+        origin = json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+    keys = ("provider", "native_session_id", "tool_use_id")
+    if (not isinstance(origin, dict) or origin.get("agent_id") != agent["agent_id"]
+            or origin.get("provider") != agent.get("backend")
+            or not all(isinstance(origin.get(k), str) and 0 < len(origin[k]) <= 160 for k in keys)):
+        return {}
+    bound = db.conn().execute("SELECT 1 FROM runtimes WHERE agent_id=? AND backend_session_id=? AND ended_at IS NULL",
+                              (agent['agent_id'], origin['native_session_id'])).fetchone()
+    return {key: origin[key] for key in keys} if bound else {}
+
+
+def _invalidate_native_mirrors(c, agent_id: str, metadata: dict, now: int) -> None:
+    keys = ("provider", "native_session_id", "tool_use_id")
+    if not isinstance(metadata, dict) or not all(metadata.get(k) for k in keys):
+        return
+    for row in c.execute("SELECT job_id,metadata_json FROM background_jobs WHERE agent_id=? AND heartbeat_source='provider_event'", (agent_id,)).fetchall():
+        native = json.loads(row['metadata_json'])
+        if all(native.get(k) == metadata[k] for k in keys):
+            _record_event(c, row['job_id'], now, note="Display projection changed; native task lifecycle unchanged")
+
+
+def event_projection(job: dict, observed_at: int) -> dict:
+    """Supersede a mirrored display row without claiming its process stopped.
+
+    Older active-job reducers already remove nonactive statuses; iOS uses this
+    event to invalidate/refetch the canonical snapshot. Detail stays canonical.
+    """
+    from .provider_background_jobs import registered_mirror
+    if job.get('heartbeat_source') != 'provider_event':
+        return job
+    replacement = registered_mirror(job)
+    if not replacement:
+        return job
+    return {**job, 'status': 'superseded', 'projection_only': True,
+            'replaced_by_job_id': replacement,
+            'updated_at': max(observed_at, int(job['updated_at'])), 'can_cancel': False}

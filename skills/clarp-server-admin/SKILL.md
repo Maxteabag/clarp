@@ -37,13 +37,16 @@ taken. Read all four before picking:
 
 ```bash
 git fetch origin
-grep -n '_SCHEMA_VERSION = ' server/lib/db.py                       # your branch
-git show origin/main:server/lib/db.py | grep -n '_SCHEMA_VERSION = ' # merged
-grep -n '_SCHEMA_VERSION = ' ~/.local/share/clarp/current/lib/db.py  # deployed
+grep -n '_SCHEMA_VERSION = ' server/lib/db_schema.py                       # your branch
+git show origin/main:server/lib/db_schema.py | grep -n '_SCHEMA_VERSION = ' # merged
+grep -n '_SCHEMA_VERSION = ' ~/.local/share/clarp/current/lib/db_schema.py  # deployed
 sqlite3 ~/.local/share/clarp/state.sqlite 'pragma user_version;'     # live DB
 ```
 
-Take `max(all four) + 1`, add a `_migrate_to_vNN` guarded by
+When first assigning a migration, choose a number above the versions already
+used by these sources. An already-assigned candidate number can be retained if
+no other source has used it; do not repeatedly increment it merely because the
+candidate itself appears in the comparison. Add a migration guarded by
 `if version < NN:`, and keep every statement `CREATE TABLE IF NOT EXISTS` so
 re-applying is harmless whichever branch lands first. Re-check after every
 rebase: a merge that lands mid-task can take your number. Verify after
@@ -102,35 +105,34 @@ Once installation starts, the installer owns rollback; cancelling the tracking
 job is not an emergency stop for the installer. Verify the deployed SHA, schema,
 runtime availability, and `clarp-admin doctor` afterwards.
 
-## Installing does not deploy runner code
+## Host, runtime and plugin activation are separate
 
-`install_and_restart` runs `systemctl --user enable --now
-clarp-runtime.service` and `restart clarp.service`. `enable --now` does not
-restart an already-running runtime, and nothing in the server automatically
-adopts a new release, so **the runtime keeps its old code until someone
-restarts it**. Verified on 2026-09-07: no drain-to-new-release mechanism exists
-in `runtime.py` or `service_manager.py`.
+The supported installer restarts the HTTP Host and enables the runtime service;
+it does not force-restart an already-running runtime. Current `runtime.py` starts
+`RuntimeReleaseMonitor`, which watches the installed `RUNTIME_RELEASE_ID` only
+when `RUNTIME_READY` exists. It hands off to the new release after
+`begin_drain_if_idle()` succeeds. Busy turns remain on their existing runtime.
+Verify this mechanism in the candidate and deployed source rather than applying
+older advice that no idle handoff exists.
 
-That split decides whether your change is actually live:
+HTTP endpoints and schema migrations activate with the Host restart. Runner
+code becomes active after the natural idle handoff; installer success alone
+is not proof of that transition. Read the runtime status `release_id` and
+`draining` fields and compare with the installed release.
 
-| Where the code lives | Live after `install.sh`? |
-|---|---|
-| HTTP endpoints (`server.py`), schema migrations | yes |
-| Runner/turn code (`turn_dispatch.py`, `*_runner.py`) | **no** |
+The standard Claude runner launches one CLI process per turn. Its plugin path
+resolves through `share/plugin -> current/plugin` on each launch, so the next
+naturally admitted turn can load the new plugin even while the runtime process
+still uses the predecessor's compatible runner code. Hook subprocesses resolve
+the library colocated with their plugin, and managed helper wrappers resolve
+`current` rather than retaining an inherited old code root. Do not claim that
+an already-running Claude turn hot-reloaded its plugin; verify an actual
+provenance receipt on subsequent natural work. Directory-plugin caching and
+manual persistent CLI sessions need their own verification.
 
-Confirm which side you changed, then check whether the runtime predates the
-deploy:
-
-```bash
-ps -o lstart= -p $(systemctl --user show clarp-runtime.service -p MainPID --value)
-stat -c %y ~/.local/share/clarp/current
-```
-
-Restarting the runtime interrupts **every in-flight turn on the host**,
-including the calling agent's own turn, so it cannot be done silently from
-inside a turn that still needs to report. Check `/agents/snapshot` for `busy`
-agents and queued turns, then ask for explicit approval with `clarp-decisions`
-rather than restarting unannounced.
+Never force a runtime or fleet restart to make a rollout look complete. A manual
+restart interrupts in-flight turns and requires explicit authorization. Preserve
+an existing recovery pause, active conversations, account selection, and rollback.
 
 ## Docker Container Administration
 

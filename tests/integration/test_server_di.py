@@ -3795,3 +3795,134 @@ def test_helper_agent_create_report_and_mark_over_http(running_server, monkeypat
     assert rows["claude"]["running_children"] == 0
     assert rows[helper]["helper_state"] == "done"
     assert rows[helper]["parent_agent_id"] == rows["claude"]["agent_id"]
+
+
+def test_native_background_runtime_to_http_lifecycle(running_server, tmp_path, monkeypatch):
+    """Replay provider records through the actual observer and HTTP surfaces."""
+    from datetime import datetime, timezone
+    from lib import agents, backends, db, provider_background_jobs as provider
+    from lib.background_job_watcher import BackgroundJobWatcher
+    base, ctx, _srv = running_server
+    owner = agents.get_by_session('rachel')
+    native, tool, task = 'fixture-native-http', 'toolu_fixture_http', 'fixture_task'
+    path = tmp_path / f'{native}.jsonl'
+    now = datetime.now(timezone.utc).isoformat()
+    def append(kind, **fields):
+        with path.open('a') as f:
+            f.write(json.dumps({'type':kind, 'timestamp':now, 'sessionId':native, **fields}) + '\n')
+    db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at) VALUES (?,?,?,?)',
+                      (owner['agent_id'], 'rachel', native, db.now_ms() - 1000))
+    monkeypatch.setattr(backends.by_id('claude'), 'find_transcript', lambda sid, **kw: path if sid == native else None)
+    append('assistant', message={'content':[{'type':'tool_use','name':'Bash','id':tool,
+        'input':{'run_in_background':True,'description':'Watch disposable CI fixture','command':'echo hidden-command'}}]})
+    append('user', message={'content':[{'type':'tool_result','tool_use_id':tool}]},
+           toolUseResult={'backgroundTaskId':task})
+    from lib import background_jobs
+    ident = provider.job_id(owner['agent_id'], native, tool)
+    watcher = BackgroundJobWatcher(ctx.stream)
+    watcher.INTERVAL_SEC = 0.01
+    watcher.PROVIDER_INTERVAL_SEC = 0.02
+    def wait_state(state):
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            job = background_jobs.get(ident, reconcile=False)
+            if job and job['metadata']['provider_state'] == state:
+                return
+            time.sleep(0.01)
+        pytest.fail(f'BackgroundJobWatcher did not observe {state}')
+    root = pathlib.Path('/tmp') / f'claude-{os.getuid()}' / path.parent.name / native / 'tasks'
+    root.mkdir(parents=True)
+    output = root / f'{task}.output'
+    try:
+        watcher.start()
+        wait_state('running')
+        output.write_text('CI fixture: step 2/3\nTOKEN=fixture-secret\n')
+        status, body = _get(base + '/background-jobs')
+        job = next(j for j in json.loads(body)['jobs'] if j['job_id'] == ident)
+        assert status == 200 and job['status'] == 'running'
+        status, body = _get(base + '/background-jobs/' + ident)
+        detail = json.loads(body)
+        assert detail['owner_session'] == 'rachel'
+        assert detail['owner_agent_id'] == owner['agent_id']
+        assert detail['job']['title'] == 'Watch disposable CI fixture'
+        assert detail['job']['elapsed_ms'] >= 0
+        assert 'step 2/3' in detail['log']['text'] and 'fixture-secret' not in body.decode()
+        assert detail['job']['can_cancel'] is False
+        status, body = _get(base + '/agents/snapshot')
+        row = next(a for a in json.loads(body)['agents'] if a['agent_id'] == owner['agent_id'])
+        assert row['background_jobs']['count'] == 1
+        status, body = _delete_status(base + '/background-jobs/' + ident)
+        assert status == 409 and body['error'] == 'provider_task_cancel_unsupported'
+        # An ordinary ended runtime cannot turn missing evidence into success.
+        db.conn().execute('UPDATE runtimes SET ended_at=? WHERE backend_session_id=?', (db.now_ms(),native))
+        wait_state('unknown')
+        status, body = _get(base + '/background-jobs/' + ident)
+        assert json.loads(body)['job']['outcome_state'] == 'unknown'
+        append('queue-operation', operation='enqueue', content=f'<task-notification><task-id>{task}</task-id><tool-use-id>{tool}</tool-use-id><status>completed</status></task-notification>')
+        wait_state('completed')
+        status, body = _get(base + '/background-jobs/' + ident)
+        assert json.loads(body)['job']['status'] == 'succeeded'
+        assert len(json.loads(body)['timeline']) == 4
+    finally:
+        watcher.stop()
+        output.unlink(missing_ok=True)
+        root.rmdir()
+        root.parent.rmdir()
+        root.parent.parent.rmdir()
+
+
+def test_provider_dedup_live_sse_existing_qt_reducer(running_server, tmp_path):
+    """Live HTTP SSE -> unchanged production Qt reducer, without a refetch."""
+    import datetime
+    from lib import agents, background_jobs, provider_background_jobs as provider
+    executable = os.environ.get('CLARP_TEST_JOB_REDUCER')
+    if not executable:
+        pytest.skip('standalone production Qt reducer probe requires CLARP_TEST_JOB_REDUCER')
+    base, ctx, _srv = running_server
+    owner = agents.get_by_session('rachel')
+    native, tool, task = 'sse-fixture-native', 'toolu_sse_fixture', 'sse_task'
+    path = tmp_path / f'{native}.jsonl'
+    def append(kind, **fields):
+        with path.open('a') as f:
+            f.write(json.dumps({'type':kind,'sessionId':native,
+                'timestamp':datetime.datetime.now(datetime.timezone.utc).isoformat(),**fields})+'\n')
+    ident = provider.job_id(owner['agent_id'], native, tool)
+    reducer = subprocess.Popen([executable],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
+    response = urllib.request.urlopen(base+'/events',timeout=3)
+    events_seen=[]
+    def reduce_until(job_id):
+        deadline=time.monotonic()+3
+        while time.monotonic()<deadline:
+            line=response.readline().decode()
+            if not line.startswith('data:'): continue
+            event=json.loads(line[5:])
+            if event.get('type') != 'background-job-updated' or event.get('agent_id') != owner['agent_id']: continue
+            events_seen.append(event)
+            reducer.stdin.write(json.dumps(event)+'\n');reducer.stdin.flush()
+            state=json.loads(reducer.stdout.readline())
+            if event['job_id']==job_id: return state
+        pytest.fail('missing live job SSE event')
+    try:
+        append('assistant',message={'content':[{'type':'tool_use','name':'Bash','id':tool,
+            'input':{'command':'private command','description':'Native watcher','run_in_background':True}}]})
+        append('user',message={'content':[{'type':'tool_result','tool_use_id':tool}]},toolUseResult={'backgroundTaskId':task})
+        provider.observe(owner,native,path)
+        assert reduce_until(ident)['ids']==[ident]
+        background_jobs.upsert(session='rachel',job_id='sse-explicit',title='Explicit watcher',
+            metadata={'provider':'claude','native_session_id':native,'tool_use_id':tool})
+        state=reduce_until('sse-explicit')
+        assert state['ids']==['sse-explicit']  # no canonical list supplied to Qt
+        superseded=[e for e in events_seen if e.get('status')=='superseded']
+        assert superseded and superseded[-1]['job']['projection_only'] is True
+        assert superseded[-1]['job']['replaced_by_job_id']=='sse-explicit'
+        assert background_jobs.get(ident)['status']=='running'  # not fake completion/cancellation
+        append('queue-operation',operation='enqueue',content=f'<task-notification><task-id>{task}</task-id><tool-use-id>{tool}</tool-use-id><status>completed</status></task-notification>')
+        provider.observe(owner,native,path)
+        assert reduce_until(ident)['ids']==['sse-explicit']
+        status,body=_get(base+'/background-jobs')
+        assert [j['job_id'] for j in json.loads(body)['jobs']]==['sse-explicit']
+        (tmp_path/'sse-receipt.json').write_text(json.dumps(events_seen,indent=2))
+    finally:
+        response.close()
+        reducer.stdin.close()
+        reducer.wait(timeout=3)

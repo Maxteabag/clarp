@@ -90,6 +90,12 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     assert current.is_symlink()
     assert (current / "server.py").is_file()
     assert (current / "runtime.py").is_file()
+    for relative in ('plugin/.claude-plugin/plugin.json', 'plugin/hooks/hooks.json',
+                     'plugin/hooks/tool_activity.py', 'lib/backend/claude_background_provenance.py'):
+        source = ROOT / relative if relative.startswith('plugin/') else ROOT / 'server' / relative
+        assert (current / relative).read_bytes() == source.read_bytes()
+    assert (share / 'plugin').resolve() == current.resolve() / 'plugin'
+
     for source in (ROOT / "docs/architecture/fleet-map").glob("*.md"):
         assert (current / "docs/architecture/fleet-map" / source.name).read_text() == source.read_text()
     assert (current / "RUNTIME_RELEASE_ID").read_text().strip()

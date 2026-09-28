@@ -1,0 +1,13 @@
+{
+  "agents": 16,
+  "input_bytes": 134221120,
+  "processed_bytes": 524960,
+  "poll_and_managed_event_ms": 13.996,
+  "first_managed_event_ms": 2.254,
+  "measurement_version": 2,
+  "max_begin_wait_ms": 1.329,
+  "writer_transactions": 2,
+  "max_writer_lock_ms": 0.246,
+  "managed_registrations": 1,
+  "max_managed_registration_ms": 13.576
+}
