@@ -912,6 +912,20 @@ def test_usage_limit_notifies_without_retry(tmp_path):
     assert state["detail"]["message"] == "Usage limit reached"
 
 
+def test_known_refusal_shows_its_plain_reason(tmp_path):
+    service, backends, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
+    service.dispatch(text="hi", requested_session="mike", trace_id="t",
+                     synthesize_audio=False)
+    _, call = backends.spawned[0]
+    call["on_error"]("Error from provider (Console): OpenCode's free tier can only "
+                     "be used from within OpenCode")
+
+    state = agents_db.latest_state(agent_id)
+    assert state["detail"]["reason"] == "usage_limit"
+    assert state["detail"]["message"].startswith("This free OpenCode model only runs")
+    assert "OpenCode's free tier" in state["detail"]["error"]
+
+
 def test_heartbeat_turn_failure_records_heartbeat_noop(tmp_path, monkeypatch):
     service, backends, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
     recorded = []

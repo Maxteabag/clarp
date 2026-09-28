@@ -184,3 +184,12 @@ def test_a_stopped_turn_leaves_no_error_row_but_keeps_what_it_did():
     assert [(t["role"], t["text"]) for t in turns] == [
         ("user", "go"), ("user", "go on"), ("assistant", "Half an answer")]
     assert "MessageAbortedError" not in json.dumps(turns)
+
+
+def test_free_tier_refusal_row_says_what_to_do():
+    rows = [("1", _row("user")), ("2", _row("assistant", error={
+        "name": "APIError", "data": {"message": "Error from provider (Console): "
+                                     "OpenCode's free tier can only be used from within OpenCode"}}))]
+    turns = opencode_transcript._turns_from_messages(rows, {"u": [_text("hi")], "a": []}, ["u", "a"])
+    assert turns[1]["text"].startswith("This free OpenCode model only runs in OpenCode's own apps.")
+    assert "(OpenCode: Error from provider (Console)" in turns[1]["text"]
