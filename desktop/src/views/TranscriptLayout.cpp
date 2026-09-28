@@ -496,7 +496,7 @@ void TranscriptLayout::createRow(int index) {
     if (context == nullptr) context = qmlContext(this);
     if (context == nullptr) return;
     const QVariantMap values = roleValues(index);
-    row.modelData = new QQmlPropertyMap(this);
+    row.modelData = QQmlPropertyMap::create(this);
     for (auto it = values.cbegin(); it != values.cend(); ++it) row.modelData->insert(it.key(), it.value());
 
     QObject* object = m_delegate->beginCreate(context);
