@@ -8,6 +8,8 @@ import sqlite3
 import stat
 import sys
 
+import pytest
+
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
@@ -18,6 +20,12 @@ from lib import opencode_transcript  # noqa: E402
 from lib import turn_lifecycle  # noqa: E402
 
 OPENCODE = by_id("opencode")
+
+
+@pytest.fixture(autouse=True)
+def _run_path(monkeypatch):
+    """These cover the ``opencode run`` path; test_opencode_serve covers live."""
+    monkeypatch.setenv("CLARP_OPENCODE_LIVE", "0")
 
 
 def test_build_cmd_fresh_and_resume():
