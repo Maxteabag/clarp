@@ -19,13 +19,18 @@ ListView {
         endContentY(count > 0 ? itemAtIndex(count - 1) : null) - contentY)
     readonly property bool atLatest: atYEnd || distanceFromBottom < 1
 
-    function pauseFollowing() {
+    // Kept without parameters: C++ checks call it by name.
+    function pauseFollowing() { stopFollowing("request"); }
+    function stopFollowing(reason) {
         scrollEpoch++;
+        if (followLatest)
+            console.info("transcript stopped following:", reason, "distance", Math.round(distanceFromBottom),
+                "count", count);
         followLatest = false;
     }
     onFollowLatestChanged: if (followLatest) anchorIndex = -1
-    function beginUserScroll() {
-        pauseFollowing();
+    function beginUserScroll(reason) {
+        stopFollowing(reason || "user scroll");
         userInteracting = true;
     }
     function endUserScroll() {
@@ -107,7 +112,20 @@ ListView {
     // jumps to a message); only the anchoring's own corrections do not.
     // Remembering it on the wheel alone snapped the view back to the last
     // wheel position after scrolling any other way.
-    onContentYChanged: if (!anchoring && !followLatest) rememberAnchor()
+    onContentYChanged: {
+        if (!anchoring && !followLatest) rememberAnchor();
+        // A jump of more than a screen that the reader did not make is the
+        // "suddenly somewhere else" report; say where from and to.
+        const delta = contentY - lastContentY;
+        if (!userInteracting && !moving && !followLatest && Math.abs(delta) > height && !jumpReport.running) {
+            console.warn("transcript jumped:", Math.round(lastContentY), "->", Math.round(contentY), "originY",
+                Math.round(originY), "count", count, "read", readIndex, "anchor", anchorIndex);
+            jumpReport.start();
+        }
+        lastContentY = contentY;
+    }
+    property real lastContentY: 0
+    Timer { id: jumpReport; interval: 2000 }
     function rememberAnchor() {
         anchorIndex = -1;
         if (followLatest || count === 0) return;
@@ -170,6 +188,7 @@ ListView {
         Qt.callLater(root.applyFollow);
     }
     function scrollToLatest() {
+        Qt.callLater(root.guardFollow);
         scrollEpoch++;
         cancelFlick();
         wheelSettle.stop();
@@ -322,6 +341,7 @@ ListView {
     // not be reproduced. Log the geometry once per episode so the next one,
     // in a real session, says where the view was.
     property bool blankReported: false
+    property bool driftSeen: false
     Timer {
         interval: 1000
         repeat: true
@@ -336,6 +356,18 @@ ListView {
             // Whatever left it there, a blank view that is not being moved
             // returns to the nearest end of the rows.
             if (blank) root.recoverIfBlank();
+            // Following, yet above the end for a whole tick: something moved
+            // the view or a follow was skipped. Go back to the end and log it.
+            const drifted = root.followLatest && !root.userInteracting && !root.moving
+                && root.distanceFromBottom > 50;
+            if (drifted && root.driftSeen) {
+                console.warn("transcript drifted while following: distance", Math.round(root.distanceFromBottom),
+                    "count", root.count, "last created", root.itemAtIndex(root.count - 1) !== null,
+                    "rescues", followRescues.count, "originY", Math.round(root.originY));
+                root.followTicket = root.scrollEpoch;
+                root.applyFollow();
+            }
+            root.driftSeen = drifted;
         }
     }
     function handleScrollKey(event) {
@@ -343,7 +375,7 @@ ListView {
             || (event.modifiers & (Qt.AltModifier | Qt.MetaModifier))) { event.accepted = false; return; }
         if (event.key === Qt.Key_End) scrollToLatest();
         else {
-            beginUserScroll();
+            beginUserScroll("key");
             if (event.key === Qt.Key_Home) {
                 positionViewAtBeginning();
                 contentY = originY - topMargin;
@@ -355,9 +387,42 @@ ListView {
         }
         event.accepted = true;
     }
-    onMovementStarted: beginUserScroll()
+    onMovementStarted: beginUserScroll("flick")
     onMovementEnded: { endUserScroll(); rememberAnchor(); }
-    onContentHeightChanged: followContentHeight()
+    onContentHeightChanged: { followContentHeight(); guardFollow(); }
+    onOriginYChanged: guardFollow()
+    onCountChanged: guardFollow()
+    // Following means staying at the end. Rows of very different heights
+    // make ListView's estimates swing (a 1,542-row chat estimated at 14.7M px),
+    // and each re-estimation can move the view or its origin in the middle of
+    // a layout pass, where positioning is unreliable: a following view was
+    // left thousands of pixels short of its end, or crept up while an agent
+    // streamed. After any such change, check from outside the layout pass,
+    // ten times a second, until the real last row has been at the end three
+    // times in a row; then the guard stops, so nothing runs at idle.
+    function guardFollow() {
+        if (!followLatest || !visible) return;
+        followGuard.settled = 0;
+        if (!followGuard.running) followGuard.start();
+    }
+    Timer {
+        id: followGuard
+        property int settled: 0
+        interval: 100
+        repeat: true
+        onTriggered: {
+            if (!root.followLatest || !root.visible) { stop(); return; }
+            if (root.userInteracting || root.moving) return;
+            const last = root.count > 0 ? root.itemAtIndex(root.count - 1) : null;
+            if (last && Math.abs(root.contentY - root.endContentY(last)) <= root.bottomMargin + 2) {
+                if (++settled >= 3) stop();
+                return;
+            }
+            settled = 0;
+            root.followTicket = root.scrollEpoch;
+            root.applyFollow();
+        }
+    }
     onHeightChanged: scheduleFollow()
     // A narrower view wraps every row taller (a new split pane is laid out
     // once, then narrowed). The last row can leave the loaded set, and with it
@@ -374,7 +439,7 @@ ListView {
             const delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 120 * 60;
             if (delta === 0) { event.accepted = false; return; }
             root.cancelFlick();
-            root.beginUserScroll();
+            root.beginUserScroll("wheel");
             root.scrollBy(-delta);
             root.rememberAnchor();
             wheelSettle.restart();
@@ -386,7 +451,7 @@ ListView {
     ScrollBar.vertical: ScrollBar {
         id: scrollBar
         objectName: "transcriptScrollBar"
-        onPressedChanged: pressed ? root.beginUserScroll() : root.endUserScroll()
+        onPressedChanged: pressed ? root.beginUserScroll("scrollbar") : root.endUserScroll()
         Keys.onPressed: event => root.handleScrollKey(event)
     }
     Connections {
