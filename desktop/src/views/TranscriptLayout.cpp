@@ -1,6 +1,7 @@
 #include "views/TranscriptLayout.h"
 
 #include <QAbstractItemModel>
+#include <QElapsedTimer>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -16,6 +17,8 @@ constexpr qreal EstimatedLineHeight = 19;
 constexpr qreal EstimatedRowChrome = 30;
 constexpr qreal EstimatedSectionHeight = 26;
 constexpr int MaxLayoutPasses = 8;
+// Spare time per frame for rows in the margin around the viewport.
+constexpr int MarginCreationBudgetMs = 4;
 } // namespace
 
 TranscriptLayout::TranscriptLayout(QQuickItem* parent) : QQuickItem(parent) {
@@ -167,6 +170,13 @@ void TranscriptLayout::setCacheExtent(qreal extent) {
     m_cacheExtent = extent;
     scheduleLayout();
     emit cacheExtentChanged();
+}
+
+void TranscriptLayout::setCreationBudget(int milliseconds) {
+    if (m_creationBudget == milliseconds) return;
+    m_creationBudget = milliseconds;
+    if (m_creationPending) scheduleLayout();
+    emit creationBudgetChanged();
 }
 
 qreal TranscriptLayout::headerHeight() const { return m_header ? m_header->height() : 0; }
@@ -559,19 +569,38 @@ void TranscriptLayout::correctViewport() {
 
 bool TranscriptLayout::placeVisibleRows() {
     if (m_rows.empty()) return false;
-    const qreal top = viewportY() - m_cacheExtent;
-    const qreal bottom = viewportY() + viewportHeight() + m_cacheExtent;
-    const int first = rowAt(top);
-    const int last = rowAt(bottom);
+    const qreal viewTop = viewportY();
+    const qreal viewBottom = viewTop + viewportHeight();
+    const int first = rowAt(viewTop - m_cacheExtent);
+    const int last = rowAt(viewBottom + m_cacheExtent);
+    const int visibleFirst = rowAt(viewTop);
+    const int visibleLast = rowAt(viewBottom);
     for (int i = 0; i < count(); ++i) {
         if ((i < first || i > last) && (m_rows[static_cast<size_t>(i)].item || m_rows[static_cast<size_t>(i)].section))
             releaseRow(m_rows[static_cast<size_t>(i)]);
     }
+    // Rows on screen first, top to bottom, then the margin nearest first.
+    std::vector<int> order;
+    for (int i = visibleFirst; i <= visibleLast; ++i) order.push_back(i);
+    for (int step = 1; visibleFirst - step >= first || visibleLast + step <= last; ++step) {
+        if (visibleLast + step <= last) order.push_back(visibleLast + step);
+        if (visibleFirst - step >= first) order.push_back(visibleFirst - step);
+    }
+    QElapsedTimer clock;
+    clock.start();
     bool changed = false;
     const qreal width = rowWidth();
-    for (int i = first; i <= last; ++i) {
+    for (const int i : order) {
         Row& row = m_rows[static_cast<size_t>(i)];
-        if (row.item == nullptr) createRow(i);
+        if (row.item == nullptr) {
+            const bool visible = i >= visibleFirst && i <= visibleLast;
+            const int budget = visible ? m_creationBudget : MarginCreationBudgetMs;
+            if (budget > 0 && clock.elapsed() >= budget) {
+                m_creationPending = true;
+                continue;
+            }
+            createRow(i);
+        }
         if (row.item == nullptr) continue;
         if (!qFuzzyCompare(row.item->width() + 1, width + 1)) row.item->setWidth(width);
         const qreal sectionHeight = row.section ? row.section->height() : 0;
@@ -596,6 +625,7 @@ bool TranscriptLayout::placeVisibleRows() {
 void TranscriptLayout::relayout() {
     if (m_inLayout || !isComponentComplete()) return;
     m_inLayout = true;
+    m_creationPending = false;
     for (int pass = 0; pass < MaxLayoutPasses; ++pass) {
         correctViewport();
         if (!placeVisibleRows()) break;
@@ -611,5 +641,7 @@ void TranscriptLayout::relayout() {
         m_footer->setWidth(width());
     }
     m_inLayout = false;
+    // Rows left for later frames: continue on the next pass of the event loop.
+    if (m_creationPending) QMetaObject::invokeMethod(this, &TranscriptLayout::scheduleLayout, Qt::QueuedConnection);
 }
 } // namespace clarp

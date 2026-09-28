@@ -38,6 +38,12 @@ class TranscriptLayout : public QQuickItem {
     Q_PROPERTY(qreal topMargin READ topMargin WRITE setTopMargin NOTIFY marginsChanged)
     Q_PROPERTY(qreal bottomMargin READ bottomMargin WRITE setBottomMargin NOTIFY marginsChanged)
     Q_PROPERTY(qreal cacheExtent READ cacheExtent WRITE setCacheExtent NOTIFY cacheExtentChanged)
+    // Milliseconds per frame for creating rows inside the viewport; 0 means
+    // create them all before the frame (opening a chat). While the reader
+    // scrolls fast a budget keeps the scroll moving and fills rows in over
+    // the next frames. Rows in the margin around the viewport always wait
+    // for spare time.
+    Q_PROPERTY(int creationBudget READ creationBudget WRITE setCreationBudget NOTIFY creationBudgetChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(qreal contentHeight READ contentHeight NOTIFY contentHeightChanged)
     Q_PROPERTY(int measuredCount READ measuredCount NOTIFY contentHeightChanged)
@@ -76,6 +82,8 @@ class TranscriptLayout : public QQuickItem {
     void setBottomMargin(qreal margin);
     qreal cacheExtent() const { return m_cacheExtent; }
     void setCacheExtent(qreal extent);
+    int creationBudget() const { return m_creationBudget; }
+    void setCreationBudget(int milliseconds);
     int count() const { return static_cast<int>(m_rows.size()); }
     qreal contentHeight() const;
     int measuredCount() const;
@@ -109,6 +117,7 @@ class TranscriptLayout : public QQuickItem {
     void spacingChanged();
     void marginsChanged();
     void cacheExtentChanged();
+    void creationBudgetChanged();
     void countChanged();
     void contentHeightChanged();
     // A correction moved the viewport to keep the anchor or the end in place.
@@ -176,6 +185,8 @@ class TranscriptLayout : public QQuickItem {
     qreal m_topMargin = 0;
     qreal m_bottomMargin = 0;
     qreal m_cacheExtent = 400;
+    int m_creationBudget = 0;
+    bool m_creationPending = false;
 
     std::vector<Row> m_rows;
     mutable std::vector<qreal> m_prefix; // m_prefix[i] = sum of block heights before row i
