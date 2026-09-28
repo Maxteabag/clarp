@@ -124,12 +124,12 @@ std::vector<TranscriptRows::Row> TranscriptRows::partsFor(int sourceRow) const {
     const bool splittable = !m_source->data(index, m_activityRole).toBool()
         && m_source->data(index, m_kindRole).toString() != QStringLiteral("live")
         && m_source->data(index, m_authorRole).toString() == QStringLiteral("assistant");
-    if (!splittable) return {Row{.source = sourceRow}};
+    if (!splittable) return {Row{.source = sourceRow, .part = 0, .parts = 1, .body = {}}};
     const QString body = m_source->data(index, m_bodyRole).toString();
     if (body.size() <= SplitAboveCharacters && !body.contains(QStringLiteral("|---")) && !body.contains(QStringLiteral("| ---")))
-        return {Row{.source = sourceRow}};
+        return {Row{.source = sourceRow, .part = 0, .parts = 1, .body = {}}};
     const QStringList parts = splitMarkdown(body);
-    if (parts.size() <= 1) return {Row{.source = sourceRow}};
+    if (parts.size() <= 1) return {Row{.source = sourceRow, .part = 0, .parts = 1, .body = {}}};
     std::vector<Row> rows;
     rows.reserve(static_cast<size_t>(parts.size()));
     for (int part = 0; part < parts.size(); ++part)
