@@ -126,3 +126,24 @@ def test_prune_database_drops_old_judgment_decisions_only(tmp_path):
     assert result["judgment_decisions"] == 1
     remaining = judgments.recent(limit=10, site="junk")
     assert [row["created_at"] for row in remaining] == [9_990]
+
+
+def test_run_once_forwards_checkpoint_flag_to_telemetry_rollup(tmp_path):
+    """run_once(checkpoint=False) must also spare telemetry.sqlite's own
+    exclusive truncate, not just state.sqlite's — that gap let the boot
+    sweep collide with startup write volume and throw "database is locked".
+    """
+    from lib import telemetry
+
+    executed: list[str] = []
+    con = telemetry.conn()
+    con.set_trace_callback(executed.append)
+    worker = maintenance.MaintenanceWorker(audio_dir=tmp_path)
+    try:
+        worker.run_once(checkpoint=False)
+        assert not any("wal_checkpoint" in sql for sql in executed)
+        executed.clear()
+        worker.run_once(checkpoint=True)
+        assert any("wal_checkpoint" in sql for sql in executed)
+    finally:
+        con.set_trace_callback(None)

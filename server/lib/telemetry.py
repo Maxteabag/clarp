@@ -187,7 +187,8 @@ def reset_for_tests(path: pathlib.Path | None = None) -> None:
     _SCHEMA_READY = False
 
 
-def rollup_and_prune(*, now_ms: int | None = None) -> dict[str, int]:
+def rollup_and_prune(*, now_ms: int | None = None,
+                      checkpoint: bool = True) -> dict[str, int]:
     now = int(now_ms if now_ms is not None else time.time() * 1000)
     hour = 60 * 60 * 1000
     current_hour = now - (now % hour)
@@ -253,5 +254,10 @@ def rollup_and_prune(*, now_ms: int | None = None) -> dict[str, int]:
         "DELETE FROM hourly_latency_buckets WHERE bucket_ms < ?",
         (now - ROLLUP_RETENTION_MS,),
     )
-    c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    # Exclusive and can block concurrent event writers for its duration;
+    # the boot sweep runs with checkpoint=False for the same reason
+    # MaintenanceWorker defers state.sqlite's own truncate (see
+    # maintenance.py), so it doesn't collide with startup write volume.
+    if checkpoint:
+        c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     return {"telemetry_details": details, "telemetry_rollups": rollups}

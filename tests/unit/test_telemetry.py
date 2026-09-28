@@ -41,6 +41,23 @@ def test_rollup_is_idempotent_and_detail_expires_after_24_hours():
     assert [tuple(row) for row in buckets] == [(10, 1), (50, 2)]
 
 
+def test_rollup_and_prune_skips_the_exclusive_checkpoint_when_asked():
+    """The boot sweep must not race startup write volume with an exclusive
+    WAL truncate (same reasoning as MaintenanceWorker's own checkpoint gate).
+    """
+    executed: list[str] = []
+    con = telemetry.conn()
+    con.set_trace_callback(executed.append)
+    try:
+        telemetry.rollup_and_prune(now_ms=0, checkpoint=False)
+        assert not any("wal_checkpoint" in sql for sql in executed)
+        executed.clear()
+        telemetry.rollup_and_prune(now_ms=0, checkpoint=True)
+        assert any("wal_checkpoint" in sql for sql in executed)
+    finally:
+        con.set_trace_callback(None)
+
+
 def test_audio_fault_views_flatten_client_records():
     import json
     fault = {
