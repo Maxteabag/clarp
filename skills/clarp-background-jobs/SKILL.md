@@ -84,3 +84,32 @@ Persist processed-item state only after confirmed delivery acceptance. Use a sta
 idempotency key across retries and restarts where the destination supports it;
 otherwise reconcile uncertain acceptance before retrying. Preserve a fixed watch
 boundary across restarts so items arriving during downtime remain eligible.
+
+## Provider-native tasks (Host contract 24)
+
+The Host automatically observes Claude background `Bash` requests and their
+native task receipts from transcripts bound to Clarp runtimes. Check the job's
+`metadata.provider_state`: launching is only a request, running means the provider
+reported a task ID, and unknown means evidence is missing or stale. A stopped
+session without a completion record has unknown outcome. These jobs do not claim
+PID ownership or heartbeats. A successful watcher task does not establish that a
+remote deployment succeeded; inspect the actual deployment result.
+
+Provider jobs have `can_cancel:false`: this Host cannot safely invoke Claude's
+native task cancellation outside its owning provider. Do not cancel the watched
+CI/deployment to stop its watcher, or signal a PID inferred from task text.
+Inspect output through the job detail API; it derives the exact task output path,
+limits its tail, and redacts common credential forms.
+
+Explicit registration remains necessary for Codex code-mode tasks and arbitrary
+systemd/nohup services. No broad process discovery or adoption occurs. Do not
+register Claude `Agent`/`Task` helpers as background jobs. The Clarp PreToolUse hook attaches non-secret invocation identity to background
+Bash commands through updatedInput, without making a permission decision. The
+legacy helper automatically retains that identity only when the registering owner
+matches its live native binding, so its actual registration replaces the automatic
+mirror in job counts. This requires the updated plugin and Host code together.
+An explicitly registered job can also provide `metadata.provider`, `metadata.native_session_id`, and
+`metadata.tool_use_id` matching the actual Claude Bash call to suppress the
+automatic mirror in job lists/counts; never guess those IDs or deduplicate by title.
+Older plugin installations and sanitized service environments may lack this
+provenance; do not guess an identity when it is absent.

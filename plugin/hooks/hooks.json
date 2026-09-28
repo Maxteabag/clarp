@@ -1,5 +1,5 @@
 {
-  "description": "Clarp's agent-state reporters. Each hook records a row the server broadcasts over SSE (agent-state / agent-activity) so the PWA and iOS clients can render what an agent is doing. Every hook is a sensor: it writes state and exits 0, and never returns a permission decision. Registering them here rather than in ~/.claude/settings.json means Clarp writes nothing into the user's Claude Code configuration — the server passes --plugin-dir when it launches the CLI.",
+  "description": "Clarp's agent-state reporters. Each hook records a row the server broadcasts over SSE (agent-state / agent-activity) so the PWA and iOS clients can render what an agent is doing. Hooks write state and exit 0, and never return a permission decision. PreToolUse also attaches non-secret invocation provenance to background Bash input so explicit job registration can deduplicate its native mirror. Registering them here rather than in ~/.claude/settings.json means Clarp writes nothing into the user's Claude Code configuration — the server passes --plugin-dir when it launches the CLI.",
   "hooks": {
     "UserPromptSubmit": [
       { "hooks": [ { "type": "command",

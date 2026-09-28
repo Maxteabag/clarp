@@ -1,0 +1,67 @@
+{
+  "source_commit": "d63a856a8c8cce0c877e2492f06e14bac14d1ff2",
+  "environment_removed_only_in_test_subprocess": [
+    "CLARP_HEARTBEATS_DISABLED"
+  ],
+  "chunks": {
+    "unit-a": {
+      "summary": "1 failed, 2472 passed, 9 subtests passed in 180.32s (0:03:00)",
+      "junit": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "1",
+        "skipped": "0",
+        "tests": "2482",
+        "time": "180.248",
+        "timestamp": "2026-09-28T15:11:28.169976+02:00",
+        "hostname": "elitebook"
+      },
+      "failures": [
+        "tests/unit/test_module_state_guard.py::test_no_new_module_state - Asse..."
+      ]
+    },
+    "unit-b": {
+      "summary": "2522 passed in 233.47s (0:03:53)",
+      "junit": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "2522",
+        "time": "231.228",
+        "timestamp": "2026-09-28T15:14:30.780943+02:00",
+        "hostname": "elitebook"
+      },
+      "failures": []
+    },
+    "remaining": {
+      "summary": "374 passed, 1 skipped, 1 warning in 156.53s (0:02:36)",
+      "junit": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "1",
+        "tests": "375",
+        "time": "156.473",
+        "timestamp": "2026-09-28T15:18:25.294110+02:00",
+        "hostname": "elitebook"
+      },
+      "failures": []
+    }
+  },
+  "remaining_failure_base_reproduction": {
+    "source": "aab0315",
+    "log": "/var/tmp/solu-review-base-sanitized.log",
+    "result": "same module-state guard failure; three earlier transient tests passed"
+  },
+  "javascript": {
+    "files_passed": 34,
+    "tests_passed": 344,
+    "seconds": 14.26,
+    "log": "/var/tmp/solu-review-js-final.log"
+  },
+  "final_live_read_only_check": {
+    "schema": 99,
+    "inherited_CLARP_HEARTBEATS_DISABLED": "1"
+  }
+}

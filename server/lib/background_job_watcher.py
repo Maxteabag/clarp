@@ -14,12 +14,16 @@ class BackgroundJobWatcher:
     # Helper and status staleness is measured in tens of minutes; once a
     # minute is plenty and keeps the per-agent scan off the fast tick.
     STALE_WORK_INTERVAL_SEC = 60.0
+    PROVIDER_INTERVAL_SEC = 5.0
 
     def __init__(self, stream):
         self._statuses: dict[str, str] = {}
         self.stream = stream
         self._last_id = 0
         self._stale_work_due = 0.0
+        self._provider_due = 0.0
+        from .provider_background_jobs import ProviderJobObserver
+        self._provider_observer = ProviderJobObserver()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -37,17 +41,30 @@ class BackgroundJobWatcher:
 
     def _loop(self) -> None:
         while not self._stop.wait(self.INTERVAL_SEC):
-            try:
-                background_jobs.reconcile_stale()
-                self._poll_once()
-            except Exception as exc:  # noqa: BLE001
-                log_exception("backgroundJobWatcherTickFail", exc)
+            self._tick()
             if time.monotonic() >= self._stale_work_due:
                 self._stale_work_due = time.monotonic() + self.STALE_WORK_INTERVAL_SEC
                 try:
                     stale_work.sweep(self.stream)
                 except Exception as exc:  # noqa: BLE001
                     log_exception("staleWorkSweepFail", exc)
+
+    def _tick(self) -> None:
+        # Publish managed-job progress before any provider backlog work.
+        try:
+            background_jobs.reconcile_stale()
+            self._poll_once()
+        except Exception as exc:
+            log_exception("backgroundJobWatcherTickFail", exc)
+        try:
+            if time.monotonic() >= self._provider_due:
+                self._provider_due = time.monotonic() + self.PROVIDER_INTERVAL_SEC
+                self._provider_observer.poll_once()
+                if self._provider_observer.continue_soon:
+                    self._provider_due = time.monotonic()
+                self._poll_once()
+        except Exception as exc:
+            log_exception("providerBackgroundWatcherTickFail", exc)
 
     def _poll_once(self) -> None:
         changes = background_jobs.events_after(self._last_id)
@@ -58,6 +75,7 @@ class BackgroundJobWatcher:
             self._last_id = int(event["event_id"])
             if not job:
                 continue
+            job = background_jobs.event_projection(job, int(event["observed_at"]))
             events.broadcast(self.stream, events.background_job_updated(
                 change_revision=self._last_id,
                 observed_at=int(event["observed_at"]),
