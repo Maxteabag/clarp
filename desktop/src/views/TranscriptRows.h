@@ -22,20 +22,20 @@ class TranscriptRows : public QAbstractListModel {
   public:
     explicit TranscriptRows(QObject* parent = nullptr);
 
-    QAbstractItemModel* sourceModel() const { return m_source; }
+    [[nodiscard]] QAbstractItemModel* sourceModel() const { return m_source; }
     void setSourceModel(QAbstractItemModel* model);
-    int count() const { return static_cast<int>(m_rows.size()); }
+    [[nodiscard]] int count() const { return static_cast<int>(m_rows.size()); }
 
-    int rowCount(const QModelIndex& parent = {}) const override;
-    QVariant data(const QModelIndex& index, int role) const override;
-    QHash<int, QByteArray> roleNames() const override;
+    [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
+    [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
+    [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
     // The first view row of a source row, for jumping to a message.
-    Q_INVOKABLE int rowForSource(int sourceRow) const;
-    Q_INVOKABLE int sourceRow(int row) const;
+    Q_INVOKABLE [[nodiscard]] int rowForSource(int sourceRow) const;
+    Q_INVOKABLE [[nodiscard]] int sourceRow(int row) const;
 
     // How a message is split; exposed for tests.
-    static QStringList splitMarkdown(const QString& markdown);
+    [[nodiscard]] static QStringList splitMarkdown(const QString& markdown);
 
   signals:
     void sourceModelChanged();
@@ -48,9 +48,9 @@ class TranscriptRows : public QAbstractListModel {
         int parts = 1;
         QString body;   // the part's markdown when split, else empty
     };
-    std::vector<Row> partsFor(int sourceRow) const;
-    int firstRowOf(int sourceRow) const;
-    int rowsOf(int sourceRow) const;
+    [[nodiscard]] std::vector<Row> partsFor(int sourceRow) const;
+    [[nodiscard]] int firstRowOf(int sourceRow) const;
+    [[nodiscard]] int rowsOf(int sourceRow) const;
     void rebuild();
     void onRowsInserted(const QModelIndex& parent, int first, int last);
     void onRowsRemoved(const QModelIndex& parent, int first, int last);
