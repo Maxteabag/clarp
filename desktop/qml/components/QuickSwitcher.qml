@@ -150,6 +150,29 @@ Rectangle {
     }
     color: Theme.scrim
 
+    // The results are rebuilt whenever an agent updates, several times a
+    // second while one streams, and each rebuild reset the selection: Enter
+    // then chose nothing and the switch silently did not happen. The
+    // selection is kept by identity across rebuilds.
+    property string selectedKey: ""
+    // Hover picks a row only after the pointer itself moved since the last
+    // keystroke. Rows sliding under a resting pointer as results change are
+    // reported as hovered; that selected them, and Enter then applied a
+    // setting instead of opening the agent typed.
+    property bool hoverSelects: false
+    property point lastPointer: Qt.point(-1, -1)
+    function keyOf(item) {
+        return item ? String(item.kind) + ":" + String(item.session || item.action || item.name || "") : "";
+    }
+    function select(index) {
+        resultList.currentIndex = index;
+        selectedKey = index >= 0 && index < results.length ? keyOf(results[index]) : "";
+    }
+    onResultsChanged: {
+        const kept = selectedKey.length > 0 ? results.findIndex(item => keyOf(item) === selectedKey) : -1;
+        resultList.currentIndex = kept >= 0 ? kept : (results.length > 0 ? 0 : -1);
+    }
+
     function open(returnToComposer) {
         contactsOnly = false;
         restoreComposer = Boolean(returnToComposer);
@@ -161,7 +184,7 @@ Rectangle {
     function openContacts(returnToComposer) {
         open(returnToComposer);
         contactsOnly = true;
-        resultList.currentIndex = root.results.length > 0 ? 0 : -1;
+        root.select(root.results.length > 0 ? 0 : -1);
     }
 
     function close(restoreFocus) {
@@ -237,17 +260,18 @@ Rectangle {
                 }
                 onTextChanged: {
                     root.query = text;
-                    resultList.currentIndex = root.results.length > 0 ? 0 : -1;
+                    root.hoverSelects = false;
+                    root.select(root.results.length > 0 ? 0 : -1);
                 }
                 Keys.onPressed: event => {
                     if (event.key === Qt.Key_Down) {
-                        resultList.currentIndex = Math.min(root.results.length - 1, resultList.currentIndex + 1);
+                        root.select(Math.min(root.results.length - 1, resultList.currentIndex + 1));
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Up) {
-                        resultList.currentIndex = Math.max(0, resultList.currentIndex - 1);
+                        root.select(Math.max(0, resultList.currentIndex - 1));
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                        root.choose(resultList.currentIndex);
+                        root.choose(resultList.currentIndex >= 0 ? resultList.currentIndex : 0);
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Escape) {
                         root.close();
@@ -263,6 +287,17 @@ Rectangle {
                 model: root.results
                 spacing: 1
                 clip: true
+                HoverHandler {
+                    onPointChanged: {
+                        const p = point.scenePosition;
+                        if (root.lastPointer.x >= 0 && Math.abs(p.x - root.lastPointer.x) + Math.abs(p.y - root.lastPointer.y) > 2) {
+                            root.hoverSelects = true;
+                            const row = resultList.indexAt(point.position.x, point.position.y + resultList.contentY);
+                            if (row >= 0) root.select(row);
+                        }
+                        root.lastPointer = p;
+                    }
+                }
                 currentIndex: root.results.length > 0 ? 0 : -1
 
                 delegate: ItemDelegate {
@@ -277,8 +312,8 @@ Rectangle {
                     highlighted: ListView.isCurrentItem
                     hoverEnabled: true
                     onHoveredChanged: {
-                        if (hovered)
-                            resultList.currentIndex = index;
+                        if (hovered && root.hoverSelects)
+                            root.select(index);
                     }
                     onClicked: root.choose(index)
 
