@@ -288,6 +288,11 @@ void TranscriptLayout::layoutNow() { relayout(); }
 
 void TranscriptLayout::updatePolish() { relayout(); }
 
+void TranscriptLayout::itemChange(ItemChange change, const ItemChangeData& value) {
+    QQuickItem::itemChange(change, value);
+    if (change == ItemVisibleHasChanged && value.boolValue) scheduleLayout();
+}
+
 void TranscriptLayout::componentComplete() {
     QQuickItem::componentComplete();
     resetRows();
@@ -482,16 +487,11 @@ void TranscriptLayout::onDataChanged(const QModelIndex& topLeft, const QModelInd
 }
 
 void TranscriptLayout::onItemHeightChanged() {
-    if (m_inLayout) return; // relayout measures created rows itself
-    m_prefixDirty = true;
-    for (Row& row : m_rows) {
-        if (row.item != sender() && row.section != sender()) continue;
-        const qreal sectionHeight = row.section != nullptr ? row.section->height() : 0;
-        row.height = sectionHeight + (row.item != nullptr ? row.item->height() : 0);
-        row.measured = true;
-        break;
-    }
-    scheduleLayout();
+    // The layout pass measures every created row, so a height change only has
+    // to schedule one. Finding the row here scanned all rows per signal; when
+    // a transcript became visible every created row changed height at once
+    // and that froze a 2,400-row chat for 23 s.
+    if (!m_inLayout) scheduleLayout();
 }
 
 void TranscriptLayout::releaseRow(Row& row) {
@@ -638,6 +638,8 @@ bool TranscriptLayout::placeVisibleRows() {
 
 void TranscriptLayout::relayout() {
     if (m_inLayout || !isComponentComplete()) return;
+    // A hidden or collapsed transcript builds nothing; it lays out when shown.
+    if (!isVisible() || viewportHeight() <= 0) return;
     m_inLayout = true;
     m_creationPending = false;
     for (int pass = 0; pass < MaxLayoutPasses; ++pass) {
