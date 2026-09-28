@@ -347,3 +347,63 @@ def test_step_start_is_thinking_not_a_tool(tmp_path, monkeypatch):
     handle.drain_thread.join(timeout=5)
     assert "thinking" in states
     assert "tool" not in states
+
+
+def test_turn_reports_tool_detail_usage_last_step_text_and_denies_question(
+        tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv("OPENCODE_PERMISSION", json.dumps({"webfetch": "deny"}))
+    step_finish = {"type": "step-finish", "reason": "tool-calls", "cost": 0.25,
+                   "tokens": {"input": 10, "output": 4, "cache": {"read": 100, "write": 1}}}
+    events = [
+        {"type": "step_start", "sessionID": "ses_x", "part": {}},
+        {"type": "text", "sessionID": "ses_x", "part": {"text": "Checking."}},
+        {"type": "tool_use", "sessionID": "ses_x", "part": {
+            "tool": "read", "state": {"status": "completed", "input": {"filePath": "/a.py"}}}},
+        {"type": "step_finish", "sessionID": "ses_x", "part": step_finish},
+        {"type": "step_start", "sessionID": "ses_x", "part": {}},
+        {"type": "text", "sessionID": "ses_x", "part": {"text": "All good."}},
+        {"type": "step_finish", "sessionID": "ses_x", "part": {**step_finish, "reason": "stop"}},
+    ]
+    fake = bin_dir / "opencode"
+    fake.write_text(
+        "#!/usr/bin/env python3\nimport os, sys\n"
+        f"open({str(tmp_path / 'perm')!r}, 'w').write(os.environ.get('OPENCODE_PERMISSION', ''))\n"
+        f"sys.stdout.write({json.dumps(''.join(json.dumps(e) + chr(10) for e in events))})\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    details: list[dict] = []
+    monkeypatch.setattr(OPENCODE, "_transition",
+                        lambda _agent_id, _event, detail: details.append(detail))
+    monkeypatch.setattr(agents_db, "get_by_agent_id", lambda _id: None)
+    monkeypatch.setattr(agents_db, "latest_turn_synthesize_audio", lambda _id: False)
+    results: list[dict] = []
+    handle = OPENCODE.start_turn(
+        text="hello", cwd=tmp_path, agent_id="a1", session="s",
+        on_session_init=lambda _sid: True, on_result=results.append,
+        enqueue=lambda **_k: 1)
+    handle.drain_thread.join(timeout=5)
+    assert json.loads((tmp_path / "perm").read_text()) == {
+        "webfetch": "deny", "question": "deny"}
+    tool = next(d for d in details if d.get("tool"))
+    assert (tool["tool"], tool["input"]) == ("Read", {"file_path": "/a.py"})
+    assert results == [{
+        "last_agent_message": "All good.",
+        "usage": {"input_tokens": 20, "output_tokens": 8,
+                  "cache_read_input_tokens": 200, "cache_creation_input_tokens": 2},
+        "total_cost_usd": 0.5,
+    }]
+
+
+def test_error_event_shows_the_provider_message(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    _install_fake_opencode(bin_dir, json.dumps({"type": "error", "error": {
+        "name": "APIError", "data": {"message": "Account is suspended"}}}) + "\n")
+    errors: list[str] = []
+    handle = OPENCODE.start_turn(text="hi", cwd=tmp_path, on_error=errors.append,
+                                 enqueue=lambda **_k: 1)
+    handle.drain_thread.join(timeout=5)
+    assert errors == ["Account is suspended"]
