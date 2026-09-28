@@ -181,9 +181,13 @@ class OpenCodeBackend(StreamJsonBackend):
         return {"OPENCODE_PERMISSION": json.dumps(rules)}
 
     def build_cmd(self, session_id: str = "", *, is_new_session: bool = False,
-                  model: str = "", effort: str = "") -> list[str]:
+                  model: str = "", effort: str = "", thinking: bool = False) -> list[str]:
         cmd = [self.required_binary,
                "run", "--format", "json", "--auto"]
+        if thinking:
+            # Emit `reasoning` events. How much a model reasons is its
+            # variant (effort); this only stops run from hiding it.
+            cmd.append("--thinking")
         if model:
             cmd += ["--model", model]
         if effort:
@@ -230,7 +234,7 @@ class OpenCodeBackend(StreamJsonBackend):
                              f"agent={agent_id or '∅'} live={int(live)}")
         run_cmd = self.build_cmd(
             backend_session_id, is_new_session=is_new_session,
-            model=model, effort=effort) + [prompt]
+            model=model, effort=effort, thinking=True) + [prompt]
         runtime_agent_id = "" if isolated else agent_id
         callbacks = dict(
             agent_id=runtime_agent_id, session=session,
@@ -294,6 +298,13 @@ class OpenCodeBackend(StreamJsonBackend):
                     part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
                     if etype == "step_finish":
                         _add_usage(st, part)
+                        continue
+                    if etype == "reasoning":
+                        # Model thinking: busy, as Codex reasoning items are;
+                        # never chat text.
+                        self._transition(agent_id, TurnEvent.TEXT_STREAMED, {
+                            "dispatch": self.runner, "trace_id": trace_id,
+                        })
                         continue
                     if etype == "step_start":
                         st.step_texts = []
@@ -527,6 +538,10 @@ class OpenCodeBackend(StreamJsonBackend):
             self._broadcast(stream, agent_id, session)
         elif ptype == "step-finish":
             _add_usage(st, part)
+        elif ptype == "reasoning":
+            # Model thinking keeps the agent busy (as Codex reasoning items
+            # do) and is never shown as chat text.
+            self._phase(st, "thinking", agent_id, trace_id)
         elif ptype == "tool":
             state = part.get("state") if isinstance(part.get("state"), dict) else {}
             status = str(state.get("status") or "")
@@ -555,7 +570,9 @@ class OpenCodeBackend(StreamJsonBackend):
         delta = props.get("delta")
         if not part_id or not isinstance(delta, str):
             return
-        if st.part_types.get(part_id) == "text":
+        if st.part_types.get(part_id) == "reasoning":
+            self._phase(st, "thinking", agent_id, trace_id)
+        elif st.part_types.get(part_id) == "text":
             st.part_texts[part_id] = st.part_texts.get(part_id, "") + delta
             self._on_text(part_id, st, ended=False, agent_id=agent_id,
                           session=session, trace_id=trace_id, stream=stream,

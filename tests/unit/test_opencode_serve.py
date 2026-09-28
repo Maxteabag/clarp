@@ -342,3 +342,26 @@ def test_supervisor_ends_the_server_when_the_runtime_goes_away(tmp_path):
     while _alive(pid) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not _alive(pid)
+
+
+def test_reasoning_marks_the_agent_busy_and_is_never_reply_text(fake):
+    sid = "ses_new"
+    events = _events()
+    finish = next(i for i, e in enumerate(events)
+                  if e["properties"].get("part", {}).get("id") == "prt_f1")
+    events[finish:finish] = [
+        {"type": "message.part.updated", "properties": {"part": {
+            "id": "prt_r", "sessionID": sid, "messageID": "msg_a", "type": "reasoning",
+            "text": ""}}},
+        {"type": "message.part.delta", "properties": {
+            "sessionID": sid, "messageID": "msg_a", "partID": "prt_r",
+            "field": "text", "delta": "<speak>private thought</speak>"}},
+    ]
+    fake.script(events)
+    handle, results, errors, spoken, _sessions = _start(fake)
+    handle.drain_thread.join(timeout=20)
+    kinds = [event for event, _detail in fake.states]
+    tool = kinds.index(TurnEvent.TOOL_STARTED)
+    assert TurnEvent.TEXT_STREAMED in kinds[tool + 1:]
+    assert "private thought" not in json.dumps([results, spoken, fake.live])
+    assert not errors
