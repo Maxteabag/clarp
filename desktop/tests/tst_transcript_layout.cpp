@@ -158,7 +158,7 @@ public:
         return result.toInt();
     }
 
-    void appendRows(int count, const QString& prefix = QStringLiteral("m"), qreal height = 30) {
+    void appendRows(int count, const QString& prefix = QStringLiteral("m"), qreal height = 30) const {
         call3("appendRows", count, prefix, height);
         settle();
     }
@@ -205,6 +205,7 @@ private slots:
     void followingTracksEndAfterModelAndHeightChanges() {
         Fixture f;
         f.appendRows(20);
+        QVERIFY(f.layout != nullptr && f.flick != nullptr);
         f.layout->setFollowing(true);
         f.settle();
         compareNear(f.contentY(), f.layout->endY(), 1, "initial following end");
@@ -225,6 +226,7 @@ private slots:
     void anchorSurvivesChangesAboveViewport() {
         Fixture f;
         f.appendRows(80);
+        QVERIFY(f.layout != nullptr && f.flick != nullptr);
         f.layout->positionAtRow(40, false);
         f.settle();
         const QString anchor = QStringLiteral("m40");
@@ -254,6 +256,7 @@ private slots:
     void modelResetKeepsSameMessageId() {
         Fixture f;
         f.appendRows(60);
+        QVERIFY(f.layout != nullptr && f.flick != nullptr);
         f.layout->positionAtRow(30, false);
         f.settle();
         const QString anchor = QStringLiteral("m30");
@@ -268,6 +271,7 @@ private slots:
     void widthChangeKeepsAnchorOnScreen() {
         Fixture f;
         f.appendRows(100);
+        QVERIFY(f.layout != nullptr && f.flick != nullptr);
         f.layout->positionAtRow(50, false);
         f.settle();
 
@@ -283,6 +287,7 @@ private slots:
     void positionAtRowStaysAtTopAfterNeighbourMeasurement() {
         Fixture f;
         f.appendRows(120);
+        QVERIFY(f.layout != nullptr && f.flick != nullptr);
         f.layout->positionAtRow(70, false);
         f.settle();
         compareNear(f.contentY(), f.layout->positionOf(70), 1, "row positioned at top");
@@ -296,6 +301,7 @@ private slots:
     void rowsFarFromViewportAreNotCreated() {
         Fixture f;
         f.appendRows(120);
+        QVERIFY(f.layout != nullptr && f.flick != nullptr);
         f.layout->positionAtRow(40, false);
         f.settle();
 
@@ -316,6 +322,7 @@ private slots:
     void createdRowsMatchDelegateHeightsAndAreContiguous() {
         Fixture f;
         f.appendRows(50);
+        QVERIFY(f.layout != nullptr && f.flick != nullptr);
         f.layout->positionAtRow(20, false);
         f.settle();
 
