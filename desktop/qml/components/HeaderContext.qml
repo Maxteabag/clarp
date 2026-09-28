@@ -76,7 +76,10 @@ Item {
             textFormat: Text.PlainText
             objectName: "headerModel"
             visible: root.showRuntime
-            text: String(root.metadata.model || "Model unavailable")
+            // Until a session reports its model it is unknown, which is normal
+            // before the first turn: say so without sounding like a failure,
+            // and never name the current default, which may not be the one used.
+            text: String(root.metadata.model || "model not reported")
             Layout.minimumWidth: 0
             Layout.maximumWidth: root.width * 0.19
             elide: Text.ElideMiddle
@@ -85,7 +88,7 @@ Item {
             font.pixelSize: 11
             HoverHandler { id: modelHover }
             ToolTip.visible: modelHover.hovered
-            ToolTip.text: root.metadata.model ? "Agent model: " + String(root.metadata.model) : "This session has not reported its model"
+            ToolTip.text: root.metadata.model ? "Agent model: " + String(root.metadata.model) : "This session has not reported its model yet"
         }
         TuiText {
             textFormat: Text.PlainText
