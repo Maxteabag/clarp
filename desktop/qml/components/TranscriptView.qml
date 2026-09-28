@@ -156,4 +156,22 @@ Item {
     Loader { id: footerLoader; sourceComponent: root.footer; width: root.width }
 
     Timer { id: wheelSettle; interval: 150; onTriggered: root.endUserScroll() }
+    // The layout keeps a following view on the end by construction. Check it
+    // anyway: a following view above its end at rest is a bug worth logging
+    // (the rig scenarios fail on this line), and it is corrected.
+    Timer {
+        interval: 1000
+        repeat: true
+        running: root.visible && root.followLatest && root.count > 0
+        property bool seen: false
+        onTriggered: {
+            const drifted = !root.userInteracting && !flick.moving && root.distanceFromBottom > 2;
+            if (drifted && seen) {
+                console.warn("transcript drifted while following: distance", Math.round(root.distanceFromBottom),
+                    "count", root.count, "measured", layout.measuredCount);
+                layout.layoutNow();
+            }
+            seen = drifted;
+        }
+    }
 }
