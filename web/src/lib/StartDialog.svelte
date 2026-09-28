@@ -39,18 +39,23 @@
           id, label: id, supported_efforts: ['low', 'medium', 'high'],
         })),
       },
+      // OpenCode efforts are the model's own variants; these match the
+      // Host's fallback rows (server/lib/backend/opencode.py, deepseek.py).
       opencode: {
-        models: ['opencode/gpt-5.4', 'anthropic/claude-sonnet-4-5'].map(id => ({
-          id, label: id, supported_efforts: ['low', 'medium', 'high', 'max'],
-        })),
+        models: [
+          { id: 'opencode/big-pickle', label: 'Big Pickle', supported_efforts: [] },
+          { id: 'huggingface/deepseek-ai/DeepSeek-V4.1-Flash', label: 'DeepSeek V4.1 Flash',
+            supported_efforts: ['none', 'low', 'high', 'xhigh', 'max'] },
+        ],
       },
       deepseek: {
         models: [
-          'fireworks-ai/accounts/fireworks/routers/deepseek-pro-latest',
-          'fireworks-ai/accounts/fireworks/routers/deepseek-flash-latest',
-        ].map(id => ({
-          id, label: id, supported_efforts: ['low', 'medium', 'high', 'max'],
-        })),
+          { id: 'fireworks-ai/accounts/fireworks/routers/deepseek-flash-latest',
+            label: 'deepseek-flash-latest (Fireworks)', supported_efforts: ['low', 'high', 'max'] },
+          { id: 'huggingface/deepseek-ai/DeepSeek-V4.1-Flash',
+            label: 'DeepSeek-V4.1-Flash (Hugging Face)',
+            supported_efforts: ['none', 'low', 'high', 'xhigh', 'max'] },
+        ],
       },
     },
   };
