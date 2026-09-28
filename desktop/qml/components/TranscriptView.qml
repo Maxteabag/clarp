@@ -125,6 +125,9 @@ Item {
             id: layout
             width: flick.width
             flickable: flick
+            // While the reader scrolls, rows fill in over a few frames rather
+            // than holding the scroll; opening a chat creates them at once.
+            creationBudget: root.userInteracting ? 10 : 0
             header: headerLoader.item ? headerLoader : null
             footer: footerLoader.item ? footerLoader : null
         }
