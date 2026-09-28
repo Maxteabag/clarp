@@ -394,7 +394,7 @@ Rectangle {
                 visible: root.conversationBindPending
                     && root.boundConversationSession.length > 0
                     && root.pendingConversationSession !== root.boundConversationSession
-                color: Qt.rgba(0, 0, 0, 0.38)
+                color: Theme.scrim
                 z: transcript.z + 1
 
                 TuiText {
