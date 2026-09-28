@@ -116,7 +116,13 @@ ListView {
         if (!item) return;
         anchorIndex = index;
         anchorOffset = item.y - contentY;
+        readIndex = index;
+        readOffset = anchorOffset;
     }
+    // The last row the reader had in view. Unlike the anchor it survives a
+    // moment with no row in view, so a blank view can return to it.
+    property int readIndex: -1
+    property real readOffset: 0
     function keepAnchor() {
         if (followLatest || anchorIndex < 0 || anchorIndex >= count || scrollBar.pressed || moving) return;
         const item = itemAtIndex(anchorIndex);
@@ -178,6 +184,7 @@ ListView {
     // to the anchor or pause state of the one being replaced.
     function resetForConversation() {
         savedAnchor = null;
+        readIndex = -1;
         scrollEpoch++;
         cancelFlick();
         wheelSettle.stop();
@@ -187,6 +194,7 @@ ListView {
     }
     function beforeModelReset() {
         anchorIndex = -1;
+        readIndex = -1;
         savedAnchor = null;
         if (followLatest || count === 0) return;
         let index = -1;
@@ -260,10 +268,46 @@ ListView {
         return count > 0 && indexAt(width / 2, contentY + height / 2) < 0
             && indexAt(width / 2, contentY + 1) < 0 && indexAt(width / 2, contentY + height - 1) < 0;
     }
-    function returnToRows(toBeginning) {
-        if (toBeginning) {
-            positionViewAtBeginning();
-            contentY = originY - topMargin;
+    // Goes back to the nearest row, not straight to an end: during a fast
+    // scroll through rows of very different heights a viewport can briefly
+    // hold no created row while rows beyond it are loaded, and jumping to
+    // the end then skipped a thousand messages in one frame. Only when the
+    // nearest created row is the first (or last) one has the edge been passed.
+    function returnToRows(towardsBeginning) {
+        let first = -1;
+        let last = -1;
+        for (let i = 0; i < count; ++i) {
+            if (!itemAtIndex(i)) continue;
+            if (first < 0) first = i;
+            last = i;
+        }
+        console.warn("transcript returned to its rows:", towardsBeginning ? "up" : "down", "contentY", contentY,
+            "originY", originY, "count", count, "created", first, "-", last, "read", readIndex);
+        // The last row the reader had in view is the best place to return
+        // to: after overshooting an edge it is the row next to that edge, and
+        // after older history is prepended above the reader (94 -> 1,192 rows
+        // in one step) it moved with the insert. Rows that are still created
+        // can be stale then, so they are only the fallback.
+        if (!followLatest && readIndex >= 0 && readIndex < count) {
+            const index = readIndex;
+            const offset = readOffset;
+            anchoring = true;
+            positionViewAtIndex(index, ListView.Beginning);
+            forceLayout();
+            const item = itemAtIndex(index);
+            if (item) contentY = item.y - offset;
+            anchoring = false;
+            return;
+        }
+        if (towardsBeginning) {
+            if (first > 0) {
+                positionViewAtIndex(first - 1, ListView.End);
+            } else {
+                positionViewAtBeginning();
+                contentY = originY - topMargin;
+            }
+        } else if (last >= 0 && last < count - 1) {
+            positionViewAtIndex(last + 1, ListView.Beginning);
         } else {
             positionViewAtEnd();
             forceLayout();
@@ -350,10 +394,13 @@ ListView {
         // Older history arrives above the reader; keep the anchor on its row.
         function onRowsInserted(parent, first, last) {
             if (root.anchorIndex >= first) root.anchorIndex += last - first + 1;
+            if (root.readIndex >= first) root.readIndex += last - first + 1;
         }
         function onRowsRemoved(parent, first, last) {
             if (root.anchorIndex > last) root.anchorIndex -= last - first + 1;
             else if (root.anchorIndex >= first) root.anchorIndex = -1;
+            if (root.readIndex > last) root.readIndex -= last - first + 1;
+            else if (root.readIndex >= first) root.readIndex = -1;
         }
         function onModelReset() { root.afterModelReset(); }
         function onConversationIdChanged() { root.savedAnchor = null; root.scrollToLatest(); }
