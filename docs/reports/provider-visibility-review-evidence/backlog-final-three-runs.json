@@ -1,0 +1,35 @@
+[
+  {
+    "agents": 16,
+    "input_bytes": 134221120,
+    "processed_bytes": 524960,
+    "poll_and_managed_event_ms": 11.185,
+    "first_managed_event_ms": 1.063,
+    "writer_transactions": 2,
+    "max_writer_lock_ms": 1.53,
+    "managed_registrations": 1,
+    "max_managed_registration_ms": 7.198
+  },
+  {
+    "agents": 16,
+    "input_bytes": 134221120,
+    "processed_bytes": 524960,
+    "poll_and_managed_event_ms": 20.191,
+    "first_managed_event_ms": 3.197,
+    "writer_transactions": 2,
+    "max_writer_lock_ms": 2.387,
+    "managed_registrations": 2,
+    "max_managed_registration_ms": 3.69
+  },
+  {
+    "agents": 16,
+    "input_bytes": 134221120,
+    "processed_bytes": 524960,
+    "poll_and_managed_event_ms": 12.181,
+    "first_managed_event_ms": 0.813,
+    "writer_transactions": 2,
+    "max_writer_lock_ms": 0.431,
+    "managed_registrations": 1,
+    "max_managed_registration_ms": 6.774
+  }
+]

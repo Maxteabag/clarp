@@ -459,6 +459,10 @@ def _upsert_owned(
                 next_log, next_cwd,
             ),
         )
+        # Exact-identity projection invalidations must precede the explicit
+        # registration event, including a native mirror already sent over SSE.
+        for linked in (metadata or {}, json.loads(existing["metadata_json"]) if existing else {}):
+            _invalidate_native_mirrors(c, agent_id, linked, now)
         _record_event(c, job_id, now)
         c.execute("COMMIT")
     except BaseException:
@@ -1426,3 +1430,30 @@ def _native_origin(agent: dict) -> dict:
     bound = db.conn().execute("SELECT 1 FROM runtimes WHERE agent_id=? AND backend_session_id=? AND ended_at IS NULL",
                               (agent['agent_id'], origin['native_session_id'])).fetchone()
     return {key: origin[key] for key in keys} if bound else {}
+
+
+def _invalidate_native_mirrors(c, agent_id: str, metadata: dict, now: int) -> None:
+    keys = ("provider", "native_session_id", "tool_use_id")
+    if not isinstance(metadata, dict) or not all(metadata.get(k) for k in keys):
+        return
+    for row in c.execute("SELECT job_id,metadata_json FROM background_jobs WHERE agent_id=? AND heartbeat_source='provider_event'", (agent_id,)).fetchall():
+        native = json.loads(row['metadata_json'])
+        if all(native.get(k) == metadata[k] for k in keys):
+            _record_event(c, row['job_id'], now, note="Display projection changed; native task lifecycle unchanged")
+
+
+def event_projection(job: dict, observed_at: int) -> dict:
+    """Supersede a mirrored display row without claiming its process stopped.
+
+    Older active-job reducers already remove nonactive statuses; iOS uses this
+    event to invalidate/refetch the canonical snapshot. Detail stays canonical.
+    """
+    from .provider_background_jobs import registered_mirror
+    if job.get('heartbeat_source') != 'provider_event':
+        return job
+    replacement = registered_mirror(job)
+    if not replacement:
+        return job
+    return {**job, 'status': 'superseded', 'projection_only': True,
+            'replaced_by_job_id': replacement,
+            'updated_at': max(observed_at, int(job['updated_at'])), 'can_cancel': False}
