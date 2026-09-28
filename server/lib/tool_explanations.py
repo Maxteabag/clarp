@@ -3,8 +3,8 @@
 A call is split into parts (see tool_explanation_shapes: compound shell
 commands per part, anything else as one), and each part is answered by the
 cheapest tier that can: a scripted template; the permanent learned table,
-keyed by the part's shape and filled with this call's values; Jev picking a
-known template or the learned explanation of a similar shape (see
+keyed by the part's shape and filled with this call's values; Jev choosing
+the closest entry of that learned table (built-in templates are extras; see
 `_select_templates`), worded as what the call most likely does, and learned
 under this shape when confident; the configured
 language model, whose answer is learned for the next call with that shape. Each
@@ -555,40 +555,38 @@ class ToolExplanations:
                 break
 
     def _select_templates(self, units, level, identity):
-        """Jev's pick, for parts no template or learned row answers, among similar known explanations.
+        """Jev's choice from the learned table, for parts neither templates nor tier 1 answer.
 
-        A part of an unfamiliar program or tool is offered the templates that
-        could render from its own arguments (see `templates.jev_offer`); any
-        other part Jev may answer (`templates.JEV_LEARNED_REASONS`) is offered
-        none. Both are offered the model's explanations of other shapes most
-        similar to it (`learning.candidates`): same program and action, same
-        program, and, for an unfamiliar program only, other programs sharing
-        words with it. A learned explanation is offered only as it renders
-        with this part's own values. A part with nothing to offer is not
-        asked. A confident pick answers the part and is learned. Returns the
-        reason each part that remains falls through, by unit, for provenance.
+        Every such part is offered the closest learned explanations in the
+        whole table (`learning.rank`): same program and action, same program,
+        then any sharing words with it. Each is shown as it reads with this
+        part's own values; one whose placeholders this part cannot fill, or
+        that states a value this call does not contain, is not offered. An
+        unfamiliar program or tool is also offered, after those, the built-in
+        templates that could render from its own arguments (see
+        `templates.jev_offer`). A part with nothing to offer is not asked. A
+        confident pick answers the part and is learned under its own shape,
+        so the table, and with it the choice, keeps growing. Returns the reason
+        each part that remains falls through, by unit, for provenance.
         """
         reasons = {id(unit): unit.route.get("reason", "") for unit in units}
         if not level or self._sources(identity) != SOURCES_ALL:
             return {key: reason or "scripted_disabled" for key, reason in reasons.items()}
-        eligible = {str(i + 1): unit for i, unit in enumerate(units) if _jev_eligible(unit)}
+        eligible = {str(i + 1): unit for i, unit in enumerate(units)}
         if not eligible:
             return reasons
         if not judgments.site_enabled("explanations"):
             return {**reasons, **{id(unit): "jev_disabled" for unit in eligible.values()
                                   if unit.route.get("reason") in templates.JEV_REASONS}}
+        rows = learning.library(level, PROMPT_VERSION, templates.VERSION)
         entries, offered = {}, {}
         for key, unit in eligible.items():
-            scripted = unit.route.get("reason") in templates.JEV_REASONS
-            offer = templates.jev_offer(unit.route, level) if scripted else ([], [])
-            template_ids, candidates = offer if not isinstance(offer, str) else ([], [])
-            criteria = {template_id: templates.TEMPLATES[template_id]["description"] for template_id in template_ids}
-            offered[key] = {}
+            offered[key], criteria = {}, {}
             evidence = templates._evidence(unit.part.activity)
-            for candidate in learning.candidates(
-                    unit.part.program, level, PROMPT_VERSION, templates.VERSION, action=unit.route.get("action", ""),
-                    tokens=_tokens(unit.part), available=shapes.slot_values(unit.part.slots),
-                    exclude={unit.part.signature}, cross_program=scripted):
+            for candidate in learning.rank(
+                    rows, program=unit.part.program, action=unit.route.get("action", ""), tokens=_tokens(unit.part),
+                    available=shapes.slot_values(unit.part.slots), exclude={unit.part.signature, unit.part.exact_key},
+                    limit=4 * learning.CANDIDATES):
                 rendered = shapes.render(candidate["template_text"], unit.part.slots)
                 text = templates.hedge(rendered) if rendered else None
                 if not text or learning.foreign(candidate["template_text"], evidence):
@@ -597,8 +595,16 @@ class ToolExplanations:
                 subject = f"A `{unit.part.program}` call" if candidate["program"] == unit.part.program else "A call"
                 criteria[choice] = f"{subject} that does this: {rendered}"
                 offered[key][choice] = {**candidate, "text": text}
+                if len(offered[key]) >= learning.CANDIDATES:
+                    break
+            scripted = unit.route.get("reason") in templates.JEV_REASONS
+            offer = templates.jev_offer(unit.route, level) if scripted else ([], [])
+            template_ids, candidates = offer if not isinstance(offer, str) else ([], [])
+            criteria.update({template_id: templates.TEMPLATES[template_id]["description"] for template_id in template_ids})
             if not criteria:
-                reasons[id(unit)] = offer if isinstance(offer, str) else "jev_no_candidates" if scripted else reasons[id(unit)]
+                # Not asked: its own reason says why it missed, and a Jev
+                # reason (`jev_*`) only ever means Jev was asked or had no list.
+                reasons[id(unit)] = offer if isinstance(offer, str) else "jev_no_candidates" if scripted or not reasons[id(unit)] else reasons[id(unit)]
                 continue
             entries[key] = {"activity": {k: v for k, v in unit.part.activity.items() if k != "scripts"},
                             "criteria": criteria, "candidates": [value for _, value in candidates],
@@ -852,10 +858,65 @@ def _answers(value, requests):
     return result
 
 
-def _jev_eligible(unit):
-    reason = unit.route.get("reason")
-    return reason in templates.JEV_REASONS or (
-        reason in templates.JEV_LEARNED_REASONS and unit.part.program not in {"", "?"})
+PROGRAM_RECOVERY = "tool_explanations.program_recovery"
+
+
+def recover_programs(connection=None):
+    """Once: name the program of rows learned as `x:? #…`, from the Host's own tool rows.
+
+    Before schema v99 a whole opaque or clipped command was learned with no
+    program, which hides it from Jev's same-program ranking. Its key hashes
+    the command, so each shell command the Host still has in `messages` is
+    shaped again, in each form a client sends it (tool input, Codex label and
+    its 80-character clip, command row), and a row whose old key matches
+    moves to the current key and program. Only that key and the program name
+    are written; no command is stored. Rows no stored command matches keep
+    their old key until an identical call moves them. Returns rows moved.
+    """
+    from . import settings_store
+    connection = connection or db.conn()
+    if settings_store.get_text(PROGRAM_RECOVERY):
+        return 0
+    targets = {row[0] for row in connection.execute(
+        "SELECT signature FROM tool_explanation_learned WHERE program='' AND signature LIKE 'x:? #%'")}
+    moves = {}
+    if targets:
+        since = connection.execute("SELECT min(created_at) FROM tool_explanation_learned WHERE program='' "
+                                   "AND signature LIKE 'x:? #%'").fetchone()[0] - 24 * 60 * 60 * 1000
+        seen = set()
+        for tools, cells in connection.execute(
+                "SELECT tools_json, display_cells_json FROM messages WHERE updated_at >= ? "
+                "AND (tools_json <> '[]' OR display_cells_json <> '[]')", (since,)):
+            texts = []
+            for tool in _json_list(tools):
+                if isinstance(tool.get("command"), str) and tool["command"]:
+                    texts += [tool["command"], tool["command"][:templates.LABEL_CLIP], tool.get("summary") or ""]
+            texts += [cell.get("summary") or "" for cell in _json_list(cells) if cell.get("kind") == "command"]
+            for text in texts:
+                if not isinstance(text, str) or not text or text in seen:
+                    continue
+                seen.add(text)
+                for activity in ({"name": "Bash", "command": text}, {"name": text}, {"kind": "command", "summary": text}):
+                    try:
+                        parts = shapes.split(normalize_activity(activity))
+                    except (ValueError, TypeError):
+                        continue
+                    for part in parts:
+                        for old, new in part.legacy:
+                            if old in targets:
+                                moves[old] = (old, new, part.program)
+        db.retry_locked(lambda: learning.rekey(connection, list(moves.values())))
+    settings_store.set_text(PROGRAM_RECOVERY, str(len(moves)))
+    log("toolExplanationPrograms", f"recovered={len(moves)} of={len(targets)}")
+    return len(moves)
+
+
+def _json_list(value):
+    try:
+        value = json.loads(value or "[]")
+    except ValueError:
+        return []
+    return [entry for entry in value if isinstance(entry, dict)] if isinstance(value, list) else []
 
 
 def _tokens(part):

@@ -114,10 +114,10 @@ def lookup(signatures, level, prompt_version, templates_version, connection=None
     return found
 
 
-# How many learned explanations one unfamiliar part may be offered, and how
-# many rows the cross-program fallback reads to find them.
+# How many learned explanations one part may be offered, and how many rows of
+# the table one batch reads to choose them from (most used and newest first).
 CANDIDATES = 5
-_SCAN = 2000
+LIBRARY_ROWS = 5000
 _STOP = frozenset({"the", "and", "for", "with", "from", "into", "that", "this", "its", "one", "all", "any",
                    "each", "without", "changing", "anything", "only", "then", "run", "runs", "call", "shows"})
 
@@ -132,45 +132,60 @@ def words(text):
     return stems
 
 
-_IDENTIFIER = re.compile(r"[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)+")
+_IDENTIFIER = re.compile(r"[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)+|\d+")
 
 
 def foreign(text, evidence):
-    """Whether `text` names a specific identifier that this call does not.
+    """Whether `text` states a specific value that this call does not contain.
 
-    A literal word of another shape (an agent name such as `oracle-mike-call`,
-    a model such as `claude-opus-5-5`, a file such as `config.toml`) stays in
-    its learned sentence, and would be false for this call. Plain hyphenated
-    words (`machine-readable`) are not identifiers.
+    A learned sentence keeps the literal words of its own call: an agent name
+    such as `oracle-mike-call`, a model such as `claude-opus-5-5`, a file such
+    as `config.toml`, a number, and the whole text of an exact-only row. Any of
+    those would be an invented parameter for another call. Plain hyphenated
+    words (`machine-readable`) are not values. Placeholders are not checked:
+    they are filled from this call.
     """
     evidence = evidence.lower()
     for token in _IDENTIFIER.findall(_PLACEHOLDER.sub(" ", text)):
         segments = re.split(r"[-_.]", token)
         specific = any(c.isdigit() for c in token) or len(segments) >= 3 or "_" in token or "." in token
-        if specific and token.lower() not in evidence:
+        if specific and not re.search(rf"(?<![a-z0-9]){re.escape(token.lower())}(?![a-z0-9])", evidence):
             return True
     return False
 
 
-def rank(rows, *, program, action="", tokens=(), available=(), exclude=(), cross_program=False,
-         limit=CANDIDATES):
-    """The learned explanations most similar to one part, best first.
+def library(level, prompt_version, templates_version, limit=LIBRARY_ROWS, connection=None):
+    """The model's learned explanations at one audience: what Jev chooses from.
 
-    `rows` are parameterised model explanations at this audience. Only a
-    row whose placeholders this part can fill is a candidate, and one text is
-    offered once. Same program and action rank first, then same program,
-    then (only with `cross_program`) other programs whose sentence shares at
-    least two, and at least half, of the part's words; within each, word
-    overlap and then use decide.
+    Parameterised and exact-only rows alike; Jev's own copies are left out,
+    because each repeats the model row it came from.
+    """
+    rows = (connection or _db.conn()).execute(
+        "SELECT signature, template_text, slot_names, program, action, hits, parameterised "
+        "FROM tool_explanation_learned WHERE level=? AND producer='llm' AND template_text<>'' AND template_id='' "
+        "AND prompt_version=? AND templates_version=? ORDER BY hits DESC, created_at DESC LIMIT ?",
+        (level, prompt_version, templates_version, limit)).fetchall()
+    return [{"signature": r[0], "template_text": r[1], "slot_names": json.loads(r[2] or "[]"), "program": r[3],
+             "action": r[4], "hits": r[5], "parameterised": bool(r[6])} for r in rows]
+
+
+def rank(rows, *, program, action="", tokens=(), available=(), exclude=(), limit=CANDIDATES):
+    """The learned explanations closest to one part, best first, from the whole table.
+
+    Only a row whose placeholders this part can fill is a candidate, and one
+    text is offered once. Same program and action rank first, then same
+    program, then any other row whose sentence shares a word with the part;
+    within each, more shared words and then more use rank higher.
     """
     tokens, available, exclude = set(tokens), set(available), set(exclude)
+    program = "" if program == "?" else program
     scored, seen = [], set()
     for row in rows:
         if row["signature"] in exclude or not set(row["slot_names"]) <= available:
             continue
-        same = row["program"] == program
+        same = bool(program) and row["program"] == program
         overlap = len(tokens & words(row["template_text"]))
-        if not same and (not cross_program or overlap < max(2, (len(tokens) + 1) // 2)):
+        if not same and not overlap:
             continue
         tier = 0 if same and action and row["action"] == action else 1 if same else 2
         scored.append(((tier, -overlap, -row["hits"]), row))
@@ -182,26 +197,6 @@ def rank(rows, *, program, action="", tokens=(), available=(), exclude=(), cross
         if len(result) >= limit:
             break
     return result
-
-
-def candidates(program, level, prompt_version, templates_version, *, action="", tokens=(), available=(),
-               exclude=(), cross_program=False, limit=CANDIDATES):
-    """Model explanations of other shapes most similar to one part (see `rank`)."""
-    if not program or program == "?":
-        return []
-    columns = "signature, template_text, slot_names, program, action, hits"
-    query = (f"SELECT {columns} FROM tool_explanation_learned WHERE level=? AND producer='llm' AND parameterised=1 "
-             "AND template_text<>'' AND prompt_version=? AND templates_version=? ")
-    connection = _db.conn()
-    rows = connection.execute(query + "AND program=? ORDER BY hits DESC, created_at DESC LIMIT ?",
-                              (level, prompt_version, templates_version, program, _SCAN)).fetchall()
-    if cross_program:
-        rows += connection.execute(query + "AND program<>? ORDER BY hits DESC, created_at DESC LIMIT ?",
-                                   (level, prompt_version, templates_version, program, _SCAN)).fetchall()
-    return rank([{"signature": r[0], "template_text": r[1], "slot_names": json.loads(r[2] or "[]"),
-                  "program": r[3], "action": r[4], "hits": r[5]} for r in rows],
-                program=program, action=action, tokens=tokens, available=available, exclude=exclude,
-                cross_program=cross_program, limit=limit)
 
 
 def program_of(signature):
