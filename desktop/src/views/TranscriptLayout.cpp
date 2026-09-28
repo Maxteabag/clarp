@@ -460,7 +460,7 @@ void TranscriptLayout::onDataChanged(const QModelIndex& topLeft, const QModelInd
             for (auto it = m_roleIds.cbegin(); it != m_roleIds.cend(); ++it) {
                 if (!roles.isEmpty() && !roles.contains(it.value())) continue;
                 const QVariant value = m_model->data(index, it.value());
-                if (row.modelData) row.modelData->insert(QString::fromUtf8(it.key()), value);
+                if (row.modelData != nullptr) row.modelData->insert(QString::fromUtf8(it.key()), value);
                 if (m_delegateProperties.contains(it.key())) row.item->setProperty(it.key().constData(), value);
             }
             if (row.item->property("index").isValid()) row.item->setProperty("index", i);
@@ -473,7 +473,7 @@ void TranscriptLayout::onDataChanged(const QModelIndex& topLeft, const QModelInd
             const QString label = m_model->data(index, sectionRole).toString();
             if (label != row.sectionLabel) {
                 row.sectionLabel = label;
-                if (row.section) row.section->setProperty("section", label);
+                if (row.section != nullptr) row.section->setProperty("section", label);
                 updateSectionFlags(i);
             }
         }
@@ -486,8 +486,8 @@ void TranscriptLayout::onItemHeightChanged() {
     m_prefixDirty = true;
     for (Row& row : m_rows) {
         if (row.item != sender() && row.section != sender()) continue;
-        const qreal sectionHeight = row.section ? row.section->height() : 0;
-        row.height = sectionHeight + (row.item ? row.item->height() : 0);
+        const qreal sectionHeight = row.section != nullptr ? row.section->height() : 0;
+        row.height = sectionHeight + (row.item != nullptr ? row.item->height() : 0);
         row.measured = true;
         break;
     }
@@ -495,19 +495,19 @@ void TranscriptLayout::onItemHeightChanged() {
 }
 
 void TranscriptLayout::releaseRow(Row& row) {
-    if (row.item) {
+    if (row.item != nullptr) {
         disconnect(row.item, nullptr, this, nullptr);
         row.item->setVisible(false);
         row.item->deleteLater();
         row.item = nullptr;
     }
-    if (row.section) {
+    if (row.section != nullptr) {
         disconnect(row.section, nullptr, this, nullptr);
         row.section->setVisible(false);
         row.section->deleteLater();
         row.section = nullptr;
     }
-    if (row.modelData) {
+    if (row.modelData != nullptr) {
         row.modelData->deleteLater();
         row.modelData = nullptr;
     }
@@ -526,7 +526,7 @@ void TranscriptLayout::createRow(int index) {
     QObject* object = m_delegate->beginCreate(context);
     auto* item = qobject_cast<QQuickItem*>(object);
     if (item == nullptr) {
-        if (object) { m_delegate->completeCreate(); delete object; }
+        if (object != nullptr) { m_delegate->completeCreate(); delete object; }
         return;
     }
     if (!m_delegatePropertiesKnown) {
@@ -549,7 +549,7 @@ void TranscriptLayout::createRow(int index) {
     connect(item, &QQuickItem::heightChanged, this, &TranscriptLayout::onItemHeightChanged);
 
     if (row.sectionShown && m_sectionDelegate) {
-        QObject* sectionObject = m_sectionDelegate->beginCreate(m_sectionDelegate->creationContext() ? m_sectionDelegate->creationContext() : context);
+        QObject* sectionObject = m_sectionDelegate->beginCreate(m_sectionDelegate->creationContext() != nullptr ? m_sectionDelegate->creationContext() : context);
         if (auto* section = qobject_cast<QQuickItem*>(sectionObject)) {
             m_sectionDelegate->setInitialProperties(section, {{QStringLiteral("section"), row.sectionLabel}});
             section->setParentItem(this);
@@ -560,7 +560,7 @@ void TranscriptLayout::createRow(int index) {
             row.section = section;
             m_sectionHeight = section->height();
             connect(section, &QQuickItem::heightChanged, this, &TranscriptLayout::onItemHeightChanged);
-        } else if (sectionObject) {
+        } else if (sectionObject != nullptr) {
             m_sectionDelegate->completeCreate();
             delete sectionObject;
         }
@@ -590,7 +590,7 @@ bool TranscriptLayout::placeVisibleRows() {
     const int visibleFirst = rowAt(viewTop);
     const int visibleLast = rowAt(viewBottom);
     for (int i = 0; i < count(); ++i) {
-        if ((i < first || i > last) && (m_rows[static_cast<size_t>(i)].item || m_rows[static_cast<size_t>(i)].section))
+        if ((i < first || i > last) && (m_rows[static_cast<size_t>(i)].item != nullptr || m_rows[static_cast<size_t>(i)].section != nullptr))
             releaseRow(m_rows[static_cast<size_t>(i)]);
     }
     // Rows on screen first, top to bottom, then the margin nearest first.
@@ -617,7 +617,7 @@ bool TranscriptLayout::placeVisibleRows() {
         }
         if (row.item == nullptr) continue;
         if (!qFuzzyCompare(row.item->width() + 1, width + 1)) row.item->setWidth(width);
-        const qreal sectionHeight = row.section ? row.section->height() : 0;
+        const qreal sectionHeight = row.section != nullptr ? row.section->height() : 0;
         const qreal measured = sectionHeight + row.item->height();
         if (!row.measured || std::abs(measured - row.height) > 0.5) {
             if (std::abs(measured - row.height) > 0.5) changed = true;
@@ -630,8 +630,8 @@ bool TranscriptLayout::placeVisibleRows() {
     for (int i = first; i <= last; ++i) {
         Row& row = m_rows[static_cast<size_t>(i)];
         const qreal y = positionOf(i);
-        if (row.section) { row.section->setY(y); row.section->setWidth(this->width()); }
-        if (row.item) row.item->setY(y + (row.section ? row.section->height() : 0));
+        if (row.section != nullptr) { row.section->setY(y); row.section->setWidth(this->width()); }
+        if (row.item != nullptr) row.item->setY(y + (row.section != nullptr ? row.section->height() : 0));
     }
     return changed;
 }

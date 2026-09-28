@@ -15,7 +15,7 @@ namespace {
 constexpr int ViewWidth = 320;
 constexpr int ViewHeight = 240;
 
-const char* kScene = R"QML(
+const char* const kScene = R"QML(
 import QtQuick
 import ClarpTest 1.0
 
@@ -130,27 +130,27 @@ public:
         QVERIFY(flick != nullptr);
     }
 
-    void call2(const char* method, const QVariant& a, const QVariant& b) {
+    void call2(const char* method, const QVariant& a, const QVariant& b) const {
         QVariant ignored;
         QVERIFY(QMetaObject::invokeMethod(root, method, Q_RETURN_ARG(QVariant, ignored),
             Q_ARG(QVariant, a), Q_ARG(QVariant, b)));
     }
 
-    void call3(const char* method, const QVariant& a, const QVariant& b, const QVariant& c) {
+    void call3(const char* method, const QVariant& a, const QVariant& b, const QVariant& c) const {
         QVariant ignored;
         QVERIFY(QMetaObject::invokeMethod(root, method, Q_RETURN_ARG(QVariant, ignored),
             Q_ARG(QVariant, a), Q_ARG(QVariant, b), Q_ARG(QVariant, c)));
     }
 
     void call5(const char* method, const QVariant& a, const QVariant& b,
-               const QVariant& c, const QVariant& d, const QVariant& e) {
+               const QVariant& c, const QVariant& d, const QVariant& e) const {
         QVariant ignored;
         QVERIFY(QMetaObject::invokeMethod(root, method, Q_RETURN_ARG(QVariant, ignored),
             Q_ARG(QVariant, a), Q_ARG(QVariant, b), Q_ARG(QVariant, c),
             Q_ARG(QVariant, d), Q_ARG(QVariant, e)));
     }
 
-    int indexOf(const QString& messageId) {
+    [[nodiscard]] int indexOf(const QString& messageId) const {
         QVariant result;
         const bool invoked = QMetaObject::invokeMethod(root, "indexOfMessage", Q_RETURN_ARG(QVariant, result),
             Q_ARG(QVariant, messageId));
@@ -163,19 +163,20 @@ public:
         settle();
     }
 
-    void settle(int passes = 4) {
+    void settle(int passes = 4) const {
+        if (layout == nullptr) return;
         for (int i = 0; i < passes; ++i) {
             layout->layoutNow();
             QCoreApplication::processEvents();
         }
     }
 
-    qreal contentY() const { return flick->property("contentY").toReal(); }
-    void setContentY(qreal y) {
+    [[nodiscard]] qreal contentY() const { return flick->property("contentY").toReal(); }
+    void setContentY(qreal y) const {
         flick->setProperty("contentY", y);
         QCoreApplication::processEvents();
     }
-    qreal screenOffset(int row) const { return layout->positionOf(row) - contentY(); }
+    [[nodiscard]] qreal screenOffset(int row) const { return layout->positionOf(row) - contentY(); }
 
     QTemporaryDir dir;
     std::unique_ptr<QQuickView> view;
