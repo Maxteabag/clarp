@@ -34,6 +34,7 @@ import time
 from .log import log
 from . import backends, db
 from . import janitor_builtins, janitor_store, judgment_sites, judgments, model_fallbacks
+from . import tool_explanation_commands as commands
 from . import tool_explanation_learning as learning
 from . import tool_explanation_mappings as mappings
 from . import tool_explanation_queue as durable_queue
@@ -82,14 +83,17 @@ def snippet(value, limit=1600):
 
 
 def normalize_activity(activity):
+    """The bounded fields the explainer reads. A heredoc body that only feeds
+    an inline script or a file write is withheld here (`shapes.redact`)."""
     if not isinstance(activity, dict):
         raise ValueError("activity must be an object")
-    result = {k: snippet(activity[k]) for k in (
+    shell_fields = {"command"} | ({"summary"} if activity.get("kind") == "command" else set())
+    result = {k: snippet(shapes.redact(activity[k]) if k in shell_fields else activity[k]) for k in (
         "kind", "name", "title", "summary", "description", "command", "file_path", "path", "pattern"
     ) if activity.get(k)}
     inputs = activity.get("input")
     if isinstance(inputs, dict):
-        selected = {k: snippet(inputs[k]) for k in (
+        selected = {k: snippet(shapes.redact(inputs[k]) if k in {"command", "cmd"} else inputs[k]) for k in (
             "command", "cmd", "code", "path", "file_path", "pattern", "query", "description"
         ) if inputs.get(k)}
         if selected:
@@ -252,7 +256,7 @@ class ToolExplanations:
             demand = item.get("demand_id")
             if demand is not None and (not isinstance(demand, str) or not 1 <= len(demand) <= 128):
                 raise ValueError("invalid demand ID")
-            activity = normalize_activity(item.get("activity"))
+            activity = normalize_activity(commands.expand(item.get("activity"), target_agent_id))
             route = templates.classify(activity) if enabled else {}
             parts = []
             if enabled:
@@ -896,6 +900,17 @@ def recover_programs(connection=None):
                 if not isinstance(text, str) or not text or text in seen:
                     continue
                 seen.add(text)
+                # A whole command such as a heredoc used to be one exact
+                # part keyed by its full text; it is shaped now, so that
+                # old key is rebuilt here to move the row.
+                whole = snippet(text)
+                try:
+                    whole = templates._strip_wrapper(whole)
+                except ValueError:
+                    pass
+                digest = shapes._key("exact", whole)
+                if f"x:? #{digest}" in targets and (program := shapes.first_program(whole)):
+                    moves[f"x:? #{digest}"] = (f"x:? #{digest}", f"x:{program} #{digest}", program)
                 for activity in ({"name": "Bash", "command": text}, {"name": text}, {"kind": "command", "summary": text}):
                     try:
                         parts = shapes.split(normalize_activity(activity))
