@@ -167,6 +167,27 @@ TestCase {
         verify(view.indexAt(view.width / 2, view.contentY + view.height / 2) >= 0,
             "after narrowing, the viewport must still show a row");
     }
+    function test_wheelPastTheFirstRowNeverLeavesTheViewBlank() {
+        // Wheeling up out of one very tall reply moved the view past the
+        // first row before that row was created. With the viewport wholly
+        // above it, the row was never created and the transcript stayed
+        // blank (E2E: contentY -758 with originY -32).
+        tallRows.clear();
+        tallRows.append({messageId: "prompt", rowHeight: 80});
+        tallRows.append({messageId: "reply", rowHeight: 9000});
+        tallRows.append({messageId: "tools", rowHeight: 40});
+        const view = createTemporaryObject(reflowComponent, testCase);
+        tryVerify(() => view.atYEnd);
+        mouseWheel(view, 200, 200, 0, 120 * 200);
+        wait(300);
+        verify(view.indexAt(view.width / 2, view.contentY + view.height / 2) >= 0,
+            "after wheeling past the top, the viewport must still show a row");
+        compare(view.itemAtIndex(0) !== null, true);
+        mouseWheel(view, 200, 200, 0, -120 * 400);
+        wait(300);
+        verify(view.indexAt(view.width / 2, view.contentY + view.height / 2) >= 0,
+            "after wheeling past the end, the viewport must still show a row");
+    }
     function test_refreshRestoresMessageIdentityAndPixelOffset() {
         const view = openView();
         view.pauseFollowing();
