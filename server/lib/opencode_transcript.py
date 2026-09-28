@@ -13,6 +13,7 @@ import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
+from . import error_classify
 from .voice_preamble import strip_voice_preamble
 from .log import log_exception
 from .claude_transcript import summarise_tool
@@ -341,6 +342,9 @@ def _error_text(data: dict) -> str:
     detail = error.get("data") if isinstance(error.get("data"), dict) else {}
     message = str(detail.get("message") or error.get("message") or "").strip()
     name = str(error.get("name") or "error")
+    reason = error_classify.explain(message)
+    if reason:
+        return f"{reason}. (OpenCode: {message})"
     return f"OpenCode {name}: {message}" if message else f"OpenCode {name}"
 
 

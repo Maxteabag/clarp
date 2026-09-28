@@ -127,3 +127,11 @@ def test_opencode_error_wordings():
     assert ec.classify_error("getaddrinfo ETIMEOUT router.huggingface.co") == ec.CONNECTION
     assert ec.classify_error("The operation was aborted.") == ec.INTERRUPTED
     assert ec.classify_error("opencode exited rc=1") == ec.RUNNER_EXIT
+
+
+def test_opencode_free_tier_refusal_is_a_plan_limit_with_a_plain_reason():
+    raw = ("Error from provider (Console): OpenCode's free tier can only be "
+           "used from within OpenCode")
+    assert ec.classify_error(raw) == ec.USAGE_LIMIT
+    assert "Choose another model" in ec.explain(raw)
+    assert ec.explain("read ECONNRESET") == ""
