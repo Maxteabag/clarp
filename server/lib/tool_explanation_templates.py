@@ -127,10 +127,187 @@ def _segments(command):
 
 
 def _strip_wrapper(command):
+    # Only a command that starts as `bash -c` is split whole: a heredoc body
+    # elsewhere may hold text (`don't`) no shell word splitter reads.
+    if not _SHELL_LABEL.match(command.strip()):
+        return command
     words = shlex.split(command)
-    if len(words) >= 3 and PurePosixPath(words[0]).name in {"bash", "sh", "zsh"} and words[1] in {"-c", "-lc"}:
+    if len(words) == 3 and PurePosixPath(words[0]).name in {"bash", "sh", "zsh"} and words[1] in {"-c", "-lc"}:
         return words[2]
     return command
+
+
+# ---- heredocs and wrappers ------------------------------------------------
+
+# A lifted heredoc in parsed text; its body is gone.
+HEREDOC = "\x03"
+# How a heredoc reads once its body is withheld: valid shell, the same for every body.
+REDACTED_HEREDOC = "<<'EOF'"
+REDACTED_BODY = "\n…\nEOF"
+_HEREDOC_START = re.compile(r"<<(-?)[ \t]*(?:'([^'\n]+)'|\"([^\"\n]+)\"|(\\?)([A-Za-z0-9_.-]+))")
+
+
+def lift_heredocs(command):
+    """Take the heredoc bodies out of a command, and drop its comments.
+
+    Returns `(text, redacted, bodies)`: `text` has each heredoc operator as
+    ` HEREDOC ` and no body; `redacted` is the command with every heredoc
+    written `<<'EOF'` and its body `…`; `bodies` pairs each body with
+    whether its delimiter was quoted (so nothing in it expands). None when a
+    heredoc is unterminated, or for a here-string (`<<<`).
+    """
+    text, redacted, bodies, pending, quote, i, n = [], [], [], [], "", 0, len(command)
+
+    def emit(value, shown=None):
+        text.append(value)
+        redacted.append(value if shown is None else shown)
+    while i < n:
+        char = command[i]
+        if quote:
+            emit(char)
+            if char == "\\" and quote == '"' and i + 1 < n:
+                emit(command[i + 1])
+                i += 1
+            elif char == quote:
+                quote = ""
+            i += 1
+        elif char in "'\"":
+            quote = char
+            emit(char)
+            i += 1
+        elif char == "\\" and i + 1 < n:
+            emit(command[i:i + 2])
+            i += 2
+        elif char == "#" and (i == 0 or command[i - 1] in " \t\n;&|("):
+            end = command.find("\n", i)
+            i = n if end < 0 else end
+        elif command.startswith("<<", i):
+            match = _HEREDOC_START.match(command, i)
+            if command.startswith("<<<", i) or not match:
+                return None
+            pending.append((match.group(2) or match.group(3) or match.group(5), bool(match.group(1)),
+                            not match.group(5) or bool(match.group(4))))
+            spaced = not redacted or redacted[-1][-1:].isspace()
+            emit(f" {HEREDOC} ", ("" if spaced else " ") + REDACTED_HEREDOC)
+            i = match.end()
+        elif char == "\n" and pending:
+            redacted.append(REDACTED_BODY * len(pending))
+            text.append("\n")
+            i += 1
+            for delimiter, tabs, quoted in pending:
+                lines = []
+                while True:
+                    if i >= n:
+                        return None
+                    end = command.find("\n", i)
+                    line = command[i:n if end < 0 else end]
+                    i = n if end < 0 else end + 1
+                    if (line.lstrip("\t") if tabs else line) == delimiter:
+                        break
+                    lines.append(line)
+                bodies.append(("\n".join(lines), quoted))
+            pending = []
+            if i < n:
+                redacted.append("\n")
+        else:
+            emit(char)
+            i += 1
+    if quote or pending:
+        return None
+    return "".join(text), "".join(redacted), bodies
+
+
+def expanding(body, quoted):
+    """Whether a heredoc body runs commands itself (`$(...)` in an unquoted one)."""
+    return not quoted and ("$(" in body or "`" in body)
+
+
+_PATH_WORD = re.compile(r"^[A-Za-z0-9._/~+-]{1,240}$")
+_WRAPPERS = {"env", "nice", "ionice", "nohup", "time", "timeout", "stdbuf", "sudo"}
+_WRAPPER_VALUE_FLAGS = {"timeout": {"-s", "-k", "--signal", "--kill-after"}, "nice": {"-n", "--adjustment"},
+                        "ionice": {"-c", "-n", "-p", "--class", "--classdata"}, "env": {"-u", "-C", "--unset", "--chdir"},
+                        "sudo": {"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "--user", "--group"},
+                        "stdbuf": set(), "time": {"-f", "-o", "--format", "--output"}, "nohup": set()}
+
+
+def peel(words, *, sudo=True):
+    """`(wrapper words, command words)`: leading env assignments and wrappers
+    such as `timeout 60`, `env A=1`, `nice -n 5` or `sudo -u x` apart from the
+    command they run. With `sudo=False` a `sudo` stays part of the command.
+    Nothing is peeled when a wrapper's options cannot be read or nothing runs.
+    """
+    i = 0
+    while i < len(words):
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[i], re.S):
+            i += 1
+            continue
+        base = PurePosixPath(words[i]).name
+        if base not in _WRAPPERS or (base == "sudo" and not sudo):
+            break
+        i += 1
+        while i < len(words) and words[i].startswith("-") and words[i] != "-":
+            if words[i] == "--":
+                i += 1
+                break
+            if not _FLAG.fullmatch(words[i].split("=", 1)[0]) and not re.fullmatch(r"-o[LN0]|-[ei][LN0]|-n?-?\d+", words[i]):
+                return [], words
+            i += 2 if words[i] in _WRAPPER_VALUE_FLAGS[base] else 1
+        if base == "timeout":
+            if i >= len(words) or not re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", words[i]):
+                return [], words
+            i += 1
+    if i >= len(words):
+        return [], words
+    return words[:i], words[i:]
+
+
+def heredoc_consumer(words):
+    """What a simple command does with the one heredoc it reads, or "".
+
+    `script`: an interpreter runs it (`python3 - <<EOF`, `bash <<EOF`);
+    `write`/`append`: `cat > PATH`, `cat >> PATH`, `tee [-a] PATH` store it.
+    Anything else reading a heredoc (a database shell, `ssh`) is "".
+    """
+    if words.count(HEREDOC) != 1:
+        return ""
+    _, rest = peel([word for word in words if word != HEREDOC])
+    if not rest:
+        return ""
+    base = PurePosixPath(rest[0]).name
+    if base == "cat":
+        return {">": "write", ">>": "append"}.get(rest[1], "") if len(rest) == 3 and _PATH_WORD.fullmatch(rest[2]) else ""
+    if base == "tee":
+        append = rest[1:2] == ["-a"]
+        paths = rest[2:] if append else rest[1:]
+        return ("append" if append else "write") if len(paths) == 1 and _PATH_WORD.fullmatch(paths[0]) else ""
+    if base in _SCRIPT or re.fullmatch(r"python3\.\d+", base):
+        args = rest[1:]
+        while args and args[0].startswith("-") and args[0] != "-":
+            if args[0] in {"-c", "-e", "-m", "-E", "-p", "-r", "--eval", "--print", "--require", "--import"} or not _FLAG.fullmatch(args[0]):
+                return ""
+            if args[0] == "-s":
+                return "script"
+            args = args[1:]
+        return "script" if not args or args[0] == "-" else ""
+    return ""
+
+
+def _classify_heredoc(text):
+    """Route one lifted command that reads a heredoc, shaped as its consumer."""
+    match = re.fullmatch(r"\s*(?:cd\s+([^\s;&|'\"]+)\s*&&\s*)?([^;&|\n'\"]*)\s*", text)
+    if not match or text.count(HEREDOC) != 1:
+        return _abstain("compound", action="compound", signature="shell")
+    words = re.sub(r"(>>?)", r" \1 ", re.sub(r"(?:^|\s)[12]?>\s*/dev/null\b", " ", match.group(2))).split()
+    consumer = heredoc_consumer(words)
+    if consumer == "write":
+        rest = peel([word for word in words if word != HEREDOC])[1]
+        return _match("write_file", {"file": rest[rest.index(">") + 1] if ">" in rest else rest[-1]},
+                      signature=_signature(rest))
+    if consumer == "append":
+        return _abstain("uncertain", action="write", signature="shell")
+    if consumer == "script":
+        return _abstain("inline_script", action="execute", signature="shell")
+    return _abstain("compound", action="compound", signature="shell")
 
 
 def _flags_and_args(words, value_flags=_VALUE_FLAGS):
@@ -175,7 +352,18 @@ def _signature(words):
 
 def classify_shell(command):
     try:
-        segments = _segments(_strip_wrapper(command))
+        command = _strip_wrapper(command)
+    except ValueError:
+        return _abstain("malformed", signature="shell")
+    if "<<" in command or "#" in command:
+        lifted = lift_heredocs(command)
+        if lifted is None or (lifted[2] and any(expanding(*body) for body in lifted[2])):
+            return _abstain("compound", action="compound", signature="shell")
+        if lifted[2]:
+            return _classify_heredoc(lifted[0])
+        command = lifted[0]
+    try:
+        segments = _segments(command)
     except ValueError:
         return _abstain("malformed", signature="shell")
     if segments is None:
@@ -198,10 +386,9 @@ def classify_shell(command):
         words = shlex.split(segments[0][0])
     except ValueError:
         return _abstain("malformed", signature="shell")
-    while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
-        words = words[1:]      # env assignment; its value is never a parameter
-    if len(words) >= 3 and words[0] == "timeout":
-        words = words[2:]
+    # Env assignments and wrappers (`timeout 60`, `nice`) only change how the
+    # command runs; an assignment's value is never a parameter. `sudo` stays.
+    words = peel(words, sudo=False)[1]
     if not words:
         return _abstain("malformed", signature="shell")
     route = _classify_words(words, cwd)

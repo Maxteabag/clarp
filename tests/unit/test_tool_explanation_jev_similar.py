@@ -223,11 +223,12 @@ def test_a_low_confidence_pick_answers_but_is_not_learned(monkeypatch):
 # ---- program of whole commands --------------------------------------------------
 
 @pytest.mark.parametrize("command, program", [
-    ("cd /x && python3 - <<'EOF'\nimport os\nEOF", "python3"),
-    ("FOO=1 x=$(git rev-parse HEAD) && make build", "make"),
+    ("cd /x && sqlite3 db <<'EOF'\nselect 1;\nEOF", "sqlite3"),
+    ("FOO=1 x=$(mktemp) && make build", "make"),
     ("for f in *.py; do wc -l $f; done", "wc"),
     ("export A=1; sqlite3 db.sqlite 'select 1' | tee out", "sqlite3"),
-    ("echo $(date)", ""),
+    ("(cd x && make build)", "make"),
+    ("echo $(rm -rf x)", ""),
 ])
 def test_an_opaque_command_names_its_first_real_program(command, program):
     [part] = shapes.split(bash(command))
@@ -242,7 +243,7 @@ def test_a_clipped_codex_label_names_its_program():
 
 
 def test_a_row_learned_under_the_old_programless_key_is_found_and_moved(monkeypatch):
-    command = "cd /x && python3 - <<'EOF'\nprint(1)\nEOF"
+    command = "cd /x && sqlite3 db <<'EOF'\nselect 1;\nEOF"
     [part] = shapes.split(bash(command))
     [[legacy, current]] = part.legacy
     assert legacy.startswith("x:? #") and current == part.signature
@@ -255,7 +256,7 @@ def test_a_row_learned_under_the_old_programless_key_is_found_and_moved(monkeypa
         [result] = service.request(1, [item(bash(command))])["items"]
         assert result["text"] == "Prints a number."
     rows = [tuple(r) for r in conn().execute("SELECT signature, program, hits FROM tool_explanation_learned")]
-    assert rows == [(part.signature, "python3", 1)]
+    assert rows == [(part.signature, "sqlite3", 1)]
 
 
 def test_a_timeout_wrapped_call_is_its_programs_and_its_old_row_still_answers(monkeypatch):
@@ -277,9 +278,11 @@ def test_a_timeout_wrapped_call_is_its_programs_and_its_old_row_still_answers(mo
 
 def test_old_programless_rows_are_recovered_once_from_the_hosts_own_tool_rows():
     from lib import tool_explanations as module, tool_explanation_templates as templates
+    # A heredoc was one exact whole-command part before it was shaped: the
+    # old row's key hashes the whole text.
     command = "cd /x && python3 - <<'EOF'\nprint(1)\nEOF"
-    [part] = shapes.split(bash(command))
-    [[legacy, current]] = part.legacy
+    digest = shapes._key("exact", command)
+    legacy, current = f"x:? #{digest}", f"x:python3 #{digest}"
     learning.store(conn(), [{"signature": legacy, "level": 2, "template_text": "Prints a number.", "parameterised": 0,
                              "producer": "llm", "prompt_version": module.PROMPT_VERSION,
                              "templates_version": templates.VERSION},

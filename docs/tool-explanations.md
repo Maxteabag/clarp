@@ -60,10 +60,19 @@ must cancel/ignore stale client responses. Never reveal raw activity while pendi
 Each call is split into parts: a compound shell command at top-level `&&`,
 `||`, `;`, `&`, `|` and newlines, anything else as one part. `cd DIR` becomes
 the directory of the parts after it, and `| head -n N`, `true` and `:` are
-dropped. Quotes are respected; command substitution, subshells, heredocs,
-process substitution, shell keywords, and pipelines into anything but a plain
-output filter (`grep`, `sort`, `wc`, `jq`, …) keep the whole command as one
-opaque part. Each part goes through the tiers, cheapest first:
+dropped. `bash -c '...'` is the parts of its argument. A heredoc read by an
+interpreter (`python3 - <<'EOF'`, `node -`, `bash`) is that program running
+an inline script, and one fed to `cat > PATH` or `tee PATH` is a file write
+(the `write_file` template). The heredoc's body is withheld before anything
+else sees the call: it is never a slot, never stored, and never sent to Jev
+or the model, so every such call reads `python3 - <<'EOF'` / `…` / `EOF` and
+one explanation holds for any body. A `$(...)` that only reads (`date`,
+`git rev-parse`, `basename`, …, piped only into filters) is one `expr` slot.
+Quotes are respected; any other command substitution, subshells, heredocs
+read by anything else (a database shell, `ssh`) or whose unquoted body runs a
+command, process substitution, shell keywords, and pipelines into anything
+but a plain output filter (`grep`, `sort`, `wc`, `jq`, …) keep the whole
+command as one opaque part. Each part goes through the tiers, cheapest first:
 
 1. **Template.** The typed scripted templates (`tool_explanation_templates`),
    including mappings a reviewer approved. Synchronous.
@@ -93,7 +102,10 @@ opaque part. Each part goes through the tiers, cheapest first:
      Jev's own copies left out; at most 5,000, most used first), ranked per
      part: same program and action, then same program, then any other row
      whose sentence shares a word stem with the part, more shared words
-     first. No embeddings, no network. Up to five are offered.
+     first. No embeddings, no network. Up to five are offered. The program
+     is the first word, looking through wrappers (`timeout N`, `env A=1`,
+     `nice`, `nohup`, `sudo`), so `timeout 60 dotnet test` is a `dotnet`
+     call; `sudo` stays `privileged` all the same.
    - **Safety**: a row is offered only if this part fills every placeholder
      from its own slots, and it is shown to Jev as it would read for this
      call. A sentence that states a value the call does not contain as a
@@ -123,9 +135,13 @@ opaque part. Each part goes through the tiers, cheapest first:
    (the pick failed validation or rendering). An answered part's reason is
    `jev_learned:<same_action|same_program|lexical>` or `jev_template:<id>`,
    with the confidence in `jev_confidence`. A Codex row whose tool name is a
-   `/usr/bin/bash -lc "…"` display label is explained as that shell command;
-   clients clip that label at 80 characters, and a clipped one is
-   `truncated` and exact. A grouped exploration row with a single
+   `/usr/bin/bash -lc "…"` display label is explained as that shell command.
+   That label is clipped at 80 characters, so the Codex backend remembers
+   each agent's recent whole commands in memory (`tool_explanation_commands`,
+   256 per agent) and the explainer uses the one the clipped label starts;
+   the apps' display and request are unchanged. A label the Host cannot
+   complete (after a restart, or two recent commands with that start that
+   differ in more than a withheld heredoc body) is `truncated` and exact. A grouped exploration row with a single
    `Read: path` is the `read_file` template; other exploration rows are
    `exploration` or `multiple_targets`.
 4. **Model.** The language model gets each unanswered part with its `slots`
@@ -148,7 +164,8 @@ Maintenance deletes rows of dead versions after 30 days and keeps at most
 Every row names its `program`. A whole command that is one opaque part
 (substitution, heredoc, loop, a pipe into a non-filter), a malformed one and a
 clipped Codex label take the program of their first real simple command,
-skipping `cd`, env assignments, builtins and keywords. Before schema v99 such
+skipping `cd`, env assignments, builtins, keywords, wrappers and heredoc
+bodies, and looking inside `(...)`, `{ ...; }` and `$(...)`. Before schema v99 such
 rows were keyed `x:? #hash` with no program, and `timeout N cmd` parts were
 keyed by `timeout`. v99 fills `program` wherever the stored signature names
 one; the others cannot be backfilled because the command was never stored, so
@@ -248,5 +265,6 @@ uv run --group dev pytest tests/unit/test_tool_explanations.py tests/integration
 uv run --group dev pytest tests/unit/test_tool_explanation_cache.py tests/unit/test_tool_explanation_queue.py
 uv run --group dev pytest tests/unit/test_tool_explanation_learning.py tests/unit/test_tool_explanation_hybrid.py
 uv run --group dev pytest tests/unit/test_tool_explanation_jev_similar.py tests/unit/test_tool_explanation_jev_picks.py
+uv run --group dev pytest tests/unit/test_tool_explanation_full_commands.py
 ctest --test-dir desktop/build/release -R 'tool-narrator|activity-layout' --output-on-failure
 ```

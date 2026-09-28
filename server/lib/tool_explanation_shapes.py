@@ -26,16 +26,31 @@ because it usually selects what a program does (`filectl list` versus
 Slots are numbered per kind in order of appearance (`path1`, `path2`,
 `num1`). The signature is `sh:<program> #<keyed hash of the shape>`, so it
 never stores a literal word, and it is stable for one Host. The program is
-the first word, looking through `timeout N` (`timeout 60 dotnet test` is
-`dotnet`); an exact whole command takes the program of its first real simple
-command (`first_program`).
+the first word, looking through wrappers (`timeout 60`, `env A=1`, `nice`,
+`nohup`, `sudo`; `timeout 60 dotnet test` is `dotnet`); the wrapper words
+stay in the shape. An exact whole command takes the program of its first
+real simple command (`first_program`).
+
+Some forms are shaped through what they run:
+
+    heredoc     `python3 - <<'EOF' … EOF`, `node - <<EOF`, `bash <<EOF` are
+                their interpreter reading an inline script; `cat > PATH
+                <<EOF`, `cat >> PATH`, `tee [-a] PATH` write PATH. The body
+                is withheld (`redact`): never a slot, never stored or sent,
+                so the part reads `python3 - <<'EOF'\n…\nEOF` for any body.
+    bash -c     `bash -c '...'`, `sh -c`, `bash -lc` are the parts of their
+                argument.
+    $(...)      a substitution that only reads (`$(date +%F)`, `$(git
+                rev-parse HEAD)`; see `_SUBSTITUTE`) is one `expr` slot.
 
 A part that cannot be shaped safely is exact: its signature hashes the whole
 part, and a learned explanation for it is only reused for the identical text.
 That is the case for inline code (`python -c`), flags that could carry a value
 (`-pSECRET`), unusually long shapes, and for the whole command when it uses
-command substitution, a subshell, a heredoc, process substitution, a shell
-keyword or a pipeline into anything but a plain output filter.
+any other substitution, a subshell, a heredoc read by anything else (a
+database shell, `ssh`) or whose unquoted body runs a command, process
+substitution, a shell keyword or a pipeline into anything but a plain output
+filter. Comments are dropped.
 
 `cd DIR` parts are not explained; they become the directory context of the
 parts after them. A trailing `| head -n N` or `| tail -N` only shortens
@@ -142,16 +157,15 @@ def _exact(activity, text, reason, program="", previous="?"):
 
 
 def _program(words):
-    """The program a simple command runs: its first word, looking through `timeout`.
+    """The program a simple command runs: its first word, looking through
+    wrappers (`timeout 60`, `env A=1`, `nice`, `nohup`, `sudo`; see `templates.peel`).
 
     Returns (program, first word's name).
     """
     words = [w for w in words if not _ENV.fullmatch(w)]
     first = PurePosixPath(words[0]).name if words else "?"
-    rest = words[1:] if first == "timeout" else []
-    while rest and rest[0].startswith("-"):
-        rest = rest[2:] if rest[0] in {"-s", "-k", "--signal", "--kill-after"} else rest[1:]
-    program = PurePosixPath(rest[1]).name if len(rest) > 1 and _NUMBER.fullmatch(rest[0]) else first
+    rest = templates.peel(words)[1]
+    program = PurePosixPath(rest[0]).name if rest else first
     return (program if templates._NAME.fullmatch(program) else "?"), (first if templates._NAME.fullmatch(first) else "?")
 
 
@@ -167,19 +181,25 @@ def first_program(command):
     ever kept, never an argument.
     """
     text = re.sub(r"^\s*(?:/\S*/)?(?:ba|z)?sh\s+-l?c\s+['\"]?", "", command)
+    lifted = templates.lift_heredocs(text)
+    if lifted:
+        text = lifted[0]    # never read a heredoc body as commands
     for segment in re.split(r"&&|\|\||[;\n|&]", text):
         words = segment.split()
         while words and (words[0] in _LEADING or _ENV.fullmatch(words[0])):
             if _ENV.fullmatch(words[0]) and ("$(" in words[0] or "`" in words[0]):
-                words = []
+                words = []     # a value being assigned is not what the command runs
                 break
             words = words[1:]
+        # `(cd x && make)`, `$(git ...)`: the program inside the punctuation.
+        words = [word.lstrip("({!").rstrip(")}").strip("'\"") for word in " ".join(words).replace("$(", " ").split()]
+        words = [word for word in words if word and word not in _LEADING]
         if not words or words[0] in _SKIP_SEGMENT:
             continue
-        name = _program([word.strip("'\"") for word in words])[0]
-        if not name or name in templates._BUILTINS or name in _NOOP or name in _KEYWORDS:
+        name = _program(words)[0]
+        if not name or name in templates._BUILTINS or name in _NOOP or name in _KEYWORDS or not _PROGRAM.fullmatch(name):
             continue
-        return name if _PROGRAM.fullmatch(name) else ""
+        return name
     return ""
 
 
@@ -232,11 +252,16 @@ def _interpreter(word):
 def _shape_words(words):
     """Shape of one simple command, or the reason it must stay exact."""
     shaper = _Shaper()
-    index = 0
-    while index < len(words) and (match := _ENV.fullmatch(words[index])):
-        shaper.slot("env", match.group(2), prefix=match.group(1) + "=")
-        index += 1
-    words = words[index:]
+    wrappers, words = templates.peel(words)
+    for word in wrappers:
+        if (match := _ENV.fullmatch(word)):
+            shaper.slot("env", match.group(2), prefix=match.group(1) + "=")
+        elif word.startswith("-") and not _NUMBER.fullmatch(word):
+            if not templates._FLAG.fullmatch(word):
+                return None, "unsafe_flag"
+            shaper.literal(word)
+        else:
+            shaper.word(word)
     if not words:
         return None, "malformed"
     program = words[0]
@@ -306,8 +331,15 @@ def split_shell(command):
     n = len(command)
     while i < n:
         char = command[i]
+        if command.startswith("$(", i) and quote != "'":
+            end = _substitution_end(command, i)
+            if end is None:
+                return None
+            current.append(_protect(command[i:end]))
+            i = end
+            continue
         if quote:
-            if quote == '"' and (char == "`" or command.startswith("$(", i)):
+            if quote == '"' and char == "`":
                 return None
             current.append(char)
             if char == "\\" and quote == '"' and i + 1 < n:
@@ -349,6 +381,57 @@ def split_shell(command):
     return [part for part in parts if part[0]]
 
 
+# A safe `$(...)` is kept as one word through shlex: its spaces, quotes and
+# backslashes are swapped for these until the word is read back (`_unmark`).
+_PROTECT = {" ": "\x05", "\t": "\x06", "'": "\x07", '"': "\x08", "\\": "\x0e"}
+_UNPROTECT = str.maketrans({v: k for k, v in _PROTECT.items()})
+# What a substitution may run to stay a plain value of the command around it:
+# it only reads, and prints something short.
+_SUBSTITUTE = frozenset({"date", "pwd", "whoami", "hostname", "id", "uname", "nproc", "basename", "dirname",
+                         "realpath", "readlink", "cat", "head", "tail", "ls", "wc", "echo", "printf", "seq",
+                         "which", "pgrep", "stat", "uuidgen", "jq", "grep", "rg", "sort", "cut", "tr", "ps", "tty"})
+_GIT_READ = frozenset({"rev-parse", "describe", "merge-base", "rev-list", "symbolic-ref", "log", "show", "ls-files"})
+
+
+def _protect(text):
+    return "".join(_PROTECT.get(char, char) for char in text)
+
+
+def _substitution_end(command, start):
+    """End of the `$(...)` at `start` when it only reads (see `_SUBSTITUTE`), else None."""
+    quote, i = "", start + 2
+    while i < len(command):
+        char = command[i]
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "(":
+            return None
+        elif char == ")":
+            break
+        i += 1
+    else:
+        return None
+    inner = command[start + 2:i]
+    if not inner.strip() or re.search(r"[`$<>;&\n\\]", inner):
+        return None
+    for index, segment in enumerate(inner.split("|")):
+        try:
+            words = shlex.split(segment)
+        except ValueError:
+            return None
+        base = PurePosixPath(words[0]).name if words else ""
+        allowed = _SUBSTITUTE if index == 0 else _FILTERS
+        if not (base in allowed or (index == 0 and base == "git" and len(words) > 1 and words[1] in _GIT_READ)):
+            return None
+        if (base == "sed" and any(w.startswith("-i") or w == "--in-place" for w in words)) or (
+                base == "date" and any(w.startswith(("-s", "--set")) for w in words)):
+            return None
+    return i + 1
+
+
 def _clean(words):
     """Drop diagnostics-only redirections; keep others as `> {path}`-style words.
 
@@ -385,22 +468,78 @@ def _clean(words):
 
 
 def _unmark(text):
-    return text.replace(_IN, "<").replace(_OUT, ">")
+    return text.replace(_IN, "<").replace(_OUT, ">").translate(_UNPROTECT)
 
 
-def _shell_parts(command):
+def _render(text):
+    """A part's text as the tiers see it: each heredoc `<<'EOF'`, its body `…`."""
+    count = text.count(templates.HEREDOC)
+    text = re.sub(r"\s*" + templates.HEREDOC + r"\s*", " " + templates.REDACTED_HEREDOC + " ", text).strip()
+    return text + templates.REDACTED_BODY * count
+
+
+def _lift(command):
+    """`(text, redacted)` of a command whose heredocs can all be shaped, or None.
+
+    A heredoc can be shaped when the one simple command reading it only runs
+    it as a script or stores it in a file (`templates.heredoc_consumer`) and
+    its body does not run commands itself.
+    """
+    lifted = templates.lift_heredocs(command)
+    if lifted is None:
+        return None
+    text, redacted, bodies = lifted
+    if not bodies:
+        return text, command
+    if any(templates.expanding(*body) for body in bodies):
+        return None
+    segments = split_shell(text)
+    if segments is None:
+        return None
+    for segment, _, redirects in segments:
+        if templates.HEREDOC not in segment:
+            continue
+        try:
+            words = [word.translate(_UNPROTECT) for word in shlex.split(segment)]
+        except ValueError:
+            return None
+        cleaned = _clean(words) if redirects else (words, None)
+        if cleaned is None or not templates.heredoc_consumer(cleaned[0]):
+            return None
+    return text, redacted
+
+
+def redact(command):
+    """The command with each heredoc body withheld, when every heredoc can be
+    shaped (see `_lift`); otherwise the command as given.
+
+    Such a body is never stored, sent or a parameter, so an explanation of
+    the call cannot depend on it and holds for any body.
+    """
+    if not isinstance(command, str) or "<<" not in command:
+        return command
+    try:
+        inner = templates._strip_wrapper(command)
+    except ValueError:
+        return command
+    lifted = _lift(inner)
+    return lifted[1] if lifted and lifted[1] != inner else command
+
+
+def _shell_parts(command, depth=0):
     try:
         command = templates._strip_wrapper(command)
     except ValueError:
         return [_exact(_bash(command), command, "malformed", first_program(command))]
     whole = first_program(command)
-    segments = split_shell(command)
+    lifted = _lift(command)
+    segments = split_shell(lifted[0]) if lifted else None
     if segments is None:
         return [_exact(_bash(command), command, "opaque", whole)]
     parsed = []
     for text, operator, redirects in segments:
         try:
-            words = shlex.split(text)
+            words = [word.translate(_UNPROTECT) for word in shlex.split(text)]
         except ValueError:
             return [_exact(_bash(command), command, "malformed", whole)]
         cleaned = _clean(words) if redirects else (words, [("word", w) for w in words])
@@ -413,7 +552,7 @@ def _shell_parts(command):
             return [_exact(_bash(command), command, "opaque", whole)]
         parsed.append((_unmark(text), operator, cleaned))
     parts, cwd = [], ""
-    for text, operator, (plain, shaped) in parsed:
+    for index, (text, operator, (plain, shaped)) in enumerate(parsed):
         base = PurePosixPath(plain[0]).name
         if len(parsed) > 1 and base == "cd" and len(plain) <= 2:
             cwd = plain[1] if len(plain) == 2 else ""
@@ -421,6 +560,14 @@ def _shell_parts(command):
         if len(parsed) > 1 and base in _NOOP and len(plain) == 1:
             continue
         if operator in {"|", "|&"} and re.fullmatch(r"(head|tail)(\s+-n)?\s+-?\d+", " ".join(plain)):
+            continue
+        piped = parsed[index + 1][1] in {"|", "|&"} if index + 1 < len(parsed) else False
+        if (depth < 2 and not piped and operator not in {"|", "|&"} and len(plain) == 3 and len(shaped) == 3
+                and PurePosixPath(plain[0]).name in {"bash", "sh", "zsh"} and plain[1] in {"-c", "-lc"}):
+            # `bash -c '...'` runs its argument: explain that instead.
+            for inner in _shell_parts(plain[2], depth + 1):
+                inner.cwd = inner.cwd or cwd
+                parts.append(inner)
             continue
         parts.append(_shell_part(text, shaped, cwd))
     if not parts:
@@ -435,8 +582,9 @@ def _bash(command):
 
 
 def _shell_part(text, shaped, cwd):
+    text = _render(text) if templates.HEREDOC in text else text
     activity = _bash(text)
-    words = [entry[1] for entry in shaped if entry[0] == "word"]
+    words = [entry[1] for entry in shaped if entry[0] == "word" and entry[1] != templates.HEREDOC]
     program, first = _program(words)
     shaper, reason = _shape_words(words)
     if shaper is None:
@@ -446,6 +594,9 @@ def _shell_part(text, shaped, cwd):
     for entry in shaped:
         if entry[0] == "redirect":
             shaper.slot("path", entry[2], prefix=entry[1] + " ")
+        elif entry[1] == templates.HEREDOC:
+            # The heredoc's body is not part of the shape, nor a slot.
+            shaper.literal("<<heredoc")
     shape, exact = _key("shape", shaper.shape), _key("exact", text)
     part = Part(activity=activity, signature=f"sh:{program} #{shape}", exact_key=f"x:{program} #{exact}",
                 program=program, slots=shaper.slots, cwd=cwd)
