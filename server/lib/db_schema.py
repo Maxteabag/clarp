@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 98
+_SCHEMA_VERSION = 99
 
 
 # The schema below is the complete current shape. It is applied in one step to

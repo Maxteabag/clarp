@@ -77,30 +77,61 @@ opaque part. Each part goes through the tiers, cheapest first:
    `tool_explanation_learned` either renders a stored sentence with this
    call's values (`{path1}`, `{path1_name}`, `{num1}`, …) or returns an
    exact-only answer for identical text. Synchronous.
-3. **Jev**, for parts whose program or tool is unknown, when the
-   `explanations` judgment site is on: it picks one of the read/list/search
-   templates or one of the model's parameterised explanations of other shapes
-   of the same program. The answer starts with "Likely". A pick with at least
-   0.90 confidence is learned. Each part is offered only what could render
-   from its own arguments (`jev_offer` in `tool_explanation_templates`):
-   a template that acts on a file or folder needs a usable argument, and
-   without one only templates true of the current directory, or needing no
-   value, are offered; a search is never offered because the call cannot
-   supply its pattern. Candidate arguments exclude shell punctuation (`]`),
-   `$` expressions, flags, bare numbers and text with spaces. Learned options
-   are offered only to parts of their own program. A part with nothing to
-   offer is not sent to Jev, and its ledger reason says why:
-   `jev_no_target` (a tool with no argument, such as a `done`/`idle` status
-   row or a delegation), `jev_unsafe_arguments` (arguments, but none usable),
-   `shell_builtin` (`export`, `[`, `echo`, `cd`, …). A Codex row whose tool
-   name is a `/usr/bin/bash -lc "…"` display label is explained as that shell
-   command; clients clip that label at 80 characters, and a clipped one is
-   `truncated`, explained only by the model and exactly. A grouped exploration
-   row with a single `Read: path` is the `read_file` template; other
-   exploration rows go to the model as `exploration` or `multiple_targets`.
-   Jev's own abstentions are `jev_unknown`, `jev_low_confidence`,
-   `jev_no_argument` (it picked a file template but no argument), and
-   `jev_invalid_parameters` (the pick failed validation or rendering).
+3. **Jev**, for parts no template or learned row answers, when the
+   `explanations` judgment site is on. Jev chooses among existing
+   explanations or abstains; it never writes one. The answer starts with
+   "Likely", and a pick with at least 0.90 confidence is learned under this
+   part's own shape (producer `jev`, `source_signature` naming the row it
+   was copied from), so the next call with that shape is a learned hit.
+   What each part is offered:
+
+   - **Similar learned explanations** (`learning.candidates`): up to five of
+     the model's parameterised explanations of *other* shapes, ranked same
+     program and action first, then same program, then, only for an
+     unfamiliar program, other programs whose sentence shares at least two,
+     and at least half, of the part's words (a cheap stem overlap; no
+     embeddings, no network). A candidate is offered only if every
+     placeholder is filled from this part's own slots, and it is shown to Jev
+     as it would read for this call. A sentence naming a specific identifier
+     the call does not contain (an agent name like `oracle-mike-call`, a
+     model, a file name) is dropped, since that literal belonged to another
+     call. Exact-only rows are never offered: their text holds another
+     call's values. The program is the first word, looking through `timeout
+     N`, so `timeout 60 dotnet test` is a `dotnet` call.
+   - **Templates**, only for an unknown program or tool (`jev_offer` in
+     `tool_explanation_templates`): the read/list/search templates that can
+     render from the part's own arguments. A template that acts on a file or
+     folder needs a usable argument; without one only templates true of the
+     current directory, or needing no value, are offered; a search is never
+     offered because the call cannot supply its pattern. Candidate arguments
+     exclude shell punctuation (`]`), `$` expressions, flags, bare numbers
+     and text with spaces.
+
+   Which parts may be asked: unknown programs and tools get both kinds;
+   mutating programs, unmapped git subcommands, multiple targets, uncertain,
+   compound, clipped, malformed, builtin and exploration parts
+   (`JEV_LEARNED_REASONS`) get only same-program learned explanations,
+   because the model's sentence already says what the program changes;
+   script runs (the model reads the script), privileged calls and uploads
+   always go to the model. With learned options on offer the "unknown"
+   choice reads "none of these states exactly what the call does", not "the
+   call could change something", so a correct sentence about a change can
+   be chosen. A part with nothing to offer is not sent to Jev, and its ledger
+   reason says why: `jev_no_target` (a tool with no argument, such as a
+   `done`/`idle` status row or a delegation), `jev_unsafe_arguments`
+   (arguments, but none usable), `jev_no_candidates` (an unknown program
+   with nothing that renders), or its own route reason (`mutating_program`,
+   …). A Codex row whose tool name is a `/usr/bin/bash -lc "…"` display
+   label is explained as that shell command; clients clip that label at 80
+   characters, and a clipped one is `truncated`, explained exactly. A
+   grouped exploration row with a single `Read: path` is the `read_file`
+   template; other exploration rows are `exploration` or
+   `multiple_targets`. Jev's own abstentions are `jev_unknown`,
+   `jev_low_confidence` (below 0.80, unchanged), `jev_no_argument` (it
+   picked a file template but no argument), and `jev_invalid_parameters`
+   (the pick failed validation or rendering). An answered part's decision
+   reason is `jev_template:<id>` or `jev_learned:<same_action|same_program|lexical>`,
+   with the confidence in `jev_confidence`.
 4. **Model.** The language model gets each unanswered part with its `slots`
    and returns `text` and a `template` with placeholders. The template is
    learned for the shape only if it renders back to exactly `text`, uses only
@@ -116,7 +147,17 @@ lists them). Approving or rejecting a mapping also deletes a Jev pick learned
 for that shape. Learned rows are shared by every Janitor configuration and
 target on the Host; the 24-hour exact cache below stays per configuration.
 Maintenance deletes rows of dead versions after 30 days and keeps at most
-100,000 exact-only rows (least recently used go first). Only keyed hashes and
+100,000 exact-only rows (least recently used go first).
+
+Every row names its `program`. A whole command that is one opaque part
+(substitution, heredoc, loop, a pipe into a non-filter), a malformed one and a
+clipped Codex label take the program of their first real simple command,
+skipping `cd`, env assignments, builtins and keywords. Before schema v99 such
+rows were keyed `x:? #hash` with no program, and `timeout N cmd` parts were
+keyed by `timeout`. v99 fills `program` wherever the stored signature names
+one; the others cannot be backfilled because the command was never stored, so
+the next identical call still finds the old key and the next ledger write
+moves that row to the current key and program. Only keyed hashes and
 placeholder text are stored for parameterised rows; exact-only rows hold the
 explanation a client was shown.
 
@@ -149,8 +190,9 @@ reused.
 
 SQLite is authoritative for the whole explanation system, in the Host database
 reported by `clarp-admin paths` (normally `~/.local/share/clarp/state.sqlite`).
-Schema v72 added four tables, and v97 adds `tool_explanation_learned` and
-`tool_explanation_decisions` (see above):
+Schema v72 added four tables, v97 adds `tool_explanation_learned` and
+`tool_explanation_decisions` (see above), and v99 adds the learned row's
+`source_signature` and backfills `program`:
 
 - `tool_explanation_cache`: lookup hash, completed text, creation and expiry time.
 - `tool_explanation_jobs`: queued/running work, bounded normalized payload,
@@ -204,5 +246,6 @@ Headless regression gates:
 uv run --group dev pytest tests/unit/test_tool_explanations.py tests/integration/test_tool_explanations_endpoint.py
 uv run --group dev pytest tests/unit/test_tool_explanation_cache.py tests/unit/test_tool_explanation_queue.py
 uv run --group dev pytest tests/unit/test_tool_explanation_learning.py tests/unit/test_tool_explanation_hybrid.py
+uv run --group dev pytest tests/unit/test_tool_explanation_jev_similar.py tests/unit/test_tool_explanation_jev_picks.py
 ctest --test-dir desktop/build/release -R 'tool-narrator|activity-layout' --output-on-failure
 ```

@@ -164,9 +164,10 @@ def select_explanation_templates(entries: dict[str, dict]) -> dict[str, dict] | 
     """Pick a known explanation, and the argument it acts on, for each activity.
 
     `entries` maps a short key to `{"activity", "criteria", "takes_argument",
-    "candidates"}`: what may be chosen for that activity (ID to what it
-    claims), which of those IDs act on one argument, and the literal arguments
-    of the activity that could be it. Every activity is asked in one request,
+    "candidates", "learned"}`: what may be chosen for that activity (ID to
+    what it claims), which of those IDs act on one argument, the literal
+    arguments of the activity that could be it, and whether learned
+    explanations of similar calls are among the choices. Every activity is asked in one request,
     each with only its own options, and the argument is asked only when a
     choice needs one and there is more than one candidate. The result maps each
     key to `{"template_id", "confidence", "argument"}` or to `{"reason"}`; None
@@ -177,7 +178,12 @@ def select_explanation_templates(entries: dict[str, dict]) -> dict[str, dict] | 
     questions: dict[str, dict] = {}
     for key, entry in entries.items():
         criteria = dict(entry["criteria"])
-        criteria["unknown"] = ("None of these exactly, or the call could change, delete, move, "
+        # Templates claim only reads, lists and searches, so any other effect
+        # rules them all out. A learned explanation may itself describe a
+        # change, so with those on offer only a mismatch is ruled out.
+        criteria["unknown"] = ("None of these states exactly what the call does, or its effect is unclear"
+                               if entry.get("learned") else
+                               "None of these exactly, or the call could change, delete, move, "
                                "upload, install or run something, or its effect is unclear")
         questions[f"t_{key}"] = judgments.choice(
             f"`activities.{key}` is one tool call an AI coding agent made; it has not been run "
