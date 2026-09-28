@@ -281,3 +281,27 @@ target_include_directories(clarp-pane-contract PRIVATE ../src)
 target_link_libraries(clarp-pane-contract PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
 clarp_apply_quality_settings(clarp-pane-contract)
 add_test(NAME clarp-desktop-pane-contract COMMAND clarp-pane-contract)
+
+# Every lane that does not choose its own gets private settings, cache, state
+# and data directories. Tests must never read or write the user's real
+# desktop files: that made results depend on the machine running them and
+# could leave test data in the settings and agent cache of the real app.
+# The Python-driven lanes give the Clarp processes they start their own
+# directories; the interpreter itself (a version-manager shim here) needs the
+# user's state to start, so those lanes are left as they are.
+set(clarp_self_isolating_tests clarp-desktop-report-no-fetch clarp-desktop-multiple-instances
+    clarp-desktop-audio-coordination clarp-desktop-preview-adoption)
+get_property(clarp_all_tests DIRECTORY PROPERTY TESTS)
+foreach(clarp_test IN LISTS clarp_all_tests)
+    if(clarp_test IN_LIST clarp_self_isolating_tests)
+        continue()
+    endif()
+    get_test_property(${clarp_test} ENVIRONMENT clarp_test_environment)
+    foreach(clarp_kind IN ITEMS CONFIG CACHE STATE DATA)
+        if(NOT clarp_test_environment MATCHES "XDG_${clarp_kind}_HOME=")
+            set(clarp_private "${CMAKE_CURRENT_BINARY_DIR}/isolated/${clarp_test}/${clarp_kind}")
+            file(MAKE_DIRECTORY "${clarp_private}")
+            set_property(TEST ${clarp_test} APPEND PROPERTY ENVIRONMENT "XDG_${clarp_kind}_HOME=${clarp_private}")
+        endif()
+    endforeach()
+endforeach()
