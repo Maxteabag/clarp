@@ -3811,20 +3811,31 @@ def test_native_background_runtime_to_http_lifecycle(running_server, tmp_path, m
         with path.open('a') as f:
             f.write(json.dumps({'type':kind, 'timestamp':now, 'sessionId':native, **fields}) + '\n')
     db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at) VALUES (?,?,?,?)',
-                      (owner['agent_id'], 'rachel', native, db.now_ms()))
+                      (owner['agent_id'], 'rachel', native, db.now_ms() - 1000))
     monkeypatch.setattr(backends.by_id('claude'), 'find_transcript', lambda sid, **kw: path if sid == native else None)
     append('assistant', message={'content':[{'type':'tool_use','name':'Bash','id':tool,
         'input':{'run_in_background':True,'description':'Watch disposable CI fixture','command':'echo hidden-command'}}]})
     append('user', message={'content':[{'type':'tool_result','tool_use_id':tool}]},
            toolUseResult={'backgroundTaskId':task})
-    provider.poll_once()
-    watcher = BackgroundJobWatcher(ctx.stream)
-    watcher._poll_once()
+    from lib import background_jobs
     ident = provider.job_id(owner['agent_id'], native, tool)
+    watcher = BackgroundJobWatcher(ctx.stream)
+    watcher.INTERVAL_SEC = 0.01
+    watcher.PROVIDER_INTERVAL_SEC = 0.02
+    def wait_state(state):
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            job = background_jobs.get(ident, reconcile=False)
+            if job and job['metadata']['provider_state'] == state:
+                return
+            time.sleep(0.01)
+        pytest.fail(f'BackgroundJobWatcher did not observe {state}')
     root = pathlib.Path('/tmp') / f'claude-{os.getuid()}' / path.parent.name / native / 'tasks'
     root.mkdir(parents=True)
     output = root / f'{task}.output'
     try:
+        watcher.start()
+        wait_state('running')
         output.write_text('CI fixture: step 2/3\nTOKEN=fixture-secret\n')
         status, body = _get(base + '/background-jobs')
         job = next(j for j in json.loads(body)['jobs'] if j['job_id'] == ident)
@@ -3844,15 +3855,16 @@ def test_native_background_runtime_to_http_lifecycle(running_server, tmp_path, m
         assert status == 409 and body['error'] == 'provider_task_cancel_unsupported'
         # An ordinary ended runtime cannot turn missing evidence into success.
         db.conn().execute('UPDATE runtimes SET ended_at=? WHERE backend_session_id=?', (db.now_ms(),native))
-        provider.poll_once()
+        wait_state('unknown')
         status, body = _get(base + '/background-jobs/' + ident)
         assert json.loads(body)['job']['outcome_state'] == 'unknown'
         append('queue-operation', operation='enqueue', content=f'<task-notification><task-id>{task}</task-id><tool-use-id>{tool}</tool-use-id><status>completed</status></task-notification>')
-        provider.poll_once()
+        wait_state('completed')
         status, body = _get(base + '/background-jobs/' + ident)
         assert json.loads(body)['job']['status'] == 'succeeded'
         assert len(json.loads(body)['timeline']) == 4
     finally:
+        watcher.stop()
         output.unlink(missing_ok=True)
         root.rmdir()
         root.parent.rmdir()

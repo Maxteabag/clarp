@@ -40,7 +40,10 @@ def job_id(agent_id: str, native_id: str, tool_id: str) -> str:
 
 def _stamp(record: dict) -> int | None:
     try:
-        return int(datetime.fromisoformat(record['timestamp'].replace('Z', '+00:00')).timestamp() * 1000)
+        value = record.get('timestamp')
+        if not isinstance(value, str):
+            return None
+        return int(datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp() * 1000)
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
 
@@ -52,55 +55,12 @@ def _field(body: str, tag: str) -> str:
 
 def _write(c, owner: dict, native: str, tool: str, at: int, *, state: str,
            title: str = '', task: str = '', project: str = '', exit_code=None) -> None:
-    if not _ID.fullmatch(tool):
+    if not isinstance(tool, str) or not _ID.fullmatch(tool):
         return
     ident = job_id(owner['agent_id'], native, tool)
-    row = c.execute('SELECT * FROM background_jobs WHERE job_id=?', (ident,)).fetchone()
-    if row:
-        meta = json.loads(row['metadata_json'])
-        if row['terminal_at'] is not None or at < meta['provider_observed_at']:
-            return
-        if task and meta.get('provider_task_id') not in ('', task):
-            return
-        # Replayed launch requests cannot undo a receipt, even at equal time.
-        if state == 'launching' or (state == 'running' and meta.get('provider_state') == 'unknown' and at <= meta['provider_observed_at']):
-            return
-    else:
-        if state != 'launching':
-            return  # Never infer an owned Bash task from an uncorrelated notice.
-        meta = {'provider': 'claude', 'native_session_id': native,
-                'tool_use_id': tool, 'provider_task_id': '', 'provider_observed_at': at,
-                'provider_project': project}
-    if task:
-        meta['provider_task_id'] = task
-    if exit_code is not None:
-        meta['exit_code'] = exit_code
-    meta.update(provider_state=state, provider_observed_at=at)
-    # Preserve the existing wire statuses for older clients. The progress and
-    # outcome fields explicitly distinguish launching/unknown from running.
-    status = {'launching': 'queued', 'unknown': 'queued', 'running': 'running',
-              'completed': 'succeeded', 'failed': 'failed', 'stopped': 'failed'}[state]
-    terminal = state in {'completed', 'failed', 'stopped'}
-    reason = 'provider_session_ended_without_result' if state == 'stopped' else ('provider_' + state if terminal else '')
-    progress = {'launching': 'Launching; awaiting provider receipt',
-                'running': 'Provider reported running; no process ownership claimed',
-                'unknown': 'Unknown: no recent provider task evidence',
-                'stopped': 'Session ended without a completion record; outcome unknown',
-                'completed': 'Provider task completed', 'failed': 'Provider task failed'}[state]
-    if row and meta == json.loads(row['metadata_json']):
-        return
-    observed = db.now_ms() if state == 'unknown' else at
-    if row is None:
-        c.execute('''INSERT INTO background_jobs
-            (job_id,agent_id,session,kind,title,status,started_at,updated_at,
-             heartbeat_source,heartbeat_at,metadata_json)
-             VALUES (?,?,?,?,?,'queued',?,?,'provider_event',NULL,?)''',
-            (ident, owner['agent_id'], owner['session'], 'provider-task',
-             safe_text(title)[:120] or 'Claude background command', at, at, json.dumps(meta)))
-    c.execute('''UPDATE background_jobs SET status=?,updated_at=?,metadata_json=?,
-        progress_text=?,progress_at=?,terminal_at=?,terminal_reason=? WHERE job_id=?''',
-        (status, observed, json.dumps(meta), progress, observed, at if terminal else None, reason, ident))
-    jobs._record_event(c, ident, observed, note=progress)
+    jobs.observe_native_task(c, owner, ident, native=native, tool=tool, at=at,
+                             provider='claude', state=state, title=safe_text(title),
+                             task=task, project=project, exit_code=exit_code)
 
 
 def ingest(c, owner: dict, native: str, project: str, record: dict) -> None:
@@ -110,28 +70,32 @@ def ingest(c, owner: dict, native: str, project: str, record: dict) -> None:
     at = _stamp(record)
     if at is None or at > db.now_ms() + 60_000:
         return
-    content = (record.get('message') or {}).get('content', [])
+    message = record.get('message')
+    content = message.get('content', []) if isinstance(message, dict) else []
     blocks = content if isinstance(content, list) else []
     for block in blocks:
         if not isinstance(block, dict):
             continue
         if record.get('type') == 'assistant' and block.get('type') == 'tool_use' and block.get('name') == 'Bash':
             inp = block.get('input') or {}
+            if not isinstance(inp, dict):
+                continue
             if inp.get('run_in_background') is True:
                 _write(c, owner, native, block.get('id', ''), at, state='launching',
                        title=str(inp.get('description') or ''), project=project)
         elif record.get('type') == 'user' and block.get('type') == 'tool_result':
             tool = block.get('tool_use_id', '')
+            if block.get('is_error'):
+                _write(c, owner, native, tool, at, state='failed')
+                continue
             meta = record.get('toolUseResult') or {}
             if not isinstance(meta, dict):
                 continue
             task = meta.get('backgroundTaskId', '')
             if isinstance(task, str) and _ID.fullmatch(task):
                 _write(c, owner, native, tool, at, state='running', task=task)
-            elif block.get('is_error'):
-                _write(c, owner, native, tool, at, state='failed')
             # A request can complete synchronously despite background=true.
-            elif isinstance(meta.get('exitCode'), int):
+            elif type(meta.get('exitCode')) is int:
                 _write(c, owner, native, tool, at,
                        state='completed' if meta['exitCode'] == 0 else 'failed', exit_code=meta['exitCode'])
     # Only native queue envelopes; arbitrary assistant/user text is not evidence.
@@ -160,6 +124,12 @@ def observe(owner: dict, native: str, path: pathlib.Path, *, ended: bool = False
         stat = os.fstat(f.fileno())
         identity = f'{stat.st_dev}:{stat.st_ino}'
         c = db.conn()
+        cursor = c.execute('SELECT * FROM provider_job_cursors WHERE agent_id=? AND native_id=?',
+                           (owner['agent_id'], native)).fetchone()
+        if (cursor and cursor['file_identity'] == identity and cursor['path'] == str(path)
+                and cursor['position'] == stat.st_size):
+            reconcile_if_needed(owner, native, ended=ended)
+            return
         c.execute('BEGIN IMMEDIATE')
         try:
             cursor = c.execute('SELECT * FROM provider_job_cursors WHERE agent_id=? AND native_id=?',
@@ -212,6 +182,25 @@ def reconcile(c, owner: dict, native: str, *, ended: bool) -> None:
             _write(c, owner, native, meta['tool_use_id'], meta['provider_observed_at'], state='unknown')
 
 
+def reconcile_if_needed(owner: dict, native: str, *, ended: bool) -> None:
+    """An idle observer does not acquire a SQLite write lock or fake activity."""
+    c = db.conn()
+    rows = c.execute("SELECT metadata_json FROM background_jobs WHERE agent_id=? AND kind='provider-task' AND terminal_at IS NULL", (owner['agent_id'],)).fetchall()
+    pending = [json.loads(row[0]) for row in rows]
+    if not any(meta.get('native_session_id') == native
+               and meta.get('provider_state') != 'unknown'
+               and (ended or db.now_ms() - meta['provider_observed_at'] > STALE_MS)
+               for meta in pending):
+        return
+    c.execute('BEGIN IMMEDIATE')
+    try:
+        reconcile(c, owner, native, ended=ended)
+        c.execute('COMMIT')
+    except BaseException:
+        c.execute('ROLLBACK')
+        raise
+
+
 def poll_once() -> None:
     """Only transcripts explicitly bound in Clarp's runtime registry.
 
@@ -220,6 +209,7 @@ def poll_once() -> None:
     """
     from . import backends
     rows = db.conn().execute('''SELECT a.agent_id,a.session,r.backend_session_id,
+        MIN(r.started_at) AS bound_at,
         MAX(CASE WHEN r.ended_at IS NULL THEN 1 ELSE 0 END) AS live
         FROM agents a JOIN runtimes r ON r.agent_id=a.agent_id
         WHERE (a.backend='claude' OR EXISTS (SELECT 1 FROM provider_job_cursors pc
@@ -237,14 +227,7 @@ def poll_once() -> None:
             if path:
                 observe(owner, native, pathlib.Path(path), ended=not row['live'])
             else:
-                c = db.conn()
-                c.execute('BEGIN IMMEDIATE')
-                try:
-                    reconcile(c, owner, native, ended=not row['live'])
-                    c.execute('COMMIT')
-                except BaseException:
-                    c.execute('ROLLBACK')
-                    raise
+                reconcile_if_needed(owner, native, ended=not row['live'])
         except Exception as exc:
             log_exception('providerBackgroundObservationFail', exc)
 
@@ -270,12 +253,16 @@ def output(job: dict) -> dict:
 def mirrors_registered(job: dict) -> bool:
     """Deduplicate only an explicit exact identity link, never title/command similarity."""
     meta = job.get('metadata') or {}
-    if meta.get('provider') != 'claude' or not meta.get('tool_use_id'):
+    if not isinstance(meta, dict):
+        return False
+    if not meta.get('provider') or not meta.get('tool_use_id'):
         return False
     for row in db.conn().execute("SELECT metadata_json FROM background_jobs WHERE agent_id=? AND heartbeat_source!='provider_event'", (job['agent_id'],)):
         try:
             other = json.loads(row[0])
         except (ValueError, TypeError):
+            continue
+        if not isinstance(other, dict):
             continue
         if all(other.get(key) == meta.get(key) for key in ('provider', 'native_session_id', 'tool_use_id')):
             return True

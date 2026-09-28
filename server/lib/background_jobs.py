@@ -315,6 +315,7 @@ def upsert(
     if not agent:
         raise ValueError(f"unknown session: {session}")
     from . import identity
+    metadata = {**(metadata or {}), **_native_origin(agent)}
     return _upsert_owned(
         owner_kind="agent", agent_id=agent["agent_id"], session=session,
         computer_id="", job_id=job_id, kind=kind, title=title, detail=detail,
@@ -1345,3 +1346,83 @@ def _public(row: Any, *, observed_at: int | None = None) -> dict:
     out["elapsed_ms"] = max(0, int(out.get("terminal_at") or now) - int(out["started_at"]))
     out["outcome_state"] = outcome_state
     return out
+
+
+def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
+                        provider: str, at: int, state: str, title: str = '',
+                        task: str = '', project: str = '', exit_code=None) -> None:
+    """Apply already-correlated provider evidence within its cursor transaction.
+
+    The registry owns every job write. The adapter owns parsing, redaction,
+    exact identity validation, and the transaction coupling to its cursor.
+    Unlike worker upsert, this never claims a process or refreshes a heartbeat.
+    """
+    row = c.execute('SELECT * FROM background_jobs WHERE job_id=?', (ident,)).fetchone()
+    if row:
+        meta = json.loads(row['metadata_json'])
+        if row['terminal_at'] is not None or at < meta['provider_observed_at']:
+            return
+        if task and meta.get('provider_task_id') not in ('', task):
+            return
+        # Replayed launch requests cannot undo a receipt, even at equal time.
+        if state == 'launching' or (state == 'running' and meta.get('provider_state') == 'unknown' and at <= meta['provider_observed_at']):
+            return
+    else:
+        if state != 'launching' or at < int(owner.get('bound_at') or 0):
+            return  # Never infer an owned Bash task from an uncorrelated notice.
+        meta = {'provider': provider, 'native_session_id': native,
+                'tool_use_id': tool, 'provider_task_id': '', 'provider_observed_at': at,
+                'provider_project': project}
+    if task:
+        meta['provider_task_id'] = task
+    if exit_code is not None:
+        meta['exit_code'] = exit_code
+    meta.update(provider_state=state, provider_observed_at=at)
+    # Preserve the existing wire statuses for older clients. The progress and
+    # outcome fields explicitly distinguish launching/unknown from running.
+    status = {'launching': 'queued', 'unknown': 'queued', 'running': 'running',
+              'completed': 'succeeded', 'failed': 'failed', 'stopped': 'failed'}[state]
+    terminal = state in {'completed', 'failed', 'stopped'}
+    reason = 'provider_session_ended_without_result' if state == 'stopped' else ('provider_' + state if terminal else '')
+    progress = {'launching': 'Launching; awaiting provider receipt',
+                'running': 'Provider reported running; no process ownership claimed',
+                'unknown': 'Unknown: no recent provider task evidence',
+                'stopped': 'Session ended without a completion record; outcome unknown',
+                'completed': 'Provider task completed', 'failed': 'Provider task failed'}[state]
+    if row and meta == json.loads(row['metadata_json']):
+        return
+    observed = db.now_ms() if state == 'unknown' else at
+    if row is None:
+        c.execute('''INSERT INTO background_jobs
+            (job_id,agent_id,session,kind,title,status,started_at,updated_at,
+             heartbeat_source,heartbeat_at,metadata_json)
+             VALUES (?,?,?,?,?,'queued',?,?,'provider_event',NULL,?)''',
+            (ident, owner['agent_id'], owner['session'], 'provider-task',
+             title[:120] or 'Claude background command', at, at, json.dumps(meta)))
+    c.execute('''UPDATE background_jobs SET status=?,updated_at=?,metadata_json=?,
+        progress_text=?,progress_at=?,terminal_at=?,terminal_reason=? WHERE job_id=?''',
+        (status, observed, json.dumps(meta), progress, observed, at if terminal else None, reason, ident))
+    _record_event(c, ident, observed, note=progress)
+
+
+def _native_origin(agent: dict) -> dict:
+    """Use inherited provenance only for its recorded agent/native binding.
+
+    This does not claim that a process is alive or grant cancellation. It only
+    links a real explicit registration to the native invocation that made it.
+    """
+    raw = os.environ.get("CLARP_BACKGROUND_ORIGIN", "")
+    if len(raw) > 2000:
+        return {}
+    try:
+        origin = json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+    keys = ("provider", "native_session_id", "tool_use_id")
+    if (not isinstance(origin, dict) or origin.get("agent_id") != agent["agent_id"]
+            or origin.get("provider") != agent.get("backend")
+            or not all(isinstance(origin.get(k), str) and 0 < len(origin[k]) <= 160 for k in keys)):
+        return {}
+    bound = db.conn().execute("SELECT 1 FROM runtimes WHERE agent_id=? AND backend_session_id=? AND ended_at IS NULL",
+                              (agent['agent_id'], origin['native_session_id'])).fetchone()
+    return {key: origin[key] for key in keys} if bound else {}

@@ -103,8 +103,13 @@ limits its tail, and redacts common credential forms.
 
 Explicit registration remains necessary for Codex code-mode tasks and arbitrary
 systemd/nohup services. No broad process discovery or adoption occurs. Do not
-register Claude `Agent`/`Task` helpers as background jobs. An explicitly registered
-job can provide `metadata.provider`, `metadata.native_session_id`, and
+register Claude `Agent`/`Task` helpers as background jobs. The Clarp PreToolUse hook attaches non-secret invocation identity to background
+Bash commands through updatedInput, without making a permission decision. The
+legacy helper automatically retains that identity only when the registering owner
+matches its live native binding, so its actual registration replaces the automatic
+mirror in job counts. This requires the updated plugin and Host code together.
+An explicitly registered job can also provide `metadata.provider`, `metadata.native_session_id`, and
 `metadata.tool_use_id` matching the actual Claude Bash call to suppress the
 automatic mirror in job lists/counts; never guess those IDs or deduplicate by title.
-The legacy CLI does not yet populate that optional metadata automatically.
+Older plugin installations and sanitized service environments may lack this
+provenance; do not guess an identity when it is absent.

@@ -39,7 +39,7 @@ def notice(state='completed', at=None, task=TASK, tool=TOOL):
 @pytest.fixture
 def case(tmp_path):
     aid = agents.create_agent(persona='Bella fixture', voice_id='', cwd=str(tmp_path), session='bella-fixture')
-    owner = {'agent_id': aid, 'session': 'bella-fixture'}
+    owner = {'agent_id': aid, 'session': 'bella-fixture', 'backend':'claude'}
     path = tmp_path / '-fixture' / f'{NATIVE}.jsonl'
     path.parent.mkdir()
     path.touch()
@@ -237,3 +237,104 @@ def test_v99_migration_creates_cursor_without_changing_jobs():
     c.execute('PRAGMA user_version=99')
     db._migrate(c)
     assert 'discarding' in {r[1] for r in c.execute('PRAGMA table_info(provider_job_cursors)')}
+
+
+def test_native_history_before_owner_binding_is_not_adopted(case):
+    owner, path, ident = case
+    owner['bound_at'] = db.now_ms()
+    append(path, launch(owner['bound_at'] - 2000), receipt(owner['bound_at'] - 1000))
+    provider.observe(owner, NATIVE, path)
+    assert jobs.get(ident) is None
+
+
+def test_malformed_records_and_cross_native_notice_do_not_poison_cursor(case):
+    owner, path, ident = case
+    append(path, {'type':'assistant','timestamp':123}, record('assistant',message=[]),
+           launch(), receipt())
+    wrong = notice(); wrong['sessionId'] = 'other-session'
+    append(path, wrong)
+    provider.observe(owner, NATIVE, path)
+    assert jobs.get(ident)['status'] == 'running'
+    append(path, notice())
+    provider.observe(owner, NATIVE, path)
+    assert jobs.get(ident)['status'] == 'succeeded'
+
+
+def test_launch_error_with_string_metadata_is_terminal(case):
+    owner, path, ident = case
+    append(path, launch(), record('user', message={'content':[
+        {'type':'tool_result','tool_use_id':TOOL,'is_error':True,'content':'hidden error'}]},
+        toolUseResult='provider launch failed'))
+    provider.observe(owner, NATIVE, path)
+    assert jobs.get(ident)['metadata']['provider_state'] == 'failed'
+
+
+def test_idle_observer_does_not_write_or_refresh_evidence(case):
+    owner, path, ident = case
+    append(path, launch(), receipt())
+    provider.observe(owner, NATIVE, path)
+    before = db.conn().total_changes
+    provider.observe(owner, NATIVE, path)
+    assert db.conn().total_changes == before
+
+
+def test_real_hook_shell_and_legacy_helper_automatically_deduplicate(case):
+    """No registration metadata authored by the agent; execute the actual helper."""
+    import pathlib
+    import shlex
+    import subprocess
+    import sys
+    owner, path, ident = case
+    root = pathlib.Path(__file__).resolve().parents[2]
+    db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at) VALUES (?,?,?,?)',
+                      (owner['agent_id'], owner['session'], NATIVE, db.now_ms() - 1000))
+    command = shlex.join([sys.executable, str(root / 'scripts/agent_bg.py'), owner['session'],
+                          'job-upsert', 'explicit-shell', 'testing', 'Disposable shell watcher'])
+    inputs = {'command': command, 'description':'Disposable shell watcher', 'run_in_background':True}
+    env = {**os.environ, 'CLAUDE_PWA_DB':str(db.DB_PATH), 'CLARP_CODE_ROOT':str(root / 'server'),
+           'CLAUDE_PWA_SESSION':owner['session']}
+    env.pop('CLARP_BACKGROUND_WORKER_PID', None)
+    hook = subprocess.run([sys.executable,str(root / 'plugin/hooks/tool_activity.py')],
+        input=json.dumps({'session_id':NATIVE,'tool_use_id':TOOL,'tool_name':'Bash','tool_input':inputs}),
+        env=env,capture_output=True,text=True,timeout=15)
+    assert hook.returncode == 0, hook.stderr
+    response = json.loads(hook.stdout)['hookSpecificOutput']
+    assert 'permissionDecision' not in response
+    updated = response['updatedInput']
+    assert updated['command'].endswith(command)
+    assert {k:v for k,v in updated.items() if k != 'command'} == {k:v for k,v in inputs.items() if k != 'command'}
+    result = subprocess.run(['bash','-c',updated['command']], env=env,
+                             capture_output=True,text=True,timeout=15)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == 'bg1:1:explicit-shell'
+    registered = jobs.get('explicit-shell')
+    assert registered['metadata']['tool_use_id'] == TOOL
+    append(path, launch(), receipt())
+    provider.observe(owner, NATIVE, path)
+    assert [j['job_id'] for j in jobs.snapshot()['jobs']] == ['explicit-shell']
+    assert len(jobs.active_by_agent()[owner['agent_id']]) == 1
+    assert jobs.get(ident)['metadata']['provider_task_id'] == TASK
+
+
+def test_origin_rejects_wrong_owner_and_ended_binding(case, monkeypatch):
+    owner, path, ident = case
+    origin = {'agent_id':owner['agent_id'],'provider':'claude','native_session_id':NATIVE,'tool_use_id':TOOL}
+    monkeypatch.setenv('CLARP_BACKGROUND_ORIGIN',json.dumps(origin))
+    # No matching live native binding: inherited state is not sufficient.
+    assert jobs.upsert(session=owner['session'],job_id='unbound',title='Unbound')['metadata'] == {}
+    db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at) VALUES (?,?,?,?)',
+                      (owner['agent_id'], owner['session'], NATIVE, db.now_ms()))
+    other = agents.create_agent(persona='Other', voice_id='',cwd=str(path.parent),session='other')
+    assert jobs.upsert(session='other',job_id='other',title='Other')['metadata'] == {}
+    db.conn().execute('UPDATE runtimes SET ended_at=? WHERE agent_id=?',(db.now_ms(),owner['agent_id']))
+    assert jobs.upsert(session=owner['session'],job_id='ended',title='Ended')['metadata'] == {}
+
+
+def test_origin_wrapper_is_scoped_and_idempotent(case):
+    from lib.backend.claude_background_provenance import tool_input_with_origin
+    owner, path, ident = case
+    assert tool_input_with_origin(owner,NATIVE,TOOL,{'command':'pwd'}) is None
+    assert tool_input_with_origin(owner,NATIVE,"bad'; touch /tmp/no",{'command':'pwd','run_in_background':True}) is None
+    inputs = {'command':"printf '%s\\n' 'unchanged $content'",'run_in_background':True}
+    updated = tool_input_with_origin(owner,NATIVE,TOOL,inputs)
+    assert tool_input_with_origin(owner,NATIVE,TOOL,updated) == updated
