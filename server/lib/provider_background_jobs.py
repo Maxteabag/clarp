@@ -214,31 +214,33 @@ def observe(owner: dict, native: str, path: pathlib.Path, *, ended: bool = False
             file_identity=excluded.file_identity,position=excluded.position,discarding=excluded.discarding,action_offset=excluded.action_offset''',
             (owner['agent_id'], native, str(path), identity, pos, int(discarding), action_offset))
         if pos >= stat.st_size:
-            reconcile(c, owner, native, ended=ended)
+            reconcile(c, owner, native, ended=ended, limit=MAX_ACTIONS - len(actions))
         c.execute('COMMIT')
     except BaseException:
         c.execute('ROLLBACK')
         raise
 
 
-def reconcile(c, owner: dict, native: str, *, ended: bool) -> None:
-    for row in c.execute("SELECT * FROM background_jobs WHERE agent_id=? AND kind='provider-task' AND terminal_at IS NULL", (owner['agent_id'],)).fetchall():
+def pending_reconciliation(c, owner: dict, native: str, *, ended: bool, limit: int):
+    return c.execute("""SELECT * FROM background_jobs
+        WHERE agent_id=? AND heartbeat_source='provider_event' AND terminal_at IS NULL
+        AND json_extract(metadata_json,'$.native_session_id')=?
+        AND json_extract(metadata_json,'$.provider_state')!='unknown'
+        AND (? OR ? - json_extract(metadata_json,'$.provider_observed_at') > ?)
+        ORDER BY job_id LIMIT ?""",
+        (owner['agent_id'], native, int(ended), db.now_ms(), STALE_MS, limit)).fetchall()
+
+
+def reconcile(c, owner: dict, native: str, *, ended: bool, limit: int = MAX_ACTIONS) -> None:
+    for row in pending_reconciliation(c, owner, native, ended=ended, limit=limit):
         meta = json.loads(row['metadata_json'])
-        if meta.get('native_session_id') != native or meta.get('provider_state') == 'unknown':
-            continue
-        if ended or db.now_ms() - meta['provider_observed_at'] > STALE_MS:
-            _write(c, owner, native, meta['tool_use_id'], meta['provider_observed_at'], state='unknown')
+        _write(c, owner, native, meta['tool_use_id'], meta['provider_observed_at'], state='unknown')
 
 
 def reconcile_if_needed(owner: dict, native: str, *, ended: bool) -> None:
     """An idle observer does not acquire a SQLite write lock or fake activity."""
     c = db.conn()
-    rows = c.execute("SELECT metadata_json FROM background_jobs WHERE agent_id=? AND kind='provider-task' AND terminal_at IS NULL", (owner['agent_id'],)).fetchall()
-    pending = [json.loads(row[0]) for row in rows]
-    if not any(meta.get('native_session_id') == native
-               and meta.get('provider_state') != 'unknown'
-               and (ended or db.now_ms() - meta['provider_observed_at'] > STALE_MS)
-               for meta in pending):
+    if not pending_reconciliation(c, owner, native, ended=ended, limit=1):
         return
     c.execute('BEGIN IMMEDIATE')
     try:

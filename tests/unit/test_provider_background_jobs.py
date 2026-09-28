@@ -393,3 +393,16 @@ def test_one_large_record_is_applied_in_bounded_resumable_action_batches(case):
     assert cursor['position']==path.stat().st_size and cursor['action_offset']==0
     provider.observe(owner,NATIVE,path)
     assert db.conn().execute('SELECT count(*) FROM background_jobs').fetchone()[0]==130
+
+
+def test_stale_reconciliation_shares_the_per_visit_mutation_budget(case):
+    owner,path,ident=case
+    blocks=[{'type':'tool_use','name':'Bash','id':f'toolu_stale_{i}',
+             'input':{'run_in_background':True}} for i in range(130)]
+    append(path,record('assistant',at=db.now_ms()-2*provider.STALE_MS,message={'content':blocks}))
+    for _ in range(6):
+        before=jobs.latest_event_id()
+        provider.observe(owner,NATIVE,path)
+        assert len(jobs.events_after(before,limit=500))<=provider.MAX_ACTIONS
+    rows=db.conn().execute('SELECT metadata_json FROM background_jobs').fetchall()
+    assert len(rows)==130 and all(json.loads(r[0])['provider_state']=='unknown' for r in rows)
