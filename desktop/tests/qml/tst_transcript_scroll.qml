@@ -188,6 +188,66 @@ TestCase {
         verify(view.indexAt(view.width / 2, view.contentY + view.height / 2) >= 0,
             "after wheeling past the end, the viewport must still show a row");
     }
+    ListModel { id: longRows }
+    Component {
+        id: longComponent
+        Clarp.TranscriptList {
+            width: testCase.width
+            height: testCase.height
+            model: longRows
+            clip: true
+            delegate: Rectangle {
+                required property string messageId
+                required property int rowHeight
+                width: ListView.view.width
+                height: rowHeight
+                color: "#202330"
+            }
+        }
+    }
+    function test_wheelStormUpScrollsInsteadOfJumpingToTheTop() {
+        // A fast wheel-up through rows of very different heights reached the
+        // top of the loaded history in one step (E2E: 3 frames, 0.3 s past
+        // ~1,200 messages): a moment without a created row in view was taken
+        // for having passed the first row.
+        longRows.clear();
+        for (let i = 0; i < 400; i++)
+            longRows.append({messageId: "r" + i, rowHeight: [40, 900, 120, 2400, 60, 300][i % 6]});
+        const view = createTemporaryObject(longComponent, testCase);
+        tryVerify(() => view.atYEnd);
+        let travelled = 0;
+        for (let step = 0; step < 12; step++) {
+            const before = view.contentY;
+            mouseWheel(view, 200, 200, 0, 120 * 20);
+            wait(30);
+            verify(view.indexAt(view.width / 2, view.contentY + view.height / 2) >= 0,
+                "the viewport must show a row after step " + step);
+            travelled += before - view.contentY;
+            verify(before - view.contentY < 1200 + view.height,
+                "one wheel event of 1200 px must not move " + Math.round(before - view.contentY) + " px");
+        }
+        verify(view.indexAt(view.width / 2, view.contentY + view.height / 2) > 300,
+            "twelve steps of 1200 px from the end must not reach the top of 400 tall rows");
+    }
+    function test_blankAfterOlderHistoryReturnsToTheSameMessage() {
+        // Older history prepended above a reader (94 -> 1,192 rows) left the
+        // view with no row; returning to the top then skipped 1,100 messages.
+        const view = openView();
+        view.pauseFollowing();
+        view.positionViewAtIndex(25, ListView.Beginning);
+        waitForRendering(view);
+        const reading = view.itemAtIndex(view.indexAt(view.width / 2, view.contentY + view.height / 2)).messageId;
+        const older = [];
+        for (let i = 0; i < 300; ++i) older.push({messageId: "old" + i, rowHeight: 48});
+        rows.insert(0, older); // one page, as the Host delivers it
+        wait(100);
+        compare(view.itemAtIndex(view.indexAt(view.width / 2, view.contentY + view.height / 2)).messageId, reading,
+            "the prepend itself keeps the reader in place");
+        view.contentY = view.originY - 50000;
+        tryVerify(() => view.indexAt(view.width / 2, view.contentY + view.height / 2) >= 0, 3000);
+        const shown = view.itemAtIndex(view.indexAt(view.width / 2, view.contentY + view.height / 2)).messageId;
+        compare(shown, reading, "the reader returns to the message they were reading");
+    }
     function test_refreshRestoresMessageIdentityAndPixelOffset() {
         const view = openView();
         view.pauseFollowing();
