@@ -41,7 +41,7 @@ def active_by_agent() -> dict[str, list[dict[str, Any]]]:
     marks = ",".join("?" for _ in ACTIVE_STATUSES)
     out: dict[str, list[dict[str, Any]]] = {}
     for row in db.conn().execute(
-            f"SELECT job_id, agent_id, kind, title, detail, metadata_json, "
+            f"SELECT job_id, agent_id, kind, title, detail, metadata_json, heartbeat_source, "
             f"progress_text, COALESCE(progress_at, started_at) AS active_at, "
             f"COALESCE(heartbeat_at, updated_at) AS heartbeat_at "
             f"FROM background_jobs WHERE status IN ({marks}) "
@@ -51,6 +51,9 @@ def active_by_agent() -> dict[str, list[dict[str, Any]]]:
             metadata = json.loads(row["metadata_json"] or "{}")
         except json.JSONDecodeError:
             metadata = {}
+        from .provider_background_jobs import mirrors_registered
+        if row["heartbeat_source"] == "provider_event" and mirrors_registered({"agent_id": row["agent_id"], "metadata": metadata}):
+            continue
         out.setdefault(row["agent_id"], []).append({
             "job_id": str(row["job_id"]),
             "kind": str(row["kind"] or ""), "title": str(row["title"] or ""),
@@ -353,6 +356,8 @@ def _upsert_owned(
         raise ValueError(f"background job must start queued or running: {status}")
     now = db.now_ms()
     job_id = job_id.strip() or uuid.uuid4().hex
+    if job_id.startswith("claude-task:"):
+        raise ValueError("provider task identity is reserved for native observation")
     timeout = max(30_000, min(int(heartbeat_timeout_ms), 24 * 60 * 60 * 1000))
     pid = int(worker_pid or 0) or None
     token = worker_start_token.strip()
@@ -519,11 +524,11 @@ def snapshot(*, include_terminal: bool = True, now_ms: int | None = None) -> dic
     except BaseException:
         c.execute("ROLLBACK")
         raise
+    from .provider_background_jobs import mirrors_registered
+    public_jobs = [_public(row, observed_at=now) for row in [*active_rows, *terminal_rows]]
     return {
-        "jobs": [
-            _public(row, observed_at=now)
-            for row in [*active_rows, *terminal_rows]
-        ],
+        "jobs": [job for job in public_jobs
+                 if job.get("heartbeat_source") != "provider_event" or not mirrors_registered(job)],
         "snapshot_revision": revision,
         "observed_at": now,
     }
@@ -584,7 +589,7 @@ def cancel_run(
     c.execute("BEGIN IMMEDIATE")
     try:
         row = c.execute(
-            "SELECT status, generation, session, owner_kind FROM background_jobs WHERE job_id=?",
+            "SELECT status, generation, session, owner_kind, heartbeat_source FROM background_jobs WHERE job_id=?",
             (job_id,)).fetchone()
         mismatch = None
         changed = False
@@ -597,6 +602,8 @@ def cancel_run(
             mismatch = "session"
         elif expected_generation is not None and int(row["generation"] or 1) != expected_generation:
             mismatch = "generation"
+        elif row["heartbeat_source"] == "provider_event":
+            mismatch = "unsupported"
         elif row["status"] not in TERMINAL_STATUSES:
             c.execute(
                 """UPDATE background_jobs
@@ -667,6 +674,9 @@ def finish(
         if row is None:
             c.execute("COMMIT")
             return None
+        if row["heartbeat_source"] == "provider_event":
+            c.execute("COMMIT")
+            return None
         expected_pid = int(row["worker_pid"] or 0)
         expected_token = str(row["worker_start_token"] or "")
         if int(row["generation"] or 1) != int(generation):
@@ -697,7 +707,8 @@ def _owned_active_row(c, job_id: str, *, session: str, generation: int):
     """The job row when `session` owns this active generation, else None."""
     row = c.execute(
         "SELECT * FROM background_jobs WHERE job_id=?", (job_id,)).fetchone()
-    if (row is None or str(row["owner_kind"] or "agent") != "agent"
+    if (row is None or row["heartbeat_source"] == "provider_event"
+            or str(row["owner_kind"] or "agent") != "agent"
             or str(row["session"] or "") != session
             or int(row["generation"] or 1) != int(generation)
             or row["status"] not in ACTIVE_STATUSES):
@@ -910,6 +921,9 @@ def detail(job_id: str, *, include_log: bool = True) -> dict | None:
         "path": "", "available": False, "reason": "forbidden", "text": "",
         "size": 0, "truncated": False,
     }
+    if include_log and job.get("heartbeat_source") == "provider_event":
+        from .provider_background_jobs import output
+        log = output(job)
     return {
         "job": job,
         "handle": job_handle(job),
@@ -1085,6 +1099,8 @@ def reconcile_stale(
     ).fetchall()
     changed: list[str] = []
     for row in rows:
+        if row["heartbeat_source"] == "provider_event":
+            continue  # Provider silence is unknown, never a fabricated heartbeat failure.
         expired = now - int(row["heartbeat_at"] or row["updated_at"]) > int(
             row["heartbeat_timeout_ms"])
         if row["status"] == "queued":
@@ -1226,6 +1242,9 @@ def _active_update(
         if row is None or row["status"] not in ACTIVE_STATUSES:
             c.execute("COMMIT")
             return get(job_id, reconcile=False)
+        if row["heartbeat_source"] == "provider_event":
+            c.execute("COMMIT")
+            return None
         expected_pid = int(row["worker_pid"] or 0)
         expected_token = str(row["worker_start_token"] or "")
         now = max(now, int(row["heartbeat_at"] or row["updated_at"]) + 1)
@@ -1317,5 +1336,12 @@ def _public(row: Any, *, observed_at: int | None = None) -> dict:
         outcome_state = "pending"
     else:
         outcome_state = str(out.get("status") or "unknown")
+    if out.get("heartbeat_source") == "provider_event":
+        provider_state = out["metadata"].get("provider_state", "unknown")
+        out["can_cancel"] = False
+        out["worker_freshness"] = "unknown"
+        if provider_state in {"unknown", "stopped"}:
+            outcome_state = "unknown"
+    out["elapsed_ms"] = max(0, int(out.get("terminal_at") or now) - int(out["started_at"]))
     out["outcome_state"] = outcome_state
     return out

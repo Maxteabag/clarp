@@ -3795,3 +3795,65 @@ def test_helper_agent_create_report_and_mark_over_http(running_server, monkeypat
     assert rows["claude"]["running_children"] == 0
     assert rows[helper]["helper_state"] == "done"
     assert rows[helper]["parent_agent_id"] == rows["claude"]["agent_id"]
+
+
+def test_native_background_runtime_to_http_lifecycle(running_server, tmp_path, monkeypatch):
+    """Replay provider records through the actual observer and HTTP surfaces."""
+    from datetime import datetime, timezone
+    from lib import agents, backends, db, provider_background_jobs as provider
+    from lib.background_job_watcher import BackgroundJobWatcher
+    base, ctx, _srv = running_server
+    owner = agents.get_by_session('rachel')
+    native, tool, task = 'fixture-native-http', 'toolu_fixture_http', 'fixture_task'
+    path = tmp_path / f'{native}.jsonl'
+    now = datetime.now(timezone.utc).isoformat()
+    def append(kind, **fields):
+        with path.open('a') as f:
+            f.write(json.dumps({'type':kind, 'timestamp':now, 'sessionId':native, **fields}) + '\n')
+    db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at) VALUES (?,?,?,?)',
+                      (owner['agent_id'], 'rachel', native, db.now_ms()))
+    monkeypatch.setattr(backends.by_id('claude'), 'find_transcript', lambda sid, **kw: path if sid == native else None)
+    append('assistant', message={'content':[{'type':'tool_use','name':'Bash','id':tool,
+        'input':{'run_in_background':True,'description':'Watch disposable CI fixture','command':'echo hidden-command'}}]})
+    append('user', message={'content':[{'type':'tool_result','tool_use_id':tool}]},
+           toolUseResult={'backgroundTaskId':task})
+    provider.poll_once()
+    watcher = BackgroundJobWatcher(ctx.stream)
+    watcher._poll_once()
+    ident = provider.job_id(owner['agent_id'], native, tool)
+    root = pathlib.Path('/tmp') / f'claude-{os.getuid()}' / path.parent.name / native / 'tasks'
+    root.mkdir(parents=True)
+    output = root / f'{task}.output'
+    try:
+        output.write_text('CI fixture: step 2/3\nTOKEN=fixture-secret\n')
+        status, body = _get(base + '/background-jobs')
+        job = next(j for j in json.loads(body)['jobs'] if j['job_id'] == ident)
+        assert status == 200 and job['status'] == 'running'
+        status, body = _get(base + '/background-jobs/' + ident)
+        detail = json.loads(body)
+        assert detail['owner_session'] == 'rachel'
+        assert detail['owner_agent_id'] == owner['agent_id']
+        assert detail['job']['title'] == 'Watch disposable CI fixture'
+        assert detail['job']['elapsed_ms'] >= 0
+        assert 'step 2/3' in detail['log']['text'] and 'fixture-secret' not in body.decode()
+        assert detail['job']['can_cancel'] is False
+        status, body = _get(base + '/agents/snapshot')
+        row = next(a for a in json.loads(body)['agents'] if a['agent_id'] == owner['agent_id'])
+        assert row['background_jobs']['count'] == 1
+        status, body = _delete_status(base + '/background-jobs/' + ident)
+        assert status == 409 and body['error'] == 'provider_task_cancel_unsupported'
+        # An ordinary ended runtime cannot turn missing evidence into success.
+        db.conn().execute('UPDATE runtimes SET ended_at=? WHERE backend_session_id=?', (db.now_ms(),native))
+        provider.poll_once()
+        status, body = _get(base + '/background-jobs/' + ident)
+        assert json.loads(body)['job']['outcome_state'] == 'unknown'
+        append('queue-operation', operation='enqueue', content=f'<task-notification><task-id>{task}</task-id><tool-use-id>{tool}</tool-use-id><status>completed</status></task-notification>')
+        provider.poll_once()
+        status, body = _get(base + '/background-jobs/' + ident)
+        assert json.loads(body)['job']['status'] == 'succeeded'
+        assert len(json.loads(body)['timeline']) == 4
+    finally:
+        output.unlink(missing_ok=True)
+        root.rmdir()
+        root.parent.rmdir()
+        root.parent.parent.rmdir()

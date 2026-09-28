@@ -4649,6 +4649,8 @@ class Handler(BaseHTTPRequestHandler):
             "job": job,
             "job_handle": background_jobs.job_handle(job),
         }
+        if outcome["mismatch"] == "unsupported":
+            return self._json(409, {"ok": False, "error": "provider_task_cancel_unsupported", **receipt})
         if outcome["mismatch"] == "generation":
             return self._json(409, {
                 "ok": False, "error": "generation_mismatch", "expected_generation": expected,

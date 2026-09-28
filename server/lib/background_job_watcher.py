@@ -38,6 +38,8 @@ class BackgroundJobWatcher:
     def _loop(self) -> None:
         while not self._stop.wait(self.INTERVAL_SEC):
             try:
+                from . import provider_background_jobs
+                provider_background_jobs.poll_once()
                 background_jobs.reconcile_stale()
                 self._poll_once()
             except Exception as exc:  # noqa: BLE001
