@@ -1,0 +1,11 @@
+[package]
+name = "clarp-core"
+version = "0.1.0"
+edition = "2024"
+description = "Qt-free protocol, sync and text logic for the Clarp Rust desktop client"
+
+[dependencies]
+serde_json = "1"
+fancy-regex = "0.14"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+url = "2"
