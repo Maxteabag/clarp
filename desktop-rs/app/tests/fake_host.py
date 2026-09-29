@@ -140,6 +140,26 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"artifacts": [{"artifact_id": "art1", "title": "Report"}]})
         if url.path == "/agent-model-options":
             return self.reply(200, {"backends": []})
+        if url.path == "/past-sessions":
+            if query.get("cwd") == "/broken":
+                return self.reply(500, {"error": "history unreadable"})
+            if query.get("cwd") == "/slow":
+                # Lets an earlier request's reply land first.
+                time.sleep(0.5)
+            sessions = [{"session_id": "old-1", "title": "Earlier work", "cwd": query.get("cwd", "")}]
+            if query.get("scope") == "all":
+                sessions.append({"session_id": "old-2", "title": "Other project", "cwd": "/elsewhere"})
+            return self.reply(200, {"sessions": sessions})
+        if url.path == "/launch-directories":
+            q = query.get("q", "")
+            if q == "slow":
+                time.sleep(0.4)
+            return self.reply(200, {"home": "/home/fake", "matches": [
+                {"path": f"/home/fake/{q or 'src'}", "label": q or "src"}]})
+        if url.path == "/dirs":
+            return self.reply(200, {"matches": [query.get("path", "") + "/one", query.get("path", "") + "/two"]})
+        if url.path == "/favorite-paths":
+            return self.reply(200, {"paths": ["/home/fake/src", "/home/fake/notes"][: int(query.get("limit", "5"))]})
         if url.path == "/log":
             session = query.get("session", "")
             with state_lock:
@@ -269,6 +289,12 @@ class Handler(BaseHTTPRequestHandler):
                 for session, items in turn_queue.items():
                     turn_queue[session] = [i for i in items if i["queue_id"] != item]
             return self.reply(200, {"ok": True})
+        if url.path == "/agent-assign":
+            if body.get("mode") == "options":
+                return self.reply(200, {"contacts": [{"name": "Paula", "available": True}]})
+            if body.get("name") == "Nobody":
+                return self.reply(409, {"error": "contact is busy"})
+            return self.reply(200, {"ok": True, "session": body.get("session")})
         if url.path in ("/select", "/stop", "/compact", "/agent-schedules/toggle", "/team-nudging") or url.path.startswith("/agent-"):
             return self.reply(200, {"ok": True})
         if url.path == "/agents":

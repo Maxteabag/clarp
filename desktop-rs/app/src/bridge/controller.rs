@@ -115,6 +115,13 @@ pub mod qobject {
         #[qproperty(QString, profile_session, cxx_name = "profileSession", READ = profile_session_value, NOTIFY = profile_changed)]
         #[qproperty(bool, profile_loading, cxx_name = "profileLoading", READ = profile_loading_value, NOTIFY = profile_changed)]
         #[qproperty(QString, profile_error, cxx_name = "profileError", READ = profile_error_value, NOTIFY = profile_changed)]
+        #[qproperty(QJsonArray, past_sessions, cxx_name = "pastSessions", READ = past_sessions_value, NOTIFY = past_sessions_changed)]
+        #[qproperty(bool, past_sessions_loading, cxx_name = "pastSessionsLoading", READ = past_sessions_loading_value, NOTIFY = past_sessions_changed)]
+        #[qproperty(QJsonArray, launch_directories, cxx_name = "launchDirectories", READ = launch_directories_value, NOTIFY = launch_directories_changed)]
+        #[qproperty(bool, launch_directories_loading, cxx_name = "launchDirectoriesLoading", READ = launch_directories_loading_value, NOTIFY = launch_directories_changed)]
+        #[qproperty(QJsonArray, directory_suggestions, cxx_name = "directorySuggestions", READ = directory_suggestions_value, NOTIFY = paths_changed)]
+        #[qproperty(QJsonArray, favorite_paths, cxx_name = "favoritePaths", READ = favorite_paths_value, NOTIFY = paths_changed)]
+        #[qproperty(QJsonArray, assignment_contacts, cxx_name = "assignmentContacts", READ = assignment_contacts_value, NOTIFY = assignment_contacts_changed)]
         #[qproperty(QJsonArray, profile_prompts, cxx_name = "profilePrompts", READ = profile_prompts_value, NOTIFY = profile_changed)]
         #[qproperty(bool, profile_prompts_have_more, cxx_name = "profilePromptsHaveMore", READ = profile_prompts_have_more_value, NOTIFY = profile_changed)]
         #[qproperty(bool, profile_prompts_loading, cxx_name = "profilePromptsLoading", READ = profile_prompts_loading_value, NOTIFY = profile_changed)]
@@ -249,6 +256,55 @@ pub mod qobject {
         fn profile_loading_value(self: &AppController) -> bool;
         fn profile_error_value(self: &AppController) -> QString;
         fn profile_prompts_value(self: &AppController) -> QJsonArray;
+        fn past_sessions_value(self: &AppController) -> QJsonArray;
+        fn past_sessions_loading_value(self: &AppController) -> bool;
+        fn launch_directories_value(self: &AppController) -> QJsonArray;
+        fn launch_directories_loading_value(self: &AppController) -> bool;
+        fn directory_suggestions_value(self: &AppController) -> QJsonArray;
+        fn favorite_paths_value(self: &AppController) -> QJsonArray;
+        fn assignment_contacts_value(self: &AppController) -> QJsonArray;
+        #[qsignal]
+        #[cxx_name = "pastSessionsChanged"]
+        fn past_sessions_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "launchDirectoriesChanged"]
+        fn launch_directories_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "pathsChanged"]
+        fn paths_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "assignmentContactsChanged"]
+        fn assignment_contacts_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "contactAssignmentRequested"]
+        fn contact_assignment_requested(self: Pin<&mut AppController>, session: &QString, automatic: bool);
+        #[qsignal]
+        #[cxx_name = "contactAssignmentSucceeded"]
+        fn contact_assignment_succeeded(self: Pin<&mut AppController>, session: &QString);
+        #[qinvokable]
+        #[cxx_name = "resumeLaunchSession"]
+        fn resume_launch_session(self: Pin<&mut AppController>, backend: &QString, session_id: &QString, anonymous: bool) -> bool;
+        #[qinvokable]
+        #[cxx_name = "loadPastSessions"]
+        fn load_past_sessions(self: Pin<&mut AppController>, working_directory: &QString, backend: &QString, all_projects: bool);
+        #[qinvokable]
+        #[cxx_name = "loadLaunchDirectories"]
+        fn load_launch_directories(self: Pin<&mut AppController>, query: &QString);
+        #[qinvokable]
+        #[cxx_name = "loadDirectorySuggestions"]
+        fn load_directory_suggestions(self: Pin<&mut AppController>, path: &QString);
+        #[qinvokable]
+        #[cxx_name = "loadFavoritePaths"]
+        fn load_favorite_paths(self: Pin<&mut AppController>);
+        #[qinvokable]
+        #[cxx_name = "loadAssignmentContacts"]
+        fn load_assignment_contacts(self: Pin<&mut AppController>, session: &QString);
+        #[qinvokable]
+        #[cxx_name = "requestContactAssignment"]
+        fn request_contact_assignment(self: Pin<&mut AppController>, session: &QString, automatic: bool);
+        #[qinvokable]
+        #[cxx_name = "assignContact"]
+        fn assign_contact(self: Pin<&mut AppController>, session: &QString, mode: &QString, name: &QString);
         fn profile_prompts_have_more_value(self: &AppController) -> bool;
         fn profile_prompts_loading_value(self: &AppController) -> bool;
         fn profile_heartbeat_value(self: &AppController) -> QJsonObject;
@@ -816,6 +872,16 @@ pub struct AppControllerRust {
     profile_task_plan: Object,
     profile_heartbeat: Object,
     profile_prompts: Vec<Value>,
+    past_sessions: Vec<Value>,
+    past_sessions_loading: bool,
+    past_sessions_generation: u64,
+    launch_directories: Vec<Value>,
+    launch_directories_loading: bool,
+    launch_directory_generation: u64,
+    directory_suggestions: Vec<Value>,
+    favorite_paths: Vec<Value>,
+    assignment_session: String,
+    assignment_contacts: Vec<Value>,
     profile_prompt_cursor: String,
     profile_prompts_have_more: bool,
     profile_prompts_loading: bool,
@@ -2090,6 +2156,190 @@ impl AppController {
 
 
 
+
+
+    // ---- past sessions, launch directories, paths, assignment ----------------
+
+    fn past_sessions_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.past_sessions)
+    }
+    fn past_sessions_loading_value(&self) -> bool {
+        self.past_sessions_loading
+    }
+    fn launch_directories_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.launch_directories)
+    }
+    fn launch_directories_loading_value(&self) -> bool {
+        self.launch_directories_loading
+    }
+    fn directory_suggestions_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.directory_suggestions)
+    }
+    fn favorite_paths_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.favorite_paths)
+    }
+    fn assignment_contacts_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.assignment_contacts)
+    }
+
+    fn resume_launch_session(mut self: Pin<&mut Self>, backend: &QString, session_id: &QString, anonymous: bool) -> bool {
+        if self.as_mut().retry_created_agent() {
+            return true;
+        }
+        let (backend, session_id) = (backend.to_string(), session_id.to_string());
+        if !self.connected || session_id.is_empty() || !self.starting_contact.is_empty() {
+            return false;
+        }
+        let mut body = json!({"backend": backend, "resume_session_id": session_id, "open_existing": true});
+        body[if anonymous { "anonymous" } else { "auto_contact" }] = json!(true);
+        self.post_contact_create("resume", &backend, body);
+        true
+    }
+
+    fn load_past_sessions(mut self: Pin<&mut Self>, working_directory: &QString, backend: &QString, all_projects: bool) {
+        let (cwd, backend) = (working_directory.to_string().trim().to_owned(), backend.to_string());
+        if cwd.is_empty() || backend.is_empty() {
+            return;
+        }
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.past_sessions_loading = true;
+            rust.past_sessions.clear();
+            rust.past_sessions_generation += 1;
+            rust.past_sessions_generation
+        };
+        self.as_mut().past_sessions_changed();
+        let mut query = vec![("cwd", cwd.as_str()), ("backend", backend.as_str())];
+        if all_projects {
+            query.push(("scope", "all"));
+        }
+        if let Some(api) = self.api.as_ref() {
+            api.get(&format!("past-sessions:{generation}"), "/past-sessions", &query);
+        }
+    }
+
+    fn load_launch_directories(mut self: Pin<&mut Self>, query: &QString) {
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.launch_directories.clear();
+            rust.launch_directories_loading = true;
+            rust.launch_directory_generation += 1;
+            rust.launch_directory_generation
+        };
+        self.as_mut().launch_directories_changed();
+        if let Some(api) = self.api.as_ref() {
+            api.get(&format!("launch-directories:{generation}"), "/launch-directories", &[("q", &query.to_string())]);
+        }
+    }
+
+    fn load_directory_suggestions(mut self: Pin<&mut Self>, path: &QString) {
+        let path = path.to_string().trim().to_owned();
+        if path.is_empty() {
+            if !self.directory_suggestions.is_empty() {
+                self.as_mut().rust_mut().directory_suggestions.clear();
+                self.paths_changed();
+            }
+            return;
+        }
+        if let Some(api) = self.api.as_ref() {
+            api.get("directory-suggestions", "/dirs", &[("path", &path)]);
+        }
+    }
+
+    fn load_favorite_paths(self: Pin<&mut Self>) {
+        if let Some(api) = self.api.as_ref() {
+            api.get("favorite-paths", "/favorite-paths", &[("limit", "5")]);
+        }
+    }
+
+    fn load_assignment_contacts(mut self: Pin<&mut Self>, session: &QString) {
+        let session = session.to_string();
+        self.as_mut().rust_mut().assignment_session = session.clone();
+        self.as_mut().rust_mut().assignment_contacts.clear();
+        self.as_mut().assignment_contacts_changed();
+        if let Some(api) = self.api.as_ref() {
+            api.post_json(&format!("assignment-options:{session}"), "/agent-assign",
+                          json!({"session": session, "mode": "options"}), None);
+        }
+    }
+
+    fn request_contact_assignment(self: Pin<&mut Self>, session: &QString, automatic: bool) {
+        self.contact_assignment_requested(session, automatic);
+    }
+
+    fn assign_contact(mut self: Pin<&mut Self>, session: &QString, mode: &QString, name: &QString) {
+        let session = session.to_string();
+        if session.is_empty() || !self.connected {
+            self.set_error("Connect and select an agent before assigning a contact");
+            return;
+        }
+        self.as_mut().set_error("");
+        if let Some(api) = self.api.as_ref() {
+            api.post_json(&format!("agent-assignment:{session}"), "/agent-assign",
+                          json!({"session": session, "mode": mode.to_string(), "name": name.to_string()}), None);
+        }
+    }
+
+    fn handle_launch_json(mut self: Pin<&mut Self>, tag: &str, object: &Object) -> bool {
+        let array = |key: &str| object.get(key).and_then(Value::as_array).cloned().unwrap_or_default();
+        if let Some(generation) = tag.strip_prefix("past-sessions:") {
+            if generation.parse::<u64>().ok() == Some(self.past_sessions_generation) {
+                self.as_mut().rust_mut().past_sessions = array("sessions");
+                self.as_mut().rust_mut().past_sessions_loading = false;
+                self.past_sessions_changed();
+            }
+        } else if let Some(generation) = tag.strip_prefix("launch-directories:") {
+            if generation.parse::<u64>().ok() == Some(self.launch_directory_generation) {
+                self.as_mut().rust_mut().launch_directories = array("matches");
+                self.as_mut().apply_host_launch_directory_default(&json::string(object, "home"));
+                self.as_mut().rust_mut().launch_directories_loading = false;
+                self.launch_directories_changed();
+            }
+        } else if tag == "directory-suggestions" {
+            self.as_mut().rust_mut().directory_suggestions = array("matches");
+            self.paths_changed();
+        } else if tag == "favorite-paths" {
+            self.as_mut().rust_mut().favorite_paths = array("paths");
+            self.paths_changed();
+        } else if let Some(session) = tag.strip_prefix("assignment-options:") {
+            if session == self.assignment_session {
+                self.as_mut().rust_mut().assignment_contacts = array("contacts");
+                self.assignment_contacts_changed();
+            }
+        } else if let Some(session) = tag.strip_prefix("agent-assignment:") {
+            let session = qs(session);
+            self.as_mut().request_snapshot();
+            self.contact_assignment_succeeded(&session);
+        } else {
+            return false;
+        }
+        true
+    }
+
+    /// Returns true when the failure is stale and must not surface; current
+    /// failures clear their loading state and fall through to the error.
+    fn handle_launch_failure(mut self: Pin<&mut Self>, tag: &str) -> bool {
+        if let Some(generation) = tag.strip_prefix("past-sessions:") {
+            if generation.parse::<u64>().ok() != Some(self.past_sessions_generation) {
+                return true;
+            }
+            self.as_mut().rust_mut().past_sessions_loading = false;
+            self.past_sessions_changed();
+        } else if let Some(generation) = tag.strip_prefix("launch-directories:") {
+            if generation.parse::<u64>().ok() != Some(self.launch_directory_generation) {
+                return true;
+            }
+            self.as_mut().rust_mut().launch_directories_loading = false;
+            self.launch_directories_changed();
+        } else if tag == "directory-suggestions" {
+            self.as_mut().rust_mut().directory_suggestions.clear();
+            self.paths_changed();
+        } else if tag == "favorite-paths" {
+            self.as_mut().rust_mut().favorite_paths.clear();
+            self.paths_changed();
+        }
+        false
+    }
 
     // ---- composer attachments -------------------------------------------------
 
@@ -3422,6 +3672,9 @@ impl AppController {
             self.finish_upload(tag, Some(object));
             return;
         }
+        if self.as_mut().handle_launch_json(tag, object) {
+            return;
+        }
         if self.as_mut().handle_team_or_queue_json(tag, object) || self.as_mut().handle_profile_json(tag, object) {
             return;
         }
@@ -3511,6 +3764,9 @@ impl AppController {
                 self.as_mut().set_error(message);
             }
             self.contact_launch_changed();
+            return;
+        }
+        if self.as_mut().handle_launch_failure(tag) {
             return;
         }
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
