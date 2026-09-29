@@ -13,6 +13,32 @@ use cxx_qt_lib::{QByteArray, QGuiApplication, QMap, QMapPair_QString_QVariant, Q
 /// types it uses unqualified (AppController, ...) are found.
 const MAIN_DOCUMENT: &str = "import Clarp.Desktop\nMain {}\n";
 
+/// Screenshot runs (`CLARP_SCREENSHOT_PATH`, like the C++ app): size the
+/// window, wait for the chat to settle, grab it to the path and quit. A
+/// failed capture exits non-zero.
+const SCREENSHOT_DOCUMENT: &str = r#"import QtQuick
+import Clarp.Desktop
+Main {
+    id: shot
+    property string screenshotPath: ""
+    property int screenshotDelay: 2000
+    property int screenshotWidth: 0
+    property int screenshotHeight: 0
+    Component.onCompleted: {
+        if (screenshotWidth > 0 && screenshotHeight > 0) {
+            shot.width = Math.max(760, screenshotWidth)
+            shot.height = Math.max(520, screenshotHeight)
+        }
+    }
+    WindowCapture { id: capture }
+    Timer {
+        interval: shot.screenshotDelay
+        running: shot.screenshotPath !== ""
+        onTriggered: Qt.exit(capture.capture(shot, shot.screenshotPath) ? 0 : 1)
+    }
+}
+"#;
+
 fn main() {
     // The app owns its Qt Quick style, like the C++ QQuickStyle::setStyle.
     // SAFETY: single-threaded here; no other thread reads the environment yet.
@@ -50,11 +76,25 @@ fn main() {
             let mut properties = QMap::<QMapPair_QString_QVariant>::default();
             properties.insert(QString::from("launchOnStartup"), QVariant::from(&launch_on_startup));
             properties.insert(QString::from("sidebarVisible"), QVariant::from(&no_new_agent));
+            if let Ok(path) = std::env::var("CLARP_SCREENSHOT_PATH") {
+                let delay = std::env::var("CLARP_SCREENSHOT_DELAY_MS").ok().and_then(|d| d.parse::<i32>().ok());
+                let delay = delay.filter(|d| *d > 0).map_or(2_000, |d| d.clamp(2_400, 60_000));
+                properties.insert(QString::from("screenshotPath"), QVariant::from(&QString::from(path.as_str())));
+                properties.insert(QString::from("screenshotDelay"), QVariant::from(&delay));
+                let size = std::env::var("CLARP_SCREENSHOT_SIZE").unwrap_or_default();
+                if let Some((width, height)) = size.split_once('x').and_then(|(w, h)| Some((w.parse::<i32>().ok()?, h.parse::<i32>().ok()?))) {
+                    properties.insert(QString::from("screenshotWidth"), QVariant::from(&width));
+                    properties.insert(QString::from("screenshotHeight"), QVariant::from(&height));
+                }
+            }
             engine.as_mut().set_initial_properties(&properties);
         }
         match probe.as_deref() {
             Some(path) => engine.as_mut().load(&QUrl::from(path)),
-            None => engine.as_mut().load_data(&QByteArray::from(MAIN_DOCUMENT), &QUrl::from("qrc:/clarp-rust/Root.qml")),
+            None => {
+                let document = if screenshot { SCREENSHOT_DOCUMENT } else { MAIN_DOCUMENT };
+                engine.as_mut().load_data(&QByteArray::from(document), &QUrl::from("qrc:/clarp-rust/Root.qml"))
+            }
         }
     }
     if let Some(app) = app.as_mut() {
