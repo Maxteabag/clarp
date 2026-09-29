@@ -66,6 +66,17 @@ DEFAULT_ROSTER: dict[str, str] = {
     "Theo":   "pNInz6obpgDQGcFmaJgB",
     "Yuki":   "MF3mGyEYCl7XYWbV9V6O",
     "Omar":   "yoZ06aMxZJJ28mfd3POQ",
+    # Cartesia-only: no ElevenLabs fallback voice.
+    "Archie": "",
+    "Tristan": "",
+    "Ronan": "",
+    "Wyatt": "",
+    "Jasper": "",
+    "Siobhan": "",
+    "Bronte": "",
+    "Pearl": "",
+    "Imogen": "",
+    "Kira": "",
     # Default Archetypes & Clarp
     "Claude": "f4a3a8e4-694c-4c45-9ca0-27caf97901b5",
     "Codex":  "ed81fd13-2016-4a49-8fe3-c0d2761695fc",
