@@ -514,6 +514,24 @@ pub mod qobject {
         /// Markdown as styled rich text for a transcript row (see
         /// `clarp_core::markdown_style`).
         #[qinvokable]
+        #[cxx_name = "openExternalLink"]
+        fn open_external_link(self: Pin<&mut AppController>, link: &QString, originating_host: &QString) -> bool;
+        #[qinvokable]
+        #[cxx_name = "openLocalReport"]
+        fn open_local_report(self: Pin<&mut AppController>, link: &QString, originating_host: &QString) -> bool;
+        #[qinvokable]
+        #[cxx_name = "copyToClipboard"]
+        fn copy_to_clipboard(self: Pin<&mut AppController>, text: &QString);
+        #[qinvokable]
+        #[cxx_name = "openAgentFiles"]
+        fn open_agent_files(self: Pin<&mut AppController>, session: &QString);
+        #[qinvokable]
+        #[cxx_name = "openAgentTerminal"]
+        fn open_agent_terminal(self: Pin<&mut AppController>, session: &QString);
+        #[qinvokable]
+        #[cxx_name = "resourceUrl"]
+        fn resource_url(self: &AppController, path: &QString) -> QUrl;
+        #[qinvokable]
         #[cxx_name = "styledMarkdownHtml"]
         fn styled_markdown_html(self: &AppController, markdown: &QString, options: &QJsonObject) -> QString;
         #[qinvokable]
@@ -3032,6 +3050,154 @@ impl AppController {
         } else {
             eprintln!("AppController: unexpected bytes reply {tag}");
         }
+    }
+
+
+    // ---- links, files, terminal, clipboard ------------------------------------
+
+    fn open_external_link(mut self: Pin<&mut Self>, link: &QString, originating_host: &QString) -> bool {
+        let target = link.to_string().trim().to_owned();
+        if target.starts_with('/') || Url::parse(&target).is_ok_and(|u| u.scheme() == "file") {
+            return self.open_local_report(&qs(&target), originating_host);
+        }
+        if !clarp_core::text::is_openable_link(&target) {
+            // Transcript text is model, tool and web output: refuse anything
+            // but web and mail links rather than hand an arbitrary scheme to
+            // whatever handler the desktop has registered for it.
+            let shown: String = target.chars().take(120).collect();
+            self.set_error(&format!("Only web and mail links can be opened: {shown}"));
+            return false;
+        }
+        self.as_mut().open_browser_url(&target)
+    }
+
+    fn open_local_report(mut self: Pin<&mut Self>, link: &QString, originating_host: &QString) -> bool {
+        let host = originating_host.to_string();
+        if host.is_empty() || normalized_base_url(&host) != self.base_url || !self.shared_filesystem {
+            self.set_error("Local reports require the originating Host to share this desktop's filesystem");
+            return false;
+        }
+        let Some(path) = clarp_core::links::local_report_path(link.to_string().trim()) else {
+            self.set_error("Local report must be a readable, non-executable HTML, PDF, text or image file");
+            return false;
+        };
+        let url = Url::from_file_path(&path).map(|u| u.to_string()).unwrap_or_default();
+        self.as_mut().open_browser_url(&url)
+    }
+
+    /// Links open in the browser of this window's workspace on Hyprland (the
+    /// `fuck open-link` helper), elsewhere through the desktop's handler.
+    fn open_browser_url(mut self: Pin<&mut Self>, url: &str) -> bool {
+        let hyprland = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok_and(|v| !v.is_empty());
+        if url.starts_with("mailto:") || super::desktop::testing_urls() || super::desktop::platform_name() != "wayland" || !hyprland {
+            if !super::desktop::open_url(url) {
+                self.set_error("No application is available to open that link");
+                return false;
+            }
+            self.set_error("");
+            return true;
+        }
+        let Some(helper) = clarp_core::links::find_executable("fuck") else {
+            self.set_error("Workspace browser helper is unavailable");
+            return false;
+        };
+        self.as_mut().set_error("");
+        let (session, host, qt, url) = (self.selected_session.clone(), self.base_url.clone(), self.qt_thread(), url.to_owned());
+        crate::runtime::handle().spawn_blocking(move || {
+            let output = std::process::Command::new(helper)
+                .args(["open-link", &url, "--requester-pid", &std::process::id().to_string()])
+                .stdin(std::process::Stdio::null())
+                .output();
+            let failure = match output {
+                Err(error) => {
+                    eprintln!("AppController: could not start the workspace browser helper: {error}");
+                    Some("Could not start workspace browser helper".to_owned())
+                }
+                Ok(done) if !done.status.success() => {
+                    let stderr: String = String::from_utf8_lossy(&done.stderr).trim().chars().take(240).collect();
+                    Some(format!("Link opening failed: {stderr}"))
+                }
+                Ok(_) => None,
+            };
+            if let Some(message) = failure {
+                let queued = qt.queue(move |controller| {
+                    // Only while the reader is still where the link was.
+                    if controller.selected_session == session && controller.base_url == host {
+                        controller.set_error(&message);
+                    }
+                });
+                if queued.is_err() {
+                    eprintln!("AppController: dropped a link failure; the controller is gone");
+                }
+            }
+        });
+        true
+    }
+
+    fn copy_to_clipboard(self: Pin<&mut Self>, text: &QString) {
+        if let Err(error) = super::desktop::copy_to_clipboard(&text.to_string()) {
+            eprintln!("AppController: copying failed: {error}");
+            self.set_error(&format!("Could not copy: {error}"));
+        }
+    }
+
+    /// The agent's working directory on this desktop, when it exists here.
+    fn local_agent_directory(&self, session: &QString) -> Option<std::path::PathBuf> {
+        let path = self.agent_working_directory(session).to_string();
+        let canonical = std::fs::canonicalize(&path).ok().filter(|_| !path.is_empty())?;
+        canonical.is_dir().then_some(canonical)
+    }
+
+    fn open_agent_files(self: Pin<&mut Self>, session: &QString) {
+        let opened = self
+            .local_agent_directory(session)
+            .and_then(|dir| Url::from_file_path(dir).ok())
+            .is_some_and(|url| super::desktop::open_url(url.as_str()));
+        if !opened {
+            self.set_error("The agent directory is not available on this desktop");
+        }
+    }
+
+    fn open_agent_terminal(self: Pin<&mut Self>, session: &QString) {
+        if !self.shared_filesystem {
+            self.set_error("The native CLI requires this desktop and Host to share the local filesystem");
+            return;
+        }
+        let Some(agent) = self.roster_agent(&session.to_string()).cloned() else { return };
+        let (program, arguments) = match clarp_core::links::native_terminal_launch(&agent) {
+            Ok(launch) => launch,
+            Err(message) => {
+                self.set_error(&message);
+                return;
+            }
+        };
+        let Some(program_path) = clarp_core::links::find_executable(&program) else {
+            self.set_error(&format!("{program} is not installed on this desktop"));
+            return;
+        };
+        let Some(directory) = self.local_agent_directory(session) else {
+            self.set_error("The agent directory is not available on this desktop");
+            return;
+        };
+        let directory = directory.to_string_lossy().into_owned();
+        let title = format!("{} — {program}", clarp_core::protocol::display_name(&agent));
+        let xdg = clarp_core::links::find_executable("xdg-terminal-exec").is_some();
+        let (launcher, launch_arguments) =
+            clarp_core::links::terminal_command(xdg, &session.to_string(), &title, &directory, &program_path.to_string_lossy(), &arguments);
+        let spawned = std::process::Command::new(&launcher)
+            .args(&launch_arguments)
+            .current_dir(&directory)
+            .stdin(std::process::Stdio::null())
+            .spawn();
+        if let Err(error) = spawned {
+            eprintln!("AppController: could not start {launcher}: {error}");
+            self.set_error(if xdg { "Could not start the default terminal" } else { "No default terminal launcher was found" });
+        }
+    }
+
+    fn resource_url(&self, path: &QString) -> QUrl {
+        let resolved = self.api.as_ref().and_then(|api| api.resolve(&path.to_string()));
+        resolved.map_or_else(QUrl::default, |url| QUrl::from(url.as_str()))
     }
 
     // ---- composer attachments -------------------------------------------------
