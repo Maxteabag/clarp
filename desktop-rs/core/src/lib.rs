@@ -14,6 +14,7 @@ pub mod endpoint;
 pub mod jobs;
 pub mod json;
 pub mod list_ops;
+pub mod markdown_style;
 pub mod media;
 pub mod narrator;
 pub mod panes;

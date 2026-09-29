@@ -50,7 +50,11 @@ turns = {
         {"id": "r1", "role": "user", "text": "Hello", "revision": 1, "timestamp": "2026-09-29T10:00:00Z"},
         {"id": "r2", "role": "assistant", "text": "Hi, how can I help?", "revision": 2, "timestamp": "2026-09-29T10:00:05Z"},
     ],
-    "mike": [{"id": "m1", "role": "assistant", "text": "Mike here", "revision": 1, "timestamp": "2026-09-29T09:00:00Z"}],
+    "mike": [{"id": "m1", "role": "assistant", "text": "Mike here", "revision": 1, "timestamp": "2026-09-29T09:00:00Z"},
+             {"id": "m2", "role": "assistant", "revision": 2, "timestamp": "2026-09-29T09:01:00Z", "text":
+              "## Build plan\n\nRun `cargo test` first, then read the [guide](https://example.com).\n\n"
+              "```rust\nfn main() {\n    println!(\"hello\");\n}\n```\n\n> Keep the main checkout untouched.\n\n"
+              "- core models\n- **Qt bridges**\n\n| step | state |\n|---|---|\n| port | done |\n| verify | running |"}],
 }
 jobs = []
 # /agents behaviour: "modern" returns the created agent row; "session-only"
