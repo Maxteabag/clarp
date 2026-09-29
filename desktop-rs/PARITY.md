@@ -9,8 +9,8 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 
 | C++ source | Lines | Rust target | Status |
 |---|---|---|---|
-| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: connect/snapshot/selection/log sync/send/stop/SSE, drafts/focus, updates/jobs, launch/lifecycle/catalog, narrator, preferences, teams and turn queue, profile/prompt history, settings status/TTS, voices, orchestrator, composer attachments (upload, shared filesystem, send), past sessions/resume, launch directories, directory suggestions/favorites and contact assignment verified in `app/tests/qml/controller*_probe.qml` against `fake_host.py`; directories, credentials, clipboard image paste, media pending |
-| `src/app/CredentialStore` | 245 | `desktop-rs/src/app/` | todo |
+| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: connect/snapshot/selection/log sync/send/stop/SSE, drafts/focus, updates/jobs, launch/lifecycle/catalog, narrator, preferences, teams and turn queue, profile/prompt history, settings status/TTS, voices, orchestrator, composer attachments (upload, shared filesystem, send), past sessions/resume, launch directories, directory suggestions/favorites, contact assignment, pairing and keyring credentials verified in `app/tests/qml/controller*_probe.qml` against `fake_host.py`; directories, credentials, clipboard image paste, media pending |
+| `src/app/CredentialStore` | 245 | `net/src/credentials.rs` (zbus) | verified (`net/tests/credentials.rs` via `net/tests/run-keyring-tests.sh`: throwaway gnome-keyring and keyring-less private buses; `app/tests/qml/controller_credentials_probe.qml` pairs, reconnects from the keyring and forgets). Deviation: a failed `/pairing/exchange` returns the page to offline instead of staying in "pairing" |
 | `src/app/InstanceServer` | 199 | `desktop-rs/src/app/` | todo |
 | `src/app/MarkdownStyle` | 250 | `desktop-rs/src/app/` | todo |
 | `src/app/PreviewVersions` | 147 | `desktop-rs/src/app/` | todo |
@@ -145,7 +145,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::paneActivationAlwaysTargetsItsComposer` | `app/tests/qml/controller_lifecycle_probe.qml` (focus follows on the next event-loop turn, not synchronously) | verified |
 | `tst_native_core::paneDraftIsDurableAndScopedToServerAndConversation` | `app/tests/qml/controller_lifecycle_probe.qml` + `app/tests/qml/controller_attachments_probe.qml` + `core/tests/settings.rs::draft_keys_are_scoped_to_host_and_session` + `core/tests/attachments.rs` | verified |
 | `tst_native_core::transcriptCacheRestoresDurableRowsWithoutStaleRegression` | | todo |
-| `tst_native_core::credentialStoreRoundTrip` | | todo |
+| `tst_native_core::credentialStoreRoundTrip` | `net/tests/credentials.rs::token_round_trips_through_an_isolated_keyring` | verified |
 | `tst_native_core::appControllerCompletesCoreProtocolFlow` | `app/tests/qml/controller_probe.qml` | wip: core flow verified; audio/clip parts pending (media step) |
 | `tst_native_core::connectedControllerShutsDownWithoutLateSseCallbacks` | `app/tests/qml/controller_lifecycle_probe.qml` | verified |
 | `tst_native_core::contactsExcludeActivePersonas` | `core/tests/directory.rs::contacts_exclude_active_personas` | verified |
