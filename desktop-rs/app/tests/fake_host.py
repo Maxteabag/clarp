@@ -34,6 +34,8 @@ turns = {
 subscribers = []
 event_id = 0
 log_path = None
+outage_until = 0.0
+CLOSE = object()
 
 
 def record(entry):
@@ -67,9 +69,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def in_outage(self):
+        # An outage looks like a dead Host: the connection closes unanswered.
+        if time.time() < outage_until:
+            self.close_connection = True
+            return True
+        return False
+
     def do_GET(self):
         url = urlparse(self.path)
         query = {k: v[0] for k, v in parse_qs(url.query).items()}
+        if self.in_outage():
+            return
         record({"method": "GET", "path": url.path, "query": query})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
@@ -106,6 +117,9 @@ class Handler(BaseHTTPRequestHandler):
                         chunk = inbox.get(timeout=5)
                     except queue.Empty:
                         chunk = b": ping\n\n"
+                    if chunk is CLOSE:
+                        self.close_connection = True
+                        return
                     self.wfile.write(chunk)
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
@@ -117,9 +131,20 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply(404, {"error": "not found"})
 
     def do_POST(self):
+        global outage_until
         url = urlparse(self.path)
         length = int(self.headers.get("Content-Length", "0"))
         body = json.loads(self.rfile.read(length) or b"{}")
+        if url.path == "/__control/outage":
+            # Test control, outside the protocol: drop every stream and refuse
+            # requests for `seconds`.
+            outage_until = time.time() + float(body.get("seconds", 1))
+            with state_lock:
+                for subscriber in list(subscribers):
+                    subscriber.put(CLOSE)
+            return self.reply(200, {"ok": True})
+        if self.in_outage():
+            return
         record({"method": "POST", "path": url.path, "body": body})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})

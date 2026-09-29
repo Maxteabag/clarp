@@ -92,7 +92,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::streamedTokenAnnouncesOnlyItsRows` | | todo |
 | `tst_native_core::spokenMarkupLeavesNoGapsInTheText` | `core/tests/protocol.rs::spoken_markup_leaves_no_gaps_in_the_text` | verified |
 | `tst_native_core::quickSwitcherPutsTheExactNameFirst` | | todo |
-| `tst_native_core::unreachableHostErrorClearsWhenItIsBack` | | todo |
+| `tst_native_core::unreachableHostErrorClearsWhenItIsBack` | `app/tests/qml/controller_lifecycle_probe.qml` (fake Host outage switch) | verified |
 | `tst_native_core::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender` | `core/tests/presentation.rs::attached_tool_elapsed_uses_assistant_boundary_and_preserves_sender` | verified (core) |
 | `tst_native_core::logMergeRefreshesExplanationsOncePerBatch` | `core/tests/presentation.rs::log_merge_costs_one_lookup_per_tool` | wip: lookup bound verified; the Rust adapter diffs rows instead of one whole-transcript dataChanged, so that assertion is replaced by "no reset, per-row updates" |
 | `tst_native_core::secondLaunchIsForwardedToTheRunningInstance` | | todo |
@@ -120,7 +120,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::agentTerminalLaunchesNativeCliThroughDefaultTerminal` | | todo |
 | `tst_native_core::sseParserHandlesChunksCommentsAndReplayIds` | `core/tests/protocol.rs::sse_parser_handles_chunks_comments_and_replay_ids` | verified |
 | `tst_native_core::nextAttentionCyclesWaitingUnreadAndPending` | `core/tests/roster.rs::next_attention_cycles_waiting_unread_and_pending` | verified |
-| `tst_native_core::readyPresentationRetainsCanonicalStreamAndRevealsFinal` | `core/tests/presentation.rs::ready_presentation_retains_canonical_stream_and_reveals_final` | wip: core verified; showWhenReady setting persistence is controller work |
+| `tst_native_core::readyPresentationRetainsCanonicalStreamAndRevealsFinal` | `core/tests/presentation.rs::ready_presentation_*` + `app/tests/qml/controller_lifecycle_probe.qml` (setting restored) | verified |
 | `tst_native_core::sseCursorIsScopedToOneHost` | `core/tests/endpoint.rs::sse_cursor_is_scoped_to_one_host` | verified |
 | `tst_native_core::snapshotFiltersArchivedAgentsAndPatchesEvents` | `core/tests/roster.rs::snapshot_filters_archived_agents_and_patches_events` | verified |
 | `tst_native_core::agentSnapshotDiffsInPlaceAndRejectsStaleState` | `core/tests/roster.rs::agent_snapshot_diffs_in_place_and_rejects_stale_state` | verified |
@@ -131,7 +131,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::olderHistoryPrependsWithoutReorderingTheTail` | `core/tests/conversation.rs::older_history_prepends_without_reordering_the_tail` | verified |
 | `tst_native_core::growingReplyRejectsStaleRevision` | `core/tests/conversation.rs::growing_reply_rejects_stale_revision` | verified |
 | `tst_native_core::optimisticDeliveryStaysVisibleUntilConfirmed` | `core/tests/conversation.rs::optimistic_delivery_stays_visible_until_confirmed` | verified |
-| `tst_native_core::emptyStartupWaitsForExplicitChoiceAndRetryTargetsLatestFailure` | | todo |
+| `tst_native_core::emptyStartupWaitsForExplicitChoiceAndRetryTargetsLatestFailure` | `app/tests/qml/empty_startup_probe.qml` | verified |
 | `tst_native_core::conversationChangeRequestsReplacement` | `core/tests/conversation.rs::conversation_change_requests_replacement` | verified |
 | `tst_native_core::clipSourcePrecedenceMatchesContract` | `core/tests/protocol.rs::clip_source_precedence_matches_contract` | verified |
 | `tst_native_core::wavEncodingProducesAValidPcmHeader` | | todo |
@@ -139,13 +139,13 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::paneWorkspacePersistenceIsAsyncAndConflictSafe` | `core/tests/panes.rs::pane_workspace_persistence_is_conflict_safe` + `a_queued_layout_replaces_*` + `pane_tree_model_probe.qml` (worker-thread writes) | verified |
 | `tst_native_core::apiClientRejectsCrossOriginAuthenticatedMedia` | `net/tests/clients.rs::api_client_rejects_cross_origin_authenticated_media` | verified |
 | `tst_native_core::apiClientDropsRepliesFromPreviousEndpointGeneration` | `net/tests/clients.rs::api_client_drops_replies_from_previous_endpoint_generation` | verified |
-| `tst_native_core::paneDraftAndFocusSurviveLayoutStateChanges` | | todo |
-| `tst_native_core::paneActivationAlwaysTargetsItsComposer` | | todo |
-| `tst_native_core::paneDraftIsDurableAndScopedToServerAndConversation` | | todo |
+| `tst_native_core::paneDraftAndFocusSurviveLayoutStateChanges` | `app/tests/qml/controller_lifecycle_probe.qml` | verified |
+| `tst_native_core::paneActivationAlwaysTargetsItsComposer` | `app/tests/qml/controller_lifecycle_probe.qml` (focus follows on the next event-loop turn, not synchronously) | verified |
+| `tst_native_core::paneDraftIsDurableAndScopedToServerAndConversation` | `app/tests/qml/controller_lifecycle_probe.qml` + `core/tests/settings.rs::draft_keys_are_scoped_to_host_and_session` | wip: text drafts verified; attachments and sharedFilesystem pending |
 | `tst_native_core::transcriptCacheRestoresDurableRowsWithoutStaleRegression` | | todo |
 | `tst_native_core::credentialStoreRoundTrip` | | todo |
 | `tst_native_core::appControllerCompletesCoreProtocolFlow` | `app/tests/qml/controller_probe.qml` | wip: core flow verified; audio/clip parts pending (media step) |
-| `tst_native_core::connectedControllerShutsDownWithoutLateSseCallbacks` | | todo |
+| `tst_native_core::connectedControllerShutsDownWithoutLateSseCallbacks` | `app/tests/qml/controller_lifecycle_probe.qml` | verified |
 | `tst_native_core::contactsExcludeActivePersonas` | `core/tests/directory.rs::contacts_exclude_active_personas` | verified |
 | `tst_native_core::microphoneCanCaptureNativePcm` | | todo |
 | `tst_native_core::backgroundTranscriptionsKeepTheirChatOwnership` | | todo |

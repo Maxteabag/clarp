@@ -25,7 +25,10 @@ for probe in app/tests/qml/*_probe.qml; do
         for _ in $(seq 50); do [ -s "$scratch/$name/port" ] && break; sleep 0.1; done
         base_url="http://127.0.0.1:$(cat "$scratch/$name/port")"
     fi
-    output=$(QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen CLARP_RS_QML="$PWD/$probe" \
+    # "// env: KEY=VALUE" lines set per-probe variables; $SCRATCH is the
+    # probe's scratch directory.
+    probe_env=$(sed -n 's#^// env: ##p' "$probe" | sed "s#\$SCRATCH#$scratch/$name#g")
+    output=$(env $probe_env QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen CLARP_RS_QML="$PWD/$probe" \
         CLARP_WORKSPACE_STORE="$store" QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
         CLARP_BASE_URL="$base_url" \
         timeout 60 "$binary" "--probe-store=$store" "--probe-host-log=$scratch/$name/host.log" 2>&1)

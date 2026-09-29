@@ -151,6 +151,19 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "notificationRequested"]
         fn notification_requested(self: Pin<&mut AppController>, title: QString, body: QString);
+        #[qsignal]
+        #[cxx_name = "draftChanged"]
+        fn draft_changed(self: Pin<&mut AppController>, session: QString, text: QString, origin_pane_id: QString);
+
+        #[qinvokable]
+        #[cxx_name = "paneDraft"]
+        fn pane_draft(self: &AppController, pane_id: &QString, session: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "setPaneDraft"]
+        fn set_pane_draft(self: Pin<&mut AppController>, pane_id: &QString, session: &QString, text: &QString);
+        #[qinvokable]
+        #[cxx_name = "flushPendingDrafts"]
+        fn flush_pending_drafts(self: Pin<&mut AppController>);
 
         #[qinvokable]
         #[cxx_name = "connectToServer"]
@@ -320,6 +333,9 @@ pub struct AppControllerRust {
     /// client_msg_id → (session, timer token)
     deliveries: HashMap<String, (String, u64)>,
     delivery_counter: u64,
+    /// Draft text by settings key, held in memory until the composer idles.
+    pending_drafts: HashMap<String, String>,
+    draft_flush_token: u64,
 }
 
 impl cxx_qt::Initialize for AppController {
@@ -375,8 +391,21 @@ impl cxx_qt::Initialize for AppController {
     }
 }
 
+impl AppControllerRust {
+    fn flush_drafts(&mut self) {
+        for (key, text) in std::mem::take(&mut self.pending_drafts) {
+            if text.is_empty() {
+                self.settings.remove(&key);
+            } else {
+                self.settings.set(&key, text);
+            }
+        }
+    }
+}
+
 impl Drop for AppControllerRust {
     fn drop(&mut self) {
+        self.flush_drafts();
         // Detach child-signal handlers before the children go away.
         self.guards.clear();
         if let Some(sse) = self.sse.as_mut() {
@@ -674,6 +703,59 @@ impl AppController {
 
     fn request_composer_focus(self: Pin<&mut Self>, pane_id: &QString) {
         self.set_composer_focus(&pane_id.to_string());
+    }
+
+    // ---- drafts ------------------------------------------------------------
+
+    fn draft_key(&self, session: &str) -> String {
+        format!("{}/text", clarp_core::settings::draft_scope_key(&self.base_url, session))
+    }
+
+    /// A draft belongs to the chat on this Host, not the pane: any pane that
+    /// opens the chat shows it.
+    fn pane_draft(&self, _pane_id: &QString, session: &QString) -> QString {
+        let session = session.to_string();
+        if session.is_empty() {
+            return QString::default();
+        }
+        let key = self.draft_key(&session);
+        match self.pending_drafts.get(&key) {
+            Some(text) => qs(text),
+            None => qs(&self.settings.string(&key, "")),
+        }
+    }
+
+    /// Drafts change on every keystroke; writing settings per key blocked
+    /// typing in the C++ client, so text waits in memory until the composer
+    /// has been idle for a second (or the controller closes).
+    fn set_pane_draft(mut self: Pin<&mut Self>, pane_id: &QString, session: &QString, text: &QString) {
+        let (pane, session_text, value) = (pane_id.to_string(), session.to_string(), text.to_string());
+        if pane.is_empty() || session_text.is_empty() || self.pane_draft(pane_id, session).to_string() == value {
+            return;
+        }
+        let key = self.draft_key(&session_text);
+        let token = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.pending_drafts.insert(key, value);
+            rust.draft_flush_token += 1;
+            rust.draft_flush_token
+        };
+        let qt = self.qt_thread();
+        crate::runtime::after(Duration::from_millis(1000), move || {
+            let queued = qt.queue(move |mut controller| {
+                if controller.draft_flush_token == token {
+                    controller.as_mut().rust_mut().flush_drafts();
+                }
+            });
+            if queued.is_err() {
+                eprintln!("AppController: dropped a draft flush; the controller is gone");
+            }
+        });
+        self.draft_changed(session.clone(), text.clone(), pane_id.clone());
+    }
+
+    fn flush_pending_drafts(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().flush_drafts();
     }
 
     // ---- connection --------------------------------------------------------

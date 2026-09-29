@@ -117,3 +117,16 @@ pub fn default_token() -> String {
         .map(|contents| token_from_config(&contents))
         .unwrap_or_default()
 }
+
+/// The settings group for one chat's composer on one Host (C++
+/// `draftScopeSettingsKey`): the SHA-256 of `base\0session`, so drafts never
+/// leak between Hosts or conversations.
+pub fn draft_scope_key(base_url: &str, session: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(normalized_base_url(base_url).as_bytes());
+    hasher.update([0u8]);
+    hasher.update(session.as_bytes());
+    let digest: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    format!("composerDrafts/{digest}")
+}

@@ -25,3 +25,12 @@ fn settings_survive_a_reload() {
     assert_eq!(reloaded.integer("missing", 7), 7);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn draft_keys_are_scoped_to_host_and_session() {
+    let a = draft_scope_key("http://h:1/", "rachel");
+    assert_eq!(a, draft_scope_key("http://h:1", "rachel"), "trailing slash is not a different Host");
+    assert_ne!(a, draft_scope_key("http://h:2", "rachel"));
+    assert_ne!(a, draft_scope_key("http://h:1", "bella"));
+    assert!(a.starts_with("composerDrafts/") && a.len() == "composerDrafts/".len() + 64);
+}
