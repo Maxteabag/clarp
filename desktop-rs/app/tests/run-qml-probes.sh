@@ -13,6 +13,8 @@ export CLARP_SETTINGS="${CLARP_SETTINGS:-off}"
 # Probes never play through the speakers; a probe opts into a test output
 # with "// env: CLARP_AUDIO_OUTPUT=null" or "=decode".
 export CLARP_AUDIO_OUTPUT="${CLARP_AUDIO_OUTPUT:-none}"
+# Nor the microphone: "// env: CLARP_AUDIO_INPUT=file:$FIXTURES/dictation.wav".
+export CLARP_AUDIO_INPUT="${CLARP_AUDIO_INPUT:-none}"
 scratch=$(mktemp -d /var/tmp/clarp-qml-probes.XXXXXX)
 trap 'rm -rf "$scratch"' EXIT
 for probe in app/tests/qml/*_probe.qml; do
@@ -34,8 +36,8 @@ for probe in app/tests/qml/*_probe.qml; do
         printf '%s' "$text" > "$scratch/$name/$fixture"
     done
     # "// env: KEY=VALUE" lines set per-probe variables; $SCRATCH is the
-    # probe's scratch directory.
-    probe_env=$(sed -n 's#^// env: ##p' "$probe" | sed "s#\$SCRATCH#$scratch/$name#g")
+    # probe's scratch directory, $FIXTURES app/tests/fixtures.
+    probe_env=$(sed -n 's#^// env: ##p' "$probe" | sed "s#\$SCRATCH#$scratch/$name#g; s#\$FIXTURES#$PWD/app/tests/fixtures#g")
     # Every probe gets a private session bus with nothing activatable, so no
     # probe can reach the user's keyring. "// needs: keyring" starts a
     # throwaway gnome-keyring on that bus, its files in the scratch directory.

@@ -120,6 +120,7 @@ pub struct AudioRust {
     /// request tag -> transcription id sent with it
     transcription_ids: HashMap<String, String>,
     lease: RecordingLease,
+    capture: Option<crate::audio_input::Recording>,
     recording: bool,
     recording_session: String,
 }
@@ -138,6 +139,7 @@ impl Default for AudioRust {
             transcriptions: Transcriptions::default(),
             transcription_ids: HashMap::new(),
             lease: RecordingLease::new(None),
+            capture: None,
             recording: false,
             recording_session: String::new(),
         }
@@ -147,6 +149,9 @@ impl Default for AudioRust {
 impl Drop for AudioRust {
     fn drop(&mut self) {
         self.output.stop();
+        if let Some(capture) = self.capture.take() {
+            capture.cancel();
+        }
         self.lease.release();
     }
 }
@@ -337,8 +342,6 @@ impl qobject::AudioController {
 
     // ---- dictation -----------------------------------------------------------
 
-    /// Used by capture (next slice); the bookkeeping is tested in core.
-    #[allow(dead_code)]
     pub fn transcribe_recording(mut self: Pin<&mut Self>, wav: Vec<u8>, target_session: &str) {
         let tag = format!("transcribe:{}", uuid::Uuid::new_v4());
         let id = uuid::Uuid::new_v4().to_string();
@@ -411,19 +414,46 @@ impl qobject::AudioController {
             return;
         }
         self.as_mut().silence();
-        // Microphone capture lands with the capture backend.
-        self.as_mut().cancel_recording();
-        self.media_error(&QString::from("No microphone is available"));
+        match crate::audio_input::start() {
+            Ok(capture) => {
+                let mut rust = self.as_mut().rust_mut();
+                rust.capture = Some(capture);
+                rust.recording = true;
+                self.recording_changed();
+            }
+            Err(message) => {
+                self.as_mut().cancel_recording();
+                self.media_error(&QString::from(message.as_str()));
+            }
+        }
     }
 
-    /// Nothing is ever captured until the capture backend lands (see
-    /// `start_recording`), so there is no recording to stop yet.
-    fn stop_recording(self: Pin<&mut Self>) {}
+    /// Stops recording and sends the audio to the chat it was recorded for.
+    fn stop_recording(mut self: Pin<&mut Self>) {
+        let Some(capture) = self.as_mut().rust_mut().capture.take().filter(|_| self.recording) else { return };
+        let (pcm, format) = capture.finish();
+        let target = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.recording = false;
+            rust.recording_session.clear();
+            rust.lease.release()
+        };
+        self.as_mut().recording_changed();
+        let wav = clarp_core::audio::encode_wav(&pcm, format);
+        if wav.len() <= clarp_core::audio::MIN_WAV_BYTES {
+            self.media_error(&QString::from("Recording was too short"));
+            return;
+        }
+        self.transcribe_recording(wav, &target);
+    }
 
     fn cancel_recording(mut self: Pin<&mut Self>) {
         let was = self.recording;
         {
             let mut rust = self.as_mut().rust_mut();
+            if let Some(capture) = rust.capture.take() {
+                capture.cancel();
+            }
             rust.lease.release();
             rust.recording_session.clear();
             rust.recording = false;

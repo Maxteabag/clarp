@@ -258,6 +258,16 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length)
+        if url.path == "/transcribe":
+            # Raw WAV; the id travels in a header and comes back.
+            if self.in_outage():
+                return
+            record({"method": "POST", "path": url.path, "body": {
+                "size": len(raw), "content_type": self.headers.get("Content-Type", ""),
+                "transcription_id": self.headers.get("X-Transcription-ID", ""),
+                "hands_free": self.headers.get("X-Hands-Free", ""), "riff": raw[:4].decode("latin1")}})
+            return self.reply(200, {"text": "  dictated words  ", "trace_id": "trace-dictation",
+                                    "transcription_id": self.headers.get("X-Transcription-ID", ""), "hands_free": False})
         if url.path == "/upload":
             # Raw file bytes; metadata travels in headers.
             if self.in_outage():
