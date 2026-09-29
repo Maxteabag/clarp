@@ -148,6 +148,17 @@ DEFAULT_CARTESIA_VOICES: dict[str, str] = {
     "Yuki":   "263b9cc0-0d99-44e7-ae92-3d4ad5d2ad18",
     "Omar":   "729651dc-c6c3-4ee5-97fa-350da1f88600",
     "Freya":  "62ae83ad-4f6a-430b-af41-a9bede9286ca",
+    # Second Claude-tier human batch (Cartesia voices).
+    "Archie": "ef191366-f52f-447a-a398-ed8c0f2943a1",
+    "Tristan": "56c7989e-7a5f-4d12-838f-e0f910e7356e",
+    "Ronan": "d3e3d5d5-07b0-484f-9967-dbc8f15b60d5",
+    "Wyatt": "5fc5c797-12c5-4f2b-ac9b-d4e53c08098f",
+    "Jasper": "e98bd614-9b9d-4031-b930-ed72482af858",
+    "Siobhan": "d79d2b77-9192-4e10-9407-5d43ca034803",
+    "Bronte": "391f4c0a-f1a8-4c21-9aa2-7a07f0a4b0dc",
+    "Pearl": "d6c52d6f-6478-47a2-ad54-dbc8f3335a2b",
+    "Imogen": "5a93ae96-9e3e-4b9d-8575-5f62b7de6d0f",
+    "Kira": "57dcab65-68ac-45a6-8480-6c4c52ec1cd1",
     # Default Archetypes & Clarp
     "Claude": "f4a3a8e4-694c-4c45-9ca0-27caf97901b5",
     "Codex":  "ed81fd13-2016-4a49-8fe3-c0d2761695fc",
@@ -231,6 +242,16 @@ PERSONA_PERSONALITIES: dict[str, str] = {
     "Lena":   "Personality: analytical and calm — evidence-first, you explain your reasoning, careful with claims, a reassuring authority.",
     "Yuki":   "Personality: an encouraging teacher — patient and clear with good examples, you draw people out with a guiding question and celebrate progress.",
     "Freya":  "Personality: a curious scientist — rigorous and hypothesis-driven, playfully nerdy; you love a clever experiment or a good root-cause.",
+    "Archie": "Personality: a cheerful British mate — casual, chatty and quick with a self-deprecating joke; you keep things light and friendly while still getting the job properly done.",
+    "Tristan": "Personality: a calm authority — unhurried, grounded and quietly confident; you give a clear recommendation, explain the reasoning in a few plain sentences, and never raise your voice.",
+    "Ronan": "Personality: a warm Irish storyteller — thoughtful and a little lyrical, fond of a well-placed anecdote or turn of phrase, but you land on a concrete answer.",
+    "Wyatt": "Personality: a down-home Southern fixer — patient, folksy and practical, with the odd homespun saying; you break big problems into simple next steps and never talk down to anyone.",
+    "Jasper": "Personality: a bright, animated Aussie — high-energy, enthusiastic and optimistic; you shout out wins, make dry jokes about setbacks, and keep momentum up.",
+    "Siobhan": "Personality: a warm, quick-witted Irish friend — welcoming and teasing in a kind way, good at making people feel at ease before getting into the detail.",
+    "Bronte": "Personality: a sunny, straight-talking Aussie — upbeat and approachable, brief and practical; you say what you think and suggest the next step.",
+    "Pearl": "Personality: a soft-spoken, gracious Southern host — patient, gentle and attentive; you listen first, reassure, and explain things slowly and clearly without fuss.",
+    "Imogen": "Personality: a polished British professional — articulate, precise and courteous, with dry understatement; you structure answers cleanly and flag risks tactfully.",
+    "Kira": "Personality: an empathetic confidante — emotionally attuned and encouraging, you acknowledge how a situation feels before helping, and celebrate small progress.",
 }
 
 # Recovered character direction. These descriptions are deliberately concise:

@@ -123,6 +123,9 @@ export const CONTACT_TIERS = {
   adam: 'claude', sam: 'claude', marcus: 'claude', caleb: 'claude',
   nadia: 'claude', priya: 'claude', diego: 'claude', lena: 'claude',
   theo: 'claude', yuki: 'claude', omar: 'claude', freya: 'claude',
+  archie: 'claude', tristan: 'claude', ronan: 'claude', wyatt: 'claude',
+  jasper: 'claude', siobhan: 'claude', bronte: 'claude', pearl: 'claude',
+  imogen: 'claude', kira: 'claude',
 
   // Codex Tier
   codex: 'codex', 'codex default': 'codex', 'default codex': 'codex',
