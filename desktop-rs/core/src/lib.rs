@@ -10,6 +10,7 @@ pub mod jobs;
 pub mod json;
 pub mod list_ops;
 pub mod panes;
+pub mod presentation;
 pub mod protocol;
 pub mod roster;
 pub mod sidebar;
