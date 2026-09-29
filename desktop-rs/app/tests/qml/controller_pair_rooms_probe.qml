@@ -14,6 +14,8 @@ Window {
     property int stage: 0
     property int ticks: 0
     property var second: null
+    property int roomChanges: 0
+    property int reloads: 0
     readonly property string hostLog: {
         for (const arg of Qt.application.arguments)
             if (arg.startsWith("--probe-host-log=")) return arg.substring(17)
@@ -38,7 +40,7 @@ Window {
         xhr.setRequestHeader("Content-Type", "application/json")
         xhr.send("{}")
     }
-    AppController { id: app }
+    AppController { id: app; onAgentConversationsChanged: roomChanges++ }
     Timer {
         id: ticker
         interval: 25; repeat: true; running: true
@@ -74,6 +76,21 @@ Window {
             stage = 5
         } else if (stage === 5 && second.agentConversations.length === 1) {
             check(second.unreadAgentConversations === 0, "the read revision persists")
+            roomChanges = 0
+            reloads = requests("/agent-conversations").length
+            app.loadAgentConversations()
+            stage = 51
+        } else if (stage === 51 && requests("/agent-conversations").length > reloads && ticks % 8 === 0) {
+            check(roomChanges === 0, "an identical room list changes nothing: " + roomChanges)
+            const xhr = new XMLHttpRequest()
+            xhr.open("POST", app.baseUrl + "/__control/rooms-gone", false)
+            xhr.setRequestHeader("Content-Type", "application/json")
+            xhr.send(JSON.stringify({"gone": true}))
+            app.clearError()
+            app.loadAgentConversations()
+            stage = 6
+        } else if (stage === 6 && app.agentConversations.length === 0) {
+            check(app.errorMessage === "" && app.unreadAgentConversations === 0, "an older Host has no rooms and no error banner")
             ticker.stop()
             finish()
         }

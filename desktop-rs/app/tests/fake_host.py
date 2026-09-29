@@ -40,6 +40,7 @@ PAIRED_TOKEN = "cld_probe_paired_device"
 state_lock = threading.Lock()
 revision = 2
 pair_revision = 3
+rooms_gone = False  # an older Host without /agent-conversations
 agents = [
     {"agent_id": "a1", "session": "rachel", "persona": "Rachel", "backend": "claude",
      "latest_state": "idle", "alive": True, "last_activity": 2000, "conversation_id": "c-rachel", "head_revision": 2},
@@ -210,6 +211,8 @@ class Handler(BaseHTTPRequestHandler):
                 {"asset_id": "m1", "mime_type": "image/png", "url": "/media/files/m1", "session": query.get("session")},
                 {"asset_id": "doc1", "mime_type": "application/pdf", "url": "/media/files/doc1"}]})
         if url.path == "/agent-conversations":
+            if rooms_gone:
+                return self.reply(404, {"error": "not found"})
             return self.reply(200, {"conversations": [
                 {"conversation_id": "pair:a1:a2", "title": "Rachel & Mike", "latest_revision": pair_revision},
                 {"conversation_id": "team-standup", "title": "not a pair", "latest_revision": 9}]})
@@ -326,6 +329,10 @@ class Handler(BaseHTTPRequestHandler):
                     if agent["session"] == body.get("session"):
                         agent.update(body.get("set", {}))
             broadcast({"type": "agent-roster", "session": body.get("session"), "kind": "updated"})
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/rooms-gone":
+            global rooms_gone
+            rooms_gone = bool(body.get("gone", True))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/pair-message":
             # Test control: the pair room gains a message.

@@ -4904,7 +4904,13 @@ impl AppController {
             if std::mem::take(&mut self.as_mut().rust_mut().rooms_dirty) {
                 self.as_mut().schedule_agent_conversations();
             }
+            // A Host without this route simply has no pair rooms to show:
+            // never turn an optional projection into a chat error banner.
             eprintln!("AppController: agent conversations failed: {message} (HTTP {status})");
+            if !self.agent_conversations.is_empty() {
+                self.as_mut().rust_mut().agent_conversations.clear();
+                self.agent_conversations_changed();
+            }
             return;
         }
         if tag.starts_with("tool-details:") {
