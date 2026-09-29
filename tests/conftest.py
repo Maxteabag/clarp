@@ -120,7 +120,12 @@ def _isolated_db(tmp_path, monkeypatch):
                 "CLAUDE_PWA_HEARTBEAT_BACKOFF_CAP_SEC",
                 "CLAUDE_PWA_HEARTBEAT_DORMANT_AFTER_NOOPS",
                 "CLAUDE_PWA_HEARTBEAT_QUIET_PERIOD_SEC",
-                "CLAUDE_PWA_HEARTBEAT_ACTIVE_HOURS"):
+                "CLAUDE_PWA_HEARTBEAT_ACTIVE_HOURS",
+                # Set by the installed Host's units, so an agent running the
+                # suite inherits them: they pause heartbeats, bind hooks to
+                # the caller's session and point scripts at the live tree.
+                "CLARP_HEARTBEATS_DISABLED", "CLAUDE_PWA_SESSION",
+                "CLARP_CODE_ROOT"):
         monkeypatch.delenv(var, raising=False)
     try:
         from lib import config as _config
