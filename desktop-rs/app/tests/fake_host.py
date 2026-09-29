@@ -39,6 +39,7 @@ MEDIA_PNG = solid_png(8, 8, (250, 200, 0, 255))
 PAIRED_TOKEN = "cld_probe_paired_device"
 state_lock = threading.Lock()
 revision = 2
+pair_revision = 3
 agents = [
     {"agent_id": "a1", "session": "rachel", "persona": "Rachel", "backend": "claude",
      "latest_state": "idle", "alive": True, "last_activity": 2000, "conversation_id": "c-rachel", "head_revision": 2},
@@ -50,6 +51,8 @@ turns = {
         {"id": "r1", "role": "user", "text": "Hello", "revision": 1, "timestamp": "2026-09-29T10:00:00Z"},
         {"id": "r2", "role": "assistant", "text": "Hi, how can I help?", "revision": 2, "timestamp": "2026-09-29T10:00:05Z"},
     ],
+    "pair:a1:a2": [{"id": "p1", "role": "assistant", "text": "Rachel to Mike: ready?", "revision": 3,
+                    "timestamp": "2026-09-29T09:30:00Z", "sender_name": "Rachel"}],
     "mike": [{"id": "m1", "role": "assistant", "text": "Mike here", "revision": 1, "timestamp": "2026-09-29T09:00:00Z"},
              {"id": "m2", "role": "assistant", "revision": 2, "timestamp": "2026-09-29T09:01:00Z", "text":
               "## Build plan\n\nRun `cargo test` first, then read the [guide](https://example.com).\n\n"
@@ -206,6 +209,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"assets": [
                 {"asset_id": "m1", "mime_type": "image/png", "url": "/media/files/m1", "session": query.get("session")},
                 {"asset_id": "doc1", "mime_type": "application/pdf", "url": "/media/files/doc1"}]})
+        if url.path == "/agent-conversations":
+            return self.reply(200, {"conversations": [
+                {"conversation_id": "pair:a1:a2", "title": "Rachel & Mike", "latest_revision": pair_revision},
+                {"conversation_id": "team-standup", "title": "not a pair", "latest_revision": 9}]})
         if url.path == "/past-sessions":
             if query.get("cwd") == "/broken":
                 return self.reply(500, {"error": "history unreadable"})
@@ -319,6 +326,15 @@ class Handler(BaseHTTPRequestHandler):
                     if agent["session"] == body.get("session"):
                         agent.update(body.get("set", {}))
             broadcast({"type": "agent-roster", "session": body.get("session"), "kind": "updated"})
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/pair-message":
+            # Test control: the pair room gains a message.
+            global pair_revision
+            with state_lock:
+                pair_revision += 1
+                turns["pair:a1:a2"].append({"id": f"p{pair_revision}", "role": "assistant", "text": body.get("text", "more"),
+                                            "revision": pair_revision, "timestamp": "2026-09-29T09:31:00Z"})
+            broadcast({"type": "transcript-updated", "session": "rachel"})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/event":
             # Test control: push one SSE event to every stream.
