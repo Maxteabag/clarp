@@ -281,6 +281,36 @@ def test_v93_adds_helper_lineage_and_backfills_janitor_role(tmp_path):
     db._migrate(upgraded)
 
 
+def test_v101_drops_per_agent_fallbacks_and_keeps_retry_receipts(tmp_path):
+    path = tmp_path / "v100.sqlite"
+    con = _fresh(path)
+    assert "agent_model_fallbacks" not in _names(con, "table")  # fresh installs never get it
+    con.executescript("""
+        CREATE TABLE agent_model_fallbacks (
+            agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
+            models_json TEXT NOT NULL DEFAULT '[]', revision INTEGER NOT NULL DEFAULT 1,
+            updated_at INTEGER NOT NULL);
+        INSERT INTO agents (agent_id, persona, voice_id, cwd, session, created_at, is_janitor)
+            VALUES ('a1', 'Ada', 'v', '/tmp', 'ada', 1, 0);
+        INSERT INTO agent_model_fallbacks VALUES
+            ('a1', '[{"backend":"claude","model":"claude-sonnet-5","effort":""}]', 3, 5);
+        INSERT INTO model_fallback_attempts
+            (agent_id, request_id, attempt, backend, model, effort, status, reason, started_at)
+            VALUES ('a1', 'r1', 0, 'agy', 'gemini', '', 'completed', 'limit', 7);
+        PRAGMA user_version = 100;
+    """)
+    con.close()
+
+    upgraded = _connect(path)
+    db._migrate(upgraded)
+
+    assert "agent_model_fallbacks" not in _names(upgraded, "table")
+    assert upgraded.execute("SELECT request_id FROM model_fallback_attempts").fetchone()[0] == "r1"
+    assert upgraded.execute("SELECT persona FROM agents").fetchone()[0] == "Ada"
+    assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+    db._migrate(upgraded)  # idempotent on a database that no longer has the table
+
+
 def test_v94_indexes_tool_explanation_release_expiry(tmp_path):
     path = tmp_path / "v93.sqlite"
     con = _fresh(path)

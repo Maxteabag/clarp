@@ -161,9 +161,7 @@ export function quotaMessage(quota, now = new Date()) {
       ? { hour: '2-digit', minute: '2-digit' }
       : { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   }
-  const next = quota.fallback_model
-    ? `Messages will run on ${quota.fallback_model} instead.`
-    : 'A message sent now will likely fail.';
+  const next = 'A message sent now will likely fail.';
   // Spent credits need a refill, not patience; the reset only restores the
   // plan's included usage.
   const what = quota.reason === 'credits_depleted'

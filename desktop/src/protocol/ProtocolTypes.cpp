@@ -196,9 +196,7 @@ QString Agent::quotaNotice(const QDateTime& now) const {
         text += (credits ? QStringLiteral("  ·  included usage resets in ")
                          : QStringLiteral("  ·  resets in ")) + wait;
     }
-    const QString fallback = backendQuota.value(QStringLiteral("fallback_model")).toString();
-    text += fallback.isEmpty() ? QStringLiteral("  ·  a message will likely fail")
-                               : QStringLiteral("  ·  runs on ") + fallback;
+    text += QStringLiteral("  ·  a message will likely fail");
     return text;
 }
 

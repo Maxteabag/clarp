@@ -130,6 +130,9 @@ def _migrate(con: sqlite3.Connection) -> None:
             from .provider_background_jobs import SCHEMA
             con.execute(SCHEMA)
 
+        if version < 101:
+            _migrate_to_v101(con)
+
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -382,7 +385,7 @@ def _migrate_to_v65(con: sqlite3.Connection) -> None:
 
 
 def _migrate_to_v79(con: sqlite3.Connection) -> None:
-    """Per-agent fallback models and their once-only invocation receipts.
+    """Fallback receipts (and, until v101, the per-agent fallback models table).
 
     Purely additive: every statement is CREATE TABLE IF NOT EXISTS, so a host
     that already ran this branch re-applies it without touching stored rows.
@@ -686,6 +689,16 @@ def _migrate_to_v76(con: sqlite3.Connection) -> None:
             con.execute(statement)
             statement = ""
     assert not statement.strip()
+
+
+def _migrate_to_v101(con: sqlite3.Connection) -> None:
+    """Per-agent fallback models are gone: an agent never switches provider.
+
+    Drops the table that held them. ``model_fallback_attempts`` stays: it is the
+    once-only receipt table for background Janitor and orchestrator retries.
+    Idempotent, and a database that never had the table is untouched.
+    """
+    con.execute("DROP TABLE IF EXISTS agent_model_fallbacks")
 
 
 def _migrate_to_v99(con: sqlite3.Connection) -> None:

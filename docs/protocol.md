@@ -126,11 +126,10 @@ Rules:
   backend cannot serve a new turn. Otherwise it is `{"state": "exhausted",
   "provider_id", "reason" (credits_depleted: the workspace must be refilled |
   usage_limit: wait for the reset), "window" (five_hour | seven_day | unknown), "resets_at"
-  (ISO time or null when the provider gave none), "observed_at",
-  "fallback_backend", "fallback_model"}`. The fallback fields name the first
-  configured fallback model on a provider that is not itself exhausted, or
-  are null. It is a warning to show before the user sends, never a reason to
-  refuse the send: a fallback or an account switch may still serve the turn.
+  (ISO time or null when the provider gave none), "observed_at"}`. An agent never switches provider when its quota runs out (host contract
+  26 removed the `fallback_backend` and `fallback_model` fields; older apps
+  read them as absent). It is a warning to show before the user sends, never a
+  reason to refuse the send: an account switch may still serve the turn.
   The Host refreshes usage every five minutes and sends `agent-roster` with
   `kind: "backend-quota"` when the picture changes.
 - `parent_agent_id` is the agent that created this one (a helper's parent,

@@ -402,22 +402,20 @@ def test_remove_archives_without_deleting_agent_or_history(host):
     assert request(host, "/janitors")[1]["janitors"] == []
 
 
-def test_fallback_settings_work_for_normal_agents_and_janitors_without_client_changes(host):
-    from lib import settings_store
-    settings_store.set_text("provider.agy.last_observed_model_ids", '["gemini-3.8-flash-low"]')
+def test_removed_agent_fallback_endpoint_is_a_plain_404_for_old_apps(host):
+    """Agents never switch provider; an old app's settings call must not crash the Host."""
     create(host)
-    for session in ("sam", "theo"):
-        before=agents.get_by_session(session)
-        body={"session":session,"expected_revision":0,"models":[{"backend":"agy","model":"gemini-3.8-flash-low","effort":""}]}
-        assert request(host,"/agent-fallbacks",body,auth=False)[0]==401
-        status,result=request(host,"/agent-fallbacks",body)
-        assert status==200, result
-        assert result["models"]==body["models"]
-        assert request(host,"/agent-fallbacks",body)[0]==409
-        status,loaded=request(host,f"/agent-fallbacks?session={session}")
-        assert status==200 and loaded==result
-        after=agents.get_by_session(session)
-        assert (after["backend"],after["model"],after["effort"])==(before["backend"],before["model"],before["effort"])
+    def status(path,body=None):
+        req=urllib.request.Request(host.base+path,data=json.dumps(body).encode() if body is not None else None,
+            headers={"Content-Type":"application/json","Authorization":"Bearer "+TOKEN},
+            method="POST" if body is not None else "GET")
+        try:
+            with urllib.request.urlopen(req,timeout=3) as response:return response.status
+        except urllib.error.HTTPError as exc:return exc.code
+    body={"session":"sam","expected_revision":0,"models":[{"backend":"agy","model":"gemini-3.8-flash-low","effort":""}]}
+    assert status("/agent-fallbacks",body)==404
+    assert status("/agent-fallbacks?session=sam")==404
+    assert status("/janitors")==200
 
 
 def test_global_policy_requires_auth_and_preserves_long_chain(host):

@@ -1580,12 +1580,10 @@ class TurnDispatchService:
                 action()
                 return True
         try:
-            from . import model_fallbacks
             prompt = _with_team_context(
                 _with_delivery_context(
                     spec.recovery_text or spec.text, unheard_audio=spec.unheard_audio),
                 digest=spec.team_digest, protocol=spec.team_protocol)
-            prompt += model_fallbacks.continuation_context(spec.agent_id)
             if spec.recovery_text:
                 # The outer envelope is filtered by the native transcript
                 # importer, including when team/delivery context is present.
@@ -1620,8 +1618,6 @@ class TurnDispatchService:
         except JanitorDispatchError:
             raise
         except FileNotFoundError as e:
-            if self._start_model_fallback(spec, state, error_classify.RUNNER_EXIT, str(e)):
-                return
             if attempt == 1:
                 log("backendMissing", str(e))
                 raise DispatchError(500, str(e)) from e
@@ -1629,8 +1625,6 @@ class TurnDispatchService:
             self._mark_interrupted(spec, error_classify.CONNECTION, str(e),
                                    attempts=attempt)
         except Exception as e:
-            if self._start_model_fallback(spec, state, error_classify.RUNNER_EXIT, str(e)):
-                return
             if attempt == 1:
                 log_exception("backendSpawnFail", e, detail=spec.session)
                 raise DispatchError(500, f"{spec.backend} spawn failed: {e}") from e
@@ -1802,8 +1796,6 @@ class TurnDispatchService:
                     self._schedule_retry(
                         replace(spec, recovery_attempted=True), attempt, state, msg)
                     return
-        if self._start_model_fallback(spec, state, category, msg):
-            return
         if (category in (error_classify.USAGE_LIMIT, error_classify.AUTH)
                 and backend.account_pool()
                 and account_failover(spec.backend).request(
@@ -1852,53 +1844,6 @@ class TurnDispatchService:
         oracle_delegations.fail_for_trace(spec.trace_id, msg or "Agent turn failed")
         # Terminal (gave up): drain the queue.
         self._finish_turn(spec)
-
-    def _start_model_fallback(self, spec, state, category, message):
-        from . import model_fallbacks, turn_model_fallback
-        # Provider failures only: a clean turn whose tools reported errors --
-        # a failing test, a non-zero command -- is the agent's own work and
-        # must stay on its primary model.
-        if state.get("bind_error") or not model_fallbacks.is_provider_failure(
-            category, message
-        ):
-            return False
-        snapshot = model_fallbacks.get(spec.agent_id)
-        if not snapshot["models"]: return False
-        if state.get("fallback_started"): return True
-        state["fallback_started"] = True
-        state["fallback_reason"] = category
-        def owned(action):
-            with _TURN_LOCK:
-                if _INFLIGHT.get(spec.agent_id) != spec.trace_id or self._superseded(spec): return False
-                try:
-                    _validate_janitor_target(agents_db.get_by_agent_id(spec.agent_id) or {}, spec.janitor_run_id, spec.trace_id)
-                except JanitorDispatchError: return False
-                action()
-                return True
-        def succeeded(model, event):
-            text = _result_assistant_text(event)
-            conversation_id = agents_db.live_backend_session(spec.agent_id) or ""
-            if conversation_id:
-                message_store.finalize_live_assistant_message(agent_id=spec.agent_id,
-                    backend_session_id=conversation_id, trace_id=spec.trace_id, text=text)
-            if spec.synthesize_audio:
-                from .voice_markup import spoken_for_tts
-                spoken = spoken_for_tts(text)
-                if spoken:
-                    agent = agents_db.get_by_agent_id(spec.agent_id) or {}
-                    tts_queue.enqueue(agent_id=spec.agent_id, session=spec.session,
-                        text=spoken, voice_id=agent.get("voice_id", ""), source="model_fallback", trace_id=spec.trace_id)
-            selected = replace(spec, backend=model["backend"], model=model["model"], effort=model.get("effort", ""), backend_session_id=conversation_id)
-            _, result, _ = self._attempt_callbacks(selected, 1, {"saw_init": False})
-            result(event)
-        def failed(error):
-            self._mark_interrupted(spec, error_classify.RUNNER_EXIT, error, attempts=len(snapshot["models"])+1)
-        turn_lifecycle.try_transition(spec.agent_id, TurnEvent.MODEL_FALLBACK_STARTED,
-            {"trace_id": spec.trace_id, "fallback": True, "reason": category})
-        threading.Thread(target=turn_model_fallback.run,
-            args=(self,spec,state,snapshot,owned,succeeded,failed),daemon=True,
-            name="model-fallback-" + spec.session).start()
-        return True
 
     def _schedule_retry(self, spec: _TurnSpec, attempt: int, state: dict,
                         message: str) -> None:

@@ -358,18 +358,15 @@ def _quota_ctx(tmp_path):
 
 
 def test_snapshot_flags_agents_whose_backend_is_out_of_quota(tmp_path, monkeypatch):
-    from lib import backend_usage, model_fallbacks
+    from lib import backend_usage
     agents_db.create_agent(
         persona="Gordon", voice_id="V", cwd=str(tmp_path), session="gordon",
         backend="codex")
-    rescued = agents_db.create_agent(
+    agents_db.create_agent(
         persona="Axel", voice_id="V2", cwd=str(tmp_path), session="axel",
         backend="codex")
     agents_db.create_agent(
         persona="Rachel", voice_id="V3", cwd=str(tmp_path), session="rachel")
-    model_fallbacks.configure(
-        rescued, [{"backend": "claude", "model": "claude-sonnet-4-6",
-                   "effort": ""}], expected_revision=0)
     quota = {"state": "exhausted", "provider_id": "codex",
              "reason": "credits_depleted", "window": "seven_day", "resets_at": "2030-03-17T17:46:40Z",
              "observed_at": "2027-01-15T08:00:00Z"}
@@ -379,10 +376,11 @@ def test_snapshot_flags_agents_whose_backend_is_out_of_quota(tmp_path, monkeypat
     rows = {row["session"]: row
             for row in build_agent_snapshot(_quota_ctx(tmp_path))["agents"]}
 
-    assert rows["gordon"]["backend_quota"] == {
-        **quota, "fallback_backend": None, "fallback_model": None}
-    assert rows["axel"]["backend_quota"]["fallback_model"] == "claude-sonnet-4-6"
-    assert rows["axel"]["backend_quota"]["fallback_backend"] == "claude"
+    # No agent is ever rescued onto another provider: the warning is the same
+    # for every agent on the exhausted backend and names no replacement model.
+    assert rows["gordon"]["backend_quota"] == quota
+    assert rows["axel"]["backend_quota"] == quota
+    assert not {"fallback_backend", "fallback_model"} & set(rows["axel"]["backend_quota"])
     assert rows["rachel"]["backend_quota"] is None
 
 
