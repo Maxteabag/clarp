@@ -456,10 +456,10 @@ impl Player {
             Ok(()) => self.finish("play-ok", ""),
             Err(error) => self.finish("play-fail", error),
         };
-        if let Err(error) = result {
-            if !missing_backend || !std::mem::replace(&mut self.reported_missing_backend, true) {
-                effects.push(Effect::Error(error));
-            }
+        if let Err(error) = result
+            && (!missing_backend || !std::mem::replace(&mut self.reported_missing_backend, true))
+        {
+            effects.push(Effect::Error(error));
         }
         effects.extend(self.start_next(recording));
         effects
