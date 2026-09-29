@@ -35,6 +35,9 @@ jobs = []
 # /agents behaviour: "modern" returns the created agent row; "session-only"
 # returns just the id and shows the row only after /__control/publish-pending.
 explanation_polls = {}
+teams = [{"team_id": "t1", "name": "Core", "color": "#fff", "member_agent_ids": ["a1"], "leader": "a1"}]
+team_messages = {"t1": [{"id": "tm1", "text": "Standup at 9"}]}
+turn_queue = {"rachel": [{"queue_id": "q1", "text": "later please"}, {"queue_id": "q2", "text": "and this"}]}
 create_mode = "modern"
 next_create_response = None
 pending_agents = []
@@ -97,6 +100,15 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/agents/snapshot":
             with state_lock:
                 return self.reply(200, {"agents": agents, "personas": [{"id": "p", "name": "Paula"}]})
+        if url.path == "/teams":
+            with state_lock:
+                return self.reply(200, {"teams": teams})
+        if url.path.startswith("/teams/") and url.path.endswith("/messages"):
+            team = url.path.split("/")[2]
+            return self.reply(200, {"messages": team_messages.get(team, [])})
+        if url.path == "/turn-queue":
+            with state_lock:
+                return self.reply(200, {"items": turn_queue.get(query.get("session", ""), []), "paused": False})
         if url.path == "/attention":
             return self.reply(200, {"items": attention})
         if url.path == "/background-jobs":
@@ -191,7 +203,32 @@ class Handler(BaseHTTPRequestHandler):
                 rows.append({"id": item["id"], "status": "ready" if seen else "pending",
                              "text": "Explained: " + summary if seen else ""})
             return self.reply(200, {"items": rows})
-        if url.path in ("/select", "/stop", "/compact", "/agent-schedules/toggle") or url.path.startswith("/agent-"):
+        if url.path == "/teams":
+            with state_lock:
+                team_id = "t%d" % (len(teams) + 1)
+                teams.append({"team_id": team_id, "name": body["name"], "color": body.get("color", ""), "member_agent_ids": []})
+            return self.reply(201, {"team_id": team_id})
+        if url.path.startswith("/teams/") and url.path.endswith("/members"):
+            team = url.path.split("/")[2]
+            with state_lock:
+                for t in teams:
+                    if t["team_id"] == team:
+                        t["member_agent_ids"].append(body["agent_id"])
+            return self.reply(200, {"ok": True})
+        if url.path.startswith("/teams/"):
+            team = url.path.split("/")[2]
+            with state_lock:
+                for t in teams:
+                    if t["team_id"] == team:
+                        t.update({"name": body.get("name", t["name"]), "leader": body.get("leader", "")})
+            return self.reply(200, {"ok": True})
+        if url.path.startswith("/turn-queue/") and url.path.endswith("/send"):
+            item = url.path.split("/")[2]
+            with state_lock:
+                for session, items in turn_queue.items():
+                    turn_queue[session] = [i for i in items if i["queue_id"] != item]
+            return self.reply(200, {"ok": True})
+        if url.path in ("/select", "/stop", "/compact", "/agent-schedules/toggle", "/team-nudging") or url.path.startswith("/agent-"):
             return self.reply(200, {"ok": True})
         if url.path == "/agents":
             if next_create_response is not None:
@@ -252,10 +289,47 @@ def do_DELETE(self):
         return
     if url.path.startswith("/background-jobs/"):
         return self.reply(200, {"ok": True})
+    if url.path.startswith("/teams/") and "/members/" in url.path:
+        _, _, team, _, agent = url.path.split("/")
+        with state_lock:
+            for t in teams:
+                if t["team_id"] == team:
+                    t["member_agent_ids"] = [a for a in t["member_agent_ids"] if a != agent]
+        return self.reply(200, {"ok": True})
+    if url.path.startswith("/teams/"):
+        team = url.path.split("/")[2]
+        with state_lock:
+            teams[:] = [t for t in teams if t["team_id"] != team]
+        return self.reply(200, {"ok": True})
+    if url.path.startswith("/turn-queue/"):
+        item = url.path.split("/")[2]
+        with state_lock:
+            for session, items in turn_queue.items():
+                turn_queue[session] = [i for i in items if i["queue_id"] != item]
+        return self.reply(200, {"ok": True})
+    return self.reply(404, {"error": "not found"})
+
+
+def do_PUT(self):
+    url = urlparse(self.path)
+    length = int(self.headers.get("Content-Length", "0"))
+    body = json.loads(self.rfile.read(length) or b"{}")
+    record({"method": "PUT", "path": url.path, "body": body})
+    if not self.authorized():
+        return self.reply(401, {"error": "unauthorized"})
+    if url.path.startswith("/turn-queue/"):
+        item = url.path.split("/")[2]
+        with state_lock:
+            for items in turn_queue.values():
+                for i in items:
+                    if i["queue_id"] == item:
+                        i["text"] = body["text"]
+        return self.reply(200, {"ok": True})
     return self.reply(404, {"error": "not found"})
 
 
 Handler.do_DELETE = do_DELETE
+Handler.do_PUT = do_PUT
 
 
 class Server(ThreadingHTTPServer):
