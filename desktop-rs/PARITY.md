@@ -156,7 +156,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::markdownParagraphsBecomeVisibleDisplayBlocks` | `core/tests/protocol.rs::markdown_paragraphs_become_visible_display_blocks` | verified |
 | `tst_native_core::hugeMarkdownBlocksAreNotRetainedInTheStyleCache` | | todo |
 | `tst_native_core::agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent` | | todo |
-| `tst_native_core::pairConversationRoomsAreReadOnlyProjections` | `app/tests/qml/controller_pair_rooms_probe.qml` | wip: listing, unread and read-only selection verified; posting into a room is refused by the Host in the C++ test and is not re-checked here |
+| `tst_native_core::pairConversationRoomsAreReadOnlyProjections` | `app/tests/qml/controller_pair_rooms_probe.qml` | verified: listed and unread, identical lists change nothing (mutation caught), read-only selection (no /select, no clips), member updates refresh, older Host without the route shows no rooms and no error |
 | `tst_native_core::onlyWebAndMailLinksAreOpenable` | `core/tests/protocol.rs::only_web_and_mail_links_are_openable` | verified |
 | `tst_native_core::toolOutputLinksAreAnchoredWithoutChangingTheText` | `core/tests/protocol.rs::tool_output_links_are_anchored_without_changing_the_text` | wip: QTextDocument round trip pending (app crate) |
 | `tst_native_core::reportHtmlCannotFetchRemoteResources` | `core/tests/protocol.rs::report_html_cannot_fetch_remote_resources` | verified |
