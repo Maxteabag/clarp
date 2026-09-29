@@ -16,6 +16,24 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 TOKEN = "probe-token"
+
+
+def solid_png(width, height, rgba):
+    """A tiny valid PNG, built with the standard library."""
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    rows = b"".join(b"\x00" + bytes(rgba) * width for _ in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+
+
+AVATAR_PNG = solid_png(64, 48, (30, 120, 200, 255))
+MEDIA_PNG = solid_png(8, 8, (250, 200, 0, 255))
 # Pairing mints this device token; it is accepted like TOKEN afterwards.
 PAIRED_TOKEN = "cld_probe_paired_device"
 state_lock = threading.Lock()
@@ -73,6 +91,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def authorized(self):
         return self.headers.get("Authorization") in (f"Bearer {TOKEN}", f"Bearer {PAIRED_TOKEN}")
+
+    def reply_bytes(self, status, data, content_type):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def reply(self, status, body):
         data = json.dumps(body).encode()
@@ -143,6 +168,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"artifacts": [{"artifact_id": "art1", "title": "Report"}]})
         if url.path == "/agent-model-options":
             return self.reply(200, {"backends": []})
+        if url.path == "/static/avatars/rachel.png":
+            return self.reply_bytes(200, AVATAR_PNG, "image/png")
+        if url.path == "/media/files/m1":
+            return self.reply_bytes(200, MEDIA_PNG, "image/png")
+        if url.path == "/media":
+            return self.reply(200, {"assets": [
+                {"asset_id": "m1", "mime_type": "image/png", "url": "/media/files/m1", "session": query.get("session")},
+                {"asset_id": "doc1", "mime_type": "application/pdf", "url": "/media/files/doc1"}]})
         if url.path == "/past-sessions":
             if query.get("cwd") == "/broken":
                 return self.reply(500, {"error": "history unreadable"})

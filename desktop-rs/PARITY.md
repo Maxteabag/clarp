@@ -9,7 +9,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 
 | C++ source | Lines | Rust target | Status |
 |---|---|---|---|
-| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: connect/snapshot/selection/log sync/send/stop/SSE, drafts/focus, updates/jobs, launch/lifecycle/catalog, narrator, preferences, teams and turn queue, profile/prompt history, settings status/TTS, voices, orchestrator, composer attachments (upload, shared filesystem, send), past sessions/resume, launch directories, directory suggestions/favorites, contact assignment, pairing and keyring credentials verified in `app/tests/qml/controller*_probe.qml` against `fake_host.py`; directories, credentials, clipboard image paste, media pending |
+| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: connect/snapshot/selection/log sync/send/stop/SSE, drafts/focus, updates/jobs, launch/lifecycle/catalog, narrator, preferences, teams and turn queue, profile/prompt history, settings status/TTS, voices, orchestrator, composer attachments (upload, shared filesystem, send), past sessions/resume, launch directories, directory suggestions/favorites, contact assignment, pairing and keyring credentials, avatars (portrait fetch/round/disk cache, failures not retried) and chat media (list, image file cache, clarp-media links) verified in `app/tests/qml/controller*_probe.qml` against `fake_host.py`; directories, clipboard image paste, audio, styled markdown pending |
 | `src/app/CredentialStore` | 245 | `net/src/credentials.rs` (zbus) | verified (`net/tests/credentials.rs` via `net/tests/run-keyring-tests.sh`: throwaway gnome-keyring and keyring-less private buses; `app/tests/qml/controller_credentials_probe.qml` pairs, reconnects from the keyring and forgets). Deviation: a failed `/pairing/exchange` returns the page to offline instead of staying in "pairing" |
 | `src/app/InstanceServer` | 199 | `desktop-rs/src/app/` | todo |
 | `src/app/MarkdownStyle` | 250 | `desktop-rs/src/app/` | todo |
@@ -22,7 +22,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/main` | 1164 | `app/src/main.rs` + `app/build.rs` | wip: Clarp.Desktop module built from `desktop/CMakeLists.txt` (QML + resources via `app/qml`, `app/resources` symlinks; QTP0004 subdirectory qmldirs generated), Basic style, software renderer, own `ClarpRust` settings namespace, Main loads and runs against the fake Host offscreen (media/avatar/audio surface still missing: TypeErrors on `app.audio`, `avatarMotion`, `avatarSource`, `resolveMediaMarkdown`, `loadMedia`); Main loaded inside its module with `launchOnStartup`/`sidebarVisible`; instance forwarding, launch options, tray, screenshots pending |
 | `src/media/AudioController` | 859 | `desktop-rs/src/media/` | todo |
 | `src/media/AudioCoordinator` | 363 | `desktop-rs/src/media/` | todo |
-| `src/media/PortraitImage` | 59 | `desktop-rs/src/media/` | todo |
+| `src/media/PortraitImage` | 59 | `core/src/media.rs` (`image` crate) | verified (`core/tests/media.rs::a_portrait_is_a_192px_circle`) |
 | `src/media/RecordingSession` | 56 | `desktop-rs/src/media/` | todo |
 | `src/media/WavEncoder` | 58 | `desktop-rs/src/media/` | todo |
 | `src/models/AgentFilterModel` | 368 | `core/src/sidebar.rs` + `app/src/bridge/agent_filter_model.rs` | verified (`core/tests/sidebar.rs`, `app/tests/qml/agent_filter_model_probe.qml`); uses `invalidateRowsFilter()` (deprecated in 6.13) because cxx cannot name `QFlags<Direction>` for `endFilterChange` |
@@ -172,7 +172,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_tool_narrator::scriptContextIsOptInBoundedAndInvalidatesCache` | `core/tests/narrator.rs::—` | not ported: local-codex script evidence only |
 | `tst_tool_narrator::memoizedLookupsFollowEveryFieldThatIsSent` | `core/tests/narrator.rs::memoized_lookups_follow_every_field_that_is_sent` | verified |
 | `tst_tool_narrator::detailLevelsChangeInstructionsAndDiscardPreviousTranslations` | `core/tests/narrator.rs::detail_levels_discard_previous_translations` | verified (instructions are the Host's now) |
-| `tst_avatar_motion::main` (standalone program) | | todo |
+| `tst_avatar_motion::main` (standalone program) | `core/tests/avatar_motion.rs` | wip: ticking lifecycle (observe, reduced motion, foreground, reconcile) verified; window-visibility half pending with `watchMotionWindow` |
 | `tst_avatar_render::main` (standalone program) | | todo |
 | `tst_desktop_presence::eligibilityExpiresWithoutUserInput` | | todo |
 | `tst_desktop_presence::focusLockSleepAndPreferenceReleasePresence` | | todo |
