@@ -146,6 +146,9 @@ def test_transcript_import_commits_in_bounded_chunks(tmp_path, monkeypatch):
         persona="Cipher", voice_id="V", cwd=str(tmp_path), session="cipher",
         backend="codex")
     monkeypatch.setattr(ms, "IMPORT_COMMIT_EVERY", 100)
+    # Pin the time budget so only the row count decides the chunks; on a
+    # loaded machine the budget ran out mid-chunk and added commits.
+    monkeypatch.setattr(ms, "IMPORT_WRITE_BUDGET_SECONDS", 60)
     real_conn = ms.conn
     commits = []
 

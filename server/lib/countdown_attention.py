@@ -48,8 +48,3 @@ def project(row: dict, *, now_ms: int, policy: str | None = None, retention_hour
                 bucket = 'review'
     return {'bucket': bucket, 'phase': phase, 'visible': bucket != 'history' and key not in archives,
             'archived': key in archives, 'identity': key, 'record_status': status}
-
-def project_page(rows: list[dict], *, now_ms: int, limit: int = 100, **kwargs) -> list[dict]:
-    """A snapshot projection filters before limiting; production cursor wiring is separate."""
-    projected = [dict(artifact_id=r['artifact_id'], **project(r, now_ms=now_ms, **kwargs)) for r in rows]
-    return [r for r in projected if r['visible']][:limit]

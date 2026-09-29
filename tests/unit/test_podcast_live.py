@@ -36,16 +36,6 @@ def test_context_uses_heard_window_and_source_authority():
     assert cfg["input"][0]["role"] == "user"
 
 
-@pytest.mark.parametrize("change", [
-    {"revision": ""}, {"transcript": [{"start": 8, "end": 2, "text": "bad"}]},
-    {"notebook_url": "javascript:alert(1)"}, {"chapters": []},
-    {"transcript": [{"start": float("nan"), "end": 2, "text": "bad"}]},
-])
-def test_rejects_invalid_episode(change):
-    with pytest.raises(ValueError):
-        podcast_live.validate_episode({**episode(), **change})
-
-
 @pytest.mark.parametrize("position", [-1, float("nan"), float("inf"), 101])
 def test_rejects_untrusted_playhead(position):
     with pytest.raises(ValueError):

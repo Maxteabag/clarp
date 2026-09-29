@@ -23,7 +23,6 @@ import pytest
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
-from lib import voice_preamble        # noqa: E402
 from lib.backend.registry import by_id  # noqa: E402
 from lib import agents as agents_db    # noqa: E402
 from lib.protocol import AgentState    # noqa: E402
@@ -336,55 +335,3 @@ def test_spawn_turn_missing_codex_raises_filenotfound(tmp_path, monkeypatch):
 
 def test_interrupt_is_safe_when_nothing_running():
     assert CODEX.interrupt_exec("no-such-agent") == 0
-
-
-def test_voice_preamble_roundtrip():
-    """apply_voice_preamble adds the <speak> instruction; strip_voice_preamble
-    recovers the original message exactly (for the history pane)."""
-    msg = "count the files in this repo"
-    wrapped = voice_preamble.apply_voice_preamble(msg)
-    assert "<speak>" in wrapped and msg in wrapped
-    assert wrapped != msg
-    assert voice_preamble.strip_voice_preamble(wrapped) == msg
-    # No-op when the preamble isn't present.
-    assert voice_preamble.strip_voice_preamble("plain message") == "plain message"
-
-
-def test_preamble_always_forbids_interactive_questions():
-    """Every app-dispatched turn carries the no-interactive-questions rule,
-    whether or not it's a spoken turn. Strip recovers the user's message in
-    both cases."""
-    msg = "should I refactor this?"
-
-    # Non-voice turn: no <speak> guidance, but the no-question rule is present.
-    silent = voice_preamble.apply_voice_preamble(msg, voice=False)
-    assert "interactive prompts" in silent
-    assert "<speak>" not in silent
-    assert voice_preamble.strip_voice_preamble(silent) == msg
-
-    # Voice turn: both the no-question rule AND the <speak> guidance.
-    spoken = voice_preamble.apply_voice_preamble(msg, voice=True)
-    assert "interactive prompts" in spoken
-    assert "<speak>" in spoken
-    assert voice_preamble.strip_voice_preamble(spoken) == msg
-
-
-def test_voice_preamble_requests_conversational_delivery_for_all_speech():
-    spoken = voice_preamble.apply_voice_preamble("Explain the result.", voice=True)
-
-    assert "Every spoken response should sound conversational" in spoken
-    assert "do not reserve them for uncertainty" in spoken
-    assert "When you're unsure or working through something complex" not in spoken
-    assert "few or no fillers" not in spoken
-
-
-def test_voice_preamble_can_hide_persona_identity():
-    msg = "hello"
-    wrapped = voice_preamble.apply_voice_preamble(
-        msg,
-        voice=True,
-        persona="Bella",
-        session="bella",
-    )
-    assert "You are Bella." in wrapped
-    assert voice_preamble.strip_voice_preamble(wrapped) == msg

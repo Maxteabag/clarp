@@ -6,12 +6,9 @@ from lib.voices import VOICE_CATALOG, voices_with_availability
 
 
 def test_catalog_has_no_duplicate_ids():
-    """The original VOICE_CATALOG had Brian listed twice. Pin that the lib
-    version is dedupable by id when we annotate availability."""
+    """The original VOICE_CATALOG had Brian listed twice."""
     ids = [v["id"] for v in VOICE_CATALOG]
-    # Even if catalogue has dupes, voices_with_availability must dedupe.
-    annotated = voices_with_availability({}, for_session="")
-    assert len(annotated) == len(set(v["id"] for v in annotated))
+    assert len(ids) == len(set(ids))
 
 
 def test_taken_by_marks_assigned_voices():

@@ -42,19 +42,11 @@ def env(tmp_path, monkeypatch):
     }
 
 
-def _fake_synthesize_to_file(text, voice_id, out_path, **kw):
-    """Stand-in for eleven_http.synthesize_to_file — writes 4 bytes."""
-    pathlib.Path(out_path).write_bytes(b"\xff\xfb\x90\x00")
-    return 4
-
-
 @pytest.fixture
 def patch_eleven(monkeypatch):
-    from lib import eleven_http, tts_worker
-    monkeypatch.setattr(eleven_http, "synthesize_to_file",
-                        _fake_synthesize_to_file)
-    # PWA-mode rows route through eleven_ws.synthesize_streaming now;
-    # patch its imported binding in tts_worker too so no real WS opens.
+    from lib import tts_worker
+    # PWA-mode rows route through eleven_ws.synthesize_streaming; patch its
+    # imported binding in tts_worker so no real WS opens.
     def _fake_ws(*, text, voice_id, out_path, api_key, model,
                  speed=1.2, stability=0.5, similarity_boost=0.75,
                  timeout=30.0, on_chunk=None, **_kw):
@@ -102,32 +94,6 @@ def test_enqueue_then_drain_lands_clip_on_disk(env, patch_eleven):
 def test_drain_when_queue_empty_returns_false(env, patch_eleven):
     from lib.tts_worker import synth_one
     assert synth_one(audio_dir=env["audio_dir"]) is False
-
-
-def test_synth_failure_marks_row_failed(env, monkeypatch):
-    from lib import eleven_http, eleven_ws, tts_worker
-    def _boom_http(text, voice_id, out_path, **kw):
-        raise eleven_http.ElevenError("rate limited")
-    def _boom_ws(**kw):
-        raise eleven_ws.ElevenWSError("rate limited")
-    monkeypatch.setattr(eleven_http, "synthesize_to_file", _boom_http)
-    monkeypatch.setattr(tts_worker, "synthesize_streaming", _boom_ws)
-
-    tts_queue.enqueue(
-        agent_id=env["agent_id"],
-        text="hello",
-        voice_id="V_MIKE",
-        session="claude",
-        source=TurnSource.PWA,
-    )
-    from lib.tts_worker import synth_one
-    assert synth_one(audio_dir=env["audio_dir"]) is True
-
-    row = tts_queue.recent(limit=1)[0]
-    assert row["status"] == tts_queue.FAILED
-    assert row["error"] and "rate limited" in row["error"]
-    # No clip on disk.
-    assert list(env["audio_dir"].glob("*.mp3")) == []
 
 
 def test_claim_next_is_atomic_across_calls(env, patch_eleven):

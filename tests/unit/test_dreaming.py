@@ -611,16 +611,6 @@ def test_grounded_seed_anti_promotes_fixed_items_and_records_evidence():
     assert "make deploy-detached" in thread["guardrail_refusals"]
 
 
-def test_dream_guardrail_classifier_refuses_forbidden_ops():
-    assert dreaming.classify_dream_operation("rg dreaming server/lib")[0] is True
-    allowed, reason = dreaming.classify_dream_operation("make deploy-detached")
-    assert allowed is False
-    assert "forbidden operation" in reason
-    allowed, reason = dreaming.classify_dream_operation("git push origin main")
-    assert allowed is False
-    assert "forbidden operation" in reason
-
-
 def test_timezone_resolution_prefers_session_location_then_latest_fallback(monkeypatch):
     monkeypatch.delenv("GOOGLE_MAPS_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)

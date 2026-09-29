@@ -183,24 +183,16 @@ def test_remove_uses_guarded_archive_route():
         ("DELETE", "/janitors/sam?expected_revision=5", None)]
 
 
-def test_shared_persona_prompt_carries_no_bookkeeping_but_skill_keeps_lifecycle():
-    from lib.voice_preamble import persona_identity_instruction
-    text = persona_identity_instruction("Theo", session="theo")
-    assert "clarp-background-jobs" not in text
-    assert "Detached statuses" not in text
-    assert "Never set a visible status" not in text
+def test_background_jobs_skill_keeps_lifecycle_guards():
     skill = (ROOT / "skills/clarp-background-jobs/SKILL.md").read_text()
     assert "short header status" not in skill
     for guard in ("generation-specific handle", "job-heartbeat", "job-finish", "job-fail", "Cancellation is sticky"):
         assert guard in skill
 
 
-def test_managed_janitor_skill_is_distributed_with_its_helper():
+def test_managed_janitor_skill_is_in_the_core_pack():
     manifest = json.loads((ROOT / "skills/manifest.json").read_text())
     assert any(s["id"] == "clarp-janitors" and s["pack"] == "core" for s in manifest["skills"])
-    skill = ROOT / "skills/clarp-janitors"
-    assert (skill / "scripts/janitor_run.py").is_file()
-    assert (skill / "references/pilot-migration.md").is_file()
 
 
 def test_leader_instructions_preserve_progress_and_permission_duties_without_caption_formatting():

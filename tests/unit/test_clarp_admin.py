@@ -77,17 +77,23 @@ def test_skill_manifest_contains_only_agreed_packs():
     assert all(item["id"].startswith("clarp-") for item in manifest["skills"])
 
 
-def test_cli_parses_noninteractive_setup():
-    args = admin.parser().parse_args([
-        "setup", "--non-interactive", "--backend", "codex",
-        "--transcription", "apple-only", "--toolchain", "existing",
-    ])
-    assert args.backend == "codex"
-    assert args.transcription == "apple-only"
-    assert args.toolchain == "existing"
-    assert args.bind is None
-    assert args.port is None
-    assert args.func is admin.cmd_setup
+def test_every_managed_skill_ships_the_files_its_instructions_name():
+    """Setup links skills/<id> by manifest id; an agent reading SKILL.md is
+    sent to its helpers by relative path, so a missing one is a dead end."""
+    import re
+    code = re.compile(r"`(?:SKILL_DIR/)?((?:scripts|references)/[A-Za-z0-9_./-]*[A-Za-z0-9_])")
+    link = re.compile(r"\]\(([^)#\s]+)\)")
+    missing = []
+    for item in json.loads((ROOT / "skills/manifest.json").read_text())["skills"]:
+        skill = ROOT / "skills" / item["id"]
+        text = (skill / "SKILL.md").read_text()
+        assert re.search(rf"^name:\s*{re.escape(item['id'])}\s*$", text, re.M), item["id"]
+        refs = set(code.findall(text)) | {
+            target for target in link.findall(text)
+            if "://" not in target and not target.startswith(("/", "~", "mailto:"))}
+        missing += [f"{item['id']}: {ref}" for ref in sorted(refs)
+                    if not (skill / ref).exists() and not (ROOT / ref).exists()]
+    assert not missing
 
 
 def test_cli_parses_custom_voice_adapter_management():
@@ -1090,14 +1096,27 @@ def test_setup_falls_back_to_loopback_without_a_config(tmp_path, monkeypatch):
 
 
 def test_setup_honours_an_explicit_bind_over_the_configured_one(tmp_path, monkeypatch):
-    config = tmp_path / "config.toml"
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config = config_dir / "config.toml"
     config.write_text('[server]\nbind_addr = "192.0.2.10"\nport = 7700\n')
+    state = config_dir / "install.json"
+    state.write_text('{"skills": []}')
+    monkeypatch.setattr(admin, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(admin, "CONFIG_FILE", config)
+    monkeypatch.setattr(admin, "INSTALL_STATE", state)
+    monkeypatch.setattr(admin, "SHARE", tmp_path / "share")
+    monkeypatch.setattr(admin, "run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(admin, "load_manifest", lambda: {"skills": []})
     args = admin.parser().parse_args([
-        "setup", "--non-interactive", "--bind", "0.0.0.0", "--port", "7682",
+        "setup", "--non-interactive", "--backend", "codex",
+        "--transcription", "apple-only", "--toolchain", "none",
+        "--bind", "0.0.0.0", "--port", "7682",
     ])
-    assert args.bind == "0.0.0.0"
-    assert args.port == 7682
+    assert args.func(args) == 0
+    server = __import__("tomllib").loads(config.read_text())["server"]
+    assert server["bind_addr"] == "0.0.0.0"
+    assert server["port"] == 7682
 
 
 # ---- issue #12: quick-start installs must be able to find their remote -----

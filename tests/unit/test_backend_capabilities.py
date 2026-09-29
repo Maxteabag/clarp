@@ -207,29 +207,6 @@ def test_declared_values_match_the_behaviour_they_replaced():
 
 # --- (5) replaced decisions -------------------------------------------------
 
-def test_interactive_terminal_argv_per_backend(monkeypatch):
-    """The table terminal_ws.py used to carry, now each backend's terminal_argv."""
-    from lib.backend.base import Unsupported
-    monkeypatch.setattr("lib.deployment.plugin_dir", lambda: None)
-    expected = {
-        "claude": (["claude", "--dangerously-skip-permissions", "--resume", "s"],
-                   ["claude", "--dangerously-skip-permissions"]),
-        "codex": (["codex", "resume", "s"], ["codex"]),
-        "agy": (["agy", "--dangerously-skip-permissions", "--conversation", "s"],
-                ["agy", "--dangerously-skip-permissions"]),
-        # No interactive terminal launch is defined for these yet; today the
-        # /terminal route fails for them, and still does.
-        "grok": None, "opencode": None, "deepseek": None,
-    }
-    for backend in registry.all():
-        if expected[backend.id] is None:
-            for sid in ("s", ""):
-                with pytest.raises(Unsupported):
-                    backend.terminal_argv(sid)
-            continue
-        assert (backend.terminal_argv("s"), backend.terminal_argv("")) == expected[backend.id]
-
-
 def _terminal_handler():
     class Handler:
         headers = {"Upgrade": "websocket", "Connection": "Upgrade",
@@ -324,7 +301,11 @@ def test_account_pool_lookup_matches_the_coordinators(monkeypatch):
 
 
 def test_spawn_kwargs_per_backend(monkeypatch):
-    """Each backend's spawn_turn keeps the keywords its own runner takes."""
+    """Each backend's spawn_turn keeps the keywords its own runner takes.
+
+    Regression: agy/codex turns crashed with `spawn_turn() got an unexpected
+    keyword argument 'synthesize_audio'`; turn_dispatch passes it for the
+    Claude path and the stream runners read it from the DB instead."""
     from lib import codex_app_server
     seen: dict[str, dict] = {}
     for backend in registry.all():

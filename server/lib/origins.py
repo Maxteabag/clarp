@@ -56,8 +56,3 @@ SUPPRESSED_ORIGINS = (
     (ROUTINE_AUTOMATION_ORIGINS - {"leader_tick"})
     | {"oracle", "agent", "schedule", "automation"}
 )
-
-
-def is_routine_automation(origin: str | None) -> bool:
-    """True when ``origin`` is one of our own scheduled automation turns."""
-    return (origin or "").strip() in ROUTINE_AUTOMATION_ORIGINS

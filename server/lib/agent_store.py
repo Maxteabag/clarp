@@ -94,14 +94,3 @@ def save_agents(data: dict[str, dict[str, Any]],
             _agents.update_agent(agent_id, persona=new_persona,
                                  voice_id=new_voice, cwd=new_cwd,
                                  backend=new_backend)
-
-
-def pick_unused_voice(agents: dict, pool: list[str] | None = None) -> str:
-    """Pick a voice not already in use; cycle through the pool if all taken."""
-    pool = pool if pool is not None else get_voice_pool()
-    used = {(info or {}).get("voice_id") for info in agents.values()}
-    for v in pool:
-        if v not in used:
-            return v
-    log("pickUnusedVoiceCycle", f"all {len(pool)} voices in use")
-    return pool[len(agents) % len(pool)]
