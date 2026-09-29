@@ -74,6 +74,23 @@ bool applyMarkdownStyle(QTextDocument* document, const MarkdownStyleOptions& opt
     const int codeSize = std::max(8, static_cast<int>(std::lround(body * 0.9)));
     QTextCursor cursor(document);
     cursor.beginEditBlock();
+    // Applying a character format splits and merges the fragments a live
+    // QTextBlock::iterator points at, so collect the ranges here and apply
+    // them once the walk is over. Editing mid-walk sent stale fragment
+    // positions to setPosition and never ended, logging until the UI froze.
+    struct CharEdit {
+        int start;
+        int end;
+        QTextCharFormat format;
+    };
+    struct BlockEdit {
+        int position;
+        QTextBlockFormat format;
+    };
+    QList<CharEdit> charEdits;
+    QList<BlockEdit> blockEdits;
+    const int documentEnd = document->characterCount() - 1;
+    bool corrupt = false;
     for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {
         QTextBlockFormat blockFormat = block.blockFormat();
         const int heading = blockFormat.headingLevel();
@@ -95,13 +112,16 @@ bool applyMarkdownStyle(QTextDocument* document, const MarkdownStyleOptions& opt
             blockFormat.setTopMargin(body * 0.05);
             blockFormat.setBottomMargin(body * 0.05);
         }
-        cursor.setPosition(block.position());
-        cursor.setBlockFormat(blockFormat);
+        blockEdits.append({.position = block.position(), .format = blockFormat});
 
         // Character formats: heading size, code font, quote tint, link colour.
         for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
             const QTextFragment fragment = it.fragment();
             if (!fragment.isValid()) continue;
+            if (fragment.position() < 0 || fragment.position() > documentEnd) {
+                corrupt = true;  // stale iterator: stop instead of spinning on it
+                break;
+            }
             QTextCharFormat charFormat = fragment.charFormat();
             bool changed = false;
             if (heading > 0) {
@@ -129,11 +149,25 @@ bool applyMarkdownStyle(QTextDocument* document, const MarkdownStyleOptions& opt
                 changed = true;
             }
             if (changed) {
-                cursor.setPosition(fragment.position());
-                cursor.setPosition(fragment.position() + fragment.length(), QTextCursor::KeepAnchor);
-                cursor.setCharFormat(charFormat);
+                charEdits.append({.start = fragment.position(), .end = fragment.position() + fragment.length(), .format = charFormat});
             }
         }
+    }
+    if (corrupt) {
+        cursor.endEditBlock();
+        document->setProperty(StyledStamp, QVariant());
+        return false;
+    }
+    for (const BlockEdit& edit : std::as_const(blockEdits)) {
+        if (edit.position < 0 || edit.position > documentEnd) continue;
+        cursor.setPosition(edit.position);
+        cursor.setBlockFormat(edit.format);
+    }
+    for (const CharEdit& edit : std::as_const(charEdits)) {
+        if (edit.start < 0 || edit.end > documentEnd || edit.start >= edit.end) continue;
+        cursor.setPosition(edit.start);
+        cursor.setPosition(edit.end, QTextCursor::KeepAnchor);
+        cursor.setCharFormat(edit.format);
     }
     // Lists: tighter indent than Qt's default 40px.
     for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {
