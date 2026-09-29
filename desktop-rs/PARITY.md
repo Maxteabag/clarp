@@ -9,7 +9,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 
 | C++ source | Lines | Rust target | Status |
 |---|---|---|---|
-| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: connect/snapshot/selection/log sync/send/stop/SSE, drafts/focus, updates/jobs, launch/lifecycle/catalog, narrator, preferences, teams and turn queue, profile/prompt history, settings status/TTS, voices, orchestrator and composer attachments (upload, shared filesystem, send) verified in `app/tests/qml/controller*_probe.qml` against `fake_host.py`; directories, credentials, clipboard image paste, media pending |
+| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: connect/snapshot/selection/log sync/send/stop/SSE, drafts/focus, updates/jobs, launch/lifecycle/catalog, narrator, preferences, teams and turn queue, profile/prompt history, settings status/TTS, voices, orchestrator, composer attachments (upload, shared filesystem, send), past sessions/resume, launch directories, directory suggestions/favorites and contact assignment verified in `app/tests/qml/controller*_probe.qml` against `fake_host.py`; directories, credentials, clipboard image paste, media pending |
 | `src/app/CredentialStore` | 245 | `desktop-rs/src/app/` | todo |
 | `src/app/InstanceServer` | 199 | `desktop-rs/src/app/` | todo |
 | `src/app/MarkdownStyle` | 250 | `desktop-rs/src/app/` | todo |
@@ -105,7 +105,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::contactCreateShowsHostMessageWithoutHttpSuffix` | `app/tests/qml/controller_launch_probe.qml` | verified |
 | `tst_native_core::newAgentWaitsForOwnRosterAndRejectsLateSnapshots` | `app/tests/qml/controller_launch_probe.qml` (session-only path, retry without a second create) | wip: a held late snapshot released after creation is not simulated |
 | `tst_native_core::fastLaunchOpensWithoutWaitingForFleet` | | todo |
-| `tst_native_core::resumeLaunchOpensExactSessionWithoutFleet` | | todo |
+| `tst_native_core::resumeLaunchOpensExactSessionWithoutFleet` | `app/tests/qml/controller_paths_probe.qml` | wip: resume request shape verified; launch mode (no fleet snapshot) lands with main wiring |
 | `tst_native_core::launchPoolCarriesBackendModelAndHandlesEmpty` | `app/tests/qml/controller_launch_probe.qml` | wip: pool request shape and empty-pool signal verified; model/effort on a pool start not asserted |
 | `tst_native_core::redesignedRosterFiltersWithoutMutatingSource` | `core/tests/sidebar.rs::redesigned_roster_filters_without_mutating_source` + `agent_filter_model_probe.qml` | verified |
 | `tst_native_core::agentRowParsesBackgroundAndHelperFieldsSafely` | `protocol.rs::agent_row_parses_background_and_helper_fields_safely` + `conversation.rs::compact_durations_read_like_the_cpp_client` | verified |
