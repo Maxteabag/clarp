@@ -16,6 +16,7 @@ rodio = "0.22"
 ksni = { version = "0.3", default-features = false, features = ["tokio"] }
 arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
 serde = "1"
+futures-util = { version = "0.3", default-features = false }
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 cxx = "1.0.202"
 cxx-qt = "0.10.0"

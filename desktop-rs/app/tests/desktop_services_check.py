@@ -119,6 +119,13 @@ try:
     check(notes and notes[0]["summary"] == "Mike" and notes[0]["body"] == "A new reply" and notes[0]["timeout"] == 8000,
           "notification: " + json.dumps(notes[:1]))
     menu.Event(entries["Show Clarp"], "clicked", dbus.String(""), dbus.UInt32(0))
+
+    def activity():
+        log = [json.loads(line) for line in open(os.environ["CLARP_HOST_LOG"]) if line.strip()]
+        return [r["body"] for r in log if r["path"] == "/application-activity"]
+    check(wait(lambda: any(a.get("foreground") for a in activity())), "the shown window reports foreground activity")
+    first = activity()[0]
+    check(first["instance_id"] and first["sequence"] >= 1 and "input_age_ms" in first, "activity report: " + json.dumps(first))
     menu.Event(entries["Quit"], "clicked", dbus.String(""), dbus.UInt32(0))
     check(wait(lambda: app.poll() is not None, 10) and app.returncode == 0, "Quit ends the app cleanly")
 finally:

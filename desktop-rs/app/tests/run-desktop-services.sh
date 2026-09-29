@@ -13,7 +13,7 @@ base="http://127.0.0.1:$(cat "$scratch/port")"
 env CLARP_BASE_URL="$base" CLARP_TOKEN=probe-token CLARP_SETTINGS="$scratch/settings.json" \
     XDG_CONFIG_HOME="$scratch/config" XDG_CACHE_HOME="$scratch/cache" XDG_DATA_HOME="$scratch/data" \
     CLARP_AUDIO_OUTPUT=none CLARP_AUDIO_INPUT=none CLARP_TEST_OPEN_URL="$scratch/urls" CLARP_TEST_CLIPBOARD="$scratch/clip" \
-    QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen CLARP_APP_LOG="$scratch/app.log" CLARP_PRIVATE_BUS=1 \
+    QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen CLARP_APP_LOG="$scratch/app.log" CLARP_PRIVATE_BUS=1 CLARP_HOST_LOG="$scratch/host.log" \
     timeout 90 dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
     python3 app/tests/desktop_services_check.py "$base" "$scratch/settings.json" "$PWD/target/debug/clarp-desktop"
 code=$?
