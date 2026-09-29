@@ -44,7 +44,7 @@ def _apns_config(tmp_path):
         'team_id = "TEAMID1234"\n'
         'bundle_id = "com.maxteabag.clarp"\n'
     )
-    config.reset_cache_for_tests()
+    config.reset_cache()
     return config.load(cfgfile)
 
 
@@ -92,7 +92,7 @@ def _user_turn(origin: str = "user", *, updated_at: int | None = None,
 # config
 # --------------------------------------------------------------------------
 def test_apns_disabled_by_default():
-    config.reset_cache_for_tests()
+    config.reset_cache()
     cfg = config.load()
     assert cfg.apns_enabled() is False
     # With no key configured, a send is a cheap no-op (never raises).
@@ -122,7 +122,7 @@ def test_apns_legacy_config_directory_falls_back_to_current_key(tmp_path):
         'key_id = "ABC123KEYID"\n'
         'team_id = "TEAMID1234"\n'
     )
-    config.reset_cache_for_tests()
+    config.reset_cache()
 
     cfg = config.load(cfgfile)
 
@@ -144,7 +144,7 @@ def test_apns_legacy_fallback_anchors_relative_config_path(tmp_path, monkeypatch
         'team_id = "TEAMID1234"\n'
     )
     monkeypatch.chdir(tmp_path)
-    config.reset_cache_for_tests()
+    config.reset_cache()
 
     cfg = config.load(pathlib.Path("config/clarp/config.toml"))
 
@@ -165,7 +165,7 @@ def test_apns_unrelated_legacy_named_directory_does_not_redirect(tmp_path):
         'key_id = "ABC123KEYID"\n'
         'team_id = "TEAMID1234"\n'
     )
-    config.reset_cache_for_tests()
+    config.reset_cache()
 
     cfg = config.load(cfgfile)
 
@@ -181,7 +181,7 @@ def test_apns_missing_key_file_is_disabled(tmp_path):
         'key_id = "ABC123KEYID"\n'
         'team_id = "TEAMID1234"\n'
     )
-    config.reset_cache_for_tests()
+    config.reset_cache()
 
     assert config.load(cfgfile).apns_enabled() is False
 
@@ -761,12 +761,12 @@ def test_avatar_url_uses_public_https_origin_only(tmp_path):
     from lib import apns, config
     cfgfile = tmp_path / "config.toml"
     cfgfile.write_text('[server]\nbind_addr = "192.0.2.10"\nport = 7682\n')
-    config.reset_cache_for_tests()
+    config.reset_cache()
     cfg = config.load(cfgfile)
     assert apns._avatar_url(cfg, "Mike") is None
     cfgfile.write_text('[server]\nbind_addr = "192.0.2.10"\nport = 7682\n'
                        'public_base_url = "https://computer.example.ts.net/"\n')
-    config.reset_cache_for_tests()
+    config.reset_cache()
     cfg = config.load(cfgfile)
     assert apns._avatar_url(cfg, "Mike") == \
         "https://computer.example.ts.net/static/avatars/mike.png"
@@ -778,7 +778,7 @@ def test_avatar_url_none_when_loopback(tmp_path):
     from lib import apns, config
     cfgfile = tmp_path / "config.toml"
     cfgfile.write_text('[server]\nbind_addr = "127.0.0.1"\nport = 7682\n')
-    config.reset_cache_for_tests()
+    config.reset_cache()
     cfg = config.load(cfgfile)
     # Loopback isn't device-reachable → skip the avatar rather than send a bad URL.
     assert apns._avatar_url(cfg, "Mike") is None

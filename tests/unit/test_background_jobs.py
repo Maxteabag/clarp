@@ -475,6 +475,6 @@ def test_cancel_run_fences_generation_and_owner_atomically():
     assert stale["job"]["generation"] == 2 and stale["job"]["status"] == "running"
     other = background_jobs.cancel_run("gen-watch", expected_generation=2, expected_session="mallory")
     assert other["mismatch"] == "session" and other["job"]["status"] == "running"
-    assert background_jobs.cancel_owned("gen-watch", session="rachel", generation=1) is None
-    done = background_jobs.cancel_owned("gen-watch", session="rachel", generation=2)
-    assert done["status"] == "cancelled" and done["generation"] == 2
+    done = background_jobs.cancel_run("gen-watch", expected_generation=2, expected_session="rachel",
+                                      reason="owner_cancelled")
+    assert done["changed"] and done["job"]["status"] == "cancelled" and done["job"]["generation"] == 2

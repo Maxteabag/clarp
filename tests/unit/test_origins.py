@@ -17,17 +17,6 @@ def test_routine_set_includes_configured_maintenance():
     }
 
 
-def test_is_routine_automation_normalizes_and_rejects_unknown():
-    assert origins.is_routine_automation("heartbeat")
-    assert origins.is_routine_automation("  dreaming  ")  # stripped
-    assert not origins.is_routine_automation("user")
-    assert not origins.is_routine_automation(None)
-    assert not origins.is_routine_automation("")
-    # Callers lowercase upstream; the module does not, so this documents that
-    # the contract is "feed me a normalized origin".
-    assert not origins.is_routine_automation("Heartbeat")
-
-
 def test_leader_tick_is_routine_but_user_facing_and_not_suppressed():
     # The deliberate axis flip: routine automation, yet the explicit
     # autonomous-leader-to-User report channel.

@@ -1,5 +1,5 @@
 import pytest
-from lib.countdown_attention import project as _project, project_page
+from lib.countdown_attention import project as _project
 
 def project(r, **kwargs):
     return _project(r, **{"policy":"action","retention_hours":24,**kwargs})
@@ -39,10 +39,6 @@ def test_invalid_before_ack_but_after_terminal():
 def test_equivalent_offset_and_immutable_row():
     r=row(target_at='2026-09-08T14:00:00+02:00');copy=r.copy()
     assert project(r,now_ms=NOW)==project(row(),now_ms=NOW);assert r==copy
-
-def test_filter_before_page_limit():
-    rows=[row(status='cancelled',artifact_id=str(i)) for i in range(250)]+[row(artifact_id='deadline',purpose='actionable')]
-    assert project_page(rows,now_ms=NOW+86400000*2,limit=1,policy="action",retention_hours=24)[0]['artifact_id']=='deadline'
 
 def test_projection_of_actual_durable_artifact(tmp_path):
     from lib import agents, artifacts

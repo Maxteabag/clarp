@@ -721,21 +721,6 @@ def _owned_active_row(c, job_id: str, *, session: str, generation: int):
     return row
 
 
-def cancel_owned(job_id: str, *, session: str, generation: int) -> dict | None:
-    """Let the owning agent session close its own job.
-
-    Finish and fail stay fenced to the registered worker PID so one process
-    cannot report another's outcome. Cancelling is different: the owner
-    must be able to close a job whose worker is gone or unreachable, and a
-    cancel reports no outcome. Returns None when `session` does not own
-    this active generation. Ownership, generation and the cancel are one
-    transaction, so a successor run can never be cancelled by mistake.
-    """
-    outcome = cancel_run(job_id, expected_generation=int(generation),
-                         expected_session=session, reason="owner_cancelled")
-    return outcome["job"] if outcome["changed"] else None
-
-
 def set_progress(
     job_id: str, *, session: str, generation: int, text: str,
 ) -> dict | None:
