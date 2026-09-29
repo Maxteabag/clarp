@@ -32,8 +32,8 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/models/ConversationPresentationModel` | 437 | `desktop-rs/src/models/` | todo |
 | `src/models/PaneTreeModel` | 1041 | `desktop-rs/src/models/` | todo |
 | `src/models/VoiceListModel` | 113 | `desktop-rs/src/models/` | todo |
-| `src/network/ApiClient` | 219 | `desktop-rs/src/network/` | todo |
-| `src/network/SseClient` | 219 | `desktop-rs/src/network/` | todo |
+| `src/network/ApiClient` | 238 | `net/src/api.rs` + `core/src/endpoint.rs` | verified (`net/tests/clients.rs`, `core/tests/endpoint.rs`) |
+| `src/network/SseClient` | 197 | `net/src/sse.rs` + `core/src/endpoint.rs` | verified (`net/tests/clients.rs::sse_*`) |
 | `src/network/SseParser` | 91 | `core/src/sse.rs` | verified (`protocol.rs::sse_parser_*`) |
 | `src/platform/DesktopIntegration` | 97 | `desktop-rs/src/platform/` | todo |
 | `src/platform/DesktopPresence` | 224 | `desktop-rs/src/platform/` | todo |
@@ -65,7 +65,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | Load tail history, paginate older messages, and apply revision deltas. | | todo |
 | Replace a conversation when its `conversation_id` changes or the server returns `replace_required`. | | todo |
 | Merge growing messages by id and revision without duplicating turns. | | todo |
-| Open one SSE stream, resume with `Last-Event-ID`, reconnect on silence or failure, and ignore unknown additive fields/events. | | todo |
+| Open one SSE stream, resume with `Last-Event-ID`, reconnect on silence or failure, and ignore unknown additive fields/events. | | wip: client verified in `net/tests/clients.rs` (resume, watchdog, backoff, stop) and `contract_fixtures.rs` (unknown events/fields); app wiring pending |
 | Send idempotent messages with an optimistic `u-<client_msg_id>` row and keep delivery pending until that id appears in `/log`. | | todo |
 | Stop a running turn and represent queued, waiting, interrupted, and active states accurately. | | todo |
 | Record microphone PCM, upload it to `/transcribe`, and carry the returned trace/transcription ids into `/send`. | | todo |
@@ -121,7 +121,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::sseParserHandlesChunksCommentsAndReplayIds` | `core/tests/protocol.rs::sse_parser_handles_chunks_comments_and_replay_ids` | verified |
 | `tst_native_core::nextAttentionCyclesWaitingUnreadAndPending` | | todo |
 | `tst_native_core::readyPresentationRetainsCanonicalStreamAndRevealsFinal` | | todo |
-| `tst_native_core::sseCursorIsScopedToOneHost` | | todo |
+| `tst_native_core::sseCursorIsScopedToOneHost` | `core/tests/endpoint.rs::sse_cursor_is_scoped_to_one_host` | verified |
 | `tst_native_core::snapshotFiltersArchivedAgentsAndPatchesEvents` | | todo |
 | `tst_native_core::agentSnapshotDiffsInPlaceAndRejectsStaleState` | | todo |
 | `tst_native_core::backendQuotaNoticeNamesReasonResetAndFallback` | `core/tests/protocol.rs::backend_quota_notice_names_reason_reset_and_fallback` | verified |
@@ -137,8 +137,8 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::wavEncodingProducesAValidPcmHeader` | | todo |
 | `tst_native_core::paneTreeSplitsClosesNavigatesAndZooms` | | todo |
 | `tst_native_core::paneWorkspacePersistenceIsAsyncAndConflictSafe` | | todo |
-| `tst_native_core::apiClientRejectsCrossOriginAuthenticatedMedia` | | todo |
-| `tst_native_core::apiClientDropsRepliesFromPreviousEndpointGeneration` | | todo |
+| `tst_native_core::apiClientRejectsCrossOriginAuthenticatedMedia` | `net/tests/clients.rs::api_client_rejects_cross_origin_authenticated_media` | verified |
+| `tst_native_core::apiClientDropsRepliesFromPreviousEndpointGeneration` | `net/tests/clients.rs::api_client_drops_replies_from_previous_endpoint_generation` | verified |
 | `tst_native_core::paneDraftAndFocusSurviveLayoutStateChanges` | | todo |
 | `tst_native_core::paneActivationAlwaysTargetsItsComposer` | | todo |
 | `tst_native_core::paneDraftIsDurableAndScopedToServerAndConversation` | | todo |
