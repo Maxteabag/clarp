@@ -293,15 +293,6 @@ _GUARDRAIL_REFUSAL_RE = re.compile(
     r"[ \t]*:[*_ \t]*(?P<value>.+?)\s*$",
     re.I | re.M,
 )
-_FORBIDDEN_OPERATION_RE = re.compile(
-    r"\b("
-    r"make\s+deploy|deploy-detached|systemctl|service\s+(?:restart|stop|start)|"
-    r"git\s+push\s+origin\s+main|git\s+push\s+.*\bmain\b|git\s+reset\s+--hard|"
-    r"git\s+checkout\s+(?:main|master)\b|git\s+merge\b|rm\s+-rf|"
-    r"gh\s+pr\s+merge|auto-?merge|send\.py|wacli|email|curl\s+.*(?:/send|/deploy)"
-    r")\b",
-    re.I,
-)
 
 _advance_request_callback: Callable[[str], None] | None = None
 _advance_request_lock = threading.Lock()
@@ -904,23 +895,6 @@ def mark_active_noop(agent_id: str) -> None:
         (now, now, run["run_id"]),
     )
     log("dreamingNoop", f"agent={agent_id} run={run['run_id']}")
-
-
-def classify_dream_operation(command: str) -> tuple[bool, str]:
-    """Return whether a proposed dream-side operation is allowed.
-
-    This is intentionally conservative. The isolated runner may read files,
-    run tests/smoke checks, and prepare disposable review artifacts, but it may
-    not deploy, mutate the shared working tree/main, message third parties, or
-    destructively alter durable state.
-    """
-    raw = " ".join(str(command or "").split())
-    if not raw:
-        return False, "empty operation"
-    match = _FORBIDDEN_OPERATION_RE.search(raw)
-    if match:
-        return False, f"forbidden operation: {match.group(1)}"
-    return True, ""
 
 
 def _record_thread_evidence(thread_id: str, response: str, *,

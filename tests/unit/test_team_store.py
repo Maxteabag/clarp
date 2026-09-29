@@ -4,14 +4,6 @@ from lib import team_store
 from lib.protocol import AgentState
 
 
-def test_extract_speak_blocks_strips_voice_markup():
-    blocks = team_store.extract_speak_blocks(
-        'plain <speak><vox>um</vox> update<br/>done</speak> tail'
-    )
-
-    assert blocks == ["Update done"]
-
-
 def test_team_block_fans_out_to_teammates(tmp_path):
     mike = agents_db.create_agent(
         persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike"

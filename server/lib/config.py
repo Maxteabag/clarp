@@ -821,7 +821,3 @@ def reset_cache() -> None:
         _CACHED_PATH = None
         _CACHED_STAT = None
         _LAST_STAT_AT = 0.0
-
-
-def reset_cache_for_tests() -> None:
-    reset_cache()

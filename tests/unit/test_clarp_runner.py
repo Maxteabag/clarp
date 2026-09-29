@@ -49,12 +49,12 @@ def test_build_cmd_no_session_omits_continuity_flag():
 
 
 def test_build_cmd_can_use_clarp_provider(monkeypatch):
-    config.reset_cache_for_tests()
+    config.reset_cache()
     monkeypatch.setenv("CLAUDE_PWA_CLAUDE_CLI", "clarp")
     try:
         assert CLAUDE.build_cmd()[0] == "clarp"
     finally:
-        config.reset_cache_for_tests()
+        config.reset_cache()
 
 
 def test_build_cmd_existing_session_uses_resume():

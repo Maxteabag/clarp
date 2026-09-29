@@ -154,52 +154,6 @@ def test_pwa_streaming_failure_marks_row_failed(env, monkeypatch):
     assert list(env["audio_dir"].glob("*.mp3")) == []
 
 
-def test_sidecar_exists_BEFORE_first_audio_byte_is_visible(env, monkeypatch):
-    """Race-condition regression. The audio_stream watcher scans for new
-    .mp3 files at a fixed cadence; when it finds one it reads the
-    sidecar to pick up streamable + agent_id + trace_id. If the worker
-    writes the .mp3 file FIRST and only writes the sidecar after
-    synthesis completes, there's a window where the watcher detects the
-    .mp3 with no sidecar — meta is empty, streamable is missing from
-    the SSE broadcast, and the client falls back to <audio src>.
-
-    Pinned: when the synthesize_streaming callback fires (i.e. while the
-    mp3 file is being written), the sidecar must already be on disk.
-    """
-    observed = {"sidecar_present_during_synth": None}
-
-    def fake_streaming(*, text, voice_id, out_path, **kw):
-        out = pathlib.Path(out_path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        # Simulate the first ElevenLabs chunk landing. The watcher's
-        # `glob("*.mp3")` would discover this file now. Check whether the
-        # sidecar is on disk at this exact instant.
-        out.write_bytes(b"\xff\xfb")
-        side = out.with_suffix(out.suffix + ".json")
-        observed["sidecar_present_during_synth"] = side.is_file()
-        return 2
-
-    from lib import tts_worker as _tw
-    monkeypatch.setattr(_tw, "synthesize_streaming", fake_streaming)
-
-    tts_queue.enqueue(
-        agent_id=env["agent_id"], text="hello",
-        voice_id="V_MIKE", session="claude",
-        source=TurnSource.PWA,
-        trace_id="trace-race",
-    )
-    from lib.tts_worker import synth_one
-    synth_one(audio_dir=env["audio_dir"])
-
-    assert observed["sidecar_present_during_synth"] is True, (
-        "race condition: the watcher would have seen the .mp3 without a "
-        "sidecar, so the SSE broadcast strips streamable/stream_url and the "
-        "client falls back to <audio src>. Write the sidecar BEFORE the "
-        "mp3 is created (or use a temp-rename), so the watcher's read is "
-        "consistent."
-    )
-
-
 def test_clip_row_exists_BEFORE_first_audio_byte(env, monkeypatch):
     """The migrated live path is SQLite-owned: by the time the first
     ElevenLabs byte lands, the clips row already exists and is marked

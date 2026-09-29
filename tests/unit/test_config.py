@@ -6,7 +6,7 @@ from lib import config
 
 
 def test_missing_config_uses_loopback_safe_default(tmp_path):
-    config.reset_cache_for_tests()
+    config.reset_cache()
     loaded = config.load(tmp_path / "missing.toml")
     assert loaded.bind_addr == "127.0.0.1"
 
@@ -14,7 +14,7 @@ def test_missing_config_uses_loopback_safe_default(tmp_path):
 def test_malformed_config_fails_closed(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[server\n")
-    config.reset_cache_for_tests()
+    config.reset_cache()
     with pytest.raises(config.ConfigError):
         config.load(path)
 
@@ -26,7 +26,7 @@ def test_roster_merges_over_builtin_defaults(tmp_path):
     shadow the rest.)"""
     path = tmp_path / "config.toml"
     path.write_text('[roster]\nMike = "custom-voice-id"\nNewbie = "newbie-voice"\n')
-    config.reset_cache_for_tests()
+    config.reset_cache()
     loaded = config.load(path)
     # Every built-in persona still present...
     for name in config.DEFAULT_ROSTER:
@@ -41,7 +41,7 @@ def test_cartesia_voices_merge_over_defaults(tmp_path):
     """[cartesia.voices] also merges over the built-ins rather than replacing."""
     path = tmp_path / "config.toml"
     path.write_text('[cartesia.voices]\nMike = "cartesia-override"\n')
-    config.reset_cache_for_tests()
+    config.reset_cache()
     loaded = config.load(path)
     for name in config.DEFAULT_CARTESIA_VOICES:
         assert name in loaded.cartesia_voices
@@ -52,7 +52,7 @@ def test_no_roster_section_uses_full_builtin(tmp_path):
     """No [roster] at all → the complete built-in roster."""
     path = tmp_path / "config.toml"
     path.write_text("[server]\nport = 7682\n")
-    config.reset_cache_for_tests()
+    config.reset_cache()
     loaded = config.load(path)
     assert set(loaded.roster) == set(config.DEFAULT_ROSTER)
 
@@ -60,7 +60,7 @@ def test_no_roster_section_uses_full_builtin(tmp_path):
 def test_claude_cli_provider_defaults_to_official(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[agents]\n")
-    config.reset_cache_for_tests()
+    config.reset_cache()
     loaded = config.load(path)
     assert loaded.claude_cli == "claude"
 
@@ -68,11 +68,11 @@ def test_claude_cli_provider_defaults_to_official(tmp_path):
 def test_claude_cli_provider_can_use_clarp(tmp_path, monkeypatch):
     path = tmp_path / "config.toml"
     path.write_text('[agents]\nclaude_cli = "clarp"\n')
-    config.reset_cache_for_tests()
+    config.reset_cache()
     loaded = config.load(path)
     assert loaded.claude_cli == "clarp"
 
-    config.reset_cache_for_tests()
+    config.reset_cache()
     monkeypatch.setenv("CLAUDE_PWA_CLAUDE_CLI", "claude")
     loaded = config.load(path)
     assert loaded.claude_cli == "claude"
@@ -85,7 +85,7 @@ def test_claude_cli_provider_can_use_clarp(tmp_path, monkeypatch):
 def test_claude_account_switch_command_requires_explicit_argv(tmp_path, value, expected):
     path = tmp_path / "config.toml"
     path.write_text(f'[agents]\nclaude_account_switch_command = {value}\n')
-    config.reset_cache_for_tests()
+    config.reset_cache()
     assert config.load(path).claude_account_switch_command == expected
 
 
@@ -171,7 +171,7 @@ def test_concurrent_first_loads_share_one_parse(tmp_path, monkeypatch):
 def test_anonymous_launch_names_speak_with_their_archetype_voice(tmp_path):
     # Issue 127: "Claude-5628" carries no voice of its own; the Cartesia map is
     # keyed on the archetype name the launch path minted it from.
-    config.reset_cache_for_tests()
+    config.reset_cache()
     loaded = config.load(tmp_path / "missing.toml")
     assert loaded.cartesia_voice_for("Claude") is not None
     assert loaded.cartesia_voice_for("Claude-5628") == loaded.cartesia_voice_for("Claude")
@@ -179,4 +179,4 @@ def test_anonymous_launch_names_speak_with_their_archetype_voice(tmp_path):
     # Only the four-hex-digit suffix is an anonymous name; other names stay unmapped.
     assert loaded.cartesia_voice_for("Nobody-5628") is None
     assert loaded.cartesia_voice_for("Claude-Smith") is None
-    config.reset_cache_for_tests()
+    config.reset_cache()
