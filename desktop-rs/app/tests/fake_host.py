@@ -170,7 +170,15 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 return self.reply(200, {"jobs": jobs})
         if url.path == "/artifacts":
-            return self.reply(200, {"artifacts": [{"artifact_id": "art1", "title": "Report"}]})
+            return self.reply(200, {"artifacts": [
+                {"artifact_id": "art1", "title": "Report"},
+                {"artifact_id": "doc1", "title": "Findings", "summary": "What we found", "type": "document", "session": "rachel",
+                 "content": "# Findings\n\nAll *good*."},
+                {"artifact_id": "html1", "title": "Page", "type": "research", "session": "rachel",
+                 "content": "<!doctype html><html><body><h1>Page</h1><img src=\"https://tracker.example/p.gif\"></body></html>"},
+                {"artifact_id": "link1", "title": "Link", "type": "link", "session": "mike", "content": "https://example.com"}]})
+        if url.path == "/message-tool-details":
+            return self.reply(200, {"tools": [{"name": "Bash", "input": {"command": "ls"}}], "display_cells": []})
         if url.path == "/agent-model-options":
             return self.reply(200, {"backends": []})
         if url.path == "/static/avatars/rachel.png":
@@ -377,6 +385,8 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 for session, items in turn_queue.items():
                     turn_queue[session] = [i for i in items if i["queue_id"] != item]
+            return self.reply(200, {"ok": True})
+        if url.path == "/preview":
             return self.reply(200, {"ok": True})
         if url.path == "/clips/ack":
             return self.reply(200, {"ok": True})

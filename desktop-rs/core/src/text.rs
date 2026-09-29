@@ -4,6 +4,9 @@
 use std::sync::LazyLock;
 
 use fancy_regex::{Captures, Regex};
+use serde_json::Value;
+
+use crate::json::Object;
 
 fn re(pattern: &str) -> Regex {
     Regex::new(pattern).expect("static pattern compiles")
@@ -365,4 +368,33 @@ pub fn markdown_display_blocks(markdown: &str) -> Vec<String> {
     }
     flush(&mut current, &mut blocks);
     blocks
+}
+
+
+/// Report artifacts whose body the desktop shows itself.
+pub fn report_type_has_body(kind: &str) -> bool {
+    matches!(kind, "document" | "research" | "html_form")
+}
+
+pub fn artifact_is_viewable_report(artifact: &Object) -> bool {
+    report_type_has_body(&crate::json::string(artifact, "type")) && !crate::json::string(artifact, "content").trim().is_empty()
+}
+
+/// What the report view shows for an artifact: HTML is sanitised against
+/// the Host (only it can reference remote resources); Markdown goes to the
+/// Markdown reader unchanged. None when it is not a viewable report.
+pub fn report_for_artifact(artifacts: &[Value], artifact_id: &str, host_origin: &str) -> Option<Object> {
+    let artifact = artifacts.iter().filter_map(Value::as_object).find(|a| crate::json::string(a, "artifact_id") == artifact_id)?;
+    if !artifact_is_viewable_report(artifact) {
+        return None;
+    }
+    let content = crate::json::string(artifact, "content");
+    let html = looks_like_html_report(&content);
+    let field = |key: &str| artifact.get(key).cloned().unwrap_or(Value::Null);
+    let report = serde_json::json!({
+        "artifact_id": artifact_id, "title": field("title"), "summary": field("summary"), "type": field("type"),
+        "session": field("session"), "isHtml": html,
+        "body": if html { sanitized_report_html(&content, host_origin) } else { content },
+    });
+    report.as_object().cloned()
 }
