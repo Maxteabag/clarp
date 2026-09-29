@@ -924,6 +924,10 @@ pub struct AppControllerRust {
     turn_queue_generation: u64,
     queue_action_sessions: HashMap<String, String>,
     composer_revision: u64,
+    /// Durable transcript rows between runs; None in screenshot scenarios.
+    transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
+    /// session -> pending save generation
+    cache_saves: HashMap<String, u64>,
     /// Rendered rows by options and markdown, bounded by bytes (C++
     /// `m_styledMarkdown`): rows re-render as the transcript recycles them.
     styled_markdown: std::cell::RefCell<(HashMap<String, String>, usize)>,
@@ -996,6 +1000,11 @@ impl cxx_qt::Initialize for AppController {
             rust.avatar_motion = Owned(new_avatar_motion_clock());
             rust.audio = Owned(new_audio_controller());
             rust.settings = Settings::user();
+            rust.transcript_cache = std::env::var_os("CLARP_SCREENSHOT_SCENARIO")
+                .is_none()
+                .then(clarp_core::media::cache_dir)
+                .flatten()
+                .map(|root| clarp_core::transcript_cache::TranscriptCache::new(root.join("transcripts")));
             let saved = rust.settings.string("connection/baseUrl", "http://127.0.0.1:7682");
             rust.base_url = normalized_base_url(&std::env::var("CLARP_BASE_URL").unwrap_or(saved));
             rust.token = std::env::var("CLARP_TOKEN").unwrap_or_else(|_| default_token());
@@ -1421,14 +1430,59 @@ impl AppController {
         }
     }
 
+    /// Saves a chat's durable rows shortly after it changes (C++
+    /// `scheduleConversationCache`): a burst of changes writes once.
+    fn schedule_conversation_cache(mut self: Pin<&mut Self>, session: &str) {
+        if self.transcript_cache.is_none() {
+            return;
+        }
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            let slot = rust.cache_saves.entry(session.to_owned()).or_default();
+            *slot += 1;
+            *slot
+        };
+        let (qt, session) = (self.qt_thread(), session.to_owned());
+        crate::runtime::after(Duration::from_millis(clarp_core::transcript_cache::SAVE_DELAY_MS), move || {
+            let queued = qt.queue(move |controller| controller.save_conversation_cache(&session, generation));
+            if queued.is_err() {
+                eprintln!("AppController: dropped a transcript cache save; the controller is gone");
+            }
+        });
+    }
+
+    fn save_conversation_cache(self: Pin<&mut Self>, session: &str, generation: u64) {
+        if self.cache_saves.get(session) != Some(&generation) {
+            return;
+        }
+        let Some(snapshot) = self.conversations.get(session).and_then(|m| m.as_ref()).map(|m| m.conversation().cache_snapshot()) else { return };
+        if let Some(cache) = self.transcript_cache.as_ref()
+            && let Err(error) = cache.save(&self.base_url, session, &snapshot)
+        {
+            eprintln!("AppController: could not cache {session}'s transcript: {error}");
+        }
+    }
+
     fn ensure_conversation(mut self: Pin<&mut Self>, session: &str) {
         if session.is_empty() || self.conversations.contains_key(session) {
             return;
         }
         let mut model = new_conversation_model();
+        let cached = self.transcript_cache.as_ref().map(|cache| cache.load(&self.base_url, session)).unwrap_or_default();
         if let Some(model) = model.as_mut() {
-            model.mutate(|core| core.open_session(session));
+            model.mutate(|core| {
+                core.open_session(session);
+                core.restore_cache_snapshot(&cached);
+            });
         }
+        let this = ControllerPtr(unsafe { self.as_mut().get_unchecked_mut() } as *mut AppController);
+        let owned = session.to_owned();
+        let cache_save = model.as_mut().map(|m| {
+            m.connect_changed(
+                move |_| unsafe { Pin::new_unchecked(&mut *this.get()) }.schedule_conversation_cache(&owned),
+                ConnectionType::QueuedConnection,
+            )
+        });
         let this = ControllerPtr(unsafe { self.as_mut().get_unchecked_mut() } as *mut AppController);
         let owned = session.to_owned();
         let replacement = model.as_mut().map(|m| {
@@ -1448,7 +1502,7 @@ impl AppController {
             )
         });
         let mut rust = self.as_mut().rust_mut();
-        rust.guards.extend(replacement.into_iter().chain(confirmed));
+        rust.guards.extend(replacement.into_iter().chain(confirmed).chain(cache_save));
         rust.conversations.insert(session.to_owned(), model);
     }
 
@@ -1517,10 +1571,12 @@ impl AppController {
         self.as_mut().rust_mut().current = None;
         let sessions: Vec<String> = self.conversations.keys().cloned().collect();
         for session in sessions {
+            let cached = self.transcript_cache.as_ref().map(|cache| cache.load(&normalized, &session)).unwrap_or_default();
             if let Some(model) = self.as_mut().conversation_mut(&session) {
                 model.mutate(|core| {
                     core.open_session("");
                     core.open_session(&session);
+                    core.restore_cache_snapshot(&cached);
                 });
             }
         }
