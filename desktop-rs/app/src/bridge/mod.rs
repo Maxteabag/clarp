@@ -3,6 +3,9 @@
 #[allow(dead_code)]
 pub mod agent_filter_model;
 pub mod agent_list_model;
+// applicationStateChanged is emitted by Qt through a string connection.
+#[allow(dead_code)]
+pub mod avatar_motion;
 // createAgent keeps the C++ QML signature (nine arguments).
 #[allow(clippy::too_many_arguments)]
 pub mod controller;

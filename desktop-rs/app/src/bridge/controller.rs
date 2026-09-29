@@ -26,6 +26,7 @@ use super::agent_list_model::qobject::{AgentListModel, new_agent_list_model};
 use super::conversation_model::qobject::{ConversationModel, new_conversation_model};
 use super::directory_models::qobject::{ContactListModel, VoiceListModel, new_contact_list_model, new_voice_list_model};
 use super::pane_tree_model::qobject::{PaneTreeModel, new_pane_tree_model};
+use super::avatar_motion::qobject::{AvatarMotionClock, new_avatar_motion_clock};
 use super::tool_narrator::qobject::{ToolNarrator, new_tool_narrator};
 
 #[cxx_qt::bridge]
@@ -53,6 +54,8 @@ pub mod qobject {
         type PaneTreeModel = crate::bridge::pane_tree_model::qobject::PaneTreeModel;
         include!("clarp-desktop/src/bridge/tool_narrator.cxxqt.h");
         type ToolNarrator = crate::bridge::tool_narrator::qobject::ToolNarrator;
+        include!("clarp-desktop/src/bridge/avatar_motion.cxxqt.h");
+        type AvatarMotionClock = crate::bridge::avatar_motion::qobject::AvatarMotionClock;
     }
 
     extern "RustQt" {
@@ -63,6 +66,7 @@ pub mod qobject {
         #[qproperty(*mut ContactListModel, contacts, READ = contacts_value, CONSTANT)]
         #[qproperty(*mut PaneTreeModel, panes, READ = panes_value, CONSTANT)]
         #[qproperty(*mut VoiceListModel, voices, READ = voices_value, CONSTANT)]
+        #[qproperty(*mut AvatarMotionClock, avatar_motion, cxx_name = "avatarMotion", READ = avatar_motion_value, CONSTANT)]
         #[qproperty(*mut ToolNarrator, tool_narrator, cxx_name = "toolNarrator", READ = tool_narrator_value, CONSTANT)]
         #[qproperty(*mut ConversationModel, conversation, READ = conversation_value, NOTIFY = conversation_changed)]
         #[qproperty(QString, base_url, cxx_name = "baseUrl", READ = base_url_value, WRITE = set_base_url, NOTIFY = base_url_changed)]
@@ -156,6 +160,7 @@ pub mod qobject {
         fn panes_value(self: &AppController) -> *mut PaneTreeModel;
         fn voices_value(self: &AppController) -> *mut VoiceListModel;
         fn tool_narrator_value(self: &AppController) -> *mut ToolNarrator;
+        fn avatar_motion_value(self: &AppController) -> *mut AvatarMotionClock;
         fn conversation_value(self: &AppController) -> *mut ConversationModel;
         fn base_url_value(self: &AppController) -> QString;
         #[cxx_name = "setBaseUrl"]
@@ -799,6 +804,7 @@ pub struct AppControllerRust {
     voices: Owned<VoiceListModel>,
     empty_conversation: Owned<ConversationModel>,
     narrator: Owned<ToolNarrator>,
+    avatar_motion: Owned<AvatarMotionClock>,
     conversations: HashMap<String, UniquePtr<ConversationModel>>,
     current: Option<String>,
     guards: Vec<QMetaObjectConnectionGuard>,
@@ -930,6 +936,7 @@ impl cxx_qt::Initialize for AppController {
             rust.voices = Owned(new_voice_list_model());
             rust.empty_conversation = Owned(new_conversation_model());
             rust.narrator = Owned(new_tool_narrator());
+            rust.avatar_motion = Owned(new_avatar_motion_clock());
             rust.settings = Settings::user();
             let saved = rust.settings.string("connection/baseUrl", "http://127.0.0.1:7682");
             rust.base_url = normalized_base_url(&std::env::var("CLARP_BASE_URL").unwrap_or(saved));
@@ -1044,6 +1051,9 @@ impl AppController {
     fn tool_narrator_value(&self) -> *mut ToolNarrator {
         pointer(&self.narrator)
     }
+    fn avatar_motion_value(&self) -> *mut AvatarMotionClock {
+        pointer(&self.avatar_motion)
+    }
     fn conversation_value(&self) -> *mut ConversationModel {
         match self.current.as_ref().and_then(|s| self.conversations.get(s)) {
             Some(model) => pointer(model),
@@ -1155,6 +1165,10 @@ impl AppController {
         unsafe { self.rust_mut().get_unchecked_mut() }.archived.as_mut()
     }
 
+    fn avatar_motion_mut(self: Pin<&mut Self>) -> Option<Pin<&mut AvatarMotionClock>> {
+        unsafe { self.rust_mut().get_unchecked_mut() }.avatar_motion.as_mut()
+    }
+
     fn narrator_mut(self: Pin<&mut Self>) -> Option<Pin<&mut ToolNarrator>> {
         unsafe { self.rust_mut().get_unchecked_mut() }.narrator.as_mut()
     }
@@ -1188,6 +1202,15 @@ impl AppController {
                 ConnectionType::QueuedConnection,
             ));
         }
+        let reduced = self.settings.boolean("appearance/reducedMotion", false);
+        let this = ControllerPtr(unsafe { self.as_mut().get_unchecked_mut() } as *mut AppController);
+        if let Some(mut motion) = self.as_mut().avatar_motion_mut() {
+            motion.as_mut().set_reduced_motion(reduced);
+            guards.push(motion.connect_changed(
+                move |_| unsafe { Pin::new_unchecked(&mut *this.get()) }.save_reduced_motion(),
+                ConnectionType::QueuedConnection,
+            ));
+        }
         let this = ControllerPtr(unsafe { self.as_mut().get_unchecked_mut() } as *mut AppController);
         if let Some(narrator) = self.as_mut().narrator_mut() {
             guards.push(narrator.connect_detail_level_changed(
@@ -1206,7 +1229,28 @@ impl AppController {
         }
     }
 
+    fn save_reduced_motion(mut self: Pin<&mut Self>) {
+        let Some(reduced) = self.avatar_motion.as_ref().map(|m| m.reduced_motion_value_pub()) else { return };
+        if self.settings.boolean("appearance/reducedMotion", false) != reduced {
+            self.as_mut().rust_mut().settings.set("appearance/reducedMotion", reduced);
+        }
+    }
+
     fn bump_agent_revision(mut self: Pin<&mut Self>) {
+        // Avatars pulse while their agent thinks, runs a tool or compacts.
+        let active: std::collections::HashSet<String> = self
+            .roster()
+            .map(|roster| {
+                roster
+                    .sessions()
+                    .into_iter()
+                    .filter(|s| matches!(roster.display_state(s).as_deref(), Some("thinking" | "tool" | "compacting" | "running")))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(motion) = self.as_mut().avatar_motion_mut() {
+            motion.reconcile(&active);
+        }
         self.as_mut().rust_mut().agent_revision += 1;
         self.as_mut().agent_revision_changed();
         self.selected_agent_changed();

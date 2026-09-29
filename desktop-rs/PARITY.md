@@ -43,7 +43,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/terminal/TerminalLaunch` | 36 | `desktop-rs/src/terminal/` | todo |
 | `src/views/TranscriptLayout` | 890 | `core/src/transcript_layout.rs` + `app/src/bridge/transcript_layout.rs` + `app/src/bridge/quick.rs` | verified: geometry in `core/tests/transcript_layout.rs`; the native QQuickItem (cxx-qt base QQuickItem, C++ creation semantics via QQmlComponent begin/complete + indexOfProperty + QQmlPropertyMap, signature-forwarded model/Flickable signals) runs the C++ test scene in `app/tests/qml/transcript_layout_probe.qml` |
 | `src/views/TranscriptRows` | 310 | `core/src/transcript_rows.rs` + `app/src/bridge/transcript_rows.rs` | verified (`core/tests/transcript_rows.rs`; list model over any source via signature-forwarded signals in `app/tests/qml/transcript_rows_probe.qml`: finishing splits without reset, rows map around split messages) |
-| `src/app/AvatarMotionClock.h` (header-only) | 224 | `desktop-rs/src/app/` | todo |
+| `src/app/AvatarMotionClock.h` (header-only) | 224 | `core/src/avatar_motion.rs` + `app/src/bridge/avatar_motion.rs` | verified (`core/tests/avatar_motion.rs`; the real Main.qml binds `avatarMotion` without errors); pending: window-visibility watching (`watchMotionWindow`) with the platform step, and observers are released by QML `onDestruction` rather than a `destroyed` hook |
 | `src/app/DesktopPalette.h` (header-only) | 40 | `desktop-rs/src/app/` | todo |
 | `src/app/KeyboardSmokeCheck.h` (header-only) | 330 | `desktop-rs/src/app/` | todo |
 | `src/app/LocalReport.h` (header-only) | 40 | `desktop-rs/src/app/` | todo |
