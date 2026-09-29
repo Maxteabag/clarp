@@ -190,12 +190,9 @@ def test_background_jobs_skill_keeps_lifecycle_guards():
         assert guard in skill
 
 
-def test_managed_janitor_skill_is_distributed_with_its_helper():
+def test_managed_janitor_skill_is_in_the_core_pack():
     manifest = json.loads((ROOT / "skills/manifest.json").read_text())
     assert any(s["id"] == "clarp-janitors" and s["pack"] == "core" for s in manifest["skills"])
-    skill = ROOT / "skills/clarp-janitors"
-    assert (skill / "scripts/janitor_run.py").is_file()
-    assert (skill / "references/pilot-migration.md").is_file()
 
 
 def test_leader_instructions_preserve_progress_and_permission_duties_without_caption_formatting():

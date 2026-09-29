@@ -77,6 +77,25 @@ def test_skill_manifest_contains_only_agreed_packs():
     assert all(item["id"].startswith("clarp-") for item in manifest["skills"])
 
 
+def test_every_managed_skill_ships_the_files_its_instructions_name():
+    """Setup links skills/<id> by manifest id; an agent reading SKILL.md is
+    sent to its helpers by relative path, so a missing one is a dead end."""
+    import re
+    code = re.compile(r"`(?:SKILL_DIR/)?((?:scripts|references)/[A-Za-z0-9_./-]*[A-Za-z0-9_])")
+    link = re.compile(r"\]\(([^)#\s]+)\)")
+    missing = []
+    for item in json.loads((ROOT / "skills/manifest.json").read_text())["skills"]:
+        skill = ROOT / "skills" / item["id"]
+        text = (skill / "SKILL.md").read_text()
+        assert re.search(rf"^name:\s*{re.escape(item['id'])}\s*$", text, re.M), item["id"]
+        refs = set(code.findall(text)) | {
+            target for target in link.findall(text)
+            if "://" not in target and not target.startswith(("/", "~", "mailto:"))}
+        missing += [f"{item['id']}: {ref}" for ref in sorted(refs)
+                    if not (skill / ref).exists() and not (ROOT / ref).exists()]
+    assert not missing
+
+
 def test_cli_parses_custom_voice_adapter_management():
     install = admin.parser().parse_args([
         "tts", "adapters", "install", "/tmp/example", "--replace",
