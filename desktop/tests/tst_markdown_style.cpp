@@ -93,6 +93,24 @@ class MarkdownStyleTest : public QObject {
         QCOMPARE(heading.text(), QStringLiteral("Title"));
         QCOMPARE(heading.begin().fragment().charFormat().intProperty(QTextFormat::FontPixelSize), 21);
     }
+    void mixedInlineFormatsInOneBlockStayInRange() {
+        // Restyling splits fragments mid-walk; every edit must land on a valid
+        // position and the run must terminate without setPosition warnings.
+        QString markdown = QStringLiteral("# Head `a` [l](https://x.y) **b** `c`\n\n");
+        for (int i = 0; i < 400; ++i)
+            markdown += QStringLiteral("Line %1 with `code` and [link](https://e.com/%1) and *em* `more` text.\n\n").arg(i);
+        QTextDocument document;
+        document.setMarkdown(markdown);
+        QTest::failOnWarning(QRegularExpression(QStringLiteral("QTextCursor::setPosition")));
+        clarp::MarkdownStyleOptions options;
+        options.monoFamily = QStringLiteral("Mono Test");
+        QVERIFY(clarp::applyMarkdownStyle(&document, options));
+        const QTextBlock block = blockStarting(&document, QStringLiteral("Line 399"));
+        bool sawCode = false;
+        for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it)
+            if (it.fragment().charFormat().fontFamilies().toStringList().contains(QStringLiteral("Mono Test"))) sawCode = true;
+        QVERIFY(sawCode);
+    }
     void optionsParseFromQml() {
         const auto options = clarp::markdownStyleOptions({{QStringLiteral("bodyPixelSize"), 17},
                                                           {QStringLiteral("link"), QStringLiteral("#1f7a78")},
