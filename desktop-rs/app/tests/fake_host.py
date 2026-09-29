@@ -13,7 +13,7 @@ import queue
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 TOKEN = "probe-token"
 state_lock = threading.Lock()
@@ -183,7 +183,21 @@ class Handler(BaseHTTPRequestHandler):
         global outage_until
         url = urlparse(self.path)
         length = int(self.headers.get("Content-Length", "0"))
-        body = json.loads(self.rfile.read(length) or b"{}")
+        raw = self.rfile.read(length)
+        if url.path == "/upload":
+            # Raw file bytes; metadata travels in headers.
+            if self.in_outage():
+                return
+            name = unquote(self.headers.get("X-File-Name", "file"))
+            record({"method": "POST", "path": url.path, "body": {
+                "name": name, "size": len(raw),
+                "content_type": self.headers.get("Content-Type", ""),
+                "session": self.headers.get("X-Session", ""),
+                "upload_id": self.headers.get("X-Upload-ID", "")}})
+            if name.startswith("fail"):
+                return self.reply(500, {"error": "upload refused"})
+            return self.reply(200, {"path": f"/srv/uploads/{name}", "name": name})
+        body = json.loads(raw or b"{}")
         if url.path == "/__control/outage":
             # Test control, outside the protocol: drop every stream and refuse
             # requests for `seconds`.

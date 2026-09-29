@@ -25,6 +25,11 @@ for probe in app/tests/qml/*_probe.qml; do
         for _ in $(seq 50); do [ -s "$scratch/$name/port" ] && break; sleep 0.1; done
         base_url="http://127.0.0.1:$(cat "$scratch/$name/port")"
     fi
+    # "// fixture: NAME TEXT" lines write files into the probe's scratch
+    # directory (next to host.log), for probes that need real files.
+    sed -n 's#^// fixture: ##p' "$probe" | while read -r fixture text; do
+        printf '%s' "$text" > "$scratch/$name/$fixture"
+    done
     # "// env: KEY=VALUE" lines set per-probe variables; $SCRATCH is the
     # probe's scratch directory.
     probe_env=$(sed -n 's#^// env: ##p' "$probe" | sed "s#\$SCRATCH#$scratch/$name#g")

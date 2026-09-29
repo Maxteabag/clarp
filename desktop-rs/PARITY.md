@@ -9,7 +9,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 
 | C++ source | Lines | Rust target | Status |
 |---|---|---|---|
-| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: connect/snapshot/selection/log sync/send/stop/SSE, drafts/focus, updates/jobs, launch/lifecycle/catalog, narrator, preferences, teams and turn queue, profile/prompt history, settings status/TTS, voices and orchestrator verified in `app/tests/qml/controller*_probe.qml` against `fake_host.py`; attachments, directories, credentials, media pending |
+| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: connect/snapshot/selection/log sync/send/stop/SSE, drafts/focus, updates/jobs, launch/lifecycle/catalog, narrator, preferences, teams and turn queue, profile/prompt history, settings status/TTS, voices, orchestrator and composer attachments (upload, shared filesystem, send) verified in `app/tests/qml/controller*_probe.qml` against `fake_host.py`; directories, credentials, clipboard image paste, media pending |
 | `src/app/CredentialStore` | 245 | `desktop-rs/src/app/` | todo |
 | `src/app/InstanceServer` | 199 | `desktop-rs/src/app/` | todo |
 | `src/app/MarkdownStyle` | 250 | `desktop-rs/src/app/` | todo |
@@ -143,7 +143,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::apiClientDropsRepliesFromPreviousEndpointGeneration` | `net/tests/clients.rs::api_client_drops_replies_from_previous_endpoint_generation` | verified |
 | `tst_native_core::paneDraftAndFocusSurviveLayoutStateChanges` | `app/tests/qml/controller_lifecycle_probe.qml` | verified |
 | `tst_native_core::paneActivationAlwaysTargetsItsComposer` | `app/tests/qml/controller_lifecycle_probe.qml` (focus follows on the next event-loop turn, not synchronously) | verified |
-| `tst_native_core::paneDraftIsDurableAndScopedToServerAndConversation` | `app/tests/qml/controller_lifecycle_probe.qml` + `core/tests/settings.rs::draft_keys_are_scoped_to_host_and_session` | wip: text drafts verified; attachments and sharedFilesystem pending |
+| `tst_native_core::paneDraftIsDurableAndScopedToServerAndConversation` | `app/tests/qml/controller_lifecycle_probe.qml` + `app/tests/qml/controller_attachments_probe.qml` + `core/tests/settings.rs::draft_keys_are_scoped_to_host_and_session` + `core/tests/attachments.rs` | verified |
 | `tst_native_core::transcriptCacheRestoresDurableRowsWithoutStaleRegression` | | todo |
 | `tst_native_core::credentialStoreRoundTrip` | | todo |
 | `tst_native_core::appControllerCompletesCoreProtocolFlow` | `app/tests/qml/controller_probe.qml` | wip: core flow verified; audio/clip parts pending (media step) |

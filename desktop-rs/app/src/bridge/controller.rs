@@ -39,6 +39,8 @@ pub mod qobject {
         type QJsonObject = cxx_qt_lib::QJsonObject;
         include!("cxx-qt-lib/qstringlist.h");
         type QStringList = cxx_qt_lib::QStringList;
+        include!("cxx-qt-lib/qurl.h");
+        type QUrl = cxx_qt_lib::QUrl;
 
         include!("clarp-desktop/src/bridge/agent_list_model.cxxqt.h");
         type AgentListModel = crate::bridge::agent_list_model::qobject::AgentListModel;
@@ -105,8 +107,8 @@ pub mod qobject {
         #[qproperty(QJsonArray, reading_themes, cxx_name = "readingThemes", READ = reading_themes_value, CONSTANT)]
         #[qproperty(u64, avatar_revision, cxx_name = "avatarRevision", READ = zero_revision, NOTIFY = agent_revision_changed)]
         #[qproperty(u64, media_revision, cxx_name = "mediaRevision", READ = zero_revision, NOTIFY = agent_revision_changed)]
-        #[qproperty(u64, composer_revision, cxx_name = "composerRevision", READ = zero_revision, NOTIFY = agent_revision_changed)]
-        #[qproperty(bool, uploading, READ = false_value, NOTIFY = agent_revision_changed)]
+        #[qproperty(u64, composer_revision, cxx_name = "composerRevision", READ = composer_revision_value, NOTIFY = composer_revision_changed)]
+        #[qproperty(bool, uploading, READ = uploading_value, NOTIFY = composer_revision_changed)]
         #[qproperty(i32, unread_agent_conversations, cxx_name = "unreadAgentConversations", READ = zero_count, NOTIFY = agent_revision_changed)]
         #[qproperty(QJsonArray, agent_conversations, cxx_name = "agentConversations", READ = empty_array, NOTIFY = agent_revision_changed)]
         #[qproperty(QJsonObject, profile_task_plan, cxx_name = "profileTaskPlan", READ = profile_task_plan_value, NOTIFY = profile_changed)]
@@ -213,6 +215,31 @@ pub mod qobject {
         fn reading_style_value(self: &AppController) -> QJsonObject;
         fn reading_themes_value(self: &AppController) -> QJsonArray;
         fn zero_revision(self: &AppController) -> u64;
+        fn composer_revision_value(self: &AppController) -> u64;
+        fn uploading_value(self: &AppController) -> bool;
+        #[qsignal]
+        #[cxx_name = "composerRevisionChanged"]
+        fn composer_revision_changed(self: Pin<&mut AppController>);
+        #[qinvokable]
+        #[cxx_name = "composerAttachments"]
+        fn composer_attachments(self: &AppController, pane_id: &QString, session: &QString) -> QJsonArray;
+        #[qinvokable]
+        #[cxx_name = "composerCanSend"]
+        fn composer_can_send(self: &AppController, pane_id: &QString, session: &QString) -> bool;
+        #[qinvokable]
+        #[cxx_name = "attachLocalFile"]
+        fn attach_local_file(self: Pin<&mut AppController>, pane_id: &QString, session: &QString, file_url: &QUrl);
+        #[qinvokable]
+        #[cxx_name = "removeComposerAttachment"]
+        fn remove_composer_attachment(self: Pin<&mut AppController>, pane_id: &QString, session: &QString, attachment_id: &QString);
+        #[qinvokable]
+        #[cxx_name = "sendComposerMessage"]
+        fn send_composer_message(self: Pin<&mut AppController>, pane_id: &QString, session: &QString, text: &QString, queue_if_busy: bool) -> bool;
+        /// Image paste needs clipboard bindings that are not ported yet:
+        /// returning false lets the native text paste proceed.
+        #[qinvokable]
+        #[cxx_name = "pasteClipboardImage"]
+        fn paste_clipboard_image(self: Pin<&mut AppController>, pane_id: &QString, session: &QString) -> bool;
         fn false_value(self: &AppController) -> bool;
         fn zero_count(self: &AppController) -> i32;
         fn empty_array(self: &AppController) -> QJsonArray;
@@ -782,6 +809,9 @@ pub struct AppControllerRust {
     turn_queue_error: String,
     turn_queue_generation: u64,
     queue_action_sessions: HashMap<String, String>,
+    composer_revision: u64,
+    /// tag → pending upload (session, attachment id and metadata)
+    pending_uploads: HashMap<String, Object>,
     profile_session: String,
     profile_task_plan: Object,
     profile_heartbeat: Object,
@@ -1381,6 +1411,10 @@ impl AppController {
             if let Some(model) = self.as_mut().conversation_mut(&session) {
                 model.mutate(|core| core.mark_delivery_failed(&client));
             }
+        }
+        let uploads: Vec<String> = self.pending_uploads.keys().cloned().collect();
+        for tag in uploads {
+            self.as_mut().finish_upload(&tag, None);
         }
         self.set_sending(false);
     }
@@ -2055,6 +2089,154 @@ impl AppController {
     }
 
 
+
+
+    // ---- composer attachments -------------------------------------------------
+
+    fn attachments_key(&self, session: &str) -> String {
+        format!("{}/attachments", clarp_core::settings::draft_scope_key(&self.base_url, session))
+    }
+
+    fn attachments_for(&self, session: &str) -> Vec<Value> {
+        if session.is_empty() {
+            return Vec::new();
+        }
+        self.settings.get(&self.attachments_key(session)).and_then(Value::as_array).cloned().unwrap_or_default()
+    }
+
+    fn store_attachments(mut self: Pin<&mut Self>, session: &str, attachments: Vec<Value>) {
+        if session.is_empty() {
+            return;
+        }
+        let key = self.attachments_key(session);
+        if attachments.is_empty() {
+            self.as_mut().rust_mut().settings.remove(&key);
+        } else {
+            self.as_mut().rust_mut().settings.set(&key, Value::Array(attachments));
+        }
+        self.as_mut().rust_mut().composer_revision += 1;
+        self.composer_revision_changed();
+    }
+
+    fn composer_revision_value(&self) -> u64 {
+        self.composer_revision
+    }
+
+    fn uploading_value(&self) -> bool {
+        !self.pending_uploads.is_empty()
+    }
+
+    /// Attachments belong to the chat on this Host, like drafts.
+    fn composer_attachments(&self, _pane_id: &QString, session: &QString) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.attachments_for(&session.to_string()))
+    }
+
+    fn composer_can_send(&self, _pane_id: &QString, session: &QString) -> bool {
+        clarp_core::attachments::can_send(&self.attachments_for(&session.to_string()))
+    }
+
+    fn attach_local_file(mut self: Pin<&mut Self>, pane_id: &QString, session: &QString, file_url: &cxx_qt_lib::QUrl) {
+        let (pane, session) = (pane_id.to_string(), session.to_string());
+        let path = Url::parse(&file_url.to_string()).ok().and_then(|u| u.to_file_path().ok());
+        let metadata = path.as_ref().and_then(|p| std::fs::metadata(p).ok());
+        let valid = metadata.as_ref().is_some_and(|m| m.is_file() && m.len() > 0 && m.len() <= clarp_core::attachments::MAX_UPLOAD_BYTES);
+        let (Some(path), true) = (path, valid && !pane.is_empty() && !session.is_empty()) else {
+            self.set_error("Choose a readable file no larger than 50 MB");
+            return;
+        };
+        let canonical = std::fs::canonicalize(&path).unwrap_or(path.clone());
+        let name = canonical.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let bytes = match std::fs::read(&canonical) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("AppController: could not read {}: {error}", canonical.display());
+                self.set_error(&format!("Could not read {name}"));
+                return;
+            }
+        };
+        let content_type = clarp_core::attachments::content_type(&name, &bytes[..bytes.len().min(64)]);
+        let id = uuid::Uuid::new_v4().to_string();
+        let mut attachments = self.attachments_for(&session);
+        if self.shared_filesystem {
+            // The Host reads the file where it is; nothing is uploaded.
+            attachments.push(json!({"id": id, "path": canonical.to_string_lossy(), "name": name,
+                                    "content_type": content_type, "local": true, "status": "ready"}));
+            self.store_attachments(&session, attachments);
+            return;
+        }
+        let tag = format!("composer-upload:{id}");
+        let pending = json!({"session": session, "id": id, "name": name, "content_type": content_type,
+                             "local_source": canonical.to_string_lossy(), "status": "uploading"});
+        self.as_mut().rust_mut().pending_uploads.insert(tag.clone(), pending.as_object().cloned().unwrap_or_default());
+        attachments.push(pending);
+        self.as_mut().store_attachments(&session, attachments);
+        if let Some(api) = self.api.as_ref() {
+            let encoded_name = clarp_core::endpoint::percent_encode_segment(&name);
+            api.post_bytes(&tag, "/upload", bytes, &content_type,
+                           &[("X-File-Name", &encoded_name), ("X-Session", &session), ("X-Upload-ID", &id)]);
+        }
+    }
+
+    fn remove_composer_attachment(mut self: Pin<&mut Self>, _pane_id: &QString, session: &QString, attachment_id: &QString) {
+        let (session, id) = (session.to_string(), attachment_id.to_string());
+        self.as_mut().rust_mut().pending_uploads.retain(|_, pending| {
+            !(json::string(pending, "session") == session && json::string(pending, "id") == id)
+        });
+        let mut attachments = self.attachments_for(&session);
+        let before = attachments.len();
+        attachments.retain(|a| a.get("id").and_then(Value::as_str) != Some(id.as_str()));
+        if attachments.len() != before {
+            self.store_attachments(&session, attachments);
+        }
+    }
+
+    fn send_composer_message(mut self: Pin<&mut Self>, pane_id: &QString, session: &QString, text: &QString, queue_if_busy: bool) -> bool {
+        let session_id = session.to_string();
+        let Some(outbound) = clarp_core::attachments::outbound_text(&text.to_string(), &self.attachments_for(&session_id)) else {
+            self.set_error("Wait for attachments to finish uploading or remove them");
+            return false;
+        };
+        if session_id.is_empty() || outbound.is_empty() {
+            return false;
+        }
+        self.as_mut().set_pane_draft(pane_id, session, &QString::default());
+        let key = self.attachments_key(&session_id);
+        self.as_mut().rust_mut().settings.remove(&key);
+        self.as_mut().rust_mut().composer_revision += 1;
+        self.as_mut().composer_revision_changed();
+        self.send_internal(&session_id, &outbound, queue_if_busy);
+        true
+    }
+
+    fn paste_clipboard_image(self: Pin<&mut Self>, _pane_id: &QString, _session: &QString) -> bool {
+        false
+    }
+
+    fn finish_upload(mut self: Pin<&mut Self>, tag: &str, object: Option<&Object>) {
+        let Some(pending) = self.as_mut().rust_mut().pending_uploads.remove(tag) else { return };
+        let (session, id) = (json::string(&pending, "session"), json::string(&pending, "id"));
+        let server_path = object.map(|o| json::string(o, "path")).unwrap_or_default();
+        let mut attachments = self.attachments_for(&session);
+        let Some(slot) = attachments.iter_mut().find(|a| a.get("id").and_then(Value::as_str) == Some(id.as_str())) else {
+            self.composer_revision_changed();
+            return;
+        };
+        if server_path.is_empty() {
+            slot["status"] = json!("failed");
+            let completed_without_path = object.is_some();
+            self.as_mut().store_attachments(&session, attachments);
+            if completed_without_path {
+                self.set_error("Upload completed without a file path");
+            }
+            return;
+        }
+        slot["path"] = json!(server_path);
+        slot["status"] = json!("ready");
+        if let Some(name) = object.map(|o| json::string(o, "name")).filter(|n| !n.is_empty()) {
+            slot["name"] = json!(name);
+        }
+        self.store_attachments(&session, attachments);
+    }
 
     // ---- profile, settings status, voices, orchestrator ----------------------
 
@@ -3236,6 +3418,10 @@ impl AppController {
     }
 
     fn handle_json(mut self: Pin<&mut Self>, tag: &str, object: &Object) {
+        if tag.starts_with("composer-upload:") {
+            self.finish_upload(tag, Some(object));
+            return;
+        }
         if self.as_mut().handle_team_or_queue_json(tag, object) || self.as_mut().handle_profile_json(tag, object) {
             return;
         }
@@ -3328,6 +3514,11 @@ impl AppController {
             return;
         }
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
+        if tag.starts_with("composer-upload:") {
+            self.as_mut().finish_upload(tag, None);
+            self.set_error(&detail);
+            return;
+        }
         if self.as_mut().handle_team_or_queue_failure(tag, &detail) || self.as_mut().handle_profile_failure(tag, &detail) {
             return;
         }
