@@ -66,18 +66,32 @@ def test_herald_tts_uses_internal_watcher_safe_filename(tmp_path):
     assert out.name.endswith("__rachel.mp3")
 
 
-def test_real_engine_uses_shutil_move(tmp_path):
-    """B8: tmp and audio_dir may be on different filesystems, so the engine
-    must use shutil.move (which falls back to copy+delete) rather than
-    os.replace (which raises EXDEV). Pin via source inspection."""
-    import inspect
-    from lib.tts_engine import ElevenLabsEngine
-    src = inspect.getsource(ElevenLabsEngine.synthesize)
-    assert "shutil.move" in src
-    assert "os.replace" not in src
-    assert "except Exception as e" in src
-    assert "tmp_path.unlink(missing_ok=True)" in src
-    assert 'cfg.tts_provider == "none"' in src
+def test_real_engine_lands_the_clip_across_filesystems(tmp_path, monkeypatch):
+    """B8: tmp and audio_dir may be on different filesystems, where a rename
+    raises EXDEV; the clip must still land (copy+delete) and tmp be removed."""
+    import errno
+    from lib import config, tts_engine
+    monkeypatch.setattr(config, "_CACHED", config.Config(tts_provider="elevenlabs"))
+    temporary = tmp_path / "tmpfs" / "clip.mp3"
+    temporary.parent.mkdir()
+
+    def fixed_mkstemp(**_kwargs):
+        return os.open(temporary, os.O_CREAT | os.O_RDWR, 0o600), str(temporary)
+
+    def cross_device(*_args, **_kwargs):
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+    monkeypatch.setattr(tts_engine.tempfile, "mkstemp", fixed_mkstemp)
+    monkeypatch.setattr(tts_engine, "synthesize_to_file",
+                        lambda _text, _voice, out_path, **_kw: pathlib.Path(out_path).write_bytes(b"mp3"))
+    monkeypatch.setattr(os, "rename", cross_device)
+    monkeypatch.setattr(os, "replace", cross_device)
+    engine = tts_engine.ElevenLabsEngine(tmp_path / "audio", api_key="configured")
+
+    out = engine.synthesize("hello", "voice", session="claude")
+
+    assert out.parent == tmp_path / "audio" and out.read_bytes() == b"mp3"
+    assert not temporary.exists()
 
 
 @pytest.mark.parametrize("provider", ["none"])
