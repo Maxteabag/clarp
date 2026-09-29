@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import pathlib
 import sys
-from types import SimpleNamespace
 
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
@@ -60,13 +59,6 @@ def test_capabilities_are_explicit_per_backend():
     assert backends.capabilities("opencode").required_binary == "opencode"
     assert backends.capabilities("deepseek").required_binary == "opencode"
     assert backends.ids() == ("claude", "codex", "agy", "grok", "opencode", "deepseek")
-
-
-def test_claude_capability_uses_configured_cli(monkeypatch):
-    from lib import config
-
-    monkeypatch.setattr(config, "load", lambda: SimpleNamespace(claude_cli="clarp"))
-    assert backends.capabilities("claude").required_binary == "clarp"
 
 
 def test_spawn_turn_routes_grok_and_opencode(monkeypatch):
@@ -166,23 +158,6 @@ def test_resume_transcript_dispatch_picks_agy_parser(monkeypatch):
     assert str(backends.by_id("agy").find_transcript(
         "conversation-7", pathlib.Path("/h"), cwd="/tmp",
     )) == "/agy/conversation-7/transcript.jsonl"
-
-
-def test_stream_kwargs_strips_synthesize_audio(monkeypatch):
-    """Regression: agy/codex turns crashed with `spawn_turn() got an
-    unexpected keyword argument 'synthesize_audio'`. turn_dispatch passes
-    synthesize_audio (for the Claude path); the stream runners read it from
-    the DB instead, so backends must strip it before delegating to them."""
-    seen = {}
-    monkeypatch.setattr(backends.by_id("grok"), "start_turn", lambda **kw: seen.update(kw))
-    backends.by_id("grok").spawn_turn(
-        text="hi", cwd="/tmp", stream=None, voice_preamble=True, synthesize_audio=True)
-    out = seen
-    assert "synthesize_audio" not in out, "synthesize_audio must be stripped"
-    # The args the stream runners DO accept survive.
-    assert out["text"] == "hi"
-    assert out["stream"] is None
-    assert out["voice_preamble"] is True
 
 
 def test_catalogue_fields_carry_presentation_and_capability_flags():

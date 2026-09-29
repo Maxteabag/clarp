@@ -70,25 +70,13 @@ def test_class_shapes():
 
 
 @pytest.mark.parametrize("backend", IDS)
-def test_data_attributes_copy_the_adapter_row(backend):
+def test_facade_hands_out_the_backend_object(backend):
     b = registry.by_id(backend)
     # get(), by_id() and the facade table all hand out the backend object
     # itself; there is no separate catalogue row any more.
     assert backends.get(backend) is b
     assert backends.by_id(backend) is b
-    a = backends._BY_ID[b.id]
-    assert a is b
-    for name in ("id", "label", "required_binary", "aliases", "efforts",
-                 "context_window", "model_family", "janitor_default_model",
-                 "api_providers", "login_kind", "effort_ui", "effort_scope",
-                 "fallback_models", "runner", "badge", "detail", "symbol",
-                 "brand", "hidden", "effort_help", "resumable", "supports_fork",
-                 "supports_steer", "supports_transcript_streaming",
-                 "supports_mcp", "supports_usage", "native_tool_explainer",
-                 "supports_compact", "config_model_field", "config_effort_field",
-                 "supports_routing", "supports_auth",
-                 "effort_compatibility_unknown", "model_carries_effort"):
-        assert getattr(b, name) == getattr(a, name), name
+    assert backends._BY_ID[b.id] is b
 
 
 # --- slice 2: decisions that are methods, not flags --------------------------
