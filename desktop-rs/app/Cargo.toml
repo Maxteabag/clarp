@@ -17,3 +17,4 @@ cxx-qt-lib = { version = "0.10.0", features = ["qt_full"] }
 
 [build-dependencies]
 cxx-qt-build = "0.10.0"
+qt-build-utils = { version = "0.10.0", default-features = false }

@@ -14,6 +14,7 @@ pub mod list_ops;
 pub mod narrator;
 pub mod panes;
 pub mod presentation;
+pub mod preview;
 pub mod protocol;
 pub mod reading_theme;
 pub mod roster;

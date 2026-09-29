@@ -7,7 +7,7 @@
 // attachments that skip the upload, and sending text plus attachment paths.
 import QtQuick
 import QtQuick.Window
-import Clarp.Native
+import Clarp.Desktop
 
 Window {
     width: 200; height: 200; visible: true

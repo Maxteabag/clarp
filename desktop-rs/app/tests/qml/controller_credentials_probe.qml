@@ -5,7 +5,7 @@
 // empty, so startup asks the (throwaway) keyring instead of any config file.
 import QtQuick
 import QtQuick.Window
-import Clarp.Native
+import Clarp.Desktop
 
 Window {
     id: root
@@ -64,7 +64,7 @@ Window {
             check(app.errorMessage === "", "paired and connected")
             check(requests("/server-info", "GET").pop().authorization === "Bearer cld_probe_paired_device", "requests carry the device token")
             // A fresh controller finds the stored token on its own.
-            second = Qt.createQmlObject('import Clarp.Native; AppController {}', root)
+            second = Qt.createQmlObject('import Clarp.Desktop; AppController {}', root)
             stage = 4
         } else if (stage === 4 && second.connected) {
             check(second.hasStoredCredential && second.errorMessage === "", "a new controller connects from the keyring")

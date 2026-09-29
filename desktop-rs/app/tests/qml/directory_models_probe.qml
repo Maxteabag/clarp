@@ -1,7 +1,7 @@
 // Offscreen check of the Rust contact and voice list models.
 import QtQuick
 import QtQuick.Window
-import Clarp.Native
+import Clarp.Desktop
 
 Window {
     width: 200; height: 400; visible: true

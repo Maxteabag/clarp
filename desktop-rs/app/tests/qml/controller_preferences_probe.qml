@@ -4,7 +4,7 @@
 // controller; reading styles resolve fonts; small queries match the C++.
 import QtQuick
 import QtQuick.Window
-import Clarp.Native
+import Clarp.Desktop
 
 Window {
     id: root
@@ -47,7 +47,7 @@ Window {
         app.newAgentOnStartup = false
         app.anonymousAgents = false
         app.sharedFilesystem = true
-        const next = Qt.createQmlObject('import Clarp.Native; AppController {}', root)
+        const next = Qt.createQmlObject('import Clarp.Desktop; AppController {}', root)
         check(next.readingTheme === "dusk" && next.minimalUi && !next.workspaceBarVisible && next.timestampsVisible, "appearance restored")
         check(next.muted && !next.pauseMobilePush && !next.newAgentOnStartup && !next.anonymousAgents, "behaviour restored")
         check(next.sharedFilesystem, "shared filesystem restored for the same Host")

@@ -3,7 +3,7 @@
 // redesignedRosterFiltersWithoutMutatingSource) through a real ListView.
 import QtQuick
 import QtQuick.Window
-import Clarp.Native
+import Clarp.Desktop
 
 Window {
     width: 400; height: 800; visible: true
