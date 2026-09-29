@@ -131,3 +131,31 @@ impl JobTracker {
         counts
     }
 }
+
+fn metadata_number(metadata: &Object, key: &str) -> Option<f64> {
+    match metadata.get(key)? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+/// Progress in 0..=1 for a job's progress bar, or -1 when unknown: an
+/// explicit `progress` fraction, else `completed`/`current` over `total`,
+/// else `progress_percent`.
+pub fn job_progress(job: &Object) -> f64 {
+    let metadata = json::object(job, "metadata");
+    if let Some(fraction) = metadata_number(&metadata, "progress").filter(|f| *f >= 0.0) {
+        return fraction.clamp(0.0, 1.0);
+    }
+    let completed = metadata_number(&metadata, "completed").or_else(|| metadata_number(&metadata, "current"));
+    let total = metadata_number(&metadata, "total").unwrap_or(0.0);
+    if let Some(completed) = completed.filter(|c| *c >= 0.0)
+        && total > 0.0 {
+            return (completed / total).clamp(0.0, 1.0);
+        }
+    match metadata_number(&metadata, "progress_percent").filter(|p| *p >= 0.0) {
+        Some(percent) => (percent / 100.0).clamp(0.0, 1.0),
+        None => -1.0,
+    }
+}

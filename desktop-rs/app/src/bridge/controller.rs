@@ -32,6 +32,10 @@ pub mod qobject {
     unsafe extern "C++" {
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
+        include!("cxx-qt-lib/qjsonarray.h");
+        type QJsonArray = cxx_qt_lib::QJsonArray;
+        include!("cxx-qt-lib/qjsonobject.h");
+        type QJsonObject = cxx_qt_lib::QJsonObject;
 
         include!("clarp-desktop/src/bridge/agent_list_model.cxxqt.h");
         type AgentListModel = crate::bridge::agent_list_model::qobject::AgentListModel;
@@ -70,6 +74,14 @@ pub mod qobject {
         #[qproperty(i32, activity_display_mode, cxx_name = "activityDisplayMode", READ = activity_display_mode_value, WRITE = set_activity_display_mode, NOTIFY = tools_visible_changed)]
         #[qproperty(QString, composer_focus_pane, cxx_name = "composerFocusPane", READ = composer_focus_pane_value, NOTIFY = composer_focus_pane_changed)]
         #[qproperty(u64, agent_revision, cxx_name = "agentRevision", READ = agent_revision_value, NOTIFY = agent_revision_changed)]
+        #[qproperty(u64, process_revision, cxx_name = "processRevision", READ = process_revision_value, NOTIFY = process_revision_changed)]
+        #[qproperty(QJsonArray, attention_items, cxx_name = "attentionItems", READ = attention_items_value, NOTIFY = updates_changed)]
+        #[qproperty(QJsonArray, background_jobs, cxx_name = "backgroundJobs", READ = background_jobs_value, NOTIFY = updates_changed)]
+        #[qproperty(QJsonArray, update_artifacts, cxx_name = "updateArtifacts", READ = update_artifacts_value, NOTIFY = updates_changed)]
+        #[qproperty(bool, updates_loading, cxx_name = "updatesLoading", READ = updates_loading_value, NOTIFY = updates_changed)]
+        #[qproperty(QString, updates_error, cxx_name = "updatesError", READ = updates_error_value, NOTIFY = updates_changed)]
+        #[qproperty(i32, attention_count, cxx_name = "attentionCount", READ = attention_count_value, NOTIFY = updates_changed)]
+        #[qproperty(QString, next_attention_target, cxx_name = "nextAttentionTarget", READ = next_attention_session, NOTIFY = updates_changed)]
         type AppController = super::AppControllerRust;
     }
 
@@ -105,6 +117,13 @@ pub mod qobject {
         fn set_activity_display_mode(self: Pin<&mut AppController>, mode: i32);
         fn composer_focus_pane_value(self: &AppController) -> QString;
         fn agent_revision_value(self: &AppController) -> u64;
+        fn process_revision_value(self: &AppController) -> u64;
+        fn attention_items_value(self: &AppController) -> QJsonArray;
+        fn background_jobs_value(self: &AppController) -> QJsonArray;
+        fn update_artifacts_value(self: &AppController) -> QJsonArray;
+        fn updates_loading_value(self: &AppController) -> bool;
+        fn updates_error_value(self: &AppController) -> QString;
+        fn attention_count_value(self: &AppController) -> i32;
 
         #[qsignal]
         #[cxx_name = "conversationChanged"]
@@ -148,6 +167,32 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "agentRevisionChanged"]
         fn agent_revision_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "processRevisionChanged"]
+        fn process_revision_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "updatesChanged"]
+        fn updates_changed(self: Pin<&mut AppController>);
+
+        #[qinvokable]
+        #[cxx_name = "loadUpdates"]
+        fn load_updates(self: Pin<&mut AppController>);
+        #[qinvokable]
+        #[cxx_name = "agentProcesses"]
+        fn agent_processes(self: &AppController, session: &QString) -> QJsonObject;
+        #[qinvokable]
+        #[cxx_name = "resolveDecision"]
+        fn resolve_decision(self: Pin<&mut AppController>, decision_id: &QString, choice: &QString, revision: i32);
+        #[qinvokable]
+        #[cxx_name = "cancelBackgroundJob"]
+        fn cancel_background_job(self: Pin<&mut AppController>, job_id: &QString);
+        #[qinvokable]
+        #[cxx_name = "updateActionPending"]
+        fn update_action_pending(self: &AppController, kind: &QString, id: &QString) -> bool;
+        /// Takes the job as JSON text (QML: `JSON.stringify(job)`).
+        #[qinvokable]
+        #[cxx_name = "backgroundJobProgressText"]
+        fn background_job_progress_text(self: &AppController, job: &QString) -> f64;
         #[qsignal]
         #[cxx_name = "notificationRequested"]
         fn notification_requested(self: Pin<&mut AppController>, title: QString, body: QString);
@@ -333,6 +378,15 @@ pub struct AppControllerRust {
     /// client_msg_id → (session, timer token)
     deliveries: HashMap<String, (String, u64)>,
     delivery_counter: u64,
+    process_revision: u64,
+    jobs: clarp_core::jobs::JobTracker,
+    attention_items: Vec<Value>,
+    background_jobs: Vec<Value>,
+    update_artifacts: Vec<Value>,
+    updates_generation: u64,
+    updates_pending: i32,
+    updates_error: String,
+    pending_update_actions: HashSet<String>,
     /// Draft text by settings key, held in memory until the composer idles.
     pending_drafts: HashMap<String, String>,
     draft_flush_token: u64,
@@ -488,6 +542,28 @@ impl AppController {
     }
     fn agent_revision_value(&self) -> u64 {
         self.agent_revision
+    }
+
+    fn process_revision_value(&self) -> u64 {
+        self.process_revision
+    }
+    fn attention_items_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.attention_items)
+    }
+    fn background_jobs_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.background_jobs)
+    }
+    fn update_artifacts_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.update_artifacts)
+    }
+    fn updates_loading_value(&self) -> bool {
+        self.updates_pending > 0
+    }
+    fn updates_error_value(&self) -> QString {
+        qs(&self.updates_error)
+    }
+    fn attention_count_value(&self) -> i32 {
+        self.attention_items.len() as i32
     }
 
     fn roster(&self) -> Option<&clarp_core::roster::Roster> {
@@ -1230,8 +1306,111 @@ impl AppController {
     }
 
     fn next_attention_session(&self) -> QString {
-        let next = self.roster().and_then(|r| r.next_attention_session(&self.selected_session, &[]));
+        let pending: Vec<String> = self
+            .attention_items
+            .iter()
+            .filter_map(|item| item.get("session").and_then(Value::as_str))
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let next = self.roster().and_then(|r| r.next_attention_session(&self.selected_session, &pending));
         qs(&next.unwrap_or_default())
+    }
+
+    // ---- updates and background jobs ----------------------------------------
+
+    fn load_updates(mut self: Pin<&mut Self>) {
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.updates_generation += 1;
+            rust.updates_error.clear();
+            rust.updates_pending = 3;
+            rust.updates_generation
+        };
+        self.as_mut().updates_changed();
+        if let Some(api) = self.api.as_ref() {
+            api.get(&format!("updates:{generation}:attention"), "/attention", &[]);
+            api.get(&format!("updates:{generation}:jobs"), "/background-jobs", &[]);
+            api.get(&format!("updates:{generation}:artifacts"), "/artifacts", &[("limit", "50"), ("order", "updated")]);
+        }
+    }
+
+    fn finish_update_request(mut self: Pin<&mut Self>, generation: u64) {
+        if generation != self.updates_generation {
+            return;
+        }
+        let pending = (self.updates_pending - 1).max(0);
+        self.as_mut().rust_mut().updates_pending = pending;
+        self.updates_changed();
+    }
+
+    /// The tracker changed: roster counts follow, and views re-read processes.
+    fn jobs_changed(mut self: Pin<&mut Self>) {
+        let counts = self.jobs.loaded().then(|| self.jobs.counts_by_agent());
+        if let Some(agents) = self.as_mut().agents_mut() {
+            match counts {
+                Some(counts) => agents.mutate(|core| core.apply_live_job_counts(counts)),
+                None => agents.mutate(|core| core.clear_live_job_counts()),
+            }
+        }
+        self.as_mut().rust_mut().process_revision += 1;
+        self.process_revision_changed();
+    }
+
+    fn agent_processes(&self, session: &QString) -> cxx_qt_lib::QJsonObject {
+        let now = chrono::Utc::now().timestamp_millis();
+        let described = self
+            .roster()
+            .and_then(|roster| clarp_core::roster::describe_agent_processes(roster, &self.jobs, &session.to_string(), now));
+        match described {
+            Some(object) => crate::qjson::to_qjson(&Value::Object(object)).to_object(),
+            None => cxx_qt_lib::QJsonObject::default(),
+        }
+    }
+
+    fn resolve_decision(mut self: Pin<&mut Self>, decision_id: &QString, choice: &QString, revision: i32) {
+        let id = decision_id.to_string();
+        let choice = match choice.to_string().as_str() {
+            "yes" | "accepted" => "accepted",
+            "no" | "rejected" => "rejected",
+            _ => return,
+        };
+        let key = format!("decision:{id}");
+        if id.is_empty() || self.pending_update_actions.contains(&key) {
+            return;
+        }
+        self.as_mut().rust_mut().pending_update_actions.insert(key);
+        self.as_mut().updates_changed();
+        let path = format!("/decisions/{}/resolve", clarp_core::endpoint::percent_encode_segment(&id));
+        if let Some(api) = self.api.as_ref() {
+            api.post_json(&format!("update-action:decision:{id}"), &path,
+                          json!({"choice": choice, "expected_revision": revision}), None);
+        }
+    }
+
+    fn cancel_background_job(mut self: Pin<&mut Self>, job_id: &QString) {
+        let id = job_id.to_string();
+        let key = format!("job:{id}");
+        if id.is_empty() || self.pending_update_actions.contains(&key) {
+            return;
+        }
+        self.as_mut().rust_mut().pending_update_actions.insert(key);
+        self.as_mut().updates_changed();
+        let path = format!("/background-jobs/{}", clarp_core::endpoint::percent_encode_segment(&id));
+        if let Some(api) = self.api.as_ref() {
+            api.delete(&format!("update-action:job:{id}"), &path);
+        }
+    }
+
+    fn update_action_pending(&self, kind: &QString, id: &QString) -> bool {
+        self.pending_update_actions.contains(&format!("{kind}:{id}"))
+    }
+
+    fn background_job_progress_text(&self, job: &QString) -> f64 {
+        match serde_json::from_str::<Value>(&job.to_string()) {
+            Ok(Value::Object(job)) => clarp_core::jobs::job_progress(&job),
+            _ => -1.0,
+        }
     }
 
     // ---- network results ---------------------------------------------------
@@ -1272,6 +1451,28 @@ impl AppController {
         } else if let Some(client_id) = tag.strip_prefix("send:") {
             let session = self.deliveries.get(client_id).map(|(s, _)| s.clone()).unwrap_or_else(|| self.selected_session.clone());
             self.request_delta(&session);
+        } else if let Some(rest) = tag.strip_prefix("updates:") {
+            let (generation, kind) = rest.split_once(':').unwrap_or((rest, ""));
+            let Ok(generation) = generation.parse::<u64>() else { return };
+            if generation != self.updates_generation {
+                return;
+            }
+            match kind {
+                "attention" => self.as_mut().rust_mut().attention_items = json::array(object, "items"),
+                "jobs" => {
+                    self.as_mut().rust_mut().background_jobs = json::array(object, "jobs");
+                    if self.as_mut().rust_mut().jobs.apply_list(object) {
+                        self.as_mut().jobs_changed();
+                    }
+                }
+                "artifacts" => self.as_mut().rust_mut().update_artifacts = json::array(object, "artifacts"),
+                _ => {}
+            }
+            self.finish_update_request(generation);
+        } else if let Some(action) = tag.strip_prefix("update-action:") {
+            self.as_mut().rust_mut().pending_update_actions.remove(action);
+            self.as_mut().updates_changed();
+            self.load_updates();
         }
         // select:, stop: and other acknowledgements need no action.
     }
@@ -1284,6 +1485,20 @@ impl AppController {
             self.as_mut().complete_snapshot_request();
         }
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
+        if let Some(rest) = tag.strip_prefix("updates:") {
+            let generation = rest.split(':').next().and_then(|g| g.parse::<u64>().ok());
+            if generation == Some(self.updates_generation) {
+                self.as_mut().rust_mut().updates_error = detail;
+                self.finish_update_request(generation.unwrap_or_default());
+            }
+            return;
+        }
+        if let Some(action) = tag.strip_prefix("update-action:") {
+            self.as_mut().rust_mut().pending_update_actions.remove(action);
+            self.as_mut().rust_mut().updates_error = detail;
+            self.updates_changed();
+            return;
+        }
         self.as_mut().set_error(&detail);
         // No HTTP status: the Host was unreachable. Reconnecting answers it.
         self.as_mut().rust_mut().error_is_transport = status == 0;
@@ -1322,7 +1537,20 @@ impl AppController {
                     if self.error_is_transport {
                         self.as_mut().set_error("");
                     }
-                    self.request_snapshot();
+                    self.as_mut().request_snapshot();
+                    // Attention, jobs and artifacts follow the sidebar instead
+                    // of competing with it for the Host on a cold start.
+                    let qt = self.qt_thread();
+                    crate::runtime::after(Duration::from_millis(1500), move || {
+                        let queued = qt.queue(|controller| {
+                            if controller.connected {
+                                controller.load_updates();
+                            }
+                        });
+                        if queued.is_err() {
+                            eprintln!("AppController: dropped the first updates load; the controller is gone");
+                        }
+                    });
                 } else {
                     if let Some(agents) = self.as_mut().agents_mut() {
                         agents.mutate(|core| core.mark_transport_unavailable());
@@ -1425,8 +1653,17 @@ impl AppController {
                 if json::string(event, "action") == "stop-agent" => {
                     self.stop_agent();
                 }
-            // Audio, updates, teams and jobs arrive with later slices; unknown
-            // types are ignored by contract (additive-only).
+            "background-job-updated" => {
+                // Apply the event's job at once so rows and the header change
+                // without waiting for the refetch; the list stays authoritative.
+                if self.jobs.loaded() && self.as_mut().rust_mut().jobs.apply_event(event) {
+                    self.as_mut().jobs_changed();
+                }
+                self.load_updates();
+            }
+            "artifact-updated" | "attention-updated" => self.load_updates(),
+            // Audio and teams arrive with later slices; unknown types are
+            // ignored by contract (additive-only).
             _ => {}
         }
     }

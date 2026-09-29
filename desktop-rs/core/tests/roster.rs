@@ -332,3 +332,16 @@ fn qt_move_destination_follows_begin_move_rows() {
     assert_eq!(qt_move_destination(2, 0), 0);
     assert_eq!(qt_move_destination(3, 1), 1);
 }
+
+#[test]
+fn job_progress_prefers_fraction_then_counts_then_percent() {
+    use clarp_core::jobs::job_progress;
+    let p = |metadata: Value| job_progress(&obj(json!({"metadata": metadata})));
+    assert_eq!(p(json!({"progress": 0.3})), 0.3);
+    assert_eq!(p(json!({"progress": 7})), 1.0);
+    assert_eq!(p(json!({"completed": 3, "total": 4})), 0.75);
+    assert_eq!(p(json!({"current": 1, "total": 4})), 0.25);
+    assert_eq!(p(json!({"progress_percent": 40})), 0.4);
+    assert_eq!(p(json!({"completed": 3})), -1.0);
+    assert_eq!(job_progress(&obj(json!({}))), -1.0);
+}
