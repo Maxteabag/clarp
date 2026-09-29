@@ -30,7 +30,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/models/ContactListModel` | 139 | `desktop-rs/src/models/` | todo |
 | `src/models/ConversationModel` | 830 | `core/src/conversation.rs` + `app/src/bridge/conversation_model.rs` | verified (`core/tests/conversation.rs`, `app/tests/qml/conversation_model_probe.qml`) |
 | `src/models/ConversationPresentationModel` | 437 | `desktop-rs/src/models/` | todo |
-| `src/models/PaneTreeModel` | 1041 | `desktop-rs/src/models/` | todo |
+| `src/models/PaneTreeModel` | 1041 | `core/src/panes.rs` + `app/src/bridge/pane_tree_model.rs` | verified (`core/tests/panes.rs`, `app/tests/qml/pane_tree_model_probe.qml`); layouts persist to `~/.config/MaxTeaBag/ClarpRust/workspaces.json` (JSON + lock file + per-window recovery files), not the C++ QSettings keys, and the legacy `workspace/paneTree` key is not migrated |
 | `src/models/VoiceListModel` | 113 | `desktop-rs/src/models/` | todo |
 | `src/network/ApiClient` | 238 | `net/src/api.rs` + `core/src/endpoint.rs` | verified (`net/tests/clients.rs`, `core/tests/endpoint.rs`) |
 | `src/network/SseClient` | 197 | `net/src/sse.rs` + `core/src/endpoint.rs` | verified (`net/tests/clients.rs::sse_*`) |
@@ -135,8 +135,8 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::conversationChangeRequestsReplacement` | `core/tests/conversation.rs::conversation_change_requests_replacement` | verified |
 | `tst_native_core::clipSourcePrecedenceMatchesContract` | `core/tests/protocol.rs::clip_source_precedence_matches_contract` | verified |
 | `tst_native_core::wavEncodingProducesAValidPcmHeader` | | todo |
-| `tst_native_core::paneTreeSplitsClosesNavigatesAndZooms` | | todo |
-| `tst_native_core::paneWorkspacePersistenceIsAsyncAndConflictSafe` | | todo |
+| `tst_native_core::paneTreeSplitsClosesNavigatesAndZooms` | `core/tests/panes.rs::pane_tree_splits_closes_navigates_and_zooms` | verified |
+| `tst_native_core::paneWorkspacePersistenceIsAsyncAndConflictSafe` | `core/tests/panes.rs::pane_workspace_persistence_is_conflict_safe` + `a_queued_layout_replaces_*` + `pane_tree_model_probe.qml` (worker-thread writes) | verified |
 | `tst_native_core::apiClientRejectsCrossOriginAuthenticatedMedia` | `net/tests/clients.rs::api_client_rejects_cross_origin_authenticated_media` | verified |
 | `tst_native_core::apiClientDropsRepliesFromPreviousEndpointGeneration` | `net/tests/clients.rs::api_client_drops_replies_from_previous_endpoint_generation` | verified |
 | `tst_native_core::paneDraftAndFocusSurviveLayoutStateChanges` | | todo |
