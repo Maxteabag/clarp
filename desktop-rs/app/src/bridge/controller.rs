@@ -109,6 +109,23 @@ pub mod qobject {
         #[qproperty(bool, uploading, READ = false_value, NOTIFY = agent_revision_changed)]
         #[qproperty(i32, unread_agent_conversations, cxx_name = "unreadAgentConversations", READ = zero_count, NOTIFY = agent_revision_changed)]
         #[qproperty(QJsonArray, agent_conversations, cxx_name = "agentConversations", READ = empty_array, NOTIFY = agent_revision_changed)]
+        #[qproperty(QJsonObject, profile_task_plan, cxx_name = "profileTaskPlan", READ = profile_task_plan_value, NOTIFY = profile_changed)]
+        #[qproperty(QString, profile_session, cxx_name = "profileSession", READ = profile_session_value, NOTIFY = profile_changed)]
+        #[qproperty(bool, profile_loading, cxx_name = "profileLoading", READ = profile_loading_value, NOTIFY = profile_changed)]
+        #[qproperty(QString, profile_error, cxx_name = "profileError", READ = profile_error_value, NOTIFY = profile_changed)]
+        #[qproperty(QJsonArray, profile_prompts, cxx_name = "profilePrompts", READ = profile_prompts_value, NOTIFY = profile_changed)]
+        #[qproperty(bool, profile_prompts_have_more, cxx_name = "profilePromptsHaveMore", READ = profile_prompts_have_more_value, NOTIFY = profile_changed)]
+        #[qproperty(bool, profile_prompts_loading, cxx_name = "profilePromptsLoading", READ = profile_prompts_loading_value, NOTIFY = profile_changed)]
+        #[qproperty(QJsonObject, profile_heartbeat, cxx_name = "profileHeartbeat", READ = profile_heartbeat_value, NOTIFY = profile_changed)]
+        #[qproperty(QJsonObject, diagnostics_health, cxx_name = "diagnosticsHealth", READ = diagnostics_health_value, NOTIFY = settings_status_changed)]
+        #[qproperty(QJsonObject, transcription_capabilities, cxx_name = "transcriptionCapabilities", READ = transcription_capabilities_value, NOTIFY = settings_status_changed)]
+        #[qproperty(QJsonObject, tts_provider_status, cxx_name = "ttsProviderStatus", READ = tts_provider_status_value, NOTIFY = settings_status_changed)]
+        #[qproperty(bool, settings_status_loading, cxx_name = "settingsStatusLoading", READ = settings_status_loading_value, NOTIFY = settings_status_changed)]
+        #[qproperty(QString, voice_bio, cxx_name = "voiceBio", READ = voice_bio_value, NOTIFY = voices_changed)]
+        #[qproperty(bool, voices_loading, cxx_name = "voicesLoading", READ = voices_loading_value, NOTIFY = voices_changed)]
+        #[qproperty(QJsonObject, orchestrator_settings, cxx_name = "orchestratorSettings", READ = orchestrator_settings_value, NOTIFY = orchestrator_changed)]
+        #[qproperty(QString, orchestrator_last_decision, cxx_name = "orchestratorLastDecision", READ = orchestrator_last_decision_value, NOTIFY = orchestrator_changed)]
+        #[qproperty(bool, orchestrator_loading, cxx_name = "orchestratorLoading", READ = orchestrator_loading_value, NOTIFY = orchestrator_changed)]
         #[qproperty(QJsonArray, teams, READ = teams_value, NOTIFY = teams_changed)]
         #[qproperty(QJsonArray, team_messages, cxx_name = "teamMessages", READ = team_messages_value, NOTIFY = teams_changed)]
         #[qproperty(QString, selected_team_id, cxx_name = "selectedTeamId", READ = selected_team_id_value, NOTIFY = teams_changed)]
@@ -200,6 +217,59 @@ pub mod qobject {
         fn zero_count(self: &AppController) -> i32;
         fn empty_array(self: &AppController) -> QJsonArray;
         fn teams_value(self: &AppController) -> QJsonArray;
+        fn profile_task_plan_value(self: &AppController) -> QJsonObject;
+        fn profile_session_value(self: &AppController) -> QString;
+        fn profile_loading_value(self: &AppController) -> bool;
+        fn profile_error_value(self: &AppController) -> QString;
+        fn profile_prompts_value(self: &AppController) -> QJsonArray;
+        fn profile_prompts_have_more_value(self: &AppController) -> bool;
+        fn profile_prompts_loading_value(self: &AppController) -> bool;
+        fn profile_heartbeat_value(self: &AppController) -> QJsonObject;
+        fn diagnostics_health_value(self: &AppController) -> QJsonObject;
+        fn transcription_capabilities_value(self: &AppController) -> QJsonObject;
+        fn tts_provider_status_value(self: &AppController) -> QJsonObject;
+        fn settings_status_loading_value(self: &AppController) -> bool;
+        fn voice_bio_value(self: &AppController) -> QString;
+        fn voices_loading_value(self: &AppController) -> bool;
+        fn orchestrator_settings_value(self: &AppController) -> QJsonObject;
+        fn orchestrator_last_decision_value(self: &AppController) -> QString;
+        fn orchestrator_loading_value(self: &AppController) -> bool;
+        #[qsignal]
+        #[cxx_name = "profileChanged"]
+        fn profile_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "settingsStatusChanged"]
+        fn settings_status_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "voicesChanged"]
+        fn voices_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "orchestratorChanged"]
+        fn orchestrator_changed(self: Pin<&mut AppController>);
+        #[qinvokable]
+        #[cxx_name = "loadAgentProfile"]
+        fn load_agent_profile(self: Pin<&mut AppController>, session: &QString);
+        #[qinvokable]
+        #[cxx_name = "loadPromptHistory"]
+        fn load_prompt_history(self: Pin<&mut AppController>, session: &QString, load_more: bool);
+        #[qinvokable]
+        #[cxx_name = "loadSettingsStatus"]
+        fn load_settings_status(self: Pin<&mut AppController>);
+        #[qinvokable]
+        #[cxx_name = "setTtsProviders"]
+        fn set_tts_providers(self: Pin<&mut AppController>, provider: &QString, fallback: &QString, voice: &QString);
+        #[qinvokable]
+        #[cxx_name = "loadVoices"]
+        fn load_voices(self: Pin<&mut AppController>, session: &QString);
+        #[qinvokable]
+        #[cxx_name = "chooseVoice"]
+        fn choose_voice(self: Pin<&mut AppController>, session: &QString, voice_id: &QString);
+        #[qinvokable]
+        #[cxx_name = "loadOrchestrator"]
+        fn load_orchestrator(self: Pin<&mut AppController>);
+        #[qinvokable]
+        #[cxx_name = "saveOrchestrator"]
+        fn save_orchestrator(self: Pin<&mut AppController>, enabled: bool, fallback_only: bool, confidence: f64, provider: &QString, model: &QString, effort: &QString, timeout_ms: i32);
         fn team_messages_value(self: &AppController) -> QJsonArray;
         fn selected_team_id_value(self: &AppController) -> QString;
         fn teams_loading_value(self: &AppController) -> bool;
@@ -712,6 +782,29 @@ pub struct AppControllerRust {
     turn_queue_error: String,
     turn_queue_generation: u64,
     queue_action_sessions: HashMap<String, String>,
+    profile_session: String,
+    profile_task_plan: Object,
+    profile_heartbeat: Object,
+    profile_prompts: Vec<Value>,
+    profile_prompt_cursor: String,
+    profile_prompts_have_more: bool,
+    profile_prompts_loading: bool,
+    profile_loading: bool,
+    profile_error: String,
+    profile_generation: u64,
+    prompt_history_generation: u64,
+    /// tag → (session, generation, load_more)
+    prompt_history_requests: HashMap<String, (String, u64, bool)>,
+    diagnostics_health: Object,
+    transcription_capabilities: Object,
+    tts_provider_status: Object,
+    settings_status_pending: i32,
+    settings_status_generation: u64,
+    voice_bio: String,
+    voices_loading: bool,
+    orchestrator_settings: Object,
+    orchestrator_last_decision: String,
+    orchestrator_loading: bool,
     created_snapshot_attempts: u32,
     /// Draft text by settings key, held in memory until the composer idles.
     pending_drafts: HashMap<String, String>,
@@ -1962,6 +2055,353 @@ impl AppController {
     }
 
 
+
+    // ---- profile, settings status, voices, orchestrator ----------------------
+
+    fn qobject(value: &Object) -> cxx_qt_lib::QJsonObject {
+        crate::qjson::to_qjson(&Value::Object(value.clone())).to_object()
+    }
+    fn profile_task_plan_value(&self) -> cxx_qt_lib::QJsonObject {
+        Self::qobject(&self.profile_task_plan)
+    }
+    fn profile_session_value(&self) -> QString {
+        qs(&self.profile_session)
+    }
+    fn profile_loading_value(&self) -> bool {
+        self.profile_loading
+    }
+    fn profile_error_value(&self) -> QString {
+        qs(&self.profile_error)
+    }
+    fn profile_prompts_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.profile_prompts)
+    }
+    fn profile_prompts_have_more_value(&self) -> bool {
+        self.profile_prompts_have_more
+    }
+    fn profile_prompts_loading_value(&self) -> bool {
+        self.profile_prompts_loading
+    }
+    fn profile_heartbeat_value(&self) -> cxx_qt_lib::QJsonObject {
+        Self::qobject(&self.profile_heartbeat)
+    }
+    fn diagnostics_health_value(&self) -> cxx_qt_lib::QJsonObject {
+        Self::qobject(&self.diagnostics_health)
+    }
+    fn transcription_capabilities_value(&self) -> cxx_qt_lib::QJsonObject {
+        Self::qobject(&self.transcription_capabilities)
+    }
+    fn tts_provider_status_value(&self) -> cxx_qt_lib::QJsonObject {
+        Self::qobject(&self.tts_provider_status)
+    }
+    fn settings_status_loading_value(&self) -> bool {
+        self.settings_status_pending > 0
+    }
+    fn voice_bio_value(&self) -> QString {
+        qs(&self.voice_bio)
+    }
+    fn voices_loading_value(&self) -> bool {
+        self.voices_loading
+    }
+    fn orchestrator_settings_value(&self) -> cxx_qt_lib::QJsonObject {
+        Self::qobject(&self.orchestrator_settings)
+    }
+    fn orchestrator_last_decision_value(&self) -> QString {
+        qs(&self.orchestrator_last_decision)
+    }
+    fn orchestrator_loading_value(&self) -> bool {
+        self.orchestrator_loading
+    }
+
+    fn load_agent_profile(mut self: Pin<&mut Self>, session: &QString) {
+        let session = session.to_string();
+        if session.is_empty() {
+            return;
+        }
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.profile_session = session.clone();
+            rust.profile_task_plan.clear();
+            rust.profile_heartbeat.clear();
+            rust.profile_prompts.clear();
+            rust.profile_error.clear();
+            rust.profile_prompt_cursor.clear();
+            rust.profile_prompts_have_more = false;
+            rust.profile_loading = true;
+            rust.profile_generation += 1;
+            rust.profile_generation
+        };
+        self.as_mut().profile_changed();
+        if let Some(api) = self.api.as_ref() {
+            api.get(&format!("profile:{generation}:{session}"), "/task-plan", &[("session", &session)]);
+            api.get(&format!("profile-heartbeat:{generation}:{session}"), "/agent-heartbeat/status", &[("session", &session)]);
+        }
+        // Media for the profile gallery arrives with the media step.
+        self.as_mut().history_for(&session, false);
+        self.as_mut().load_updates();
+        self.load_teams();
+    }
+
+    fn load_prompt_history(self: Pin<&mut Self>, session: &QString, load_more: bool) {
+        self.history_for(&session.to_string(), load_more);
+    }
+
+    fn history_for(mut self: Pin<&mut Self>, session: &str, load_more: bool) {
+        if session.is_empty()
+            || (load_more && (session != self.profile_session || !self.profile_prompts_have_more || self.profile_prompt_cursor.is_empty()))
+        {
+            return;
+        }
+        let tag = format!("prompt-history:{}", uuid::Uuid::new_v4());
+        let cursor = self.profile_prompt_cursor.clone();
+        {
+            let mut rust = self.as_mut().rust_mut();
+            if !load_more {
+                rust.profile_session = session.to_owned();
+                rust.profile_prompts.clear();
+                rust.profile_prompt_cursor.clear();
+                rust.profile_prompts_have_more = false;
+            }
+            rust.prompt_history_generation += 1;
+            rust.profile_prompts_loading = true;
+            let generation = rust.prompt_history_generation;
+            rust.prompt_history_requests.insert(tag.clone(), (session.to_owned(), generation, load_more));
+        }
+        self.as_mut().profile_changed();
+        if let Some(api) = self.api.as_ref() {
+            let mut query = vec![("session", session), ("limit", "20")];
+            if load_more {
+                query.push(("before", &cursor));
+            }
+            api.get(&tag, "/identity/prompt-history", &query);
+        }
+    }
+
+    fn load_settings_status(mut self: Pin<&mut Self>) {
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.settings_status_generation += 1;
+            rust.settings_status_pending = 3;
+            rust.settings_status_generation
+        };
+        self.as_mut().settings_status_changed();
+        if let Some(api) = self.api.as_ref() {
+            api.get(&format!("settings-status:{generation}:diagnostics"), "/diagnostics/health", &[]);
+            api.get(&format!("settings-status:{generation}:transcription"), "/transcription-capabilities", &[]);
+            api.get(&format!("settings-status:{generation}:tts"), "/tts/providers", &[]);
+        }
+    }
+
+    fn set_tts_providers(mut self: Pin<&mut Self>, provider: &QString, fallback: &QString, voice: &QString) {
+        let provider = provider.to_string().trim().to_owned();
+        if provider.is_empty() {
+            return;
+        }
+        let fallback = fallback.to_string().trim().to_owned();
+        self.as_mut().rust_mut().settings_status_pending += 1;
+        self.as_mut().settings_status_changed();
+        let body = json!({"provider": provider, "fallback": if fallback.is_empty() { "none".to_owned() } else { fallback },
+                          "voice": voice.to_string().trim()});
+        if let Some(api) = self.api.as_ref() {
+            api.post_json("settings-action:tts", "/tts/providers", body, None);
+        }
+    }
+
+    fn load_voices(self: Pin<&mut Self>, session: &QString) {
+        self.voices_for(&session.to_string());
+    }
+
+    fn voices_for(mut self: Pin<&mut Self>, session: &str) {
+        if session.is_empty() {
+            return;
+        }
+        self.as_mut().rust_mut().voice_bio.clear();
+        self.as_mut().rust_mut().voices_loading = true;
+        self.as_mut().voices_changed();
+        if let Some(api) = self.api.as_ref() {
+            api.get(&format!("voices:{session}"), "/voices", &[("for", session)]);
+        }
+    }
+
+    fn choose_voice(self: Pin<&mut Self>, session: &QString, voice_id: &QString) {
+        let (session, voice) = (session.to_string(), voice_id.to_string());
+        if session.is_empty() || voice.is_empty() {
+            return;
+        }
+        if let Some(api) = self.api.as_ref() {
+            api.post_json(&format!("voice-select:{session}"), "/agent-voice", json!({"session": session, "voice_id": voice}), None);
+        }
+    }
+
+    fn load_orchestrator(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().orchestrator_loading = true;
+        self.as_mut().orchestrator_changed();
+        if let Some(api) = self.api.as_ref() {
+            api.get("orchestrator-load", "/orchestrator/settings", &[]);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn save_orchestrator(mut self: Pin<&mut Self>, enabled: bool, fallback_only: bool, confidence: f64, provider: &QString, model: &QString, effort: &QString, timeout_ms: i32) {
+        self.as_mut().rust_mut().orchestrator_loading = true;
+        self.as_mut().orchestrator_changed();
+        let provider = provider.to_string();
+        let body = json!({
+            "enabled": enabled, "fallback_only": fallback_only, "confidence_threshold": confidence.clamp(0.5, 0.99),
+            "provider": if provider.is_empty() { "openai".to_owned() } else { provider },
+            "model": model.to_string().trim(), "effort": effort.to_string().trim(), "timeout_ms": timeout_ms.clamp(250, 60_000),
+        });
+        if let Some(api) = self.api.as_ref() {
+            api.post_json("orchestrator-save", "/orchestrator/settings", body, None);
+        }
+    }
+
+    fn handle_profile_json(mut self: Pin<&mut Self>, tag: &str, object: &Object) -> bool {
+        let fenced = |rest: &str, generation: u64, session: &str| {
+            let (g, s) = rest.split_once(':').unwrap_or((rest, ""));
+            g.parse::<u64>().ok() == Some(generation) && s == session
+        };
+        if let Some(rest) = tag.strip_prefix("profile:") {
+            if fenced(rest, self.profile_generation, &self.profile_session) {
+                {
+                    let mut rust = self.as_mut().rust_mut();
+                    rust.profile_task_plan = json::object(object, "plan");
+                    rust.profile_loading = false;
+                    rust.profile_error.clear();
+                }
+                self.profile_changed();
+            }
+        } else if let Some(rest) = tag.strip_prefix("profile-heartbeat:") {
+            if fenced(rest, self.profile_generation, &self.profile_session) {
+                self.as_mut().rust_mut().profile_heartbeat = object.clone();
+                self.profile_changed();
+            }
+        } else if tag.starts_with("prompt-history:") {
+            let Some((session, generation, load_more)) = self.as_mut().rust_mut().prompt_history_requests.remove(tag) else { return true };
+            if session != self.profile_session || generation != self.prompt_history_generation {
+                return true;
+            }
+            let incoming = json::array(object, "prompts");
+            let page = json::object(object, "page");
+            {
+                let mut rust = self.as_mut().rust_mut();
+                if load_more {
+                    let mut seen: HashSet<String> =
+                        rust.profile_prompts.iter().filter_map(|p| p.get("turn_id").and_then(Value::as_str)).map(str::to_owned).collect();
+                    for prompt in incoming {
+                        let id = prompt.get("turn_id").and_then(Value::as_str).unwrap_or_default().to_owned();
+                        if id.is_empty() || seen.insert(id) {
+                            rust.profile_prompts.push(prompt);
+                        }
+                    }
+                } else {
+                    rust.profile_prompts = incoming;
+                }
+                rust.profile_prompts_have_more = json::boolean(&page, "has_more");
+                rust.profile_prompt_cursor = json::string(&page, "next_before");
+                rust.profile_prompts_loading = false;
+            }
+            self.profile_changed();
+        } else if let Some(rest) = tag.strip_prefix("settings-status:") {
+            let (generation, kind) = rest.split_once(':').unwrap_or((rest, ""));
+            if generation.parse::<u64>().ok() != Some(self.settings_status_generation) {
+                return true;
+            }
+            {
+                let mut rust = self.as_mut().rust_mut();
+                match kind {
+                    "diagnostics" => rust.diagnostics_health = object.clone(),
+                    "transcription" => rust.transcription_capabilities = object.clone(),
+                    "tts" => rust.tts_provider_status = object.clone(),
+                    _ => {}
+                }
+                rust.settings_status_pending = (rust.settings_status_pending - 1).max(0);
+            }
+            self.settings_status_changed();
+        } else if tag == "settings-action:tts" {
+            {
+                let mut rust = self.as_mut().rust_mut();
+                rust.tts_provider_status = object.clone();
+                rust.settings_status_pending = (rust.settings_status_pending - 1).max(0);
+            }
+            self.settings_status_changed();
+        } else if let Some(session) = tag.strip_prefix("voices:") {
+            let voice_id = self.roster_agent(session).map(|a| a.voice_id.clone()).unwrap_or_default();
+            let voices = clarp_core::directory::voices_from_response(object, &voice_id);
+            self.as_mut().rust_mut().voice_bio = json::string(object, "bio");
+            if let Some(model) = unsafe { self.as_mut().rust_mut().get_unchecked_mut() }.voices.as_mut() {
+                model.replace(voices);
+            }
+            self.as_mut().rust_mut().voices_loading = false;
+            self.voices_changed();
+        } else if let Some(session) = tag.strip_prefix("voice-select:") {
+            let session = session.to_owned();
+            self.as_mut().request_snapshot();
+            self.as_mut().voices_for(&session);
+            self.agent_mutation_succeeded(qs(&session));
+        } else if tag == "orchestrator-load" || tag == "orchestrator-save" {
+            let recent = json::array(object, "recent_decisions");
+            {
+                let mut rust = self.as_mut().rust_mut();
+                rust.orchestrator_settings = json::object(object, "settings");
+                if let Some(decision) = recent.first().and_then(Value::as_object) {
+                    let action = decision.get("final_action").and_then(Value::as_str).map_or_else(|| json::string(decision, "decision_kind"), str::to_owned);
+                    let target = decision.get("target_session").and_then(Value::as_str).unwrap_or("none").to_owned();
+                    let confidence = decision.get("confidence").and_then(Value::as_f64).unwrap_or(0.0);
+                    rust.orchestrator_last_decision = format!("{action}: {target} ({confidence:.2})");
+                } else if object.contains_key("recent_decisions") {
+                    rust.orchestrator_last_decision = "No decisions logged yet.".into();
+                }
+                rust.orchestrator_loading = false;
+            }
+            self.orchestrator_changed();
+        } else {
+            return false;
+        }
+        true
+    }
+
+    fn handle_profile_failure(mut self: Pin<&mut Self>, tag: &str, detail: &str) -> bool {
+        if let Some(rest) = tag.strip_prefix("profile:") {
+            if rest.split(':').next().and_then(|g| g.parse::<u64>().ok()) == Some(self.profile_generation) {
+                self.as_mut().rust_mut().profile_loading = false;
+                self.as_mut().rust_mut().profile_error = detail.to_owned();
+                self.profile_changed();
+            }
+        } else if tag.starts_with("profile-heartbeat:") {
+            // Optional on older Hosts; the profile stays usable without it.
+        } else if tag.starts_with("prompt-history:") {
+            let request = self.as_mut().rust_mut().prompt_history_requests.remove(tag);
+            if request.is_some_and(|(_, generation, _)| generation == self.prompt_history_generation) {
+                self.as_mut().rust_mut().profile_prompts_loading = false;
+                self.as_mut().rust_mut().profile_error = detail.to_owned();
+                self.profile_changed();
+            }
+        } else if let Some(rest) = tag.strip_prefix("settings-status:") {
+            if rest.split(':').next().and_then(|g| g.parse::<u64>().ok()) == Some(self.settings_status_generation) {
+                let pending = (self.settings_status_pending - 1).max(0);
+                self.as_mut().rust_mut().settings_status_pending = pending;
+                self.settings_status_changed();
+            }
+        } else if tag == "settings-action:tts" {
+            let pending = (self.settings_status_pending - 1).max(0);
+            self.as_mut().rust_mut().settings_status_pending = pending;
+            self.as_mut().settings_status_changed();
+            self.set_error(detail);
+        } else if tag.starts_with("voices:") {
+            self.as_mut().rust_mut().voices_loading = false;
+            self.as_mut().voices_changed();
+            self.set_error(detail);
+        } else if tag.starts_with("orchestrator-") {
+            self.as_mut().rust_mut().orchestrator_loading = false;
+            self.as_mut().orchestrator_changed();
+            self.set_error(detail);
+        } else {
+            return false;
+        }
+        true
+    }
+
     // ---- teams and the turn queue --------------------------------------------
 
     fn teams_value(&self) -> cxx_qt_lib::QJsonArray {
@@ -2796,7 +3236,7 @@ impl AppController {
     }
 
     fn handle_json(mut self: Pin<&mut Self>, tag: &str, object: &Object) {
-        if self.as_mut().handle_team_or_queue_json(tag, object) {
+        if self.as_mut().handle_team_or_queue_json(tag, object) || self.as_mut().handle_profile_json(tag, object) {
             return;
         }
         if tag == "server-info" {
@@ -2888,7 +3328,7 @@ impl AppController {
             return;
         }
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
-        if self.as_mut().handle_team_or_queue_failure(tag, &detail) {
+        if self.as_mut().handle_team_or_queue_failure(tag, &detail) || self.as_mut().handle_profile_failure(tag, &detail) {
             return;
         }
         if let Some(rest) = tag.strip_prefix("updates:") {
