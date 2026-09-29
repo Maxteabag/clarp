@@ -109,6 +109,16 @@ pub mod qobject {
         #[qproperty(bool, uploading, READ = false_value, NOTIFY = agent_revision_changed)]
         #[qproperty(i32, unread_agent_conversations, cxx_name = "unreadAgentConversations", READ = zero_count, NOTIFY = agent_revision_changed)]
         #[qproperty(QJsonArray, agent_conversations, cxx_name = "agentConversations", READ = empty_array, NOTIFY = agent_revision_changed)]
+        #[qproperty(QJsonArray, teams, READ = teams_value, NOTIFY = teams_changed)]
+        #[qproperty(QJsonArray, team_messages, cxx_name = "teamMessages", READ = team_messages_value, NOTIFY = teams_changed)]
+        #[qproperty(QString, selected_team_id, cxx_name = "selectedTeamId", READ = selected_team_id_value, NOTIFY = teams_changed)]
+        #[qproperty(bool, teams_loading, cxx_name = "teamsLoading", READ = teams_loading_value, NOTIFY = teams_changed)]
+        #[qproperty(QString, teams_error, cxx_name = "teamsError", READ = teams_error_value, NOTIFY = teams_changed)]
+        #[qproperty(QJsonArray, turn_queue_items, cxx_name = "turnQueueItems", READ = turn_queue_items_value, NOTIFY = turn_queue_changed)]
+        #[qproperty(QString, turn_queue_session, cxx_name = "turnQueueSession", READ = turn_queue_session_value, NOTIFY = turn_queue_changed)]
+        #[qproperty(bool, turn_queue_paused, cxx_name = "turnQueuePaused", READ = turn_queue_paused_value, NOTIFY = turn_queue_changed)]
+        #[qproperty(bool, turn_queue_loading, cxx_name = "turnQueueLoading", READ = turn_queue_loading_value, NOTIFY = turn_queue_changed)]
+        #[qproperty(QString, turn_queue_error, cxx_name = "turnQueueError", READ = turn_queue_error_value, NOTIFY = turn_queue_changed)]
         type AppController = super::AppControllerRust;
     }
 
@@ -189,6 +199,64 @@ pub mod qobject {
         fn false_value(self: &AppController) -> bool;
         fn zero_count(self: &AppController) -> i32;
         fn empty_array(self: &AppController) -> QJsonArray;
+        fn teams_value(self: &AppController) -> QJsonArray;
+        fn team_messages_value(self: &AppController) -> QJsonArray;
+        fn selected_team_id_value(self: &AppController) -> QString;
+        fn teams_loading_value(self: &AppController) -> bool;
+        fn teams_error_value(self: &AppController) -> QString;
+        fn turn_queue_items_value(self: &AppController) -> QJsonArray;
+        fn turn_queue_session_value(self: &AppController) -> QString;
+        fn turn_queue_paused_value(self: &AppController) -> bool;
+        fn turn_queue_loading_value(self: &AppController) -> bool;
+        fn turn_queue_error_value(self: &AppController) -> QString;
+        #[qsignal]
+        #[cxx_name = "teamsChanged"]
+        fn teams_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "turnQueueChanged"]
+        fn turn_queue_changed(self: Pin<&mut AppController>);
+        #[qinvokable]
+        #[cxx_name = "loadTeams"]
+        fn load_teams(self: Pin<&mut AppController>);
+        #[qinvokable]
+        #[cxx_name = "selectTeam"]
+        fn select_team(self: Pin<&mut AppController>, team_id: &QString);
+        #[qinvokable]
+        #[cxx_name = "createTeam"]
+        fn create_team(self: Pin<&mut AppController>, name: &QString, color: &QString);
+        #[qinvokable]
+        #[cxx_name = "updateTeam"]
+        fn update_team(self: Pin<&mut AppController>, team_id: &QString, name: &QString, color: &QString, leader_agent_id: &QString);
+        #[qinvokable]
+        #[cxx_name = "addTeamMember"]
+        fn add_team_member(self: Pin<&mut AppController>, team_id: &QString, agent_id: &QString);
+        #[qinvokable]
+        #[cxx_name = "removeTeamMember"]
+        fn remove_team_member(self: Pin<&mut AppController>, team_id: &QString, agent_id: &QString);
+        #[qinvokable]
+        #[cxx_name = "setTeamNudging"]
+        fn set_team_nudging(self: Pin<&mut AppController>, team_id: &QString, enabled: bool);
+        #[qinvokable]
+        #[cxx_name = "deleteTeam"]
+        fn delete_team(self: Pin<&mut AppController>, team_id: &QString);
+        #[qinvokable]
+        #[cxx_name = "teamNameById"]
+        fn team_name_by_id(self: &AppController, team_id: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "teamAgentChoices"]
+        fn team_agent_choices(self: &AppController) -> QJsonArray;
+        #[qinvokable]
+        #[cxx_name = "loadTurnQueue"]
+        fn load_turn_queue(self: Pin<&mut AppController>, session: &QString);
+        #[qinvokable]
+        #[cxx_name = "updateQueuedTurn"]
+        fn update_queued_turn(self: Pin<&mut AppController>, queue_id: &QString, text: &QString);
+        #[qinvokable]
+        #[cxx_name = "deleteQueuedTurn"]
+        fn delete_queued_turn(self: Pin<&mut AppController>, queue_id: &QString);
+        #[qinvokable]
+        #[cxx_name = "sendQueuedTurn"]
+        fn send_queued_turn(self: Pin<&mut AppController>, queue_id: &QString);
         #[qsignal]
         #[cxx_name = "minimalUiChanged"]
         fn minimal_ui_changed(self: Pin<&mut AppController>);
@@ -629,6 +697,21 @@ pub struct AppControllerRust {
     shared_filesystem_override: String,
     reading_theme: String,
     workspace: clarp_core::workspace::WorkspaceContext,
+    teams: Vec<Value>,
+    team_messages: Vec<Value>,
+    selected_team_id: String,
+    team_list_loading: bool,
+    team_messages_loading: bool,
+    teams_error: String,
+    team_list_generation: u64,
+    team_messages_generation: u64,
+    turn_queue_items: Vec<Value>,
+    turn_queue_session: String,
+    turn_queue_paused: bool,
+    turn_queue_loading: bool,
+    turn_queue_error: String,
+    turn_queue_generation: u64,
+    queue_action_sessions: HashMap<String, String>,
     created_snapshot_attempts: u32,
     /// Draft text by settings key, held in memory until the composer idles.
     pending_drafts: HashMap<String, String>,
@@ -1878,6 +1961,341 @@ impl AppController {
         clarp_core::jobs::job_progress(&crate::qjson::from_qjson_object(job))
     }
 
+
+    // ---- teams and the turn queue --------------------------------------------
+
+    fn teams_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.teams)
+    }
+    fn team_messages_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.team_messages)
+    }
+    fn selected_team_id_value(&self) -> QString {
+        qs(&self.selected_team_id)
+    }
+    fn teams_loading_value(&self) -> bool {
+        self.team_list_loading || self.team_messages_loading
+    }
+    fn teams_error_value(&self) -> QString {
+        qs(&self.teams_error)
+    }
+    fn turn_queue_items_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.turn_queue_items)
+    }
+    fn turn_queue_session_value(&self) -> QString {
+        qs(&self.turn_queue_session)
+    }
+    fn turn_queue_paused_value(&self) -> bool {
+        self.turn_queue_paused
+    }
+    fn turn_queue_loading_value(&self) -> bool {
+        self.turn_queue_loading
+    }
+    fn turn_queue_error_value(&self) -> QString {
+        qs(&self.turn_queue_error)
+    }
+
+    fn load_teams(mut self: Pin<&mut Self>) {
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.team_list_generation += 1;
+            rust.team_list_loading = true;
+            rust.teams_error.clear();
+            rust.team_list_generation
+        };
+        self.as_mut().teams_changed();
+        if let Some(api) = self.api.as_ref() {
+            api.get(&format!("team-list:{generation}"), "/teams", &[]);
+        }
+    }
+
+    fn select_team(self: Pin<&mut Self>, team_id: &QString) {
+        self.select_team_id(&team_id.to_string());
+    }
+
+    fn select_team_id(mut self: Pin<&mut Self>, team_id: &str) {
+        if team_id.is_empty() {
+            return;
+        }
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            let changed = rust.selected_team_id != team_id;
+            rust.selected_team_id = team_id.to_owned();
+            if changed {
+                rust.team_messages.clear();
+            }
+            rust.team_messages_generation += 1;
+            rust.team_messages_loading = changed || rust.team_messages.is_empty();
+            rust.team_messages_generation
+        };
+        self.as_mut().teams_changed();
+        let path = format!("/teams/{}/messages", clarp_core::endpoint::percent_encode_segment(team_id));
+        if let Some(api) = self.api.as_ref() {
+            api.get(&format!("team-messages:{generation}:{team_id}"), &path, &[("limit", "100")]);
+        }
+    }
+
+    fn team_action(&self, tag: &str, method: &str, path: &str, body: Value) {
+        let Some(api) = self.api.as_ref() else { return };
+        match method {
+            "DELETE" => api.delete(tag, path),
+            _ => api.post_json(tag, path, body, None),
+        }
+    }
+
+    fn create_team(self: Pin<&mut Self>, name: &QString, color: &QString) {
+        let name = name.to_string().trim().to_owned();
+        if !name.is_empty() {
+            self.team_action("team-action:create", "POST", "/teams", json!({"name": name, "color": color.to_string()}));
+        }
+    }
+
+    fn update_team(mut self: Pin<&mut Self>, team_id: &QString, name: &QString, color: &QString, leader_agent_id: &QString) {
+        let (id, name, leader) = (team_id.to_string(), name.to_string().trim().to_owned(), leader_agent_id.to_string());
+        if id.is_empty() || name.is_empty() {
+            return;
+        }
+        if !leader.is_empty() {
+            let member = self
+                .teams
+                .iter()
+                .find(|t| t.get("team_id").and_then(Value::as_str) == Some(id.as_str()))
+                .map(|t| t.get("member_agent_ids").and_then(Value::as_array).is_some_and(|m| m.iter().any(|a| a.as_str() == Some(leader.as_str()))));
+            if member == Some(false) {
+                self.as_mut().rust_mut().teams_error = "Team leader must already be a member".into();
+                self.teams_changed();
+                return;
+            }
+        }
+        let path = format!("/teams/{}", clarp_core::endpoint::percent_encode_segment(&id));
+        self.team_action("team-action:update", "POST", &path, json!({"name": name, "color": color.to_string().trim(), "leader": leader}));
+    }
+
+    fn add_team_member(self: Pin<&mut Self>, team_id: &QString, agent_id: &QString) {
+        let (team, agent) = (team_id.to_string(), agent_id.to_string());
+        if team.is_empty() || agent.is_empty() {
+            return;
+        }
+        let path = format!("/teams/{}/members", clarp_core::endpoint::percent_encode_segment(&team));
+        self.team_action("team-action:add-member", "POST", &path, json!({"agent_id": agent}));
+    }
+
+    fn remove_team_member(self: Pin<&mut Self>, team_id: &QString, agent_id: &QString) {
+        let (team, agent) = (team_id.to_string(), agent_id.to_string());
+        if team.is_empty() || agent.is_empty() {
+            return;
+        }
+        let path = format!(
+            "/teams/{}/members/{}",
+            clarp_core::endpoint::percent_encode_segment(&team),
+            clarp_core::endpoint::percent_encode_segment(&agent)
+        );
+        self.team_action("team-action:remove-member", "DELETE", &path, Value::Null);
+    }
+
+    fn set_team_nudging(self: Pin<&mut Self>, team_id: &QString, enabled: bool) {
+        let team = team_id.to_string();
+        if !team.is_empty() {
+            self.team_action("team-action:nudging", "POST", "/team-nudging", json!({"team_id": team, "nudge_enabled": enabled}));
+        }
+    }
+
+    fn delete_team(mut self: Pin<&mut Self>, team_id: &QString) {
+        let team = team_id.to_string();
+        if team.is_empty() {
+            return;
+        }
+        if self.selected_team_id == team {
+            self.as_mut().rust_mut().selected_team_id.clear();
+            self.as_mut().rust_mut().team_messages.clear();
+            self.as_mut().teams_changed();
+        }
+        let path = format!("/teams/{}", clarp_core::endpoint::percent_encode_segment(&team));
+        self.team_action("team-action:delete", "DELETE", &path, Value::Null);
+    }
+
+    fn team_name_by_id(&self, team_id: &QString) -> QString {
+        let id = team_id.to_string();
+        let name = self
+            .teams
+            .iter()
+            .find(|t| t.get("team_id").and_then(Value::as_str) == Some(id.as_str()))
+            .map(|t| t.get("name").and_then(Value::as_str).unwrap_or(&id).to_owned());
+        qs(&name.unwrap_or(id))
+    }
+
+    fn team_agent_choices(&self) -> cxx_qt_lib::QJsonArray {
+        let choices: Vec<Value> = self
+            .roster()
+            .map(|r| r.agents().iter().map(|a| json!({"id": a.agent_id, "session": a.session, "name": display_name(a)})).collect())
+            .unwrap_or_default();
+        crate::qjson::to_qjson_array(&choices)
+    }
+
+    fn load_turn_queue(self: Pin<&mut Self>, session: &QString) {
+        self.load_queue_for(&session.to_string());
+    }
+
+    fn load_queue_for(mut self: Pin<&mut Self>, session: &str) {
+        if session.is_empty() {
+            return;
+        }
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            if rust.turn_queue_session != session {
+                rust.turn_queue_items.clear();
+                rust.turn_queue_paused = false;
+            }
+            rust.turn_queue_session = session.to_owned();
+            rust.turn_queue_loading = true;
+            rust.turn_queue_error.clear();
+            rust.turn_queue_generation += 1;
+            rust.turn_queue_generation
+        };
+        self.as_mut().turn_queue_changed();
+        if let Some(api) = self.api.as_ref() {
+            api.get(&format!("turn-queue:{generation}:{session}"), "/turn-queue", &[("session", session)]);
+        }
+    }
+
+    fn queue_action(mut self: Pin<&mut Self>, method: &str, path: String, body: Value) {
+        if self.turn_queue_session.is_empty() {
+            return;
+        }
+        let tag = format!("queue-action:{}", uuid::Uuid::new_v4());
+        let session = self.turn_queue_session.clone();
+        self.as_mut().rust_mut().queue_action_sessions.insert(tag.clone(), session);
+        let Some(api) = self.api.as_ref() else { return };
+        match method {
+            "PUT" => api.put_json(&tag, &path, body),
+            "DELETE" => api.delete(&tag, &path),
+            _ => api.post_json(&tag, &path, body, None),
+        }
+    }
+
+    fn update_queued_turn(self: Pin<&mut Self>, queue_id: &QString, text: &QString) {
+        let (id, text) = (queue_id.to_string(), text.to_string().trim().to_owned());
+        if !id.is_empty() && !text.is_empty() {
+            self.queue_action("PUT", format!("/turn-queue/{}", clarp_core::endpoint::percent_encode_segment(&id)), json!({"text": text}));
+        }
+    }
+
+    fn delete_queued_turn(self: Pin<&mut Self>, queue_id: &QString) {
+        let id = queue_id.to_string();
+        if !id.is_empty() {
+            self.queue_action("DELETE", format!("/turn-queue/{}", clarp_core::endpoint::percent_encode_segment(&id)), Value::Null);
+        }
+    }
+
+    fn send_queued_turn(self: Pin<&mut Self>, queue_id: &QString) {
+        let id = queue_id.to_string();
+        if !id.is_empty() {
+            self.queue_action("POST", format!("/turn-queue/{}/send", clarp_core::endpoint::percent_encode_segment(&id)), json!({}));
+        }
+    }
+
+    /// Replies for team and queue tags; true when the tag was one of them.
+    fn handle_team_or_queue_json(mut self: Pin<&mut Self>, tag: &str, object: &Object) -> bool {
+        if let Some(generation) = tag.strip_prefix("team-list:") {
+            if generation.parse::<u64>().ok() != Some(self.team_list_generation) {
+                return true;
+            }
+            let teams = json::array(object, "teams");
+            let selected = self.selected_team_id.clone();
+            let exists = selected.is_empty() || teams.iter().any(|t| t.get("team_id").and_then(Value::as_str) == Some(selected.as_str()));
+            let first = teams.first().and_then(|t| t.get("team_id").and_then(Value::as_str)).map(str::to_owned);
+            self.as_mut().rust_mut().teams = teams;
+            self.as_mut().rust_mut().team_list_loading = false;
+            self.as_mut().teams_changed();
+            if !exists || selected.is_empty() {
+                match first {
+                    Some(first) => self.select_team_id(&first),
+                    None if !exists => {
+                        self.as_mut().rust_mut().selected_team_id.clear();
+                        self.as_mut().rust_mut().team_messages.clear();
+                        self.teams_changed();
+                    }
+                    None => {}
+                }
+            }
+        } else if let Some(rest) = tag.strip_prefix("team-messages:") {
+            let (generation, team) = rest.split_once(':').unwrap_or((rest, ""));
+            if generation.parse::<u64>().ok() != Some(self.team_messages_generation) || team != self.selected_team_id {
+                return true;
+            }
+            self.as_mut().rust_mut().team_messages = json::array(object, "messages");
+            self.as_mut().rust_mut().team_messages_loading = false;
+            self.teams_changed();
+        } else if tag.starts_with("team-action:") {
+            let selected = self.selected_team_id.clone();
+            self.as_mut().load_teams();
+            if !selected.is_empty() {
+                self.select_team_id(&selected);
+            }
+        } else if let Some(rest) = tag.strip_prefix("turn-queue:") {
+            let (generation, session) = rest.split_once(':').unwrap_or((rest, ""));
+            if generation.parse::<u64>().ok() != Some(self.turn_queue_generation) || session != self.turn_queue_session {
+                return true;
+            }
+            {
+                let mut rust = self.as_mut().rust_mut();
+                rust.turn_queue_items = json::array(object, "items");
+                rust.turn_queue_paused = json::boolean(object, "paused");
+                rust.turn_queue_loading = false;
+                rust.turn_queue_error.clear();
+            }
+            self.turn_queue_changed();
+        } else if tag.starts_with("queue-action:") {
+            let session = self.as_mut().rust_mut().queue_action_sessions.remove(tag).unwrap_or_default();
+            if !session.is_empty() && session == self.turn_queue_session {
+                self.load_queue_for(&session);
+            }
+        } else {
+            return false;
+        }
+        true
+    }
+
+    fn handle_team_or_queue_failure(mut self: Pin<&mut Self>, tag: &str, detail: &str) -> bool {
+        if tag.starts_with("turn-queue:") || tag.starts_with("queue-action:") {
+            if let Some(rest) = tag.strip_prefix("turn-queue:") {
+                if rest.split(':').next().and_then(|g| g.parse::<u64>().ok()) != Some(self.turn_queue_generation) {
+                    return true;
+                }
+                self.as_mut().rust_mut().turn_queue_loading = false;
+            } else {
+                self.as_mut().rust_mut().queue_action_sessions.remove(tag);
+            }
+            self.as_mut().rust_mut().turn_queue_error = detail.to_owned();
+            self.turn_queue_changed();
+            return true;
+        }
+        if tag.starts_with("team-list:") || tag.starts_with("team-messages:") || tag.starts_with("team-action:") {
+            let generation = tag.split(':').nth(1).and_then(|g| g.parse::<u64>().ok());
+            if tag.starts_with("team-list:") && generation != Some(self.team_list_generation) {
+                return true;
+            }
+            if tag.starts_with("team-messages:") && generation != Some(self.team_messages_generation) {
+                return true;
+            }
+            {
+                let mut rust = self.as_mut().rust_mut();
+                if tag.starts_with("team-list:") {
+                    rust.team_list_loading = false;
+                } else if tag.starts_with("team-messages:") {
+                    rust.team_messages_loading = false;
+                } else {
+                    rust.team_list_loading = false;
+                    rust.team_messages_loading = false;
+                }
+                rust.teams_error = detail.to_owned();
+            }
+            self.teams_changed();
+            return true;
+        }
+        false
+    }
+
     // ---- agent launch and lifecycle ------------------------------------------
 
     fn launch_directory_or_home(&self) -> String {
@@ -2378,6 +2796,9 @@ impl AppController {
     }
 
     fn handle_json(mut self: Pin<&mut Self>, tag: &str, object: &Object) {
+        if self.as_mut().handle_team_or_queue_json(tag, object) {
+            return;
+        }
         if tag == "server-info" {
             let name = object.get("name").and_then(Value::as_str).unwrap_or("Clarp").to_owned();
             self.as_mut().rust_mut().server_name = name;
@@ -2467,6 +2888,9 @@ impl AppController {
             return;
         }
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
+        if self.as_mut().handle_team_or_queue_failure(tag, &detail) {
+            return;
+        }
         if let Some(rest) = tag.strip_prefix("updates:") {
             let generation = rest.split(':').next().and_then(|g| g.parse::<u64>().ok());
             if generation == Some(self.updates_generation) {
@@ -2607,6 +3031,9 @@ impl AppController {
             "queue-updated" => {
                 if let Some(agents) = self.as_mut().agents_mut() {
                     agents.mutate(|core| core.apply_queue_event(event));
+                }
+                if session == self.turn_queue_session {
+                    self.load_queue_for(&session);
                 }
             }
             "user-notification" => {

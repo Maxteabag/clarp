@@ -9,7 +9,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 
 | C++ source | Lines | Rust target | Status |
 |---|---|---|---|
-| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: slice 1 (connect, snapshot, selection, log sync, send/confirm, stop, SSE roster/transcript/state/activity/notification) verified in `controller_probe.qml`; audio, teams, updates, launch, drafts, narrator pending |
+| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: connect/snapshot/selection/log sync/send/stop/SSE, drafts/focus, updates/jobs, launch/lifecycle/catalog, narrator, preferences, teams and turn queue verified in `app/tests/qml/controller*_probe.qml` against `fake_host.py`; profile, settings status, voices, orchestrator, attachments, directories, credentials, media pending |
 | `src/app/CredentialStore` | 245 | `desktop-rs/src/app/` | todo |
 | `src/app/InstanceServer` | 199 | `desktop-rs/src/app/` | todo |
 | `src/app/MarkdownStyle` | 250 | `desktop-rs/src/app/` | todo |
