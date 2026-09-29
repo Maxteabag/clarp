@@ -29,3 +29,30 @@ pub fn to_qjson_array(items: &[Value]) -> QJsonArray {
     }
     array
 }
+
+/// Qt JSON → serde_json (numbers that are whole become integers).
+pub fn from_qjson(value: &QJsonValue) -> Value {
+    if value.is_bool() {
+        Value::Bool(value.to_bool())
+    } else if value.is_double() {
+        let number = value.to_double();
+        if number.fract() == 0.0 && number.abs() < 9.0e15 {
+            Value::from(number as i64)
+        } else {
+            serde_json::Number::from_f64(number).map_or(Value::Null, Value::Number)
+        }
+    } else if value.is_string() {
+        Value::String(value.to_string().to_string())
+    } else if value.is_array() {
+        Value::Array(value.to_array().iter().map(|item| from_qjson(&item)).collect())
+    } else if value.is_object() {
+        Value::Object(from_qjson_object(&value.to_object()))
+    } else {
+        Value::Null
+    }
+}
+
+pub fn from_qjson_object(object: &QJsonObject) -> serde_json::Map<String, Value> {
+    let keys = cxx_qt_lib::QList::<QString>::from(&object.keys());
+    keys.iter().map(|key| (key.to_string(), from_qjson(&object.value(key)))).collect()
+}

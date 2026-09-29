@@ -14,7 +14,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/PreviewVersions` | 147 | `desktop-rs/src/app/` | todo |
 | `src/app/StallMonitor` | 247 | `desktop-rs/src/app/` | todo |
 | `src/app/TimeFormat` | 138 | `core/src/time_format.rs` | verified (`conversation.rs::stamps_*`, `compact_*`); en_US formats fixed, QLocale-driven locale pending |
-| `src/app/ToolNarrator` | 820 | `desktop-rs/src/app/` | todo |
+| `src/app/ToolNarrator` | 802 | `core/src/narrator.rs` + `app/src/bridge/tool_narrator.rs` | verified for the shared-Host path (`core/tests/narrator.rs`, `app/tests/qml/narrator_probe.qml`); the local `codex exec` fallback and script-context evidence are not ported (the app always uses the Host) |
 | `src/app/TranscriptCache` | 123 | `desktop-rs/src/app/` | todo |
 | `src/app/WorkspaceContext` | 86 | `desktop-rs/src/app/` | todo |
 | `src/main` | 1164 | `desktop-rs/src/main/` | todo |
@@ -29,7 +29,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/models/BackgroundJobTracker` | 159 | `core/src/jobs.rs` | verified (`roster.rs::background_job_tracker_keeps_only_active_jobs`) |
 | `src/models/ContactListModel` | 139 | `core/src/directory.rs` + `app/src/bridge/directory_models.rs` | verified (`core/tests/directory.rs`, `directory_models_probe.qml`) |
 | `src/models/ConversationModel` | 830 | `core/src/conversation.rs` + `app/src/bridge/conversation_model.rs` | verified (`core/tests/conversation.rs`, `app/tests/qml/conversation_model_probe.qml`) |
-| `src/models/ConversationPresentationModel` | 437 | `core/src/presentation.rs` + `app/src/bridge/presentation_model.rs` | verified (`core/tests/presentation.rs`, `presentation_model_probe.qml`); a row-diffing list model rather than a proxy; explanation runs need the ToolNarrator lookup (controller step) and are off until then |
+| `src/models/ConversationPresentationModel` | 437 | `core/src/presentation.rs` + `app/src/bridge/presentation_model.rs` | verified (`core/tests/presentation.rs`, `presentation_model_probe.qml`, `narrator_probe.qml` for explanation runs); a row-diffing list model rather than a proxy |
 | `src/models/PaneTreeModel` | 1041 | `core/src/panes.rs` + `app/src/bridge/pane_tree_model.rs` | verified (`core/tests/panes.rs`, `app/tests/qml/pane_tree_model_probe.qml`); layouts persist to `~/.config/MaxTeaBag/ClarpRust/workspaces.json` (JSON + lock file + per-window recovery files), not the C++ QSettings keys, and the legacy `workspace/paneTree` key is not migrated |
 | `src/models/VoiceListModel` | 113 | `core/src/directory.rs` + `app/src/bridge/directory_models.rs` | verified (`core/tests/directory.rs`, `directory_models_probe.qml`) |
 | `src/network/ApiClient` | 238 | `net/src/api.rs` + `core/src/endpoint.rs` | verified (`net/tests/clients.rs`, `core/tests/endpoint.rs`) |
@@ -162,15 +162,15 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::reportHtmlKeepsStructureButNeverFetchesRemoteResources` | `core/tests/protocol.rs::report_html_keeps_structure_but_never_fetches_remote_resources` | wip: QTextDocument plain-text check pending (app crate) |
 | `tst_native_core::reportForArtifactExposesSanitizedBody` | | todo |
 | `tst_native_core::portedUrlsBecomeLinksWithoutChangingVisibleText` | `core/tests/protocol.rs::ported_urls_become_links_without_changing_visible_text` | wip: QTextDocument setMarkdown check pending (app crate) |
-| `tst_tool_narrator::viewportOwnersShareAndReleaseQueuedActivity` | | todo |
-| `tst_tool_narrator::sharedHostPollsWithoutStartingLocalCodex` | | todo |
-| `tst_tool_narrator::optInDeduplicatesBatchesAndPreservesCache` | | todo |
-| `tst_tool_narrator::disableCancelsAndRejectsLateReplies` | | todo |
+| `tst_tool_narrator::viewportOwnersShareAndReleaseQueuedActivity` | `core/tests/narrator.rs::viewport_owners_share_and_release_queued_activity` | verified |
+| `tst_tool_narrator::sharedHostPollsWithoutStartingLocalCodex` | `core/tests/narrator.rs::shared_host_polls_until_ready_and_caches + narrator_probe.qml` | verified |
+| `tst_tool_narrator::optInDeduplicatesBatchesAndPreservesCache` | `core/tests/narrator.rs::identical_requests_are_deduplicated_* + payload_redacts_and_never_sends_results` | wip: local-codex argv/diagnostics assertions not applicable (not ported) |
+| `tst_tool_narrator::disableCancelsAndRejectsLateReplies` | `core/tests/narrator.rs::late_replies_after_disable_are_rejected` | verified |
 | `tst_tool_narrator::failureFallsBackWithoutRetryStorm_data` | | todo |
-| `tst_tool_narrator::failureFallsBackWithoutRetryStorm` | | todo |
-| `tst_tool_narrator::scriptContextIsOptInBoundedAndInvalidatesCache` | | todo |
-| `tst_tool_narrator::memoizedLookupsFollowEveryFieldThatIsSent` | | todo |
-| `tst_tool_narrator::detailLevelsChangeInstructionsAndDiscardPreviousTranslations` | | todo |
+| `tst_tool_narrator::failureFallsBackWithoutRetryStorm` | `core/tests/narrator.rs::failures_fall_back_without_a_retry_storm` | verified (Host failure, invalid reply, timeout, failed row) |
+| `tst_tool_narrator::scriptContextIsOptInBoundedAndInvalidatesCache` | `core/tests/narrator.rs::—` | not ported: local-codex script evidence only |
+| `tst_tool_narrator::memoizedLookupsFollowEveryFieldThatIsSent` | `core/tests/narrator.rs::memoized_lookups_follow_every_field_that_is_sent` | verified |
+| `tst_tool_narrator::detailLevelsChangeInstructionsAndDiscardPreviousTranslations` | `core/tests/narrator.rs::detail_levels_discard_previous_translations` | verified (instructions are the Host's now) |
 
 ## Qt model adapters
 
