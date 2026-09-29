@@ -13,6 +13,7 @@ import time
 import pytest
 
 from lib import agents
+from lib.backend import opencode_serve
 from lib.backend.registry import by_id
 from lib.process_registry import TurnHandle
 
@@ -57,6 +58,11 @@ def test_stopping_runner_terminates_descendants_only(tmp_path, monkeypatch, back
         "time.sleep(60)\n")
     monkeypatch.setattr(shutil, "which", lambda _name: sys.executable)
     monkeypatch.setattr(runner, "build_cmd", lambda *a, **kw: [sys.executable, str(executable)])
+    # OpenCode turns start `opencode serve` under a supervisor; point that at
+    # the fixture so no installed opencode runs, and the stop lands before the
+    # server ever prints a URL.
+    monkeypatch.setattr(opencode_serve, "serve_cmd", lambda _binary: [
+        sys.executable, "-c", opencode_serve.SUPERVISOR, sys.executable, str(executable)])
     agent_id = agents.create_agent(
         persona="Fixture", voice_id="", cwd=str(tmp_path), session="fixture",
         backend=backend)
