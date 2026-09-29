@@ -13,7 +13,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/MarkdownStyle` | 250 | `desktop-rs/src/app/` | todo |
 | `src/app/PreviewVersions` | 147 | `desktop-rs/src/app/` | todo |
 | `src/app/StallMonitor` | 247 | `desktop-rs/src/app/` | todo |
-| `src/app/TimeFormat` | 124 | `desktop-rs/src/app/` | todo |
+| `src/app/TimeFormat` | 138 | `core/src/time_format.rs` | verified (`conversation.rs::stamps_*`, `compact_*`); en_US formats fixed, QLocale-driven locale pending |
 | `src/app/ToolNarrator` | 820 | `desktop-rs/src/app/` | todo |
 | `src/app/TranscriptCache` | 123 | `desktop-rs/src/app/` | todo |
 | `src/app/WorkspaceContext` | 86 | `desktop-rs/src/app/` | todo |
@@ -28,7 +28,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/models/AgentListModel` | 708 | `desktop-rs/src/models/` | todo |
 | `src/models/BackgroundJobTracker` | 159 | `desktop-rs/src/models/` | todo |
 | `src/models/ContactListModel` | 139 | `desktop-rs/src/models/` | todo |
-| `src/models/ConversationModel` | 830 | `desktop-rs/src/models/` | todo |
+| `src/models/ConversationModel` | 830 | `core/src/conversation.rs` + `app/src/bridge/conversation_model.rs` | verified (`core/tests/conversation.rs`, `app/tests/qml/conversation_model_probe.qml`) |
 | `src/models/ConversationPresentationModel` | 437 | `desktop-rs/src/models/` | todo |
 | `src/models/PaneTreeModel` | 1041 | `desktop-rs/src/models/` | todo |
 | `src/models/VoiceListModel` | 113 | `desktop-rs/src/models/` | todo |
@@ -78,7 +78,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 
 | C++ test | Rust test | Status |
 |---|---|---|
-| `tst_native_core::spawnedLifecycleNeverBecomesTranscriptTool` | | todo |
+| `tst_native_core::spawnedLifecycleNeverBecomesTranscriptTool` | `core/tests/conversation.rs::spawned_lifecycle_never_becomes_transcript_tool` | verified |
 | `tst_native_core::voiceErrorsStayInTheirSession` | | todo |
 | `tst_native_core::sidebarPreviewIsPlainText` | `core/tests/protocol.rs::sidebar_preview_is_plain_text` | verified |
 | `tst_native_core::clipboardImageBecomesAttachmentWithoutSending` | | todo |
@@ -106,14 +106,14 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::resumeLaunchOpensExactSessionWithoutFleet` | | todo |
 | `tst_native_core::launchPoolCarriesBackendModelAndHandlesEmpty` | | todo |
 | `tst_native_core::redesignedRosterFiltersWithoutMutatingSource` | | todo |
-| `tst_native_core::agentRowParsesBackgroundAndHelperFieldsSafely` | `core/tests/protocol.rs::agent_row_parses_background_and_helper_fields_safely` | wip: compactDuration part pending (app/TimeFormat) |
+| `tst_native_core::agentRowParsesBackgroundAndHelperFieldsSafely` | `protocol.rs::agent_row_parses_background_and_helper_fields_safely` + `conversation.rs::compact_durations_read_like_the_cpp_client` | verified |
 | `tst_native_core::backgroundJobTrackerKeepsOnlyActiveJobs` | | todo |
 | `tst_native_core::rosterPrefersLiveJobCountsAndCountsHelpers` | | todo |
 | `tst_native_core::treeOrderMatchesTheTeamWalk` | | todo |
 | `tst_native_core::sidebarNestsHelpersAndCollapsesFinishedOnes` | | todo |
 | `tst_native_core::sidebarUpdatesNeverResetTheRows` | | todo |
 | `tst_native_core::sidebarStatusUpdatesDoNotRebuildTree` | | todo |
-| `tst_native_core::subagentCellsDescribePhaseNameAndTask` | `core/tests/protocol.rs::subagent_cells_describe_phase_name_and_task` | wip: ConversationModel `_subagent` role part pending (models) |
+| `tst_native_core::subagentCellsDescribePhaseNameAndTask` | `protocol.rs::subagent_cells_describe_phase_name_and_task` + `conversation.rs::subagent_cells_are_annotated_on_the_way_out_only` | verified |
 | `tst_native_core::controllerTracksJobsFromListAndEvents` | | todo |
 | `tst_native_core::rosterLookupIsConsistentDuringStructuralSignals` | | todo |
 | `tst_native_core::circularPortraitsAreBoundedAndAntialiased` | | todo |
@@ -125,14 +125,14 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::snapshotFiltersArchivedAgentsAndPatchesEvents` | | todo |
 | `tst_native_core::agentSnapshotDiffsInPlaceAndRejectsStaleState` | | todo |
 | `tst_native_core::backendQuotaNoticeNamesReasonResetAndFallback` | `core/tests/protocol.rs::backend_quota_notice_names_reason_reset_and_fallback` | verified |
-| `tst_native_core::tailThenDeltaMatchesGoldenFixture` | | todo |
-| `tst_native_core::streamingRowsUpdateInPlaceAndRetireWhenFinalized` | | todo |
-| `tst_native_core::activityRowsUpdateInPlaceBySemanticIdentity` | | todo |
-| `tst_native_core::olderHistoryPrependsWithoutReorderingTheTail` | | todo |
-| `tst_native_core::growingReplyRejectsStaleRevision` | | todo |
-| `tst_native_core::optimisticDeliveryStaysVisibleUntilConfirmed` | | todo |
+| `tst_native_core::tailThenDeltaMatchesGoldenFixture` | `core/tests/conversation.rs::tail_then_delta_matches_golden_fixture` | verified |
+| `tst_native_core::streamingRowsUpdateInPlaceAndRetireWhenFinalized` | `core/tests/conversation.rs::streaming_rows_update_in_place_and_retire_when_finalized` | verified |
+| `tst_native_core::activityRowsUpdateInPlaceBySemanticIdentity` | `core/tests/conversation.rs::activity_rows_update_in_place_by_semantic_identity` | verified |
+| `tst_native_core::olderHistoryPrependsWithoutReorderingTheTail` | `core/tests/conversation.rs::older_history_prepends_without_reordering_the_tail` | verified |
+| `tst_native_core::growingReplyRejectsStaleRevision` | `core/tests/conversation.rs::growing_reply_rejects_stale_revision` | verified |
+| `tst_native_core::optimisticDeliveryStaysVisibleUntilConfirmed` | `core/tests/conversation.rs::optimistic_delivery_stays_visible_until_confirmed` | verified |
 | `tst_native_core::emptyStartupWaitsForExplicitChoiceAndRetryTargetsLatestFailure` | | todo |
-| `tst_native_core::conversationChangeRequestsReplacement` | | todo |
+| `tst_native_core::conversationChangeRequestsReplacement` | `core/tests/conversation.rs::conversation_change_requests_replacement` | verified |
 | `tst_native_core::clipSourcePrecedenceMatchesContract` | `core/tests/protocol.rs::clip_source_precedence_matches_contract` | verified |
 | `tst_native_core::wavEncodingProducesAValidPcmHeader` | | todo |
 | `tst_native_core::paneTreeSplitsClosesNavigatesAndZooms` | | todo |
@@ -171,6 +171,15 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_tool_narrator::scriptContextIsOptInBoundedAndInvalidatesCache` | | todo |
 | `tst_tool_narrator::memoizedLookupsFollowEveryFieldThatIsSent` | | todo |
 | `tst_tool_narrator::detailLevelsChangeInstructionsAndDiscardPreviousTranslations` | | todo |
+
+## Qt model adapters
+
+Core models record ordered ops (`Reset`/`Insert`/`Remove`/`Update`/`Signal`);
+each cxx-qt adapter replays them onto a row mirror between the matching
+`begin*/end*` calls, so views never see a half-applied change and Qt never
+re-enters Rust state mid-mutation. Core tests replay the ops onto a mirror and
+assert it equals the model after every step. `app/tests/run-qml-probes.sh`
+drives each adapter through a real ListView offscreen.
 
 ## Contract fixtures
 
