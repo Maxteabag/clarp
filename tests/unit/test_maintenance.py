@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import threading
 
 from lib import agents as agents_db
@@ -147,3 +148,19 @@ def test_run_once_forwards_checkpoint_flag_to_telemetry_rollup(tmp_path):
         assert any("wal_checkpoint" in sql for sql in executed)
     finally:
         con.set_trace_callback(None)
+
+
+def test_prune_event_logs_removes_only_expired_daily_logs(tmp_path):
+    today = datetime.date(2026, 9, 29)
+    for name in ("2026-09-01.jsonl", "2026-09-14.jsonl", "2026-09-15.jsonl",
+                 "2026-09-29.jsonl", "notes.jsonl", "2026-09-01.txt"):
+        (tmp_path / name).write_text("{}\n")
+
+    removed = maintenance.prune_event_logs(
+        tmp_path, max_age_ms=14 * maintenance.DAY_MS, today=today,
+    )
+
+    assert removed == 2
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "2026-09-01.txt", "2026-09-15.jsonl", "2026-09-29.jsonl", "notes.jsonl",
+    ]
