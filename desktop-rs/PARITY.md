@@ -16,7 +16,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/TimeFormat` | 138 | `core/src/time_format.rs` | verified (`conversation.rs::stamps_*`, `compact_*`); en_US formats fixed, QLocale-driven locale pending |
 | `src/app/ToolNarrator` | 802 | `core/src/narrator.rs` + `app/src/bridge/tool_narrator.rs` | verified for the shared-Host path (`core/tests/narrator.rs`, `app/tests/qml/narrator_probe.qml`); the local `codex exec` fallback and script-context evidence are not ported (the app always uses the Host) |
 | `src/app/TranscriptCache` | 123 | `desktop-rs/src/app/` | todo |
-| `src/app/WorkspaceContext` | 86 | `desktop-rs/src/app/` | todo |
+| `src/app/WorkspaceContext` | 86 | `core/src/workspace.rs` | verified (`core/tests/workspace.rs`, real Git worktree) |
 | `src/main` | 1164 | `desktop-rs/src/main/` | todo |
 | `src/main` | 1164 | `desktop-rs/src/main/` | todo |
 | `src/media/AudioController` | 859 | `desktop-rs/src/media/` | todo |
@@ -49,7 +49,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/MemoryDiagnostics.h` (header-only) | 71 | `desktop-rs/src/app/` | todo |
 | `src/app/PairSidebarSmokeCheck.h` (header-only) | 62 | `desktop-rs/src/app/` | todo |
 | `src/app/PreviewRelaunch.h` (header-only) | 15 | `desktop-rs/src/app/` | todo |
-| `src/app/ReadingTheme.h` (header-only) | 282 | `desktop-rs/src/app/` | todo |
+| `src/app/ReadingTheme.h` (header-only) | 282 | `core/src/reading_theme.rs` + generated `reading_themes.json` | verified (`core/tests/reading_theme.rs`); fonts resolved through fontconfig (`app/src/fonts.rs`) |
 | `src/app/ReadyReplySmokeCheck.h` (header-only) | 85 | `desktop-rs/src/app/` | todo |
 | `src/app/StartupTrace.h` (header-only) | 52 | `desktop-rs/src/app/` | todo |
 | `src/app/TranscriptScrollSmokeCheck.h` (header-only) | 440 | `desktop-rs/src/app/` | todo |
