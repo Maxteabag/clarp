@@ -2,6 +2,7 @@
 //! the conversation sync and delivery reducers, and transcript text rules.
 //! Everything here is pure so `cargo test` needs no display or Qt runtime.
 
+pub mod catalog;
 pub mod conversation;
 pub mod delivery;
 pub mod directory;

@@ -97,14 +97,14 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::logMergeRefreshesExplanationsOncePerBatch` | `core/tests/presentation.rs::log_merge_costs_one_lookup_per_tool` | wip: lookup bound verified; the Rust adapter diffs rows instead of one whole-transcript dataChanged, so that assertion is replaced by "no reset, per-row updates" |
 | `tst_native_core::secondLaunchIsForwardedToTheRunningInstance` | | todo |
 | `tst_native_core::readyModePreservesActivityAndHidesOnlyProvisionalBody` | `core/tests/presentation.rs::ready_mode_preserves_activity_and_hides_only_provisional_body` | verified (core) |
-| `tst_native_core::idleContactStartsFreshWithSavedDefaults` | | todo |
-| `tst_native_core::idleContactUsesDialogLaunchValues` | | todo |
-| `tst_native_core::hostDefaultDirectoryReplacesHomePlaceholder` | | todo |
-| `tst_native_core::contactCreateShowsHostMessageWithoutHttpSuffix` | | todo |
-| `tst_native_core::newAgentWaitsForOwnRosterAndRejectsLateSnapshots` | | todo |
+| `tst_native_core::idleContactStartsFreshWithSavedDefaults` | `app/tests/qml/controller_launch_probe.qml` | verified |
+| `tst_native_core::idleContactUsesDialogLaunchValues` | `app/tests/qml/controller_launch_probe.qml` | verified |
+| `tst_native_core::hostDefaultDirectoryReplacesHomePlaceholder` | `app/tests/qml/controller_launch_probe.qml` | verified |
+| `tst_native_core::contactCreateShowsHostMessageWithoutHttpSuffix` | `app/tests/qml/controller_launch_probe.qml` | verified |
+| `tst_native_core::newAgentWaitsForOwnRosterAndRejectsLateSnapshots` | `app/tests/qml/controller_launch_probe.qml` (session-only path, retry without a second create) | wip: a held late snapshot released after creation is not simulated |
 | `tst_native_core::fastLaunchOpensWithoutWaitingForFleet` | | todo |
 | `tst_native_core::resumeLaunchOpensExactSessionWithoutFleet` | | todo |
-| `tst_native_core::launchPoolCarriesBackendModelAndHandlesEmpty` | | todo |
+| `tst_native_core::launchPoolCarriesBackendModelAndHandlesEmpty` | `app/tests/qml/controller_launch_probe.qml` | wip: pool request shape and empty-pool signal verified; model/effort on a pool start not asserted |
 | `tst_native_core::redesignedRosterFiltersWithoutMutatingSource` | `core/tests/sidebar.rs::redesigned_roster_filters_without_mutating_source` + `agent_filter_model_probe.qml` | verified |
 | `tst_native_core::agentRowParsesBackgroundAndHelperFieldsSafely` | `protocol.rs::agent_row_parses_background_and_helper_fields_safely` + `conversation.rs::compact_durations_read_like_the_cpp_client` | verified |
 | `tst_native_core::backgroundJobTrackerKeepsOnlyActiveJobs` | `core/tests/roster.rs::background_job_tracker_keeps_only_active_jobs` | verified |

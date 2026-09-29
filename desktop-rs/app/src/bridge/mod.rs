@@ -3,6 +3,8 @@
 #[allow(dead_code)]
 pub mod agent_filter_model;
 pub mod agent_list_model;
+// createAgent keeps the C++ QML signature (nine arguments).
+#[allow(clippy::too_many_arguments)]
 pub mod controller;
 pub mod conversation_model;
 pub mod directory_models;
