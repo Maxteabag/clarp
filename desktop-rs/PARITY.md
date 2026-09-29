@@ -41,7 +41,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/platform/MprisIntegration` | 252 | `desktop-rs/src/platform/` | todo |
 | `src/protocol/ProtocolTypes` | 799 | `core/src/{protocol,text,json}.rs` | verified (`core/tests/protocol.rs`) |
 | `src/terminal/TerminalLaunch` | 36 | `desktop-rs/src/terminal/` | todo |
-| `src/views/TranscriptLayout` | 890 | `core/src/transcript_layout.rs` | wip: geometry (heights, prefix sums, anchoring, following, sections, visible plan, width rescale) verified in `core/tests/transcript_layout.rs`; the Rust QQuickItem that creates delegates is next |
+| `src/views/TranscriptLayout` | 890 | `core/src/transcript_layout.rs` + `app/src/bridge/transcript_layout.rs` + `app/src/bridge/quick.rs` | verified: geometry in `core/tests/transcript_layout.rs`; the native QQuickItem (cxx-qt base QQuickItem, C++ creation semantics via QQmlComponent begin/complete + indexOfProperty + QQmlPropertyMap, signature-forwarded model/Flickable signals) runs the C++ test scene in `app/tests/qml/transcript_layout_probe.qml` |
 | `src/views/TranscriptRows` | 310 | `core/src/transcript_rows.rs` | wip: splitting and row mapping verified in `core/tests/transcript_rows.rs`; Qt list model pending |
 | `src/app/AvatarMotionClock.h` (header-only) | 224 | `desktop-rs/src/app/` | todo |
 | `src/app/DesktopPalette.h` (header-only) | 40 | `desktop-rs/src/app/` | todo |
