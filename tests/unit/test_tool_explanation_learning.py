@@ -266,15 +266,35 @@ def test_decisions_are_buffered_not_written_per_request():
 # ---- versions, privacy, retention ---------------------------------------------
 
 def test_prompt_or_template_version_invalidates_learned_rows(monkeypatch):
-    translate, calls = templated("Shows commit {sha1}.")
+    learn, _ = templated("Shows commit {sha1}.")
+    asked = []
+
+    def translate(level, items):
+        # Only the first answer is learned. A later one would re-learn the
+        # same shape under the new versions, so whether the stale row
+        # survived to be pruned would depend on the worker winning the race
+        # against close().
+        asked.append(items)
+        if len(asked) == 1:
+            return learn(level, items)
+        raise RuntimeError("model unavailable")
+
+    def asks_the_model_again(service):
+        unseen = [item(bash("git show 1234abcd"))]
+        before = len(asked)
+        assert service.request(1, unseen)["items"][0]["status"] == "pending"
+        settle(service, unseen)
+        return len(asked) > before
+
     with ToolExplanations(translate=translate, debounce=.001) as service:
         settle(service, [item(bash("git show abc1234"))])
         monkeypatch.setattr(module, "PROMPT_VERSION", module.PROMPT_VERSION + 1)
-        assert service.request(1, [item(bash("git show 1234abcd"))])["items"][0]["status"] == "pending"
+        assert asks_the_model_again(service)
         monkeypatch.setattr(module, "PROMPT_VERSION", module.PROMPT_VERSION - 1)
         monkeypatch.setattr(templates, "VERSION", templates.VERSION + 1)
-        assert service.request(1, [item(bash("git show 1234abcd"))])["items"][0]["status"] == "pending"
+        assert asks_the_model_again(service)
     old = conn().execute("SELECT count(*) FROM tool_explanation_learned").fetchone()[0]
+    assert old == 1
     counts = learning.prune(conn(), db.now_ms() + learning.STALE_VERSION_GRACE_MS + 1,
                             module.PROMPT_VERSION, templates.VERSION)
     assert counts["tool_explanation_learned"] == old
