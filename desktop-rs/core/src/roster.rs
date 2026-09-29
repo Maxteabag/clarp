@@ -4,7 +4,6 @@
 //! and helper counts are resolved here, so the Qt adapter's `data()` is a
 //! lookup into its mirror and model-wide changes arrive as row updates.
 
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
@@ -13,7 +12,7 @@ use crate::jobs::{JobCounts, JobTracker, is_sub_agent};
 use crate::json::{self, Object};
 use crate::list_ops::ListOp;
 use crate::protocol::{Agent, display_name, is_busy_state};
-use crate::text::plain_preview_text;
+use crate::text::{name_order, plain_preview_text};
 use crate::time_format::compact_duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -128,11 +127,6 @@ pub struct Roster {
     archived_only: bool,
     transport_available: bool,
     ops: Vec<Op>,
-}
-
-/// Case-insensitive first, like QString::localeAwareCompare for en_US names.
-fn name_order(left: &str, right: &str) -> Ordering {
-    left.to_lowercase().cmp(&right.to_lowercase()).then_with(|| left.cmp(right))
 }
 
 impl Roster {

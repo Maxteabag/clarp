@@ -4,6 +4,7 @@
 
 pub mod conversation;
 pub mod delivery;
+pub mod directory;
 pub mod endpoint;
 pub mod jobs;
 pub mod json;

@@ -27,11 +27,11 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/models/AgentFilterModel` | 368 | `core/src/sidebar.rs` + `app/src/bridge/agent_filter_model.rs` | verified (`core/tests/sidebar.rs`, `app/tests/qml/agent_filter_model_probe.qml`); uses `invalidateRowsFilter()` (deprecated in 6.13) because cxx cannot name `QFlags<Direction>` for `endFilterChange` |
 | `src/models/AgentListModel` | 708 | `core/src/roster.rs` + `app/src/bridge/agent_list_model.rs` | verified (`core/tests/roster.rs`, `app/tests/qml/agent_list_model_probe.qml`); name order is case-insensitive, not ICU collation |
 | `src/models/BackgroundJobTracker` | 159 | `core/src/jobs.rs` | verified (`roster.rs::background_job_tracker_keeps_only_active_jobs`) |
-| `src/models/ContactListModel` | 139 | `desktop-rs/src/models/` | todo |
+| `src/models/ContactListModel` | 139 | `core/src/directory.rs` + `app/src/bridge/directory_models.rs` | verified (`core/tests/directory.rs`, `directory_models_probe.qml`) |
 | `src/models/ConversationModel` | 830 | `core/src/conversation.rs` + `app/src/bridge/conversation_model.rs` | verified (`core/tests/conversation.rs`, `app/tests/qml/conversation_model_probe.qml`) |
 | `src/models/ConversationPresentationModel` | 437 | `desktop-rs/src/models/` | todo |
 | `src/models/PaneTreeModel` | 1041 | `core/src/panes.rs` + `app/src/bridge/pane_tree_model.rs` | verified (`core/tests/panes.rs`, `app/tests/qml/pane_tree_model_probe.qml`); layouts persist to `~/.config/MaxTeaBag/ClarpRust/workspaces.json` (JSON + lock file + per-window recovery files), not the C++ QSettings keys, and the legacy `workspace/paneTree` key is not migrated |
-| `src/models/VoiceListModel` | 113 | `desktop-rs/src/models/` | todo |
+| `src/models/VoiceListModel` | 113 | `core/src/directory.rs` + `app/src/bridge/directory_models.rs` | verified (`core/tests/directory.rs`, `directory_models_probe.qml`) |
 | `src/network/ApiClient` | 238 | `net/src/api.rs` + `core/src/endpoint.rs` | verified (`net/tests/clients.rs`, `core/tests/endpoint.rs`) |
 | `src/network/SseClient` | 197 | `net/src/sse.rs` + `core/src/endpoint.rs` | verified (`net/tests/clients.rs::sse_*`) |
 | `src/network/SseParser` | 91 | `core/src/sse.rs` | verified (`protocol.rs::sse_parser_*`) |
@@ -146,7 +146,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::credentialStoreRoundTrip` | | todo |
 | `tst_native_core::appControllerCompletesCoreProtocolFlow` | | todo |
 | `tst_native_core::connectedControllerShutsDownWithoutLateSseCallbacks` | | todo |
-| `tst_native_core::contactsExcludeActivePersonas` | | todo |
+| `tst_native_core::contactsExcludeActivePersonas` | `core/tests/directory.rs::contacts_exclude_active_personas` | verified |
 | `tst_native_core::microphoneCanCaptureNativePcm` | | todo |
 | `tst_native_core::backgroundTranscriptionsKeepTheirChatOwnership` | | todo |
 | `tst_native_core::clipFailsFastWithoutMediaBackend` | | todo |

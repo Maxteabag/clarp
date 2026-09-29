@@ -19,6 +19,12 @@ fn starts_with_ignore_ascii_case(text: &str, prefix: &str) -> bool {
         && text[..prefix.len()].eq_ignore_ascii_case(prefix)
 }
 
+/// Case-insensitive first, like QString::localeAwareCompare for en_US names
+/// (not full ICU collation).
+pub fn name_order(left: &str, right: &str) -> std::cmp::Ordering {
+    left.to_lowercase().cmp(&right.to_lowercase()).then_with(|| left.cmp(right))
+}
+
 /// Qt's QString::simplified: trim, then collapse inner whitespace runs.
 pub fn simplified(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
