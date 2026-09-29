@@ -45,13 +45,9 @@ def voices_with_availability(agents: dict, for_session: str = "") -> list[dict]:
     The session being edited counts as not-taken (it's their current voice).
     """
     include_voice = (agents.get(for_session) or {}).get("voice_id")
-    seen: set[str] = set()
     out: list[dict] = []
     for v in VOICE_CATALOG:
         vid = v["id"]
-        if vid in seen:
-            continue
-        seen.add(vid)
         taken_by = None
         for sid, info in agents.items():
             if (info or {}).get("voice_id") == vid:
