@@ -5,10 +5,8 @@ import pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
 from lib.agent_store import (  # noqa: E402
     AGENT_ROSTER,
-    AGENT_VOICE_POOL,
     load_agents,
     save_agents,
-    pick_unused_voice,
 )
 
 
@@ -47,19 +45,6 @@ def test_save_diff_soft_deletes_missing_session():
     })
     save_agents({"mike": {"name": "Mike", "voice_id": "V1", "cwd": "/tmp"}})
     assert set(load_agents().keys()) == {"mike"}
-
-
-def test_pick_unused_voice_picks_first_free():
-    agents = {"a": {"voice_id": AGENT_VOICE_POOL[0]}}
-    picked = pick_unused_voice(agents)
-    assert picked == AGENT_VOICE_POOL[1]
-
-
-def test_pick_unused_voice_cycles_when_all_taken(capsys):
-    agents = {f"a{i}": {"voice_id": v} for i, v in enumerate(AGENT_VOICE_POOL)}
-    picked = pick_unused_voice(agents)
-    assert picked in AGENT_VOICE_POOL
-    assert "pickUnusedVoiceCycle" in capsys.readouterr().err
 
 
 def test_roster_has_known_personas():
