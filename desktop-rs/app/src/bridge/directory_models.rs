@@ -141,6 +141,10 @@ impl qobject::ContactListModel {
         self.count_changed();
     }
 
+    pub fn contacts(&self) -> &[Contact] {
+        &self.rows
+    }
+
     fn apply_snapshot_text(self: Pin<&mut Self>, snapshot: &QString, active_names: &QString) {
         let Some(serde_json::Value::Object(snapshot)) = parse(snapshot, "snapshot") else { return };
         let active: HashSet<String> = parse(active_names, "active names")

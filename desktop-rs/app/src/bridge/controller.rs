@@ -82,6 +82,10 @@ pub mod qobject {
         #[qproperty(QString, updates_error, cxx_name = "updatesError", READ = updates_error_value, NOTIFY = updates_changed)]
         #[qproperty(i32, attention_count, cxx_name = "attentionCount", READ = attention_count_value, NOTIFY = updates_changed)]
         #[qproperty(QString, next_attention_target, cxx_name = "nextAttentionTarget", READ = next_attention_session, NOTIFY = updates_changed)]
+        #[qproperty(QString, starting_contact, cxx_name = "startingContact", READ = starting_contact_value, NOTIFY = contact_launch_changed)]
+        #[qproperty(QString, last_working_directory, cxx_name = "lastWorkingDirectory", READ = last_working_directory_value, NOTIFY = launch_defaults_changed)]
+        #[qproperty(QString, last_backend, cxx_name = "lastBackend", READ = last_backend_value, NOTIFY = launch_defaults_changed)]
+        #[qproperty(QJsonArray, backend_options, cxx_name = "backendOptions", READ = backend_options_value, NOTIFY = model_catalog_changed)]
         type AppController = super::AppControllerRust;
     }
 
@@ -124,6 +128,99 @@ pub mod qobject {
         fn updates_loading_value(self: &AppController) -> bool;
         fn updates_error_value(self: &AppController) -> QString;
         fn attention_count_value(self: &AppController) -> i32;
+        fn starting_contact_value(self: &AppController) -> QString;
+        fn last_working_directory_value(self: &AppController) -> QString;
+        fn last_backend_value(self: &AppController) -> QString;
+        fn backend_options_value(self: &AppController) -> QJsonArray;
+
+        #[qsignal]
+        #[cxx_name = "contactLaunchChanged"]
+        fn contact_launch_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "launchDefaultsChanged"]
+        fn launch_defaults_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "modelCatalogChanged"]
+        fn model_catalog_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "agentMutationSucceeded"]
+        fn agent_mutation_succeeded(self: Pin<&mut AppController>, session: QString);
+        #[qsignal]
+        #[cxx_name = "launchPoolEmpty"]
+        fn launch_pool_empty(self: Pin<&mut AppController>);
+
+        #[qinvokable]
+        #[cxx_name = "startAnonymousAgent"]
+        fn start_anonymous_agent(self: Pin<&mut AppController>, backend: &QString, model: &QString, effort: &QString) -> bool;
+        #[qinvokable]
+        #[cxx_name = "startAvailableContact"]
+        fn start_available_contact(self: Pin<&mut AppController>, backend: &QString, model: &QString, effort: &QString) -> bool;
+        #[qinvokable]
+        #[cxx_name = "quickStartContact"]
+        fn quick_start_contact(self: Pin<&mut AppController>, name: &QString, backend: &QString, model: &QString, effort: &QString) -> bool;
+        #[qinvokable]
+        #[cxx_name = "matchingContacts"]
+        fn matching_contacts(self: &AppController, query: &QString) -> QJsonArray;
+        #[qinvokable]
+        #[cxx_name = "quickStartBackend"]
+        fn quick_start_backend(self: &AppController) -> QString;
+        #[qinvokable]
+        #[cxx_name = "setLaunchDirectory"]
+        fn set_launch_directory(self: Pin<&mut AppController>, path: &QString);
+        #[qinvokable]
+        #[cxx_name = "launchDirectory"]
+        fn launch_directory(self: &AppController) -> QString;
+        #[qinvokable]
+        #[cxx_name = "createAgent"]
+        fn create_agent(self: Pin<&mut AppController>, name: &QString, working_directory: &QString, backend: &QString, model: &QString, effort: &QString, replace_session: &QString, mode: &QString, past_session_id: &QString, mcp_servers: &QJsonArray);
+        #[qinvokable]
+        #[cxx_name = "releaseAgent"]
+        fn release_agent(self: Pin<&mut AppController>, session: &QString);
+        #[qinvokable]
+        #[cxx_name = "setAgentHeartbeat"]
+        fn set_agent_heartbeat(self: Pin<&mut AppController>, session: &QString, enabled: bool);
+        #[qinvokable]
+        #[cxx_name = "setAgentDreaming"]
+        fn set_agent_dreaming(self: Pin<&mut AppController>, session: &QString, enabled: bool);
+        #[qinvokable]
+        #[cxx_name = "setAgentPushMuted"]
+        fn set_agent_push_muted(self: Pin<&mut AppController>, session: &QString, muted: bool);
+        #[qinvokable]
+        #[cxx_name = "renameAgent"]
+        fn rename_agent(self: Pin<&mut AppController>, session: &QString, name: &QString);
+        #[qinvokable]
+        #[cxx_name = "archiveAgent"]
+        fn archive_agent(self: Pin<&mut AppController>, session: &QString);
+        #[qinvokable]
+        #[cxx_name = "setAgentArchived"]
+        fn set_agent_archived(self: Pin<&mut AppController>, session: &QString, archived: bool);
+        #[qinvokable]
+        #[cxx_name = "setScheduleEnabled"]
+        fn set_schedule_enabled(self: Pin<&mut AppController>, schedule_id: &QString, enabled: bool);
+        #[qinvokable]
+        #[cxx_name = "setAgentLlm"]
+        fn set_agent_llm(self: Pin<&mut AppController>, session: &QString, model: &QString, effort: &QString);
+        #[qinvokable]
+        #[cxx_name = "compactSession"]
+        fn compact_session(self: Pin<&mut AppController>, session: &QString);
+        #[qinvokable]
+        #[cxx_name = "setAgentMcp"]
+        fn set_agent_mcp(self: Pin<&mut AppController>, session: &QString, servers: &QJsonArray);
+        #[qinvokable]
+        #[cxx_name = "modelsForBackend"]
+        fn models_for_backend(self: &AppController, backend: &QString) -> QJsonArray;
+        #[qinvokable]
+        #[cxx_name = "effortsForModel"]
+        fn efforts_for_model(self: &AppController, backend: &QString, model: &QString) -> QJsonArray;
+        #[qinvokable]
+        #[cxx_name = "defaultEffortForModel"]
+        fn default_effort_for_model(self: &AppController, backend: &QString, model: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "backendSupportsResume"]
+        fn backend_supports_resume(self: &AppController, backend: &QString) -> bool;
+        #[qinvokable]
+        #[cxx_name = "backendSupportsFork"]
+        fn backend_supports_fork(self: &AppController, backend: &QString) -> bool;
 
         #[qsignal]
         #[cxx_name = "conversationChanged"]
@@ -387,6 +484,14 @@ pub struct AppControllerRust {
     updates_pending: i32,
     updates_error: String,
     pending_update_actions: HashSet<String>,
+    model_catalog: Object,
+    starting_contact: String,
+    starting_backend: String,
+    last_working_directory: String,
+    last_backend: String,
+    launch_directory: String,
+    pending_created_session: String,
+    created_snapshot_attempts: u32,
     /// Draft text by settings key, held in memory until the composer idles.
     pending_drafts: HashMap<String, String>,
     draft_flush_token: u64,
@@ -411,6 +516,8 @@ impl cxx_qt::Initialize for AppController {
             rust.activity_display_mode =
                 rust.settings.integer("conversation/activityDisplayMode", i64::from(tools_visible)).clamp(0, 2) as i32;
             rust.waiting_for_session_choice = std::env::var_os("CLARP_EMPTY_STARTUP").is_some();
+            rust.last_working_directory = rust.settings.string("launch/workingDirectory", "~");
+            rust.last_backend = rust.settings.string("launch/backend", "");
             rust.connection_state = "offline".into();
         }
         if let Some(archive) = self.as_mut().rust_mut().archived.as_mut() {
@@ -564,6 +671,19 @@ impl AppController {
     }
     fn attention_count_value(&self) -> i32 {
         self.attention_items.len() as i32
+    }
+
+    fn starting_contact_value(&self) -> QString {
+        qs(&self.starting_contact)
+    }
+    fn last_working_directory_value(&self) -> QString {
+        qs(&self.last_working_directory)
+    }
+    fn last_backend_value(&self) -> QString {
+        qs(&self.last_backend)
+    }
+    fn backend_options_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&clarp_core::catalog::backend_options(&self.model_catalog))
     }
 
     fn roster(&self) -> Option<&clarp_core::roster::Roster> {
@@ -962,6 +1082,9 @@ impl AppController {
             model.replace(contacts);
         }
         self.as_mut().bump_agent_revision();
+        if self.as_mut().check_pending_created() {
+            return;
+        }
 
         let selected_known = self.roster_agent(&self.selected_session).is_some();
         if self.selected_session.is_empty() || !selected_known {
@@ -1317,6 +1440,383 @@ impl AppController {
         qs(&next.unwrap_or_default())
     }
 
+    // ---- agent launch and lifecycle ------------------------------------------
+
+    fn launch_directory_or_home(&self) -> String {
+        if self.launch_directory.is_empty() { "~".into() } else { self.launch_directory.clone() }
+    }
+
+    fn launch_directory(&self) -> QString {
+        qs(&self.launch_directory_or_home())
+    }
+
+    fn set_launch_directory(mut self: Pin<&mut Self>, path: &QString) {
+        self.as_mut().rust_mut().launch_directory = path.to_string().trim().to_owned();
+    }
+
+    /// A fresh Host proposes its workspace root; only a still-default "~"
+    /// is replaced, never a folder the user chose.
+    fn apply_host_launch_directory_default(mut self: Pin<&mut Self>, directory: &str) {
+        let directory = directory.trim();
+        if directory.is_empty() || (!self.last_working_directory.trim().is_empty() && self.last_working_directory != "~") {
+            return;
+        }
+        let changed = self.last_working_directory != directory || self.launch_directory != directory;
+        self.as_mut().rust_mut().last_working_directory = directory.to_owned();
+        self.as_mut().rust_mut().launch_directory = directory.to_owned();
+        if changed {
+            self.launch_defaults_changed();
+        }
+    }
+
+    fn quick_start_backend_name(&self) -> String {
+        if !self.last_backend.is_empty() {
+            return self.last_backend.clone();
+        }
+        let selected = self.roster_agent(&self.selected_session).map(|a| a.backend.clone()).unwrap_or_default();
+        if selected.is_empty() { "claude".into() } else { selected }
+    }
+
+    fn quick_start_backend(&self) -> QString {
+        qs(&self.quick_start_backend_name())
+    }
+
+    fn contact_rows(&self) -> &[clarp_core::directory::Contact] {
+        self.contacts.as_ref().map_or(&[], |model| model.contacts())
+    }
+
+    fn matching_contacts(&self, query: &QString) -> cxx_qt_lib::QJsonArray {
+        let needle = query.to_string().trim().to_lowercase();
+        let rows: Vec<Value> = self
+            .contact_rows()
+            .iter()
+            .filter(|c| c.name.to_lowercase().contains(&needle))
+            .map(|c| json!({"name": c.name, "description": c.description, "symbol": c.avatar_symbol, "avatarUrl": c.avatar_url}))
+            .collect();
+        crate::qjson::to_qjson_array(&rows)
+    }
+
+    /// A launch already created a session the roster has not shown yet: ask
+    /// again instead of creating a second agent.
+    fn retry_created_agent(mut self: Pin<&mut Self>) -> bool {
+        if self.pending_created_session.is_empty() {
+            return false;
+        }
+        self.as_mut().rust_mut().created_snapshot_attempts = 0;
+        self.as_mut().set_error("");
+        self.request_snapshot();
+        true
+    }
+
+    fn post_contact_create(mut self: Pin<&mut Self>, starting: &str, backend: &str, mut body: Value) {
+        self.as_mut().set_error("");
+        self.as_mut().rust_mut().starting_contact = starting.to_owned();
+        self.as_mut().rust_mut().starting_backend = backend.to_owned();
+        self.as_mut().contact_launch_changed();
+        body["cwd"] = json!(self.launch_directory_or_home());
+        body["synthesize_audio"] = json!(false);
+        if let Some(api) = self.api.as_ref() {
+            api.post_json("contact-create", "/agents", body, None);
+        }
+    }
+
+    fn with_llm(mut body: Value, model: &str, effort: &str) -> Value {
+        if !model.trim().is_empty() {
+            body["model"] = json!(model.trim());
+        }
+        if !effort.trim().is_empty() {
+            body["effort"] = json!(effort.trim());
+        }
+        body
+    }
+
+    fn start_anonymous_agent(mut self: Pin<&mut Self>, backend: &QString, model: &QString, effort: &QString) -> bool {
+        if self.as_mut().retry_created_agent() {
+            return true;
+        }
+        let backend = backend.to_string();
+        if !self.connected || backend.is_empty() || !self.starting_contact.is_empty() {
+            return false;
+        }
+        let body = Self::with_llm(json!({"anonymous": true, "backend": backend}), &model.to_string(), &effort.to_string());
+        self.post_contact_create("anonymous", &backend, body);
+        true
+    }
+
+    fn start_available_contact(mut self: Pin<&mut Self>, backend: &QString, model: &QString, effort: &QString) -> bool {
+        if self.as_mut().retry_created_agent() {
+            return true;
+        }
+        let backend = backend.to_string();
+        if !self.connected || backend.is_empty() || !self.starting_contact.is_empty() {
+            return false;
+        }
+        let body = Self::with_llm(json!({"auto_contact": true, "backend": backend}), &model.to_string(), &effort.to_string());
+        self.post_contact_create("pool", &backend, body);
+        true
+    }
+
+    fn quick_start_contact(self: Pin<&mut Self>, name: &QString, backend: &QString, model: &QString, effort: &QString) -> bool {
+        if !self.starting_contact.is_empty() {
+            return false;
+        }
+        if !self.connected {
+            self.set_error("Connect to the Host before starting a contact");
+            return false;
+        }
+        let wanted = name.to_string().trim().to_lowercase();
+        let Some(contact) = self.contact_rows().iter().find(|c| c.name.to_lowercase() == wanted).map(|c| c.name.clone()) else {
+            self.set_error("This contact is no longer idle; choose its existing chat");
+            return false;
+        };
+        let backend = backend.to_string().trim().to_owned();
+        let backend = if backend.is_empty() { self.quick_start_backend_name() } else { backend };
+        let body = Self::with_llm(json!({"name": contact, "backend": backend}), &model.to_string(), &effort.to_string());
+        self.post_contact_create(&contact, &backend, body);
+        true
+    }
+
+    fn create_agent(
+        mut self: Pin<&mut Self>, name: &QString, working_directory: &QString, backend: &QString, model: &QString,
+        effort: &QString, replace_session: &QString, mode: &QString, past_session_id: &QString, mcp_servers: &cxx_qt_lib::QJsonArray,
+    ) {
+        if self.as_mut().retry_created_agent() {
+            return;
+        }
+        let (name, directory, backend) = (name.to_string().trim().to_owned(), working_directory.to_string().trim().to_owned(), backend.to_string().trim().to_owned());
+        if name.is_empty() || directory.is_empty() || backend.is_empty() {
+            self.set_error("Name, workspace, and backend are required");
+            return;
+        }
+        let mut body = Self::with_llm(
+            json!({"name": name, "session": name.to_lowercase(), "cwd": directory, "backend": backend, "synthesize_audio": false}),
+            &model.to_string(), &effort.to_string(),
+        );
+        // MCP servers are chosen by name.
+        let servers: Vec<Value> = mcp_servers
+            .iter()
+            .map(|v| v.to_string().to_string())
+            .filter(|name| !name.is_empty())
+            .map(Value::from)
+            .collect();
+        if !servers.is_empty() {
+            body["mcp_servers"] = Value::Array(servers);
+        }
+        let changed = self.last_working_directory != directory || self.last_backend != backend;
+        {
+            let mut rust = self.as_mut().rust_mut();
+            rust.last_working_directory = directory.clone();
+            rust.last_backend = backend.clone();
+            rust.settings.set("launch/workingDirectory", directory);
+            rust.settings.set("launch/backend", backend);
+        }
+        if changed {
+            self.as_mut().launch_defaults_changed();
+        }
+        let replace = replace_session.to_string();
+        if !replace.is_empty() {
+            body["replace_sid"] = json!(replace);
+        }
+        let past = past_session_id.to_string();
+        match mode.to_string().as_str() {
+            "resume" if !past.is_empty() => body["resume_session_id"] = json!(past),
+            "fork" if !past.is_empty() => body["fork_session_id"] = json!(past),
+            _ => {}
+        }
+        if let Some(api) = self.api.as_ref() {
+            api.post_json(&format!("agent-create:{replace}"), "/agents", body, None);
+        }
+    }
+
+    fn created_agent(mut self: Pin<&mut Self>, tag: &str, object: &Object) {
+        if tag == "contact-create" {
+            let backend = self.starting_backend.clone();
+            if !backend.is_empty() && self.last_backend != backend {
+                self.as_mut().rust_mut().last_backend = backend.clone();
+                self.as_mut().rust_mut().settings.set("launch/backend", backend);
+                self.as_mut().launch_defaults_changed();
+            }
+            let created_cwd = json::object(object, "agent").get("cwd").and_then(Value::as_str).map(str::to_owned);
+            let directory = created_cwd.unwrap_or_else(|| self.launch_directory.clone());
+            if !directory.is_empty() && self.last_working_directory != directory {
+                self.as_mut().rust_mut().last_working_directory = directory.clone();
+                self.as_mut().rust_mut().settings.set("launch/workingDirectory", directory);
+                self.as_mut().launch_defaults_changed();
+            }
+            self.as_mut().rust_mut().starting_backend.clear();
+        }
+        let session = json::string(object, "session");
+        if session.is_empty() {
+            self.as_mut().rust_mut().starting_contact.clear();
+            self.as_mut().contact_launch_changed();
+            self.set_error("The Host did not return the new agent's session.");
+            return;
+        }
+        let created = json::object(object, "agent");
+        let upserted = json::string(&created, "session") == session
+            && self.as_mut().agents_mut().is_some_and(|agents| agents.mutate(|core| core.upsert_created_agent(&created)));
+        if upserted {
+            {
+                // Old fleet responses must not undo this authoritative creation.
+                let mut rust = self.as_mut().rust_mut();
+                rust.snapshot_generation += 1;
+                rust.snapshot_in_flight = false;
+                rust.snapshot_dirty = false;
+                rust.pending_created_session.clear();
+                rust.starting_contact.clear();
+            }
+            self.as_mut().contact_launch_changed();
+            self.as_mut().finish_created(&session);
+            return;
+        }
+        // Hosts that only return a session id: wait for the roster to show it,
+        // ignoring any snapshot already in flight from before the creation.
+        {
+            let mut rust = self.as_mut().rust_mut();
+            rust.snapshot_generation += 1;
+            rust.snapshot_in_flight = false;
+            rust.snapshot_dirty = false;
+            rust.pending_created_session = session;
+            rust.created_snapshot_attempts = 0;
+        }
+        self.request_snapshot();
+    }
+
+    fn finish_created(mut self: Pin<&mut Self>, session: &str) {
+        self.as_mut().select(session);
+        let pane = self.panes.as_ref().map(|p| p.core().active_pane_id().to_owned()).unwrap_or_default();
+        self.as_mut().set_composer_focus(&pane);
+        self.agent_mutation_succeeded(qs(session));
+    }
+
+    /// Called after every applied snapshot while a created session is awaited.
+    fn check_pending_created(mut self: Pin<&mut Self>) -> bool {
+        let expected = self.pending_created_session.clone();
+        if expected.is_empty() {
+            return false;
+        }
+        if self.roster_agent(&expected).is_none() {
+            self.as_mut().rust_mut().created_snapshot_attempts += 1;
+            if self.created_snapshot_attempts <= 5 {
+                let qt = self.qt_thread();
+                crate::runtime::after(Duration::from_millis(200), move || {
+                    let queued = qt.queue(move |controller| {
+                        if controller.pending_created_session == expected {
+                            controller.request_snapshot();
+                        }
+                    });
+                    if queued.is_err() {
+                        eprintln!("AppController: dropped a created-agent retry; the controller is gone");
+                    }
+                });
+            } else {
+                self.set_error("Your new agent is still loading. Press Enter to retry.");
+            }
+            return true;
+        }
+        self.as_mut().rust_mut().pending_created_session.clear();
+        self.as_mut().rust_mut().starting_contact.clear();
+        self.as_mut().contact_launch_changed();
+        self.finish_created(&expected);
+        false
+    }
+
+    fn post_agent_setting(self: Pin<&mut Self>, session: &str, path: &str, body: Value) {
+        if let Some(api) = self.api.as_ref() {
+            api.post_json(&format!("agent-setting:{session}"), path, body, None);
+        }
+    }
+
+    fn release_agent(self: Pin<&mut Self>, session: &QString) {
+        let session = session.to_string();
+        if session.is_empty() {
+            return;
+        }
+        if let Some(api) = self.api.as_ref() {
+            api.delete(&format!("agent-release:{session}"), &format!("/agents/{}", clarp_core::endpoint::percent_encode_segment(&session)));
+        }
+    }
+
+    fn set_agent_heartbeat(self: Pin<&mut Self>, session: &QString, enabled: bool) {
+        let session = session.to_string();
+        self.post_agent_setting(&session, "/agent-heartbeat", json!({"session": session, "heartbeat_enabled": enabled}));
+    }
+
+    fn set_agent_dreaming(self: Pin<&mut Self>, session: &QString, enabled: bool) {
+        let session = session.to_string();
+        self.post_agent_setting(&session, "/agent-dreaming", json!({"session": session, "dreaming_enabled": enabled}));
+    }
+
+    fn set_agent_push_muted(self: Pin<&mut Self>, session: &QString, muted: bool) {
+        let session = session.to_string();
+        self.post_agent_setting(&session, "/agent-mute", json!({"session": session, "muted": muted}));
+    }
+
+    /// Display name only: session and agent ids are stable, so the chat and
+    /// every pairing survive a rename.
+    fn rename_agent(self: Pin<&mut Self>, session: &QString, name: &QString) {
+        let (session, name) = (session.to_string(), name.to_string().trim().to_owned());
+        if session.is_empty() || name.is_empty() {
+            return;
+        }
+        self.post_agent_setting(&session, "/agent-rename", json!({"session": session, "name": name}));
+    }
+
+    fn archive_agent(self: Pin<&mut Self>, session: &QString) {
+        self.set_agent_archived(session, true);
+    }
+
+    fn set_agent_archived(self: Pin<&mut Self>, session: &QString, archived: bool) {
+        let session = session.to_string();
+        self.post_agent_setting(&session, "/agent-archive", json!({"session": session, "archived": archived}));
+    }
+
+    fn set_schedule_enabled(self: Pin<&mut Self>, schedule_id: &QString, enabled: bool) {
+        let id = schedule_id.to_string().trim().to_owned();
+        if id.is_empty() {
+            return;
+        }
+        if let Some(api) = self.api.as_ref() {
+            api.post_json("schedule-toggle:", "/agent-schedules/toggle", json!({"schedule_id": id, "enabled": enabled}), None);
+        }
+    }
+
+    fn set_agent_llm(self: Pin<&mut Self>, session: &QString, model: &QString, effort: &QString) {
+        let session = session.to_string();
+        self.post_agent_setting(&session, "/agent-llm", json!({"session": session, "model": model.to_string(), "effort": effort.to_string()}));
+    }
+
+    fn compact_session(self: Pin<&mut Self>, session: &QString) {
+        let session = session.to_string();
+        self.post_agent_setting(&session, "/compact", json!({"session": session}));
+    }
+
+    fn set_agent_mcp(self: Pin<&mut Self>, session: &QString, servers: &cxx_qt_lib::QJsonArray) {
+        let session = session.to_string();
+        let servers: Vec<Value> = servers.iter().map(|v| Value::from(v.to_string().to_string())).collect();
+        self.post_agent_setting(&session, "/agent-mcp", json!({"session": session, "mcp_servers": servers}));
+    }
+
+    fn models_for_backend(&self, backend: &QString) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&clarp_core::catalog::models_for_backend(&self.model_catalog, &backend.to_string()))
+    }
+
+    fn efforts_for_model(&self, backend: &QString, model: &QString) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&clarp_core::catalog::efforts_for_model(&self.model_catalog, &backend.to_string(), &model.to_string()))
+    }
+
+    fn default_effort_for_model(&self, backend: &QString, model: &QString) -> QString {
+        qs(&clarp_core::catalog::default_effort_for_model(&self.model_catalog, &backend.to_string(), &model.to_string()))
+    }
+
+    fn backend_supports_resume(&self, backend: &QString) -> bool {
+        clarp_core::catalog::backend_supports(&self.model_catalog, &backend.to_string(), "supports_resume")
+    }
+
+    fn backend_supports_fork(&self, backend: &QString) -> bool {
+        clarp_core::catalog::backend_supports(&self.model_catalog, &backend.to_string(), "supports_fork")
+    }
+
     // ---- updates and background jobs ----------------------------------------
 
     fn load_updates(mut self: Pin<&mut Self>) {
@@ -1429,8 +1929,12 @@ impl AppController {
             self.as_mut().rust_mut().server_name = name;
             self.as_mut().rust_mut().server_version = json::string(object, "clarp_version");
             self.as_mut().server_info_changed();
+            self.as_mut().apply_host_launch_directory_default(&json::string(object, "default_cwd"));
             self.as_mut().set_connecting(false);
             self.as_mut().request_snapshot();
+            if let Some(api) = self.api.as_ref() {
+                api.get("model-catalog", "/agent-model-options", &[]);
+            }
             if let Some(sse) = self.as_mut().rust_mut().sse.as_mut() {
                 sse.start();
             }
@@ -1451,6 +1955,17 @@ impl AppController {
         } else if let Some(client_id) = tag.strip_prefix("send:") {
             let session = self.deliveries.get(client_id).map(|(s, _)| s.clone()).unwrap_or_else(|| self.selected_session.clone());
             self.request_delta(&session);
+        } else if tag == "model-catalog" {
+            self.as_mut().rust_mut().model_catalog = object.clone();
+            self.model_catalog_changed();
+        } else if tag == "contact-create" || tag.starts_with("agent-create:") {
+            self.created_agent(tag, object);
+        } else if let Some(session) = tag.strip_prefix("agent-release:").or_else(|| tag.strip_prefix("agent-setting:")) {
+            let session = session.to_owned();
+            self.as_mut().request_snapshot();
+            self.agent_mutation_succeeded(qs(&session));
+        } else if tag == "schedule-toggle:" {
+            self.request_snapshot();
         } else if let Some(rest) = tag.strip_prefix("updates:") {
             let (generation, kind) = rest.split_once(':').unwrap_or((rest, ""));
             let Ok(generation) = generation.parse::<u64>() else { return };
@@ -1483,6 +1998,19 @@ impl AppController {
                 return;
             }
             self.as_mut().complete_snapshot_request();
+        }
+        if tag == "contact-create" {
+            // The Host's own message, without an HTTP suffix: it explains
+            // what to change (a forbidden folder, an occupied contact).
+            self.as_mut().rust_mut().starting_backend.clear();
+            self.as_mut().rust_mut().starting_contact.clear();
+            if message == "contact_pool_empty" {
+                self.as_mut().launch_pool_empty();
+            } else {
+                self.as_mut().set_error(message);
+            }
+            self.contact_launch_changed();
+            return;
         }
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         if let Some(rest) = tag.strip_prefix("updates:") {

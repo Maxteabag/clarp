@@ -32,6 +32,11 @@ turns = {
     "mike": [{"id": "m1", "role": "assistant", "text": "Mike here", "revision": 1, "timestamp": "2026-09-29T09:00:00Z"}],
 }
 jobs = []
+# /agents behaviour: "modern" returns the created agent row; "session-only"
+# returns just the id and shows the row only after /__control/publish-pending.
+create_mode = "modern"
+next_create_response = None
+pending_agents = []
 attention = [{"id": "d1", "session": "mike", "kind": "decision"}]
 subscribers = []
 event_id = 0
@@ -87,7 +92,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
         if url.path == "/server-info":
-            return self.reply(200, {"name": "Fake Host", "clarp_version": "9.9.9"})
+            return self.reply(200, {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp"})
         if url.path == "/agents/snapshot":
             with state_lock:
                 return self.reply(200, {"agents": agents, "personas": [{"id": "p", "name": "Paula"}]})
@@ -152,6 +157,16 @@ class Handler(BaseHTTPRequestHandler):
                 for subscriber in list(subscribers):
                     subscriber.put(CLOSE)
             return self.reply(200, {"ok": True})
+        global create_mode, next_create_response, pending_agents
+        if url.path == "/__control/create":
+            create_mode = body.get("mode", create_mode)
+            next_create_response = body.get("respond")
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/publish-pending":
+            with state_lock:
+                agents.extend(pending_agents)
+                pending_agents = []
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/jobs":
             # Test control: replace the job list, then push an optional event.
             global jobs
@@ -165,8 +180,29 @@ class Handler(BaseHTTPRequestHandler):
         record({"method": "POST", "path": url.path, "body": body})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
-        if url.path in ("/select", "/stop"):
+        if url.path in ("/select", "/stop", "/compact", "/agent-schedules/toggle") or url.path.startswith("/agent-"):
             return self.reply(200, {"ok": True})
+        if url.path == "/agents":
+            if next_create_response is not None:
+                scripted, next_create_response = next_create_response, None
+                return self.reply(scripted["status"], scripted["body"])
+            name = body.get("name") or ("Pool" if body.get("auto_contact") else "Anon")
+            session = name.lower() + "-new"
+            row = {"agent_id": session + "-id", "session": session, "persona": name, "backend": body.get("backend", ""),
+                   "cwd": body.get("cwd", ""), "latest_state": "idle", "alive": True, "last_activity": 9000,
+                   "conversation_id": "c-" + session, "head_revision": 0}
+            with state_lock:
+                turns[session] = []
+                if create_mode == "modern":
+                    agents.append(row)
+                else:
+                    pending_agents.append(row)
+            if create_mode == "modern":
+                self.reply(201, {"session": session, "agent": row})
+            else:
+                self.reply(201, {"session": session})
+            broadcast({"type": "agent-roster", "session": session, "kind": "created"})
+            return
         if url.path == "/send":
             global revision
             session = body["session"]
@@ -189,6 +225,26 @@ class Handler(BaseHTTPRequestHandler):
             broadcast({"type": "user-notification", "session": session, "persona": "Rachel", "preview": "Echo"})
             return
         return self.reply(404, {"error": "not found"})
+
+
+def do_DELETE(self):
+    url = urlparse(self.path)
+    record({"method": "DELETE", "path": url.path})
+    if not self.authorized():
+        return self.reply(401, {"error": "unauthorized"})
+    if url.path.startswith("/agents/"):
+        session = url.path[len("/agents/"):]
+        with state_lock:
+            agents[:] = [a for a in agents if a["session"] != session]
+        self.reply(200, {"ok": True})
+        broadcast({"type": "agent-roster", "session": session, "kind": "deleted"})
+        return
+    if url.path.startswith("/background-jobs/"):
+        return self.reply(200, {"ok": True})
+    return self.reply(404, {"error": "not found"})
+
+
+Handler.do_DELETE = do_DELETE
 
 
 class Server(ThreadingHTTPServer):
