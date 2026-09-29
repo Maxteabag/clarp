@@ -54,7 +54,8 @@ def test_stopping_runner_terminates_descendants_only(tmp_path, monkeypatch, back
     executable.write_text(
         "import pathlib, subprocess, sys, time\n"
         "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-        f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))\n"
+        f"pathlib.Path({str(pid_file) + '.tmp'!r}).write_text(str(child.pid))\n"
+        f"pathlib.Path({str(pid_file) + '.tmp'!r}).replace({str(pid_file)!r})\n"
         "time.sleep(60)\n")
     monkeypatch.setattr(shutil, "which", lambda _name: sys.executable)
     monkeypatch.setattr(runner, "build_cmd", lambda *a, **kw: [sys.executable, str(executable)])

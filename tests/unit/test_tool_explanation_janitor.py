@@ -400,6 +400,9 @@ def test_same_scoped_owner_keeps_distinct_targets_out_of_shared_batches_and_cach
         first.request(3, [ITEM], target_agent_id=targets[0])
         second.request(3, [ITEM], target_agent_id=targets[1])
         texts = [ready(service, target_agent_id=target)["text"] for service, target in zip([first, second], targets)]
+        # A request can read the learned answer before the second worker has
+        # stored its cache row; closing the services then abandons that write.
+        wait_for(lambda: db.conn().execute("SELECT count(*) FROM tool_explanation_cache").fetchone()[0] == 2)
     # Each target keeps its own batch, run and cached answer. The explanation
     # itself is learned per call shape for the whole Host, so the second target
     # reuses the first answer instead of asking the model again.
