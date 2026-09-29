@@ -59,7 +59,8 @@ Window {
                                          "url": "/clips/1/complete.mp3", "complete_url": "/clips/1/complete.mp3"})
             stage = 1
         } else if (stage === 1 && acks(1).indexOf("play-ok") >= 0) {
-            check(JSON.stringify(acks(1)) === JSON.stringify(["queued", "play-start", "play-ok"]), "acknowledged in order: " + acks(1))
+            // Acks are separate requests and may reach the Host out of order.
+            check(acks(1).slice().sort().join() === "play-ok,play-start,queued", "queued, started and played: " + acks(1))
             check(sawPlaying && !app.audio.playing, "played and stopped")
             check(requests("/clips/1/complete.mp3", "GET").length === 1, "downloaded once")
             app.selectSession("mike")

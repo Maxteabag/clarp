@@ -10,6 +10,9 @@ status=0
 export CLARP_BASE_URL="${CLARP_BASE_URL:-http://127.0.0.1:9}"
 export CLARP_TOKEN="${CLARP_TOKEN:-probe-token}"
 export CLARP_SETTINGS="${CLARP_SETTINGS:-off}"
+# Probes never play through the speakers; a probe opts into a test output
+# with "// env: CLARP_AUDIO_OUTPUT=null" or "=decode".
+export CLARP_AUDIO_OUTPUT="${CLARP_AUDIO_OUTPUT:-none}"
 scratch=$(mktemp -d /var/tmp/clarp-qml-probes.XXXXXX)
 trap 'rm -rf "$scratch"' EXIT
 for probe in app/tests/qml/*_probe.qml; do
