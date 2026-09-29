@@ -10,5 +10,10 @@ pub mod conversation_model;
 pub mod directory_models;
 pub mod pane_tree_model;
 pub mod presentation_model;
+#[allow(dead_code)]
+pub mod quick;
 pub mod preview_versions;
 pub mod tool_narrator;
+// The forwarding signals are emitted by Qt through string connections.
+#[allow(dead_code)]
+pub mod transcript_layout;
