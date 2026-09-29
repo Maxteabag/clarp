@@ -22,7 +22,7 @@ from lib.clip_delivery.raw_pcm import RAW_PCM_FORMAT, RawPcmDelivery  # noqa: E4
 def test_config_defaults_keep_current_wire_format(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[audio]\n")
-    config.reset_cache_for_tests()
+    config.reset_cache()
     loaded = config.load(path)
     assert loaded.raw_pcm_encoding == "pcm_f32le"
     assert loaded.raw_pcm_sample_rate == 44100
@@ -32,7 +32,7 @@ def test_config_reads_raw_pcm_format_knobs(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text(
         '[audio]\nraw_pcm_encoding = "PCM_S16LE"\nraw_pcm_sample_rate = 24000\n')
-    config.reset_cache_for_tests()
+    config.reset_cache()
     loaded = config.load(path)
     assert loaded.raw_pcm_encoding == "pcm_s16le"
     assert loaded.raw_pcm_sample_rate == 24000
@@ -43,7 +43,7 @@ def test_config_env_overrides_raw_pcm_format(tmp_path, monkeypatch):
     path.write_text('[audio]\nraw_pcm_encoding = "pcm_f32le"\n')
     monkeypatch.setenv("CLAUDE_PWA_RAW_PCM_ENCODING", "pcm_s16le")
     monkeypatch.setenv("CLAUDE_PWA_RAW_PCM_SAMPLE_RATE", "24000")
-    config.reset_cache_for_tests()
+    config.reset_cache()
     loaded = config.load(path)
     assert loaded.raw_pcm_encoding == "pcm_s16le"
     assert loaded.raw_pcm_sample_rate == 24000
