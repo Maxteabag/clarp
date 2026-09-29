@@ -36,7 +36,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/network/ApiClient` | 238 | `net/src/api.rs` + `core/src/endpoint.rs` | verified (`net/tests/clients.rs`, `core/tests/endpoint.rs`) |
 | `src/network/SseClient` | 197 | `net/src/sse.rs` + `core/src/endpoint.rs` | verified (`net/tests/clients.rs::sse_*`) |
 | `src/network/SseParser` | 91 | `core/src/sse.rs` | verified (`protocol.rs::sse_parser_*`) |
-| `src/platform/DesktopIntegration` | 97 | `desktop-rs/src/platform/` | todo |
+| `src/platform/DesktopIntegration` | 97 | `app/src/bridge/desktop_services.rs` (ksni StatusNotifierItem + org.freedesktop.Notifications over zbus) | verified by `app/tests/run-desktop-services.sh` (fake tray host and notification daemon on a private bus: registration, menu, mute from the tray, notifications for replies in closed chats, Show, Quit). Deviation: the tray waits for a tray host that starts later instead of giving up at launch; MPRIS pending |
 | `src/platform/DesktopPresence` | 224 | `desktop-rs/src/platform/` | todo |
 | `src/platform/MprisIntegration` | 252 | `desktop-rs/src/platform/` | todo |
 | `src/protocol/ProtocolTypes` | 799 | `core/src/{protocol,text,json}.rs` | verified (`core/tests/protocol.rs`) |

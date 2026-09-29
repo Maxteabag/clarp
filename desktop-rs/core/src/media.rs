@@ -105,3 +105,12 @@ pub fn rounded_portrait(bytes: &[u8]) -> Option<Vec<u8>> {
     portrait.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
     Some(png)
 }
+
+/// An icon for StatusNotifierItem hosts: `side` px square, ARGB32 in
+/// network byte order.
+pub fn argb_icon(png: &[u8], side: u32) -> Option<(i32, i32, Vec<u8>)> {
+    let image = image::load_from_memory(png).ok()?;
+    let rgba = image.resize_exact(side, side, image::imageops::FilterType::Triangle).to_rgba8();
+    let data = rgba.pixels().flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
+    Some((side as i32, side as i32, data))
+}

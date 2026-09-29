@@ -12,6 +12,7 @@ pub mod avatar_motion;
 pub mod controller;
 pub mod conversation_model;
 pub mod desktop;
+pub mod desktop_services;
 pub mod directory_models;
 pub mod pane_tree_model;
 pub mod presentation_model;
