@@ -23,3 +23,4 @@ pub mod tool_narrator;
 pub mod transcript_layout;
 #[allow(dead_code)]
 pub mod transcript_rows;
+pub mod window_capture;

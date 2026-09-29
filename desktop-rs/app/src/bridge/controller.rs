@@ -1045,6 +1045,19 @@ impl cxx_qt::Initialize for AppController {
             narrator.set_detail_level(level);
         }
         self.as_mut().connect_children();
+        // Screenshot runs open a requested chat once the fleet has loaded.
+        if std::env::var_os("CLARP_SCREENSHOT_PATH").is_some()
+            && let Ok(session) = std::env::var("CLARP_SCREENSHOT_SELECT_SESSION")
+            && !session.is_empty()
+        {
+            let qt = self.qt_thread();
+            crate::runtime::after(Duration::from_millis(1_400), move || {
+                let queued = qt.queue(move |controller| controller.select_session(&qs(&session)));
+                if queued.is_err() {
+                    eprintln!("AppController: dropped the screenshot selection; the controller is gone");
+                }
+            });
+        }
         // Connect once the event loop runs, like the C++ QTimer::singleShot(0).
         if qt.queue(|controller| controller.connect_or_look_up_token()).is_err() {
             eprintln!("AppController: could not schedule the first connection");
