@@ -28,6 +28,7 @@ pub mod sidebar;
 pub mod sse;
 pub mod sync;
 pub mod text;
+pub mod transcript_cache;
 pub mod transcript_layout;
 pub mod transcript_rows;
 pub mod time_format;
