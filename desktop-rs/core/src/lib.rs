@@ -3,6 +3,7 @@
 //! Everything here is pure so `cargo test` needs no display or Qt runtime.
 
 pub mod attachments;
+pub mod audio;
 pub mod avatar_motion;
 pub mod catalog;
 pub mod conversation;
