@@ -5,9 +5,13 @@
 pub mod conversation;
 pub mod delivery;
 pub mod endpoint;
+pub mod jobs;
 pub mod json;
+pub mod list_ops;
 pub mod protocol;
+pub mod roster;
 pub mod sse;
 pub mod sync;
 pub mod text;
 pub mod time_format;
+pub mod tree;

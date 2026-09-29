@@ -13,6 +13,7 @@ use fancy_regex::Regex;
 use serde_json::{Value, json};
 
 use crate::json::{self, Object};
+pub use crate::list_ops::{ListOp, replay};
 use crate::protocol::{Message, describe_subagent_cell};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -65,15 +66,7 @@ pub enum Signal {
     BatchFinished,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Op {
-    Reset(Vec<Message>),
-    Insert { at: usize, rows: Vec<Message> },
-    Remove { at: usize, count: usize },
-    /// Replace one row. `roles` may be empty when nothing visible changed.
-    Update { row: usize, message: Box<Message>, roles: Vec<Role> },
-    Signal(Signal),
-}
+pub type Op = ListOp<Message, Role, Signal>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoadKind {
@@ -182,7 +175,7 @@ impl Conversation {
     }
 
     fn update(&mut self, row: usize, message: Message, roles: Vec<Role>) {
-        self.ops.push(Op::Update { row, message: Box::new(message.clone()), roles });
+        self.ops.push(Op::Update { first: row, items: vec![message.clone()], roles });
         self.messages[row] = message;
     }
 
@@ -690,21 +683,4 @@ pub fn presented_display_cells(message: &Message) -> Vec<Value> {
             Value::Object(object)
         })
         .collect()
-}
-
-/// Apply ops to a mirror of the rows, as the Qt adapter does.
-pub fn replay(mirror: &mut Vec<Message>, ops: &[Op]) {
-    for op in ops {
-        match op {
-            Op::Reset(rows) => *mirror = rows.clone(),
-            Op::Insert { at, rows } => {
-                mirror.splice(*at..*at, rows.iter().cloned());
-            }
-            Op::Remove { at, count } => {
-                mirror.drain(*at..*at + *count);
-            }
-            Op::Update { row, message, .. } => mirror[*row] = (**message).clone(),
-            Op::Signal(_) => {}
-        }
-    }
 }

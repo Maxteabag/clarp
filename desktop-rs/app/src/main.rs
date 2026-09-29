@@ -1,4 +1,5 @@
 mod bridge;
+mod list_replay;
 mod qjson;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QUrl};
