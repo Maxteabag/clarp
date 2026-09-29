@@ -1,6 +1,7 @@
 """Bounded retention for ephemeral server data and generated audio."""
 from __future__ import annotations
 
+import datetime
 import pathlib
 import shutil
 import threading
@@ -22,6 +23,9 @@ class Policy:
     state_max_age_ms: int = 30 * DAY_MS
     clip_row_max_age_ms: int = 30 * DAY_MS
     hls_artifact_max_age_ms: int = DAY_MS
+    # The daily event-log mirror (lib.eventlog) is diagnostic; SQLite holds the
+    # live record. Nothing else ever deleted these files.
+    event_log_max_age_ms: int = 14 * DAY_MS
     # Must outlive the longest window lib.turn_usage reports on (7 days).
     turn_usage_max_age_ms: int = 30 * DAY_MS
     background_job_events_max_age_ms: int = 30 * DAY_MS
@@ -127,6 +131,31 @@ def prune_hls_artifacts(audio_dir: pathlib.Path, *, now_ms: int | None = None,
     return removed
 
 
+def prune_event_logs(log_dir: pathlib.Path, *, max_age_ms: int,
+                     today: datetime.date | None = None) -> int:
+    """Delete daily ``YYYY-MM-DD.jsonl`` event logs older than ``max_age_ms``.
+
+    Age comes from the date in the file name, so a touched or copied file
+    cannot dodge retention, and any other file in the directory is left alone.
+    """
+    today = today or datetime.datetime.now(datetime.timezone.utc).date()
+    cutoff = today - datetime.timedelta(milliseconds=max_age_ms)
+    removed = 0
+    for path in pathlib.Path(log_dir).glob("*.jsonl"):
+        try:
+            day = datetime.date.fromisoformat(path.stem)
+        except ValueError:
+            continue
+        if day >= cutoff:
+            continue
+        try:
+            path.unlink()
+            removed += 1
+        except OSError as e:
+            log_exception("eventLogPruneFail", e, detail=path.name)
+    return removed
+
+
 class MaintenanceWorker:
     """Run conservative retention cleanup at startup and then hourly."""
 
@@ -163,6 +192,10 @@ class MaintenanceWorker:
             self.audio_dir, max_age_ms=self.policy.hls_artifact_max_age_ms,
         )}
         counts.update(prune_database(policy=self.policy))
+        from . import eventlog
+        counts["event_logs"] = prune_event_logs(
+            eventlog.LOG_DIR, max_age_ms=self.policy.event_log_max_age_ms,
+        )
         try:
             counts["helpers_archived"] = archive_done_helpers(
                 policy=self.policy, stream=self.stream)
