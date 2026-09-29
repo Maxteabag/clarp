@@ -97,6 +97,10 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "batchFinished"]
         fn batch_finished(self: Pin<&mut ConversationModel>);
+        /// Emitted once after every mutation has been replayed; the Rust
+        /// presentation model recomputes on it (Qt's row signals are private).
+        #[qsignal]
+        fn changed(self: Pin<&mut ConversationModel>);
 
         #[qinvokable]
         #[cxx_name = "openSession"]
@@ -165,6 +169,52 @@ pub mod qobject {
         #[cxx_name = "rowCount"]
         fn row_count(self: &ConversationModel, parent: &QModelIndex) -> i32;
     }
+
+    impl cxx_qt::Initialize for ConversationModel {}
+}
+
+thread_local! {
+    /// Live ConversationModels by object address, so a presentation model
+    /// handed a plain QAbstractItemModel* can read rows and subscribe.
+    static LIVE_MODELS: std::cell::RefCell<std::collections::HashSet<usize>> = Default::default();
+}
+
+impl cxx_qt::Initialize for qobject::ConversationModel {
+    fn initialize(mut self: Pin<&mut Self>) {
+        let address = unsafe { self.as_mut().get_unchecked_mut() } as *mut qobject::ConversationModel as usize;
+        self.as_mut().rust_mut().address = address;
+        LIVE_MODELS.with(|models| models.borrow_mut().insert(address));
+    }
+}
+
+impl Drop for ConversationModelRust {
+    fn drop(&mut self) {
+        LIVE_MODELS.with(|models| models.borrow_mut().remove(&self.address));
+    }
+}
+
+fn is_live(address: usize) -> bool {
+    LIVE_MODELS.with(|models| models.borrow().contains(&address))
+}
+
+/// Read access to the live ConversationModel at `address`. Safe to call from
+/// its own `changed` handler, which runs after all rows were replayed.
+///
+/// SAFETY: the caller must not keep the reference past the current call.
+pub unsafe fn live<'a>(address: usize) -> Option<&'a qobject::ConversationModel> {
+    is_live(address).then(|| unsafe { &*(address as *const qobject::ConversationModel) })
+}
+
+/// Connect `handler` to the `changed` signal of the model at `address`.
+pub fn on_changed(address: usize, handler: impl FnMut() + Send + 'static) -> Option<cxx_qt::QMetaObjectConnectionGuard> {
+    if !is_live(address) {
+        return None;
+    }
+    let mut handler = handler;
+    // SAFETY: the address belongs to a live ConversationModel on this thread,
+    // and connecting does not touch its Rust state.
+    let model = unsafe { Pin::new_unchecked(&mut *(address as *mut qobject::ConversationModel)) };
+    Some(model.on_changed(move |_| handler()))
 }
 
 /// Qt::UserRole + 1 onward, in the C++ enum order.
@@ -202,7 +252,7 @@ pub fn role_id(role: Role) -> i32 {
     USER_ROLE + 1 + ROLES.iter().position(|(r, _)| *r == role).expect("every role is listed") as i32
 }
 
-fn role_for(id: i32) -> Option<Role> {
+pub fn role_for(id: i32) -> Option<Role> {
     usize::try_from(id - USER_ROLE - 1).ok().and_then(|i| ROLES.get(i)).map(|(role, _)| *role)
 }
 
@@ -211,13 +261,22 @@ pub struct ConversationModelRust {
     core: Conversation,
     /// What views see; only ever changed between begin/end notifications.
     rows: Vec<Message>,
+    address: usize,
+}
+
+pub fn role_names_hash() -> QHash<QHashPair_i32_QByteArray> {
+    let mut names = QHash::<QHashPair_i32_QByteArray>::default();
+    for (role, name) in ROLES {
+        names.insert(role_id(role), QByteArray::from(name));
+    }
+    names
 }
 
 fn qs(text: &str) -> QString {
     QString::from(text)
 }
 
-fn cell_value(message: &Message, role: Role) -> QVariant {
+pub fn cell_value(message: &Message, role: Role) -> QVariant {
     match role {
         Role::MessageId => QVariant::from(&qs(&message.id)),
         Role::Author => QVariant::from(&qs(&message.role)),
@@ -288,11 +347,7 @@ impl qobject::ConversationModel {
     }
 
     fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
-        let mut names = QHash::<QHashPair_i32_QByteArray>::default();
-        for (role, name) in ROLES {
-            names.insert(role_id(role), QByteArray::from(name));
-        }
-        names
+        role_names_hash()
     }
 
     fn row_count(&self, parent: &QModelIndex) -> i32 {
@@ -303,10 +358,19 @@ impl qobject::ConversationModel {
     pub fn mutate<R>(mut self: Pin<&mut Self>, change: impl FnOnce(&mut Conversation) -> R) -> R {
         let result = change(&mut self.as_mut().rust_mut().core);
         let ops = self.as_mut().rust_mut().core.take_ops();
+        let any = !ops.is_empty();
         for op in ops {
             self.as_mut().replay(op);
         }
+        if any {
+            self.as_mut().changed();
+        }
         result
+    }
+
+    /// The rows views currently see.
+    pub fn rows(&self) -> &[Message] {
+        &self.rows
     }
 
     fn replay(mut self: Pin<&mut Self>, op: Op) {
