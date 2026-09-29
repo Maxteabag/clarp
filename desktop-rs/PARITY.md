@@ -20,11 +20,11 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/TranscriptCache` | 123 | `desktop-rs/src/app/` | todo |
 | `src/app/WorkspaceContext` | 86 | `core/src/workspace.rs` | verified (`core/tests/workspace.rs`, real Git worktree) |
 | `src/main` | 1164 | `app/src/main.rs` + `app/build.rs` | wip: Clarp.Desktop module built from `desktop/CMakeLists.txt` (QML + resources via `app/qml`, `app/resources` symlinks; QTP0004 subdirectory qmldirs generated), Basic style, software renderer, own `ClarpRust` settings namespace, Main loads and runs against the fake Host offscreen (media/avatar/audio surface still missing: TypeErrors on `app.audio`, `avatarMotion`, `avatarSource`, `resolveMediaMarkdown`, `loadMedia`); Main loaded inside its module with `launchOnStartup`/`sidebarVisible`; instance forwarding, launch options, tray, screenshots pending |
-| `src/media/AudioController` | 859 | `desktop-rs/src/media/` | todo |
+| `src/media/AudioController` | 859 | `core/src/audio.rs` | wip: player state machine (queue, source precedence, HLS, raw PCM, acks, mute/silence/pause), transcription ownership verified in `core/tests/audio.rs`; Qt object, output backend and capture pending |
 | `src/media/AudioCoordinator` | 363 | `desktop-rs/src/media/` | todo |
 | `src/media/PortraitImage` | 59 | `core/src/media.rs` (`image` crate) | verified (`core/tests/media.rs::a_portrait_is_a_192px_circle`) |
-| `src/media/RecordingSession` | 56 | `desktop-rs/src/media/` | todo |
-| `src/media/WavEncoder` | 58 | `desktop-rs/src/media/` | todo |
+| `src/media/RecordingSession` | 56 | `core/src/audio.rs` (`RecordingLease`, flock) | verified (`core/tests/audio.rs::the_microphone_is_exclusive_across_windows`) |
+| `src/media/WavEncoder` | 58 | `core/src/audio.rs` | verified (`core/tests/audio.rs::wav_encoding_produces_a_valid_pcm_header`) |
 | `src/models/AgentFilterModel` | 368 | `core/src/sidebar.rs` + `app/src/bridge/agent_filter_model.rs` | verified (`core/tests/sidebar.rs`, `app/tests/qml/agent_filter_model_probe.qml`); uses `invalidateRowsFilter()` (deprecated in 6.13) because cxx cannot name `QFlags<Direction>` for `endFilterChange` |
 | `src/models/AgentListModel` | 708 | `core/src/roster.rs` + `app/src/bridge/agent_list_model.rs` | verified (`core/tests/roster.rs`, `app/tests/qml/agent_list_model_probe.qml`); name order is case-insensitive, not ICU collation |
 | `src/models/BackgroundJobTracker` | 159 | `core/src/jobs.rs` | verified (`roster.rs::background_job_tracker_keeps_only_active_jobs`) |
@@ -135,7 +135,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::emptyStartupWaitsForExplicitChoiceAndRetryTargetsLatestFailure` | `app/tests/qml/empty_startup_probe.qml` | verified |
 | `tst_native_core::conversationChangeRequestsReplacement` | `core/tests/conversation.rs::conversation_change_requests_replacement` | verified |
 | `tst_native_core::clipSourcePrecedenceMatchesContract` | `core/tests/protocol.rs::clip_source_precedence_matches_contract` | verified |
-| `tst_native_core::wavEncodingProducesAValidPcmHeader` | | todo |
+| `tst_native_core::wavEncodingProducesAValidPcmHeader` | `core/tests/audio.rs::wav_encoding_produces_a_valid_pcm_header` | verified |
 | `tst_native_core::paneTreeSplitsClosesNavigatesAndZooms` | `core/tests/panes.rs::pane_tree_splits_closes_navigates_and_zooms` | verified |
 | `tst_native_core::paneWorkspacePersistenceIsAsyncAndConflictSafe` | `core/tests/panes.rs::pane_workspace_persistence_is_conflict_safe` + `a_queued_layout_replaces_*` + `pane_tree_model_probe.qml` (worker-thread writes) | verified |
 | `tst_native_core::apiClientRejectsCrossOriginAuthenticatedMedia` | `net/tests/clients.rs::api_client_rejects_cross_origin_authenticated_media` | verified |
