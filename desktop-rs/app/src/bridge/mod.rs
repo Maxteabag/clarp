@@ -11,6 +11,7 @@ pub mod avatar_motion;
 #[allow(clippy::too_many_arguments)]
 pub mod controller;
 pub mod conversation_model;
+pub mod desktop;
 pub mod directory_models;
 pub mod pane_tree_model;
 pub mod presentation_model;

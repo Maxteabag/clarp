@@ -13,6 +13,8 @@ export CLARP_SETTINGS="${CLARP_SETTINGS:-off}"
 # Probes never play through the speakers; a probe opts into a test output
 # with "// env: CLARP_AUDIO_OUTPUT=null" or "=decode".
 export CLARP_AUDIO_OUTPUT="${CLARP_AUDIO_OUTPUT:-none}"
+# Links and copies never reach the user's browser or clipboard: they are
+# recorded in the probe's scratch files opened-urls and clipboard.
 # Nor the microphone: "// env: CLARP_AUDIO_INPUT=file:$FIXTURES/dictation.wav".
 export CLARP_AUDIO_INPUT="${CLARP_AUDIO_INPUT:-none}"
 scratch=$(mktemp -d /var/tmp/clarp-qml-probes.XXXXXX)
@@ -35,6 +37,14 @@ for probe in app/tests/qml/*_probe.qml; do
     sed -n 's#^// fixture: ##p' "$probe" | while read -r fixture text; do
         printf '%s' "$text" > "$scratch/$name/$fixture"
     done
+    # "// fixture-exec: NAME TEXT" writes an executable (TEXT may use \n);
+    # "// fixture-dir: NAME" makes a directory (NAME may contain spaces).
+    sed -n 's#^// fixture-exec: ##p' "$probe" | while read -r fixture text; do
+        printf '%b' "$text" > "$scratch/$name/$fixture" && chmod +x "$scratch/$name/$fixture"
+    done
+    sed -n 's#^// fixture-dir: ##p' "$probe" | while IFS= read -r fixture; do
+        mkdir -p "$scratch/$name/$fixture"
+    done
     # "// env: KEY=VALUE" lines set per-probe variables; $SCRATCH is the
     # probe's scratch directory, $FIXTURES app/tests/fixtures.
     probe_env=$(sed -n 's#^// env: ##p' "$probe" | sed "s#\$SCRATCH#$scratch/$name#g; s#\$FIXTURES#$PWD/app/tests/fixtures#g")
@@ -50,6 +60,7 @@ for probe in app/tests/qml/*_probe.qml; do
     output=$(env $probe_env QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen CLARP_RS_QML="$PWD/$probe" \
         CLARP_WORKSPACE_STORE="$store" QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
         CLARP_BASE_URL="$base_url" XDG_CONFIG_HOME="$scratch/$name/config" XDG_CACHE_HOME="$scratch/$name/cache" XDG_DATA_HOME="$scratch/$name/data" \
+        CLARP_TEST_OPEN_URL="$scratch/$name/opened-urls" CLARP_TEST_CLIPBOARD="$scratch/$name/clipboard" \
         timeout 60 dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
         sh -c "$keyring"' exec "$@"' probe "$binary" "--probe-store=$store" "--probe-host-log=$scratch/$name/host.log" 2>&1)
     code=$?

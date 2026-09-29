@@ -9,7 +9,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 
 | C++ source | Lines | Rust target | Status |
 |---|---|---|---|
-| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: connect/snapshot/selection/log sync/send/stop/SSE, drafts/focus, updates/jobs, launch/lifecycle/catalog, narrator, preferences, teams and turn queue, profile/prompt history, settings status/TTS, voices, orchestrator, composer attachments (upload, shared filesystem, send), past sessions/resume, launch directories, directory suggestions/favorites, contact assignment, pairing and keyring credentials, avatars (portrait fetch/round/disk cache, failures not retried) and chat media (list, image file cache, clarp-media links) verified in `app/tests/qml/controller*_probe.qml` against `fake_host.py`; directories, clipboard image paste, audio, styled markdown pending |
+| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: connect/snapshot/selection/log sync/send/stop/SSE, drafts/focus, updates/jobs, launch/lifecycle/catalog, narrator, preferences, teams and turn queue, profile/prompt history, settings status/TTS, voices, orchestrator, composer attachments (upload, shared filesystem, send), past sessions/resume, launch directories, directory suggestions/favorites, contact assignment, pairing and keyring credentials, avatars (portrait fetch/round/disk cache, failures not retried) and chat media (list, image file cache, clarp-media links), links (web/mail only, Hyprland workspace helper, local reports), clipboard (arboard), agent files and native CLI terminal verified in `app/tests/qml/controller*_probe.qml` against `fake_host.py`; directories, clipboard image paste, audio, styled markdown pending |
 | `src/app/CredentialStore` | 245 | `net/src/credentials.rs` (zbus) | verified (`net/tests/credentials.rs` via `net/tests/run-keyring-tests.sh`: throwaway gnome-keyring and keyring-less private buses; `app/tests/qml/controller_credentials_probe.qml` pairs, reconnects from the keyring and forgets). Deviation: a failed `/pairing/exchange` returns the page to offline instead of staying in "pairing" |
 | `src/app/InstanceServer` | 199 | `desktop-rs/src/app/` | todo |
 | `src/app/MarkdownStyle` | 250 | `core/src/markdown_style.rs` (pulldown-cmark) + `styledMarkdownHtml` in the controller | verified (`core/tests/markdown_style.rs`, `app/tests/qml/markdown_style_probe.qml`, screenshot of a styled reply). Deviation: rendered directly to Qt rich-text HTML instead of restyling a QTextDocument; raw HTML in a message stays text; `styleMarkdown(textDocument)` is not ported (no QML caller) |
@@ -40,13 +40,13 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/platform/DesktopPresence` | 224 | `desktop-rs/src/platform/` | todo |
 | `src/platform/MprisIntegration` | 252 | `desktop-rs/src/platform/` | todo |
 | `src/protocol/ProtocolTypes` | 799 | `core/src/{protocol,text,json}.rs` | verified (`core/tests/protocol.rs`) |
-| `src/terminal/TerminalLaunch` | 36 | `desktop-rs/src/terminal/` | todo |
+| `src/terminal/TerminalLaunch` | 36 | `core/src/links.rs` | verified (`core/tests/links.rs`; `app/tests/qml/controller_terminal_probe.qml`) |
 | `src/views/TranscriptLayout` | 890 | `core/src/transcript_layout.rs` + `app/src/bridge/transcript_layout.rs` + `app/src/bridge/quick.rs` | verified: geometry in `core/tests/transcript_layout.rs`; the native QQuickItem (cxx-qt base QQuickItem, C++ creation semantics via QQmlComponent begin/complete + indexOfProperty + QQmlPropertyMap, signature-forwarded model/Flickable signals) runs the C++ test scene in `app/tests/qml/transcript_layout_probe.qml` |
 | `src/views/TranscriptRows` | 310 | `core/src/transcript_rows.rs` + `app/src/bridge/transcript_rows.rs` | verified (`core/tests/transcript_rows.rs`; list model over any source via signature-forwarded signals in `app/tests/qml/transcript_rows_probe.qml`: finishing splits without reset, rows map around split messages) |
 | `src/app/AvatarMotionClock.h` (header-only) | 224 | `core/src/avatar_motion.rs` + `app/src/bridge/avatar_motion.rs` | verified (`core/tests/avatar_motion.rs`; the real Main.qml binds `avatarMotion` without errors); pending: window-visibility watching (`watchMotionWindow`) with the platform step, and observers are released by QML `onDestruction` rather than a `destroyed` hook |
 | `src/app/DesktopPalette.h` (header-only) | 40 | `desktop-rs/src/app/` | todo |
 | `src/app/KeyboardSmokeCheck.h` (header-only) | 330 | `desktop-rs/src/app/` | todo |
-| `src/app/LocalReport.h` (header-only) | 40 | `desktop-rs/src/app/` | todo |
+| `src/app/LocalReport.h` (header-only) | 40 | `core/src/links.rs::local_report_path` | verified (`core/tests/links.rs::only_readable_non_executable_reports_open`); content is checked by magic bytes/UTF-8 instead of the freedesktop MIME database |
 | `src/app/MemoryDiagnostics.h` (header-only) | 71 | `desktop-rs/src/app/` | todo |
 | `src/app/PairSidebarSmokeCheck.h` (header-only) | 62 | `desktop-rs/src/app/` | todo |
 | `src/app/PreviewRelaunch.h` (header-only) | 15 | `core/src/preview.rs` | verified (`core/tests/preview.rs::relaunch_preserves_host_and_session`) |
@@ -118,7 +118,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::controllerTracksJobsFromListAndEvents` | `app/tests/qml/controller_jobs_probe.qml` | verified |
 | `tst_native_core::rosterLookupIsConsistentDuringStructuralSignals` | adapter `indexOfSession` reads the replayed mirror | wip: needs a probe that checks lookups inside rowsInserted/Removed/Moved handlers |
 | `tst_native_core::circularPortraitsAreBoundedAndAntialiased` | | todo |
-| `tst_native_core::agentTerminalLaunchesNativeCliThroughDefaultTerminal` | | todo |
+| `tst_native_core::agentTerminalLaunchesNativeCliThroughDefaultTerminal` | `app/tests/qml/controller_terminal_probe.qml` | verified (stub `xdg-terminal-exec` and CLIs on PATH; exact command per backend; refused without a shared filesystem) |
 | `tst_native_core::sseParserHandlesChunksCommentsAndReplayIds` | `core/tests/protocol.rs::sse_parser_handles_chunks_comments_and_replay_ids` | verified |
 | `tst_native_core::nextAttentionCyclesWaitingUnreadAndPending` | `core/tests/roster.rs::next_attention_cycles_waiting_unread_and_pending` | verified |
 | `tst_native_core::readyPresentationRetainsCanonicalStreamAndRevealsFinal` | `core/tests/presentation.rs::ready_presentation_*` + `app/tests/qml/controller_lifecycle_probe.qml` (setting restored) | verified |

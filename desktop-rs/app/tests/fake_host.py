@@ -304,6 +304,14 @@ class Handler(BaseHTTPRequestHandler):
                 agents.extend(pending_agents)
                 pending_agents = []
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/agent":
+            # Test control: change an agent's fields, then announce it.
+            with state_lock:
+                for agent in agents:
+                    if agent["session"] == body.get("session"):
+                        agent.update(body.get("set", {}))
+            broadcast({"type": "agent-roster", "session": body.get("session"), "kind": "updated"})
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/event":
             # Test control: push one SSE event to every stream.
             broadcast(body)
