@@ -19,7 +19,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/ToolNarrator` | 802 | `core/src/narrator.rs` + `app/src/bridge/tool_narrator.rs` | verified for the shared-Host path (`core/tests/narrator.rs`, `app/tests/qml/narrator_probe.qml`); the local `codex exec` fallback and script-context evidence are not ported (the app always uses the Host) |
 | `src/app/TranscriptCache` | 123 | `desktop-rs/src/app/` | todo |
 | `src/app/WorkspaceContext` | 86 | `core/src/workspace.rs` | verified (`core/tests/workspace.rs`, real Git worktree) |
-| `src/main` | 1164 | `app/src/main.rs` + `app/build.rs` | wip: Clarp.Desktop module built from `desktop/CMakeLists.txt` (QML + resources via `app/qml`, `app/resources` symlinks; QTP0004 subdirectory qmldirs generated), Basic style, software renderer, own `ClarpRust` settings namespace, Main loaded inside its module with `launchOnStartup`/`sidebarVisible`; instance forwarding, launch options, tray, screenshots pending |
+| `src/main` | 1164 | `app/src/main.rs` + `app/build.rs` | wip: Clarp.Desktop module built from `desktop/CMakeLists.txt` (QML + resources via `app/qml`, `app/resources` symlinks; QTP0004 subdirectory qmldirs generated), Basic style, software renderer, own `ClarpRust` settings namespace, Main loads and runs against the fake Host offscreen (media/avatar/audio surface still missing: TypeErrors on `app.audio`, `avatarMotion`, `avatarSource`, `resolveMediaMarkdown`, `loadMedia`); Main loaded inside its module with `launchOnStartup`/`sidebarVisible`; instance forwarding, launch options, tray, screenshots pending |
 | `src/media/AudioController` | 859 | `desktop-rs/src/media/` | todo |
 | `src/media/AudioCoordinator` | 363 | `desktop-rs/src/media/` | todo |
 | `src/media/PortraitImage` | 59 | `desktop-rs/src/media/` | todo |
@@ -42,7 +42,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/protocol/ProtocolTypes` | 799 | `core/src/{protocol,text,json}.rs` | verified (`core/tests/protocol.rs`) |
 | `src/terminal/TerminalLaunch` | 36 | `desktop-rs/src/terminal/` | todo |
 | `src/views/TranscriptLayout` | 890 | `core/src/transcript_layout.rs` + `app/src/bridge/transcript_layout.rs` + `app/src/bridge/quick.rs` | verified: geometry in `core/tests/transcript_layout.rs`; the native QQuickItem (cxx-qt base QQuickItem, C++ creation semantics via QQmlComponent begin/complete + indexOfProperty + QQmlPropertyMap, signature-forwarded model/Flickable signals) runs the C++ test scene in `app/tests/qml/transcript_layout_probe.qml` |
-| `src/views/TranscriptRows` | 310 | `core/src/transcript_rows.rs` | wip: splitting and row mapping verified in `core/tests/transcript_rows.rs`; Qt list model pending |
+| `src/views/TranscriptRows` | 310 | `core/src/transcript_rows.rs` + `app/src/bridge/transcript_rows.rs` | verified (`core/tests/transcript_rows.rs`; list model over any source via signature-forwarded signals in `app/tests/qml/transcript_rows_probe.qml`: finishing splits without reset, rows map around split messages) |
 | `src/app/AvatarMotionClock.h` (header-only) | 224 | `desktop-rs/src/app/` | todo |
 | `src/app/DesktopPalette.h` (header-only) | 40 | `desktop-rs/src/app/` | todo |
 | `src/app/KeyboardSmokeCheck.h` (header-only) | 330 | `desktop-rs/src/app/` | todo |

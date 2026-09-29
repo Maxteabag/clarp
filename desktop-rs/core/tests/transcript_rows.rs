@@ -18,11 +18,11 @@ fn message(id: &str, body: &str, kind: &str) -> Message {
     Message { id: id.into(), body: body.into(), kind: kind.into() }
 }
 
-fn sources(messages: &[Message]) -> Vec<Source<'_>> {
-    messages
-        .iter()
-        .map(|m| Source { id: &m.id, body: &m.body, kind: &m.kind, author: "assistant", activity: false })
-        .collect()
+fn sources(messages: &[Message]) -> impl Fn(usize) -> Source + '_ {
+    |row| {
+        let m = &messages[row];
+        Source { id: m.id.clone(), body: m.body.clone(), kind: m.kind.clone(), author: "assistant".into(), activity: false }
+    }
 }
 
 fn key(rows: &TranscriptRows, messages: &[Message], row: usize) -> String {
@@ -62,10 +62,10 @@ fn long_text_splits_at_block_boundaries() {
 fn finishing_message_splits_without_resetting() {
     let mut messages = vec![message("a", "Hello.", "final"), message("b", &table(140), "live")];
     let mut rows = TranscriptRows::default();
-    rows.rebuild(&sources(&messages));
+    rows.rebuild(messages.len(), sources(&messages));
     assert_eq!(rows.count(), 2, "a live message is never split");
     messages[1].kind = "final".into();
-    let changes = rows.data_changed(1, 1, &sources(&messages), true, false);
+    let changes = rows.data_changed(1, 1, sources(&messages), true, false);
     assert!(!changes.contains(&Change::Reset));
     assert!(changes.iter().any(|c| matches!(c, Change::Insert { .. })));
     assert!(rows.count() > 9);
@@ -80,11 +80,11 @@ fn finishing_message_splits_without_resetting() {
 fn inserts_and_removes_map_around_split_messages() {
     let mut messages = vec![message("a", "One.", "final"), message("big", &table(100), "final"), message("c", "Three.", "final")];
     let mut rows = TranscriptRows::default();
-    rows.rebuild(&sources(&messages));
+    rows.rebuild(messages.len(), sources(&messages));
     let big_parts = rows.count() - 2;
     assert!(big_parts > 1);
     messages.insert(0, message("older", "Zero.", "final"));
-    assert_eq!(rows.inserted(0, 0, &sources(&messages)), [Change::Insert { at: 0, count: 1 }]);
+    assert_eq!(rows.inserted(0, 0, sources(&messages)), [Change::Insert { at: 0, count: 1 }]);
     assert_eq!(rows.count(), big_parts + 3);
     assert_eq!(key(&rows, &messages, 0), "older");
     assert_eq!(rows.row_for_source(2), Some(2));
@@ -100,14 +100,15 @@ fn inserts_and_removes_map_around_split_messages() {
 #[test]
 fn unsplittable_rows_stay_whole_and_role_only_changes_keep_parts() {
     let big = table(100);
-    let user = Source { id: "u", body: &big, kind: "final", author: "user", activity: false };
-    let activity = Source { id: "t", body: &big, kind: "final", author: "assistant", activity: true };
+    let user = Source { id: "u".into(), body: big.clone(), kind: "final".into(), author: "user".into(), activity: false };
+    let activity = Source { id: "t".into(), body: big.clone(), kind: "final".into(), author: "assistant".into(), activity: true };
+    let both = [user, activity];
     let mut rows = TranscriptRows::default();
-    rows.rebuild(&[user, activity]);
+    rows.rebuild(2, |row| both[row].clone());
     assert_eq!(rows.count(), 2, "only assistant replies split");
     let messages = vec![message("big", &big, "final")];
-    rows.rebuild(&sources(&messages));
+    rows.rebuild(messages.len(), sources(&messages));
     let parts = rows.count();
-    assert_eq!(rows.data_changed(0, 0, &sources(&messages), false, false), [Change::Update { first: 0, last: parts - 1, all_roles: false }]);
+    assert_eq!(rows.data_changed(0, 0, sources(&messages), false, false), [Change::Update { first: 0, last: parts - 1, all_roles: false }]);
     assert_eq!(rows.count(), parts);
 }

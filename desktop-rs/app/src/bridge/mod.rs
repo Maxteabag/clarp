@@ -17,3 +17,5 @@ pub mod tool_narrator;
 // The forwarding signals are emitted by Qt through string connections.
 #[allow(dead_code)]
 pub mod transcript_layout;
+#[allow(dead_code)]
+pub mod transcript_rows;

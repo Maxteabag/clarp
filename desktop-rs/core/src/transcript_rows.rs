@@ -63,12 +63,12 @@ pub fn split_markdown(markdown: &str) -> Vec<String> {
 }
 
 /// What splitting needs to know about one source row.
-#[derive(Debug, Clone, Copy)]
-pub struct Source<'a> {
-    pub id: &'a str,
-    pub body: &'a str,
-    pub kind: &'a str,
-    pub author: &'a str,
+#[derive(Debug, Clone, Default)]
+pub struct Source {
+    pub id: String,
+    pub body: String,
+    pub kind: String,
+    pub author: String,
     pub activity: bool,
 }
 
@@ -96,11 +96,11 @@ impl Part {
 pub fn parts_for(source_row: usize, source: &Source) -> Vec<Part> {
     let splittable = !source.activity && source.kind != "live" && source.author == "assistant";
     if !splittable
-        || (qlen(source.body) <= SPLIT_ABOVE_CHARACTERS && !source.body.contains("|---") && !source.body.contains("| ---"))
+        || (qlen(&source.body) <= SPLIT_ABOVE_CHARACTERS && !source.body.contains("|---") && !source.body.contains("| ---"))
     {
         return vec![Part::whole(source_row)];
     }
-    let parts = split_markdown(source.body);
+    let parts = split_markdown(&source.body);
     if parts.len() <= 1 {
         return vec![Part::whole(source_row)];
     }
@@ -150,8 +150,10 @@ impl TranscriptRows {
         self.rows.get(row).map(|r| r.source)
     }
 
-    pub fn rebuild(&mut self, sources: &[Source]) -> Change {
-        self.rows = sources.iter().enumerate().flat_map(|(row, source)| parts_for(row, source)).collect();
+    /// `source(row)` reads one source row; only the rows a change touches
+    /// are read.
+    pub fn rebuild(&mut self, count: usize, source: impl Fn(usize) -> Source) -> Change {
+        self.rows = (0..count).flat_map(|row| parts_for(row, &source(row))).collect();
         Change::Reset
     }
 
@@ -163,12 +165,12 @@ impl TranscriptRows {
         }
     }
 
-    /// Source rows `first..=last` were inserted; `sources` is the whole
-    /// source after the insert.
-    pub fn inserted(&mut self, first: usize, last: usize, sources: &[Source]) -> Vec<Change> {
+    /// Source rows `first..=last` were inserted; `source` reads the source
+    /// after the insert.
+    pub fn inserted(&mut self, first: usize, last: usize, source: impl Fn(usize) -> Source) -> Vec<Change> {
         let at = self.first_row_of(first);
         self.shift_sources(first, (last - first + 1) as isize);
-        let parts: Vec<Part> = (first..=last).flat_map(|row| parts_for(row, &sources[row])).collect();
+        let parts: Vec<Part> = (first..=last).flat_map(|row| parts_for(row, &source(row))).collect();
         let count = parts.len();
         self.rows.splice(at..at, parts);
         vec![Change::Insert { at, count }]
@@ -184,9 +186,9 @@ impl TranscriptRows {
 
     /// Source rows `first..=last` changed. `split_may_change` when the body,
     /// kind or activity changed (or the roles are unknown).
-    pub fn data_changed(&mut self, first: usize, last: usize, sources: &[Source], split_may_change: bool, all_roles: bool) -> Vec<Change> {
+    pub fn data_changed(&mut self, first: usize, last: usize, source: impl Fn(usize) -> Source, split_may_change: bool, all_roles: bool) -> Vec<Change> {
         let mut changes = Vec::new();
-        for (source_row, source) in sources.iter().enumerate().take(last + 1).skip(first) {
+        for source_row in first..=last {
             let start = self.first_row_of(source_row);
             let existing = self.rows_of(source_row);
             if !split_may_change {
@@ -195,7 +197,7 @@ impl TranscriptRows {
                 }
                 continue;
             }
-            let parts = parts_for(source_row, source);
+            let parts = parts_for(source_row, &source(source_row));
             let wanted = parts.len();
             if wanted == existing {
                 self.rows.splice(start..start + existing, parts);
