@@ -4,7 +4,7 @@
 // synchronous, so it cannot stand in for a second window here.
 import QtQuick
 import QtQuick.Window
-import Clarp.Native
+import Clarp.Desktop
 
 Window {
     width: 200; height: 200; visible: true

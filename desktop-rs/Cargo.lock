@@ -238,6 +238,7 @@ dependencies = [
  "cxx-qt",
  "cxx-qt-build",
  "cxx-qt-lib",
+ "qt-build-utils",
  "serde_json",
  "tokio",
  "url",

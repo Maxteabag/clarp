@@ -3,7 +3,7 @@
 // Port of tst_native_core::emptyStartupWaitsForExplicitChoiceAndRetryTargetsLatestFailure.
 import QtQuick
 import QtQuick.Window
-import Clarp.Native
+import Clarp.Desktop
 
 Window {
     width: 200; height: 200; visible: true

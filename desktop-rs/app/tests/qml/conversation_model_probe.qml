@@ -3,7 +3,7 @@
 //     CLARP_RS_QML=$PWD/app/tests/qml/conversation_model_probe.qml target/debug/clarp-desktop
 import QtQuick
 import QtQuick.Window
-import Clarp.Native
+import Clarp.Desktop
 
 Window {
     width: 400; height: 600; visible: true

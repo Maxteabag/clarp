@@ -13,14 +13,13 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/CredentialStore` | 245 | `net/src/credentials.rs` (zbus) | verified (`net/tests/credentials.rs` via `net/tests/run-keyring-tests.sh`: throwaway gnome-keyring and keyring-less private buses; `app/tests/qml/controller_credentials_probe.qml` pairs, reconnects from the keyring and forgets). Deviation: a failed `/pairing/exchange` returns the page to offline instead of staying in "pairing" |
 | `src/app/InstanceServer` | 199 | `desktop-rs/src/app/` | todo |
 | `src/app/MarkdownStyle` | 250 | `desktop-rs/src/app/` | todo |
-| `src/app/PreviewVersions` | 147 | `desktop-rs/src/app/` | todo |
+| `src/app/PreviewVersions` | 147 | `core/src/preview.rs` + `app/src/bridge/preview_versions.rs` | verified (core: `core/tests/preview.rs`); the bridge runs the helper off-thread and quits through `QCoreApplication::quit` bound with cxx `#[Self]` |
 | `src/app/StallMonitor` | 247 | `desktop-rs/src/app/` | todo |
 | `src/app/TimeFormat` | 138 | `core/src/time_format.rs` | verified (`conversation.rs::stamps_*`, `compact_*`); en_US formats fixed, QLocale-driven locale pending |
 | `src/app/ToolNarrator` | 802 | `core/src/narrator.rs` + `app/src/bridge/tool_narrator.rs` | verified for the shared-Host path (`core/tests/narrator.rs`, `app/tests/qml/narrator_probe.qml`); the local `codex exec` fallback and script-context evidence are not ported (the app always uses the Host) |
 | `src/app/TranscriptCache` | 123 | `desktop-rs/src/app/` | todo |
 | `src/app/WorkspaceContext` | 86 | `core/src/workspace.rs` | verified (`core/tests/workspace.rs`, real Git worktree) |
-| `src/main` | 1164 | `desktop-rs/src/main/` | todo |
-| `src/main` | 1164 | `desktop-rs/src/main/` | todo |
+| `src/main` | 1164 | `app/src/main.rs` + `app/build.rs` | wip: Clarp.Desktop module built from `desktop/CMakeLists.txt` (QML + resources via `app/qml`, `app/resources` symlinks; QTP0004 subdirectory qmldirs generated), Basic style, software renderer, own `ClarpRust` settings namespace, Main loaded inside its module with `launchOnStartup`/`sidebarVisible`; instance forwarding, launch options, tray, screenshots pending |
 | `src/media/AudioController` | 859 | `desktop-rs/src/media/` | todo |
 | `src/media/AudioCoordinator` | 363 | `desktop-rs/src/media/` | todo |
 | `src/media/PortraitImage` | 59 | `desktop-rs/src/media/` | todo |
@@ -50,7 +49,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/LocalReport.h` (header-only) | 40 | `desktop-rs/src/app/` | todo |
 | `src/app/MemoryDiagnostics.h` (header-only) | 71 | `desktop-rs/src/app/` | todo |
 | `src/app/PairSidebarSmokeCheck.h` (header-only) | 62 | `desktop-rs/src/app/` | todo |
-| `src/app/PreviewRelaunch.h` (header-only) | 15 | `desktop-rs/src/app/` | todo |
+| `src/app/PreviewRelaunch.h` (header-only) | 15 | `core/src/preview.rs` | verified (`core/tests/preview.rs::relaunch_preserves_host_and_session`) |
 | `src/app/ReadingTheme.h` (header-only) | 282 | `core/src/reading_theme.rs` + generated `reading_themes.json` | verified (`core/tests/reading_theme.rs`); fonts resolved through fontconfig (`app/src/fonts.rs`) |
 | `src/app/ReadyReplySmokeCheck.h` (header-only) | 85 | `desktop-rs/src/app/` | todo |
 | `src/app/StartupTrace.h` (header-only) | 52 | `desktop-rs/src/app/` | todo |
@@ -84,8 +83,8 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::voiceErrorsStayInTheirSession` | | todo |
 | `tst_native_core::sidebarPreviewIsPlainText` | `core/tests/protocol.rs::sidebar_preview_is_plain_text` | verified |
 | `tst_native_core::clipboardImageBecomesAttachmentWithoutSending` | | todo |
-| `tst_native_core::relaunchPreservesHostSessionAndDraft` | | todo |
-| `tst_native_core::previewRestartCapturesContextAndRejectsBusy` | | todo |
+| `tst_native_core::relaunchPreservesHostSessionAndDraft` | `core/tests/preview.rs::relaunch_preserves_host_and_session` | wip: environment and arguments verified; restoreDesktopSession pending |
+| `tst_native_core::previewRestartCapturesContextAndRejectsBusy` | `core/tests/preview.rs::preview_restart_captures_context_and_rejects_busy` | verified |
 | `tst_native_core::restoredSessionDoesNotFallBackToAnotherAgent` | | todo |
 | `tst_native_core::localReportsRequireOriginAndSafeReadableFiles` | | todo |
 | `tst_native_core::leadingDayTracksVisibleHistory` | `core/tests/presentation.rs::leading_day_tracks_visible_history` | verified (core) |

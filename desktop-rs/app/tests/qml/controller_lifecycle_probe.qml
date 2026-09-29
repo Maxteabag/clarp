@@ -8,7 +8,7 @@
 // connectedControllerShutsDownWithoutLateSseCallbacks.
 import QtQuick
 import QtQuick.Window
-import Clarp.Native
+import Clarp.Desktop
 
 Window {
     width: 200; height: 200; visible: true
@@ -24,7 +24,7 @@ Window {
         if (!ok) { failures++; console.log("FAIL " + what) } else console.log("ok   " + what)
     }
     function controller() {
-        return Qt.createQmlObject('import Clarp.Native; AppController {}', root)
+        return Qt.createQmlObject('import Clarp.Desktop; AppController {}', root)
     }
     function post(path, body) {
         const xhr = new XMLHttpRequest()

@@ -3,7 +3,7 @@
 // TTS providers, voices and the orchestrator against the fake Host.
 import QtQuick
 import QtQuick.Window
-import Clarp.Native
+import Clarp.Desktop
 
 Window {
     width: 200; height: 200; visible: true
@@ -31,7 +31,9 @@ Window {
             app.loadAgentProfile("rachel")
             check(app.profileLoading && app.profileSession === "rachel", "profile loading")
             stage = 1
-        } else if (stage === 1 && !app.profileLoading && !app.profilePromptsLoading && app.profilePrompts.length === 20) {
+        } else if (stage === 1 && !app.profileLoading && !app.profilePromptsLoading && app.profilePrompts.length === 20
+                   && app.profileHeartbeat.interval_minutes !== undefined) {
+            // The heartbeat is its own optional request, outside profileLoading.
             check(app.profileTaskPlan.title === "Ship it", "task plan")
             check(app.profileHeartbeat.interval_minutes === 30, "heartbeat status")
             check(app.profilePromptsHaveMore, "more prompts to page")

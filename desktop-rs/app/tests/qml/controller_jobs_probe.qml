@@ -3,7 +3,7 @@
 // attention, artifacts and next-attention wiring.
 import QtQuick
 import QtQuick.Window
-import Clarp.Native
+import Clarp.Desktop
 
 Window {
     width: 200; height: 200; visible: true

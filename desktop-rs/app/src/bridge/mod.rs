@@ -10,4 +10,5 @@ pub mod conversation_model;
 pub mod directory_models;
 pub mod pane_tree_model;
 pub mod presentation_model;
+pub mod preview_versions;
 pub mod tool_narrator;

@@ -4,7 +4,7 @@
 // delivery timeout. Port of tst_native_core::appControllerCompletesCoreProtocolFlow.
 import QtQuick
 import QtQuick.Window
-import Clarp.Native
+import Clarp.Desktop
 
 Window {
     width: 200; height: 200; visible: true
