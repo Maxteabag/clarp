@@ -181,7 +181,7 @@ impl qobject::PreviewVersions {
                 versions.schedule_refresh(Duration::from_millis(REFRESH_MS));
             });
             if queued.is_err() {
-                // The object is gone; the timer ends with it.
+                eprintln!("PreviewVersions: refresh timer stopped; the object is gone");
             }
         });
     }
