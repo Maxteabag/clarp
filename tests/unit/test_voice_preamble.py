@@ -124,3 +124,12 @@ def test_strip_handles_the_quoted_prompt_opencode_stores():
     assert strip_voice_preamble('"' + wrapped + '"') == "Hi there"
     assert strip_voice_preamble(wrapped) == "Hi there"
     assert strip_voice_preamble('"just a quoted message"') == '"just a quoted message"'
+
+
+def test_voice_preamble_requests_conversational_delivery_for_all_speech():
+    spoken = vp.apply_voice_preamble("Explain the result.", voice=True)
+
+    assert "Every spoken response should sound conversational" in spoken
+    assert "do not reserve them for uncertainty" in spoken
+    assert "When you're unsure or working through something complex" not in spoken
+    assert "few or no fillers" not in spoken

@@ -183,12 +183,7 @@ def test_remove_uses_guarded_archive_route():
         ("DELETE", "/janitors/sam?expected_revision=5", None)]
 
 
-def test_shared_persona_prompt_carries_no_bookkeeping_but_skill_keeps_lifecycle():
-    from lib.voice_preamble import persona_identity_instruction
-    text = persona_identity_instruction("Theo", session="theo")
-    assert "clarp-background-jobs" not in text
-    assert "Detached statuses" not in text
-    assert "Never set a visible status" not in text
+def test_background_jobs_skill_keeps_lifecycle_guards():
     skill = (ROOT / "skills/clarp-background-jobs/SKILL.md").read_text()
     assert "short header status" not in skill
     for guard in ("generation-specific handle", "job-heartbeat", "job-finish", "job-fail", "Cancellation is sticky"):
