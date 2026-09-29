@@ -9,7 +9,7 @@ use clarp_core::conversation::{Conversation, LoadKind, Op, Role, Signal, present
 use clarp_core::protocol::Message;
 use clarp_core::time_format::day_separator;
 use cxx_qt::CxxQtType;
-use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QList, QModelIndex, QString, QVariant};
+use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 
 use crate::qjson::to_qjson_array;
 
@@ -137,6 +137,12 @@ pub mod qobject {
         #[inherit]
         #[cxx_name = "endRemoveRows"]
         unsafe fn end_remove_rows(self: Pin<&mut ConversationModel>);
+        #[inherit]
+        #[cxx_name = "beginMoveRows"]
+        unsafe fn begin_move_rows(self: Pin<&mut ConversationModel>, source_parent: &QModelIndex, source_first: i32, source_last: i32, destination_parent: &QModelIndex, destination_child: i32) -> bool;
+        #[inherit]
+        #[cxx_name = "endMoveRows"]
+        unsafe fn end_move_rows(self: Pin<&mut ConversationModel>);
         #[inherit]
         #[cxx_name = "beginResetModel"]
         unsafe fn begin_reset_model(self: Pin<&mut ConversationModel>);
@@ -304,39 +310,7 @@ impl qobject::ConversationModel {
     }
 
     fn replay(mut self: Pin<&mut Self>, op: Op) {
-        let root = QModelIndex::default();
-        match op {
-            Op::Reset(rows) => unsafe {
-                self.as_mut().begin_reset_model();
-                self.as_mut().rust_mut().rows = rows;
-                self.as_mut().end_reset_model();
-            },
-            Op::Insert { at, rows } if !rows.is_empty() => unsafe {
-                let last = (at + rows.len() - 1) as i32;
-                self.as_mut().begin_insert_rows(&root, at as i32, last);
-                self.as_mut().rust_mut().rows.splice(at..at, rows);
-                self.as_mut().end_insert_rows();
-            },
-            Op::Insert { .. } => {}
-            Op::Remove { at, count } if count > 0 => unsafe {
-                self.as_mut().begin_remove_rows(&root, at as i32, (at + count - 1) as i32);
-                self.as_mut().rust_mut().rows.drain(at..at + count);
-                self.as_mut().end_remove_rows();
-            },
-            Op::Remove { .. } => {}
-            Op::Update { row, message, roles } => {
-                self.as_mut().rust_mut().rows[row] = *message;
-                if !roles.is_empty() {
-                    let index = self.index(row as i32, 0, &root);
-                    let mut ids = QList::<i32>::default();
-                    for role in roles {
-                        ids.append(role_id(role));
-                    }
-                    self.as_mut().data_changed(&index, &index, &ids);
-                }
-            }
-            Op::Signal(signal) => self.emit(signal),
-        }
+        crate::list_replay::replay_list_op!(self, op, role_id, emit);
     }
 
     fn emit(self: Pin<&mut Self>, signal: Signal) {

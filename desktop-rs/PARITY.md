@@ -25,8 +25,8 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/media/RecordingSession` | 56 | `desktop-rs/src/media/` | todo |
 | `src/media/WavEncoder` | 58 | `desktop-rs/src/media/` | todo |
 | `src/models/AgentFilterModel` | 368 | `desktop-rs/src/models/` | todo |
-| `src/models/AgentListModel` | 708 | `desktop-rs/src/models/` | todo |
-| `src/models/BackgroundJobTracker` | 159 | `desktop-rs/src/models/` | todo |
+| `src/models/AgentListModel` | 708 | `core/src/roster.rs` + `app/src/bridge/agent_list_model.rs` | verified (`core/tests/roster.rs`, `app/tests/qml/agent_list_model_probe.qml`); name order is case-insensitive, not ICU collation |
+| `src/models/BackgroundJobTracker` | 159 | `core/src/jobs.rs` | verified (`roster.rs::background_job_tracker_keeps_only_active_jobs`) |
 | `src/models/ContactListModel` | 139 | `desktop-rs/src/models/` | todo |
 | `src/models/ConversationModel` | 830 | `core/src/conversation.rs` + `app/src/bridge/conversation_model.rs` | verified (`core/tests/conversation.rs`, `app/tests/qml/conversation_model_probe.qml`) |
 | `src/models/ConversationPresentationModel` | 437 | `desktop-rs/src/models/` | todo |
@@ -54,7 +54,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/StartupTrace.h` (header-only) | 52 | `desktop-rs/src/app/` | todo |
 | `src/app/TranscriptScrollSmokeCheck.h` (header-only) | 440 | `desktop-rs/src/app/` | todo |
 | `src/app/VoiceViewportSmokeCheck.h` (header-only) | 153 | `desktop-rs/src/app/` | todo |
-| `src/models/TreeOrder.h` (header-only) | 79 | `desktop-rs/src/models/` | todo |
+| `src/models/TreeOrder.h` (header-only) | 79 | `core/src/tree.rs` | verified (`roster.rs::tree_order_matches_the_team_walk`) |
 
 ## Behaviors (REWRITE_PLAN.md: Existing behavior to preserve)
 
@@ -107,9 +107,9 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::launchPoolCarriesBackendModelAndHandlesEmpty` | | todo |
 | `tst_native_core::redesignedRosterFiltersWithoutMutatingSource` | | todo |
 | `tst_native_core::agentRowParsesBackgroundAndHelperFieldsSafely` | `protocol.rs::agent_row_parses_background_and_helper_fields_safely` + `conversation.rs::compact_durations_read_like_the_cpp_client` | verified |
-| `tst_native_core::backgroundJobTrackerKeepsOnlyActiveJobs` | | todo |
-| `tst_native_core::rosterPrefersLiveJobCountsAndCountsHelpers` | | todo |
-| `tst_native_core::treeOrderMatchesTheTeamWalk` | | todo |
+| `tst_native_core::backgroundJobTrackerKeepsOnlyActiveJobs` | `core/tests/roster.rs::background_job_tracker_keeps_only_active_jobs` | verified |
+| `tst_native_core::rosterPrefersLiveJobCountsAndCountsHelpers` | `core/tests/roster.rs::roster_prefers_live_job_counts_and_counts_helpers` | verified |
+| `tst_native_core::treeOrderMatchesTheTeamWalk` | `core/tests/roster.rs::tree_order_matches_the_team_walk` | verified |
 | `tst_native_core::sidebarNestsHelpersAndCollapsesFinishedOnes` | | todo |
 | `tst_native_core::sidebarUpdatesNeverResetTheRows` | | todo |
 | `tst_native_core::sidebarStatusUpdatesDoNotRebuildTree` | | todo |
@@ -119,11 +119,11 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::circularPortraitsAreBoundedAndAntialiased` | | todo |
 | `tst_native_core::agentTerminalLaunchesNativeCliThroughDefaultTerminal` | | todo |
 | `tst_native_core::sseParserHandlesChunksCommentsAndReplayIds` | `core/tests/protocol.rs::sse_parser_handles_chunks_comments_and_replay_ids` | verified |
-| `tst_native_core::nextAttentionCyclesWaitingUnreadAndPending` | | todo |
+| `tst_native_core::nextAttentionCyclesWaitingUnreadAndPending` | `core/tests/roster.rs::next_attention_cycles_waiting_unread_and_pending` | verified |
 | `tst_native_core::readyPresentationRetainsCanonicalStreamAndRevealsFinal` | | todo |
 | `tst_native_core::sseCursorIsScopedToOneHost` | `core/tests/endpoint.rs::sse_cursor_is_scoped_to_one_host` | verified |
-| `tst_native_core::snapshotFiltersArchivedAgentsAndPatchesEvents` | | todo |
-| `tst_native_core::agentSnapshotDiffsInPlaceAndRejectsStaleState` | | todo |
+| `tst_native_core::snapshotFiltersArchivedAgentsAndPatchesEvents` | `core/tests/roster.rs::snapshot_filters_archived_agents_and_patches_events` | verified |
+| `tst_native_core::agentSnapshotDiffsInPlaceAndRejectsStaleState` | `core/tests/roster.rs::agent_snapshot_diffs_in_place_and_rejects_stale_state` | verified |
 | `tst_native_core::backendQuotaNoticeNamesReasonResetAndFallback` | `core/tests/protocol.rs::backend_quota_notice_names_reason_reset_and_fallback` | verified |
 | `tst_native_core::tailThenDeltaMatchesGoldenFixture` | `core/tests/conversation.rs::tail_then_delta_matches_golden_fixture` | verified |
 | `tst_native_core::streamingRowsUpdateInPlaceAndRetireWhenFinalized` | `core/tests/conversation.rs::streaming_rows_update_in_place_and_retire_when_finalized` | verified |
