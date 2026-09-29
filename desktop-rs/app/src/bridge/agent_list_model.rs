@@ -107,6 +107,14 @@ pub mod qobject {
         fn row_count(self: &AgentListModel, parent: &QModelIndex) -> i32;
     }
 
+    #[namespace = "rust::cxxqtlib1"]
+    unsafe extern "C++" {
+        include!("cxx-qt-lib/common.h");
+        /// Owned by the AppController, which QML reaches it through.
+        #[rust_name = "new_agent_list_model"]
+        fn make_unique() -> UniquePtr<AgentListModel>;
+    }
+
     impl cxx_qt::Initialize for AgentListModel {}
 }
 
@@ -270,6 +278,15 @@ impl qobject::AgentListModel {
     fn index_of_session(&self, session: &QString) -> i32 {
         let session = session.to_string();
         self.rows.iter().position(|r| r.session == session).map_or(-1, |row| row as i32)
+    }
+
+    /// Turn this model into the archive view (archived agents only).
+    pub fn make_archive(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().core = Roster::archived();
+    }
+
+    pub fn roster(&self) -> &Roster {
+        &self.core
     }
 
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {

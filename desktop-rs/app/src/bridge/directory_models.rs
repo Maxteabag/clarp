@@ -85,6 +85,15 @@ pub mod qobject {
         #[cxx_name = "rowCount"]
         fn row_count(self: &VoiceListModel, parent: &QModelIndex) -> i32;
     }
+
+    #[namespace = "rust::cxxqtlib1"]
+    unsafe extern "C++" {
+        include!("cxx-qt-lib/common.h");
+        #[rust_name = "new_contact_list_model"]
+        fn make_unique() -> UniquePtr<ContactListModel>;
+        #[rust_name = "new_voice_list_model"]
+        fn make_unique() -> UniquePtr<VoiceListModel>;
+    }
 }
 
 const USER_ROLE: i32 = 0x0100;

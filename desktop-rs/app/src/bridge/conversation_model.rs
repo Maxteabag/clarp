@@ -171,6 +171,14 @@ pub mod qobject {
     }
 
     impl cxx_qt::Initialize for ConversationModel {}
+
+    #[namespace = "rust::cxxqtlib1"]
+    unsafe extern "C++" {
+        include!("cxx-qt-lib/common.h");
+        /// Owned by the AppController, which QML reaches it through.
+        #[rust_name = "new_conversation_model"]
+        fn make_unique() -> UniquePtr<ConversationModel>;
+    }
 }
 
 thread_local! {
@@ -366,6 +374,10 @@ impl qobject::ConversationModel {
             self.as_mut().changed();
         }
         result
+    }
+
+    pub fn conversation(&self) -> &Conversation {
+        &self.core
     }
 
     /// The rows views currently see.

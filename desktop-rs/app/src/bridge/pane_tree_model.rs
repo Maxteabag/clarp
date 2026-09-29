@@ -118,6 +118,14 @@ pub mod qobject {
 
     impl cxx_qt::Threading for PaneTreeModel {}
     impl cxx_qt::Initialize for PaneTreeModel {}
+
+    #[namespace = "rust::cxxqtlib1"]
+    unsafe extern "C++" {
+        include!("cxx-qt-lib/common.h");
+        /// Owned by the AppController, which QML reaches it through.
+        #[rust_name = "new_pane_tree_model"]
+        fn make_unique() -> UniquePtr<PaneTreeModel>;
+    }
 }
 
 /// `CLARP_WORKSPACE_STORE=off` disables persistence; any other value is the
@@ -223,6 +231,10 @@ impl qobject::PaneTreeModel {
     }
     fn pane_count_value(&self) -> i32 {
         self.core.pane_count() as i32
+    }
+
+    pub fn core(&self) -> &PaneTree {
+        &self.core
     }
 
     /// Run a core mutation, emit its signals, then start any queued write.
