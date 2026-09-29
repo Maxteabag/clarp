@@ -18,7 +18,7 @@ use clarp_core::settings::{Settings, default_token, normalized_base_url};
 use clarp_net::{ApiClient, ApiReply, SseClient, SseSignal};
 use cxx::UniquePtr;
 use cxx_qt::{ConnectionType, CxxQtThread, CxxQtType, QMetaObjectConnectionGuard, Threading};
-use cxx_qt_lib::QString;
+use cxx_qt_lib::{QString, QUrl};
 use serde_json::{Value, json};
 use url::Url;
 
@@ -110,8 +110,8 @@ pub mod qobject {
         #[qproperty(QString, reading_theme, cxx_name = "readingTheme", READ = reading_theme_value, WRITE = set_reading_theme, NOTIFY = reading_theme_changed)]
         #[qproperty(QJsonObject, reading_style, cxx_name = "readingStyle", READ = reading_style_value, NOTIFY = reading_theme_changed)]
         #[qproperty(QJsonArray, reading_themes, cxx_name = "readingThemes", READ = reading_themes_value, CONSTANT)]
-        #[qproperty(u64, avatar_revision, cxx_name = "avatarRevision", READ = zero_revision, NOTIFY = agent_revision_changed)]
-        #[qproperty(u64, media_revision, cxx_name = "mediaRevision", READ = zero_revision, NOTIFY = agent_revision_changed)]
+        #[qproperty(u64, avatar_revision, cxx_name = "avatarRevision", READ = avatar_revision_value, NOTIFY = avatar_revision_changed)]
+        #[qproperty(u64, media_revision, cxx_name = "mediaRevision", READ = media_revision_value, NOTIFY = media_changed)]
         #[qproperty(u64, composer_revision, cxx_name = "composerRevision", READ = composer_revision_value, NOTIFY = composer_revision_changed)]
         #[qproperty(bool, uploading, READ = uploading_value, NOTIFY = composer_revision_changed)]
         #[qproperty(i32, unread_agent_conversations, cxx_name = "unreadAgentConversations", READ = zero_count, NOTIFY = agent_revision_changed)]
@@ -228,6 +228,32 @@ pub mod qobject {
         fn reading_style_value(self: &AppController) -> QJsonObject;
         fn reading_themes_value(self: &AppController) -> QJsonArray;
         fn zero_revision(self: &AppController) -> u64;
+        fn avatar_revision_value(self: &AppController) -> u64;
+        fn media_revision_value(self: &AppController) -> u64;
+        #[qsignal]
+        #[cxx_name = "avatarRevisionChanged"]
+        fn avatar_revision_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "mediaChanged"]
+        fn media_changed(self: Pin<&mut AppController>);
+        #[qinvokable]
+        #[cxx_name = "avatarSource"]
+        fn avatar_source(self: Pin<&mut AppController>, session: &QString) -> QUrl;
+        #[qinvokable]
+        #[cxx_name = "contactAvatarSource"]
+        fn contact_avatar_source(self: Pin<&mut AppController>, name: &QString) -> QUrl;
+        #[qinvokable]
+        #[cxx_name = "mediaForSession"]
+        fn media_for_session(self: &AppController, session: &QString) -> QJsonArray;
+        #[qinvokable]
+        #[cxx_name = "mediaSource"]
+        fn media_source(self: &AppController, asset_id: &QString) -> QUrl;
+        #[qinvokable]
+        #[cxx_name = "resolveMediaMarkdown"]
+        fn resolve_media_markdown(self: &AppController, markdown: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "loadMedia"]
+        fn load_media(self: Pin<&mut AppController>, session: &QString);
         fn composer_revision_value(self: &AppController) -> u64;
         fn uploading_value(self: &AppController) -> bool;
         #[qsignal]
@@ -884,6 +910,20 @@ pub struct AppControllerRust {
     turn_queue_generation: u64,
     queue_action_sessions: HashMap<String, String>,
     composer_revision: u64,
+    avatars: AvatarCache,
+    contact_avatars: AvatarCache,
+    next_avatar_request: u64,
+    avatar_revision: u64,
+    media_revision: u64,
+    media_generations: HashMap<String, u64>,
+    /// tag -> (session, generation)
+    media_list_requests: HashMap<String, (String, u64)>,
+    media_assets: HashMap<String, Vec<Value>>,
+    /// asset id -> cached file URL
+    media_sources: HashMap<String, String>,
+    /// tag -> (asset id, session)
+    media_content_requests: HashMap<String, (String, String)>,
+    media_directory: Option<std::path::PathBuf>,
     /// tag → pending upload (session, attachment id and metadata)
     pending_uploads: HashMap<String, Object>,
     profile_session: String,
@@ -1002,7 +1042,26 @@ impl cxx_qt::Initialize for AppController {
     }
 }
 
+/// Portrait sources for sessions (or contact names), like the C++ maps:
+/// the URL each one wants, the image shown, the URL that last failed, and
+/// the requests in flight (tag -> (key, url)).
+#[derive(Default)]
+struct AvatarCache {
+    urls: HashMap<String, String>,
+    sources: HashMap<String, String>,
+    failures: HashMap<String, String>,
+    requests: HashMap<String, (String, String)>,
+}
+
 impl AppControllerRust {
+    /// Screenshot runs never read or write the portrait cache.
+    fn portrait_cache(&self) -> Option<std::path::PathBuf> {
+        if std::env::var_os("CLARP_SCREENSHOT_SCENARIO").is_some() {
+            return None;
+        }
+        clarp_core::media::cache_dir()
+    }
+
     fn compute_shared_filesystem(&self) -> bool {
         (!self.shared_filesystem_override.is_empty() && self.shared_filesystem_override == self.base_url)
             || self.settings.boolean(&clarp_core::settings::shared_filesystem_key(&self.base_url), false)
@@ -1022,6 +1081,11 @@ impl AppControllerRust {
 impl Drop for AppControllerRust {
     fn drop(&mut self) {
         self.flush_drafts();
+        if let Some(directory) = self.media_directory.take()
+            && let Err(error) = std::fs::remove_dir_all(&directory)
+        {
+            eprintln!("AppController: could not remove {}: {error}", directory.display());
+        }
         // Detach child-signal handlers before the children go away.
         self.guards.clear();
         if let Some(sse) = self.sse.as_mut() {
@@ -2527,6 +2591,261 @@ impl AppController {
         false
     }
 
+
+    // ---- avatars and media ------------------------------------------------------
+
+    fn avatar_revision_value(&self) -> u64 {
+        self.avatar_revision
+    }
+    fn media_revision_value(&self) -> u64 {
+        self.media_revision
+    }
+
+    fn agent_avatar_url(&self, session: &str) -> String {
+        let Some(agent) = self.roster().and_then(|r| r.agents().iter().find(|a| a.session == session)) else {
+            return String::new();
+        };
+        clarp_core::media::avatar_url(&agent.avatar_url, clarp_core::protocol::display_name(agent))
+    }
+
+    /// The portrait for `key`, requesting it when missing (C++
+    /// `requestAvatarForSession`). Empty until it arrives.
+    fn portrait(mut self: Pin<&mut Self>, key: &str, url: String, contact: bool) -> QUrl {
+        let cache_root = self.portrait_cache();
+        let base = self.base_url.clone();
+        let tag = {
+            let mut rust = self.as_mut().rust_mut();
+            let next = rust.next_avatar_request + 1;
+            let cache = if contact { &mut rust.contact_avatars } else { &mut rust.avatars };
+            if url.is_empty() {
+                cache.urls.remove(key);
+                cache.sources.remove(key);
+                cache.failures.remove(key);
+                return QUrl::default();
+            }
+            if cache.urls.get(key) != Some(&url) {
+                cache.urls.insert(key.to_owned(), url.clone());
+                cache.sources.remove(key);
+                cache.failures.remove(key);
+            }
+            if let Some(source) = cache.sources.get(key) {
+                return QUrl::from(source.as_str());
+            }
+            if cache.failures.get(key) == Some(&url) {
+                return QUrl::default();
+            }
+            if let Some(cached) = cache_root.map(|root| clarp_core::media::portrait_cache_path(&root, &format!("{base}{url}"))).filter(|p| p.exists()) {
+                let source = Url::from_file_path(&cached).map(|u| u.to_string()).unwrap_or_default();
+                cache.sources.insert(key.to_owned(), source.clone());
+                return QUrl::from(source.as_str());
+            }
+            if cache.requests.values().any(|(k, u)| k == key && *u == url) {
+                return QUrl::default();
+            }
+            let tag = format!("{}:{next}", if contact { "contact-avatar" } else { "avatar" });
+            cache.requests.insert(tag.clone(), (key.to_owned(), url.clone()));
+            rust.next_avatar_request = next;
+            tag
+        };
+        if let Some(api) = self.api.as_ref() {
+            api.get_bytes(&tag, &url);
+        }
+        QUrl::default()
+    }
+
+    fn avatar_source(mut self: Pin<&mut Self>, session: &QString) -> QUrl {
+        let session = session.to_string();
+        if session.is_empty() {
+            return QUrl::default();
+        }
+        let url = self.agent_avatar_url(&session);
+        self.as_mut().portrait(&session, url, false)
+    }
+
+    fn contact_avatar_source(mut self: Pin<&mut Self>, name: &QString) -> QUrl {
+        let name = name.to_string();
+        if name.is_empty() {
+            return QUrl::default();
+        }
+        let url = self.contact_rows().iter().find(|c| c.name == name).map(|c| c.avatar_url.clone()).unwrap_or_default();
+        self.as_mut().portrait(&name, url, true)
+    }
+
+    fn portrait_failed(mut self: Pin<&mut Self>, tag: &str) {
+        let mut rust = self.as_mut().rust_mut();
+        let cache = if tag.starts_with("contact-avatar:") { &mut rust.contact_avatars } else { &mut rust.avatars };
+        if let Some((key, url)) = cache.requests.remove(tag) {
+            cache.failures.insert(key, url);
+        }
+    }
+
+    fn handle_portrait_bytes(self: Pin<&mut Self>, tag: String, bytes: Vec<u8>, content_type: &str) {
+        let mime = clarp_core::media::mime(content_type);
+        if bytes.is_empty() || bytes.len() > clarp_core::media::MAX_PORTRAIT_BYTES || !mime.starts_with("image/") {
+            self.portrait_failed(&tag);
+            return;
+        }
+        // Decoding and re-encoding costs tens of milliseconds a portrait;
+        // do it off the GUI thread, then cache the result on disk.
+        let qt = self.qt_thread();
+        crate::runtime::handle().spawn_blocking(move || {
+            let portrait = clarp_core::media::rounded_portrait(&bytes);
+            let (bytes, mime) = match portrait {
+                Some(png) => (png, "image/png".to_owned()),
+                None => (bytes, mime),
+            };
+            if qt.queue(move |controller| controller.finish_portrait(&tag, bytes, &mime)).is_err() {
+                eprintln!("AppController: dropped a portrait; the controller is gone");
+            }
+        });
+    }
+
+    fn finish_portrait(mut self: Pin<&mut Self>, tag: &str, bytes: Vec<u8>, mime: &str) {
+        use base64::Engine;
+        let contact = tag.starts_with("contact-avatar:");
+        let request = {
+            let mut rust = self.as_mut().rust_mut();
+            let cache = if contact { &mut rust.contact_avatars } else { &mut rust.avatars };
+            cache.requests.remove(tag)
+        };
+        let Some((key, url)) = request else { return };
+        let current = if contact { self.contact_avatars.urls.get(&key) == Some(&url) } else { self.agent_avatar_url(&key) == url };
+        if !current {
+            return;
+        }
+        // Shown from memory now; the rounded PNG is cached for the next start.
+        let source = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
+        if mime == "image/png"
+            && let Some(root) = self.portrait_cache()
+        {
+            let path = clarp_core::media::portrait_cache_path(&root, &format!("{}{url}", self.base_url));
+            let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&path, &bytes));
+            if let Err(error) = written {
+                eprintln!("AppController: could not cache portrait {}: {error}", path.display());
+            }
+        }
+        {
+            let mut rust = self.as_mut().rust_mut();
+            let cache = if contact { &mut rust.contact_avatars } else { &mut rust.avatars };
+            cache.sources.insert(key.clone(), source);
+            cache.failures.remove(&key);
+            rust.avatar_revision += 1;
+        }
+        self.avatar_revision_changed();
+    }
+
+    fn media_for_session(&self, session: &QString) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(self.media_assets.get(&session.to_string()).map_or(&[][..], Vec::as_slice))
+    }
+
+    fn media_source(&self, asset_id: &QString) -> QUrl {
+        self.media_sources.get(&asset_id.to_string()).map_or_else(QUrl::default, |u| QUrl::from(u.as_str()))
+    }
+
+    fn resolve_media_markdown(&self, markdown: &QString) -> QString {
+        qs(&clarp_core::media::resolve_media_markdown(&markdown.to_string(), &self.media_sources))
+    }
+
+    fn load_media(mut self: Pin<&mut Self>, session: &QString) {
+        let session = session.to_string();
+        if session.is_empty() {
+            return;
+        }
+        let tag = format!("media-list:{}", uuid::Uuid::new_v4());
+        {
+            let mut rust = self.as_mut().rust_mut();
+            let generation = rust.media_generations.get(&session).copied().unwrap_or(0) + 1;
+            rust.media_generations.insert(session.clone(), generation);
+            rust.media_list_requests.insert(tag.clone(), (session.clone(), generation));
+        }
+        if let Some(api) = self.api.as_ref() {
+            api.get(&tag, "/media", &[("session", &session), ("limit", "100")]);
+        }
+    }
+
+    fn handle_media_list(mut self: Pin<&mut Self>, tag: &str, object: &Object) {
+        let Some((session, generation)) = self.as_mut().rust_mut().media_list_requests.remove(tag) else { return };
+        if self.media_generations.get(&session) != Some(&generation) {
+            return;
+        }
+        let assets = object.get("assets").and_then(Value::as_array).cloned().unwrap_or_default();
+        let mut fetch = Vec::new();
+        for asset in &assets {
+            let id = asset.get("asset_id").and_then(Value::as_str).unwrap_or_default();
+            let mime = asset.get("mime_type").and_then(Value::as_str).unwrap_or_default();
+            let url = asset.get("url").and_then(Value::as_str).unwrap_or_default();
+            if id.is_empty() || !mime.starts_with("image/") || url.is_empty() || self.media_sources.contains_key(id) {
+                continue;
+            }
+            fetch.push((format!("media-content:{}", uuid::Uuid::new_v4()), id.to_owned(), url.to_owned()));
+        }
+        {
+            let mut rust = self.as_mut().rust_mut();
+            rust.media_assets.insert(session.clone(), assets);
+            for (tag, id, _) in &fetch {
+                rust.media_content_requests.insert(tag.clone(), (id.clone(), session.clone()));
+            }
+            rust.media_revision += 1;
+        }
+        if let Some(api) = self.api.as_ref() {
+            for (tag, _, url) in &fetch {
+                api.get_bytes(tag, url);
+            }
+        }
+        self.media_changed();
+    }
+
+    fn handle_media_bytes(mut self: Pin<&mut Self>, tag: &str, bytes: &[u8], content_type: &str) {
+        let Some((asset, session)) = self.as_mut().rust_mut().media_content_requests.remove(tag) else { return };
+        let still_current = self
+            .media_assets
+            .get(&session)
+            .is_some_and(|assets| assets.iter().any(|a| a.get("asset_id").and_then(Value::as_str) == Some(asset.as_str())));
+        let mime = clarp_core::media::mime(content_type);
+        if asset.is_empty() || !still_current || bytes.is_empty() || bytes.len() > clarp_core::media::MAX_INLINE_MEDIA_BYTES || !mime.starts_with("image/") {
+            return;
+        }
+        // Image bytes stay out of Markdown/QML strings: a data URL would be
+        // copied each time a transcript delegate is rebuilt.
+        if self.media_directory.is_none() {
+            let directory = clarp_core::media::cache_dir().map(|root| root.join(format!("media-{}", std::process::id())));
+            match directory.as_ref().map(std::fs::create_dir_all) {
+                Some(Ok(())) => self.as_mut().rust_mut().media_directory = directory,
+                other => {
+                    if let Some(Err(error)) = other {
+                        eprintln!("AppController: could not create the media cache: {error}");
+                    }
+                    self.set_error("Unable to cache chat images locally");
+                    return;
+                }
+            }
+        }
+        let Some(directory) = self.media_directory.clone() else { return };
+        let path = directory.join(clarp_core::media::media_file_name(&self.base_url, &asset));
+        if let Err(error) = std::fs::write(&path, bytes) {
+            eprintln!("AppController: could not cache {}: {error}", path.display());
+            self.set_error("Unable to cache chat image");
+            return;
+        }
+        let url = Url::from_file_path(&path).map(|u| u.to_string()).unwrap_or_default();
+        {
+            let mut rust = self.as_mut().rust_mut();
+            rust.media_sources.insert(asset, url);
+            rust.media_revision += 1;
+        }
+        self.media_changed();
+    }
+
+    fn handle_bytes(self: Pin<&mut Self>, tag: String, bytes: Vec<u8>, content_type: String) {
+        if tag.starts_with("media-content:") {
+            self.handle_media_bytes(&tag, &bytes, &content_type);
+        } else if tag.starts_with("avatar:") || tag.starts_with("contact-avatar:") {
+            self.handle_portrait_bytes(tag, bytes, &content_type);
+        } else {
+            eprintln!("AppController: unexpected bytes reply {tag}");
+        }
+    }
+
     // ---- composer attachments -------------------------------------------------
 
     fn attachments_key(&self, session: &str) -> String {
@@ -3849,13 +4168,17 @@ impl AppController {
         match reply {
             ApiReply::Json { tag, object } => self.handle_json(&tag, &object),
             ApiReply::Failed { tag, message, status } => self.handle_failure(&tag, &message, status),
-            ApiReply::Bytes { tag, .. } => eprintln!("AppController: unexpected bytes reply {tag}"),
+            ApiReply::Bytes { tag, bytes, content_type } => self.handle_bytes(tag, bytes, content_type),
         }
     }
 
     fn handle_json(mut self: Pin<&mut Self>, tag: &str, object: &Object) {
         if tag.starts_with("composer-upload:") {
             self.finish_upload(tag, Some(object));
+            return;
+        }
+        if tag.starts_with("media-list:") {
+            self.handle_media_list(tag, object);
             return;
         }
         if self.as_mut().handle_launch_json(tag, object) {
@@ -3963,6 +4286,17 @@ impl AppController {
             return;
         }
         if self.as_mut().handle_launch_failure(tag) {
+            return;
+        }
+        if tag.starts_with("media-list:") || tag.starts_with("media-content:") {
+            self.as_mut().rust_mut().media_list_requests.remove(tag);
+            self.as_mut().rust_mut().media_content_requests.remove(tag);
+            eprintln!("AppController: {tag} failed: {message} (HTTP {status})");
+            return;
+        }
+        if tag.starts_with("avatar:") || tag.starts_with("contact-avatar:") {
+            eprintln!("AppController: {tag} failed: {message} (HTTP {status})");
+            self.portrait_failed(tag);
             return;
         }
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
