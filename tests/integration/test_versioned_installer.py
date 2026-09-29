@@ -1,12 +1,31 @@
 from __future__ import annotations
 
+import fcntl
 import os
 import json
 from pathlib import Path
 import subprocess
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _built_pwa():
+    """Build the web bundle once, under the real environment.
+
+    install.sh builds it when it is missing, but these tests run the
+    installer with a throwaway $HOME, and an npm that resolves through the
+    user's home (a mise or nvm shim) fails there. The lock keeps xdist
+    workers from building the same checkout at once.
+    """
+    with open(ROOT / "package-lock.json") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not (ROOT / "static/app/bundle.js").is_file():
+            subprocess.run("npm ci --ignore-scripts --no-audit --no-fund && npm run build",
+                           shell=True, cwd=ROOT, check=True)
 
 
 def test_installer_leaves_pre_clarp_paths_untouched(tmp_path):
