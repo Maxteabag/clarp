@@ -34,6 +34,7 @@ turns = {
 jobs = []
 # /agents behaviour: "modern" returns the created agent row; "session-only"
 # returns just the id and shows the row only after /__control/publish-pending.
+explanation_polls = {}
 create_mode = "modern"
 next_create_response = None
 pending_agents = []
@@ -180,6 +181,16 @@ class Handler(BaseHTTPRequestHandler):
         record({"method": "POST", "path": url.path, "body": body})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
+        if url.path == "/tool-explanations":
+            # First poll of an item is pending, the next is ready.
+            rows = []
+            for item in body.get("items", []):
+                seen = explanation_polls.get(item["id"], 0)
+                explanation_polls[item["id"]] = seen + 1
+                summary = item.get("activity", {}).get("summary", "")
+                rows.append({"id": item["id"], "status": "ready" if seen else "pending",
+                             "text": "Explained: " + summary if seen else ""})
+            return self.reply(200, {"items": rows})
         if url.path in ("/select", "/stop", "/compact", "/agent-schedules/toggle") or url.path.startswith("/agent-"):
             return self.reply(200, {"ok": True})
         if url.path == "/agents":

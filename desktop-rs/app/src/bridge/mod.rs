@@ -10,3 +10,4 @@ pub mod conversation_model;
 pub mod directory_models;
 pub mod pane_tree_model;
 pub mod presentation_model;
+pub mod tool_narrator;

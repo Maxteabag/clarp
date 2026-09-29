@@ -26,6 +26,7 @@ use super::agent_list_model::qobject::{AgentListModel, new_agent_list_model};
 use super::conversation_model::qobject::{ConversationModel, new_conversation_model};
 use super::directory_models::qobject::{ContactListModel, VoiceListModel, new_contact_list_model, new_voice_list_model};
 use super::pane_tree_model::qobject::{PaneTreeModel, new_pane_tree_model};
+use super::tool_narrator::qobject::{ToolNarrator, new_tool_narrator};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -46,6 +47,8 @@ pub mod qobject {
         type VoiceListModel = crate::bridge::directory_models::qobject::VoiceListModel;
         include!("clarp-desktop/src/bridge/pane_tree_model.cxxqt.h");
         type PaneTreeModel = crate::bridge::pane_tree_model::qobject::PaneTreeModel;
+        include!("clarp-desktop/src/bridge/tool_narrator.cxxqt.h");
+        type ToolNarrator = crate::bridge::tool_narrator::qobject::ToolNarrator;
     }
 
     extern "RustQt" {
@@ -56,6 +59,7 @@ pub mod qobject {
         #[qproperty(*mut ContactListModel, contacts, READ = contacts_value, CONSTANT)]
         #[qproperty(*mut PaneTreeModel, panes, READ = panes_value, CONSTANT)]
         #[qproperty(*mut VoiceListModel, voices, READ = voices_value, CONSTANT)]
+        #[qproperty(*mut ToolNarrator, tool_narrator, cxx_name = "toolNarrator", READ = tool_narrator_value, CONSTANT)]
         #[qproperty(*mut ConversationModel, conversation, READ = conversation_value, NOTIFY = conversation_changed)]
         #[qproperty(QString, base_url, cxx_name = "baseUrl", READ = base_url_value, WRITE = set_base_url, NOTIFY = base_url_changed)]
         #[qproperty(QString, selected_session, cxx_name = "selectedSession", READ = selected_session_value, NOTIFY = selected_session_changed)]
@@ -95,6 +99,7 @@ pub mod qobject {
         fn contacts_value(self: &AppController) -> *mut ContactListModel;
         fn panes_value(self: &AppController) -> *mut PaneTreeModel;
         fn voices_value(self: &AppController) -> *mut VoiceListModel;
+        fn tool_narrator_value(self: &AppController) -> *mut ToolNarrator;
         fn conversation_value(self: &AppController) -> *mut ConversationModel;
         fn base_url_value(self: &AppController) -> QString;
         #[cxx_name = "setBaseUrl"]
@@ -440,6 +445,7 @@ pub struct AppControllerRust {
     panes: Owned<PaneTreeModel>,
     voices: Owned<VoiceListModel>,
     empty_conversation: Owned<ConversationModel>,
+    narrator: Owned<ToolNarrator>,
     conversations: HashMap<String, UniquePtr<ConversationModel>>,
     current: Option<String>,
     guards: Vec<QMetaObjectConnectionGuard>,
@@ -507,6 +513,7 @@ impl cxx_qt::Initialize for AppController {
             rust.panes = Owned(new_pane_tree_model());
             rust.voices = Owned(new_voice_list_model());
             rust.empty_conversation = Owned(new_conversation_model());
+            rust.narrator = Owned(new_tool_narrator());
             rust.settings = Settings::user();
             let saved = rust.settings.string("connection/baseUrl", "http://127.0.0.1:7682");
             rust.base_url = normalized_base_url(&std::env::var("CLARP_BASE_URL").unwrap_or(saved));
@@ -542,8 +549,15 @@ impl cxx_qt::Initialize for AppController {
                 eprintln!("AppController: dropped an SSE signal; the controller is gone");
             }
         });
+        let narrator_api = api.clone();
         self.as_mut().rust_mut().api = Some(api);
         self.as_mut().rust_mut().sse = Some(sse);
+        let level = self.settings.integer("experiments/toolDetailLevel", 0) as i32;
+        if let Some(narrator) = self.as_mut().narrator_mut() {
+            let mut narrator = narrator;
+            narrator.as_mut().set_api(narrator_api);
+            narrator.set_detail_level(level);
+        }
         self.as_mut().connect_children();
         // Connect once the event loop runs, like the C++ QTimer::singleShot(0).
         if qt.queue(|controller| controller.reconnect()).is_err() {
@@ -592,6 +606,9 @@ impl AppController {
     }
     fn voices_value(&self) -> *mut VoiceListModel {
         pointer(&self.voices)
+    }
+    fn tool_narrator_value(&self) -> *mut ToolNarrator {
+        pointer(&self.narrator)
     }
     fn conversation_value(&self) -> *mut ConversationModel {
         match self.current.as_ref().and_then(|s| self.conversations.get(s)) {
@@ -704,6 +721,10 @@ impl AppController {
         unsafe { self.rust_mut().get_unchecked_mut() }.archived.as_mut()
     }
 
+    fn narrator_mut(self: Pin<&mut Self>) -> Option<Pin<&mut ToolNarrator>> {
+        unsafe { self.rust_mut().get_unchecked_mut() }.narrator.as_mut()
+    }
+
     fn panes_mut(self: Pin<&mut Self>) -> Option<Pin<&mut PaneTreeModel>> {
         unsafe { self.rust_mut().get_unchecked_mut() }.panes.as_mut()
     }
@@ -733,7 +754,22 @@ impl AppController {
                 ConnectionType::QueuedConnection,
             ));
         }
+        let this = ControllerPtr(unsafe { self.as_mut().get_unchecked_mut() } as *mut AppController);
+        if let Some(narrator) = self.as_mut().narrator_mut() {
+            guards.push(narrator.connect_detail_level_changed(
+                move |_| unsafe { Pin::new_unchecked(&mut *this.get()) }.save_narrator_level(),
+                ConnectionType::QueuedConnection,
+            ));
+        }
         self.as_mut().rust_mut().guards.extend(guards);
+    }
+
+    fn save_narrator_level(mut self: Pin<&mut Self>) {
+        let Some(level) = self.narrator.as_ref().map(|n| n.detail_level()) else { return };
+        self.as_mut().rust_mut().settings.set("experiments/toolDetailLevel", level);
+        if level > 0 {
+            self.as_mut().rust_mut().settings.set("experiments/toolLastTranslationLevel", level);
+        }
     }
 
     fn bump_agent_revision(mut self: Pin<&mut Self>) {
@@ -832,6 +868,9 @@ impl AppController {
         let normalized = normalized_base_url(&value.to_string());
         if self.base_url == normalized {
             return;
+        }
+        if let Some(narrator) = self.as_mut().narrator_mut() {
+            narrator.reset();
         }
         self.as_mut().reset_transient_state();
         if let Some(sse) = self.as_mut().rust_mut().sse.as_mut() {
@@ -1915,7 +1954,23 @@ impl AppController {
 
     // ---- network results ---------------------------------------------------
 
-    fn handle_reply(self: Pin<&mut Self>, reply: ApiReply) {
+    fn handle_reply(mut self: Pin<&mut Self>, reply: ApiReply) {
+        let narrator_tag = match &reply {
+            ApiReply::Json { tag, .. } | ApiReply::Failed { tag, .. } => {
+                self.narrator.as_ref().is_some_and(|n| n.owns_tag(tag))
+            }
+            ApiReply::Bytes { .. } => false,
+        };
+        if narrator_tag {
+            if let Some(narrator) = self.as_mut().narrator_mut() {
+                match &reply {
+                    ApiReply::Json { tag, object } => narrator.handle_reply(tag, object),
+                    ApiReply::Failed { tag, status, .. } => narrator.handle_failure(tag, *status),
+                    ApiReply::Bytes { .. } => {}
+                }
+            }
+            return;
+        }
         match reply {
             ApiReply::Json { tag, object } => self.handle_json(&tag, &object),
             ApiReply::Failed { tag, message, status } => self.handle_failure(&tag, &message, status),

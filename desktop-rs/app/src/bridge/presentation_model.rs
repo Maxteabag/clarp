@@ -168,6 +168,9 @@ pub struct PresentationRust {
     rows: Vec<PresentedRow>,
     leading_day: String,
     source_connection: Option<QMetaObjectConnectionGuard>,
+    /// The ToolNarrator and scope explanation runs read from (cache-only).
+    narrator: usize,
+    narrator_session: String,
 }
 
 impl Default for PresentationRust {
@@ -179,6 +182,8 @@ impl Default for PresentationRust {
             rows: Vec::new(),
             leading_day: String::new(),
             source_connection: None,
+            narrator: 0,
+            narrator_session: String::new(),
         }
     }
 }
@@ -253,8 +258,11 @@ impl qobject::ConversationPresentationModel {
         self.refresh();
     }
 
-    unsafe fn update_explanations(self: Pin<&mut Self>, _narrator: *mut qobject::QObject, _session: &QString, _directory: &QString, _local_files: bool) {
-        // No narrator yet: developer-mode presentation (every row shown).
+    /// Explanation runs read the narrator's cache; a disabled or failed
+    /// narrator shows developer mode (every original row).
+    unsafe fn update_explanations(mut self: Pin<&mut Self>, narrator: *mut qobject::QObject, session: &QString, _directory: &QString, _local_files: bool) {
+        self.as_mut().rust_mut().narrator = narrator as usize;
+        self.as_mut().rust_mut().narrator_session = session.to_string();
         self.refresh();
     }
 
@@ -269,9 +277,17 @@ impl qobject::ConversationPresentationModel {
             Some(source) => source.rows().to_vec(),
             None => Vec::new(),
         };
+        let narrator = unsafe { super::tool_narrator::live(self.narrator) }
+            .filter(|n| n.enabled_value_pub() && !n.unavailable_value_pub());
+        let session = self.narrator_session.clone();
+        let lookup = move |activity: &serde_json::Map<String, serde_json::Value>| -> String {
+            let mut activity = activity.clone();
+            activity.insert("_session".into(), serde_json::Value::from(session.as_str()));
+            narrator.map(|n| n.explain(&activity)).unwrap_or_default()
+        };
         let presentation = {
             let settings = &mut self.as_mut().rust_mut().settings;
-            present(&messages, settings, None)
+            present(&messages, settings, narrator.is_some().then_some(&lookup as &dyn Fn(&_) -> String))
         };
         let ops = diff(&self.rows, &presentation.rows);
         self.as_mut().rust_mut().presentation = presentation;
