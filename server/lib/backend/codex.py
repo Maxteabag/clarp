@@ -153,6 +153,7 @@ class CodexBackend(StreamJsonBackend):
     janitor_default_model = 'gpt-5.3-codex-spark'
     model_family = 'codex'
     fallback_models = (
+        ('gpt-6.1-sol', 'GPT-6.1 Sol'),
         ('gpt-5.4', 'GPT-5.4'),
         ('gpt-5.4-mini', 'GPT-5.4 Mini'),
         ('gpt-5.2-codex', 'GPT-5.2 Codex'),
