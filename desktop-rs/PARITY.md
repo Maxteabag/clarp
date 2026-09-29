@@ -24,7 +24,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/media/PortraitImage` | 59 | `desktop-rs/src/media/` | todo |
 | `src/media/RecordingSession` | 56 | `desktop-rs/src/media/` | todo |
 | `src/media/WavEncoder` | 58 | `desktop-rs/src/media/` | todo |
-| `src/models/AgentFilterModel` | 368 | `desktop-rs/src/models/` | todo |
+| `src/models/AgentFilterModel` | 368 | `core/src/sidebar.rs` + `app/src/bridge/agent_filter_model.rs` | verified (`core/tests/sidebar.rs`, `app/tests/qml/agent_filter_model_probe.qml`); uses `invalidateRowsFilter()` (deprecated in 6.13) because cxx cannot name `QFlags<Direction>` for `endFilterChange` |
 | `src/models/AgentListModel` | 708 | `core/src/roster.rs` + `app/src/bridge/agent_list_model.rs` | verified (`core/tests/roster.rs`, `app/tests/qml/agent_list_model_probe.qml`); name order is case-insensitive, not ICU collation |
 | `src/models/BackgroundJobTracker` | 159 | `core/src/jobs.rs` | verified (`roster.rs::background_job_tracker_keeps_only_active_jobs`) |
 | `src/models/ContactListModel` | 139 | `desktop-rs/src/models/` | todo |
@@ -105,17 +105,17 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::fastLaunchOpensWithoutWaitingForFleet` | | todo |
 | `tst_native_core::resumeLaunchOpensExactSessionWithoutFleet` | | todo |
 | `tst_native_core::launchPoolCarriesBackendModelAndHandlesEmpty` | | todo |
-| `tst_native_core::redesignedRosterFiltersWithoutMutatingSource` | | todo |
+| `tst_native_core::redesignedRosterFiltersWithoutMutatingSource` | `core/tests/sidebar.rs::redesigned_roster_filters_without_mutating_source` + `agent_filter_model_probe.qml` | verified |
 | `tst_native_core::agentRowParsesBackgroundAndHelperFieldsSafely` | `protocol.rs::agent_row_parses_background_and_helper_fields_safely` + `conversation.rs::compact_durations_read_like_the_cpp_client` | verified |
 | `tst_native_core::backgroundJobTrackerKeepsOnlyActiveJobs` | `core/tests/roster.rs::background_job_tracker_keeps_only_active_jobs` | verified |
 | `tst_native_core::rosterPrefersLiveJobCountsAndCountsHelpers` | `core/tests/roster.rs::roster_prefers_live_job_counts_and_counts_helpers` | verified |
 | `tst_native_core::treeOrderMatchesTheTeamWalk` | `core/tests/roster.rs::tree_order_matches_the_team_walk` | verified |
-| `tst_native_core::sidebarNestsHelpersAndCollapsesFinishedOnes` | | todo |
-| `tst_native_core::sidebarUpdatesNeverResetTheRows` | | todo |
-| `tst_native_core::sidebarStatusUpdatesDoNotRebuildTree` | | todo |
+| `tst_native_core::sidebarNestsHelpersAndCollapsesFinishedOnes` | `core/tests/sidebar.rs::sidebar_nests_helpers_and_collapses_finished_ones` + `agent_filter_model_probe.qml` | verified |
+| `tst_native_core::sidebarUpdatesNeverResetTheRows` | `core/tests/sidebar.rs::sidebar_order_survives_filter_round_trips` + probe `resets === 0` | verified |
+| `tst_native_core::sidebarStatusUpdatesDoNotRebuildTree` | `agent_filter_model.rs::tree_changing` gates rebuilds | wip: no read-counting source test yet |
 | `tst_native_core::subagentCellsDescribePhaseNameAndTask` | `protocol.rs::subagent_cells_describe_phase_name_and_task` + `conversation.rs::subagent_cells_are_annotated_on_the_way_out_only` | verified |
 | `tst_native_core::controllerTracksJobsFromListAndEvents` | | todo |
-| `tst_native_core::rosterLookupIsConsistentDuringStructuralSignals` | | todo |
+| `tst_native_core::rosterLookupIsConsistentDuringStructuralSignals` | adapter `indexOfSession` reads the replayed mirror | wip: needs a probe that checks lookups inside rowsInserted/Removed/Moved handlers |
 | `tst_native_core::circularPortraitsAreBoundedAndAntialiased` | | todo |
 | `tst_native_core::agentTerminalLaunchesNativeCliThroughDefaultTerminal` | | todo |
 | `tst_native_core::sseParserHandlesChunksCommentsAndReplayIds` | `core/tests/protocol.rs::sse_parser_handles_chunks_comments_and_replay_ids` | verified |
@@ -178,7 +178,10 @@ Core models record ordered ops (`Reset`/`Insert`/`Remove`/`Update`/`Signal`);
 each cxx-qt adapter replays them onto a row mirror between the matching
 `begin*/end*` calls, so views never see a half-applied change and Qt never
 re-enters Rust state mid-mutation. Core tests replay the ops onto a mirror and
-assert it equals the model after every step. `app/tests/run-qml-probes.sh`
+assert it equals the model after every step. Qt's row signals are private
+(`QPrivateSignal`) and cannot be connected from Rust, so `AgentListModel`
+emits a public `structureChanged` after replaying structural ops; the sidebar
+proxy subscribes through a per-thread registry of live roster models. `app/tests/run-qml-probes.sh`
 drives each adapter through a real ListView offscreen.
 
 ## Contract fixtures

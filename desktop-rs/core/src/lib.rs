@@ -10,6 +10,7 @@ pub mod json;
 pub mod list_ops;
 pub mod protocol;
 pub mod roster;
+pub mod sidebar;
 pub mod sse;
 pub mod sync;
 pub mod text;

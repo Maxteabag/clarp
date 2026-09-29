@@ -40,6 +40,11 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "countChanged"]
         fn count_changed(self: Pin<&mut AgentListModel>);
+        /// Rows were inserted, removed, moved or reset. Public stand-in for
+        /// Qt's private row signals, which Rust cannot connect to.
+        #[qsignal]
+        #[cxx_name = "structureChanged"]
+        fn structure_changed(self: Pin<&mut AgentListModel>);
 
         #[qinvokable]
         #[cxx_name = "indexOfSession"]
@@ -101,6 +106,41 @@ pub mod qobject {
         #[cxx_name = "rowCount"]
         fn row_count(self: &AgentListModel, parent: &QModelIndex) -> i32;
     }
+
+    impl cxx_qt::Initialize for AgentListModel {}
+}
+
+thread_local! {
+    /// Live AgentListModels by object address, so a proxy handed a plain
+    /// QAbstractItemModel* can subscribe to `structureChanged`.
+    static LIVE_MODELS: std::cell::RefCell<std::collections::HashMap<usize, usize>> = Default::default();
+}
+
+impl cxx_qt::Initialize for qobject::AgentListModel {
+    fn initialize(mut self: Pin<&mut Self>) {
+        let address = unsafe { self.as_mut().get_unchecked_mut() } as *mut qobject::AgentListModel as usize;
+        self.as_mut().rust_mut().address = address;
+        LIVE_MODELS.with(|models| models.borrow_mut().insert(address, address));
+    }
+}
+
+impl Drop for AgentListModelRust {
+    fn drop(&mut self) {
+        LIVE_MODELS.with(|models| models.borrow_mut().remove(&self.address));
+    }
+}
+
+/// Connect `handler` to the structure signal of the AgentListModel at
+/// `address`, if that address is one. The guard disconnects on drop.
+pub fn on_structure_changed(address: usize, handler: impl FnMut() + Send + 'static) -> Option<cxx_qt::QMetaObjectConnectionGuard> {
+    let live = LIVE_MODELS.with(|models| models.borrow().contains_key(&address));
+    if !live {
+        return None;
+    }
+    let mut handler = handler;
+    // SAFETY: the address belongs to a live AgentListModel on this thread.
+    let model = unsafe { Pin::new_unchecked(&mut *(address as *mut qobject::AgentListModel)) };
+    Some(model.on_structure_changed(move |_| handler()))
 }
 
 const USER_ROLE: i32 = 0x0100;
@@ -205,6 +245,7 @@ pub struct AgentListModelRust {
     core: Roster,
     /// What views see; only ever changed between begin/end notifications.
     rows: Vec<AgentRow>,
+    address: usize,
 }
 
 fn parse_object(text: &QString, what: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
@@ -231,10 +272,6 @@ impl qobject::AgentListModel {
         self.rows.iter().position(|r| r.session == session).map_or(-1, |row| row as i32)
     }
 
-    pub fn roster(&self) -> &Roster {
-        &self.core
-    }
-
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
         let row = usize::try_from(index.row()).ok().and_then(|row| self.rows.get(row));
         match (row, role_for(role)) {
@@ -259,8 +296,12 @@ impl qobject::AgentListModel {
     pub fn mutate<R>(mut self: Pin<&mut Self>, change: impl FnOnce(&mut Roster) -> R) -> R {
         let result = change(&mut self.as_mut().rust_mut().core);
         let ops = self.as_mut().rust_mut().core.take_ops();
+        let structural = ops.iter().any(|op| !matches!(op, Op::Update { .. } | Op::Signal(_)));
         for op in ops {
             self.as_mut().replay(op);
+        }
+        if structural {
+            self.as_mut().structure_changed();
         }
         result
     }
