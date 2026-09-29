@@ -29,7 +29,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/models/BackgroundJobTracker` | 159 | `core/src/jobs.rs` | verified (`roster.rs::background_job_tracker_keeps_only_active_jobs`) |
 | `src/models/ContactListModel` | 139 | `core/src/directory.rs` + `app/src/bridge/directory_models.rs` | verified (`core/tests/directory.rs`, `directory_models_probe.qml`) |
 | `src/models/ConversationModel` | 830 | `core/src/conversation.rs` + `app/src/bridge/conversation_model.rs` | verified (`core/tests/conversation.rs`, `app/tests/qml/conversation_model_probe.qml`) |
-| `src/models/ConversationPresentationModel` | 437 | `desktop-rs/src/models/` | todo |
+| `src/models/ConversationPresentationModel` | 437 | `core/src/presentation.rs` (+ adapter pending) | wip: core verified (`core/tests/presentation.rs`); cxx-qt adapter and ToolNarrator lookup pending |
 | `src/models/PaneTreeModel` | 1041 | `core/src/panes.rs` + `app/src/bridge/pane_tree_model.rs` | verified (`core/tests/panes.rs`, `app/tests/qml/pane_tree_model_probe.qml`); layouts persist to `~/.config/MaxTeaBag/ClarpRust/workspaces.json` (JSON + lock file + per-window recovery files), not the C++ QSettings keys, and the legacy `workspace/paneTree` key is not migrated |
 | `src/models/VoiceListModel` | 113 | `core/src/directory.rs` + `app/src/bridge/directory_models.rs` | verified (`core/tests/directory.rs`, `directory_models_probe.qml`) |
 | `src/network/ApiClient` | 238 | `net/src/api.rs` + `core/src/endpoint.rs` | verified (`net/tests/clients.rs`, `core/tests/endpoint.rs`) |
@@ -86,17 +86,17 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::previewRestartCapturesContextAndRejectsBusy` | | todo |
 | `tst_native_core::restoredSessionDoesNotFallBackToAnotherAgent` | | todo |
 | `tst_native_core::localReportsRequireOriginAndSafeReadableFiles` | | todo |
-| `tst_native_core::leadingDayTracksVisibleHistory` | | todo |
-| `tst_native_core::oldActivityGroupsAreLazyAndVisitScoped` | | todo |
-| `tst_native_core::consecutiveExplanationsCollapseWithoutChangingTranscript` | | todo |
+| `tst_native_core::leadingDayTracksVisibleHistory` | `core/tests/presentation.rs::leading_day_tracks_visible_history` | verified (core) |
+| `tst_native_core::oldActivityGroupsAreLazyAndVisitScoped` | `core/tests/presentation.rs::old_activity_groups_are_lazy_and_visit_scoped` | verified (core) |
+| `tst_native_core::consecutiveExplanationsCollapseWithoutChangingTranscript` | `core/tests/presentation.rs::consecutive_explanations_collapse_without_changing_transcript` | verified (core) |
 | `tst_native_core::streamedTokenAnnouncesOnlyItsRows` | | todo |
 | `tst_native_core::spokenMarkupLeavesNoGapsInTheText` | `core/tests/protocol.rs::spoken_markup_leaves_no_gaps_in_the_text` | verified |
 | `tst_native_core::quickSwitcherPutsTheExactNameFirst` | | todo |
 | `tst_native_core::unreachableHostErrorClearsWhenItIsBack` | | todo |
-| `tst_native_core::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender` | | todo |
-| `tst_native_core::logMergeRefreshesExplanationsOncePerBatch` | | todo |
+| `tst_native_core::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender` | `core/tests/presentation.rs::attached_tool_elapsed_uses_assistant_boundary_and_preserves_sender` | verified (core) |
+| `tst_native_core::logMergeRefreshesExplanationsOncePerBatch` | `core/tests/presentation.rs::log_merge_costs_one_lookup_per_tool` | wip: lookup bound verified; the Rust adapter diffs rows instead of one whole-transcript dataChanged, so that assertion is replaced by "no reset, per-row updates" |
 | `tst_native_core::secondLaunchIsForwardedToTheRunningInstance` | | todo |
-| `tst_native_core::readyModePreservesActivityAndHidesOnlyProvisionalBody` | | todo |
+| `tst_native_core::readyModePreservesActivityAndHidesOnlyProvisionalBody` | `core/tests/presentation.rs::ready_mode_preserves_activity_and_hides_only_provisional_body` | verified (core) |
 | `tst_native_core::idleContactStartsFreshWithSavedDefaults` | | todo |
 | `tst_native_core::idleContactUsesDialogLaunchValues` | | todo |
 | `tst_native_core::hostDefaultDirectoryReplacesHomePlaceholder` | | todo |
@@ -120,7 +120,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::agentTerminalLaunchesNativeCliThroughDefaultTerminal` | | todo |
 | `tst_native_core::sseParserHandlesChunksCommentsAndReplayIds` | `core/tests/protocol.rs::sse_parser_handles_chunks_comments_and_replay_ids` | verified |
 | `tst_native_core::nextAttentionCyclesWaitingUnreadAndPending` | `core/tests/roster.rs::next_attention_cycles_waiting_unread_and_pending` | verified |
-| `tst_native_core::readyPresentationRetainsCanonicalStreamAndRevealsFinal` | | todo |
+| `tst_native_core::readyPresentationRetainsCanonicalStreamAndRevealsFinal` | `core/tests/presentation.rs::ready_presentation_retains_canonical_stream_and_reveals_final` | wip: core verified; showWhenReady setting persistence is controller work |
 | `tst_native_core::sseCursorIsScopedToOneHost` | `core/tests/endpoint.rs::sse_cursor_is_scoped_to_one_host` | verified |
 | `tst_native_core::snapshotFiltersArchivedAgentsAndPatchesEvents` | `core/tests/roster.rs::snapshot_filters_archived_agents_and_patches_events` | verified |
 | `tst_native_core::agentSnapshotDiffsInPlaceAndRejectsStaleState` | `core/tests/roster.rs::agent_snapshot_diffs_in_place_and_rejects_stale_state` | verified |
