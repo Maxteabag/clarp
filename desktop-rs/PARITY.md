@@ -114,7 +114,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::sidebarUpdatesNeverResetTheRows` | `core/tests/sidebar.rs::sidebar_order_survives_filter_round_trips` + probe `resets === 0` | verified |
 | `tst_native_core::sidebarStatusUpdatesDoNotRebuildTree` | `agent_filter_model.rs::tree_changing` gates rebuilds | wip: no read-counting source test yet |
 | `tst_native_core::subagentCellsDescribePhaseNameAndTask` | `protocol.rs::subagent_cells_describe_phase_name_and_task` + `conversation.rs::subagent_cells_are_annotated_on_the_way_out_only` | verified |
-| `tst_native_core::controllerTracksJobsFromListAndEvents` | | todo |
+| `tst_native_core::controllerTracksJobsFromListAndEvents` | `app/tests/qml/controller_jobs_probe.qml` | verified |
 | `tst_native_core::rosterLookupIsConsistentDuringStructuralSignals` | adapter `indexOfSession` reads the replayed mirror | wip: needs a probe that checks lookups inside rowsInserted/Removed/Moved handlers |
 | `tst_native_core::circularPortraitsAreBoundedAndAntialiased` | | todo |
 | `tst_native_core::agentTerminalLaunchesNativeCliThroughDefaultTerminal` | | todo |

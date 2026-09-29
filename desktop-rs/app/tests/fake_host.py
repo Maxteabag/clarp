@@ -31,6 +31,8 @@ turns = {
     ],
     "mike": [{"id": "m1", "role": "assistant", "text": "Mike here", "revision": 1, "timestamp": "2026-09-29T09:00:00Z"}],
 }
+jobs = []
+attention = [{"id": "d1", "session": "mike", "kind": "decision"}]
 subscribers = []
 event_id = 0
 log_path = None
@@ -89,6 +91,13 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/agents/snapshot":
             with state_lock:
                 return self.reply(200, {"agents": agents, "personas": [{"id": "p", "name": "Paula"}]})
+        if url.path == "/attention":
+            return self.reply(200, {"items": attention})
+        if url.path == "/background-jobs":
+            with state_lock:
+                return self.reply(200, {"jobs": jobs})
+        if url.path == "/artifacts":
+            return self.reply(200, {"artifacts": [{"artifact_id": "art1", "title": "Report"}]})
         if url.path == "/agent-model-options":
             return self.reply(200, {"backends": []})
         if url.path == "/log":
@@ -143,6 +152,14 @@ class Handler(BaseHTTPRequestHandler):
                 for subscriber in list(subscribers):
                     subscriber.put(CLOSE)
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/jobs":
+            # Test control: replace the job list, then push an optional event.
+            global jobs
+            with state_lock:
+                jobs = body.get("jobs", [])
+            if body.get("event"):
+                broadcast(body["event"])
+            return self.reply(200, {"ok": True})
         if self.in_outage():
             return
         record({"method": "POST", "path": url.path, "body": body})
@@ -174,6 +191,22 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply(404, {"error": "not found"})
 
 
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # One tagged line per failure, so the runner output shows the cause.
+        import sys
+        import traceback
+        kind, error, _ = sys.exc_info()
+        if kind in (ConnectionResetError, BrokenPipeError):
+            # A client closing a kept-alive or streaming connection on exit.
+            sys.stderr.write(f"fake host: client {client_address[1]} went away ({kind.__name__})\n")
+            return
+        sys.stderr.write(f"FAKE_HOST_ERROR {client_address[1]} {kind.__name__}: {error} | "
+                         + " / ".join(traceback.format_exc().strip().splitlines()[-3:]) + "\n")
+
+
 def main():
     global log_path
     parser = argparse.ArgumentParser()
@@ -181,8 +214,7 @@ def main():
     parser.add_argument("--log", required=True)
     args = parser.parse_args()
     log_path = args.log
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    server.daemon_threads = True
+    server = Server(("127.0.0.1", 0), Handler)
     with open(args.port_file, "w") as handle:
         handle.write(str(server.server_address[1]))
     server.serve_forever()

@@ -73,3 +73,9 @@ fn error_bodies_name_the_host_message() {
     assert_eq!(error_message(b"<html>", "HTTP 502"), "HTTP 502");
     assert_eq!(error_message(br#"["list"]"#, "HTTP 500"), "HTTP 500");
 }
+
+#[test]
+fn path_segments_are_percent_encoded_like_qt() {
+    assert_eq!(percent_encode_segment("job 1/x"), "job%201%2Fx");
+    assert_eq!(percent_encode_segment("a-b_c.d~e"), "a-b_c.d~e");
+}
