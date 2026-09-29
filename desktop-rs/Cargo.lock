@@ -189,11 +189,15 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clarp-core",
+ "clarp-net",
  "cxx",
  "cxx-qt",
  "cxx-qt-build",
  "cxx-qt-lib",
  "serde_json",
+ "tokio",
+ "url",
+ "uuid",
 ]
 
 [[package]]

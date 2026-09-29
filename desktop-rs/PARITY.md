@@ -7,7 +7,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 
 | C++ source | Lines | Rust target | Status |
 |---|---|---|---|
-| `src/app/AppController` | 4730 | `desktop-rs/src/app/` | todo |
+| `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: slice 1 (connect, snapshot, selection, log sync, send/confirm, stop, SSE roster/transcript/state/activity/notification) verified in `controller_probe.qml`; audio, teams, updates, launch, drafts, narrator pending |
 | `src/app/CredentialStore` | 245 | `desktop-rs/src/app/` | todo |
 | `src/app/InstanceServer` | 199 | `desktop-rs/src/app/` | todo |
 | `src/app/MarkdownStyle` | 250 | `desktop-rs/src/app/` | todo |
@@ -60,17 +60,17 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 
 | Behavior | Rust test / check | Status |
 |---|---|---|
-| Discover and render the live agent roster from `/agents/snapshot`. | | todo |
-| Select and follow an agent, including server-wide focus updates. | | todo |
-| Load tail history, paginate older messages, and apply revision deltas. | | todo |
-| Replace a conversation when its `conversation_id` changes or the server returns `replace_required`. | | todo |
-| Merge growing messages by id and revision without duplicating turns. | | todo |
+| Discover and render the live agent roster from `/agents/snapshot`. | `app/tests/qml/controller_probe.qml` (fake Host) + `core/tests/roster.rs` | verified |
+| Select and follow an agent, including server-wide focus updates. | `app/tests/qml/controller_probe.qml` (fake Host) (select, POST /select, pane follows) + `roster.rs::focus_events_mark_exactly_one_row` | verified |
+| Load tail history, paginate older messages, and apply revision deltas. | `app/tests/qml/controller_probe.qml` (fake Host) (tail, SSE-driven delta) + `conversation.rs` | wip: older-page request not yet probed end to end |
+| Replace a conversation when its `conversation_id` changes or the server returns `replace_required`. | `conversation.rs::conversation_change_requests_replacement` + controller replace-on-replacementRequired | wip: controller path not yet probed end to end |
+| Merge growing messages by id and revision without duplicating turns. | `conversation.rs::growing_reply_rejects_stale_revision`, `contract_fixtures.rs` | verified |
 | Open one SSE stream, resume with `Last-Event-ID`, reconnect on silence or failure, and ignore unknown additive fields/events. | | wip: client verified in `net/tests/clients.rs` (resume, watchdog, backoff, stop) and `contract_fixtures.rs` (unknown events/fields); app wiring pending |
-| Send idempotent messages with an optimistic `u-<client_msg_id>` row and keep delivery pending until that id appears in `/log`. | | todo |
+| Send idempotent messages with an optimistic `u-<client_msg_id>` row and keep delivery pending until that id appears in `/log`. | `app/tests/qml/controller_probe.qml` (fake Host) (optimistic row, confirmed by u-<id>, unfiled send stays pending) | wip: 20 s delivery-timeout failure not exercised |
 | Stop a running turn and represent queued, waiting, interrupted, and active states accurately. | | todo |
 | Record microphone PCM, upload it to `/transcribe`, and carry the returned trace/transcription ids into `/send`. | | todo |
 | Play announced clips, select sources by protocol precedence, and acknowledge queued/start/success/failure states. | | todo |
-| Treat `user-notification` as the only unread/desktop-notification decision. | | todo |
+| Treat `user-notification` as the only unread/desktop-notification decision. | `app/tests/qml/controller_probe.qml` (fake Host) (no notification for the open chat) + `roster.rs` | wip: notification for a background chat not probed |
 | Create/relaunch/fork/release agents and expose the desktop overview, voice-selection, and orchestrator settings workflows. | | todo |
 | Preserve the desktop pane workspace, collapsible agent rail, keyboard-driven navigation, quick switcher, tool visibility, and scroll-to-latest behavior. | | todo |
 
@@ -144,7 +144,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::paneDraftIsDurableAndScopedToServerAndConversation` | | todo |
 | `tst_native_core::transcriptCacheRestoresDurableRowsWithoutStaleRegression` | | todo |
 | `tst_native_core::credentialStoreRoundTrip` | | todo |
-| `tst_native_core::appControllerCompletesCoreProtocolFlow` | | todo |
+| `tst_native_core::appControllerCompletesCoreProtocolFlow` | `app/tests/qml/controller_probe.qml` | wip: core flow verified; audio/clip parts pending (media step) |
 | `tst_native_core::connectedControllerShutsDownWithoutLateSseCallbacks` | | todo |
 | `tst_native_core::contactsExcludeActivePersonas` | `core/tests/directory.rs::contacts_exclude_active_personas` | verified |
 | `tst_native_core::microphoneCanCaptureNativePcm` | | todo |

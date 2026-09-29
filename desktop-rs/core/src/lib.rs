@@ -13,6 +13,7 @@ pub mod panes;
 pub mod presentation;
 pub mod protocol;
 pub mod roster;
+pub mod settings;
 pub mod sidebar;
 pub mod sse;
 pub mod sync;

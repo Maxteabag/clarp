@@ -5,6 +5,10 @@ edition = "2024"
 
 [dependencies]
 clarp-core = { path = "../core" }
+clarp-net = { path = "../net" }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 serde_json = "1"
 cxx = "1.0.202"
