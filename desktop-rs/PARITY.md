@@ -1,5 +1,7 @@
 # Rust desktop parity checklist
 
+The C++ test list covers declared and inline-defined test slots plus standalone test programs.
+
 Status: `todo` / `wip` / `ported` (Rust code exists) / `verified` (Rust test or headless check named).
 The C++ `desktop/` tree stays the reference until every row is `verified`.
 
@@ -171,6 +173,46 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_tool_narrator::scriptContextIsOptInBoundedAndInvalidatesCache` | `core/tests/narrator.rs::—` | not ported: local-codex script evidence only |
 | `tst_tool_narrator::memoizedLookupsFollowEveryFieldThatIsSent` | `core/tests/narrator.rs::memoized_lookups_follow_every_field_that_is_sent` | verified |
 | `tst_tool_narrator::detailLevelsChangeInstructionsAndDiscardPreviousTranslations` | `core/tests/narrator.rs::detail_levels_discard_previous_translations` | verified (instructions are the Host's now) |
+| `tst_avatar_motion::main` (standalone program) | | todo |
+| `tst_avatar_render::main` (standalone program) | | todo |
+| `tst_desktop_presence::eligibilityExpiresWithoutUserInput` | | todo |
+| `tst_desktop_presence::focusLockSleepAndPreferenceReleasePresence` | | todo |
+| `tst_desktop_presence::maintenanceActivityDoesNotDependOnPushPreference` | | todo |
+| `tst_desktop_presence::unknownSessionNeverSuppresses` | | todo |
+| `tst_markdown_style::codeUsesMonoAndBackground` | | todo |
+| `tst_markdown_style::headingsScaleWithTheBodyNotTheWeb` | | todo |
+| `tst_markdown_style::mixedInlineFormatsInOneBlockStayInRange` | | todo |
+| `tst_markdown_style::optionsParseFromQml` | | todo |
+| `tst_markdown_style::quotesAndTablesAreStyled` | | todo |
+| `tst_markdown_style::secondPassIsANoOp` | | todo |
+| `tst_markdown_style::styledHtmlCarriesTheFinalLayout` | | todo |
+| `tst_palette::overridesLightHostInEveryState` | | todo |
+| `tst_reading_theme::bodySizeAndMeasureStayInReadingRange` | `core/tests/reading_theme.rs::body_size_and_measure_stay_in_reading_range` | verified |
+| `tst_reading_theme::bodyTextMeetsAaaOnEverySurface` | `core/tests/reading_theme.rs::body_text_meets_aaa_on_every_surface` | verified |
+| `tst_reading_theme::chromeRolesStayReadableOnEveryTheme` | `core/tests/reading_theme.rs::chrome_roles_stay_readable_on_every_theme` | verified |
+| `tst_reading_theme::fontFallsBackToTheNextInstalledFamily` | `core/tests/reading_theme.rs::font_falls_back_to_the_next_installed_family` | verified |
+| `tst_reading_theme::idsAreUniqueAndUnknownFallsBackToTerminal` | `core/tests/reading_theme.rs::ids_are_unique_and_unknown_falls_back_to_terminal` | verified |
+| `tst_reading_theme::noPurePolarityExtremes` | `core/tests/reading_theme.rs::no_pure_polarity_extremes` | verified |
+| `tst_reading_theme::optionsMirrorThemes` | `core/tests/reading_theme.rs::options_mirror_themes` | verified |
+| `tst_reading_theme::secondaryTextMeetsAa` | `core/tests/reading_theme.rs::secondary_text_meets_aa` | verified |
+| `tst_stall_monitor::blockedGuiThreadIsLoggedWithItsStack` | | todo |
+| `tst_stall_monitor::disabledMonitorDoesNothing` | | todo |
+| `tst_stall_monitor::memoryThresholdCapturesTheGuiStack` | | todo |
+| `tst_stall_monitor::postedBlockDurationsUseWakeTime` | | todo |
+| `tst_stall_monitor::shortPausesAreNotStalls` | | todo |
+| `tst_transcript_layout::anchorSurvivesChangesAboveViewport` | | todo |
+| `tst_transcript_layout::createdRowsMatchDelegateHeightsAndAreContiguous` | | todo |
+| `tst_transcript_layout::followingTracksEndAfterModelAndHeightChanges` | | todo |
+| `tst_transcript_layout::modelResetKeepsSameMessageId` | | todo |
+| `tst_transcript_layout::positionAtRowStaysAtTopAfterNeighbourMeasurement` | | todo |
+| `tst_transcript_layout::rowsFarFromViewportAreNotCreated` | | todo |
+| `tst_transcript_layout::widthChangeKeepsAnchorOnScreen` | | todo |
+| `tst_transcript_rows::bigTablesSplitIntoChunksThatRepeatTheHeader` | | todo |
+| `tst_transcript_rows::finishingMessageSplitsWithoutResetting` | | todo |
+| `tst_transcript_rows::insertsAndRemovesMapAroundSplitMessages` | | todo |
+| `tst_transcript_rows::longTextSplitsAtBlockBoundaries` | | todo |
+| `tst_transcript_rows::smallMessagesStayWhole` | | todo |
+| `tst_workspace_context::ordinaryDirectoryAndRealGitWorktree` | `core/tests/workspace.rs::ordinary_directory_and_real_git_worktree` | verified |
 
 ## Qt model adapters
 
