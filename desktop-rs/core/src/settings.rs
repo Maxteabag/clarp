@@ -59,26 +59,49 @@ impl Settings {
 
     /// Set and save. A failed save is reported, never silently dropped.
     pub fn set(&mut self, key: &str, value: impl Into<Value>) {
-        self.values.insert(key.to_owned(), value.into());
-        self.save();
+        let value = value.into();
+        self.values.insert(key.to_owned(), value.clone());
+        self.save(key, Some(value));
     }
 
     pub fn remove(&mut self, key: &str) {
-        if self.values.remove(key).is_some() {
-            self.save();
-        }
+        self.values.remove(key);
+        self.save(key, None);
     }
 
-    fn save(&self) {
-        let Some(path) = &self.path else { return };
-        let result = (|| {
+    fn read(path: &std::path::Path) -> Map<String, Value> {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default()
+    }
+
+    /// Writes one change. Other windows share the file, so this rereads it
+    /// under a lock and applies only this key: saving the whole in-memory
+    /// copy would erase what another window saved meanwhile. What the
+    /// others saved is picked up on the way.
+    fn save(&mut self, key: &str, value: Option<Value>) {
+        let Some(path) = self.path.clone() else { return };
+        let result = (|| -> std::io::Result<()> {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
+            let mut lock_path = path.clone().into_os_string();
+            lock_path.push(".lock");
+            let lock = std::fs::File::options().create(true).truncate(false).write(true).open(&lock_path)?;
+            lock.lock()?;
+            let mut current = Self::read(&path);
+            match &value {
+                Some(value) => current.insert(key.to_owned(), value.clone()),
+                None => current.remove(key),
+            };
             let mut temporary = path.clone().into_os_string();
-            temporary.push(".tmp");
-            std::fs::write(&temporary, Value::Object(self.values.clone()).to_string())?;
-            std::fs::rename(&temporary, path)
+            temporary.push(format!(".tmp.{}", std::process::id()));
+            std::fs::write(&temporary, Value::Object(current.clone()).to_string())?;
+            std::fs::rename(&temporary, &path)?;
+            self.values = current;
+            Ok(())
         })();
         if let Err(error) = result {
             eprintln!("settings: could not save {}: {error}", path.display());
@@ -137,4 +160,11 @@ pub fn shared_filesystem_key(base_url: &str) -> String {
     use sha2::{Digest, Sha256};
     let digest: String = Sha256::digest(normalized_base_url(base_url).as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
     format!("connections/{digest}/sharedFilesystem")
+}
+
+/// Where the last revision read in a pair room is kept, per Host.
+pub fn agent_conversation_seen_key(base_url: &str, conversation_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let short = |text: &str| Sha256::digest(text.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect::<String>();
+    format!("agentConversations/{}/{}/seenRevision", short(base_url), short(conversation_id))
 }
