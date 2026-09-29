@@ -514,6 +514,22 @@ pub mod qobject {
         /// Markdown as styled rich text for a transcript row (see
         /// `clarp_core::markdown_style`).
         #[qinvokable]
+        #[cxx_name = "artifactsForSession"]
+        fn artifacts_for_session(self: &AppController, session: &QString) -> QJsonArray;
+        #[qinvokable]
+        #[cxx_name = "artifactIsViewableReport"]
+        fn artifact_is_viewable_report(self: &AppController, artifact: &QJsonObject) -> bool;
+        #[qinvokable]
+        #[cxx_name = "reportForArtifact"]
+        fn report_for_artifact(self: &AppController, artifact_id: &QString) -> QJsonObject;
+        /// A row's full tool calls, fetched when the reader opens them.
+        #[qinvokable]
+        #[cxx_name = "loadMessageToolDetails"]
+        fn load_message_tool_details(self: Pin<&mut AppController>, session: &QString, message_id: &QString);
+        #[qinvokable]
+        #[cxx_name = "previewVoice"]
+        fn preview_voice(self: Pin<&mut AppController>, session: &QString, name: &QString, voice_id: &QString);
+        #[qinvokable]
         #[cxx_name = "openExternalLink"]
         fn open_external_link(self: Pin<&mut AppController>, link: &QString, originating_host: &QString) -> bool;
         #[qinvokable]
@@ -942,6 +958,8 @@ pub struct AppControllerRust {
     turn_queue_generation: u64,
     queue_action_sessions: HashMap<String, String>,
     composer_revision: u64,
+    /// tag -> (session, message id)
+    tool_detail_requests: HashMap<String, (String, String)>,
     /// Durable transcript rows between runs; None in screenshot scenarios.
     transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
     /// session -> pending save generation
@@ -3053,6 +3071,49 @@ impl AppController {
     }
 
 
+
+    // ---- artifacts, reports, tool details, voice preview -----------------------
+
+    fn artifacts_for_session(&self, session: &QString) -> cxx_qt_lib::QJsonArray {
+        let session = session.to_string();
+        let artifacts: Vec<Value> =
+            self.update_artifacts.iter().filter(|a| a.get("session").and_then(Value::as_str) == Some(session.as_str())).cloned().collect();
+        crate::qjson::to_qjson_array(&artifacts)
+    }
+
+    fn artifact_is_viewable_report(&self, artifact: &cxx_qt_lib::QJsonObject) -> bool {
+        clarp_core::text::artifact_is_viewable_report(&crate::qjson::from_qjson_object(artifact))
+    }
+
+    fn report_for_artifact(&self, artifact_id: &QString) -> cxx_qt_lib::QJsonObject {
+        clarp_core::text::report_for_artifact(&self.update_artifacts, &artifact_id.to_string(), &self.base_url)
+            .map_or_else(cxx_qt_lib::QJsonObject::default, |report| crate::qjson::to_qjson(&Value::Object(report)).to_object())
+    }
+
+    fn load_message_tool_details(mut self: Pin<&mut Self>, session: &QString, message_id: &QString) {
+        let (session, message_id) = (session.to_string(), message_id.to_string());
+        if session.is_empty() || message_id.is_empty() || self.tool_detail_requests.values().any(|(s, m)| *s == session && *m == message_id) {
+            return;
+        }
+        let tag = format!("tool-details:{}", uuid::Uuid::new_v4());
+        self.as_mut().rust_mut().tool_detail_requests.insert(tag.clone(), (session.clone(), message_id.clone()));
+        if let Some(api) = self.api.as_ref() {
+            api.get(&tag, "/message-tool-details", &[("session", &session), ("message_id", &message_id)]);
+        }
+    }
+
+    fn preview_voice(self: Pin<&mut Self>, session: &QString, name: &QString, voice_id: &QString) {
+        let (session, name, voice_id) = (session.to_string(), name.to_string(), voice_id.to_string());
+        if session.is_empty() || voice_id.is_empty() {
+            return;
+        }
+        let spoken = if name.is_empty() { session.clone() } else { name };
+        if let Some(api) = self.api.as_ref() {
+            api.post_json(&format!("voice-preview:{session}"), "/preview",
+                          json!({"voice_id": voice_id, "session": session, "text": format!("Hi, I'm {spoken}.")}), None);
+        }
+    }
+
     // ---- links, files, terminal, clipboard ------------------------------------
 
     fn open_external_link(mut self: Pin<&mut Self>, link: &QString, originating_host: &QString) -> bool {
@@ -4535,6 +4596,18 @@ impl AppController {
             self.handle_media_list(tag, object);
             return;
         }
+        if tag.starts_with("tool-details:") {
+            if let Some((session, message_id)) = self.as_mut().rust_mut().tool_detail_requests.remove(tag) {
+                self.as_mut().ensure_conversation(&session);
+                if let Some(model) = self.as_mut().conversation_mut(&session) {
+                    model.mutate(|core| core.apply_tool_details(&message_id, object));
+                }
+            }
+            return;
+        }
+        if tag.starts_with("voice-preview:") {
+            return;
+        }
         if tag.starts_with("recoverable:") {
             let events: Vec<Object> =
                 object.get("events").and_then(Value::as_array).into_iter().flatten().filter_map(|e| e.as_object().cloned()).collect();
@@ -4650,6 +4723,11 @@ impl AppController {
             return;
         }
         if self.as_mut().handle_launch_failure(tag) {
+            return;
+        }
+        if tag.starts_with("tool-details:") {
+            self.as_mut().rust_mut().tool_detail_requests.remove(tag);
+            eprintln!("AppController: {tag} failed: {message} (HTTP {status})");
             return;
         }
         if tag.starts_with("media-list:") || tag.starts_with("media-content:") {

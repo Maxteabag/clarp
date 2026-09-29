@@ -51,7 +51,7 @@ Window {
         } else if (stage === 1 && !app.updatesLoading && rachel(backgroundJobCountRole) === 2) {
             check(rachel(subAgentCountRole) === 1, "the list replaces the snapshot's counts")
             check(app.agentProcesses("rachel").jobs.length === 2, "process popover lists both jobs")
-            check(app.attentionCount === 1 && app.updateArtifacts.length === 1, "attention and artifacts loaded")
+            check(app.attentionCount === 1 && app.updateArtifacts.length === 4, "attention and artifacts loaded")
             check(app.nextAttentionTarget === "mike", "a pending decision makes its chat the next target")
             check(app.backgroundJobProgressText(JSON.stringify({metadata: {completed: 3, total: 10}})) === 0.3, "job progress")
             revision = app.processRevision
