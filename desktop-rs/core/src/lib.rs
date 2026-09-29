@@ -13,6 +13,7 @@ pub mod directory;
 pub mod endpoint;
 pub mod jobs;
 pub mod json;
+pub mod launch;
 pub mod links;
 pub mod list_ops;
 pub mod markdown_style;

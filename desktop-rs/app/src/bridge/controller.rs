@@ -519,6 +519,11 @@ pub mod qobject {
         #[cxx_name = "agentConversationsChanged"]
         fn agent_conversations_changed(self: Pin<&mut AppController>);
         /// A pair room: two agents' conversation, shown read-only.
+        /// A relaunched window reopens the chat it had (see main): shown at
+        /// once, confirmed when the Host's roster arrives.
+        #[qinvokable]
+        #[cxx_name = "restoreDesktopSession"]
+        fn restore_desktop_session(self: Pin<&mut AppController>, session: &QString);
         #[qinvokable]
         #[cxx_name = "agentConversation"]
         fn agent_conversation(self: &AppController, conversation_id: &QString) -> QJsonObject;
@@ -970,6 +975,11 @@ pub struct AppControllerRust {
     turn_queue_generation: u64,
     queue_action_sessions: HashMap<String, String>,
     composer_revision: u64,
+    /// A launch that names a backend: the fleet waits until its agent exists.
+    launch_mode: bool,
+    launch_session: String,
+    /// The chat a relaunched window reopens, until the roster confirms it.
+    restored_session: String,
     agent_conversations: Vec<Value>,
     rooms_in_flight: bool,
     rooms_dirty: bool,
@@ -1065,6 +1075,7 @@ impl cxx_qt::Initialize for AppController {
             rust.activity_display_mode =
                 rust.settings.integer("conversation/activityDisplayMode", i64::from(tools_visible)).clamp(0, 2) as i32;
             rust.waiting_for_session_choice = std::env::var_os("CLARP_EMPTY_STARTUP").is_some();
+            rust.launch_mode = std::env::var("CLARP_RS_LAUNCH_MODE").as_deref() == Ok("1");
             rust.last_working_directory = rust.settings.string("launch/workingDirectory", "~");
             rust.last_backend = rust.settings.string("launch/backend", "");
             rust.minimal_ui = rust.settings.boolean("appearance/minimalUi", false);
@@ -1126,6 +1137,10 @@ impl cxx_qt::Initialize for AppController {
                     eprintln!("AppController: dropped the screenshot selection; the controller is gone");
                 }
             });
+        }
+        if std::env::var("CLARP_RESTORE_DESKTOP").as_deref() == Ok("1") {
+            let session = std::env::var("CLARP_RESTORE_SESSION").unwrap_or_default();
+            self.as_mut().restore_desktop_session(&qs(&session));
         }
         // Connect once the event loop runs, like the C++ QTimer::singleShot(0).
         if qt.queue(|controller| controller.connect_or_look_up_token()).is_err() {
@@ -1941,6 +1956,9 @@ impl AppController {
     }
 
     fn request_snapshot(mut self: Pin<&mut Self>) {
+        if self.launch_mode {
+            return;
+        }
         if self.snapshot_in_flight {
             self.as_mut().rust_mut().snapshot_dirty = true;
             return;
@@ -2005,7 +2023,16 @@ impl AppController {
             return;
         }
 
-        let selected_known = self.roster_agent(&self.selected_session).is_some();
+        if !self.restored_session.is_empty() {
+            let restored = self.restored_session.clone();
+            if self.roster_agent(&restored).is_none() && !restored.starts_with("pair:") {
+                // Never replace the explicitly restored chat with the first row.
+                self.set_error("The conversation selected before updating is not available on this Host. Choose another conversation or retry.");
+                return;
+            }
+            self.as_mut().select(&restored);
+        }
+        let selected_known = self.roster_agent(&self.selected_session).is_some() || self.selected_session.starts_with("pair:");
         if self.selected_session.is_empty() || !selected_known {
             let first = self.roster().and_then(|r| r.first_session()).map(str::to_owned);
             match first {
@@ -2058,9 +2085,11 @@ impl AppController {
     }
 
     fn select(mut self: Pin<&mut Self>, session: &str) {
-        if session.is_empty() {
+        // A launch screen shows only the agent it starts.
+        if session.is_empty() || (self.launch_mode && session != self.launch_session) {
             return;
         }
+        self.as_mut().rust_mut().restored_session.clear();
         self.as_mut().rust_mut().waiting_for_session_choice = false;
         let changed = self.selected_session != session;
         self.as_mut().rust_mut().selected_session = session.to_owned();
@@ -3107,6 +3136,27 @@ impl AppController {
 
 
 
+
+    fn restore_desktop_session(mut self: Pin<&mut Self>, session: &QString) {
+        let session = session.to_string();
+        if session.is_empty() {
+            return;
+        }
+        self.as_mut().ensure_conversation(&session);
+        {
+            let mut rust = self.as_mut().rust_mut();
+            rust.restored_session = session.clone();
+            rust.selected_session = session.clone();
+            rust.current = Some(session.clone());
+        }
+        if let Some(panes) = self.as_mut().panes_mut() {
+            panes.mutate(|core| core.set_active_session(&session));
+        }
+        self.as_mut().selected_session_changed();
+        self.as_mut().conversation_changed();
+        self.selected_agent_changed();
+    }
+
     // ---- pair rooms --------------------------------------------------------------
 
     fn unread_agent_conversations_value(&self) -> i32 {
@@ -3130,6 +3180,9 @@ impl AppController {
     }
 
     fn load_agent_conversations(mut self: Pin<&mut Self>) {
+        if self.launch_mode {
+            return;
+        }
         if self.rooms_in_flight {
             self.as_mut().rust_mut().rooms_dirty = true;
             return;
@@ -3329,7 +3382,11 @@ impl AppController {
         self.as_mut().set_error("");
         let (session, host, qt, url) = (self.selected_session.clone(), self.base_url.clone(), self.qt_thread(), url.to_owned());
         crate::runtime::handle().spawn_blocking(move || {
-            let output = std::process::Command::new(helper)
+            let mut command = std::process::Command::new(helper);
+            for variable in clarp_core::launch::RESTORE_VARIABLES {
+                command.env_remove(variable);
+            }
+            let output = command
                 .args(["open-link", &url, "--requester-pid", &std::process::id().to_string()])
                 .stdin(std::process::Stdio::null())
                 .output();
@@ -3409,7 +3466,11 @@ impl AppController {
         let xdg = clarp_core::links::find_executable("xdg-terminal-exec").is_some();
         let (launcher, launch_arguments) =
             clarp_core::links::terminal_command(xdg, &session.to_string(), &title, &directory, &program_path.to_string_lossy(), &arguments);
-        let spawned = std::process::Command::new(&launcher)
+        let mut command = std::process::Command::new(&launcher);
+        for variable in clarp_core::launch::RESTORE_VARIABLES {
+            command.env_remove(variable);
+        }
+        let spawned = command
             .args(&launch_arguments)
             .current_dir(&directory)
             .stdin(std::process::Stdio::null())
@@ -4495,7 +4556,22 @@ impl AppController {
     }
 
     fn finish_created(mut self: Pin<&mut Self>, session: &str) {
+        self.as_mut().rust_mut().launch_session = session.to_owned();
         self.as_mut().select(session);
+        if self.launch_mode {
+            // The agent exists: the rest of the fleet can load now.
+            let qt = self.qt_thread();
+            crate::runtime::after(Duration::from_millis(500), move || {
+                let queued = qt.queue(|mut controller| {
+                    controller.as_mut().rust_mut().launch_mode = false;
+                    controller.as_mut().request_snapshot();
+                    controller.load_updates();
+                });
+                if queued.is_err() {
+                    eprintln!("AppController: dropped resuming the fleet; the controller is gone");
+                }
+            });
+        }
         let pane = self.panes.as_ref().map(|p| p.core().active_pane_id().to_owned()).unwrap_or_default();
         self.as_mut().set_composer_focus(&pane);
         self.agent_mutation_succeeded(qs(session));
@@ -4632,6 +4708,9 @@ impl AppController {
     // ---- updates and background jobs ----------------------------------------
 
     fn load_updates(mut self: Pin<&mut Self>) {
+        if self.launch_mode {
+            return;
+        }
         let generation = {
             let mut rust = self.as_mut().rust_mut();
             rust.updates_generation += 1;
