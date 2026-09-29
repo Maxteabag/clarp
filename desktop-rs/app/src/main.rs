@@ -1,4 +1,5 @@
-mod app;
+mod bridge;
+mod qjson;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QUrl};
 
