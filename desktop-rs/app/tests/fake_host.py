@@ -170,6 +170,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"backends": []})
         if url.path == "/static/avatars/rachel.png":
             return self.reply_bytes(200, AVATAR_PNG, "image/png")
+        if url.path.startswith("/clips/") and url.path.endswith("/complete.mp3"):
+            if "/404/" in url.path:
+                return self.reply(404, {"error": "clip expired"})
+            return self.reply_bytes(200, b"ID3fixture-audio", "audio/mpeg")
+        if url.path == "/clips/recoverable":
+            events = [{"type": "audio", "clip_id": 50, "session": query.get("session"), "url": "/clips/50/complete.mp3",
+                       "complete_url": "/clips/50/complete.mp3", "trace_id": "recovered"}] if query.get("session") == "mike" else []
+            return self.reply(200, {"events": events})
         if url.path == "/media/files/m1":
             return self.reply_bytes(200, MEDIA_PNG, "image/png")
         if url.path == "/media":
@@ -272,6 +280,10 @@ class Handler(BaseHTTPRequestHandler):
                 agents.extend(pending_agents)
                 pending_agents = []
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/event":
+            # Test control: push one SSE event to every stream.
+            broadcast(body)
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/jobs":
             # Test control: replace the job list, then push an optional event.
             global jobs
@@ -333,6 +345,8 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 for session, items in turn_queue.items():
                     turn_queue[session] = [i for i in items if i["queue_id"] != item]
+            return self.reply(200, {"ok": True})
+        if url.path == "/clips/ack":
             return self.reply(200, {"ok": True})
         if url.path == "/agent-assign":
             if body.get("mode") == "options":

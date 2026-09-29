@@ -26,6 +26,7 @@ use super::agent_list_model::qobject::{AgentListModel, new_agent_list_model};
 use super::conversation_model::qobject::{ConversationModel, new_conversation_model};
 use super::directory_models::qobject::{ContactListModel, VoiceListModel, new_contact_list_model, new_voice_list_model};
 use super::pane_tree_model::qobject::{PaneTreeModel, new_pane_tree_model};
+use super::audio_controller::qobject::{AudioController, new_audio_controller};
 use super::avatar_motion::qobject::{AvatarMotionClock, new_avatar_motion_clock};
 use super::tool_narrator::qobject::{ToolNarrator, new_tool_narrator};
 
@@ -54,6 +55,8 @@ pub mod qobject {
         type PaneTreeModel = crate::bridge::pane_tree_model::qobject::PaneTreeModel;
         include!("clarp-desktop/src/bridge/tool_narrator.cxxqt.h");
         type ToolNarrator = crate::bridge::tool_narrator::qobject::ToolNarrator;
+        include!("clarp-desktop/src/bridge/audio_controller.cxxqt.h");
+        type AudioController = crate::bridge::audio_controller::qobject::AudioController;
         include!("clarp-desktop/src/bridge/avatar_motion.cxxqt.h");
         type AvatarMotionClock = crate::bridge::avatar_motion::qobject::AvatarMotionClock;
     }
@@ -66,6 +69,7 @@ pub mod qobject {
         #[qproperty(*mut ContactListModel, contacts, READ = contacts_value, CONSTANT)]
         #[qproperty(*mut PaneTreeModel, panes, READ = panes_value, CONSTANT)]
         #[qproperty(*mut VoiceListModel, voices, READ = voices_value, CONSTANT)]
+        #[qproperty(*mut AudioController, audio, READ = audio_value, CONSTANT)]
         #[qproperty(*mut AvatarMotionClock, avatar_motion, cxx_name = "avatarMotion", READ = avatar_motion_value, CONSTANT)]
         #[qproperty(*mut ToolNarrator, tool_narrator, cxx_name = "toolNarrator", READ = tool_narrator_value, CONSTANT)]
         #[qproperty(*mut ConversationModel, conversation, READ = conversation_value, NOTIFY = conversation_changed)]
@@ -161,6 +165,10 @@ pub mod qobject {
         fn voices_value(self: &AppController) -> *mut VoiceListModel;
         fn tool_narrator_value(self: &AppController) -> *mut ToolNarrator;
         fn avatar_motion_value(self: &AppController) -> *mut AvatarMotionClock;
+        fn audio_value(self: &AppController) -> *mut AudioController;
+        #[qinvokable]
+        #[cxx_name = "toggleRecordingForSession"]
+        fn toggle_recording_for_session(self: Pin<&mut AppController>, session: &QString);
         fn conversation_value(self: &AppController) -> *mut ConversationModel;
         fn base_url_value(self: &AppController) -> QString;
         #[cxx_name = "setBaseUrl"]
@@ -831,6 +839,7 @@ pub struct AppControllerRust {
     empty_conversation: Owned<ConversationModel>,
     narrator: Owned<ToolNarrator>,
     avatar_motion: Owned<AvatarMotionClock>,
+    audio: Owned<AudioController>,
     conversations: HashMap<String, UniquePtr<ConversationModel>>,
     current: Option<String>,
     guards: Vec<QMetaObjectConnectionGuard>,
@@ -977,6 +986,7 @@ impl cxx_qt::Initialize for AppController {
             rust.empty_conversation = Owned(new_conversation_model());
             rust.narrator = Owned(new_tool_narrator());
             rust.avatar_motion = Owned(new_avatar_motion_clock());
+            rust.audio = Owned(new_audio_controller());
             rust.settings = Settings::user();
             let saved = rust.settings.string("connection/baseUrl", "http://127.0.0.1:7682");
             rust.base_url = normalized_base_url(&std::env::var("CLARP_BASE_URL").unwrap_or(saved));
@@ -1118,6 +1128,30 @@ impl AppController {
     fn avatar_motion_value(&self) -> *mut AvatarMotionClock {
         pointer(&self.avatar_motion)
     }
+    fn audio_value(&self) -> *mut AudioController {
+        pointer(&self.audio)
+    }
+
+    fn toggle_recording_for_session(mut self: Pin<&mut Self>, session: &QString) {
+        let recording = self.audio.as_ref().is_some_and(|a| a.recording_pub());
+        if session.is_empty() && !recording {
+            return;
+        }
+        if let Some(audio) = self.as_mut().audio_mut() {
+            audio.toggle_recording_for_session(session);
+        }
+    }
+
+    /// The selected chat's clips that were announced while this window was
+    /// not listening, played now.
+    fn request_recoverable_clips(self: Pin<&mut Self>, session: &str) {
+        if session.is_empty() {
+            return;
+        }
+        if let Some(api) = self.api.as_ref() {
+            api.get(&format!("recoverable:{session}"), "/clips/recoverable", &[("session", session)]);
+        }
+    }
     fn conversation_value(&self) -> *mut ConversationModel {
         match self.current.as_ref().and_then(|s| self.conversations.get(s)) {
             Some(model) => pointer(model),
@@ -1229,6 +1263,10 @@ impl AppController {
         unsafe { self.rust_mut().get_unchecked_mut() }.archived.as_mut()
     }
 
+    fn audio_mut(self: Pin<&mut Self>) -> Option<Pin<&mut AudioController>> {
+        unsafe { self.rust_mut().get_unchecked_mut() }.audio.as_mut()
+    }
+
     fn avatar_motion_mut(self: Pin<&mut Self>) -> Option<Pin<&mut AvatarMotionClock>> {
         unsafe { self.rust_mut().get_unchecked_mut() }.avatar_motion.as_mut()
     }
@@ -1263,6 +1301,29 @@ impl AppController {
         if let Some(agents) = self.as_mut().agents_mut() {
             guards.push(agents.connect_structure_changed(
                 move |_| unsafe { Pin::new_unchecked(&mut *this.get()) }.bump_agent_revision(),
+                ConnectionType::QueuedConnection,
+            ));
+        }
+        let muted = self.muted;
+        let raw = unsafe { self.as_mut().get_unchecked_mut() } as *mut AppController;
+        if let Some(mut audio) = self.as_mut().audio_mut() {
+            audio.as_mut().set_muted(muted);
+            let this = ControllerPtr(raw);
+            guards.push(audio.as_mut().connect_muted_changed(
+                move |_, muted| unsafe { Pin::new_unchecked(&mut *this.get()) }.set_muted(muted),
+                ConnectionType::QueuedConnection,
+            ));
+            let this = ControllerPtr(raw);
+            guards.push(audio.as_mut().connect_media_error(
+                move |_, message| unsafe { Pin::new_unchecked(&mut *this.get()) }.set_error(&message.to_string()),
+                ConnectionType::QueuedConnection,
+            ));
+            let this = ControllerPtr(raw);
+            guards.push(audio.connect_transcription_ready(
+                move |_, text, trace, transcription, hands_free, target| {
+                    let (text, trace, transcription, target) = (text.to_string(), trace.to_string(), transcription.to_string(), target.to_string());
+                    unsafe { Pin::new_unchecked(&mut *this.get()) }.deliver_dictation(&text, &trace, &transcription, hands_free, &target);
+                },
                 ConnectionType::QueuedConnection,
             ));
         }
@@ -1633,6 +1694,9 @@ impl AppController {
         if let Some(sse) = self.as_mut().rust_mut().sse.as_mut() {
             sse.stop();
         }
+        if let Some(audio) = self.as_mut().audio_mut() {
+            audio.set_endpoint(None, "");
+        }
         self.as_mut().set_connecting(false);
         self.as_mut().set_connection_state("offline");
         self.as_mut().set_error("");
@@ -1692,6 +1756,9 @@ impl AppController {
             sse.set_endpoint(endpoint.clone(), &token);
         }
         self.as_mut().reset_transient_state();
+        if let Some(audio) = self.as_mut().audio_mut() {
+            audio.set_endpoint(Some(endpoint.clone()), &token);
+        }
         if let Some(api) = self.api.as_ref() {
             api.set_endpoint(endpoint, &token);
         }
@@ -1884,7 +1951,8 @@ impl AppController {
             && let Some(api) = self.api.as_ref() {
                 api.post_json(&format!("select:{session}"), "/select", json!({"session": session}), None);
             }
-        self.request_tail(session, false);
+        self.as_mut().request_tail(session, false);
+        self.request_recoverable_clips(session);
     }
 
     fn refresh_conversation(self: Pin<&mut Self>) {
@@ -2020,7 +2088,17 @@ impl AppController {
         self.send_internal(&session.to_string(), &text.to_string(), queue_if_busy);
     }
 
-    fn send_internal(mut self: Pin<&mut Self>, session: &str, text: &str, queue_if_busy: bool) {
+    fn send_internal(self: Pin<&mut Self>, session: &str, text: &str, queue_if_busy: bool) {
+        self.send_with_voice(session, text, queue_if_busy, "", "", false);
+    }
+
+    /// A dictation goes to the chat it was recorded for, else the selection.
+    fn deliver_dictation(mut self: Pin<&mut Self>, text: &str, trace: &str, transcription: &str, hands_free: bool, target: &str) {
+        let target = clarp_core::protocol::voice_delivery_session(target, &self.selected_session).to_owned();
+        self.as_mut().send_with_voice(&target, text, false, trace, transcription, hands_free);
+    }
+
+    fn send_with_voice(mut self: Pin<&mut Self>, session: &str, text: &str, queue_if_busy: bool, trace: &str, transcription: &str, hands_free: bool) {
         let trimmed = text.trim();
         if trimmed.is_empty() || session.is_empty() {
             return;
@@ -2033,12 +2111,20 @@ impl AppController {
         if let Some(model) = self.as_mut().conversation_mut(session) {
             model.mutate(|core| core.add_optimistic(&client_id, trimmed));
         }
+        if let Some(audio) = self.as_mut().audio_mut() {
+            audio.silence();
+        }
         self.as_mut().set_sending(true);
-        let body = json!({
+        let mut body = json!({
             "session": session, "text": trimmed, "client_msg_id": client_id,
-            // Audio is ported with the media step; until then never ask for speech.
-            "synthesize_audio": false, "hands_free": false, "queue_if_busy": queue_if_busy,
+            "synthesize_audio": !self.muted, "hands_free": hands_free, "queue_if_busy": queue_if_busy,
         });
+        if !trace.is_empty() {
+            body["trace_id"] = json!(trace);
+        }
+        if !transcription.is_empty() {
+            body["transcription_id"] = json!(transcription);
+        }
         if let Some(api) = self.api.as_ref() {
             api.post_json(&format!("send:{client_id}"), "/send", body, None);
         }
@@ -2212,6 +2298,9 @@ impl AppController {
         }
         self.as_mut().rust_mut().muted = value;
         self.as_mut().rust_mut().settings.set("audio/muted", value);
+        if let Some(audio) = self.as_mut().audio_mut() {
+            audio.set_muted(value);
+        }
         self.muted_changed();
     }
 
@@ -4181,6 +4270,16 @@ impl AppController {
             self.handle_media_list(tag, object);
             return;
         }
+        if tag.starts_with("recoverable:") {
+            let events: Vec<Object> =
+                object.get("events").and_then(Value::as_array).into_iter().flatten().filter_map(|e| e.as_object().cloned()).collect();
+            if let Some(mut audio) = self.as_mut().audio_mut() {
+                for event in events {
+                    audio.as_mut().enqueue_clip(event);
+                }
+            }
+            return;
+        }
         if self.as_mut().handle_launch_json(tag, object) {
             return;
         }
@@ -4409,6 +4508,11 @@ impl AppController {
         let kind = json::string(event, "type");
         let session = json::string(event, "session");
         match kind.as_str() {
+            "audio" => {
+                if let Some(audio) = self.as_mut().audio_mut() {
+                    audio.enqueue_clip(event.clone());
+                }
+            }
             "agent-roster" => self.request_snapshot(),
             "transcript-updated" => {
                 if self.conversations.contains_key(&session) {

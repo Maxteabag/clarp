@@ -3,6 +3,7 @@
 #[allow(dead_code)]
 pub mod agent_filter_model;
 pub mod agent_list_model;
+pub mod audio_controller;
 // applicationStateChanged is emitted by Qt through a string connection.
 #[allow(dead_code)]
 pub mod avatar_motion;
