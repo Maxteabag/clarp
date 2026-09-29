@@ -37,6 +37,8 @@ pub mod qobject {
         type QJsonArray = cxx_qt_lib::QJsonArray;
         include!("cxx-qt-lib/qjsonobject.h");
         type QJsonObject = cxx_qt_lib::QJsonObject;
+        include!("cxx-qt-lib/qstringlist.h");
+        type QStringList = cxx_qt_lib::QStringList;
 
         include!("clarp-desktop/src/bridge/agent_list_model.cxxqt.h");
         type AgentListModel = crate::bridge::agent_list_model::qobject::AgentListModel;
@@ -90,6 +92,23 @@ pub mod qobject {
         #[qproperty(QString, last_working_directory, cxx_name = "lastWorkingDirectory", READ = last_working_directory_value, NOTIFY = launch_defaults_changed)]
         #[qproperty(QString, last_backend, cxx_name = "lastBackend", READ = last_backend_value, NOTIFY = launch_defaults_changed)]
         #[qproperty(QJsonArray, backend_options, cxx_name = "backendOptions", READ = backend_options_value, NOTIFY = model_catalog_changed)]
+        #[qproperty(bool, minimal_ui, cxx_name = "minimalUi", READ = minimal_ui_value, WRITE = set_minimal_ui, NOTIFY = minimal_ui_changed)]
+        #[qproperty(bool, workspace_bar_visible, cxx_name = "workspaceBarVisible", READ = workspace_bar_visible_value, WRITE = set_workspace_bar_visible, NOTIFY = workspace_bar_visible_changed)]
+        #[qproperty(bool, timestamps_visible, cxx_name = "timestampsVisible", READ = timestamps_visible_value, WRITE = set_timestamps_visible, NOTIFY = timestamps_visible_changed)]
+        #[qproperty(bool, muted, READ = muted_value, WRITE = set_muted, NOTIFY = muted_changed)]
+        #[qproperty(bool, pause_mobile_push, cxx_name = "pauseMobilePush", READ = pause_mobile_push_value, WRITE = set_pause_mobile_push, NOTIFY = pause_mobile_push_changed)]
+        #[qproperty(bool, new_agent_on_startup, cxx_name = "newAgentOnStartup", READ = new_agent_on_startup_value, WRITE = set_new_agent_on_startup, NOTIFY = new_agent_on_startup_changed)]
+        #[qproperty(bool, anonymous_agents, cxx_name = "anonymousAgents", READ = anonymous_agents_value, WRITE = set_anonymous_agents, NOTIFY = anonymous_agents_changed)]
+        #[qproperty(bool, shared_filesystem, cxx_name = "sharedFilesystem", READ = shared_filesystem_value, WRITE = set_shared_filesystem, NOTIFY = shared_filesystem_changed)]
+        #[qproperty(QString, reading_theme, cxx_name = "readingTheme", READ = reading_theme_value, WRITE = set_reading_theme, NOTIFY = reading_theme_changed)]
+        #[qproperty(QJsonObject, reading_style, cxx_name = "readingStyle", READ = reading_style_value, NOTIFY = reading_theme_changed)]
+        #[qproperty(QJsonArray, reading_themes, cxx_name = "readingThemes", READ = reading_themes_value, CONSTANT)]
+        #[qproperty(u64, avatar_revision, cxx_name = "avatarRevision", READ = zero_revision, NOTIFY = agent_revision_changed)]
+        #[qproperty(u64, media_revision, cxx_name = "mediaRevision", READ = zero_revision, NOTIFY = agent_revision_changed)]
+        #[qproperty(u64, composer_revision, cxx_name = "composerRevision", READ = zero_revision, NOTIFY = agent_revision_changed)]
+        #[qproperty(bool, uploading, READ = false_value, NOTIFY = agent_revision_changed)]
+        #[qproperty(i32, unread_agent_conversations, cxx_name = "unreadAgentConversations", READ = zero_count, NOTIFY = agent_revision_changed)]
+        #[qproperty(QJsonArray, agent_conversations, cxx_name = "agentConversations", READ = empty_array, NOTIFY = agent_revision_changed)]
         type AppController = super::AppControllerRust;
     }
 
@@ -137,7 +156,109 @@ pub mod qobject {
         fn last_working_directory_value(self: &AppController) -> QString;
         fn last_backend_value(self: &AppController) -> QString;
         fn backend_options_value(self: &AppController) -> QJsonArray;
+        fn minimal_ui_value(self: &AppController) -> bool;
+        #[cxx_name = "setMinimalUi"]
+        fn set_minimal_ui(self: Pin<&mut AppController>, value: bool);
+        fn workspace_bar_visible_value(self: &AppController) -> bool;
+        #[cxx_name = "setWorkspaceBarVisible"]
+        fn set_workspace_bar_visible(self: Pin<&mut AppController>, value: bool);
+        fn timestamps_visible_value(self: &AppController) -> bool;
+        #[cxx_name = "setTimestampsVisible"]
+        fn set_timestamps_visible(self: Pin<&mut AppController>, value: bool);
+        fn muted_value(self: &AppController) -> bool;
+        #[cxx_name = "setMuted"]
+        fn set_muted(self: Pin<&mut AppController>, value: bool);
+        fn pause_mobile_push_value(self: &AppController) -> bool;
+        #[cxx_name = "setPauseMobilePush"]
+        fn set_pause_mobile_push(self: Pin<&mut AppController>, value: bool);
+        fn new_agent_on_startup_value(self: &AppController) -> bool;
+        #[cxx_name = "setNewAgentOnStartup"]
+        fn set_new_agent_on_startup(self: Pin<&mut AppController>, value: bool);
+        fn anonymous_agents_value(self: &AppController) -> bool;
+        #[cxx_name = "setAnonymousAgents"]
+        fn set_anonymous_agents(self: Pin<&mut AppController>, value: bool);
+        fn shared_filesystem_value(self: &AppController) -> bool;
+        #[cxx_name = "setSharedFilesystem"]
+        fn set_shared_filesystem(self: Pin<&mut AppController>, value: bool);
+        fn reading_theme_value(self: &AppController) -> QString;
+        #[cxx_name = "setReadingTheme"]
+        fn set_reading_theme(self: Pin<&mut AppController>, value: QString);
+        fn reading_style_value(self: &AppController) -> QJsonObject;
+        fn reading_themes_value(self: &AppController) -> QJsonArray;
+        fn zero_revision(self: &AppController) -> u64;
+        fn false_value(self: &AppController) -> bool;
+        fn zero_count(self: &AppController) -> i32;
+        fn empty_array(self: &AppController) -> QJsonArray;
+        #[qsignal]
+        #[cxx_name = "minimalUiChanged"]
+        fn minimal_ui_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "workspaceBarVisibleChanged"]
+        fn workspace_bar_visible_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "timestampsVisibleChanged"]
+        fn timestamps_visible_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "mutedChanged"]
+        fn muted_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "pauseMobilePushChanged"]
+        fn pause_mobile_push_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "newAgentOnStartupChanged"]
+        fn new_agent_on_startup_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "anonymousAgentsChanged"]
+        fn anonymous_agents_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "sharedFilesystemChanged"]
+        fn shared_filesystem_changed(self: Pin<&mut AppController>);
+        #[qsignal]
+        #[cxx_name = "readingThemeChanged"]
+        fn reading_theme_changed(self: Pin<&mut AppController>);
 
+        #[qinvokable]
+        #[cxx_name = "agentDetails"]
+        fn agent_details(self: Pin<&mut AppController>, session: &QString) -> QJsonObject;
+        #[qinvokable]
+        #[cxx_name = "agentModel"]
+        fn agent_model(self: &AppController, session: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "agentEffort"]
+        fn agent_effort(self: &AppController, session: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "agentQuotaNotice"]
+        fn agent_quota_notice(self: &AppController, session: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "agentNameById"]
+        fn agent_name_by_id(self: &AppController, agent_id: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "agentSessionById"]
+        fn agent_session_by_id(self: &AppController, agent_id: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "matchingAgents"]
+        fn matching_agents(self: &AppController, query: &QString) -> QJsonArray;
+        #[qinvokable]
+        #[cxx_name = "isPairSession"]
+        fn is_pair_session(self: &AppController, session: &QString) -> bool;
+        #[qinvokable]
+        #[cxx_name = "chatStamp"]
+        fn chat_stamp(self: &AppController, time: i64) -> QString;
+        #[qinvokable]
+        #[cxx_name = "markStartup"]
+        fn mark_startup(self: &AppController, milestone: &QString);
+        #[qinvokable]
+        #[cxx_name = "markdownDisplayBlocks"]
+        fn markdown_display_blocks(self: &AppController, markdown: &QString) -> QStringList;
+        #[qinvokable]
+        #[cxx_name = "linkifiedOutput"]
+        fn linkified_output(self: &AppController, text: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "canLinkifyOutput"]
+        fn can_linkify_output(self: &AppController, text: &QString) -> bool;
+        #[qinvokable]
+        #[cxx_name = "backgroundJobProgress"]
+        fn background_job_progress(self: &AppController, job: &QJsonObject) -> f64;
         #[qsignal]
         #[cxx_name = "contactLaunchChanged"]
         fn contact_launch_changed(self: Pin<&mut AppController>);
@@ -497,6 +618,17 @@ pub struct AppControllerRust {
     last_backend: String,
     launch_directory: String,
     pending_created_session: String,
+    minimal_ui: bool,
+    workspace_bar_visible: bool,
+    timestamps_visible: bool,
+    muted: bool,
+    pause_mobile_push: bool,
+    new_agent_on_startup: bool,
+    anonymous_agents: bool,
+    shared_filesystem: bool,
+    shared_filesystem_override: String,
+    reading_theme: String,
+    workspace: clarp_core::workspace::WorkspaceContext,
     created_snapshot_attempts: u32,
     /// Draft text by settings key, held in memory until the composer idles.
     pending_drafts: HashMap<String, String>,
@@ -525,6 +657,19 @@ impl cxx_qt::Initialize for AppController {
             rust.waiting_for_session_choice = std::env::var_os("CLARP_EMPTY_STARTUP").is_some();
             rust.last_working_directory = rust.settings.string("launch/workingDirectory", "~");
             rust.last_backend = rust.settings.string("launch/backend", "");
+            rust.minimal_ui = rust.settings.boolean("appearance/minimalUi", false);
+            rust.workspace_bar_visible = rust.settings.boolean("appearance/workspaceBar", true);
+            rust.timestamps_visible = rust.settings.boolean("conversation/timestampsVisible", false);
+            rust.muted = rust.settings.boolean("audio/muted", false);
+            rust.pause_mobile_push = rust.settings.boolean("notifications/pauseMobileWhileDesktopActive", true);
+            rust.new_agent_on_startup = rust.settings.boolean("launch/newAgentOnStartup", true);
+            rust.anonymous_agents = rust.settings.boolean("launch/anonymousAgents", true);
+            rust.reading_theme = clarp_core::reading_theme::normalized_theme_id(
+                &rust.settings.string("appearance/readingTheme", clarp_core::reading_theme::default_theme_id()));
+            let shared_host = std::env::var("CLARP_SHARED_FILESYSTEM_HOST").unwrap_or_default();
+            rust.shared_filesystem_override =
+                if shared_host.trim().is_empty() { String::new() } else { normalized_base_url(&shared_host) };
+            rust.shared_filesystem = rust.compute_shared_filesystem();
             rust.connection_state = "offline".into();
         }
         if let Some(archive) = self.as_mut().rust_mut().archived.as_mut() {
@@ -567,6 +712,11 @@ impl cxx_qt::Initialize for AppController {
 }
 
 impl AppControllerRust {
+    fn compute_shared_filesystem(&self) -> bool {
+        (!self.shared_filesystem_override.is_empty() && self.shared_filesystem_override == self.base_url)
+            || self.settings.boolean(&clarp_core::settings::shared_filesystem_key(&self.base_url), false)
+    }
+
     fn flush_drafts(&mut self) {
         for (key, text) in std::mem::take(&mut self.pending_drafts) {
             if text.is_empty() {
@@ -901,6 +1051,11 @@ impl AppController {
             }
         }
         self.as_mut().rust_mut().settings.set("connection/baseUrl", normalized);
+        let shared = self.compute_shared_filesystem();
+        if shared != self.shared_filesystem {
+            self.as_mut().rust_mut().shared_filesystem = shared;
+            self.as_mut().shared_filesystem_changed();
+        }
         self.as_mut().base_url_changed();
         self.as_mut().selected_session_changed();
         self.as_mut().selected_agent_changed();
@@ -1477,6 +1632,250 @@ impl AppController {
             .collect();
         let next = self.roster().and_then(|r| r.next_attention_session(&self.selected_session, &pending));
         qs(&next.unwrap_or_default())
+    }
+
+
+    // ---- preferences and small queries -------------------------------------
+
+    fn minimal_ui_value(&self) -> bool {
+        self.minimal_ui
+    }
+
+    fn set_minimal_ui(mut self: Pin<&mut Self>, value: bool) {
+        if self.minimal_ui == value {
+            return;
+        }
+        self.as_mut().rust_mut().minimal_ui = value;
+        self.as_mut().rust_mut().settings.set("appearance/minimalUi", value);
+        self.minimal_ui_changed();
+    }
+
+    fn workspace_bar_visible_value(&self) -> bool {
+        self.workspace_bar_visible
+    }
+
+    fn set_workspace_bar_visible(mut self: Pin<&mut Self>, value: bool) {
+        if self.workspace_bar_visible == value {
+            return;
+        }
+        self.as_mut().rust_mut().workspace_bar_visible = value;
+        self.as_mut().rust_mut().settings.set("appearance/workspaceBar", value);
+        self.workspace_bar_visible_changed();
+    }
+
+    fn timestamps_visible_value(&self) -> bool {
+        self.timestamps_visible
+    }
+
+    fn set_timestamps_visible(mut self: Pin<&mut Self>, value: bool) {
+        if self.timestamps_visible == value {
+            return;
+        }
+        self.as_mut().rust_mut().timestamps_visible = value;
+        self.as_mut().rust_mut().settings.set("conversation/timestampsVisible", value);
+        self.timestamps_visible_changed();
+    }
+
+    fn muted_value(&self) -> bool {
+        self.muted
+    }
+
+    fn set_muted(mut self: Pin<&mut Self>, value: bool) {
+        if self.muted == value {
+            return;
+        }
+        self.as_mut().rust_mut().muted = value;
+        self.as_mut().rust_mut().settings.set("audio/muted", value);
+        self.muted_changed();
+    }
+
+    fn pause_mobile_push_value(&self) -> bool {
+        self.pause_mobile_push
+    }
+
+    fn set_pause_mobile_push(mut self: Pin<&mut Self>, value: bool) {
+        if self.pause_mobile_push == value {
+            return;
+        }
+        self.as_mut().rust_mut().pause_mobile_push = value;
+        self.as_mut().rust_mut().settings.set("notifications/pauseMobileWhileDesktopActive", value);
+        self.pause_mobile_push_changed();
+    }
+
+    fn new_agent_on_startup_value(&self) -> bool {
+        self.new_agent_on_startup
+    }
+
+    fn set_new_agent_on_startup(mut self: Pin<&mut Self>, value: bool) {
+        if self.new_agent_on_startup == value {
+            return;
+        }
+        self.as_mut().rust_mut().new_agent_on_startup = value;
+        self.as_mut().rust_mut().settings.set("launch/newAgentOnStartup", value);
+        self.new_agent_on_startup_changed();
+    }
+
+    fn anonymous_agents_value(&self) -> bool {
+        self.anonymous_agents
+    }
+
+    fn set_anonymous_agents(mut self: Pin<&mut Self>, value: bool) {
+        if self.anonymous_agents == value {
+            return;
+        }
+        self.as_mut().rust_mut().anonymous_agents = value;
+        self.as_mut().rust_mut().settings.set("launch/anonymousAgents", value);
+        self.anonymous_agents_changed();
+    }
+
+    fn shared_filesystem_value(&self) -> bool {
+        self.shared_filesystem
+    }
+
+    fn set_shared_filesystem(mut self: Pin<&mut Self>, value: bool) {
+        if self.shared_filesystem == value {
+            return;
+        }
+        let key = clarp_core::settings::shared_filesystem_key(&self.base_url);
+        self.as_mut().rust_mut().shared_filesystem = value;
+        self.as_mut().rust_mut().settings.set(&key, value);
+        self.shared_filesystem_changed();
+    }
+
+    fn reading_theme_value(&self) -> QString {
+        qs(&self.reading_theme)
+    }
+
+    fn set_reading_theme(mut self: Pin<&mut Self>, value: QString) {
+        let normalized = clarp_core::reading_theme::normalized_theme_id(&value.to_string());
+        if self.reading_theme == normalized {
+            return;
+        }
+        self.as_mut().rust_mut().reading_theme = normalized.clone();
+        self.as_mut().rust_mut().settings.set("appearance/readingTheme", normalized);
+        self.reading_theme_changed();
+    }
+
+    /// Fonts resolve here so a machine without Literata or Atkinson
+    /// Hyperlegible falls back to the next listed family.
+    fn reading_style_value(&self) -> cxx_qt_lib::QJsonObject {
+        let style = clarp_core::reading_theme::style(&self.reading_theme, crate::fonts::installed);
+        crate::qjson::to_qjson(&Value::Object(style)).to_object()
+    }
+
+    fn reading_themes_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&clarp_core::reading_theme::options())
+    }
+
+    // Placeholders until avatars, media, attachments and pair rooms land.
+    fn zero_revision(&self) -> u64 {
+        0
+    }
+    fn false_value(&self) -> bool {
+        false
+    }
+    fn zero_count(&self) -> i32 {
+        0
+    }
+    fn empty_array(&self) -> cxx_qt_lib::QJsonArray {
+        cxx_qt_lib::QJsonArray::default()
+    }
+
+    fn agent_details(mut self: Pin<&mut Self>, session: &QString) -> cxx_qt_lib::QJsonObject {
+        let session = session.to_string();
+        let Some(agent) = self.roster_agent(&session).cloned() else { return cxx_qt_lib::QJsonObject::default() };
+        let shared = self.shared_filesystem;
+        let workspace = self.as_mut().rust_mut().workspace.describe(&agent.working_directory, shared);
+        let state = self.roster().and_then(|r| r.display_state(&session)).unwrap_or_default();
+        let details = json!({
+            "agent_id": agent.agent_id, "session": agent.session, "name": display_name(&agent),
+            "backend": agent.backend, "working_directory": agent.working_directory, "workspace": workspace,
+            "model": agent.model, "effort": agent.effort,
+            "default_effort": clarp_core::catalog::default_effort_for_model(&self.model_catalog, &agent.backend, &agent.model),
+            "state": state, "status_text": agent.status_text, "context_tokens": agent.context_tokens,
+            "context_window": agent.context_window, "queue_count": agent.queued_turn_count, "muted": agent.muted,
+            "heartbeat_enabled": agent.heartbeat_enabled, "dreaming_enabled": agent.dreaming_enabled,
+            "schedules": agent.schedules, "mcp_servers": agent.mcp_servers, "team_ids": agent.team_ids,
+        });
+        crate::qjson::to_qjson(&details).to_object()
+    }
+
+    fn agent_model(&self, session: &QString) -> QString {
+        self.roster_agent(&session.to_string()).map_or_else(QString::default, |a| qs(&a.model))
+    }
+
+    fn agent_effort(&self, session: &QString) -> QString {
+        self.roster_agent(&session.to_string()).map_or_else(QString::default, |a| qs(&a.effort))
+    }
+
+    fn agent_quota_notice(&self, session: &QString) -> QString {
+        self.roster_agent(&session.to_string()).map_or_else(QString::default, |a| qs(&a.quota_notice(chrono::Utc::now())))
+    }
+
+    fn agent_name_by_id(&self, agent_id: &QString) -> QString {
+        let id = agent_id.to_string();
+        self.roster().and_then(|r| r.find_by_agent_id(&id)).map_or_else(|| qs(&id), |a| qs(display_name(a)))
+    }
+
+    fn agent_session_by_id(&self, agent_id: &QString) -> QString {
+        let id = agent_id.to_string();
+        self.roster().and_then(|r| r.find_by_agent_id(&id)).map_or_else(QString::default, |a| qs(&a.session))
+    }
+
+    fn matching_agents(&self, query: &QString) -> cxx_qt_lib::QJsonArray {
+        let needle = query.to_string().trim().to_lowercase();
+        let rows: Vec<Value> = self
+            .roster()
+            .map(|roster| roster.agents().to_vec())
+            .unwrap_or_default()
+            .iter()
+            .filter(|agent| {
+                needle.is_empty()
+                    || [display_name(agent), agent.session.as_str(), agent.working_directory.as_str()]
+                        .iter()
+                        .any(|field| field.to_lowercase().contains(&needle))
+            })
+            .map(|agent| json!({"session": agent.session, "name": display_name(agent), "backend": agent.backend,
+                                "state": agent.latest_state, "busy": agent.busy, "unread": agent.unread}))
+            .collect();
+        crate::qjson::to_qjson_array(&rows)
+    }
+
+    /// Agent-to-agent rooms are read-only Host projections, never agents.
+    fn is_pair_session(&self, session: &QString) -> bool {
+        session.to_string().starts_with("pair:")
+    }
+
+    fn chat_stamp(&self, time: i64) -> QString {
+        qs(&clarp_core::time_format::chat_stamp(time, &chrono::Local::now()))
+    }
+
+    fn mark_startup(&self, milestone: &QString) {
+        if std::env::var_os("CLARP_STARTUP_TRACE").is_some() {
+            eprintln!("startup: {milestone}");
+        }
+    }
+
+    fn markdown_display_blocks(&self, markdown: &QString) -> cxx_qt_lib::QStringList {
+        let mut blocks = cxx_qt_lib::QStringList::default();
+        for block in clarp_core::text::markdown_display_blocks(&markdown.to_string()) {
+            blocks.append(qs(&block));
+        }
+        blocks
+    }
+
+    fn linkified_output(&self, text: &QString) -> QString {
+        qs(&clarp_core::text::linkified_plain_text(&text.to_string()))
+    }
+
+    fn can_linkify_output(&self, text: &QString) -> bool {
+        let text = text.to_string();
+        text.chars().count() <= clarp_core::text::MAX_LINKIFIED_TEXT_LENGTH
+            && ["http://", "https://", "www."].iter().any(|scheme| text.contains(scheme))
+    }
+
+    fn background_job_progress(&self, job: &cxx_qt_lib::QJsonObject) -> f64 {
+        clarp_core::jobs::job_progress(&crate::qjson::from_qjson_object(job))
     }
 
     // ---- agent launch and lifecycle ------------------------------------------

@@ -1,4 +1,5 @@
 mod bridge;
+mod fonts;
 mod list_replay;
 mod qjson;
 mod runtime;

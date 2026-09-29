@@ -130,3 +130,11 @@ pub fn draft_scope_key(base_url: &str, session: &str) -> String {
     let digest: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
     format!("composerDrafts/{digest}")
 }
+
+/// Per-Host flag: this machine shares the Host's filesystem (C++
+/// `sharedFilesystemSettingsKey`).
+pub fn shared_filesystem_key(base_url: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest: String = Sha256::digest(normalized_base_url(base_url).as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    format!("connections/{digest}/sharedFilesystem")
+}
