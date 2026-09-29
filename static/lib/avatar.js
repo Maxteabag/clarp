@@ -14,9 +14,10 @@ export function avatarSlug(name) {
 }
 
 const BUNDLED_AVATAR_SLUGS = new Set([
-  'adam', 'antoni', 'arnold', 'bella', 'caleb', 'diego', 'domi', 'elli',
-  'freya', 'josh', 'lena', 'marcus', 'mike', 'nadia', 'omar', 'priya',
-  'rachel', 'sam', 'theo', 'yuki',
+  'adam', 'antoni', 'archie', 'arnold', 'bella', 'bronte', 'caleb',
+  'diego', 'domi', 'elli', 'freya', 'imogen', 'jasper', 'josh', 'kira',
+  'lena', 'marcus', 'mike', 'nadia', 'omar', 'pearl', 'priya', 'rachel',
+  'ronan', 'sam', 'siobhan', 'theo', 'tristan', 'wyatt', 'yuki',
 ]);
 
 export function resolveAvatarUrl(agentsBySession, name, session = '',

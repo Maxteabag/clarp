@@ -52,6 +52,16 @@ CONTACT_TIERS: dict[str, str] = {
     "yuki": "claude",
     "omar": "claude",
     "freya": "claude",
+    "archie": "claude",
+    "tristan": "claude",
+    "ronan": "claude",
+    "wyatt": "claude",
+    "jasper": "claude",
+    "siobhan": "claude",
+    "bronte": "claude",
+    "pearl": "claude",
+    "imogen": "claude",
+    "kira": "claude",
 
     # Codex Tier
     "codex": "codex",

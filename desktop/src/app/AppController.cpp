@@ -48,13 +48,16 @@ QString avatarUrlForAgent(const Agent& agent) {
         return agent.avatarUrl;
     }
     static const QSet<QString> bundled{
-        QStringLiteral("adam"),  QStringLiteral("antoni"), QStringLiteral("arnold"),
-        QStringLiteral("bella"), QStringLiteral("caleb"),  QStringLiteral("diego"),
-        QStringLiteral("domi"),  QStringLiteral("elli"),   QStringLiteral("freya"),
-        QStringLiteral("josh"),  QStringLiteral("lena"),   QStringLiteral("marcus"),
-        QStringLiteral("mike"),  QStringLiteral("nadia"),  QStringLiteral("omar"),
-        QStringLiteral("priya"), QStringLiteral("rachel"), QStringLiteral("sam"),
-        QStringLiteral("theo"),  QStringLiteral("yuki"),
+        QStringLiteral("adam"), QStringLiteral("antoni"), QStringLiteral("archie"),
+        QStringLiteral("arnold"), QStringLiteral("bella"), QStringLiteral("bronte"),
+        QStringLiteral("caleb"), QStringLiteral("diego"), QStringLiteral("domi"),
+        QStringLiteral("elli"), QStringLiteral("freya"), QStringLiteral("imogen"),
+        QStringLiteral("jasper"), QStringLiteral("josh"), QStringLiteral("kira"),
+        QStringLiteral("lena"), QStringLiteral("marcus"), QStringLiteral("mike"),
+        QStringLiteral("nadia"), QStringLiteral("omar"), QStringLiteral("pearl"),
+        QStringLiteral("priya"), QStringLiteral("rachel"), QStringLiteral("ronan"),
+        QStringLiteral("sam"), QStringLiteral("siobhan"), QStringLiteral("theo"),
+        QStringLiteral("tristan"), QStringLiteral("wyatt"), QStringLiteral("yuki"),
     };
     QString slug = displayName(agent).toLower();
     slug.remove(QRegularExpression(QStringLiteral("[^a-z0-9_-]")));
