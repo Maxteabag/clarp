@@ -21,6 +21,7 @@ pub mod media;
 pub mod narrator;
 pub mod panes;
 pub mod presentation;
+pub mod presence;
 pub mod preview;
 pub mod protocol;
 pub mod reading_theme;

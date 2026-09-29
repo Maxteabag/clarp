@@ -975,6 +975,8 @@ pub struct AppControllerRust {
     turn_queue_generation: u64,
     queue_action_sessions: HashMap<String, String>,
     composer_revision: u64,
+    /// Optional requests whose failure was already logged once.
+    quiet_failures: HashSet<String>,
     /// This controller's address when it is the window controller.
     registered: usize,
     /// A launch that names a backend: the fleet waits until its agent exists.
@@ -2491,6 +2493,32 @@ impl AppController {
     }
     pub fn muted_pub(&self) -> bool {
         self.muted
+    }
+    pub fn presence_inputs(&self) -> (bool, bool) {
+        (self.pause_mobile_push, self.connected)
+    }
+
+    /// Someone is (or is no longer) at this desktop: the Host may pause
+    /// phone alerts while the lease holds.
+    pub fn report_desktop_presence(&self, instance: &str, sequence: u64, active: bool) {
+        if self.token.is_empty() {
+            return;
+        }
+        if let Some(api) = self.api.as_ref() {
+            let body = json!({"instance_id": instance, "sequence": sequence, "active": active, "sent_at_ms": chrono::Utc::now().timestamp_millis()});
+            api.post_json("desktop-presence", "/desktop-presence", body, Some(Duration::from_secs(5)));
+        }
+    }
+
+    pub fn report_application_activity(&self, instance: &str, sequence: u64, foreground: bool, input_age_ms: i64) {
+        if self.token.is_empty() {
+            return;
+        }
+        if let Some(api) = self.api.as_ref() {
+            let body = json!({"instance_id": instance, "sequence": sequence, "foreground": foreground,
+                              "input_age_ms": input_age_ms, "sent_at_ms": chrono::Utc::now().timestamp_millis()});
+            api.post_json("application-activity", "/application-activity", body, Some(Duration::from_secs(5)));
+        }
     }
     pub fn set_muted_pub(self: Pin<&mut Self>, value: bool) {
         self.set_muted(value);
@@ -5004,6 +5032,14 @@ impl AppController {
             return;
         }
         if self.as_mut().handle_launch_failure(tag) {
+            return;
+        }
+        if tag == "desktop-presence" || tag == "application-activity" {
+            // Older or offline Hosts ignore these optional leases: say so
+            // once, never as a chat error.
+            if self.as_mut().rust_mut().quiet_failures.insert(tag.to_owned()) {
+                eprintln!("AppController: {tag} is not accepted by this Host: {message} (HTTP {status})");
+            }
             return;
         }
         if tag == "agent-conversations" {

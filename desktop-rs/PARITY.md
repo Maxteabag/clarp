@@ -37,7 +37,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/network/SseClient` | 197 | `net/src/sse.rs` + `core/src/endpoint.rs` | verified (`net/tests/clients.rs::sse_*`) |
 | `src/network/SseParser` | 91 | `core/src/sse.rs` | verified (`protocol.rs::sse_parser_*`) |
 | `src/platform/DesktopIntegration` | 97 | `app/src/bridge/desktop_services.rs` (ksni StatusNotifierItem + org.freedesktop.Notifications over zbus) | verified by `app/tests/run-desktop-services.sh` (fake tray host and notification daemon on a private bus: registration, menu, mute from the tray, notifications for replies in closed chats, Show, Quit). Deviation: the tray waits for a tray host that starts later instead of giving up at launch; MPRIS pending |
-| `src/platform/DesktopPresence` | 224 | `desktop-rs/src/platform/` | todo |
+| `src/platform/DesktopPresence` | 224 | `core/src/presence.rs` + `app/src/bridge/desktop_services.rs` | verified: rules in `core/tests/presence.rs` (the four C++ cases plus lease renewal and input expiry); the real window reports foreground activity to the Host with logind session state in `app/tests/run-desktop-services.sh`. Input is detected with `QEvent::isInputEvent` (cxx cannot name `QEvent::Type`), so hover counts as input |
 | `src/platform/MprisIntegration` | 252 | `desktop-rs/src/platform/` | todo |
 | `src/protocol/ProtocolTypes` | 799 | `core/src/{protocol,text,json}.rs` | verified (`core/tests/protocol.rs`) |
 | `src/terminal/TerminalLaunch` | 36 | `core/src/links.rs` | verified (`core/tests/links.rs`; `app/tests/qml/controller_terminal_probe.qml`) |
@@ -174,10 +174,10 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_tool_narrator::detailLevelsChangeInstructionsAndDiscardPreviousTranslations` | `core/tests/narrator.rs::detail_levels_discard_previous_translations` | verified (instructions are the Host's now) |
 | `tst_avatar_motion::main` (standalone program) | `core/tests/avatar_motion.rs` | wip: ticking lifecycle (observe, reduced motion, foreground, reconcile) verified; window-visibility half pending with `watchMotionWindow` |
 | `tst_avatar_render::main` (standalone program) | | todo |
-| `tst_desktop_presence::eligibilityExpiresWithoutUserInput` | | todo |
-| `tst_desktop_presence::focusLockSleepAndPreferenceReleasePresence` | | todo |
-| `tst_desktop_presence::maintenanceActivityDoesNotDependOnPushPreference` | | todo |
-| `tst_desktop_presence::unknownSessionNeverSuppresses` | | todo |
+| `tst_desktop_presence::eligibilityExpiresWithoutUserInput` | `core/tests/presence.rs::eligibility_expires_without_user_input` | verified (core) |
+| `tst_desktop_presence::focusLockSleepAndPreferenceReleasePresence` | `core/tests/presence.rs::focus_lock_sleep_and_preference_release_presence` | verified (core) |
+| `tst_desktop_presence::maintenanceActivityDoesNotDependOnPushPreference` | `core/tests/presence.rs::maintenance_activity_does_not_depend_on_push_preference` | verified (core) |
+| `tst_desktop_presence::unknownSessionNeverSuppresses` | `core/tests/presence.rs::unknown_session_never_suppresses` | verified (core) |
 | `tst_markdown_style::codeUsesMonoAndBackground` | `core/tests/markdown_style.rs::code_uses_mono_and_background` | verified (core) |
 | `tst_markdown_style::headingsScaleWithTheBodyNotTheWeb` | `core/tests/markdown_style.rs::headings_scale_with_the_body_not_the_web` | verified (core) |
 | `tst_markdown_style::mixedInlineFormatsInOneBlockStayInRange` | `core/tests/markdown_style.rs::large_messages_with_mixed_inline_formats_render` | verified (core) |

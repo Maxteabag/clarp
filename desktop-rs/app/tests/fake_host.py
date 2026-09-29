@@ -409,6 +409,8 @@ class Handler(BaseHTTPRequestHandler):
                 for session, items in turn_queue.items():
                     turn_queue[session] = [i for i in items if i["queue_id"] != item]
             return self.reply(200, {"ok": True})
+        if url.path in ("/desktop-presence", "/application-activity"):
+            return self.reply(200, {"ok": True})
         if url.path == "/preview":
             return self.reply(200, {"ok": True})
         if url.path == "/clips/ack":
