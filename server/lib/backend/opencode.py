@@ -104,6 +104,23 @@ def _add_usage(st: _TurnState, part: dict) -> None:
         st.cost = (st.cost or 0.0) + float(part["cost"])
 
 
+_LIST_ITEMS = 50
+
+
+def _bounded(value: Any) -> Any:
+    """A live tool input value small enough for every state broadcast. Lists
+    stay (a todo update's items are its status line) but are capped."""
+    if isinstance(value, str):
+        return truncate(value, 400)
+    if isinstance(value, list):
+        return [{str(k): truncate(v, 200) if isinstance(v, str) else v
+                 for k, v in item.items() if isinstance(v, (str, int, float, bool))}
+                if isinstance(item, dict) else _bounded(item)
+                for item in value[:_LIST_ITEMS]
+                if isinstance(item, (dict, str, int, float, bool))]
+    return value
+
+
 def _tool_detail(agent_id: str, part: dict) -> tuple[str, dict[str, Any]]:
     """The shared tool name and bounded input for a tool part's live state."""
     raw_name = str(part.get("tool") or part.get("name") or "tool")
@@ -111,10 +128,9 @@ def _tool_detail(agent_id: str, part: dict) -> tuple[str, dict[str, Any]]:
     raw_input = state.get("input") if isinstance(state.get("input"), dict) else {}
     name = opencode_transcript._TOOL_NAMES.get(raw_name, raw_name)
     tool_input = {
-        opencode_transcript._ARG_NAMES.get(str(k), str(k)):
-            truncate(v, 400) if isinstance(v, str) else v
+        opencode_transcript._ARG_NAMES.get(str(k), str(k)): _bounded(v)
         for k, v in raw_input.items()
-        if isinstance(v, (str, int, float, bool))}
+        if isinstance(v, (str, int, float, bool, list))}
     if name == "Bash" and raw_input.get("command"):
         # As Codex does: the apps clip the command; the explainer completes
         # it from here.

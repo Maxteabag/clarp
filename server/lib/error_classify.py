@@ -81,7 +81,10 @@ _CONNECTION_RE = re.compile(
 _TRANSIENT_RE = re.compile(
     r"overloaded|rate[ _]?limit|too many requests|\b429\b|"
     r"\b5\d{2}\b|internal server error|service unavailable|bad gateway|"
-    r"gateway time-?out|api (error|timeout).*(retry|temporar)|temporarily unavailable",
+    r"gateway time-?out|api (error|timeout).*(retry|temporar)|temporarily unavailable|"
+    # OpenCode's gateway when the model's own provider is down. Retrying it as
+    # a dropped connection kept the user on "Reconnecting" for four minutes.
+    r"upstream request failed|endpoint is unavailable",
     re.I,
 )
 _USAGE_LIMIT_RE = re.compile(
@@ -133,6 +136,9 @@ _EXPLANATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"free tier can only be used from within opencode", re.I),
      "This free OpenCode model only runs in OpenCode's own apps. "
      "Choose another model for this agent"),
+    (re.compile(r"upstream request failed|endpoint is unavailable", re.I),
+     "This model's provider is unavailable right now. "
+     "Try again later or choose another model"),
 )
 
 
