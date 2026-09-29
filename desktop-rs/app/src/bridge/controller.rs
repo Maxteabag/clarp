@@ -118,8 +118,8 @@ pub mod qobject {
         #[qproperty(u64, media_revision, cxx_name = "mediaRevision", READ = media_revision_value, NOTIFY = media_changed)]
         #[qproperty(u64, composer_revision, cxx_name = "composerRevision", READ = composer_revision_value, NOTIFY = composer_revision_changed)]
         #[qproperty(bool, uploading, READ = uploading_value, NOTIFY = composer_revision_changed)]
-        #[qproperty(i32, unread_agent_conversations, cxx_name = "unreadAgentConversations", READ = zero_count, NOTIFY = agent_revision_changed)]
-        #[qproperty(QJsonArray, agent_conversations, cxx_name = "agentConversations", READ = empty_array, NOTIFY = agent_revision_changed)]
+        #[qproperty(i32, unread_agent_conversations, cxx_name = "unreadAgentConversations", READ = unread_agent_conversations_value, NOTIFY = agent_conversations_changed)]
+        #[qproperty(QJsonArray, agent_conversations, cxx_name = "agentConversations", READ = agent_conversations_value, NOTIFY = agent_conversations_changed)]
         #[qproperty(QJsonObject, profile_task_plan, cxx_name = "profileTaskPlan", READ = profile_task_plan_value, NOTIFY = profile_changed)]
         #[qproperty(QString, profile_session, cxx_name = "profileSession", READ = profile_session_value, NOTIFY = profile_changed)]
         #[qproperty(bool, profile_loading, cxx_name = "profileLoading", READ = profile_loading_value, NOTIFY = profile_changed)]
@@ -513,6 +513,18 @@ pub mod qobject {
         fn markdown_display_blocks(self: &AppController, markdown: &QString) -> QStringList;
         /// Markdown as styled rich text for a transcript row (see
         /// `clarp_core::markdown_style`).
+        fn unread_agent_conversations_value(self: &AppController) -> i32;
+        fn agent_conversations_value(self: &AppController) -> QJsonArray;
+        #[qsignal]
+        #[cxx_name = "agentConversationsChanged"]
+        fn agent_conversations_changed(self: Pin<&mut AppController>);
+        /// A pair room: two agents' conversation, shown read-only.
+        #[qinvokable]
+        #[cxx_name = "agentConversation"]
+        fn agent_conversation(self: &AppController, conversation_id: &QString) -> QJsonObject;
+        #[qinvokable]
+        #[cxx_name = "loadAgentConversations"]
+        fn load_agent_conversations(self: Pin<&mut AppController>);
         #[qinvokable]
         #[cxx_name = "artifactsForSession"]
         fn artifacts_for_session(self: &AppController, session: &QString) -> QJsonArray;
@@ -958,6 +970,10 @@ pub struct AppControllerRust {
     turn_queue_generation: u64,
     queue_action_sessions: HashMap<String, String>,
     composer_revision: u64,
+    agent_conversations: Vec<Value>,
+    rooms_in_flight: bool,
+    rooms_dirty: bool,
+    rooms_refresh: u64,
     /// tag -> (session, message id)
     tool_detail_requests: HashMap<String, (String, String)>,
     /// Durable transcript rows between runs; None in screenshot scenarios.
@@ -1231,6 +1247,9 @@ impl AppController {
         qs(&self.selected_session)
     }
     fn selected_name_value(&self) -> QString {
+        if self.selected_session.starts_with("pair:") {
+            return qs(&self.pair_title(&self.selected_session));
+        }
         self.roster_agent(&self.selected_session).map_or_else(QString::default, |a| qs(display_name(a)))
     }
     fn selected_state_value(&self) -> QString {
@@ -2058,6 +2077,13 @@ impl AppController {
             self.as_mut().conversation_changed();
             self.as_mut().selected_agent_changed();
         }
+        if session.starts_with("pair:") {
+            // A pair room is a projection, not an agent: no Host focus, no clips.
+            let latest = self.room(session).and_then(|r| r.get("latest_revision")).and_then(Value::as_i64).unwrap_or(0);
+            self.as_mut().mark_agent_conversation_seen(session, latest);
+            self.request_tail(session, false);
+            return;
+        }
         // The Host refuses focus on a janitor (inspection-only).
         let janitor = self.roster_agent(session).is_some_and(|a| a.janitor);
         if !janitor
@@ -2328,7 +2354,15 @@ impl AppController {
 
     fn agent_name(&self, session: &QString) -> QString {
         let session = session.to_string();
+        if session.starts_with("pair:") {
+            return qs(&self.pair_title(&session));
+        }
         self.roster_agent(&session).map_or_else(|| qs(&session), |a| qs(display_name(a)))
+    }
+
+    fn pair_title(&self, session: &str) -> String {
+        let title = self.room(session).map(|r| json::string(r, "title")).unwrap_or_default();
+        if title.is_empty() { "Agent conversation".into() } else { title }
     }
 
     fn agent_state(&self, session: &QString) -> QString {
@@ -3071,6 +3105,136 @@ impl AppController {
     }
 
 
+
+
+    // ---- pair rooms --------------------------------------------------------------
+
+    fn unread_agent_conversations_value(&self) -> i32 {
+        self.agent_conversations.iter().filter(|room| room.get("unread").and_then(Value::as_bool) == Some(true)).count() as i32
+    }
+
+    fn agent_conversations_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.agent_conversations)
+    }
+
+    fn room(&self, conversation_id: &str) -> Option<&Object> {
+        self.agent_conversations
+            .iter()
+            .filter_map(Value::as_object)
+            .find(|room| room.get("conversation_id").and_then(Value::as_str) == Some(conversation_id))
+    }
+
+    fn agent_conversation(&self, conversation_id: &QString) -> cxx_qt_lib::QJsonObject {
+        self.room(&conversation_id.to_string())
+            .map_or_else(cxx_qt_lib::QJsonObject::default, |room| crate::qjson::to_qjson(&Value::Object(room.clone())).to_object())
+    }
+
+    fn load_agent_conversations(mut self: Pin<&mut Self>) {
+        if self.rooms_in_flight {
+            self.as_mut().rust_mut().rooms_dirty = true;
+            return;
+        }
+        if self.token.is_empty() {
+            return;
+        }
+        self.as_mut().rust_mut().rooms_in_flight = true;
+        if let Some(api) = self.api.as_ref() {
+            api.get("agent-conversations", "/agent-conversations", &[]);
+        }
+    }
+
+    /// Any agent may start a pair at any time: refresh the list after a
+    /// short debounce, not on every streamed token.
+    fn schedule_agent_conversations(mut self: Pin<&mut Self>) {
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.rooms_refresh += 1;
+            rust.rooms_refresh
+        };
+        let qt = self.qt_thread();
+        crate::runtime::after(Duration::from_millis(400), move || {
+            let queued = qt.queue(move |controller| {
+                if controller.rooms_refresh == generation {
+                    controller.load_agent_conversations();
+                }
+            });
+            if queued.is_err() {
+                eprintln!("AppController: dropped a pair room refresh; the controller is gone");
+            }
+        });
+    }
+
+    fn seen_key(&self, conversation_id: &str) -> String {
+        clarp_core::settings::agent_conversation_seen_key(&self.base_url, conversation_id)
+    }
+
+    fn seen_revision(&self, conversation_id: &str) -> i64 {
+        self.settings.integer(&self.seen_key(conversation_id), 0)
+    }
+
+    fn mark_agent_conversation_seen(mut self: Pin<&mut Self>, conversation_id: &str, revision: i64) {
+        if conversation_id.is_empty() || revision <= 0 {
+            return;
+        }
+        if revision > self.seen_revision(conversation_id) {
+            let key = self.seen_key(conversation_id);
+            self.as_mut().rust_mut().settings.set(&key, revision);
+        }
+        let mut changed = false;
+        for room in &mut self.as_mut().rust_mut().agent_conversations {
+            if room.get("conversation_id").and_then(Value::as_str) == Some(conversation_id) && room.get("unread").and_then(Value::as_bool) == Some(true) {
+                room["unread"] = json!(false);
+                changed = true;
+            }
+        }
+        if changed {
+            self.agent_conversations_changed();
+        }
+    }
+
+    fn apply_agent_conversations(mut self: Pin<&mut Self>, conversations: &[Value]) {
+        let mut rooms = Vec::new();
+        let mut behind = Vec::new();
+        for room in conversations.iter().filter_map(Value::as_object) {
+            let id = json::string(room, "conversation_id");
+            if !id.starts_with("pair:") {
+                continue;
+            }
+            let latest = room.get("latest_revision").and_then(Value::as_i64).unwrap_or(0);
+            if id == self.selected_session {
+                self.as_mut().mark_agent_conversation_seen(&id, latest);
+            }
+            let mut room = room.clone();
+            room.insert("unread".into(), json!(latest > self.seen_revision(&id)));
+            room.insert("session".into(), json!(id));
+            rooms.push(Value::Object(room));
+            if self.conversations.get(&id).and_then(|m| m.as_ref()).is_some_and(|m| m.conversation().latest_revision() < latest) {
+                behind.push(id);
+            }
+        }
+        for id in behind {
+            self.as_mut().request_delta(&id);
+        }
+        if self.agent_conversations == rooms {
+            return;
+        }
+        self.as_mut().rust_mut().agent_conversations = rooms;
+        self.as_mut().agent_conversations_changed();
+        self.selected_agent_changed();
+    }
+
+    /// A transcript changed: pair rooms that include this agent change too.
+    fn refresh_pair_conversations_for(mut self: Pin<&mut Self>, session: &str) {
+        let agent_id = self.roster_agent(session).map(|a| a.agent_id.clone()).unwrap_or_default();
+        if !agent_id.is_empty() {
+            let related: Vec<String> =
+                self.conversations.keys().filter(|id| id.starts_with("pair:") && id.contains(&agent_id)).cloned().collect();
+            for id in related {
+                self.as_mut().request_delta(&id);
+            }
+        }
+        self.schedule_agent_conversations();
+    }
 
     // ---- artifacts, reports, tool details, voice preview -----------------------
 
@@ -4596,6 +4760,15 @@ impl AppController {
             self.handle_media_list(tag, object);
             return;
         }
+        if tag == "agent-conversations" {
+            self.as_mut().rust_mut().rooms_in_flight = false;
+            if std::mem::take(&mut self.as_mut().rust_mut().rooms_dirty) {
+                self.as_mut().schedule_agent_conversations();
+            }
+            let conversations = json::array(object, "conversations");
+            self.apply_agent_conversations(&conversations);
+            return;
+        }
         if tag.starts_with("tool-details:") {
             if let Some((session, message_id)) = self.as_mut().rust_mut().tool_detail_requests.remove(tag) {
                 self.as_mut().ensure_conversation(&session);
@@ -4653,7 +4826,8 @@ impl AppController {
                 return;
             }
             self.as_mut().complete_snapshot_request();
-            self.apply_snapshot(object);
+            self.as_mut().apply_snapshot(object);
+            self.schedule_agent_conversations();
         } else if let Some(session) = tag.strip_prefix("log-tail:") {
             self.apply_log(session, object, LoadKind::Tail);
         } else if let Some(session) = tag.strip_prefix("log-replace:") {
@@ -4723,6 +4897,14 @@ impl AppController {
             return;
         }
         if self.as_mut().handle_launch_failure(tag) {
+            return;
+        }
+        if tag == "agent-conversations" {
+            self.as_mut().rust_mut().rooms_in_flight = false;
+            if std::mem::take(&mut self.as_mut().rust_mut().rooms_dirty) {
+                self.as_mut().schedule_agent_conversations();
+            }
+            eprintln!("AppController: agent conversations failed: {message} (HTTP {status})");
             return;
         }
         if tag.starts_with("tool-details:") {
@@ -4859,8 +5041,9 @@ impl AppController {
             "agent-roster" => self.request_snapshot(),
             "transcript-updated" => {
                 if self.conversations.contains_key(&session) {
-                    self.request_delta(&session);
+                    self.as_mut().request_delta(&session);
                 }
+                self.refresh_pair_conversations_for(&session);
             }
             "agent-state" => {
                 if let Some(agents) = self.as_mut().agents_mut() {
