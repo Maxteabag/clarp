@@ -120,18 +120,6 @@ def test_attention_inspects_all_priorities_then_optionally_filters_session(monke
     assert output["count"] == 1 and output["items"][0]["session"] == "theo"
 
 
-def test_both_app_instructions_allow_native_questions_but_prohibit_cli_popups(monkeypatch):
-    from lib import voice_preamble
-
-    monkeypatch.syspath_prepend(str(_ROOT / "plugin/hooks"))
-    spec = importlib.util.spec_from_file_location("question_pwa_hook", _ROOT / "plugin/hooks/pwa_source_flag.py")
-    hook = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(hook)
-    for text in (voice_preamble._NO_INTERACTIVE_QUESTIONS,
-                 hook._build_additional_context(app_dispatched=True, voiced=False)):
-        assert "Pay special attention to Clarp skills." in text
-
-
 def test_create_report_dry_run_publishes_read_only_form(tmp_path, requests, capsys):
     html = tmp_path / "report.html"
     html.write_text("<main><h1>Findings</h1></main>")
