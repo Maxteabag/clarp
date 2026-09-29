@@ -420,6 +420,10 @@ def test_fair_sweep_catches_up_at_fast_ticks_then_returns_to_idle(tmp_path,monke
         path.write_text((json.dumps({'type':'noise'})+'\n')*20000)
         paths[native]=path
     monkeypatch.setattr(backends.by_id('claude'),'find_transcript',lambda native:paths[native])
+    # Only the byte and transcript bounds decide the visit count; the wall-clock
+    # budgets would make it depend on the machine's speed.
+    monkeypatch.setattr(provider,'PARSE_BUDGET_SEC',60)
+    monkeypatch.setattr(provider.ProviderJobObserver,'BUDGET_SEC',60)
     observer=provider.ProviderJobObserver()
     visits=0
     while True:
