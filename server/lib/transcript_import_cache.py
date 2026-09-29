@@ -13,7 +13,7 @@ from collections.abc import Callable
 
 _guard = threading.Lock()
 _path_locks: dict[str, threading.Lock] = {}
-_imported: dict[str, tuple[int, int]] = {}
+_imported: dict[str, tuple[int, ...]] = {}
 
 
 def source_path(path: pathlib.Path) -> pathlib.Path:
@@ -33,9 +33,21 @@ def source_size(path: pathlib.Path) -> int:
     return source_path(path).stat().st_size
 
 
-def _signature(path: pathlib.Path) -> tuple[int, int]:
-    stat = source_path(path).stat()
-    return stat.st_mtime_ns, stat.st_size
+def _signature(path: pathlib.Path) -> tuple[int, ...]:
+    source = source_path(path)
+    stat = source.stat()
+    signature: tuple[int, ...] = (stat.st_mtime_ns, stat.st_size)
+    if source != path:
+        # A database in WAL mode leaves the main file untouched until a
+        # checkpoint; new rows are only in <database>-wal. A stopped OpenCode
+        # server never checkpoints, so its last step stayed out of history.
+        try:
+            wal = pathlib.Path(f"{source}-wal").stat()
+        except OSError:
+            pass
+        else:
+            signature += (wal.st_mtime_ns, wal.st_size)
+    return signature
 
 
 def import_if_changed(path: pathlib.Path, importer: Callable[[], None],

@@ -13,6 +13,7 @@ import pytest
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
+from lib import activity  # noqa: E402
 from lib import agents as agents_db  # noqa: E402
 from lib.backend import opencode  # noqa: E402
 from lib.backend.registry import by_id  # noqa: E402
@@ -370,6 +371,11 @@ def test_turn_reports_tool_detail_usage_last_step_text_and_denies_question(
         {"type": "text", "sessionID": "ses_x", "part": {"text": "Checking."}},
         {"type": "tool_use", "sessionID": "ses_x", "part": {
             "tool": "read", "state": {"status": "completed", "input": {"filePath": "/a.py"}}}},
+        {"type": "tool_use", "sessionID": "ses_x", "part": {
+            "tool": "todowrite", "state": {"status": "completed", "input": {"todos": [
+                {"content": "Read the tests", "status": "completed", "priority": "high"},
+                {"content": "Fix the parser", "status": "in_progress", "priority": "high"},
+            ]}}}},
         {"type": "step_finish", "sessionID": "ses_x", "part": step_finish},
         {"type": "step_start", "sessionID": "ses_x", "part": {}},
         {"type": "text", "sessionID": "ses_x", "part": {"text": "All good."}},
@@ -396,6 +402,10 @@ def test_turn_reports_tool_detail_usage_last_step_text_and_denies_question(
         "webfetch": "deny", "question": "deny"}
     tool = next(d for d in details if d.get("tool"))
     assert (tool["tool"], tool["input"]) == ("Read", {"file_path": "/a.py"})
+    # The todo list is the plan's status line; it used to be dropped as a
+    # non-scalar input, and every update read "0 items".
+    plan = next(d for d in details if d.get("tool") == "TodoWrite")
+    assert activity.summarize_tool_activity("TodoWrite", plan["input"])["summary"] == "Fix the parser"
     assert results == [{
         "last_agent_message": "All good.",
         "usage": {"input_tokens": 20, "output_tokens": 8,

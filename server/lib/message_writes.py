@@ -465,6 +465,28 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
 
 
 _FINAL_TWIN_WINDOW_S = 600
+# A native copy is sent after its client row is written; allow for clock and
+# write ordering before deciding a copy predates the next row.
+_RETRY_ECHO_SLACK_S = 1.0
+
+
+def _parse_timestamp(value: Any) -> _dt.datetime | None:
+    try:
+        stamp = _dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=_dt.timezone.utc)
+
+
+def _is_retry_echo(native_timestamp: Any, next_client_timestamp: Any) -> bool:
+    """A native copy of the request just matched, not of the next client row
+    with the same text: that row was written after this copy was sent."""
+    if next_client_timestamp is None:
+        return True
+    native_at = _parse_timestamp(native_timestamp)
+    next_at = _parse_timestamp(next_client_timestamp)
+    return (native_at is not None and next_at is not None
+            and (next_at - native_at).total_seconds() > _RETRY_ECHO_SLACK_S)
 
 
 def _final_twins(database, *, agent_id: str, backend_session_id: str, text: str,
@@ -473,15 +495,7 @@ def _final_twins(database, *, agent_id: str, backend_session_id: str, text: str,
     visible = _strip_voice_markup(text)
     if not visible:
         return []
-
-    def parse(value: Any) -> _dt.datetime | None:
-        try:
-            stamp = _dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        except ValueError:
-            return None
-        return stamp if stamp.tzinfo else stamp.replace(tzinfo=_dt.timezone.utc)
-
-    reply_at = parse(timestamp)
+    reply_at = _parse_timestamp(timestamp)
     if reply_at is None:
         return []
     twins = []
@@ -493,7 +507,7 @@ def _final_twins(database, *, agent_id: str, backend_session_id: str, text: str,
     ).fetchall():
         if row["message_id"] in exclude or _strip_voice_markup(row["text"]) != visible:
             continue
-        written = parse(row["timestamp"])
+        written = _parse_timestamp(row["timestamp"])
         if written is None:
             continue
         if abs((written - reply_at).total_seconds()) <= _FINAL_TWIN_WINDOW_S:
@@ -511,9 +525,9 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     # User turns the client already recorded durably (keyed by client_msg_id).
     # Claude's transcript carries its own copy of each; we link those back to
     # the client rows by text in send order rather than inserting a duplicate.
-    client_user_provenance: dict[str, list[tuple[str, str, str]]] = {}
+    client_user_provenance: dict[str, list[tuple[str, str, str, str]]] = {}
     for r in database.execute(
-        """SELECT message_id, text, origin, sender_agent_id FROM messages
+        """SELECT message_id, text, origin, sender_agent_id, timestamp FROM messages
             WHERE agent_id = ? AND backend_session_id = ?
               AND source_file LIKE 'client:%'
             ORDER BY updated_at ASC, seq ASC""",
@@ -524,6 +538,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             r["message_id"],
             r["origin"] or "user",
             r["sender_agent_id"] or "",
+            r["timestamp"],
         ))
     latest_user_key, current_origin, current_sender_agent_id = _latest_user_provenance(
         database, agent_id, backend_session_id)
@@ -534,6 +549,10 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         latest_user_key if current_origin == "heartbeat" else ""
     )
     assistant_ordinal = 0
+    # The request whose client row was matched last and has had no answer yet.
+    # When an attempt fails, the dispatcher sends the same prompt again and
+    # the backend records one more copy of it per retry.
+    unanswered_key = ""
     current_request_trace = ""
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
@@ -563,6 +582,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             database.execute("BEGIN IMMEDIATE")
             batch_started = time.monotonic()
         role = turn.get("role")
+        if role == "assistant" and not turn.get("failed"):
+            unanswered_key = ""
         if role == "assistant":
             authority = database.execute(
                 """SELECT trace_id FROM agy_turn_authority
@@ -628,8 +649,21 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         if role == "user" and turn.get("id") is None:
             key = _norm_text(text)
             rows = client_user_provenance.get(key) or []
+            if key and key == unanswered_key and _is_retry_echo(
+                    turn.get("timestamp"), rows[0][3] if rows else None):
+                # A retry's copy: the matched client row already stands for
+                # it. Imported, it showed the message twice and later replies
+                # lost their sender. Clear whatever an earlier import left here.
+                removed = database.execute(
+                    """DELETE FROM messages
+                        WHERE agent_id = ? AND backend_session_id = ?
+                          AND source_file = ? AND seq = ?""",
+                    (agent_id, backend_session_id, source_file, seq)).rowcount
+                skipped_slot_removed = skipped_slot_removed or removed > 0
+                continue
             if rows:
-                client_msg_id, current_origin, current_sender_agent_id = rows.pop(0)
+                client_msg_id, current_origin, current_sender_agent_id, _ = rows.pop(0)
+                unanswered_key = key
                 authored = database.execute("SELECT trace_id FROM messages WHERE message_id=?", (client_msg_id,)).fetchone()
                 current_request_trace = (authored["trace_id"] or "") if authored else ""
                 current_heartbeat_key = (
@@ -650,6 +684,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 continue
             current_origin, current_sender_agent_id = "user", ""
             current_heartbeat_key = ""
+            unanswered_key = ""
         if role == "user":
             current_request_trace = str(turn.get("trace_id") or "")
             current_origin, current_sender_agent_id = origin, sender_agent_id

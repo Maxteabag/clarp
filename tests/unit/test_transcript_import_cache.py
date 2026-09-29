@@ -30,6 +30,24 @@ def test_pseudo_path_signature_tracks_the_database(tmp_path):
     assert transcript_import_cache.source_size(pseudo) == len(b"v2 with more bytes")
 
 
+def test_pseudo_path_signature_sees_rows_still_in_the_wal(tmp_path):
+    """OpenCode's database is in WAL mode: a stopped server never checkpoints,
+    so its last step changed only <database>-wal and never reached history."""
+    transcript_import_cache.reset_for_tests()
+    db = tmp_path / "opencode.db"
+    db.write_bytes(b"main")
+    wal = tmp_path / "opencode.db-wal"
+    wal.write_bytes(b"")
+    pseudo = pathlib.Path(f"{db}#ses_1")
+    calls: list[int] = []
+    assert transcript_import_cache.import_if_changed(pseudo, lambda: calls.append(1))
+
+    wal.write_bytes(b"frame for the stopped step")
+    _bump_mtime(wal)
+    assert transcript_import_cache.import_if_changed(pseudo, lambda: calls.append(2))
+    assert calls == [1, 2]
+
+
 def test_plain_file_is_unaffected(tmp_path):
     transcript_import_cache.reset_for_tests()
     path = tmp_path / "conversation.jsonl"

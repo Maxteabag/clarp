@@ -135,3 +135,11 @@ def test_opencode_free_tier_refusal_is_a_plan_limit_with_a_plain_reason():
     assert ec.classify_error(raw) == ec.USAGE_LIMIT
     assert "Choose another model" in ec.explain(raw)
     assert ec.explain("read ECONNRESET") == ""
+
+
+def test_opencode_provider_outage_is_reported_not_retried_as_a_dropped_connection():
+    """Retried as CONNECTION, a down free model kept the user on
+    "Reconnecting" for four minutes and re-sent the prompt twice."""
+    raw = "Error from provider (Console): Upstream request failed: Endpoint is unavailable."
+    assert ec.classify_error(raw) == ec.TRANSIENT
+    assert "provider is unavailable" in ec.explain(raw)

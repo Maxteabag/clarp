@@ -437,6 +437,9 @@ def _turns_from_messages(
         kind = _kind_of(data) if role == "assistant" and not failed else ""
         if kind:
             turn["kind"] = kind
+        if failed:
+            # No answer: a retry sends the same prompt again (message_writes).
+            turn["failed"] = True
         turns.append(turn)
         open_turn = turn if role == "assistant" and not failed else None
     if pending:

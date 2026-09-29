@@ -187,3 +187,53 @@ def test_human_read_tags_system_automation_prompts(tmp_path):
         "dreaming", "heartbeat", "leader_tick", "leader_tick", "watcher"]
     assert sorted(m["origin"] for m in visible if not m["automated"]) == [
         "agent", "schedule", "user"]
+
+
+def test_a_retried_prompt_shows_once_and_its_answer_keeps_the_sender(tmp_path, monkeypatch):
+    """A failed attempt is retried by sending the same prompt again, so the
+    backend holds one copy per attempt. Those copies used to take the next
+    identical request's client row: the message showed twice and the later
+    answers lost who asked."""
+    from lib import message_writes
+    target = agents_db.create_agent(
+        persona="Omar", voice_id="V", cwd=str(tmp_path), session="omar")
+    sender = agents_db.create_agent(
+        persona="Lena", voice_id="V", cwd=str(tmp_path), session="lena")
+    start = 1_790_000_000_000
+    clock = {"ms": start}
+    monkeypatch.setattr(message_writes, "now_ms", lambda: clock["ms"])
+
+    def at(seconds):
+        return message_writes._iso_from_ms(start + int(seconds * 1000))
+
+    def failed(seconds):
+        return {"role": "assistant", "text": "OpenCode APIError: Endpoint is unavailable.",
+                "timestamp": at(seconds), "failed": True}
+
+    def send(client_msg_id):
+        message_store.record_user_message(
+            agent_id=target, backend_session_id="bs", client_msg_id=client_msg_id,
+            text="check it", origin="agent", sender_agent_id=sender)
+
+    send("c1")
+    attempts = [
+        {"role": "user", "text": "check it", "timestamp": at(0.3)}, failed(1),
+        {"role": "user", "text": "check it", "timestamp": at(75)}, failed(76),
+        {"role": "user", "text": "check it", "timestamp": at(150)}, failed(151),
+    ]
+    message_store.store_transcript_turns(
+        agent_id=target, backend_session_id="bs", source_file="f", turns=attempts)
+    clock["ms"] = start + 300_000
+    send("c2")
+    message_store.store_transcript_turns(
+        agent_id=target, backend_session_id="bs", source_file="f", turns=attempts + [
+            {"role": "user", "text": "check it", "timestamp": at(300.4)},
+            {"role": "assistant", "text": "Done.", "timestamp": at(320),
+             "kind": "final_answer"},
+        ])
+
+    rows = message_store.list_messages(agent_id=target, backend_session_id="bs")
+    assert [m["text"] for m in rows if m["role"] == "user"] == ["check it", "check it"]
+    assert all(m["sender_name"] == "Lena" for m in rows if m["role"] == "user")
+    answer = next(m for m in rows if m["text"] == "Done.")
+    assert (answer["origin"], answer["reply_to_name"]) == ("agent", "Lena")
