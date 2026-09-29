@@ -1,4 +1,5 @@
 // needs: fake-host
+// env: CLARP_AUDIO_OUTPUT=none
 // C++ clipFailsFastWithoutMediaBackend: without a playback backend both
 // clips are queued and failed instead of the first blocking the queue, and
 // the missing backend is reported once, not per clip.

@@ -9,6 +9,7 @@ Usage: fake_host.py --port-file PATH --log PATH
 """
 import argparse
 import json
+import pathlib
 import queue
 import threading
 import time
@@ -170,6 +171,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"backends": []})
         if url.path == "/static/avatars/rachel.png":
             return self.reply_bytes(200, AVATAR_PNG, "image/png")
+        if url.path == "/fixtures/tone.pcm":
+            import math
+            import struct
+            samples = [int(8000 * math.sin(i / 8)) for i in range(4800)]
+            return self.reply_bytes(200, struct.pack("<%dh" % len(samples), *samples), "application/octet-stream")
+        if url.path in ("/fixtures/clip.mp3", "/fixtures/clip.m4a"):
+            name = url.path.rsplit("/", 1)[1]
+            data = (pathlib.Path(__file__).parent / "fixtures" / name).read_bytes()
+            return self.reply_bytes(200, data, "audio/mpeg" if name.endswith(".mp3") else "audio/mp4")
         if url.path.startswith("/clips/") and url.path.endswith("/complete.mp3"):
             if "/404/" in url.path:
                 return self.reply(404, {"error": "clip expired"})
