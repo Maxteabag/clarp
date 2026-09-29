@@ -15,6 +15,7 @@ use cxx_qt_lib::QString;
 use serde_json::Value;
 use url::Url;
 
+use crate::audio_coordinator::{self, Coordinator};
 use crate::audio_output::{self, AudioOutput, OutputEvent};
 
 #[cxx_qt::bridge]
@@ -106,6 +107,10 @@ pub mod qobject {
 
 pub struct AudioRust {
     player: Player,
+    /// Elects one player across windows; None until initialized.
+    coordinator: Option<Coordinator>,
+    /// The owner's state, shown while another window plays.
+    remote: clarp_core::audio_journal::State,
     output: Box<dyn AudioOutput>,
     /// Bumped whenever the output is stopped, so a stopped clip's late
     /// events are ignored.
@@ -129,6 +134,8 @@ impl Default for AudioRust {
     fn default() -> Self {
         Self {
             player: Player::default(),
+            coordinator: None,
+            remote: clarp_core::audio_journal::State::default(),
             output: audio_output::select(),
             output_generation: 0,
             api: None,
@@ -148,6 +155,9 @@ impl Default for AudioRust {
 
 impl Drop for AudioRust {
     fn drop(&mut self) {
+        if let Some(coordinator) = self.coordinator.take() {
+            coordinator.stop();
+        }
         self.output.stop();
         if let Some(capture) = self.capture.take() {
             capture.cancel();
@@ -165,6 +175,13 @@ impl cxx_qt::Initialize for qobject::AudioController {
             }
         });
         self.as_mut().rust_mut().api = Some(api);
+        let qt = self.qt_thread();
+        let coordinator = Coordinator::new(std::sync::Arc::new(move |event| {
+            if qt.queue(move |audio| audio.coordinator_event(event)).is_err() {
+                eprintln!("AudioController: dropped a coordination event; the controller is gone");
+            }
+        }));
+        self.as_mut().rust_mut().coordinator = Some(coordinator);
         self.pending_playback_after();
     }
 }
@@ -179,12 +196,23 @@ impl qobject::AudioController {
     fn transcriptions_in_flight_value(&self) -> i32 {
         self.transcriptions.in_flight()
     }
+    /// Another window owns playback: show what it plays.
+    fn remote_view(&self) -> bool {
+        self.coordinator.as_ref().is_some_and(|c| c.configured() && !c.owner())
+    }
     fn playing_value(&self) -> bool {
-        self.player.output() == Output::Playing
+        if self.remote_view() { self.remote.playing } else { self.player.output() == Output::Playing }
     }
     fn paused_value(&self) -> bool {
-        self.player.output() == Output::Paused
+        if self.remote_view() { self.remote.paused } else { self.player.output() == Output::Paused }
     }
+
+    /// Clips wait while the microphone is in use or another window plays.
+    fn hold(&self) -> bool {
+        self.lease.busy() || !self.coordinator.as_ref().is_some_and(Coordinator::owner)
+    }
+
+
     pub fn recording_pub(&self) -> bool {
         self.recording
     }
@@ -197,8 +225,10 @@ impl qobject::AudioController {
         let qt = self.qt_thread();
         crate::runtime::after(Duration::from_millis(PENDING_PLAYBACK_MS), move || {
             let queued = qt.queue(|mut audio| {
-                let busy = audio.lease.busy();
-                let effects = audio.as_mut().rust_mut().player.start_next(busy);
+                let hold = audio.hold();
+                let coordinator = audio.coordinator.clone();
+                let mut begin = |event: &Object| coordinator.as_ref().is_some_and(|c| c.begin(event));
+                let effects = audio.as_mut().rust_mut().player.start_next(hold, &mut begin);
                 audio.as_mut().apply(effects);
                 audio.pending_playback_after();
             });
@@ -231,13 +261,34 @@ impl qobject::AudioController {
         if let (Some(api), Some(url)) = (self.api.as_ref(), base.clone()) {
             api.set_endpoint(url, token);
         }
+        let scope = base.as_ref().filter(|_| !token.is_empty() && std::env::var_os("CLARP_SCREENSHOT_PATH").is_none()).map(|url| {
+            let mut url = url.clone();
+            if !url.path().ends_with('/') {
+                let path = format!("{}/", url.path());
+                url.set_path(&path);
+            }
+            url.set_query(None);
+            url.set_fragment(None);
+            format!("{url}\0{token}")
+        });
+        let muted = self.player.muted();
+        if let Some(coordinator) = self.coordinator.as_ref() {
+            match scope {
+                Some(scope) => coordinator.configure(&scope, muted),
+                None => coordinator.stop(),
+            }
+        }
         let mut rust = self.as_mut().rust_mut();
         rust.base = base;
         rust.token = token.to_owned();
     }
 
-    /// Without a coordinator (the D-Bus one lands later), mute is local.
+    /// Mute belongs to the shared journal once coordinated.
     pub fn set_muted(mut self: Pin<&mut Self>, muted: bool) {
+        if let Some(coordinator) = self.coordinator.as_ref().filter(|c| c.configured()) {
+            coordinator.command("mute", muted);
+            return;
+        }
         let changed = self.player.muted() != muted;
         let effects = self.as_mut().rust_mut().player.set_muted(muted);
         self.as_mut().apply(effects);
@@ -246,14 +297,71 @@ impl qobject::AudioController {
         }
     }
 
-    pub fn enqueue_clip(mut self: Pin<&mut Self>, event: Object) {
+    pub fn enqueue_clip(self: Pin<&mut Self>, event: Object) {
         let clip = clarp_core::protocol::AudioClip::from_json(&event);
         if clip.preferred_source().is_empty() {
             return;
         }
-        let busy = self.lease.busy();
-        let effects = self.as_mut().rust_mut().player.enqueue(event, busy);
+        if let Some(coordinator) = self.coordinator.as_ref() {
+            coordinator.submit(event);
+        }
+    }
+
+    /// A clip the journal gave this window, as owner (C++ `enqueueOwned`).
+    fn enqueue_owned(mut self: Pin<&mut Self>, event: Object) {
+        if !self.coordinator.as_ref().is_some_and(Coordinator::owner) {
+            return;
+        }
+        let hold = self.hold();
+        let coordinator = self.coordinator.clone();
+        let mut begin = |event: &Object| coordinator.as_ref().is_some_and(|c| c.begin(event));
+        let effects = self.as_mut().rust_mut().player.enqueue(event, hold, &mut begin);
         self.apply(effects);
+    }
+
+    fn coordinator_event(mut self: Pin<&mut Self>, event: audio_coordinator::Event) {
+        use audio_coordinator::Event;
+        match event {
+            Event::ClipReady(event) => self.enqueue_owned(event),
+            Event::Command(action) => {
+                let effects = {
+                    let player = &mut self.as_mut().rust_mut().player;
+                    match action.as_str() {
+                        "stop" => player.silence(),
+                        "pause" => player.pause(),
+                        "resume" => player.resume(),
+                        "toggle" => player.toggle(),
+                        _ => Vec::new(),
+                    }
+                };
+                self.apply(effects);
+            }
+            Event::State(state) => {
+                if self.player.muted() != state.muted {
+                    let owner = self.coordinator.as_ref().is_some_and(Coordinator::owner);
+                    let effects = self.as_mut().rust_mut().player.set_muted(state.muted);
+                    if owner {
+                        self.as_mut().apply(effects);
+                    }
+                    self.as_mut().muted_changed(state.muted);
+                }
+                let owner = self.coordinator.as_ref().is_some_and(Coordinator::owner);
+                let shown = clarp_core::audio_journal::State { muted: false, ..state };
+                if !owner && self.remote != shown {
+                    self.as_mut().rust_mut().remote = shown;
+                    self.playing_changed();
+                }
+            }
+            Event::Ownership(owner) => {
+                if !owner {
+                    let effects = self.as_mut().rust_mut().player.reset();
+                    self.as_mut().apply(effects);
+                    self.as_mut().rust_mut().remote = clarp_core::audio_journal::State::default();
+                }
+                self.playing_changed();
+            }
+            Event::Error(message) => self.media_error(&QString::from(message.as_str())),
+        }
     }
 
     fn apply(mut self: Pin<&mut Self>, effects: Vec<Effect>) {
@@ -291,9 +399,18 @@ impl qobject::AudioController {
                 }
                 Effect::PauseOutput => self.as_mut().rust_mut().output.pause(),
                 Effect::ResumeOutput => self.as_mut().rust_mut().output.resume(),
-                // The shared journal arrives with the coordinator.
-                Effect::Finished(_) => {}
-                Effect::Changed => self.as_mut().playing_changed(),
+                Effect::Finished(event) => {
+                    if let Some(coordinator) = self.coordinator.as_ref() {
+                        coordinator.finish(&event);
+                    }
+                }
+                Effect::Changed => {
+                    let (playing, paused, available) = (self.playing_value(), self.paused_value(), self.player.has_current());
+                    if let Some(coordinator) = self.coordinator.as_ref() {
+                        coordinator.publish(playing, paused, available);
+                    }
+                    self.as_mut().playing_changed();
+                }
                 Effect::Error(message) => self.as_mut().media_error(&QString::from(message.as_str())),
             }
         }
@@ -303,12 +420,14 @@ impl qobject::AudioController {
         if generation != self.output_generation {
             return;
         }
-        let busy = self.lease.busy();
+        let hold = self.hold();
+        let coordinator = self.coordinator.clone();
+        let mut begin = |event: &Object| coordinator.as_ref().is_some_and(|c| c.begin(event));
         let effects = match event {
             OutputEvent::Started => self.as_mut().rust_mut().player.started(),
             OutputEvent::Ended { result, missing_backend } => {
                 self.as_mut().rust_mut().output_generation += 1;
-                self.as_mut().rust_mut().player.ended(result, missing_backend, busy)
+                self.as_mut().rust_mut().player.ended(result, missing_backend, hold, &mut begin)
             }
         };
         self.apply(effects);
@@ -463,7 +582,12 @@ impl qobject::AudioController {
         }
     }
 
+    /// Stops speech in whichever window plays it.
     pub fn silence(mut self: Pin<&mut Self>) {
+        if let Some(coordinator) = self.coordinator.as_ref().filter(|c| c.configured()) {
+            coordinator.command("stop", false);
+            return;
+        }
         let effects = self.as_mut().rust_mut().player.silence();
         self.apply(effects);
     }

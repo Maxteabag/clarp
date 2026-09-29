@@ -316,24 +316,29 @@ impl Player {
         }
     }
 
-    /// A clip this window owns (C++ `enqueueOwned`).
-    pub fn enqueue(&mut self, event: Object, recording: bool) -> Vec<Effect> {
+    /// A clip this window owns (C++ `enqueueOwned`). `begin` claims a clip
+    /// in the shared journal before it starts; a refused clip is dropped.
+    pub fn enqueue(&mut self, event: Object, hold: bool, begin: &mut dyn FnMut(&Object) -> bool) -> Vec<Effect> {
         if self.muted {
             return vec![Effect::Finished(event)];
         }
         let mut effects = vec![ack(&AudioClip::from_json(&event), "queued", "")];
         self.queue.push_back(event);
-        effects.extend(self.start_next(recording));
+        effects.extend(self.start_next(hold, begin));
         effects
     }
 
-    /// Starts the next clip unless one is playing, muted, or the microphone
-    /// is in use (called again on a timer).
-    pub fn start_next(&mut self, recording: bool) -> Vec<Effect> {
-        if self.muted || self.downloading.is_some() || self.current.is_some() || recording {
+    /// Starts the next clip unless one is playing, muted, or `hold` (the
+    /// microphone is in use, or this window does not own playback); called
+    /// again on a timer.
+    pub fn start_next(&mut self, hold: bool, begin: &mut dyn FnMut(&Object) -> bool) -> Vec<Effect> {
+        if self.muted || self.downloading.is_some() || self.current.is_some() || hold {
             return Vec::new();
         }
         let Some(event) = self.queue.pop_front() else { return Vec::new() };
+        if !begin(&event) {
+            return Vec::new();
+        }
         let clip = AudioClip::from_json(&event);
         self.current = Some((event, clip.clone()));
         self.play_started = false;
@@ -451,7 +456,7 @@ impl Player {
 
     /// The output finished the clip, or could not play it. `missing_backend`
     /// marks "there is no audio output at all", reported once per run.
-    pub fn ended(&mut self, result: Result<(), String>, missing_backend: bool, recording: bool) -> Vec<Effect> {
+    pub fn ended(&mut self, result: Result<(), String>, missing_backend: bool, hold: bool, begin: &mut dyn FnMut(&Object) -> bool) -> Vec<Effect> {
         let mut effects = match &result {
             Ok(()) => self.finish("play-ok", ""),
             Err(error) => self.finish("play-fail", error),
@@ -461,7 +466,7 @@ impl Player {
         {
             effects.push(Effect::Error(error));
         }
-        effects.extend(self.start_next(recording));
+        effects.extend(self.start_next(hold, begin));
         effects
     }
 
