@@ -157,8 +157,7 @@ def _insert_live_message_atomic(
                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             # The trace was only ever encoded into source_file, leaving this
             # column NULL on every live row, so nothing could tell the agent's
-            # own reply apart from the one this trace had just delivered. See
-            # model_fallbacks._superseded_by_own_reply.
+            # own reply apart from the one this trace had just delivered.
             (msg_id, agent_id, backend_session_id, f"live:{trace_id or msg_id}",
              -900000, "assistant", timestamp, text, "live", None, "[]", "[]",
              timestamp_ms, revision, origin, sender_agent_id, trace_id or None),

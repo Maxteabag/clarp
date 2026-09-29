@@ -131,11 +131,6 @@ def test_empty_model_inference_does_not_auto_inherit_global_chain(env):
     assert janitor_design_policy.effective_chain(owner['session'])['source']=='explicit'
     assert model_fallbacks.get(owner['agent_id'])['revision']==0
 
-def test_unbounded_fallback_validation_keeps_each_distinct_model(env):
-    from lib import model_fallbacks
-    chain=[{'backend':'codex','model':f'gpt-model-{i}','effort':'low'}for i in range(10)]
-    assert len(model_fallbacks.validate(chain))==10
-
 def test_exhaustion_is_a_new_event_after_low_quota_warning(env):
     _,owners=env;owner=owners['quota-monitor'];window={'window_id':'one-window'}
     assert service.quota_crossing('codex','a',window,80,owner,100)['remaining']==20
@@ -155,8 +150,7 @@ def test_global_fallback_wire_revision_stays_integer_and_override_is_explicit(en
     owner=owners['heartbeat-decider']
     janitor_design_policy.configure({'model_chain':[{'provider':'codex','model':'gpt-primary'},{'provider':'codex','model':'gpt-fallback'}],'inherit_sessions':[owner['session']]},0)
     value=model_fallbacks.get(owner['agent_id']);assert type(value['revision'])is int
-    with pytest.raises(ValueError,match='inherits global'):
-        model_fallbacks.configure(owner['agent_id'],[],expected_revision=value['revision'])
+    assert value['source']=='global' and value['models']==[{'backend':'codex','model':'gpt-fallback','effort':''}]
 
 def test_managed_label_effect_is_fenced_by_global_model_revision(monkeypatch):
     import test_janitor_store as fixture

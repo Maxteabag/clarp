@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import json
 
 from . import (background_jobs, agent_goals, agents as agents_db, avatar_settings, backend_usage, backends,
                compaction, db,
@@ -29,33 +28,13 @@ def _exhausted_backends() -> dict[str, dict[str, Any]]:
         return {}
 
 
-def _fallback_chains() -> dict[str, list[dict[str, Any]]]:
-    chains: dict[str, list[dict[str, Any]]] = {}
-    try:
-        for row in db.conn().execute(
-                "SELECT agent_id, models_json FROM agent_model_fallbacks"):
-            models = json.loads(row["models_json"] or "[]")
-            if isinstance(models, list):
-                chains[row["agent_id"]] = [m for m in models if isinstance(m, dict)]
-    except Exception as exc:  # noqa: BLE001
-        log_exception("snapshotFallbackChainsFail", exc)
-    return chains
+def _backend_quota(backend: str, exhausted: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    """Why this agent's next turn is expected to fail, or None when it is not.
 
-
-def _backend_quota(backend: str, exhausted: dict[str, dict[str, Any]],
-                   fallbacks: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Why this agent's next turn is expected to fail, or None when it is not."""
-    quota = exhausted.get(backends.normalize(backend))
-    if not quota:
-        return None
-    rescue = next(
-        (m for m in fallbacks
-         if backends.normalize(m.get("backend")) not in exhausted), None)
-    return {
-        **quota,
-        "fallback_backend": rescue.get("backend") if rescue else None,
-        "fallback_model": rescue.get("model") if rescue else None,
-    }
+    An agent never switches provider on its own when its quota runs out: the
+    turn fails with the provider's own message and waits for the reset.
+    """
+    return exhausted.get(backends.normalize(backend)) or None
 
 
 def _compacting_check() -> Any:
@@ -104,7 +83,6 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     janitor_templates = {row["agent_id"]: row["template_id"] for row in
                          db.conn().execute("SELECT agent_id,template_id FROM janitor_configs")}
     exhausted = _exhausted_backends()
-    fallback_chains = _fallback_chains() if exhausted else {}
     agent_rows = agents_db.list_agents()
     tree = helper_tree(agent_rows, states, visible_labels)
     child_count = tree.child_count
@@ -262,10 +240,9 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "queued_turn_revision": queue_states.get(agent_id, {}).get("revision", 0),
             "queue_paused": bool(queue_states.get(agent_id, {}).get("paused", False)),
             "goal":           agent_goals.public(goals.get(agent_id)),
-            # Advisory only: a send is never refused, because a fallback
-            # model or an account switch may still serve it.
-            "backend_quota": _backend_quota(
-                backend, exhausted, fallback_chains.get(agent_id, [])),
+            # Advisory only: a send is never refused, because an account
+            # switch may still serve it.
+            "backend_quota": _backend_quota(backend, exhausted),
             "activity":       state_activity_event(
                 agent_id=agent_id,
                 session=a["session"],

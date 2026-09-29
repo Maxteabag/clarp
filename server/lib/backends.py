@@ -199,15 +199,13 @@ def spawn_turn(backend: str, **kwargs: Any):
 def interrupt(backend: str, agent_id: str) -> int:
     if _RUNTIME_CLIENT is not None:
         return int(_RUNTIME_CLIENT.interrupt(normalize(backend), agent_id))
-    from .turn_model_fallback import REGISTRY
-    return by_id(backend).interrupt(agent_id) + REGISTRY.interrupt(agent_id, event="fallbackInterruptFail")
+    return by_id(backend).interrupt(agent_id)
 
 
 def interrupt_any(agent_id: str) -> int:
     if _RUNTIME_CLIENT is not None:
         return int(_RUNTIME_CLIENT.interrupt_any(agent_id))
-    from .turn_model_fallback import REGISTRY
-    total = REGISTRY.interrupt(agent_id, event="fallbackInterruptFail")
+    total = 0
     seen: set[str] = set()
     for b in _all():
         if b.runner and b.runner not in seen:
@@ -234,8 +232,7 @@ def active_handles(backend: str, agent_id: str) -> list:
         if agent_id in set(status.get("terminals") or ()):
             return [_RemoteHandle("terminal")]
         return []
-    from .turn_model_fallback import REGISTRY
-    return by_id(backend).active_handles(agent_id) + REGISTRY.active_handles(agent_id)
+    return by_id(backend).active_handles(agent_id)
 
 
 class GoalUnsupported(RuntimeError):

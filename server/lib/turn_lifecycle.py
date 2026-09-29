@@ -76,7 +76,6 @@ class TurnEvent:
     SPAWN_STARTED = "spawn_started"              # dispatcher: backend accepted
     RETRY_SCHEDULED = "retry_scheduled"          # dispatcher: reconnecting
     ACCOUNT_RECOVERY_WAIT = "account_recovery_wait"
-    MODEL_FALLBACK_STARTED = "model_fallback_started"
     TEXT_STREAMED = "text_streamed"              # backend: assistant delta
     TOOL_STARTED = "tool_started"                # hook / backend
     TOOL_FINISHED = "tool_finished"              # hook / backend
@@ -115,7 +114,6 @@ TRANSITIONS: dict[str, tuple[str, frozenset[str]]] = {
     TurnEvent.SPAWN_STARTED: (AgentState.THINKING, ALL),
     TurnEvent.RETRY_SCHEDULED: (AgentState.THINKING, STARTED),
     TurnEvent.ACCOUNT_RECOVERY_WAIT: (AgentState.THINKING, STARTED),
-    TurnEvent.MODEL_FALLBACK_STARTED: (AgentState.THINKING, STARTED),
     # A fast backend streams before the dispatcher records the spawn, so the
     # previous turn's terminal state is a legal origin.
     TurnEvent.TEXT_STREAMED: (AgentState.THINKING, STARTED),

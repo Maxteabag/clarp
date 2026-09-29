@@ -2542,8 +2542,7 @@ void NativeCoreTest::backendQuotaNoticeNamesReasonResetAndFallback() {
                             {QStringLiteral("provider_id"), QStringLiteral("codex")},
                             {QStringLiteral("reason"), QStringLiteral("credits_depleted")},
                             {QStringLiteral("window"), QStringLiteral("seven_day")},
-                            {QStringLiteral("resets_at"), QStringLiteral("2026-09-22T11:30:00Z")},
-                            {QStringLiteral("fallback_model"), QJsonValue::Null}});
+                            {QStringLiteral("resets_at"), QStringLiteral("2026-09-22T11:30:00Z")}});
     QCOMPARE(Agent::fromJson(base).quotaNotice(now),
              QStringLiteral("Codex workspace is out of credits  ·  included usage resets in 5d 5h"
                             "  ·  a message will likely fail"));
@@ -2553,10 +2552,9 @@ void NativeCoreTest::backendQuotaNoticeNamesReasonResetAndFallback() {
                             {QStringLiteral("provider_id"), QStringLiteral("codex")},
                             {QStringLiteral("reason"), QStringLiteral("usage_limit")},
                             {QStringLiteral("window"), QStringLiteral("unknown")},
-                            {QStringLiteral("resets_at"), QJsonValue::Null},
-                            {QStringLiteral("fallback_model"), QStringLiteral("claude-sonnet-5")}});
+                            {QStringLiteral("resets_at"), QJsonValue::Null}});
     QCOMPARE(Agent::fromJson(base).quotaNotice(now),
-             QStringLiteral("Codex is out of quota  ·  runs on claude-sonnet-5"));
+             QStringLiteral("Codex is out of quota  ·  a message will likely fail"));
 
     // A running turn is not a moment to warn about the next one.
     base.insert(QStringLiteral("busy"), true);

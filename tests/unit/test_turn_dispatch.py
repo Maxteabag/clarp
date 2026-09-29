@@ -912,6 +912,26 @@ def test_usage_limit_notifies_without_retry(tmp_path):
     assert state["detail"]["message"] == "Usage limit reached"
 
 
+def test_usage_limit_never_moves_the_agent_to_another_provider(tmp_path):
+    """The agent keeps its own backend and session; the limit is simply surfaced."""
+    import threading
+    service, backends, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
+    before = agents_db.get_by_agent_id(agent_id)
+    service.dispatch(text="hi", requested_session="mike", trace_id="t",
+                     synthesize_audio=False)
+    _, call = backends.spawned[0]
+    call["on_error"]("You've hit your usage limit. Try again at 3:29 PM.")
+
+    assert len(backends.spawned) == 1
+    assert [name for name in (t.name for t in threading.enumerate())
+            if name.startswith("model-fallback")] == []
+    after = agents_db.get_by_agent_id(agent_id)
+    assert (after["backend"], after["model"], after["effort"]) == (
+        before["backend"], before["model"], before["effort"])
+    assert agents_db.latest_state(agent_id)["detail"]["reason"] == "usage_limit"
+    assert not hasattr(service, "_start_model_fallback")
+
+
 def test_known_refusal_shows_its_plain_reason(tmp_path):
     service, backends, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
     service.dispatch(text="hi", requested_session="mike", trace_id="t",

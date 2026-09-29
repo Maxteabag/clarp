@@ -191,21 +191,18 @@ def test_failure_can_be_retried_after_cooldown(monkeypatch):
         assert len(calls) == 2
 
 
-def test_provider_failure_uses_configured_fallback_and_caches_only_final_text(monkeypatch):
-    from lib import janitor_builtins, model_fallbacks, settings_store
-    settings_store.set_text("provider.agy.last_observed_model_ids", '["gemini-3.8-flash-low"]')
+def test_provider_failure_retries_on_the_next_global_chain_model_and_caches_only_final_text(monkeypatch):
+    from lib import janitor_builtins, janitor_design_policy
     owner=janitor_builtins.get_builtin("tool-explainer")
-    model_fallbacks.configure(owner["agent_id"],[{"backend":"agy","model":"gemini-3.8-flash-low","effort":""}],expected_revision=0)
+    janitor_design_policy.configure({"model_chain":[{"provider":"codex","model":"gpt-primary"},{"provider":"codex","model":"gpt-fallback"}],"inherit_sessions":[owner["session"]]},0)
     calls=[]
-    def primary(*args,**kwargs):
-        calls.append("primary")
-        raise RuntimeError("usage limit reached")
-    def secondary(self,level,items,model,run):
-        calls.append(model["model"])
+    def codex(self,level,items,run):
+        calls.append(run["configuration"]["model"])
+        if len(calls)==1:
+            raise RuntimeError("usage limit reached")
         return {item["id"]:"List the files." for item in items}
-    monkeypatch.setattr(ToolExplanations,"_run_codex",primary)
-    monkeypatch.setattr(ToolExplanations,"_run_fallback",secondary)
+    monkeypatch.setattr(ToolExplanations,"_run_codex",codex)
     with ToolExplanations(debounce=.001) as service:
         assert wait_ready(service)["text"]=="List the files."
         assert wait_ready(service)["status"]=="ready"
-    assert calls==["primary","gemini-3.8-flash-low"]
+    assert calls==["gpt-primary","gpt-fallback"]

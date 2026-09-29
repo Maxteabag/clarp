@@ -1,14 +1,16 @@
-"""Per-agent recovery models and once-only invocation receipts.
+"""Provider retry for background Janitor and orchestrator model calls.
 
-Primary settings remain unchanged. Only an **AI/provider failure** hands work to
-a fallback model: the account is out of quota, the connection dropped, the API
-returned back-pressure, the CLI died, the request timed out, or the model
-produced no usable answer. A tool that returns an error -- a failing test, a
-non-zero shell command, a rejected patch -- is the agent's own work and stays
-with its primary model, so ordinary debugging never switches providers.
+Conversation agents never switch provider: an agent that hits its usage limit
+keeps its own session and waits for the reset (see ``turn_dispatch``). This
+module only serves one-shot structured calls -- Janitor decisions, tool
+explanations, orchestrator phases -- that carry no conversation. Their chain
+comes from the global Janitor model policy (``janitor_design_policy``).
 
-A failed invocation may try each configured fallback once; cancellation,
-user interrupts and permission failures never grant a retry.
+Only an **AI/provider failure** hands such a call to the next model in the
+chain: the account is out of quota, the connection dropped, the API returned
+back-pressure, the CLI died, the request timed out, or the model produced no
+usable answer. A failed invocation may try each configured model once;
+cancellation, user interrupts and permission failures never grant a retry.
 """
 
 from __future__ import annotations
@@ -17,11 +19,6 @@ import re
 from contextlib import contextmanager
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS agent_model_fallbacks (
- agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
- models_json TEXT NOT NULL DEFAULT '[]', revision INTEGER NOT NULL DEFAULT 1,
- updated_at INTEGER NOT NULL
-);
 CREATE TABLE IF NOT EXISTS model_fallback_attempts (
  agent_id TEXT NOT NULL REFERENCES agents(agent_id), request_id TEXT NOT NULL,
  attempt INTEGER NOT NULL, backend TEXT NOT NULL, model TEXT NOT NULL, effort TEXT NOT NULL,
@@ -30,10 +27,6 @@ CREATE TABLE IF NOT EXISTS model_fallback_attempts (
  PRIMARY KEY(agent_id,request_id,attempt)
 );
 """
-
-
-class Conflict(ValueError):
-    pass
 
 
 class Cancelled(RuntimeError):
@@ -71,99 +64,22 @@ def _write():
         raise
 
 
-def validate(models):
-    from . import backends
-
-    if not isinstance(models, list):
-        raise ValueError("fallback models must be an array")
-    result = []
-    for item in models:
-        if not isinstance(item, dict) or set(item) - {"backend", "model", "effort"}:
-            raise ValueError("invalid fallback model")
-        backend, model, effort = (
-            item.get(k, "") for k in ("backend", "model", "effort")
-        )
-        if not all(isinstance(x, str) for x in (backend, model, effort)):
-            raise ValueError("fallback fields must be strings")
-        backend, model, effort = backend.strip(), model.strip(), effort.strip()
-        if (
-            not backends.get(backend)
-            or not model
-            or not backends.is_valid_model(backend, model)
-        ):
-            raise ValueError("unavailable fallback model")
-        if effort and effort not in backends.valid_efforts(backend):
-            raise ValueError("invalid fallback effort")
-        if backends.get(backend).effort_compatibility_unknown and effort:
-            # Antigravity encodes Low in the model ID; adding --effort is not
-            # a supported model-specific combination in the current adapter.
-            raise ValueError("Antigravity effort is included in the model choice")
-        value = dict(backend=backend, model=model, effort=effort)
-        if value in result:
-            raise ValueError("duplicate fallback model")
-        result.append(value)
-    return result
-
-
-def supported_backends(agent_id):
-    """Providers that can serve as a fallback for this agent.
-
-    Every routing-capable adapter qualifies, including for janitors: their
-    structured work goes through :func:`json_call`, which drives each backend
-    through the same one-shot ``routing_cmd``/``routing_text`` interface.
-    """
-    from . import backends
-
-    return [adapter.id for adapter in backends.routing_adapters()]
-
-
 def get(agent_id):
-    from . import db
+    """The retry chain for one agent's background calls.
 
-    row = (
-        db.conn()
-        .execute("SELECT * FROM agent_model_fallbacks WHERE agent_id=?", (agent_id,))
-        .fetchone()
-    )
+    Only Janitors that inherit the global model policy have one; every other
+    agent gets an empty chain and stays on its primary model.
+    """
     from . import agents, janitor_design_policy
+
     agent = agents.get_by_agent_id(agent_id)
     if agent and agent.get("is_janitor"):
         effective = janitor_design_policy.effective_chain(agent["session"])
         if effective["source"] == "global":
             chain = effective["chain"]
-            return {"models":[{"backend":v["provider"],"model":v["model"],"effort":""} for v in chain[1:]],
-                    "revision": -(effective["revision"]+1), "source":"global", "supported_backends":supported_backends(agent_id)}
-    return {
-        "models": json.loads(row["models_json"]) if row else [],
-        "revision": row["revision"] if row else 0,
-        "supported_backends": supported_backends(agent_id),
-    }
-
-
-def configure(agent_id, models, *, expected_revision):
-    from . import db
-
-    models = validate(models)
-    if any(model["backend"] not in supported_backends(agent_id) for model in models):
-        raise ValueError("fallback provider is not supported for this agent's job")
-    if not isinstance(expected_revision, int) or isinstance(expected_revision, bool):
-        raise ValueError("expected_revision required")
-    with _write() as c:
-        if not c.execute(
-            "SELECT 1 FROM agents WHERE agent_id=? AND deleted_at IS NULL", (agent_id,)
-        ).fetchone():
-            raise ValueError("agent not found")
-        prior = get(agent_id)
-        if prior.get("source") == "global":
-            raise ValueError("This Janitor inherits global models; edit Janitor models or disable inheritance first")
-        if prior["revision"] != expected_revision:
-            raise Conflict("fallback settings changed; reload")
-        c.execute(
-            """INSERT INTO agent_model_fallbacks VALUES (?,?,?,?) ON CONFLICT(agent_id)
-            DO UPDATE SET models_json=excluded.models_json,revision=excluded.revision,updated_at=excluded.updated_at""",
-            (agent_id, json.dumps(models), expected_revision + 1, db.now_ms()),
-        )
-    return get(agent_id)
+            return {"models": [{"backend": v["provider"], "model": v["model"], "effort": ""} for v in chain[1:]],
+                    "revision": -(effective["revision"] + 1), "source": "global"}
+    return {"models": [], "revision": 0}
 
 
 # The only failure categories that mean "the AI/provider failed". Everything
@@ -405,91 +321,6 @@ def json_call(model, prompt, schema, *, current=lambda: True, timeout=45):
             except (ProcessLookupError, PermissionError):
                 pass
             process.communicate()
-
-
-def conversation_rows(agent_id):
-    from . import db, agents
-    from datetime import datetime, timezone
-
-    runtime = agents.current_runtime_id(agent_id)
-    if runtime is None:
-        return []
-    result = []
-    for row in db.conn().execute(
-        "SELECT * FROM model_fallback_attempts WHERE agent_id=? AND runtime_id=? AND status='completed' AND result_json IS NOT NULL ORDER BY started_at DESC LIMIT 20",
-        (agent_id, runtime),
-    ):
-        text = json.loads(row["result_json"]).get("text", "")
-        if text:
-            result.append(
-                {
-                    "id": f"fallback-{row['request_id']}-{row['attempt']}",
-                    "role": "assistant",
-                    "text": text,
-                    "timestamp": datetime.fromtimestamp(
-                        row["finished_at"] / 1000, timezone.utc
-                    ).isoformat(),
-                    "trace_id": row["request_id"],
-                    "origin": "automation",
-                    "fallback_model": row["model"],
-                    "revision": 0,
-                }
-            )
-    return list(reversed(result))
-
-
-def continuation_context(agent_id):
-    """Hand the next turn the fallback answer that already did the work.
-
-    Delimited so the transcript importer can strip it: appended bare, it was
-    stored as part of the user's own message and the chat showed every turn
-    twice. Offered only until the agent's own model answers again, because a
-    fallback result stops being "work already completed" the moment the real
-    model has spoken — before this check it was re-appended to every prompt for
-    the life of the runtime.
-    """
-    from . import message_store
-
-    rows = conversation_rows(agent_id)
-    if not rows or _superseded_by_own_reply(agent_id, rows[-1]):
-        return ""
-    return (
-        "\n" + message_store.FALLBACK_CONTEXT_OPEN + "\n"
-        "Clarp fallback work already completed in this conversation."
-        " Use its result; do not repeat completed actions:\n"
-        + rows[-1]["text"][-12000:]
-        + "\n" + message_store.FALLBACK_CONTEXT_CLOSE + "\n"
-    )
-
-
-def _superseded_by_own_reply(agent_id, row):
-    """True once the agent's own assistant turn is newer than the fallback.
-
-    The fallback's own delivered answer is itself stored as an assistant
-    message, so it is excluded by trace: counting it would suppress the
-    context on the very next turn and strand the work it just did.
-    """
-    from . import db
-
-    finished = db.conn().execute(
-        """SELECT MAX(COALESCE(
-               CAST((julianday(timestamp) - 2440587.5) * 86400000 AS INTEGER),
-               updated_at))
-             FROM messages
-            WHERE agent_id = ? AND role = 'assistant'
-              AND COALESCE(text, '') != ''
-              AND COALESCE(origin, 'user') != 'automation'
-              AND COALESCE(trace_id, '') != ?""",
-        (agent_id, row.get("trace_id") or ""),
-    ).fetchone()[0]
-    if not finished:
-        return False
-    try:
-        from datetime import datetime
-        completed = datetime.fromisoformat(row["timestamp"]).timestamp() * 1000
-    except (TypeError, ValueError):
-        return False
-    return int(finished) > int(completed)
 
 
 def schema_object(text, schema):
