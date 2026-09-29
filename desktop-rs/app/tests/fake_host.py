@@ -103,6 +103,28 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/teams":
             with state_lock:
                 return self.reply(200, {"teams": teams})
+        if url.path == "/task-plan":
+            return self.reply(200, {"plan": {"title": "Ship it", "items": [{"title": "Probe"}]}})
+        if url.path == "/agent-heartbeat/status":
+            return self.reply(200, {"enabled": True, "interval_minutes": 30})
+        if url.path == "/identity/prompt-history":
+            page = [{"turn_id": f"p{i}", "text": f"prompt {i}"} for i in range(1, 31)]
+            before = query.get("before")
+            start = next((i + 1 for i, p in enumerate(page) if p["turn_id"] == before), 0)
+            chunk = page[start:start + int(query.get("limit", "20"))]
+            more = start + len(chunk) < len(page)
+            return self.reply(200, {"prompts": chunk, "page": {"has_more": more, "next_before": chunk[-1]["turn_id"] if more else ""}})
+        if url.path == "/diagnostics/health":
+            return self.reply(200, {"status": "ok"})
+        if url.path == "/transcription-capabilities":
+            return self.reply(200, {"providers": ["whisper"]})
+        if url.path == "/tts/providers":
+            return self.reply(200, {"provider": "elevenlabs", "fallback": "none"})
+        if url.path == "/voices":
+            return self.reply(200, {"bio": "Warm and clear", "voices": [{"id": "v1", "label": "Warm", "taken_by": "Mike"}, {"id": "v2"}]})
+        if url.path == "/orchestrator/settings":
+            return self.reply(200, {"settings": {"enabled": False}, "recent_decisions": [
+                {"final_action": "route", "target_session": "rachel", "confidence": 0.87}]})
         if url.path.startswith("/teams/") and url.path.endswith("/messages"):
             team = url.path.split("/")[2]
             return self.reply(200, {"messages": team_messages.get(team, [])})
@@ -203,6 +225,11 @@ class Handler(BaseHTTPRequestHandler):
                 rows.append({"id": item["id"], "status": "ready" if seen else "pending",
                              "text": "Explained: " + summary if seen else ""})
             return self.reply(200, {"items": rows})
+        if url.path == "/tts/providers":
+            return self.reply(200, {"provider": body["provider"], "fallback": body["fallback"]})
+        if url.path == "/orchestrator/settings":
+            return self.reply(200, {"settings": {"enabled": body["enabled"], "provider": body["provider"],
+                                                 "timeout_ms": body["timeout_ms"]}, "recent_decisions": []})
         if url.path == "/teams":
             with state_lock:
                 team_id = "t%d" % (len(teams) + 1)
