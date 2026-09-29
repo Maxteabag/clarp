@@ -33,10 +33,20 @@ for probe in app/tests/qml/*_probe.qml; do
     # "// env: KEY=VALUE" lines set per-probe variables; $SCRATCH is the
     # probe's scratch directory.
     probe_env=$(sed -n 's#^// env: ##p' "$probe" | sed "s#\$SCRATCH#$scratch/$name#g")
+    # Every probe gets a private session bus with nothing activatable, so no
+    # probe can reach the user's keyring. "// needs: keyring" starts a
+    # throwaway gnome-keyring on that bus, its files in the scratch directory.
+    keyring=""
+    if grep -q 'needs: keyring' "$probe"; then
+        mkdir -p "$scratch/$name/keyring-run" && chmod 700 "$scratch/$name/keyring-run"
+        keyring="printf probe-pass | XDG_DATA_HOME='$scratch/$name/keyring' XDG_RUNTIME_DIR='$scratch/$name/keyring-run' \
+            gnome-keyring-daemon --unlock --components=secrets --daemonize >/dev/null;"
+    fi
     output=$(env $probe_env QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen CLARP_RS_QML="$PWD/$probe" \
         CLARP_WORKSPACE_STORE="$store" QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
         CLARP_BASE_URL="$base_url" \
-        timeout 60 "$binary" "--probe-store=$store" "--probe-host-log=$scratch/$name/host.log" 2>&1)
+        timeout 60 dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
+        sh -c "$keyring"' exec "$@"' probe "$binary" "--probe-store=$store" "--probe-host-log=$scratch/$name/host.log" 2>&1)
     code=$?
     if [ -n "$host_pid" ]; then kill "$host_pid" 2>/dev/null; wait "$host_pid" 2>/dev/null; fi
     if [ "$code" -eq 0 ] && printf '%s\n' "$output" | grep -q PROBE_PASS; then

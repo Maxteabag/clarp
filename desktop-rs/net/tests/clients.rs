@@ -283,10 +283,12 @@ async fn stopped_stream_reports_disconnect_once_and_never_delivers_late_events()
     });
     let (mut client, mut signals) = sse_client();
     client.set_endpoint(url, "");
+    assert!(!client.running());
     client.start();
+    assert!(client.running());
     assert_eq!(next(&mut signals).await, SseSignal::Connected(true));
     client.stop();
-    assert!(!client.connected());
+    assert!(!client.connected() && !client.running());
     assert_eq!(next(&mut signals).await, SseSignal::Connected(false));
     tokio::time::sleep(Duration::from_millis(400)).await;
     assert!(signals.try_recv().is_err(), "no signal after stop");

@@ -16,6 +16,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 TOKEN = "probe-token"
+# Pairing mints this device token; it is accepted like TOKEN afterwards.
+PAIRED_TOKEN = "cld_probe_paired_device"
 state_lock = threading.Lock()
 revision = 2
 agents = [
@@ -70,7 +72,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def authorized(self):
-        return self.headers.get("Authorization") == f"Bearer {TOKEN}"
+        return self.headers.get("Authorization") in (f"Bearer {TOKEN}", f"Bearer {PAIRED_TOKEN}")
 
     def reply(self, status, body):
         data = json.dumps(body).encode()
@@ -92,7 +94,8 @@ class Handler(BaseHTTPRequestHandler):
         query = {k: v[0] for k, v in parse_qs(url.query).items()}
         if self.in_outage():
             return
-        record({"method": "GET", "path": url.path, "query": query})
+        record({"method": "GET", "path": url.path, "query": query,
+                "authorization": self.headers.get("Authorization", "")})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
         if url.path == "/server-info":
@@ -246,7 +249,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ok": True})
         if self.in_outage():
             return
-        record({"method": "POST", "path": url.path, "body": body})
+        record({"method": "POST", "path": url.path, "body": body,
+                "authorization": self.headers.get("Authorization", "")})
+        if url.path == "/pairing/exchange":
+            # Unauthenticated by design: the one-time code is the credential.
+            code = body.get("code")
+            if code == "123456":
+                return self.reply(200, {"device": {"id": "d1", "token": PAIRED_TOKEN}})
+            if code == "000000":
+                return self.reply(200, {"device": {"id": "d1"}})
+            return self.reply(403, {"error": "pairing code expired"})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
         if url.path == "/tool-explanations":

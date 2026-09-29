@@ -101,6 +101,7 @@ pub mod qobject {
         #[qproperty(bool, pause_mobile_push, cxx_name = "pauseMobilePush", READ = pause_mobile_push_value, WRITE = set_pause_mobile_push, NOTIFY = pause_mobile_push_changed)]
         #[qproperty(bool, new_agent_on_startup, cxx_name = "newAgentOnStartup", READ = new_agent_on_startup_value, WRITE = set_new_agent_on_startup, NOTIFY = new_agent_on_startup_changed)]
         #[qproperty(bool, anonymous_agents, cxx_name = "anonymousAgents", READ = anonymous_agents_value, WRITE = set_anonymous_agents, NOTIFY = anonymous_agents_changed)]
+        #[qproperty(bool, has_stored_credential, cxx_name = "hasStoredCredential", READ = has_stored_credential_value, NOTIFY = has_stored_credential_changed)]
         #[qproperty(bool, shared_filesystem, cxx_name = "sharedFilesystem", READ = shared_filesystem_value, WRITE = set_shared_filesystem, NOTIFY = shared_filesystem_changed)]
         #[qproperty(QString, reading_theme, cxx_name = "readingTheme", READ = reading_theme_value, WRITE = set_reading_theme, NOTIFY = reading_theme_changed)]
         #[qproperty(QJsonObject, reading_style, cxx_name = "readingStyle", READ = reading_style_value, NOTIFY = reading_theme_changed)]
@@ -658,6 +659,16 @@ pub mod qobject {
         #[cxx_name = "connectToServer"]
         fn connect_to_server(self: Pin<&mut AppController>, url: &QString, token: &QString);
         #[qinvokable]
+        #[cxx_name = "pairDevice"]
+        fn pair_device(self: Pin<&mut AppController>, url: &QString, code: &QString);
+        #[qinvokable]
+        #[cxx_name = "forgetCredential"]
+        fn forget_credential(self: Pin<&mut AppController>);
+        fn has_stored_credential_value(self: &AppController) -> bool;
+        #[qsignal]
+        #[cxx_name = "hasStoredCredentialChanged"]
+        fn has_stored_credential_changed(self: Pin<&mut AppController>);
+        #[qinvokable]
         fn reconnect(self: Pin<&mut AppController>);
         #[qinvokable]
         #[cxx_name = "selectSession"]
@@ -847,6 +858,7 @@ pub struct AppControllerRust {
     new_agent_on_startup: bool,
     anonymous_agents: bool,
     shared_filesystem: bool,
+    has_stored_credential: bool,
     shared_filesystem_override: String,
     reading_theme: String,
     workspace: clarp_core::workspace::WorkspaceContext,
@@ -977,7 +989,7 @@ impl cxx_qt::Initialize for AppController {
         }
         self.as_mut().connect_children();
         // Connect once the event loop runs, like the C++ QTimer::singleShot(0).
-        if qt.queue(|controller| controller.reconnect()).is_err() {
+        if qt.queue(|controller| controller.connect_or_look_up_token()).is_err() {
             eprintln!("AppController: could not schedule the first connection");
         }
     }
@@ -1425,6 +1437,136 @@ impl AppController {
     fn connect_to_server(mut self: Pin<&mut Self>, url: &QString, token: &QString) {
         self.as_mut().set_base_url(url.clone());
         self.as_mut().rust_mut().token = token.to_string().trim().to_owned();
+        self.connect_or_look_up_token();
+    }
+
+    /// Without a token, ask the keyring for this Host's first; the lookup
+    /// connects either way.
+    fn connect_or_look_up_token(self: Pin<&mut Self>) {
+        if !self.token.is_empty() {
+            self.reconnect();
+            return;
+        }
+        let (base, qt) = (self.base_url.clone(), self.qt_thread());
+        crate::runtime::handle().spawn(async move {
+            let token = clarp_net::credentials::lookup(&base).await;
+            if qt.queue(move |controller| controller.credential_looked_up(&base, token)).is_err() {
+                eprintln!("AppController: dropped a keyring lookup; the controller is gone");
+            }
+        });
+    }
+
+    fn credential_looked_up(mut self: Pin<&mut Self>, server: &str, token: String) {
+        if normalized_base_url(server) != self.base_url {
+            return;
+        }
+        let stored = !token.is_empty();
+        if self.token.is_empty() {
+            self.as_mut().rust_mut().token = token;
+        }
+        self.as_mut().set_has_stored_credential(stored);
+        self.reconnect();
+    }
+
+    fn set_has_stored_credential(mut self: Pin<&mut Self>, stored: bool) {
+        if self.has_stored_credential != stored {
+            self.as_mut().rust_mut().has_stored_credential = stored;
+            self.has_stored_credential_changed();
+        }
+    }
+
+    fn has_stored_credential_value(&self) -> bool {
+        self.has_stored_credential
+    }
+
+    fn store_credential(self: Pin<&mut Self>, token: String) {
+        let (base, qt) = (self.base_url.clone(), self.qt_thread());
+        crate::runtime::handle().spawn(async move {
+            let result = clarp_net::credentials::store(&base, &token).await;
+            if qt.queue(move |controller| controller.credential_stored(&base, result)).is_err() {
+                eprintln!("AppController: dropped a keyring store result; the controller is gone");
+            }
+        });
+    }
+
+    fn credential_stored(self: Pin<&mut Self>, server: &str, result: Result<(), String>) {
+        match result {
+            Err(message) => {
+                eprintln!("AppController: storing the device token failed: {message}");
+                if !message.is_empty() {
+                    self.set_error(&message);
+                }
+            }
+            Ok(()) if normalized_base_url(server) == self.base_url => self.set_has_stored_credential(true),
+            Ok(()) => {}
+        }
+    }
+
+    fn forget_credential(self: Pin<&mut Self>) {
+        let (base, qt) = (self.base_url.clone(), self.qt_thread());
+        crate::runtime::handle().spawn(async move {
+            let result = clarp_net::credentials::remove(&base).await;
+            if qt.queue(move |controller| controller.credential_removed(&base, result)).is_err() {
+                eprintln!("AppController: dropped a keyring remove result; the controller is gone");
+            }
+        });
+    }
+
+    fn credential_removed(mut self: Pin<&mut Self>, server: &str, result: Result<(), String>) {
+        if let Err(message) = result {
+            eprintln!("AppController: forgetting the device token failed: {message}");
+            self.set_error(&message);
+            return;
+        }
+        if normalized_base_url(server) != self.base_url {
+            return;
+        }
+        self.as_mut().rust_mut().token.clear();
+        if let Some(sse) = self.as_mut().rust_mut().sse.as_mut() {
+            sse.stop();
+        }
+        self.as_mut().set_connecting(false);
+        self.as_mut().set_connection_state("offline");
+        self.as_mut().set_error("");
+        self.set_has_stored_credential(false);
+    }
+
+    fn pair_device(mut self: Pin<&mut Self>, url: &QString, code: &QString) {
+        let code = code.to_string().trim().to_owned();
+        if code.is_empty() {
+            self.set_error("Enter the one-time pairing code");
+            return;
+        }
+        self.as_mut().set_base_url(url.clone());
+        let Some(endpoint) = Url::parse(&self.base_url).ok().filter(|u| u.host_str().is_some_and(|h| !h.is_empty())) else {
+            self.set_error("Enter a valid Clarp server URL");
+            return;
+        };
+        self.as_mut().rust_mut().token.clear();
+        if let Some(sse) = self.as_mut().rust_mut().sse.as_mut() {
+            sse.stop();
+        }
+        if let Some(api) = self.api.as_ref() {
+            api.set_endpoint(endpoint, "");
+        }
+        self.as_mut().set_connecting(true);
+        self.as_mut().set_connection_state("pairing");
+        self.as_mut().set_error("");
+        if let Some(api) = self.api.as_ref() {
+            api.post_json("pairing", "/pairing/exchange", json!({"code": code, "device_name": "Clarp desktop"}), None);
+        }
+    }
+
+    fn handle_pairing(mut self: Pin<&mut Self>, object: &Object) {
+        let token = object.get("device").and_then(Value::as_object).map(|d| json::string(d, "token")).unwrap_or_default();
+        if token.is_empty() {
+            self.as_mut().set_connecting(false);
+            self.as_mut().set_connection_state("offline");
+            self.set_error("Pairing response did not contain a device credential");
+            return;
+        }
+        self.as_mut().rust_mut().token = token.clone();
+        self.as_mut().store_credential(token);
         self.reconnect();
     }
 
@@ -3678,12 +3820,22 @@ impl AppController {
         if self.as_mut().handle_team_or_queue_json(tag, object) || self.as_mut().handle_profile_json(tag, object) {
             return;
         }
+        if tag == "pairing" {
+            self.handle_pairing(object);
+            return;
+        }
         if tag == "server-info" {
             let name = object.get("name").and_then(Value::as_str).unwrap_or("Clarp").to_owned();
             self.as_mut().rust_mut().server_name = name;
             self.as_mut().rust_mut().server_version = json::string(object, "clarp_version");
             self.as_mut().server_info_changed();
             self.as_mut().apply_host_launch_directory_default(&json::string(object, "default_cwd"));
+            // A device token that worked is worth keeping; plain tokens from
+            // config.toml or the environment are not written to the keyring.
+            if self.token.starts_with("cld_") {
+                let token = self.token.clone();
+                self.as_mut().store_credential(token);
+            }
             self.as_mut().set_connecting(false);
             self.as_mut().request_snapshot();
             if let Some(api) = self.api.as_ref() {
@@ -3795,7 +3947,9 @@ impl AppController {
         self.as_mut().set_error(&detail);
         // No HTTP status: the Host was unreachable. Reconnecting answers it.
         self.as_mut().rust_mut().error_is_transport = status == 0;
-        if tag == "server-info" {
+        // Unlike the C++ client, a failed pairing does not leave the page
+        // stuck in "pairing".
+        if tag == "server-info" || tag == "pairing" {
             self.as_mut().set_connecting(false);
             self.set_connection_state(if status == 401 { "unauthorized" } else { "offline" });
         } else if tag.starts_with("log-") {
@@ -3824,7 +3978,13 @@ impl AppController {
             SseSignal::Connected(connected) => {
                 self.as_mut().rust_mut().connected = connected;
                 self.as_mut().connected_changed();
-                self.as_mut().set_connection_state(if connected { "live" } else { "reconnecting" });
+                // After a deliberate stop (reconnect, pairing, forgetting the
+                // token) the caller already set the state; the queued
+                // disconnect must not turn it into "reconnecting".
+                let running = self.sse.as_ref().is_some_and(SseClient::running);
+                if connected || running {
+                    self.as_mut().set_connection_state(if connected { "live" } else { "reconnecting" });
+                }
                 if connected {
                     // "Connection refused" from the outage must not outlive it.
                     if self.error_is_transport {

@@ -66,6 +66,13 @@ impl SseClient {
         self.state.lock().expect("sse state").connected
     }
 
+    /// Whether the stream is meant to be running: started and not stopped.
+    /// `Connected(false)` reaches the sink after `stop()` returns, so callers
+    /// use this to tell a deliberate stop from a dropped stream.
+    pub fn running(&self) -> bool {
+        self.task.is_some()
+    }
+
     pub fn last_event_id(&self) -> String {
         self.state.lock().expect("sse state").cursor.last_event_id().to_owned()
     }
