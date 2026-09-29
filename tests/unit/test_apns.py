@@ -699,25 +699,6 @@ def _msg(mid, seq, text, updated_at):
         " VALUES (?,?,?,?,?,?,?)", (mid, "a1", seq, "assistant", text, "[]", updated_at))
 
 
-def test_freshness_floor_rejects_previous_turn_message():
-    """Repro of the off-by-one: at DONE time only the PREVIOUS turn's reply is in
-    the table (the new one is still ingesting). Without a floor the stale reply is
-    returned; the freshness floor rejects it so the caller waits for the real one."""
-    from lib import db
-    _agent_a1()
-    t_prev = db.now_ms()
-    _msg("m1", 1, "previous reply", t_prev)
-    t_done = t_prev + 10_000
-    floor = t_done - apns._SETTLE_MARGIN_MS
-    # Bug shape: a naive latest-message read grabs the stale previous reply.
-    assert apns._latest_assistant_text("a1") == "previous reply"
-    # Fix: this turn's floor rejects it (→ caller waits instead of previewing it).
-    assert apns._latest_assistant_text("a1", not_before=floor) is None
-    # Once THIS turn's reply lands, it's the one selected.
-    _msg("m2", 2, "this turn reply", t_done + 50)
-    assert apns._latest_assistant_text("a1", not_before=floor) == "this turn reply"
-
-
 def test_send_turn_done_waits_for_this_turns_message(tmp_path, monkeypatch):
     """End-to-end: the push body waits for THIS turn's reply to ingest (it lands
     during the settle wait, mimicking the transcript streamer racing DONE) rather
@@ -763,15 +744,15 @@ def test_avatar_url_uses_public_https_origin_only(tmp_path):
     cfgfile.write_text('[server]\nbind_addr = "192.0.2.10"\nport = 7682\n')
     config.reset_cache()
     cfg = config.load(cfgfile)
-    assert apns._avatar_url(cfg, "Mike") is None
+    assert apns._avatar_details(cfg, "Mike")[0] is None
     cfgfile.write_text('[server]\nbind_addr = "192.0.2.10"\nport = 7682\n'
                        'public_base_url = "https://computer.example.ts.net/"\n')
     config.reset_cache()
     cfg = config.load(cfgfile)
-    assert apns._avatar_url(cfg, "Mike") == \
+    assert apns._avatar_details(cfg, "Mike")[0] == \
         "https://computer.example.ts.net/static/avatars/mike.png"
     # No persona → no url.
-    assert apns._avatar_url(cfg, "") is None
+    assert apns._avatar_details(cfg, "")[0] is None
 
 
 def test_avatar_url_none_when_loopback(tmp_path):
@@ -781,7 +762,7 @@ def test_avatar_url_none_when_loopback(tmp_path):
     config.reset_cache()
     cfg = config.load(cfgfile)
     # Loopback isn't device-reachable → skip the avatar rather than send a bad URL.
-    assert apns._avatar_url(cfg, "Mike") is None
+    assert apns._avatar_details(cfg, "Mike")[0] is None
 
 
 def test_send_user_notification_carries_needs_response_into_the_wire_payload(tmp_path, monkeypatch):

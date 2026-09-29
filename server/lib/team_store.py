@@ -25,9 +25,6 @@ _HEARTBEAT_WAKE_STATE_KINDS = {
     AgentState.BACKGROUND,
 }
 
-_SPEAK_BLOCK_RE = re.compile(
-    r"<speak\b[^>]*>(.*?)</speak>", re.IGNORECASE | re.DOTALL
-)
 _TEAM_BLOCK_RE = re.compile(
     r"<team\b[^>]*>(.*?)</team>", re.IGNORECASE | re.DOTALL
 )
@@ -54,11 +51,6 @@ def _blocks_from(regex: re.Pattern[str], text: str | None) -> list[str]:
         if cleaned:
             out.append(cleaned)
     return out
-
-
-def extract_speak_blocks(text: str | None) -> list[str]:
-    """Return display-clean spoken blocks from assistant markup."""
-    return _blocks_from(_SPEAK_BLOCK_RE, text)
 
 
 def extract_team_blocks(text: str | None) -> list[str]:

@@ -24,8 +24,6 @@ import weakref
 import time
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
-from .voice_markup import clean_for_display
-
 from .log import log, log_exception
 
 # APNs hosts. TestFlight + App Store builds use the production host; a debug
@@ -217,47 +215,7 @@ def _host(environment: str) -> str:
     return _HOST_SANDBOX if (environment or "").lower() == "sandbox" else _HOST_PRODUCTION
 
 
-_PREVIEW_MAX = 180
 _DEFAULT_BODY = "Done — your turn 👋"
-# The DONE state routinely beats the final assistant message into the messages
-# table (separate ingest pipeline), so the push body must wait for a message
-# from THIS turn rather than grabbing the previous one.
-_SETTLE_MARGIN_MS = 2000   # tolerate the message landing slightly before DONE
-
-
-def _latest_assistant_text(agent_id: str | None, not_before: int = 0,
-                           *, require_spoken: bool = False) -> str | None:
-    """A clean one-line preview of the agent's most recent reply, for the push
-    body. None if there's nothing to show (→ caller uses the default body).
-
-    `not_before` (epoch ms) restricts to messages ingested at/after that time —
-    pass this turn's boundary so a stale previous-turn reply can't be previewed
-    while the new one is still being ingested."""
-    if not agent_id:
-        return None
-    from . import db
-    try:
-        row = db.conn().execute(
-            "SELECT text FROM messages "
-            "WHERE agent_id = ? AND role = 'assistant' AND TRIM(text) != '' "
-            "AND updated_at >= ? "
-            "ORDER BY updated_at DESC, seq DESC LIMIT 1",
-            (agent_id, not_before),
-        ).fetchone()
-    except Exception:  # noqa: BLE001
-        return None
-    if not row or not row["text"]:
-        return None
-    raw = str(row["text"] or "")
-    if require_spoken and "<speak" not in raw.lower():
-        return None
-    # One canonical cleaner for every user-facing surface (see lib.voice_markup):
-    # strips <speak>, drops <vox> fillers, removes <break>/<speed> SSML. Without
-    # this the push body leaked raw markup that the chat already hid.
-    text = clean_for_display(row["text"], oneline=True)
-    if not text:
-        return None
-    return text[:_PREVIEW_MAX - 1] + "…" if len(text) > _PREVIEW_MAX else text
 
 
 _CLIENT_LOCK = threading.Lock()
@@ -350,13 +308,6 @@ def _avatar_details(
         character for character in persona.strip().lower()
         if character in allowed)
     return (f"{base}/static/avatars/{slug}.png", False) if slug else (None, False)
-
-
-def _avatar_url(
-    cfg, persona: str, agent_id: str = "", device_base_url: str = "",
-) -> str | None:
-    """Compatibility accessor for tests and callers interested only in URL."""
-    return _avatar_details(cfg, persona, agent_id, device_base_url)[0]
 
 
 def turn_done_payload(persona: str, session: str | None,
