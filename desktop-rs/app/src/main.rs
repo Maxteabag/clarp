@@ -1,3 +1,4 @@
+mod audio_output;
 mod bridge;
 mod fonts;
 mod list_replay;

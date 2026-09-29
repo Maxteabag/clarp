@@ -19,8 +19,8 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/ToolNarrator` | 802 | `core/src/narrator.rs` + `app/src/bridge/tool_narrator.rs` | verified for the shared-Host path (`core/tests/narrator.rs`, `app/tests/qml/narrator_probe.qml`); the local `codex exec` fallback and script-context evidence are not ported (the app always uses the Host) |
 | `src/app/TranscriptCache` | 123 | `desktop-rs/src/app/` | todo |
 | `src/app/WorkspaceContext` | 86 | `core/src/workspace.rs` | verified (`core/tests/workspace.rs`, real Git worktree) |
-| `src/main` | 1164 | `app/src/main.rs` + `app/build.rs` | wip: Clarp.Desktop module built from `desktop/CMakeLists.txt` (QML + resources via `app/qml`, `app/resources` symlinks; QTP0004 subdirectory qmldirs generated), Basic style, software renderer, own `ClarpRust` settings namespace, Main loads and runs against the fake Host offscreen (media/avatar/audio surface still missing: TypeErrors on `app.audio`, `avatarMotion`, `avatarSource`, `resolveMediaMarkdown`, `loadMedia`); Main loaded inside its module with `launchOnStartup`/`sidebarVisible`; instance forwarding, launch options, tray, screenshots pending |
-| `src/media/AudioController` | 859 | `core/src/audio.rs` | wip: player state machine (queue, source precedence, HLS, raw PCM, acks, mute/silence/pause), transcription ownership verified in `core/tests/audio.rs`; Qt object, output backend and capture pending |
+| `src/main` | 1164 | `app/src/main.rs` + `app/build.rs` | wip: Clarp.Desktop module built from `desktop/CMakeLists.txt` (QML + resources via `app/qml`, `app/resources` symlinks; QTP0004 subdirectory qmldirs generated), Basic style, software renderer, own `ClarpRust` settings namespace, Main loads and runs against the fake Host offscreen with no QML warnings; Main loaded inside its module with `launchOnStartup`/`sidebarVisible`; instance forwarding, launch options, tray, screenshots pending |
+| `src/media/AudioController` | 859 | `core/src/audio.rs` + `app/src/bridge/audio_controller.rs` + `app/src/audio_output.rs` | wip: player state machine and dictation bookkeeping verified in `core/tests/audio.rs`; `app.audio` plays announced and recoverable clips with acks, silence and mute through the test sink (`controller_audio_probe.qml`) and fails fast without a backend (`controller_audio_nobackend_probe.qml`); real playback output, microphone capture and the D-Bus coordinator pending |
 | `src/media/AudioCoordinator` | 363 | `desktop-rs/src/media/` | todo |
 | `src/media/PortraitImage` | 59 | `core/src/media.rs` (`image` crate) | verified (`core/tests/media.rs::a_portrait_is_a_192px_circle`) |
 | `src/media/RecordingSession` | 56 | `core/src/audio.rs` (`RecordingLease`, flock) | verified (`core/tests/audio.rs::the_microphone_is_exclusive_across_windows`) |
@@ -70,7 +70,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | Send idempotent messages with an optimistic `u-<client_msg_id>` row and keep delivery pending until that id appears in `/log`. | `app/tests/qml/controller_probe.qml` (fake Host) (optimistic row, confirmed by u-<id>, unfiled send stays pending) | wip: 20 s delivery-timeout failure not exercised |
 | Stop a running turn and represent queued, waiting, interrupted, and active states accurately. | | todo |
 | Record microphone PCM, upload it to `/transcribe`, and carry the returned trace/transcription ids into `/send`. | | todo |
-| Play announced clips, select sources by protocol precedence, and acknowledge queued/start/success/failure states. | | todo |
+| Play announced clips, select sources by protocol precedence, and acknowledge queued/start/success/failure states. | `core/tests/audio.rs` + `app/tests/qml/controller_audio_probe.qml` (test sink) | wip: verified through the silent sink; audible output pending |
 | Treat `user-notification` as the only unread/desktop-notification decision. | `app/tests/qml/controller_probe.qml` (fake Host) (no notification for the open chat) + `roster.rs` | wip: notification for a background chat not probed |
 | Create/relaunch/fork/release agents and expose the desktop overview, voice-selection, and orchestrator settings workflows. | | todo |
 | Preserve the desktop pane workspace, collapsible agent rail, keyboard-driven navigation, quick switcher, tool visibility, and scroll-to-latest behavior. | | todo |
@@ -149,8 +149,8 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::connectedControllerShutsDownWithoutLateSseCallbacks` | `app/tests/qml/controller_lifecycle_probe.qml` | verified |
 | `tst_native_core::contactsExcludeActivePersonas` | `core/tests/directory.rs::contacts_exclude_active_personas` | verified |
 | `tst_native_core::microphoneCanCaptureNativePcm` | | todo |
-| `tst_native_core::backgroundTranscriptionsKeepTheirChatOwnership` | | todo |
-| `tst_native_core::clipFailsFastWithoutMediaBackend` | | todo |
+| `tst_native_core::backgroundTranscriptionsKeepTheirChatOwnership` | `core/tests/audio.rs::background_transcriptions_keep_their_chat_ownership` | wip: ownership, per-chat cancel and Host-switch cancel verified in core; end-to-end with capture |
+| `tst_native_core::clipFailsFastWithoutMediaBackend` | `app/tests/qml/controller_audio_nobackend_probe.qml` + `core/tests/audio.rs::clips_fail_fast_without_a_media_backend_and_report_it_once` | verified |
 | `tst_native_core::narrationClipWithoutMediaBackendStaysBounded` | | todo |
 | `tst_native_core::sharedPlaybackDoesNotDuplicateDownloads` | | todo |
 | `tst_native_core::markdownParagraphsBecomeVisibleDisplayBlocks` | `core/tests/protocol.rs::markdown_paragraphs_become_visible_display_blocks` | verified |
