@@ -9,40 +9,72 @@ mod runtime;
 
 use cxx_qt_lib::{QByteArray, QGuiApplication, QMap, QMapPair_QString_QVariant, QQmlApplicationEngine, QString, QUrl, QVariant};
 
-/// The C++ app calls `loadFromModule("Clarp.Desktop", "Main")`, which cxx-qt
-/// does not bind. Instantiating `Main` from a document that imports the
-/// module is equivalent: Main.qml resolves inside its module, so the native
-/// types it uses unqualified (AppController, ...) are found.
-const MAIN_DOCUMENT: &str = "import Clarp.Desktop\nMain {}\n";
-
-/// Screenshot runs (`CLARP_SCREENSHOT_PATH`, like the C++ app): size the
-/// window, wait for the chat to settle, grab it to the path and quit. A
-/// failed capture exits non-zero.
-const SCREENSHOT_DOCUMENT: &str = r#"import QtQuick
+/// The root document. The C++ app calls `loadFromModule("Clarp.Desktop",
+/// "Main")`, which cxx-qt does not bind; instantiating `Main` from a document
+/// that imports the module is equivalent (Main.qml resolves inside its
+/// module, so the native types it uses unqualified are found). It also hands
+/// Main the command-line launch once loaded (C++ `openLaunchAgent` through
+/// `invokeMethod`) and runs screenshot captures (`CLARP_SCREENSHOT_PATH`):
+/// size the window, wait, grab it to the path and quit; a failed capture
+/// exits non-zero.
+const MAIN_DOCUMENT: &str = r#"import QtQuick
 import Clarp.Desktop
 Main {
-    id: shot
+    id: root
+    property bool launchNow: false
+    property string launchBackend: ""
+    property string launchModel: ""
+    property string launchEffort: ""
+    property int launchAnonymous: -1
+    property string launchDirectory: ""
     property string screenshotPath: ""
     property int screenshotDelay: 2000
     property int screenshotWidth: 0
     property int screenshotHeight: 0
     Component.onCompleted: {
         if (screenshotWidth > 0 && screenshotHeight > 0) {
-            shot.width = Math.max(760, screenshotWidth)
-            shot.height = Math.max(520, screenshotHeight)
+            root.width = Math.max(760, screenshotWidth)
+            root.height = Math.max(520, screenshotHeight)
         }
+        if (launchNow)
+            Qt.callLater(() => root.openLaunchAgent(launchBackend, launchModel, launchEffort, launchAnonymous, launchDirectory))
     }
     WindowCapture { id: capture }
     Timer {
-        interval: shot.screenshotDelay
-        running: shot.screenshotPath !== ""
-        onTriggered: Qt.exit(capture.capture(shot, shot.screenshotPath) ? 0 : 1)
+        interval: root.screenshotDelay
+        running: root.screenshotPath !== ""
+        onTriggered: Qt.exit(capture.capture(root, root.screenshotPath) ? 0 : 1)
     }
 }
 "#;
 
+/// `--preview-versions`: the version manager window instead of the desktop.
+const VERSIONS_DOCUMENT: &str = "import Clarp.Desktop\nPreviewVersionWindow {}\n";
+
 fn main() {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    let options = match clarp_core::launch::parse(&arguments) {
+        Ok(options) => options,
+        Err(message) => {
+            eprintln!("{message}");
+            std::process::exit(1);
+        }
+    };
+    if options.help {
+        print!("{}", clarp_core::launch::HELP);
+        return;
+    }
+    if options.version {
+        println!("clarp-desktop {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    let screenshot = std::env::var_os("CLARP_SCREENSHOT_PATH").is_some();
+    let restoring = std::env::var("CLARP_RESTORE_DESKTOP").as_deref() == Ok("1");
+    let settings = clarp_core::settings::Settings::user();
+    let launch_on_startup = options.launch_on_startup(restoring, settings.boolean("launch/newAgentOnStartup", true), screenshot);
     // The app owns its Qt Quick style, like the C++ QQuickStyle::setStyle.
+    // The controller reads how it was launched from the environment: it is
+    // created by QML, out of reach of main.
     // SAFETY: single-threaded here; no other thread reads the environment yet.
     unsafe {
         std::env::remove_var("QT_STYLE_OVERRIDE");
@@ -52,16 +84,25 @@ fn main() {
         if std::env::var_os("QT_QUICK_BACKEND").is_none() && std::env::var("CLARP_RENDERER").as_deref() != Ok("gl") {
             std::env::set_var("QT_QUICK_BACKEND", "software");
         }
+        if options.auto_start(launch_on_startup) {
+            std::env::set_var("CLARP_RS_LAUNCH_MODE", "1");
+        }
+        if options.empty_startup(restoring) {
+            std::env::set_var("CLARP_EMPTY_STARTUP", "1");
+        }
     }
-    let arguments: Vec<String> = std::env::args().skip(1).collect();
-    let no_new_agent = arguments.iter().any(|a| a == "--no-new-agent");
-    let screenshot = std::env::var_os("CLARP_SCREENSHOT_PATH").is_some();
 
     let mut app = QGuiApplication::new();
     if let Some(mut app) = app.as_mut() {
         // Its own settings namespace: the Rust build never shares QSettings
         // with an installed C++ Clarp, and screenshot runs never touch either.
-        let name = if screenshot { "ClarpRustScreenshot" } else { "ClarpRust" };
+        let name = if options.preview_versions {
+            "ClarpRustPreviewVersionManager"
+        } else if screenshot {
+            "ClarpRustScreenshot"
+        } else {
+            "ClarpRust"
+        };
         app.as_mut().set_application_name(&QString::from(name));
         app.as_mut().set_application_display_name(&QString::from("Clarp"));
         app.as_mut().set_organization_name(&QString::from("MaxTeaBag"));
@@ -71,17 +112,21 @@ fn main() {
     let mut engine = QQmlApplicationEngine::new();
     let probe = std::env::var("CLARP_RS_QML").ok();
     if let Some(mut engine) = engine.as_mut() {
-        if probe.is_none() {
-            let settings = clarp_core::settings::Settings::user();
-            let launch_on_startup =
-                !no_new_agent && settings.boolean("launch/newAgentOnStartup", true) && !screenshot;
+        if probe.is_none() && !options.preview_versions {
             let mut properties = QMap::<QMapPair_QString_QVariant>::default();
+            let text = |value: &str| QVariant::from(&QString::from(value));
             properties.insert(QString::from("launchOnStartup"), QVariant::from(&launch_on_startup));
-            properties.insert(QString::from("sidebarVisible"), QVariant::from(&no_new_agent));
+            properties.insert(QString::from("sidebarVisible"), QVariant::from(&options.empty_startup(restoring)));
+            properties.insert(QString::from("launchNow"), QVariant::from(&launch_on_startup));
+            properties.insert(QString::from("launchBackend"), text(&options.backend));
+            properties.insert(QString::from("launchModel"), text(options.model.as_deref().unwrap_or_default()));
+            properties.insert(QString::from("launchEffort"), text(options.effort.as_deref().unwrap_or_default()));
+            properties.insert(QString::from("launchAnonymous"), QVariant::from(&options.anonymous_mode()));
+            properties.insert(QString::from("launchDirectory"), text(options.cwd.as_deref().unwrap_or_default()));
             if let Ok(path) = std::env::var("CLARP_SCREENSHOT_PATH") {
                 let delay = std::env::var("CLARP_SCREENSHOT_DELAY_MS").ok().and_then(|d| d.parse::<i32>().ok());
                 let delay = delay.filter(|d| *d > 0).map_or(2_000, |d| d.clamp(2_400, 60_000));
-                properties.insert(QString::from("screenshotPath"), QVariant::from(&QString::from(path.as_str())));
+                properties.insert(QString::from("screenshotPath"), text(&path));
                 properties.insert(QString::from("screenshotDelay"), QVariant::from(&delay));
                 let size = std::env::var("CLARP_SCREENSHOT_SIZE").unwrap_or_default();
                 if let Some((width, height)) = size.split_once('x').and_then(|(w, h)| Some((w.parse::<i32>().ok()?, h.parse::<i32>().ok()?))) {
@@ -94,11 +139,14 @@ fn main() {
         match probe.as_deref() {
             Some(path) => engine.as_mut().load(&QUrl::from(path)),
             None => {
-                let document = if screenshot { SCREENSHOT_DOCUMENT } else { MAIN_DOCUMENT };
+                let document = if options.preview_versions { VERSIONS_DOCUMENT } else { MAIN_DOCUMENT };
                 engine.as_mut().load_data(&QByteArray::from(document), &QUrl::from("qrc:/clarp-rust/Root.qml"))
             }
         }
     }
+    // The restore request stays in the environment: worker threads run by
+    // now, so it cannot be removed safely. Processes the controller starts
+    // drop it themselves (see `clarp_core::launch::RESTORE_VARIABLES`).
     if let Some(app) = app.as_mut() {
         std::process::exit(app.exec());
     }
