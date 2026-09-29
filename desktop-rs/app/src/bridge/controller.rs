@@ -511,6 +511,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "markdownDisplayBlocks"]
         fn markdown_display_blocks(self: &AppController, markdown: &QString) -> QStringList;
+        /// Markdown as styled rich text for a transcript row (see
+        /// `clarp_core::markdown_style`).
+        #[qinvokable]
+        #[cxx_name = "styledMarkdownHtml"]
+        fn styled_markdown_html(self: &AppController, markdown: &QString, options: &QJsonObject) -> QString;
         #[qinvokable]
         #[cxx_name = "linkifiedOutput"]
         fn linkified_output(self: &AppController, text: &QString) -> QString;
@@ -919,6 +924,9 @@ pub struct AppControllerRust {
     turn_queue_generation: u64,
     queue_action_sessions: HashMap<String, String>,
     composer_revision: u64,
+    /// Rendered rows by options and markdown, bounded by bytes (C++
+    /// `m_styledMarkdown`): rows re-render as the transcript recycles them.
+    styled_markdown: std::cell::RefCell<(HashMap<String, String>, usize)>,
     avatars: AvatarCache,
     contact_avatars: AvatarCache,
     next_avatar_request: u64,
@@ -2482,6 +2490,28 @@ impl AppController {
         if std::env::var_os("CLARP_STARTUP_TRACE").is_some() {
             eprintln!("startup: {milestone}");
         }
+    }
+
+    fn styled_markdown_html(&self, markdown: &QString, options: &cxx_qt_lib::QJsonObject) -> QString {
+        const MAX_CACHED_CHARS: usize = 16 * 1024;
+        const MAX_CACHE_BYTES: usize = 4 * 1024 * 1024;
+        let (markdown, values) = (markdown.to_string(), crate::qjson::from_qjson_object(options));
+        let key = clarp_core::markdown_style::cache_key(&markdown, &values);
+        if let Some(html) = self.styled_markdown.borrow().0.get(&key) {
+            return qs(html);
+        }
+        let html = clarp_core::markdown_style::styled_markdown_html(&markdown, &clarp_core::markdown_style::options_from(&values));
+        if markdown.len() <= MAX_CACHED_CHARS && html.len() <= MAX_CACHED_CHARS {
+            let mut cache = self.styled_markdown.borrow_mut();
+            let bytes = key.len() + html.len();
+            if cache.1 + bytes > MAX_CACHE_BYTES {
+                cache.0.clear();
+                cache.1 = 0;
+            }
+            cache.0.insert(key, html.clone());
+            cache.1 += bytes;
+        }
+        qs(&html)
     }
 
     fn markdown_display_blocks(&self, markdown: &QString) -> cxx_qt_lib::QStringList {

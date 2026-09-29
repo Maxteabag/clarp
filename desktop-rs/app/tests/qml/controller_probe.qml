@@ -73,8 +73,8 @@ Window {
             check(notifications.length === 0, "no notification for the open chat")
             app.selectSession("mike")
             stage = 2
-        } else if (stage === 2 && app.selectedSession === "mike" && app.conversation.count === 1) {
-            check(ids(app.conversation)[0] === "m1", "switching loads mike's log")
+        } else if (stage === 2 && app.selectedSession === "mike" && app.conversation.count === 2) {
+            check(ids(app.conversation).join() === "m1,m2", "switching loads mike's log")
             check(app.conversationForSession("rachel").count === 4, "rachel's transcript is kept")
             app.stopAgent()
             app.sendMessage("never-file", false)

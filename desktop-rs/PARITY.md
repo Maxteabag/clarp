@@ -12,7 +12,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/AppController` | 3771 | `app/src/bridge/controller.rs` | wip: connect/snapshot/selection/log sync/send/stop/SSE, drafts/focus, updates/jobs, launch/lifecycle/catalog, narrator, preferences, teams and turn queue, profile/prompt history, settings status/TTS, voices, orchestrator, composer attachments (upload, shared filesystem, send), past sessions/resume, launch directories, directory suggestions/favorites, contact assignment, pairing and keyring credentials, avatars (portrait fetch/round/disk cache, failures not retried) and chat media (list, image file cache, clarp-media links) verified in `app/tests/qml/controller*_probe.qml` against `fake_host.py`; directories, clipboard image paste, audio, styled markdown pending |
 | `src/app/CredentialStore` | 245 | `net/src/credentials.rs` (zbus) | verified (`net/tests/credentials.rs` via `net/tests/run-keyring-tests.sh`: throwaway gnome-keyring and keyring-less private buses; `app/tests/qml/controller_credentials_probe.qml` pairs, reconnects from the keyring and forgets). Deviation: a failed `/pairing/exchange` returns the page to offline instead of staying in "pairing" |
 | `src/app/InstanceServer` | 199 | `desktop-rs/src/app/` | todo |
-| `src/app/MarkdownStyle` | 250 | `desktop-rs/src/app/` | todo |
+| `src/app/MarkdownStyle` | 250 | `core/src/markdown_style.rs` (pulldown-cmark) + `styledMarkdownHtml` in the controller | verified (`core/tests/markdown_style.rs`, `app/tests/qml/markdown_style_probe.qml`, screenshot of a styled reply). Deviation: rendered directly to Qt rich-text HTML instead of restyling a QTextDocument; raw HTML in a message stays text; `styleMarkdown(textDocument)` is not ported (no QML caller) |
 | `src/app/PreviewVersions` | 147 | `core/src/preview.rs` + `app/src/bridge/preview_versions.rs` | verified (core: `core/tests/preview.rs`); the bridge runs the helper off-thread and quits through `QCoreApplication::quit` bound with cxx `#[Self]` |
 | `src/app/StallMonitor` | 247 | `desktop-rs/src/app/` | todo |
 | `src/app/TimeFormat` | 138 | `core/src/time_format.rs` | verified (`conversation.rs::stamps_*`, `compact_*`); en_US formats fixed, QLocale-driven locale pending |
@@ -178,13 +178,13 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_desktop_presence::focusLockSleepAndPreferenceReleasePresence` | | todo |
 | `tst_desktop_presence::maintenanceActivityDoesNotDependOnPushPreference` | | todo |
 | `tst_desktop_presence::unknownSessionNeverSuppresses` | | todo |
-| `tst_markdown_style::codeUsesMonoAndBackground` | | todo |
-| `tst_markdown_style::headingsScaleWithTheBodyNotTheWeb` | | todo |
-| `tst_markdown_style::mixedInlineFormatsInOneBlockStayInRange` | | todo |
-| `tst_markdown_style::optionsParseFromQml` | | todo |
-| `tst_markdown_style::quotesAndTablesAreStyled` | | todo |
-| `tst_markdown_style::secondPassIsANoOp` | | todo |
-| `tst_markdown_style::styledHtmlCarriesTheFinalLayout` | | todo |
+| `tst_markdown_style::codeUsesMonoAndBackground` | `core/tests/markdown_style.rs::code_uses_mono_and_background` | verified (core) |
+| `tst_markdown_style::headingsScaleWithTheBodyNotTheWeb` | `core/tests/markdown_style.rs::headings_scale_with_the_body_not_the_web` | verified (core) |
+| `tst_markdown_style::mixedInlineFormatsInOneBlockStayInRange` | `core/tests/markdown_style.rs::large_messages_with_mixed_inline_formats_render` | verified (core) |
+| `tst_markdown_style::optionsParseFromQml` | `core/tests/markdown_style.rs::options_parse_from_qml` | verified (core) |
+| `tst_markdown_style::quotesAndTablesAreStyled` | `core/tests/markdown_style.rs::quotes_lists_and_tables_are_styled` | verified (core) |
+| `tst_markdown_style::secondPassIsANoOp` | `app/tests/qml/markdown_style_probe.qml` (cached re-render) | verified: rendering is pure and cached; there is no in-place restyle pass to repeat |
+| `tst_markdown_style::styledHtmlCarriesTheFinalLayout` | `core/tests/markdown_style.rs::styled_html_carries_the_final_layout` | verified (core) |
 | `tst_palette::overridesLightHostInEveryState` | | todo |
 | `tst_reading_theme::bodySizeAndMeasureStayInReadingRange` | `core/tests/reading_theme.rs::body_size_and_measure_stay_in_reading_range` | verified |
 | `tst_reading_theme::bodyTextMeetsAaaOnEverySurface` | `core/tests/reading_theme.rs::body_text_meets_aaa_on_every_surface` | verified |
