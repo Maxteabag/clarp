@@ -54,6 +54,6 @@ fn main() {
                 .resource(QResource::new().files(resources.iter().map(String::as_str)))
                 .resource(QResource::new().files(qmldirs)),
         )
-        .files(["src/bridge/agent_filter_model.rs", "src/bridge/avatar_motion.rs", "src/bridge/agent_list_model.rs", "src/bridge/audio_controller.rs", "src/bridge/controller.rs", "src/bridge/desktop.rs", "src/bridge/conversation_model.rs", "src/bridge/directory_models.rs", "src/bridge/pane_tree_model.rs", "src/bridge/presentation_model.rs", "src/bridge/preview_versions.rs", "src/bridge/tool_narrator.rs", "src/bridge/transcript_layout.rs", "src/bridge/transcript_rows.rs", "src/bridge/window_capture.rs", "src/bridge/quick.rs"])
+        .files(["src/bridge/agent_filter_model.rs", "src/bridge/avatar_motion.rs", "src/bridge/agent_list_model.rs", "src/bridge/audio_controller.rs", "src/bridge/controller.rs", "src/bridge/desktop.rs", "src/bridge/desktop_services.rs", "src/bridge/conversation_model.rs", "src/bridge/directory_models.rs", "src/bridge/pane_tree_model.rs", "src/bridge/presentation_model.rs", "src/bridge/preview_versions.rs", "src/bridge/tool_narrator.rs", "src/bridge/transcript_layout.rs", "src/bridge/transcript_rows.rs", "src/bridge/window_capture.rs", "src/bridge/quick.rs"])
         .build();
 }

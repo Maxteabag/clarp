@@ -975,6 +975,8 @@ pub struct AppControllerRust {
     turn_queue_generation: u64,
     queue_action_sessions: HashMap<String, String>,
     composer_revision: u64,
+    /// This controller's address when it is the window controller.
+    registered: usize,
     /// A launch that names a backend: the fleet waits until its agent exists.
     launch_mode: bool,
     launch_session: String,
@@ -1048,8 +1050,24 @@ pub struct AppControllerRust {
     draft_flush_token: u64,
 }
 
+/// The window's controller, for the desktop services the root document
+/// starts next to Main (tray, notifications): Main's `app` is out of their
+/// reach in QML. The first controller wins; it clears itself when dropped.
+static WINDOW_CONTROLLER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// # Safety
+/// Only on the GUI thread, and only while the controller lives.
+pub unsafe fn window_controller<'a>() -> Option<Pin<&'a mut qobject::AppController>> {
+    let address = WINDOW_CONTROLLER.load(std::sync::atomic::Ordering::SeqCst);
+    (address != 0).then(|| unsafe { Pin::new_unchecked(&mut *(address as *mut qobject::AppController)) })
+}
+
 impl cxx_qt::Initialize for AppController {
     fn initialize(mut self: Pin<&mut Self>) {
+        let address = unsafe { self.as_mut().get_unchecked_mut() } as *mut Self as usize;
+        if WINDOW_CONTROLLER.compare_exchange(0, address, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst).is_ok() {
+            self.as_mut().rust_mut().registered = address;
+        }
         {
             let mut rust = self.as_mut().rust_mut();
             rust.agents = Owned(new_agent_list_model());
@@ -1187,6 +1205,10 @@ impl AppControllerRust {
 
 impl Drop for AppControllerRust {
     fn drop(&mut self) {
+        if self.registered != 0 {
+            // Fails only when another controller took over, which is fine.
+            let _ = WINDOW_CONTROLLER.compare_exchange(self.registered, 0, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst);
+        }
         self.flush_drafts();
         if let Some(directory) = self.media_directory.take()
             && let Err(error) = std::fs::remove_dir_all(&directory)
@@ -2466,6 +2488,12 @@ impl AppController {
 
     fn muted_value(&self) -> bool {
         self.muted
+    }
+    pub fn muted_pub(&self) -> bool {
+        self.muted
+    }
+    pub fn set_muted_pub(self: Pin<&mut Self>, value: bool) {
+        self.set_muted(value);
     }
 
     fn set_muted(mut self: Pin<&mut Self>, value: bool) {

@@ -39,6 +39,7 @@ Main {
         if (launchNow)
             Qt.callLater(() => root.openLaunchAgent(launchBackend, launchModel, launchEffort, launchAnonymous, launchDirectory))
     }
+    DesktopServices { window: root }
     WindowCapture { id: capture }
     Timer {
         interval: root.screenshotDelay
