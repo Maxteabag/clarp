@@ -41,8 +41,8 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/platform/MprisIntegration` | 252 | `desktop-rs/src/platform/` | todo |
 | `src/protocol/ProtocolTypes` | 799 | `core/src/{protocol,text,json}.rs` | verified (`core/tests/protocol.rs`) |
 | `src/terminal/TerminalLaunch` | 36 | `desktop-rs/src/terminal/` | todo |
-| `src/views/TranscriptLayout` | 890 | `desktop-rs/src/views/` | todo |
-| `src/views/TranscriptRows` | 310 | `desktop-rs/src/views/` | todo |
+| `src/views/TranscriptLayout` | 890 | `core/src/transcript_layout.rs` | wip: geometry (heights, prefix sums, anchoring, following, sections, visible plan, width rescale) verified in `core/tests/transcript_layout.rs`; the Rust QQuickItem that creates delegates is next |
+| `src/views/TranscriptRows` | 310 | `core/src/transcript_rows.rs` | wip: splitting and row mapping verified in `core/tests/transcript_rows.rs`; Qt list model pending |
 | `src/app/AvatarMotionClock.h` (header-only) | 224 | `desktop-rs/src/app/` | todo |
 | `src/app/DesktopPalette.h` (header-only) | 40 | `desktop-rs/src/app/` | todo |
 | `src/app/KeyboardSmokeCheck.h` (header-only) | 330 | `desktop-rs/src/app/` | todo |
@@ -199,18 +199,18 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_stall_monitor::memoryThresholdCapturesTheGuiStack` | | todo |
 | `tst_stall_monitor::postedBlockDurationsUseWakeTime` | | todo |
 | `tst_stall_monitor::shortPausesAreNotStalls` | | todo |
-| `tst_transcript_layout::anchorSurvivesChangesAboveViewport` | | todo |
-| `tst_transcript_layout::createdRowsMatchDelegateHeightsAndAreContiguous` | | todo |
-| `tst_transcript_layout::followingTracksEndAfterModelAndHeightChanges` | | todo |
-| `tst_transcript_layout::modelResetKeepsSameMessageId` | | todo |
-| `tst_transcript_layout::positionAtRowStaysAtTopAfterNeighbourMeasurement` | | todo |
-| `tst_transcript_layout::rowsFarFromViewportAreNotCreated` | | todo |
-| `tst_transcript_layout::widthChangeKeepsAnchorOnScreen` | | todo |
-| `tst_transcript_rows::bigTablesSplitIntoChunksThatRepeatTheHeader` | | todo |
-| `tst_transcript_rows::finishingMessageSplitsWithoutResetting` | | todo |
-| `tst_transcript_rows::insertsAndRemovesMapAroundSplitMessages` | | todo |
-| `tst_transcript_rows::longTextSplitsAtBlockBoundaries` | | todo |
-| `tst_transcript_rows::smallMessagesStayWhole` | | todo |
+| `tst_transcript_layout::anchorSurvivesChangesAboveViewport` | `core/tests/transcript_layout.rs::anchor_survives_changes_above_viewport` | verified (core) |
+| `tst_transcript_layout::createdRowsMatchDelegateHeightsAndAreContiguous` | `core/tests/transcript_layout.rs::created_rows_match_delegate_heights_and_are_contiguous` | verified (core) |
+| `tst_transcript_layout::followingTracksEndAfterModelAndHeightChanges` | `core/tests/transcript_layout.rs::following_tracks_end_after_model_and_height_changes` | verified (core) |
+| `tst_transcript_layout::modelResetKeepsSameMessageId` | `core/tests/transcript_layout.rs::model_reset_keeps_same_message_id` | verified (core) |
+| `tst_transcript_layout::positionAtRowStaysAtTopAfterNeighbourMeasurement` | `core/tests/transcript_layout.rs::position_at_row_stays_at_top_after_neighbour_measurement` | verified (core) |
+| `tst_transcript_layout::rowsFarFromViewportAreNotCreated` | `core/tests/transcript_layout.rs::rows_far_from_viewport_are_not_created` | verified (core) |
+| `tst_transcript_layout::widthChangeKeepsAnchorOnScreen` | `core/tests/transcript_layout.rs::width_change_keeps_anchor_on_screen` | verified (core) |
+| `tst_transcript_rows::bigTablesSplitIntoChunksThatRepeatTheHeader` | `core/tests/transcript_rows.rs::big_tables_split_into_chunks_that_repeat_the_header` | verified (core) |
+| `tst_transcript_rows::finishingMessageSplitsWithoutResetting` | `core/tests/transcript_rows.rs::finishing_message_splits_without_resetting` | verified (core) |
+| `tst_transcript_rows::insertsAndRemovesMapAroundSplitMessages` | `core/tests/transcript_rows.rs::inserts_and_removes_map_around_split_messages` | verified (core) |
+| `tst_transcript_rows::longTextSplitsAtBlockBoundaries` | `core/tests/transcript_rows.rs::long_text_splits_at_block_boundaries` | verified (core) |
+| `tst_transcript_rows::smallMessagesStayWhole` | `core/tests/transcript_rows.rs::small_messages_stay_whole` | verified (core) |
 | `tst_workspace_context::ordinaryDirectoryAndRealGitWorktree` | `core/tests/workspace.rs::ordinary_directory_and_real_git_worktree` | verified |
 
 ## Qt model adapters
