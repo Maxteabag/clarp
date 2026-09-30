@@ -8,6 +8,7 @@ pub mod audio;
 pub mod audio_coordinator;
 pub mod audio_input;
 pub mod audio_output;
+pub mod desktop;
 pub mod mpris;
 pub mod runtime;
 

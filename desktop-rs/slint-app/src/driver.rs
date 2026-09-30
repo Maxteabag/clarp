@@ -301,6 +301,7 @@ pub fn start_check(name: &str, out: String) {
         "settings" => settings_check(out),
         "keymap" => keymap_check(out),
         "voice" => voice_check(out),
+        "desktop" => desktop_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();
@@ -955,6 +956,46 @@ fn voice_check(out: String) {
             }
             check(identity.contains("\"Clarp\""), "the voice is a media player on the session bus");
             check(property("org.mpris.MediaPlayer2.Player", "PlaybackStatus").contains("\"Stopped\""), "stopped once the clip ended");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check desktop --out DIR`: a reply in a chat that is not open raises
+/// a notification (recorded: `CLARP_TEST_NOTIFY_LOG`), and someone typing
+/// at the window is reported as present (`CLARP_TEST_FOREGROUND`).
+fn desktop_check(_out: String) {
+    fn notifications() -> Vec<serde_json::Value> {
+        let Some(path) = std::env::var_os("CLARP_TEST_NOTIFY_LOG") else { return Vec::new() };
+        std::fs::read_to_string(path).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
+    }
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(|app, window, elapsed| {
+            let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
+            // The desktop services start a second after launch.
+            if !open || elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            window.invoke_chat_chosen("mike".into());
+            let event = serde_json::json!({"type": "user-notification", "session": "rachel", "persona": "Rachel", "preview": "Echo from Rachel"});
+            check(control("/__control/event", &event).is_ok(), "the Host says Rachel replied");
+            true
+        })),
+        ("notified", Box::new(|_, _window, _| {
+            let shown = notifications();
+            if shown.is_empty() {
+                return false;
+            }
+            check(shown[0]["title"].as_str().is_some_and(|t| t.contains("Rachel")) && shown[0]["body"] == "Echo from Rachel", &format!("a reply in a chat that is not open is notified: {shown:?}"));
+            headless::type_text("x");
+            true
+        })),
+        ("present", Box::new(|_, _window, _| {
+            let reports = posts("/desktop-presence");
+            let Some(active) = reports.iter().find(|r| r["body"]["active"] == true) else { return false };
+            check(active["body"]["instance_id"].as_str().is_some_and(|i| !i.is_empty()), "someone typing at the window is reported present");
+            check(!posts("/application-activity").is_empty(), "and the window's activity with it");
             true
         })),
     ];

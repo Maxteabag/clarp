@@ -46,3 +46,31 @@ impl Engine {
         self.send_with_voice(&session, text, false, trace, transcription, hands_free);
     }
 }
+
+impl Engine {
+    /// What presence needs: whether phone alerts may pause while someone
+    /// is here (the setting), and whether a Host is connected.
+    pub fn presence_inputs(&self) -> (bool, bool) {
+        (self.settings.boolean("notifications/pauseMobileWhileDesktopActive", true), self.connected)
+    }
+
+    /// Someone is (or is no longer) at this desktop: the Host may pause
+    /// phone alerts while the lease holds.
+    pub fn report_desktop_presence(&self, instance: &str, sequence: u64, active: bool) {
+        if self.token.is_empty() {
+            return;
+        }
+        let body = serde_json::json!({"instance_id": instance, "sequence": sequence, "active": active,
+                                      "sent_at_ms": chrono::Utc::now().timestamp_millis()});
+        self.api.post_json("desktop-presence", "/desktop-presence", body, Some(std::time::Duration::from_secs(5)));
+    }
+
+    pub fn report_application_activity(&self, instance: &str, sequence: u64, foreground: bool, input_age_ms: i64) {
+        if self.token.is_empty() {
+            return;
+        }
+        let body = serde_json::json!({"instance_id": instance, "sequence": sequence, "foreground": foreground,
+                                      "input_age_ms": input_age_ms, "sent_at_ms": chrono::Utc::now().timestamp_millis()});
+        self.api.post_json("application-activity", "/application-activity", body, Some(std::time::Duration::from_secs(5)));
+    }
+}

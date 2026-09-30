@@ -196,6 +196,8 @@ pub struct Engine {
     host_status: host_status::HostStatus,
     keyring: bool,
     has_stored_credential: bool,
+    /// Optional requests whose failure was already logged once.
+    quiet_failures: HashSet<String>,
 
     // lifecycle
     launch: lifecycle::Launch,
@@ -288,6 +290,7 @@ impl Engine {
             host_status: host_status::HostStatus::default(),
             keyring,
             has_stored_credential: false,
+            quiet_failures: HashSet::new(),
             panes: workspace::Panes::new(workspace_store),
             deliveries: HashMap::new(),
             delivery_counter: 0,
@@ -1058,6 +1061,14 @@ impl Engine {
     fn handle_failure(&mut self, tag: &str, message: &str, status: u16) {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         if self.host_status_failed(tag, &detail) {
+            return;
+        }
+        if tag == "desktop-presence" || tag == "application-activity" {
+            // Older or offline Hosts ignore these optional leases: say so
+            // once, never as a chat error.
+            if self.quiet_failures.insert(tag.to_owned()) {
+                eprintln!("Engine: {tag} is not accepted by this Host: {detail}");
+            }
             return;
         }
         if self.lifecycle_failure(tag, message, status) {

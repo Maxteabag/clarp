@@ -239,7 +239,9 @@ impl App {
                 Change::Preferences => {
                     let muted = self.engine.borrow().muted();
                     platform::audio::with(|audio| audio.set_muted(muted));
+                    platform::desktop::muted_changed(muted);
                 }
+                Change::Notification { title, body } => platform::desktop::notify(title.clone(), body.clone()),
                 _ => {}
             }
         }
@@ -555,6 +557,7 @@ fn main() {
     let muted = state.engine.borrow().muted();
     platform::audio::start(muted);
     platform::serve_mpris();
+    platform::desktop::start();
     state.engine.borrow_mut().start();
     drop(state);
     if let Some(out) = e2e_out {
