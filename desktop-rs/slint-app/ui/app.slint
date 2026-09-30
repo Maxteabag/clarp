@@ -1,6 +1,7 @@
 import { TextEdit, Button } from "std-widgets.slint";
 import { Palette } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
+import { NavRail } from "navrail.slint";
 import { Transcript, MessageRow } from "transcript.slint";
 
 export { Palette, ChatRow, MessageRow }
@@ -14,6 +15,17 @@ export component AppWindow inherits Window {
     default-font-size: Palette.body-size;
 
     in property <[ChatRow]> chats;
+    in property <[ChatRow]> rooms;
+    in property <[ChatRow]> archived;
+    in property <int> unread-rooms;
+    in property <int> attention;
+    in property <bool> muted;
+    in property <string> server-initial;
+    in-out property <string> surface: "chats";
+    in property <string> selected-model;
+    in property <string> selected-effort;
+    out property <string> query: sidebar.query;
+    out property <string> scope: sidebar.scope;
     in property <[MessageRow]> messages;
     in property <string> selected-name;
     in property <string> selected-detail;
@@ -23,6 +35,9 @@ export component AppWindow inherits Window {
     in property <bool> busy;
     in-out property <string> draft;
     callback chat-chosen(string);
+    callback filter-changed();
+    callback toggle-muted();
+    callback open-switcher();
     callback send(string);
     callback stop();
     callback dismiss-error();
@@ -30,10 +45,23 @@ export component AppWindow inherits Window {
     forward-focus: composer;
 
     HorizontalLayout {
+        NavRail {
+            surface: root.surface;
+            attention: root.attention;
+            muted: root.muted;
+            server-initial: root.server-initial;
+            select-surface(surface) => { root.surface = surface; }
+            toggle-muted => { root.toggle-muted(); }
+            open-switcher => { root.open-switcher(); }
+        }
         sidebar := Sidebar {
-            width: 300px;
+            width: 320px;
             rows: root.chats;
+            rooms: root.rooms;
+            archived: root.archived;
+            unread-rooms: root.unread-rooms;
             chosen(session) => { root.chat-chosen(session); }
+            filter-changed => { root.filter-changed(); }
         }
         Rectangle { width: 1px; background: Palette.rule; }
         VerticalLayout {
@@ -58,6 +86,18 @@ export component AppWindow inherits Window {
                         vertical-alignment: center;
                         overflow: elide;
                         horizontal-stretch: 1;
+                    }
+                    if root.selected-model != "": Text {
+                        text: "model " + root.selected-model;
+                        color: Palette.muted;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                    if root.selected-effort != "": Text {
+                        text: "effort " + root.selected-effort;
+                        color: Palette.muted;
+                        font-size: 12px;
+                        vertical-alignment: center;
                     }
                     Text {
                         text: root.connection;

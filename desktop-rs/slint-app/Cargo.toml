@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 clarp-core = { path = "../core" }
 clarp-engine = { path = "../engine" }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 slint = { version = "1.18", default-features = false, features = [
     "std", "compat-1-2", "accessibility",

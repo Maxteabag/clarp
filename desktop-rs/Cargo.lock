@@ -899,6 +899,7 @@ dependencies = [
 name = "clarp-slint"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "clarp-core",
  "clarp-engine",
  "image",

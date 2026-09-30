@@ -30,8 +30,8 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/AssignAgentDialog.qml` | 146 | ui/panels/assignagentdialog.slint | todo |
 | `qml/components/AttachFileDialog.qml` | 12 | ui/composer.slint | todo |
 | `qml/components/AvatarActivity.qml` | 38 | ui/sidebar.slint | todo |
-| `qml/components/ChatList.qml` | 456 | ui/sidebar.slint | todo |
-| `qml/components/ChatRow.qml` | 301 | ui/sidebar.slint | todo |
+| `qml/components/ChatList.qml` | 456 | `slint-app/ui/sidebar.slint` (search, All/Unread, pair rooms and archive rows, nesting via `clarp_core::sidebar`) | wip: in the e2e; keyboard navigation, hide/collapse, restore from archive and a search/scope check pending |
+| `qml/components/ChatRow.qml` | 301 | `slint-app/ui/sidebar.slint` `Row` (name, stamp, preview, activity line, queue, muted, unread, busy ring, helper depth) | wip: portraits, process glyph, done-helpers lines pending |
 | `qml/components/Composer.qml` | 461 | ui/composer.slint | todo |
 | `qml/components/ConnectionPage.qml` | 151 | ui/panels/connectionpage.slint | todo |
 | `qml/components/ConversationPane.qml` | 575 | ui/workspace.slint | todo |
@@ -43,10 +43,10 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/LaunchDirectoryPicker.qml` | 113 | ui/panels/launchdirectorypicker.slint | todo |
 | `qml/components/MediaGallery.qml` | 163 | ui/panels/mediagallery.slint | todo |
 | `qml/components/MessageDelegate.qml` | 538 | ui/transcript.slint | todo |
-| `qml/components/NavRail.qml` | 145 | ui/sidebar.slint | todo |
+| `qml/components/NavRail.qml` | 145 | `slint-app/ui/navrail.slint` (same SVG icons, attention badge, mute, settings, Host initial) | wip: surfaces other than chats pending |
 | `qml/components/NewSessionHub.qml` | 458 | ui/panels/newsessionhub.slint | todo |
 | `qml/components/OrchestratorDialog.qml` | 193 | ui/panels/orchestratordialog.slint | todo |
-| `qml/components/PairRow.qml` | 117 | ui/sidebar.slint | todo |
+| `qml/components/PairRow.qml` | 117 | `slint-app/ui/sidebar.slint` room rows + `engine` rooms (unread from seen revisions; `engine/tests/host_flow.rs::pair_rooms_load_unread_and_are_read_once_opened`) | wip: participants' portraits pending |
 | `qml/components/PaneLeaf.qml` | 69 | ui/workspace.slint | todo |
 | `qml/components/PreviewVersionPanel.qml` | 114 | ui/panels/previewversionpanel.slint | todo |
 | `qml/components/ProcessGlyph.qml` | 118 | ui/sidebar.slint | todo |

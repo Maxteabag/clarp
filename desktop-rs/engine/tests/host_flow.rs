@@ -133,3 +133,17 @@ fn an_unreachable_host_is_offline_with_an_error() {
     d.until("offline", |e| e.connection_state() == "offline" && !e.error().is_empty());
     assert!(!d.engine.connected());
 }
+
+#[test]
+fn pair_rooms_load_unread_and_are_read_once_opened() {
+    let host = Host::start("rooms");
+    let mut d = Driver::new(&host.base);
+    d.engine.start();
+    d.until("rooms", |e| !e.rooms().is_empty());
+    assert_eq!(d.engine.rooms().len(), 1, "only pair: conversations are rooms");
+    assert_eq!(d.engine.unread_rooms(), 1);
+    assert_eq!(d.engine.chat_name("pair:a1:a2"), "Rachel & Mike");
+    d.engine.select("pair:a1:a2");
+    d.until("room opened and read", |e| e.unread_rooms() == 0 && e.conversation("pair:a1:a2").is_some_and(|c| !c.rows().is_empty()));
+    assert!(host.requests("POST", "/select").iter().all(|r| r["body"]["session"] != "pair:a1:a2"), "a room takes no Host focus");
+}
