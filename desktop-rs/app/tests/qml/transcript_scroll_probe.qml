@@ -1,11 +1,12 @@
 // needs: fake-host
 // env: CLARP_AUDIO_OUTPUT=null
-// C++ TranscriptScrollSmokeCheck phase A (CLARP_SCREENSHOT_TRANSCRIPT_SCROLL)
+// C++ TranscriptScrollSmokeCheck (CLARP_SCREENSHOT_TRANSCRIPT_SCROLL)
 // on the real Main: the real transcript (model -> presentation -> native
 // TranscriptLayout -> MessageDelegate) follows a streaming reply at the end,
 // a real wheel turn pauses it and moves the reader, and streaming, a new
 // final row and a refresh never pull a paused reader away; jumping to the
-// latest resumes following, as does wheeling back to the end. The fixture
+// latest resumes following, as does wheeling back to the end. Then the same
+// in a second chat with grouped activity, show-when-ready and narration. The fixture
 // keeps the chat's own conversation id: the Host is live here (the C++ lane
 // ran offline), and a different id rightly makes the controller reload.
 import QtQuick
@@ -59,6 +60,16 @@ Main {
     property int step: 0
     property int streamed: 0
     property real readerY: 0
+    property string session: "rachel"
+    function activity(status, tool, path) {
+        return JSON.stringify({activity_status: status, activity_action: "tool", tool: tool, file_path: path, activity_summary: tool + " " + path})
+    }
+    function event(body) {
+        const xhr = new XMLHttpRequest()
+        xhr.open("POST", ctl.baseUrl + "/__control/event", false)
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.send(JSON.stringify(body))
+    }
     function stream() {
         ++streamed
         const live = turn(39, true)
@@ -77,7 +88,7 @@ Main {
         onTriggered: {
             if (!ctl) { ctl = find(o => o.selectedSession !== undefined && o.agents !== undefined && o.panes !== undefined); return }
             if (step === 0 && (!ctl.connected || ctl.selectedSession !== "rachel" || ctl.conversationForSession("rachel").count === 0)) return
-            model = ctl.conversationForSession("rachel")
+            model = ctl.conversationForSession(session)
             transcript = find(o => o.objectName === "transcriptList" && o.visible && o.width > 0)
             if (!transcript) { check(false, "a visible transcript"); stop(); finish(); return }
             const contentY = transcript.contentY, distance = transcript.distanceFromBottom
@@ -132,8 +143,61 @@ Main {
                 if (!require(atEnd && following, "wheeling back to the end resumes following")) return
                 stream()
                 break
-            default:
+            case 11:
                 if (!require(atEnd && following && distance < 2, "streaming after resuming keeps the end visible")) return
+                // Phase B, the user's real configuration: grouped activity,
+                // replies shown when ready and tool narration make the
+                // presentation refresh its groups on every streamed change.
+                ctl.activityDisplayMode = 2
+                ctl.showWhenReady = true
+                ctl.toolNarrator.enabled = true
+                ctl.selectSession("mike")
+                session = "mike"
+                break
+            case 12: {
+                if (ctl.conversationForSession("mike").count === 0) { step--; return }
+                const grouped = turns(41, false).map((row, i) => { if (i % 2 === 1) { row.text = ""; row.activity_count = 3 } return row })
+                model.applyLogText(JSON.stringify({conversation_id: model.conversationId, turns: grouped, latest_revision: 41}), "tail")
+                break
+            }
+            case 13:
+                if (!require(atEnd && following, "the grouped load ends at the bottom")) return
+                event({type: "agent-state", session: "mike", kind: "thinking"})
+                model.applyActivityText(activity("running", "Read", "a.swift"))
+                break
+            case 14:
+                if (!require(atEnd && following && distance < 2, "activity while following keeps the end visible")) return
+                wheel(5)
+                break
+            case 15:
+                if (!require(!following && distance > 200, "a wheel turn during activity pauses following")) return
+                readerY = contentY
+                model.applyActivityText(activity("ok", "Read", "a.swift"))
+                model.applyActivityText(activity("running", "Edit", "b.swift"))
+                streamed = 0
+                stream()
+                break
+            case 16:
+                if (!require(Math.abs(contentY - readerY) < 2 && !following, "activity updates do not move a paused reader")) return
+                model.applyActivityText(activity("ok", "Edit", "b.swift"))
+                model.applyActivityText(activity("running", "Bash", "ctest"))
+                stream()
+                break
+            case 17:
+                if (!require(Math.abs(contentY - readerY) < 2 && !following, "streamed live text does not move a paused reader")) return
+                model.applyLogText(JSON.stringify({conversation_id: model.conversationId, latest_revision: 95, turns: [
+                    {id: "fixture-final-b", role: "assistant", text: "Final grouped answer.", timestamp: "2026-09-15T08:45:00Z", revision: 95}]}), "delta")
+                break
+            case 18:
+                if (!require(Math.abs(contentY - readerY) < 2 && !following, "the final grouped answer does not move a paused reader")) return
+                model.clearActivity()
+                break
+            case 19:
+                if (!require(Math.abs(contentY - readerY) < 2 && !following, "clearing activity does not move a paused reader")) return
+                transcript.scrollToLatest()
+                break
+            default:
+                if (!require(atEnd && following && distance < 2, "jumping to the latest after grouped activity reaches the bottom")) return
                 stop()
                 finish()
             }
