@@ -17,6 +17,52 @@ pub(crate) fn color(value: &str) -> Option<slint::Color> {
     })
 }
 
+thread_local! {
+    /// Installed font families, once `fc-list` has answered.
+    static FONTS: std::cell::RefCell<Option<std::collections::HashSet<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Reads the installed families off the UI thread, then applies the theme
+/// again with the family it can really use.
+pub(crate) fn load_fonts(theme: String) {
+    let spawned = std::thread::Builder::new().name("font-list".into()).spawn(move || {
+        let listed = std::process::Command::new("fc-list").args([":", "family"]).output();
+        let families: std::collections::HashSet<String> = match listed {
+            Ok(output) => String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .flat_map(|line| line.split(',').map(|f| f.trim().to_owned()).collect::<Vec<_>>())
+                .filter(|f| !f.is_empty())
+                .collect(),
+            Err(error) => {
+                eprintln!("clarp-slint: cannot list fonts: {error}");
+                return;
+            }
+        };
+        let applied = slint::invoke_from_event_loop(move || {
+            FONTS.with(|fonts| *fonts.borrow_mut() = Some(families));
+            if let Some(window) = crate::window() {
+                let current = crate::app().map(|app| app.engine.borrow().reading_theme()).unwrap_or(theme);
+                apply_theme(&window, &current);
+            }
+        });
+        if let Err(error) = applied {
+            eprintln!("clarp-slint: dropped the font list: {error}");
+        }
+    });
+    if let Err(error) = spawned {
+        eprintln!("clarp-slint: cannot list fonts: {error}");
+    }
+}
+
+/// The theme's first installed family (its first choice until the font
+/// list is known).
+pub(crate) fn theme_font(theme: &clarp_core::json::Object) -> String {
+    FONTS.with(|fonts| match fonts.borrow().as_ref() {
+        Some(installed) => clarp_core::reading_theme::resolve_font(theme, |family| installed.contains(family)),
+        None => clarp_core::reading_theme::resolve_font(theme, |_| true),
+    })
+}
+
 pub(crate) fn apply_theme(window: &AppWindow, id: &str) {
     let theme = clarp_core::reading_theme::theme(id);
     let pick = |key: &str| theme.get(key).and_then(|v| v.as_str()).and_then(color);
@@ -56,6 +102,7 @@ pub(crate) fn apply_theme(window: &AppWindow, id: &str) {
     if let Some(size) = theme.get("fontPixelSize").and_then(|v| v.as_f64()) {
         palette.set_body_size(size as f32);
     }
+    palette.set_body_family(theme_font(theme).into());
 }
 
 pub(crate) fn stamp(epoch_millis: i64) -> String {

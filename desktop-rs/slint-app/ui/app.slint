@@ -6,8 +6,9 @@ import { Attachment } from "composer.slint";
 import { MessageRow, MessageBlock, TableRow, ToolRow } from "transcript.slint";
 import { Workspace, PaneView, SplitView, WorkspaceTab } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
+import { Settings, SettingRow } from "settings.slint";
 
-export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow }
+export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow }
 
 export struct Hint {
     label: string,
@@ -53,7 +54,9 @@ export component AppWindow inherits Window {
     preferred-width: 1100px;
     preferred-height: 700px;
     background: Palette.window;
-    default-font-family: Palette.body-family;
+    // The chrome keeps the terminal face; the reading theme styles the
+    // transcript and the composer (as in the Qt app).
+    default-font-family: "JetBrains Mono";
     default-font-size: Palette.body-size;
 
     in property <[ChatRow]> chats;
@@ -110,6 +113,15 @@ export component AppWindow inherits Window {
     callback save-layout-instead();
     callback resize-split(string, float);
     callback balance();
+    in property <[SettingRow]> setting-rows;
+    in-out property <int> setting-current;
+    in property <bool> minimal-ui;
+    out property <bool> settings-focused: settings.list-focused;
+    public function focus-settings() { settings.focus-list(); }
+    callback setting-changed(string, int);
+    callback surface-chosen(string);
+    callback sidebar-hide();
+    callback run-command(string);
     in property <bool> switcher-open;
     in property <[SwitcherRow]> switcher-rows;
     in property <int> switcher-current;
@@ -137,7 +149,7 @@ export component AppWindow inherits Window {
                 attention: root.attention;
                 muted: root.muted;
                 server-initial: root.server-initial;
-                select-surface(surface) => { root.surface = surface; }
+                select-surface(surface) => { root.surface-chosen(surface); }
                 toggle-muted => { root.toggle-muted(); }
                 open-switcher => { root.open-switcher(); }
             }
@@ -149,6 +161,9 @@ export component AppWindow inherits Window {
                 archived: root.archived;
                 unread-rooms: root.unread-rooms;
                 cursor: root.sidebar-cursor;
+                minimal: root.minimal-ui;
+                hide => { root.run-command("sidebar"); }
+                new-agent => { root.run-command("new"); }
                 chosen(session) => { root.chat-chosen(session); }
                 filter-changed => { root.filter-changed(); }
             }
@@ -181,8 +196,14 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                Workspace {
+                // The surfaces share this area; the workspace stays alive
+                // (its panes keep their place) while another shows.
+                Rectangle {
                     vertical-stretch: 1;
+                    Workspace {
+                    visible: root.surface != "settings";
+                    width: parent.width;
+                    height: parent.height;
                     panes: root.panes;
                     splits: root.splits;
                     workspaces: root.workspaces;
@@ -205,6 +226,17 @@ export component AppWindow inherits Window {
                     save-layout-instead => { root.save-layout-instead(); }
                     resize-split(id, ratio) => { root.resize-split(id, ratio); }
                     balance => { root.balance(); }
+                }
+                settings := Settings {
+                    visible: root.surface == "settings";
+                    width: parent.width;
+                    height: parent.height;
+                    rows: root.setting-rows;
+                    current: root.setting-current;
+                    moved(index) => { root.setting-current = index; }
+                    activated(id) => { root.setting-changed(id, 1); }
+                    adjusted(id, delta) => { root.setting-changed(id, delta); }
+                }
                 }
                 if root.shortcuts-visible: ShortcutBar {
                     mode: root.keyboard-mode;

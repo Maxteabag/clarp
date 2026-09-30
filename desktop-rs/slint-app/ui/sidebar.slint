@@ -130,6 +130,21 @@ component Row inherits Rectangle {
 
 // The chat list (ChatList/ChatRow in QML): search, the All/Unread scope,
 // agent-to-agent rooms and the archive behind one row each.
+component SideButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> round;
+    callback clicked();
+    width: 34px;
+    height: 34px;
+    border-radius: root.round ? 17px : 3px;
+    background: touch.has-hover ? Palette.hover : root.round ? Palette.control : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    Image { source: root.icon; width: 18px; height: 18px; colorize: Palette.muted; }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
 export component Sidebar inherits Rectangle {
     in property <[ChatRow]> rows;
     in property <[ChatRow]> rooms;
@@ -146,6 +161,10 @@ export component Sidebar inherits Rectangle {
     callback chosen(string);
     callback filter-changed();
     callback restore(string);
+    callback hide();
+    callback new-agent();
+    // Minimal UI hides the hide button (Ctrl+B still works).
+    in property <bool> minimal;
     public function focus-search() { search.focus(); }
     public function clear-search() { search.text = ""; root.filter-changed(); }
     background: Palette.raised;
@@ -156,10 +175,22 @@ export component Sidebar inherits Rectangle {
             padding-left: 10px;
             padding-right: 10px;
             vertical-stretch: 0;
+            spacing: 6px;
             search := LineEdit {
                 height: 34px;
                 placeholder-text: "Search agents · /";
                 edited => { root.filter-changed(); }
+            }
+            if !root.minimal: SideButton {
+                icon: @image-url("../../../desktop/resources/icons/rail-sidebar.svg");
+                label: "Hide sidebar · Ctrl+B";
+                clicked => { root.hide(); }
+            }
+            SideButton {
+                icon: @image-url("../../../desktop/resources/icons/rail-plus.svg");
+                label: "New agent · Ctrl+N";
+                round: true;
+                clicked => { root.new-agent(); }
             }
         }
         HorizontalLayout {

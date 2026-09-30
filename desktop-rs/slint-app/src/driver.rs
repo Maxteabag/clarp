@@ -298,6 +298,7 @@ pub fn start_check(name: &str, out: String) {
         "composer" => composer_check(out),
         "panes" => panes_check(out),
         "switcher" => switcher_check(out),
+        "settings" => settings_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();
@@ -744,6 +745,78 @@ fn switcher_check(out: String) {
             }
             window.invoke_switcher_dismissed();
             check(!window.get_switcher_open(), "a click outside closes it");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check settings --out DIR`: Ctrl+, opens the surface with the Host's
+/// status, the keyboard moves over the rows that do something, Space and
+/// Left/Right change them, and Escape goes back to the chat.
+fn settings_check(out: String) {
+    use slint::platform::Key;
+    let out2 = out.clone();
+    fn row(window: &crate::AppWindow, label: &str) -> Option<crate::SettingRow> {
+        window.get_setting_rows().iter().find(|r| r.label == label)
+    }
+    fn current(window: &crate::AppWindow) -> String {
+        window.get_setting_rows().row_data(window.get_setting_current() as usize).map(|r| r.label.to_string()).unwrap_or_default()
+    }
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(|app, _window, _| {
+            let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
+            if !open || !report().composer_focused {
+                return false;
+            }
+            headless::press_with(&[Key::Control], ",");
+            true
+        })),
+        ("open", Box::new(move |app, window, _| {
+            if window.get_surface() != "settings" || !window.get_settings_focused() || app.engine.borrow().host_status_loading() {
+                return false;
+            }
+            check(window.get_keyboard_mode() == "SETTINGS", "Ctrl+, opens the settings with the keyboard in them");
+            // The fake Host's health has no `ready`, which QML also shows as needing attention.
+            check(row(window, "Diagnostics").is_some_and(|r| r.detail == "Needs attention"), &format!("the Host's diagnostics show: {:?}", row(window, "Diagnostics").map(|r| r.detail)));
+            check(row(window, "Voice provider").is_some_and(|r| r.detail == "elevenlabs"), "and its voice provider");
+            check(row(window, "TTS queue").is_some_and(|r| r.detail.contains("pending")), "and its speech queue");
+            check(current(window) == "Timestamps", &format!("the first row that does something is current: {}", current(window)));
+            shot(&out2, "settings-01");
+            headless::press(" ");
+            true
+        })),
+        ("toggled", Box::new(|app, window, _| {
+            if !row(window, "Timestamps").is_some_and(|r| r.on) {
+                return false;
+            }
+            check(app.prefs.borrow().timestamps, "Space switches the current row");
+            headless::press(Key::DownArrow);
+            headless::press(Key::DownArrow);
+            headless::press(Key::DownArrow);
+            true
+        })),
+        ("moved", Box::new(|_, window, _| {
+            if current(window) != "Tool activity" {
+                return false;
+            }
+            check(true, "Down skips section titles");
+            headless::press(Key::RightArrow);
+            true
+        })),
+        ("stepped", Box::new(|app, window, _| {
+            if app.engine.borrow().activity_mode() != 1 {
+                return false;
+            }
+            check(row(window, "Tool activity").is_some_and(|r| r.detail == "Always visible"), "Right steps a choice");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("back", Box::new(|_, window, _| {
+            if window.get_surface() != "chats" || !report().composer_focused {
+                return false;
+            }
+            check(true, "Escape goes back to the chat, ready to type");
             true
         })),
     ];
