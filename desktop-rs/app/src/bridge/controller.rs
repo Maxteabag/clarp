@@ -1435,10 +1435,18 @@ impl AppController {
                 ConnectionType::QueuedConnection,
             ));
         }
-        let this = ControllerPtr(unsafe { self.as_mut().get_unchecked_mut() } as *mut AppController);
-        if let Some(agents) = self.as_mut().agents_mut() {
-            guards.push(agents.connect_structure_changed(
+        let raw_controller = unsafe { self.as_mut().get_unchecked_mut() } as *mut AppController;
+        let this = ControllerPtr(raw_controller);
+        if let Some(mut agents) = self.as_mut().agents_mut() {
+            guards.push(agents.as_mut().connect_structure_changed(
                 move |_| unsafe { Pin::new_unchecked(&mut *this.get()) }.bump_agent_revision(),
+                ConnectionType::QueuedConnection,
+            ));
+            // A row's state changing (C++ dataChanged) also moves the
+            // revision: views read agentState(session) through it.
+            let this = ControllerPtr(raw_controller);
+            guards.push(agents.connect_data_changed(
+                move |_, _, _, _| unsafe { Pin::new_unchecked(&mut *this.get()) }.bump_agent_revision(),
                 ConnectionType::QueuedConnection,
             ));
         }
