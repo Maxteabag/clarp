@@ -12,6 +12,8 @@ pub mod blocks;
 mod composer;
 mod connection;
 mod host_status;
+pub mod lifecycle;
+mod queue;
 pub mod workspace;
 
 use std::collections::{HashMap, HashSet};
@@ -58,6 +60,21 @@ pub enum Change {
     Composer(String),
     /// A reply in a chat that is not open: the desktop may notify.
     Notification { title: String, body: String },
+    /// Launch data changed: the model catalog, idle contacts, launch
+    /// defaults, paths, past sessions, assignment contacts or the
+    /// starting contact.
+    Launch,
+    /// The Host's contact pool had no one free to start.
+    LaunchPoolEmpty,
+    /// A create, rename, release or other agent setting succeeded (Qt
+    /// `agentMutationSucceeded`), for this session.
+    AgentMutated(String),
+    /// This chat's turn queue changed (items, paused, loading or error).
+    Queue(String),
+    /// The UI should offer contact assignment for a chat.
+    AssignmentRequested { session: String, automatic: bool },
+    /// A contact was assigned to this chat.
+    AssignmentSucceeded(String),
 }
 
 enum Message {
@@ -71,6 +88,8 @@ enum Message {
     PanesWritten(clarp_core::panes::WriteResult),
     CredentialStored { base: String, result: Result<(), String> },
     CredentialRemoved { base: String, result: Result<(), String> },
+    /// Look again for a created session the roster did not show yet.
+    CreatedAgentDue(String),
 }
 
 pub struct Config {
@@ -152,6 +171,10 @@ pub struct Engine {
     host_status: host_status::HostStatus,
     keyring: bool,
     has_stored_credential: bool,
+
+    // lifecycle
+    launch: lifecycle::Launch,
+    queue: queue::TurnQueue,
 }
 
 impl Engine {
@@ -189,6 +212,8 @@ impl Engine {
             activity_mode: config.settings.integer("conversation/activityDisplayMode", i64::from(tools_visible)).clamp(0, 2) as i32,
             ..clarp_core::presentation::Settings::default()
         };
+        // lifecycle
+        let launch = lifecycle::Launch::new(&config.settings);
         Ok(Self {
             base_url: normalized_base_url(&config.base_url),
             token: config.token,
@@ -237,6 +262,10 @@ impl Engine {
             deliveries: HashMap::new(),
             delivery_counter: 0,
             sending: false,
+
+            // lifecycle
+            launch,
+            queue: queue::TurnQueue::default(),
         })
     }
 
@@ -271,6 +300,7 @@ impl Engine {
                 Message::PanesWritten(result) => self.panes_written(result),
                 Message::CredentialStored { base, result } => self.credential_stored(&base, result),
                 Message::CredentialRemoved { base, result } => self.credential_removed(&base, result),
+                Message::CreatedAgentDue(session) => self.created_agent_due(&session),
             }
         }
         let mut changes = std::mem::take(&mut self.changes);
@@ -566,6 +596,9 @@ impl Engine {
         }
         self.schedule_agent_conversations();
         self.open_shown_panes();
+        if self.lifecycle_snapshot(object) {
+            return;
+        }
         let selected_known = self.roster.find(&self.selected).is_some() || self.selected.starts_with("pair:");
         if self.selected.is_empty() || !selected_known {
             // A restored layout reopens its active chat when it still exists.
@@ -907,6 +940,9 @@ impl Engine {
     }
 
     fn handle_json(&mut self, tag: &str, object: &Object) {
+        if self.lifecycle_json(tag, object) {
+            return;
+        }
         if tag == "agent-conversations" {
             self.rooms_in_flight = false;
             if std::mem::take(&mut self.rooms_dirty) {
@@ -965,6 +1001,9 @@ impl Engine {
     fn handle_failure(&mut self, tag: &str, message: &str, status: u16) {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         if self.host_status_failed(tag, &detail) {
+            return;
+        }
+        if self.lifecycle_failure(tag, message, status) {
             return;
         }
         if tag.starts_with("composer-upload:") {
@@ -1056,6 +1095,7 @@ impl Engine {
     fn handle_event(&mut self, event: &Object) {
         let kind = json::string(event, "type");
         let session = json::string(event, "session");
+        self.lifecycle_event(&kind, &session);
         match kind.as_str() {
             "tts-error" => {
                 let message = event.get("message").and_then(Value::as_str).map_or_else(|| json::string(event, "error"), str::to_owned);
