@@ -1,4 +1,4 @@
-import { Field, Editor } from "fields.slint";
+import { Field, Editor, PlainEditor } from "fields.slint";
 import { Palette } from "theme.slint";
 
 export struct Attachment {
@@ -135,13 +135,13 @@ export component Composer inherits FocusScope {
             root.send(root.draft, queue);
         }
     }
-    Rectangle { background: Palette.window; }
-    Rectangle { y: 0; height: 1px; background: Palette.rule; }
+    // The [i] Insert frame is the box: the editor sits on the pane itself,
+    // and its actions are keys (the shortcut bar lists them).
     VerticalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        padding-top: 8px;
-        padding-bottom: 8px;
+        padding-left: 4px;
+        padding-right: 4px;
+        padding-top: 2px;
+        padding-bottom: 2px;
         spacing: 6px;
         if root.starting != "": Text {
             text: "Starting " + root.starting + "…";
@@ -193,44 +193,18 @@ export component Composer inherits FocusScope {
                 remove => { root.remove-attachment(item.id); }
             }
         }
-        HorizontalLayout {
-            spacing: 6px;
-            editor := Editor {
-                horizontal-stretch: 1;
-                text <=> root.draft;
-                enabled: root.active;
-                wrap: word-wrap;
-                font-size: Palette.body-size;
-                font-family: Palette.body-family;
-                min-height: 44px;
-                preferred-height: 60px;
-                accessible-label: "Message to " + root.agent-name;
-                edited(text) => { root.edited(text); }
-            }
-            VerticalLayout {
-                alignment: end;
-                spacing: 2px;
-                if root.playing: IconButton {
-                    icon: @image-url("../../../desktop/resources/icons/rail-muted.svg");
-                    label: "Stop voice playback";
-                    clicked => { root.silence(); }
-                }
-                IconButton {
-                    icon: @image-url("icons/attach.svg");
-                    label: "Attach a file (Ctrl+Shift+O)";
-                    enabled: root.active;
-                    clicked => { root.attach(); }
-                }
-                IconButton {
-                    icon: root.busy && !root.sendable ? @image-url("icons/stop.svg") : @image-url("icons/send.svg");
-                    label: root.busy && !root.sendable ? "Stop the turn" : "Send";
-                    tint: root.busy && !root.sendable ? Palette.danger : Palette.accent;
-                    enabled: root.busy || root.sendable;
-                    clicked => {
-                        if (root.busy && !root.sendable) { root.stop(); } else { root.submit(false); }
-                    }
-                }
-            }
+        editor := PlainEditor {
+            vertical-stretch: 1;
+            text <=> root.draft;
+            enabled: root.active;
+            wrap: word-wrap;
+            font-size: Palette.body-size;
+            font-family: Palette.body-family;
+            min-height: 44px;
+            preferred-height: 60px;
+            placeholder-text: root.active ? "Message " + root.agent-name : "";
+            accessible-label: "Message to " + root.agent-name;
+            edited(text) => { root.edited(text); }
         }
     }
 }

@@ -19,6 +19,10 @@ pub enum Guard {
     Rows,
     /// The composer can send.
     Send,
+    /// The open agent is working (thinking, a tool, compacting).
+    Busy,
+    /// A voice reply is playing.
+    Playing,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +58,7 @@ fn parent(state: &str) -> Option<&'static str> {
 }
 
 fn state(name: &str) -> Vec<Binding> {
-    use Guard::{Agent, Attention, None as Always, Rows, Send};
+    use Guard::{Agent, Attention, Busy, None as Always, Playing, Rows, Send};
     let b = binding;
     match name {
         "main" => vec![
@@ -138,6 +142,10 @@ fn state(name: &str) -> Vec<Binding> {
             b("send", &["Return"], "Send", true, Send, true),
             b("newline", &["Shift+Return"], "New line", true, Always, true),
             b("queue", &["Ctrl+Return"], "Queue", true, Send, true),
+            // The composer has no buttons: its actions are keys, shown here.
+            b("attach", &["Ctrl+Shift+O"], "Attach", true, Agent, true),
+            b("stop-agent", &["Ctrl+."], "Stop", true, Busy, false),
+            b("silence", &["Ctrl+Shift+M"], "Stop voice", true, Playing, false),
         ],
         "search" => vec![
             b("search-next", &["Down"], "Results", true, Rows, true),
@@ -169,6 +177,8 @@ pub struct Facts {
     pub agent: bool,
     pub rows: bool,
     pub can_send: bool,
+    pub busy: bool,
+    pub playing: bool,
 }
 
 impl Facts {
@@ -179,6 +189,8 @@ impl Facts {
             Guard::Agent => self.agent,
             Guard::Rows => self.rows,
             Guard::Send => self.can_send,
+            Guard::Busy => self.busy,
+            Guard::Playing => self.playing,
         }
     }
 }
@@ -248,13 +260,17 @@ pub fn import(text: &str) -> Result<Overrides, String> {
         overrides.insert(action.clone(), key.to_owned());
     }
     for name in STATES {
-        let mut seen: BTreeMap<String, &'static str> = BTreeMap::new();
+        // A nearer native binding (the focused control's own key, such as
+        // the composer's Ctrl+Shift+O) shadows an outer one on purpose.
+        let mut seen: BTreeMap<String, (&'static str, bool)> = BTreeMap::new();
         for entry in resolve(name, &overrides, None) {
             for key in &entry.keys {
-                if let Some(other) = seen.insert(key.clone(), entry.action)
-                    && other != entry.action
-                {
-                    return Err(format!("Conflict in {name}: {key}"));
+                match seen.get(key) {
+                    Some((_, true)) => continue,
+                    Some((other, false)) if *other != entry.action => return Err(format!("Conflict in {name}: {key}")),
+                    _ => {
+                        seen.insert(key.clone(), (entry.action, entry.native));
+                    }
                 }
             }
         }
@@ -334,7 +350,7 @@ mod tests {
     use super::*;
 
     fn all() -> Facts {
-        Facts { attention: true, agent: true, rows: true, can_send: true }
+        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, playing: true }
     }
 
     #[test]

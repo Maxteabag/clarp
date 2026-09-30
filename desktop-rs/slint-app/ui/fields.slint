@@ -2,6 +2,7 @@
 // the one focus style. Each wraps the std widget in a rounded clip and makes
 // it 2px taller, so the underline (its bottom 2px) falls outside.
 import { LineEdit, TextEdit, Palette as WidgetPalette } from "std-widgets.slint";
+import { Palette } from "theme.slint";
 
 export component Field inherits Rectangle {
     in-out property <string> text <=> inner.text;
@@ -72,5 +73,58 @@ export component Editor inherits Rectangle {
         width: parent.width - 8px;
         height: 1px;
         background: WidgetPalette.border;
+    }
+}
+
+// A multi-line editor with no box of its own (the composer): the text on
+// the region's background, scrolling to keep the cursor in view, as
+// TextEditBase does.
+export component PlainEditor inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder-text;
+    in property <bool> enabled <=> input.enabled;
+    in property <length> font-size <=> input.font-size;
+    in property <string> font-family <=> input.font-family;
+    in property <TextWrap> wrap <=> input.wrap;
+    out property <bool> has-focus: input.has-focus;
+    callback edited(string);
+    forward-focus: input;
+    accessible-role: text-input;
+    accessible-value: root.text;
+    accessible-placeholder-text: root.placeholder-text;
+    clip: true;
+    scroll := Flickable {
+        content-width: self.width;
+        content-height: max(self.height, input.preferred-height);
+        input := TextInput {
+            width: scroll.width;
+            single-line: false;
+            wrap: word-wrap;
+            color: Palette.text;
+            selection-background-color: Palette.accent.with-alpha(0.35);
+            selection-foreground-color: Palette.text;
+            page-height: scroll.height;
+            accessible-role: none;
+            edited => { root.edited(self.text); }
+            cursor-position-changed(cpos) => {
+                if (cpos.y + scroll.content-y < 0px) {
+                    scroll.content-y = min(0px, -cpos.y);
+                } else if (cpos.y + scroll.content-y > scroll.height - 20px) {
+                    scroll.content-y = min(0px, max(scroll.height - self.height, scroll.height - cpos.y - 20px));
+                }
+            }
+        }
+    }
+    if root.text == "" && input.preedit-text == "": Text {
+        x: 0;
+        y: 0;
+        width: root.width;
+        vertical-alignment: top;
+        text: root.placeholder-text;
+        font-size: input.font-size;
+        font-family: input.font-family;
+        color: Palette.faint;
+        overflow: elide;
+        accessible-role: none;
     }
 }

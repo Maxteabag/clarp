@@ -160,6 +160,9 @@ export component AppWindow inherits Window {
     in property <[SettingRow]> setting-rows;
     in-out property <int> setting-current;
     in property <bool> minimal-ui;
+    // The rail of destinations (Chats, Updates, Teams, Settings); Ctrl+1..4
+    // and Ctrl+K reach them without it.
+    in property <bool> nav-rail-visible: true;
     out property <bool> settings-focused: settings.list-focused;
     public function focus-settings() { settings.focus-list(); }
     callback setting-changed(string, int);
@@ -281,7 +284,7 @@ export component AppWindow inherits Window {
             y: 0;
             width: parent.width;
             height: parent.height - (root.shortcuts-visible ? footer.height : 0px);
-            NavRail {
+            if root.nav-rail-visible: NavRail {
                 surface: root.surface;
                 attention: root.attention;
                 muted: root.muted;

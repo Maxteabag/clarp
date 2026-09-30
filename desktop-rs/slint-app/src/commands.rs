@@ -43,6 +43,8 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
         agent: !selected.is_empty() && !selected.starts_with("pair:"),
         rows: window.get_chats().row_count() > 0,
         can_send: engine.can_send(selected),
+        busy: engine.roster().find(selected).is_some_and(|a| matches!(a.latest_state.as_str(), "thinking" | "tool" | "compacting")),
+        playing: crate::platform::audio::with(|audio| audio.playing()).unwrap_or(false),
     }
 }
 
@@ -225,8 +227,13 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             focus_sidebar(app, window);
         }
         "sidebar" => {
+            // The keyboard stays where it is; only a hidden explorer (or its
+            // search) hands it to the chat.
+            let was_in_sidebar = window.get_sidebar_focused() || window.get_search_focused();
             window.set_sidebar_visible(!window.get_sidebar_visible());
-            app.focus_composer();
+            if was_in_sidebar && !window.get_sidebar_visible() {
+                app.focus_transcript();
+            }
         }
         "split-right" | "split-down" => {
             let direction = if action == "split-right" { "vertical" } else { "horizontal" };
@@ -263,6 +270,9 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         }
         "jump-latest" => app.to_latest(),
         "stop-agent" => app.engine.borrow_mut().stop(),
+        "silence" => {
+            crate::platform::audio::with(crate::platform::audio::Audio::silence);
+        }
         "preview-versions" => {
             if !crate::preview_view::enabled() {
                 return false;
