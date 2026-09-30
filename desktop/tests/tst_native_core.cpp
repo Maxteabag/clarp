@@ -306,12 +306,19 @@ class FakeClarpServer final : public QTcpServer {
                                {QStringLiteral("sort_index"), 20},
                                {QStringLiteral("supports_resume"), true},
                                {QStringLiteral("supports_fork"), true},
+                               {QStringLiteral("supported_efforts"),
+                                QJsonArray{QStringLiteral("low"), QStringLiteral("medium")}},
                                {QStringLiteral("models"),
                                 QJsonArray{QJsonObject{
                                     {QStringLiteral("id"), QStringLiteral("gpt-test")},
                                     {QStringLiteral("label"), QStringLiteral("GPT Test")},
                                     {QStringLiteral("supported_efforts"),
-                                     QJsonArray{QStringLiteral("low"), QStringLiteral("high")}},
+                                     QJsonArray{QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("xhigh")}},
+                                }, QJsonObject{
+                                    // Contract 25: a model with no efforts says so with [].
+                                    {QStringLiteral("id"), QStringLiteral("gpt-plain")},
+                                    {QStringLiteral("label"), QStringLiteral("GPT Plain")},
+                                    {QStringLiteral("supported_efforts"), QJsonArray{}},
                                 }}},
                            }},
                           {QStringLiteral("claude"),
@@ -3745,9 +3752,14 @@ void NativeCoreTest::appControllerCompletesCoreProtocolFlow() {
     QCOMPARE(controller.backendOptions().first().toMap().value(QStringLiteral("id")).toString(),
              QStringLiteral("claude"));
     QVERIFY(controller.backendSupportsResume(QStringLiteral("codex")));
-    QCOMPARE(controller.modelsForBackend(QStringLiteral("codex")).size(), 2);
-    QCOMPARE(controller.effortsForModel(QStringLiteral("codex"), QStringLiteral("gpt-test")).size(),
-             3);
+    QCOMPARE(controller.modelsForBackend(QStringLiteral("codex")).size(), 3);
+    const QVariantList testEfforts = controller.effortsForModel(QStringLiteral("codex"), QStringLiteral("gpt-test"));
+    QCOMPARE(testEfforts.size(), 4);
+    QCOMPARE(testEfforts.last().toMap().value(QStringLiteral("label")).toString(), QStringLiteral("Extra high"));
+    // A model row with [] offers only the provider default, never the
+    // provider's own list; a model that does not say falls back to it.
+    QCOMPARE(controller.effortsForModel(QStringLiteral("codex"), QStringLiteral("gpt-plain")).size(), 1);
+    QCOMPARE(controller.effortsForModel(QStringLiteral("codex"), QStringLiteral("unlisted")).size(), 3);
 
     controller.loadPastSessions(QStringLiteral("/tmp"), QStringLiteral("codex"));
     QTRY_COMPARE_WITH_TIMEOUT(controller.pastSessions().size(), 1, 3'000);

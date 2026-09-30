@@ -1675,28 +1675,35 @@ QVariantList AppController::effortsForModel(const QString& backend, const QStrin
     const QVariantMap providers = m_modelCatalog.value(QStringLiteral("providers")).toMap();
     const QVariantMap provider = providers.value(backend).toMap();
     const QVariantList models = provider.value(QStringLiteral("models")).toList();
+    // Since Host contract 25 each model row states its own efforts; an empty
+    // list means the model has none, so only the provider default is offered.
+    // The provider's list applies only to rows that do not say.
+    bool modelSays = false;
     for (const QVariant& value : models) {
         const QVariantMap model = value.toMap();
-        if (model.value(QStringLiteral("id")).toString() == modelId) {
-            for (const QVariant& effort :
-                 model.value(QStringLiteral("supported_efforts")).toList()) {
-                ids.append(effort.toString());
-            }
-            break;
-        }
+        if (model.value(QStringLiteral("id")).toString() != modelId) continue;
+        const QVariant efforts = model.value(QStringLiteral("supported_efforts"));
+        modelSays = efforts.isValid() && !efforts.isNull();
+        for (const QVariant& effort : efforts.toList()) ids.append(effort.toString());
+        break;
     }
-    if (ids.isEmpty()) {
+    if (!modelSays) {
         for (const QVariant& effort :
              provider.value(QStringLiteral("supported_efforts")).toList()) {
             ids.append(effort.toString());
         }
     }
+    static const QHash<QString, QString> labels{
+        {QStringLiteral("none"), QStringLiteral("Off")},
+        {QStringLiteral("minimal"), QStringLiteral("Minimal")},
+        {QStringLiteral("xhigh"), QStringLiteral("Extra high")},
+    };
     QVariantList efforts{
         QVariantMap{{QStringLiteral("id"), QString{}},
                     {QStringLiteral("label"), QStringLiteral("Provider default")}},
     };
     for (const QString& id : std::as_const(ids)) {
-        QString label = id;
+        QString label = labels.value(id, id);
         if (!label.isEmpty()) {
             label.front() = label.front().toUpper();
         }

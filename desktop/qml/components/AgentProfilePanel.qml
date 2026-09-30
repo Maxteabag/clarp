@@ -299,6 +299,8 @@ Rectangle {
                             }
                         }
                         RowLayout {
+                            // A model without efforts offers only the default.
+                            visible: llmCard.effortRows.length > 1
                             Layout.fillWidth: true
                             TuiLabel { text: "Effort"; color: Theme.secondary; font.pixelSize: 12 }
                             ThemedComboBox {
