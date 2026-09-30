@@ -380,3 +380,19 @@ fn agent_reply_keeps_its_author_and_names_the_answered_agent() {
     assert!(restored.restore_cache_snapshot(&h.model.cache_snapshot()));
     assert_eq!((restored.rows()[1].reply_to_agent_id.as_str(), restored.rows()[1].delivery.as_str()), ("agent-cpp", "private"));
 }
+
+/// A delta that arrives right after a long chat opens must not hide its
+/// older history: on a delta, the Host's `has_more` is about a backlog of
+/// newer rows, not older ones.
+#[test]
+fn a_delta_never_hides_older_history() {
+    let mut h = Harness::new("mike");
+    let rows: Vec<Value> = (150..250).map(|i| json!({"id": format!("m-{i}"), "role": "user", "text": "x", "revision": i})).collect();
+    h.log(json!({"conversation_id": "c", "turns": rows, "latest_revision": 250, "has_more": true}), LoadKind::Tail);
+    assert!(h.model.has_more());
+    h.log(json!({"conversation_id": "c", "turns": [], "latest_revision": 250, "has_more": false}), LoadKind::Delta);
+    assert!(h.model.has_more(), "a delta says nothing about older rows");
+    let older: Vec<Value> = (0..150).map(|i| json!({"id": format!("m-{i}"), "role": "user", "text": "x", "revision": i})).collect();
+    h.log(json!({"conversation_id": "c", "turns": older, "latest_revision": 250, "has_more": false}), LoadKind::Older);
+    assert!(!h.model.has_more(), "the last older page ends it");
+}

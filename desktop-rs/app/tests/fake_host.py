@@ -129,7 +129,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.in_outage():
             return
         record({"method": "GET", "path": url.path, "query": query,
-                "authorization": self.headers.get("Authorization", "")})
+                "authorization": self.headers.get("Authorization", ""),
+                "last_event_id": self.headers.get("Last-Event-ID", "")})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
         if url.path == "/server-info":
@@ -245,8 +246,19 @@ class Handler(BaseHTTPRequestHandler):
                 chosen = [t for t in rows if t["revision"] > after] if after >= 0 else rows
                 latest = max([t["revision"] for t in rows] or [0])
                 cid = next((a["conversation_id"] for a in agents if a["session"] == session), "")
+                # Pages of `limit` rows, newest first; `before` is the oldest
+                # row the client holds.
+                more = False
+                if after < 0:
+                    before = query.get("before")
+                    if before:
+                        end = next((i for i, t in enumerate(rows) if t["id"] == before), len(rows))
+                        chosen = rows[:end]
+                    limit = int(query.get("limit", "0") or 0)
+                    if limit and len(chosen) > limit:
+                        chosen, more = chosen[-limit:], True
             return self.reply(200, {"conversation_id": cid, "turns": chosen, "latest_revision": latest,
-                                    "has_more": False, "missing": False})
+                                    "has_more": more, "missing": False})
         if url.path == "/events":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -328,6 +340,26 @@ class Handler(BaseHTTPRequestHandler):
                 turns.setdefault(session, [])
                 agents.append(row)
             broadcast({"type": "agent-roster", "session": session, "kind": "created"})
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/fill":
+            # Test control: replace a chat's history with `count` rows, under
+            # `conversation_id` (default: unchanged), and announce it.
+            session, count = body["session"], int(body["count"])
+            global revision
+            with state_lock:
+                rows = []
+                for i in range(count):
+                    revision += 1
+                    rows.append({"id": f"{session}-{i}", "role": "user" if i % 2 == 0 else "assistant",
+                                 "text": f"{body.get('prefix', 'Row')} {i}", "revision": revision,
+                                 "timestamp": "2026-09-15T08:00:00Z"})
+                turns[session] = rows
+                for agent in agents:
+                    if agent["session"] == session:
+                        agent["head_revision"] = revision
+                        if body.get("conversation_id"):
+                            agent["conversation_id"] = body["conversation_id"]
+            broadcast({"type": "transcript-updated", "session": session})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/publish-pending":
             with state_lock:
@@ -457,7 +489,6 @@ class Handler(BaseHTTPRequestHandler):
             broadcast({"type": "agent-roster", "session": session, "kind": "created"})
             return
         if url.path == "/send":
-            global revision
             session = body["session"]
             if body.get("text") == "never-file":
                 # Accepted but never filed: the client must time the send out.
